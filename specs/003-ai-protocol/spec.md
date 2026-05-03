@@ -59,7 +59,7 @@ A generation request represents one model invocation made for agent execution.
 At the semantic level, a generation request contains:
 - a model target
 - model context assembled by runtime
-- tool declarations available to the model
+- the tool declaration snapshot available to the model for this request
 - generation controls such as limits or stopping policy
 
 These concepts should map cleanly to `OpenAI-compatible` or `Anthropic-compatible` generation families when practical. This spec does not adopt either family's concrete fields.
@@ -68,7 +68,7 @@ The model target identifies which model the AI layer should invoke. This spec do
 
 Model context is the semantic input that runtime intends the model to consume. [006 Context Assembly](../006-context-assembly/spec.md) defines model context assembly and projection. Its loop-visible portion uses the message semantics from [002 Agent Execution](../002-agent-execution/spec.md).
 
-Tool declarations describe what the model may request. [007 Tool Surface](../007-tool-surface/spec.md) defines their semantic boundary. They do not define concrete tool behavior, resource gate semantics, permission rules, or execution scheduling.
+The tool declaration snapshot describes what the model may request for this generation request. [007 Tool Surface](../007-tool-surface/spec.md) defines declaration snapshot and execution binding semantics. Tool declarations do not define concrete tool behavior, resource gate semantics, permission rules, or execution scheduling.
 
 Generation controls constrain the model invocation. They do not define provider-specific options or transport-level behavior.
 
@@ -126,7 +126,7 @@ Provider and model failures must surface as observable failed generation outcome
 
 `psychevo-agent-core` owns agent execution, turn progression, core execution events, tool execution flow, and projection of normalized AI output categories into the agent loop.
 
-`psychevo-runtime` owns the run-scoped tool surface, resource surface wiring, model context assembly, durable records, and replay wiring.
+`psychevo-runtime` owns the agent-invocation scoped tool surface, resource surface wiring, model context assembly, durable records, persistence, and replay wiring.
 
 `psychevo-cli` owns process and terminal behavior. CLI rendering must not define AI protocol semantics.
 
@@ -135,8 +135,9 @@ Provider and model failures must surface as observable failed generation outcome
 - [000 Foundation](../000-foundation/spec.md) defines the upstream project foundation and implementation-neutral principles.
 - [001 Architecture](../001-architecture/spec.md) defines Rust workspace layout, crate boundaries, runtime coordination, and dependency direction.
 - [002 Agent Execution](../002-agent-execution/spec.md) defines agent-core execution semantics and core event families.
-- [004 Runtime Contract](../004-runtime-contract/spec.md) defines runtime run assembly and evidence sink wiring.
+- [004 Runtime Contract](../004-runtime-contract/spec.md) defines agent-invocation assembly and evidence sink wiring.
 - [005 Durable Evidence](../005-durable-evidence/spec.md) defines durable evidence semantics for AI outcomes and optional metadata preservation.
 - [006 Context Assembly](../006-context-assembly/spec.md) defines model context assembly consumed by generation requests.
 - [007 Tool Surface](../007-tool-surface/spec.md) defines tool declarations and execution bindings available to generation requests.
 - [009 Resource Surface](../009-resource-surface/spec.md) defines resource gate semantics outside the AI protocol.
+- [030 State and Data Model](../030-state-and-data-model/spec.md) defines how AI generation facts relate to other state families.

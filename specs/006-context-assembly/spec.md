@@ -8,7 +8,9 @@ Define the model context assembly contract owned by `psychevo-runtime`.
 ## Scope
 
 - semantic model context assembled for one generation request
+- per-agent-invocation context projection boundary
 - generic source category visibility boundaries
+- capability-supplied context candidates
 - runtime-owned context projection
 - context transformation boundaries
 - durable evidence relationship for context assembly facts
@@ -17,10 +19,10 @@ Define the model context assembly contract owned by `psychevo-runtime`.
 Out of scope:
 - prompt wording, prompt templates, prompt section ordering, or provider role mapping
 - exact provider request fields, response fields, stream fields, or wire formats
-- exact source discovery rules, concrete file names, attachment syntax, or reference syntax
+- exact source discovery rules, concrete file names, attachment syntax, or lookup syntax
 - token counting, context-window thresholds, reserve budgets, or truncation limits
 - compaction algorithms, summarization algorithms, or summary schemas
-- memory retention behavior, skills, session storage, branches, replay formats, or workflow behavior
+- memory retention behavior, skills, session storage layouts, branches, replay formats, or workflow behavior
 - tool declarations, tool schemas, tool execution behavior, or concrete tools
 - resource permission schemas, policy rules, approval behavior, sandbox behavior, path rules, or enforcement mechanics
 - Rust APIs, payload schemas, storage formats, persistence formats, or CLI rendering
@@ -33,7 +35,7 @@ Instruction context is non-transcript instruction or runtime guidance intended f
 
 Loop-visible context is model-visible message material that uses the message semantics defined by [002 Agent Execution](../002-agent-execution/spec.md). Loop-visible context is the part of model context that belongs to the agent loop transcript.
 
-Attached context is caller-supplied or runtime-supplied facts, references, or artifacts made model-visible by context projection. This spec does not define attachment syntax, source discovery, source trust, or source storage.
+Attached context is caller-supplied or runtime-supplied facts, source material, or artifacts made model-visible by context projection. This spec does not define attachment syntax, source discovery, source trust, or source storage.
 
 Summary context is model-visible context produced by a context transformation. Summary context may stand in for earlier or larger source material, but this spec does not define summary structure, generation method, or persistence format.
 
@@ -41,11 +43,11 @@ These are semantic categories, not required prompt sections or provider fields.
 
 ## Context Projection
 
-Context projection is the runtime-owned selection and transformation of available inputs into model context for one generation request.
+Context projection is the runtime-owned selection and transformation of available inputs into model context for one generation request. The projection boundary is per agent invocation and may differ for each generation request inside that invocation.
 
-Runtime assembles model context before invoking generation. A run may produce a different context projection for each generation request.
+Runtime assembles model context before invoking generation.
 
-Context projection may combine instruction context, loop-visible context, attached context, summary context, session continuity inputs, memory recall candidates, and generic resource facts. These are source categories, not required sections or provider fields. [008 Session Continuity](../008-session-continuity/spec.md) defines session continuity inputs. [009 Resource Surface](../009-resource-surface/spec.md) defines resource facts and resource gates. [010 Memory System](../010-memory-system/spec.md) defines memory recall candidates.
+Context projection may combine instruction context, loop-visible context, attached context, summary context, capability-supplied context candidates, session continuity inputs, memory recall candidates, and generic resource facts. These are source categories, not required sections or provider fields. [008 Session Continuity](../008-session-continuity/spec.md) defines session continuity inputs. [009 Resource Surface](../009-resource-surface/spec.md) defines resource facts and resource gates. [010 Memory System](../010-memory-system/spec.md) defines memory recall candidates. [050 Capability Extensions](../050-capability-extensions/spec.md) defines source and contribution boundaries for capability-supplied candidates.
 
 Runtime must preserve visibility boundaries during projection. Inputs that remain runtime-only must not become model-visible. Inputs projected as loop-visible context must use agent execution message semantics.
 
@@ -53,11 +55,15 @@ Resource facts are candidates for context projection, not automatic model contex
 
 Memory recall candidates are not automatically model-visible. This spec owns whether recalled memory becomes model context.
 
+Capability selection may contribute instruction context, attached context candidates, or summary context candidates. Contribution does not make those candidates model-visible; runtime projection still owns visibility.
+
 Instruction context, attached context, and summary context may be model-visible without becoming finalized loop-visible message artifacts. A later spec may promote a source category into message semantics, but this spec does not do so.
 
 The assembled model context is an input to the generation request defined by [003 AI Protocol](../003-ai-protocol/spec.md). Model target, tool declarations, and generation controls are adjacent generation request inputs and remain outside model context. [007 Tool Surface](../007-tool-surface/spec.md) defines tool declaration semantics.
 
-Context assembly facts needed for run inspection must be connectable to durable evidence. [005 Durable Evidence](../005-durable-evidence/spec.md) defines which durable evidence facts must be representable; this spec does not require full prompt snapshots.
+Context assembly facts needed for agent-invocation inspection must be connectable to durable evidence. [005 Durable Evidence](../005-durable-evidence/spec.md) defines which durable evidence facts must be representable; this spec does not require full prompt snapshots.
+
+Context projection is not required to write source material or projected material into session messages. If a projection becomes loop-visible message material, [002 Agent Execution](../002-agent-execution/spec.md) owns the message semantics.
 
 ## Context Transformation
 
@@ -65,7 +71,7 @@ Context transformations may filter, truncate, summarize, or compact source mater
 
 A transformation changes the model-facing projection for a generation request. It must not redefine source semantics owned by agent execution, AI protocol, runtime contract, or durable evidence specs.
 
-Summary context produced by a transformation is model-visible context. Summary content, summary schemas, summarizer models, thresholds, cut points, and validation rules belong outside this spec.
+Summary context produced by a transformation is model-visible context. Summary content, summary schemas, summarizer models, thresholds, boundaries, and validation rules belong outside this spec.
 
 Transformation policy may depend on caller inputs, runtime configuration, provider constraints, or model limits. This spec does not define those policies or their precedence.
 
@@ -75,9 +81,11 @@ Transformation policy may depend on caller inputs, runtime configuration, provid
 - [001 Architecture](../001-architecture/spec.md) defines crate boundaries and dependency direction.
 - [002 Agent Execution](../002-agent-execution/spec.md) defines loop-visible message semantics and execution events.
 - [003 AI Protocol](../003-ai-protocol/spec.md) defines generation request semantics that consume assembled model context.
-- [004 Runtime Contract](../004-runtime-contract/spec.md) defines runtime run assembly and wiring responsibilities.
-- [005 Durable Evidence](../005-durable-evidence/spec.md) defines durable evidence semantics for inspectable run facts.
+- [004 Runtime Contract](../004-runtime-contract/spec.md) defines agent-invocation assembly and wiring responsibilities.
+- [005 Durable Evidence](../005-durable-evidence/spec.md) defines durable evidence semantics for inspectable agent-invocation facts.
 - [007 Tool Surface](../007-tool-surface/spec.md) defines tool declarations that stay adjacent to model context.
 - [008 Session Continuity](../008-session-continuity/spec.md) defines continuity inputs that may feed context projection.
 - [009 Resource Surface](../009-resource-surface/spec.md) defines resource facts and gates that may constrain context projection.
 - [010 Memory System](../010-memory-system/spec.md) defines memory recall candidates that may feed context projection.
+- [030 State and Data Model](../030-state-and-data-model/spec.md) defines how context facts relate to other state families.
+- [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability contribution boundaries for context candidates.

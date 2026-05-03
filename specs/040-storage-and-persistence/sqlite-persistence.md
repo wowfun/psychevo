@@ -1,0 +1,97 @@
+---
+name: 040. SQLite Persistence Attachment
+psychevo_self_edit: deny
+---
+
+Define the default SQLite persistence implementation contract for the first implementation slice.
+
+This attachment is part of [040 Storage and Persistence](spec.md). It is not an independently numbered spec and does not introduce a new public interface.
+
+## Scope
+
+- SQLite-backed session and message persistence
+- default first-slice schema shape
+- minimal SQLite behavior requirements
+- schema version boundary
+- bounded write contention behavior
+- relationship-based retrieval of retained material
+
+Out of scope:
+- full-text search, trigram search, vector search, indexes beyond implementation need, pagination, sorting, or query language design
+- branch trees, fork UI, retry UI, undo UI, merge behavior, or transcript search
+- artifact storage engines, external blob stores, checkpoint stores, or provider credential stores
+- migration framework design beyond a minimal schema version boundary
+- Rust APIs, payload schemas, public identifiers, CLI behavior, SDK behavior, or transport behavior
+
+## Schema Shape
+
+The default first-slice SQLite shape contains:
+- `sessions`
+- `messages`
+
+The default first-slice SQLite shape does not create:
+- a separate per-invocation execution-root table
+- `facts`
+- `refs`
+- `artifacts`
+
+This attachment defines implementation shape, not public contract shape. Column names and indexes are implementation details unless a later spec freezes them. Storage must still preserve the logical record fields required by [030 Session Record Model](../030-state-and-data-model/session-record-model.md).
+
+## Sessions
+
+The `sessions` storage shape persists logical session record material from [030 Session Record Model](../030-state-and-data-model/session-record-model.md).
+
+Required semantics include:
+- one row or equivalent durable unit per persistent session
+- session identity suitable for relating messages to the session
+- lifecycle timestamps and optional ended state
+- optional parent session relationship
+- counters or summaries needed by implementation
+- metadata space for model and working-context summaries
+
+Reopening the same persistent session updates the existing session state rather than creating a new execution root.
+
+## Messages
+
+The `messages` storage shape persists logical message record material from [030 Session Record Model](../030-state-and-data-model/session-record-model.md).
+
+Required semantics include:
+- durable relationship to one session
+- role and loop-visible material
+- timestamp or durable ordering material
+- optional assistant tool-call material
+- optional tool-result relationship aids
+- optional token count, finish, outcome, reasoning, model, or provider metadata
+
+The first implementation slice must preserve the logical message field support required by [030 Session Record Model](../030-state-and-data-model/session-record-model.md), including tool-call fields, tool-result relationship aids, reasoning fields, and model/provider metadata when present.
+
+The first implementation slice stores large tool material in message material or metadata when practical. External artifact storage belongs to a later attachment or spec.
+
+## SQLite Behavior
+
+SQLite persistence should enable WAL mode when supported.
+
+SQLite persistence must enable foreign key enforcement when relationships depend on foreign keys.
+
+Writes that persist one accepted message or one bounded session update must use bounded write transactions.
+
+Schema versioning must exist through `PRAGMA user_version` or a minimal schema metadata mechanism.
+
+SQLite persistence must handle write contention with bounded retry and backoff or surface a bounded storage failure to runtime. Retry loops must not be unbounded.
+
+SQLite persistence should perform periodic WAL checkpoint work when supported by the deployment shape.
+
+Storage failures that affect session or message persistence must be observable to runtime or caller-facing layers that depend on persistence.
+
+## Retrieval
+
+Final result material, tool result material, and artifact material retained in the first slice are retrieved through session, evidence, message, and material relationships.
+
+This attachment does not define public locators, path formats, cursor formats, database keys, or transport payloads.
+
+## Related Topics
+
+- [040 Storage and Persistence](spec.md) defines the storage boundary.
+- [030 State and Data Model](../030-state-and-data-model/spec.md) defines semantic state relationships.
+- [030 Session Record Model](../030-state-and-data-model/session-record-model.md) defines logical session and message records.
+- [005 Durable Evidence](../005-durable-evidence/spec.md) defines evidence semantics.

@@ -15,16 +15,16 @@ Define Psychevo's system-level architecture boundaries.
 - dependency direction between architecture layers
 
 Out of scope:
-- event, trace, provider, tool, or session schemas
+- event, trace, provider, tool, session, or persistence schemas
 - concrete trait, function, CLI, or file format APIs
 - built-in tool names or tool behavior
 - replay, evaluation, memory, skill, extension, or self-evolution behavior
 
 ## Architecture Principles
 
-- Layering over bundling. Psychevo separates provider protocol, agent execution, runtime assembly, and transport instead of bundling product concerns into lower layers.
+- Layering over bundling. Psychevo separates provider protocol, agent execution, runtime assembly, persistence, and transport instead of bundling product concerns into lower layers.
 - Component specialization. Each primary architecture component owns one system-level responsibility area and must not absorb responsibilities from adjacent components.
-- Runtime is the coordination and library surface. System-level run assembly, resource surface wiring, tool surface assembly, context assembly, durable evidence, and replay wiring converge in `psychevo-runtime`; non-CLI entry points should depend on runtime libraries directly instead of routing through command-line transport.
+- Runtime is the coordination and library surface. Session coordination, agent-invocation assembly, resource surface wiring, tool surface assembly, context assembly, durable evidence, persistence, and replay wiring converge in `psychevo-runtime`; non-CLI entry points should depend on runtime libraries directly instead of routing through command-line transport.
 - Transport is replaceable. CLI parsing, terminal rendering, stdin/stdout behavior, exit codes, and environment handling must remain outside the core runtime and lower layers.
 
 ## Primary Architecture Components
@@ -65,18 +65,20 @@ Must not know:
 ### `psychevo-runtime`
 
 Owns:
-- system-level run coordination
-- agent runtime assembly
+- session coordination
+- agent-invocation assembly
+- built-in runtime capability modules specified by capability specs
 - resource surface wiring
-- run-scoped tool surface assembly
+- agent-invocation scoped tool surface assembly
+- capability extension resolution into agent-invocation scoped selections
 - model context assembly
-- durable execution records and replay wiring
+- durable execution records, persistence, and replay wiring
 - the stable library surface for future non-CLI entry points
 
 Must not know:
 - CLI parsing, terminal rendering, stdin/stdout framing, or process exit behavior
 - UI-specific interaction mechanics
-- entry-point-specific run modes that can be implemented separately
+- entry-point-specific modes that can be implemented separately
 
 ### `psychevo-cli`
 
@@ -92,7 +94,7 @@ Must not own:
 - provider protocol behavior
 - coding tool behavior
 - resource surface rules
-- durable record or replay semantics
+- durable record, persistence, or replay semantics
 - long-lived business logic
 
 ## Dependency Direction
@@ -111,7 +113,10 @@ Allowed dependency rules:
 
 Allowed direct interaction rules:
 - `psychevo-cli` may directly interact with `psychevo-runtime` only.
-- `psychevo-runtime` may directly interact with `psychevo-agent-core`, `psychevo-ai`, run-scoped tool surface bindings, and runtime-owned durable records.
+- `psychevo-runtime` may directly interact with `psychevo-agent-core`, `psychevo-ai`, agent-invocation scoped tool surface bindings, and runtime-owned durable records.
+- `psychevo-runtime` may resolve capability extension contributions into agent-invocation scoped selections.
+- `psychevo-runtime` may implement and assemble built-in capability modules, such as capability specs that explicitly place their implementation in runtime. Concrete capability behavior remains owned by those capability specs.
+- `psychevo-runtime` may own SQLite persistence for the first implementation slice without adding a new crate.
 - `psychevo-agent-core` may directly interact with `psychevo-ai` and tool abstractions supplied by runtime.
 
 Prohibited dependency rules:
@@ -125,10 +130,15 @@ Prohibited dependency rules:
 - [000 Foundation](../000-foundation/spec.md) defines the upstream project foundation and implementation-neutral principles.
 - [002 Agent Execution](../002-agent-execution/spec.md) defines agent-core execution semantics and core event families.
 - [003 AI Protocol](../003-ai-protocol/spec.md) defines provider-neutral generation semantics for `psychevo-ai`.
-- [004 Runtime Contract](../004-runtime-contract/spec.md) defines runtime run assembly and evidence sink wiring.
-- [005 Durable Evidence](../005-durable-evidence/spec.md) defines durable evidence semantics for inspectable runs.
+- [004 Runtime Contract](../004-runtime-contract/spec.md) defines session coordination, agent-invocation assembly, and evidence sink wiring.
+- [005 Durable Evidence](../005-durable-evidence/spec.md) defines durable evidence semantics for sessions and agent invocations.
 - [006 Context Assembly](../006-context-assembly/spec.md) defines model context assembly and transformation boundaries.
-- [007 Tool Surface](../007-tool-surface/spec.md) defines run-scoped tool surface semantics.
-- [008 Session Continuity](../008-session-continuity/spec.md) defines continuity across runs.
+- [007 Tool Surface](../007-tool-surface/spec.md) defines agent-invocation scoped tool surface semantics.
+- [008 Session Continuity](../008-session-continuity/spec.md) defines the session boundary for continuity and persistence.
 - [009 Resource Surface](../009-resource-surface/spec.md) defines runtime-owned resource surface and resource decision semantics.
 - [010 Memory System](../010-memory-system/spec.md) defines optional memory boundaries outside architecture layering.
+- [020 Interfaces](../020-interfaces/spec.md) defines caller-facing interface layer semantics.
+- [030 State and Data Model](../030-state-and-data-model/spec.md) defines cross-cutting semantic state relationships.
+- [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines storage and persistence boundaries.
+- [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability contribution boundaries resolved by runtime.
+- [100 Coding Agent](../100-coding-agent/spec.md) defines a runtime-owned built-in capability target.

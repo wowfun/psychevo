@@ -13,6 +13,7 @@ Define the runtime-owned resource surface for non-model resources used by contex
 - resource boundaries around facts and operations
 - access gates before model visibility or resource use
 - allow, deny, and defer resource decisions
+- observable resource bounds, timeouts, and aborts
 - evidence relationship for resource decisions that affect model visibility or tool execution
 
 Out of scope:
@@ -35,6 +36,8 @@ A resource operation is attempted access, use, mutation, execution, or external 
 The resource surface is the runtime-supplied candidate surface of resource facts and resource operations. Candidate means available for consideration, not authorized for model visibility or execution.
 
 Runtime supplies the resource surface. This spec does not define how resources are discovered, selected, prioritized, provisioned, scheduled, cleaned up, or configured.
+
+Capability extensions may contribute resource candidates or resource gates. [050 Capability Extensions](../050-capability-extensions/spec.md) defines source, contribution, activation, availability, and conflict boundaries for those candidates. This spec owns resource surface and resource decision semantics after candidates reach the resource boundary.
 
 Resource facts are not automatically model-visible. [006 Context Assembly](../006-context-assembly/spec.md) owns context projection and visibility.
 
@@ -72,6 +75,10 @@ Resource decisions may carry optional reason or metadata. Reason and metadata mu
 
 Deny or defer projection into context omission, tool-result artifacts, terminal rendering, or user-facing output is owned by adjacent specs and future implementation specs, not by this spec.
 
+Resource operations may also encounter runtime bounds, timeout, or abort conditions. When those conditions affect model visibility or tool execution, they must be observable as resource facts, tool-result material, or before-agent-start rejection through the adjacent owning spec.
+
+Adjacent capability or tool specs may require a denied, deferred, bounded, timed-out, or aborted operation to appear as a structured tool-result error. This spec owns that the resource decision or boundary condition exists and is observable; it does not define the tool-result format.
+
 ## Evidence Relationship
 
 Resource decisions that affect model visibility or tool execution must be observable as durable evidence facts.
@@ -84,7 +91,9 @@ Durable evidence may represent that a resource fact was allowed, denied, or defe
 
 - [000 Foundation](../000-foundation/spec.md) defines the upstream project foundation and implementation-neutral principles.
 - [001 Architecture](../001-architecture/spec.md) defines crate boundaries and dependency direction.
-- [004 Runtime Contract](../004-runtime-contract/spec.md) defines runtime run assembly and resource surface wiring.
-- [005 Durable Evidence](../005-durable-evidence/spec.md) defines durable evidence semantics for inspectable run facts.
+- [004 Runtime Contract](../004-runtime-contract/spec.md) defines agent-invocation assembly and resource surface wiring.
+- [005 Durable Evidence](../005-durable-evidence/spec.md) defines durable evidence semantics for inspectable agent-invocation facts.
 - [006 Context Assembly](../006-context-assembly/spec.md) defines model visibility and projection for resource facts.
 - [007 Tool Surface](../007-tool-surface/spec.md) defines tool declarations and execution bindings that may use resource operations.
+- [030 State and Data Model](../030-state-and-data-model/spec.md) defines how resource facts relate to other state families.
+- [050 Capability Extensions](../050-capability-extensions/spec.md) defines how capability contributions may provide resource candidates or gates.
