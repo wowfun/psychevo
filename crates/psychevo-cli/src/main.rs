@@ -4,6 +4,7 @@ use std::fs;
 use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
@@ -44,9 +45,15 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    Init,
+    Init(InitArgs),
     Smoke(SmokeArgs),
     Run(RunArgs),
+}
+
+#[derive(Debug, Parser)]
+struct InitArgs {
+    #[arg(long)]
+    reset_state: bool,
 }
 
 #[derive(Debug, Parser)]
@@ -81,6 +88,8 @@ struct RunArgs {
     continue_latest: bool,
     #[arg(long, value_enum, default_value_t = RunFormatArg::Default)]
     format: RunFormatArg,
+    #[arg(long)]
+    include_reasoning: bool,
     #[arg()]
     message: Vec<String>,
 }
@@ -150,13 +159,13 @@ async fn main() -> ExitCode {
 async fn run() -> Result<ExitCode> {
     let cli = Cli::parse();
     match cli.command {
-        Commands::Init => run_init_command(),
+        Commands::Init(args) => run_init_command(args),
         Commands::Smoke(args) => run_smoke_command(args).await,
         Commands::Run(args) => run_run_command(args).await,
     }
 }
 
-fn run_init_command() -> Result<ExitCode> {
+fn run_init_command(args: InitArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
@@ -176,6 +185,9 @@ fn run_init_command() -> Result<ExitCode> {
     }
     if !env_file.exists() {
         fs::write(&env_file, STARTER_ENV)?;
+    }
+    if args.reset_state {
+        backup_state_files(&home, &state)?;
     }
     SqliteStore::open(&state)?;
 
@@ -237,6 +249,9 @@ async fn run_run_command(args: RunArgs) -> Result<ExitCode> {
 }
 
 async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
+    if args.include_reasoning && args.format != RunFormatArg::Json {
+        return Err(anyhow!("--include-reasoning requires --format json"));
+    }
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
@@ -266,6 +281,7 @@ async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
         config_path,
         model: args.model.clone(),
         reasoning_effort: args.variant.map(|variant| variant.as_str().to_string()),
+        include_reasoning: args.include_reasoning,
         inherited_env: Some(env_map),
     })
     .await?;
@@ -310,6 +326,35 @@ fn ensure_home_initialized(home: &Path) -> Result<()> {
             "Psychevo home is not initialized; run `pevo init` to create {}",
             config.display()
         ));
+    }
+    Ok(())
+}
+
+fn backup_state_files(home: &Path, state: &Path) -> Result<()> {
+    let timestamp_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let backup_dir = home.join("backups").join(format!("state-{timestamp_ms}"));
+    let files = [
+        state.to_path_buf(),
+        PathBuf::from(format!("{}-wal", state.display())),
+        PathBuf::from(format!("{}-shm", state.display())),
+    ];
+    let mut moved_any = false;
+    for file in files {
+        if !file.exists() {
+            continue;
+        }
+        fs::create_dir_all(&backup_dir)?;
+        let name = file
+            .file_name()
+            .ok_or_else(|| anyhow!("state file has no file name: {}", file.display()))?;
+        fs::rename(&file, backup_dir.join(name))?;
+        moved_any = true;
+    }
+    if moved_any {
+        println!("state_backup: {}", backup_dir.display());
     }
     Ok(())
 }

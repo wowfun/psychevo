@@ -39,6 +39,7 @@ async fn run_live_read_tool(provider: &str) {
         config_path: None,
         model: None,
         reasoning_effort: None,
+        include_reasoning: true,
         inherited_env: Some(inherited_env),
     })
     .await

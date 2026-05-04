@@ -34,6 +34,7 @@ const READ_MAX_BYTES: usize = 50 * 1024;
 const READ_MAX_LINES: usize = 2000;
 const BASH_DEFAULT_TIMEOUT_SECS: u64 = 120;
 const BASH_MAX_TIMEOUT_SECS: u64 = 300;
+const SQLITE_SCHEMA_VERSION: i64 = 2;
 const REASONING_EFFORT_VALUES: &[&str] =
     &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
@@ -94,6 +95,7 @@ pub struct RunOptions {
     pub config_path: Option<PathBuf>,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
+    pub include_reasoning: bool,
     pub inherited_env: Option<BTreeMap<String, String>>,
 }
 
@@ -130,7 +132,19 @@ impl SqliteStore {
         conn.busy_timeout(Duration::from_millis(250))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
-        conn.pragma_update(None, "user_version", 1)?;
+        let user_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        let has_schema =
+            sqlite_table_exists(&conn, "sessions")? || sqlite_table_exists(&conn, "messages")?;
+        if user_version != 0 && user_version != SQLITE_SCHEMA_VERSION {
+            return Err(Error::Config(format!(
+                "state database schema version {user_version} is not supported; run `pevo init --reset-state` or set PSYCHEVO_DB to a new state database"
+            )));
+        }
+        if user_version == 0 && has_schema {
+            return Err(Error::Config(
+                "state database has an unknown schema version; run `pevo init --reset-state` or set PSYCHEVO_DB to a new state database".to_string(),
+            ));
+        }
         conn.execute_batch(
             r#"
             CREATE TABLE IF NOT EXISTS sessions (
@@ -166,7 +180,6 @@ impl SqliteStore {
                 model TEXT,
                 provider TEXT,
                 usage_json TEXT,
-                reasoning_json TEXT,
                 metadata_json TEXT,
                 UNIQUE(session_id, session_seq)
             );
@@ -175,6 +188,7 @@ impl SqliteStore {
                 ON messages(session_id, session_seq);
             "#,
         )?;
+        conn.pragma_update(None, "user_version", SQLITE_SCHEMA_VERSION)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
@@ -271,9 +285,8 @@ impl SqliteStore {
                 INSERT INTO messages (
                     session_id, session_seq, role, timestamp_ms, message_json,
                     content_text, tool_call_id, tool_name, tool_calls_json,
-                    finish_reason, outcome, model, provider, usage_json,
-                    reasoning_json, metadata_json
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, NULL, ?14, NULL)
+                    finish_reason, outcome, model, provider, usage_json, metadata_json
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, NULL, NULL)
                 "#,
                 params![
                     session_id,
@@ -288,8 +301,7 @@ impl SqliteStore {
                     fields.finish_reason,
                     fields.outcome,
                     fields.model,
-                    fields.provider,
-                    fields.reasoning_json
+                    fields.provider
                 ],
             )?;
             conn.execute(
@@ -368,6 +380,16 @@ impl SqliteStore {
     }
 }
 
+fn sqlite_table_exists(conn: &Connection, table: &str) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1",
+        params![table],
+        |_| Ok(()),
+    )
+    .optional()
+    .map(|value| value.is_some())
+}
+
 fn is_busy(err: &rusqlite::Error) -> bool {
     let msg = err.to_string().to_lowercase();
     msg.contains("busy") || msg.contains("locked")
@@ -393,7 +415,6 @@ struct MessageFields {
     outcome: Option<String>,
     model: Option<String>,
     provider: Option<String>,
-    reasoning_json: Option<String>,
     tool_call_count: i64,
 }
 
@@ -419,7 +440,6 @@ fn message_fields(message: &Message) -> Result<MessageFields> {
             outcome: None,
             model: None,
             provider: None,
-            reasoning_json: None,
             tool_call_count: 0,
         }),
         Message::Assistant {
@@ -445,13 +465,6 @@ fn message_fields(message: &Message) -> Result<MessageFields> {
                     _ => None,
                 })
                 .collect::<Vec<_>>();
-            let reasoning = content
-                .iter()
-                .filter_map(|block| match block {
-                    AssistantBlock::Reasoning { text } => Some(json!({ "text": text })),
-                    _ => None,
-                })
-                .collect::<Vec<_>>();
             Ok(MessageFields {
                 role: "assistant".to_string(),
                 timestamp_ms: *timestamp_ms,
@@ -467,11 +480,6 @@ fn message_fields(message: &Message) -> Result<MessageFields> {
                 outcome: Some(outcome.as_str().to_string()),
                 model: model.clone(),
                 provider: provider.clone(),
-                reasoning_json: if reasoning.is_empty() {
-                    None
-                } else {
-                    Some(serde_json::to_string(&reasoning)?)
-                },
                 tool_call_count: tool_calls.len() as i64,
             })
         }
@@ -492,7 +500,6 @@ fn message_fields(message: &Message) -> Result<MessageFields> {
             outcome: Some(if *is_error { "failed" } else { "normal" }.to_string()),
             model: None,
             provider: None,
-            reasoning_json: None,
             tool_call_count: 0,
         }),
     }
@@ -715,6 +722,7 @@ pub async fn run_live(options: RunOptions) -> Result<RunResult> {
         control: SmokeControl::None,
         control_handle: Some(control_handle),
         events: Some(Arc::clone(&events)),
+        include_reasoning: options.include_reasoning,
     });
     let generation_metadata = resolved
         .reasoning_effort
@@ -1409,6 +1417,7 @@ pub async fn run_smoke(options: SmokeOptions) -> Result<SmokeResult> {
         control: options.control,
         control_handle: Some(control_handle),
         events: None,
+        include_reasoning: false,
     });
     let request = AgentLoopRequest {
         model_provider: "fake".to_string(),
@@ -1452,6 +1461,7 @@ struct PersistenceSink {
     control: SmokeControl,
     control_handle: Option<ControlHandle>,
     events: Option<Arc<Mutex<Vec<Value>>>>,
+    include_reasoning: bool,
 }
 
 impl EventSink for PersistenceSink {
@@ -1461,9 +1471,10 @@ impl EventSink for PersistenceSink {
         let control = self.control;
         let control_handle = self.control_handle.clone();
         let events = self.events.clone();
+        let include_reasoning = self.include_reasoning;
         Box::pin(async move {
             if let Some(events) = events
-                && let Ok(value) = serde_json::to_value(&event)
+                && let Some(value) = project_agent_event(&event, include_reasoning)
             {
                 events.lock().expect("event lock poisoned").push(value);
             }
@@ -1493,6 +1504,58 @@ impl EventSink for PersistenceSink {
             }
             Ok(())
         })
+    }
+}
+
+fn project_agent_event(event: &AgentEvent, include_reasoning: bool) -> Option<Value> {
+    let projected = match event {
+        AgentEvent::ReasoningDelta { text } => {
+            return include_reasoning.then(|| json!({ "type": "reasoning_delta", "text": text }));
+        }
+        AgentEvent::ReasoningEnd { text } => {
+            return include_reasoning.then(|| json!({ "type": "reasoning_end", "text": text }));
+        }
+        AgentEvent::AgentEnd { outcome, messages } => AgentEvent::AgentEnd {
+            outcome: *outcome,
+            messages: messages.iter().map(sanitize_message_for_output).collect(),
+        },
+        AgentEvent::MessageStart { message } => AgentEvent::MessageStart {
+            message: sanitize_message_for_output(message),
+        },
+        AgentEvent::MessageUpdate { message } => AgentEvent::MessageUpdate {
+            message: sanitize_message_for_output(message),
+        },
+        AgentEvent::MessageEnd { message } => AgentEvent::MessageEnd {
+            message: sanitize_message_for_output(message),
+        },
+        other => other.clone(),
+    };
+    serde_json::to_value(projected).ok()
+}
+
+fn sanitize_message_for_output(message: &Message) -> Message {
+    match message {
+        Message::Assistant {
+            content,
+            timestamp_ms,
+            finish_reason,
+            outcome,
+            model,
+            provider,
+            ..
+        } => Message::Assistant {
+            content: content
+                .iter()
+                .filter(|block| !matches!(block, AssistantBlock::Reasoning { .. }))
+                .cloned()
+                .collect(),
+            timestamp_ms: *timestamp_ms,
+            finish_reason: finish_reason.clone(),
+            outcome: *outcome,
+            model: model.clone(),
+            provider: provider.clone(),
+        },
+        other => other.clone(),
     }
 }
 
@@ -2525,6 +2588,7 @@ mod tests {
             config_path: None,
             model: None,
             reasoning_effort: None,
+            include_reasoning: false,
             inherited_env: Some(BTreeMap::from([(
                 "HOME".to_string(),
                 temp.path().to_string_lossy().to_string(),
@@ -3054,5 +3118,125 @@ mod tests {
         assert_ne!(latest, second);
         assert_ne!(latest, smoke);
         assert_ne!(latest, other);
+    }
+
+    #[test]
+    fn sqlite_schema_v2_rejects_old_state_databases() {
+        let temp = tempdir().expect("temp");
+        let db = temp.path().join("old.db");
+        {
+            let conn = Connection::open(&db).expect("db");
+            conn.pragma_update(None, "user_version", 1)
+                .expect("version");
+            conn.execute_batch("CREATE TABLE sessions (id TEXT);")
+                .expect("schema");
+        }
+
+        let err = match SqliteStore::open(&db) {
+            Ok(_) => panic!("old db opened successfully"),
+            Err(err) => err,
+        };
+        assert!(err.to_string().contains("schema version 1"));
+        assert!(err.to_string().contains("--reset-state"));
+    }
+
+    #[test]
+    fn sqlite_schema_v2_stores_reasoning_only_in_message_json() {
+        let temp = tempdir().expect("temp");
+        let db = temp.path().join("state.db");
+        let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+        let store = SqliteStore::open(&db).expect("store");
+        let session_id = store
+            .create_session_with_metadata(&workdir, "run", "model", "provider", None)
+            .expect("session");
+        store
+            .append_message(
+                &session_id,
+                &Message::Assistant {
+                    content: vec![
+                        AssistantBlock::Reasoning {
+                            text: "folded".to_string(),
+                            provider_evidence: Some(json!({
+                                "reasoning_details": [{ "type": "thinking", "text": "opaque" }]
+                            })),
+                        },
+                        AssistantBlock::Text {
+                            text: "visible".to_string(),
+                        },
+                    ],
+                    timestamp_ms: 1,
+                    finish_reason: Some("stop".to_string()),
+                    outcome: Outcome::Normal,
+                    model: Some("model".to_string()),
+                    provider: Some("provider".to_string()),
+                },
+            )
+            .expect("append");
+
+        let conn = Connection::open(&db).expect("db");
+        let columns = conn
+            .prepare("PRAGMA table_info(messages)")
+            .expect("schema stmt")
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("schema rows")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("columns");
+        assert!(!columns.iter().any(|name| name == "reasoning_json"));
+        assert!(!columns.iter().any(|name| name == "reasoning_content"));
+        assert!(!columns.iter().any(|name| name == "reasoning_details_json"));
+
+        let message_json: String = conn
+            .query_row(
+                "SELECT message_json FROM messages WHERE session_id = ?1",
+                [&session_id],
+                |row| row.get(0),
+            )
+            .expect("message_json");
+        let message: Value = serde_json::from_str(&message_json).expect("message");
+        assert_eq!(message["content"][0]["type"], "reasoning");
+        assert_eq!(message["content"][0]["text"], "folded");
+        assert_eq!(
+            message["content"][0]["provider_evidence"]["reasoning_details"][0]["type"],
+            "thinking"
+        );
+        assert!(message.get("reasoning_content").is_none());
+        assert!(message.get("reasoning_details").is_none());
+    }
+
+    #[test]
+    fn json_projection_hides_reasoning_unless_included() {
+        let message = Message::Assistant {
+            content: vec![
+                AssistantBlock::Reasoning {
+                    text: "private".to_string(),
+                    provider_evidence: Some(json!({
+                        "reasoning_details": [{ "type": "thinking" }]
+                    })),
+                },
+                AssistantBlock::Text {
+                    text: "visible".to_string(),
+                },
+            ],
+            timestamp_ms: 1,
+            finish_reason: Some("stop".to_string()),
+            outcome: Outcome::Normal,
+            model: Some("model".to_string()),
+            provider: Some("provider".to_string()),
+        };
+        let event = AgentEvent::MessageEnd {
+            message: message.clone(),
+        };
+        let hidden = project_agent_event(&event, false).expect("hidden");
+        let hidden_text = serde_json::to_string(&hidden).expect("hidden json");
+        assert!(hidden_text.contains("visible"));
+        assert!(!hidden_text.contains("private"));
+        assert!(!hidden_text.contains("reasoning_content"));
+
+        assert!(
+            project_agent_event(&AgentEvent::ReasoningDelta { text: "x".into() }, false).is_none()
+        );
+        let shown = project_agent_event(&AgentEvent::ReasoningDelta { text: "x".into() }, true)
+            .expect("shown");
+        assert_eq!(shown, json!({"type":"reasoning_delta","text":"x"}));
     }
 }

@@ -66,8 +66,14 @@ pub struct TextBlock {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AssistantBlock {
-    Text { text: String },
-    Reasoning { text: String },
+    Text {
+        text: String,
+    },
+    Reasoning {
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider_evidence: Option<Value>,
+    },
     ToolCall(ToolCallBlock),
 }
 
@@ -146,6 +152,12 @@ pub enum AgentEvent {
     },
     MessageEnd {
         message: Message,
+    },
+    ReasoningDelta {
+        text: String,
+    },
+    ReasoningEnd {
+        text: String,
     },
     ToolExecutionStart {
         tool_call_id: String,
@@ -462,19 +474,23 @@ async fn stream_assistant(
     };
 
     let mut stream = provider.stream(generation_request, abort).await?;
-    let mut text = String::new();
-    let mut reasoning = String::new();
+    let mut raw_text = String::new();
+    let mut provider_reasoning = String::new();
+    let mut reasoning_details = Vec::new();
+    let mut emitted_inline_reasoning_len = 0usize;
     let mut tool_builders: BTreeMap<(usize, usize), ToolCallBuilder> = BTreeMap::new();
     let mut finish_reason = None;
     let mut outcome = Outcome::Normal;
+    let timestamp_ms = now_ms();
     let mut assistant = Message::Assistant {
         content: Vec::new(),
-        timestamp_ms: now_ms(),
+        timestamp_ms,
         finish_reason: None,
         outcome,
         model: Some(request.model.clone()),
         provider: Some(request.model_provider.clone()),
     };
+    let mut last_visible_assistant = assistant.clone();
     emit(
         &sink,
         AgentEvent::MessageStart {
@@ -484,12 +500,29 @@ async fn stream_assistant(
     .await?;
 
     while let Some(event) = stream.next().await {
+        let mut visible_changed = false;
         match event? {
             StreamEvent::TextDelta { text: delta } => {
-                text.push_str(&delta);
+                raw_text.push_str(&delta);
+                let (_, inline_reasoning) = split_inline_think_blocks(&raw_text, true);
+                if inline_reasoning.len() > emitted_inline_reasoning_len {
+                    let delta = inline_reasoning[emitted_inline_reasoning_len..].to_string();
+                    emitted_inline_reasoning_len = inline_reasoning.len();
+                    if !delta.is_empty() {
+                        emit(&sink, AgentEvent::ReasoningDelta { text: delta }).await?;
+                    }
+                }
+                visible_changed = true;
             }
-            StreamEvent::ReasoningDelta { text: delta } => {
-                reasoning.push_str(&delta);
+            StreamEvent::ReasoningDelta {
+                text: delta,
+                reasoning_content: _,
+            } => {
+                provider_reasoning.push_str(&delta);
+                emit(&sink, AgentEvent::ReasoningDelta { text: delta }).await?;
+            }
+            StreamEvent::ReasoningDetails { details } => {
+                collect_reasoning_details(&mut reasoning_details, details);
             }
             StreamEvent::ToolCallStart {
                 content_index,
@@ -507,6 +540,7 @@ async fn stream_assistant(
                         call_index,
                     },
                 );
+                visible_changed = true;
             }
             StreamEvent::ToolCallDelta {
                 content_index,
@@ -531,6 +565,7 @@ async fn stream_assistant(
                     builder.name = name;
                 }
                 builder.arguments_json.push_str(&arguments_delta);
+                visible_changed = true;
             }
             StreamEvent::ToolCallEnd { .. } => {}
             StreamEvent::Usage { .. } | StreamEvent::Metadata { .. } => {}
@@ -543,14 +578,53 @@ async fn stream_assistant(
                 break;
             }
         }
+        let (visible_text, inline_reasoning) = split_inline_think_blocks(&raw_text, true);
+        let reasoning = combine_reasoning(&provider_reasoning, &inline_reasoning);
         assistant = build_assistant_message(
-            &text,
-            &reasoning,
-            &tool_builders,
-            finish_reason.clone(),
-            outcome,
+            AssistantBuildState {
+                text: &visible_text,
+                reasoning: &reasoning,
+                reasoning_provider_evidence: reasoning_provider_evidence(&reasoning_details),
+                tool_builders: &tool_builders,
+                timestamp_ms,
+                finish_reason: finish_reason.clone(),
+                outcome,
+            },
             request,
         );
+        if visible_changed && visible_assistant_changed(&last_visible_assistant, &assistant) {
+            last_visible_assistant = assistant.clone();
+            emit(
+                &sink,
+                AgentEvent::MessageUpdate {
+                    message: assistant.clone(),
+                },
+            )
+            .await?;
+        }
+    }
+
+    let (visible_text, inline_reasoning) = split_inline_think_blocks(&raw_text, false);
+    if inline_reasoning.len() > emitted_inline_reasoning_len {
+        let delta = inline_reasoning[emitted_inline_reasoning_len..].to_string();
+        if !delta.is_empty() {
+            emit(&sink, AgentEvent::ReasoningDelta { text: delta }).await?;
+        }
+    }
+    let reasoning = combine_reasoning(&provider_reasoning, &inline_reasoning);
+    assistant = build_assistant_message(
+        AssistantBuildState {
+            text: &visible_text,
+            reasoning: &reasoning,
+            reasoning_provider_evidence: reasoning_provider_evidence(&reasoning_details),
+            tool_builders: &tool_builders,
+            timestamp_ms,
+            finish_reason,
+            outcome,
+        },
+        request,
+    );
+    if visible_assistant_changed(&last_visible_assistant, &assistant) {
         emit(
             &sink,
             AgentEvent::MessageUpdate {
@@ -559,15 +633,9 @@ async fn stream_assistant(
         )
         .await?;
     }
-
-    assistant = build_assistant_message(
-        &text,
-        &reasoning,
-        &tool_builders,
-        finish_reason,
-        outcome,
-        request,
-    );
+    if !reasoning.is_empty() {
+        emit(&sink, AgentEvent::ReasoningEnd { text: reasoning }).await?;
+    }
     emit(
         &sink,
         AgentEvent::MessageEnd {
@@ -578,26 +646,30 @@ async fn stream_assistant(
     Ok(assistant)
 }
 
-fn build_assistant_message(
-    text: &str,
-    reasoning: &str,
-    tool_builders: &BTreeMap<(usize, usize), ToolCallBuilder>,
+struct AssistantBuildState<'a> {
+    text: &'a str,
+    reasoning: &'a str,
+    reasoning_provider_evidence: Option<Value>,
+    tool_builders: &'a BTreeMap<(usize, usize), ToolCallBuilder>,
+    timestamp_ms: i64,
     finish_reason: Option<String>,
     outcome: Outcome,
-    request: &AgentLoopRequest,
-) -> Message {
+}
+
+fn build_assistant_message(state: AssistantBuildState<'_>, request: &AgentLoopRequest) -> Message {
     let mut content = Vec::new();
-    if !reasoning.is_empty() {
+    if !state.reasoning.is_empty() || state.reasoning_provider_evidence.is_some() {
         content.push(AssistantBlock::Reasoning {
-            text: reasoning.to_string(),
+            text: state.reasoning.to_string(),
+            provider_evidence: state.reasoning_provider_evidence,
         });
     }
-    if !text.is_empty() {
+    if !state.text.is_empty() {
         content.push(AssistantBlock::Text {
-            text: text.to_string(),
+            text: state.text.to_string(),
         });
     }
-    for builder in tool_builders.values() {
+    for builder in state.tool_builders.values() {
         let parsed = serde_json::from_str::<Value>(&builder.arguments_json);
         let (arguments, arguments_error) = match parsed {
             Ok(value) => (value, None),
@@ -615,12 +687,76 @@ fn build_assistant_message(
     }
     Message::Assistant {
         content,
-        timestamp_ms: now_ms(),
-        finish_reason,
-        outcome,
+        timestamp_ms: state.timestamp_ms,
+        finish_reason: state.finish_reason,
+        outcome: state.outcome,
         model: Some(request.model.clone()),
         provider: Some(request.model_provider.clone()),
     }
+}
+
+fn split_inline_think_blocks(input: &str, streaming: bool) -> (String, String) {
+    let mut visible = String::new();
+    let mut reasoning = Vec::new();
+    let mut cursor = 0usize;
+    while let Some(relative_start) = input[cursor..].find("<think>") {
+        let start = cursor + relative_start;
+        visible.push_str(&input[cursor..start]);
+        let content_start = start + "<think>".len();
+        if let Some(relative_end) = input[content_start..].find("</think>") {
+            let end = content_start + relative_end;
+            let thought = input[content_start..end].trim();
+            if !thought.is_empty() {
+                reasoning.push(thought.to_string());
+            }
+            cursor = end + "</think>".len();
+        } else {
+            if !streaming {
+                visible.push_str(&input[start..]);
+            }
+            return (visible, reasoning.join("\n\n"));
+        }
+    }
+    visible.push_str(&input[cursor..]);
+    (visible, reasoning.join("\n\n"))
+}
+
+fn combine_reasoning(provider_reasoning: &str, inline_reasoning: &str) -> String {
+    match (
+        provider_reasoning.trim().is_empty(),
+        inline_reasoning.trim().is_empty(),
+    ) {
+        (true, true) => String::new(),
+        (false, true) => provider_reasoning.to_string(),
+        (true, false) => inline_reasoning.to_string(),
+        (false, false) => format!("{provider_reasoning}\n\n{inline_reasoning}"),
+    }
+}
+
+fn collect_reasoning_details(details: &mut Vec<Value>, value: Value) {
+    match value {
+        Value::Array(values) => details.extend(values),
+        other => details.push(other),
+    }
+}
+
+fn reasoning_provider_evidence(details: &[Value]) -> Option<Value> {
+    (!details.is_empty()).then(|| json!({ "reasoning_details": details }))
+}
+
+fn visible_assistant_changed(previous: &Message, current: &Message) -> bool {
+    visible_assistant_blocks(previous) != visible_assistant_blocks(current)
+}
+
+fn visible_assistant_blocks(message: &Message) -> Vec<AssistantBlock> {
+    let Message::Assistant { content, .. } = message else {
+        return Vec::new();
+    };
+    content
+        .iter()
+        .filter(|block| !matches!(block, AssistantBlock::Reasoning { .. }))
+        .cloned()
+        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -766,5 +902,197 @@ pub struct NoopEventSink;
 impl EventSink for NoopEventSink {
     fn emit(&self, _event: AgentEvent) -> BoxFuture<'static, Result<()>> {
         Box::pin(async { Ok(()) })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::stream;
+    use psychevo_ai::{FakeProvider, RawStreamEvent};
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct CaptureSink {
+        events: Mutex<Vec<AgentEvent>>,
+    }
+
+    impl EventSink for CaptureSink {
+        fn emit(&self, event: AgentEvent) -> BoxFuture<'static, Result<()>> {
+            self.events.lock().expect("events").push(event);
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    #[derive(Clone)]
+    struct StaticProvider {
+        events: Vec<StreamEvent>,
+    }
+
+    impl GenerationProvider for StaticProvider {
+        fn stream(
+            &self,
+            _request: GenerationRequest,
+            _abort: AbortSignal,
+        ) -> BoxFuture<'static, psychevo_ai::Result<psychevo_ai::GenerationStream>> {
+            let events = self.events.clone().into_iter().map(Ok);
+            Box::pin(async move {
+                let output: psychevo_ai::GenerationStream = Box::pin(stream::iter(events));
+                Ok(output)
+            })
+        }
+    }
+
+    fn request() -> AgentLoopRequest {
+        AgentLoopRequest {
+            model_provider: "fake".to_string(),
+            model: "model".to_string(),
+            generation_metadata: json!({}),
+            previous_messages: Vec::new(),
+            prompt_messages: vec![user_text_message("hello")],
+            tools: Vec::new(),
+            max_turns: 1,
+        }
+    }
+
+    #[tokio::test]
+    async fn reasoning_only_progress_has_no_visible_message_update() {
+        let provider = Arc::new(FakeProvider::new(vec![vec![
+            RawStreamEvent::Reasoning("private".to_string()),
+            RawStreamEvent::Text("visible".to_string()),
+            RawStreamEvent::Done(Outcome::Normal),
+        ]]));
+        let sink = Arc::new(CaptureSink::default());
+        let (_, control) = ControlHandle::new();
+        let completion = run_agent_loop(provider, request(), sink.clone(), control)
+            .await
+            .expect("loop");
+        assert_eq!(completion.outcome, Outcome::Normal);
+
+        let events = sink.events.lock().expect("events");
+        assert!(events.iter().any(|event| {
+            matches!(event, AgentEvent::ReasoningDelta { text } if text == "private")
+        }));
+        let updates = events
+            .iter()
+            .filter(|event| matches!(event, AgentEvent::MessageUpdate { .. }))
+            .count();
+        assert_eq!(updates, 1);
+    }
+
+    #[tokio::test]
+    async fn usage_and_metadata_do_not_emit_empty_message_updates() {
+        let provider = Arc::new(StaticProvider {
+            events: vec![
+                StreamEvent::Metadata {
+                    metadata: json!({"id":"resp"}),
+                },
+                StreamEvent::Usage {
+                    usage: json!({"total_tokens":1}),
+                },
+                StreamEvent::TextDelta {
+                    text: "ok".to_string(),
+                },
+                StreamEvent::Done {
+                    outcome: Outcome::Normal,
+                    finish_reason: Some("stop".to_string()),
+                },
+            ],
+        });
+        let sink = Arc::new(CaptureSink::default());
+        let (_, control) = ControlHandle::new();
+        run_agent_loop(provider, request(), sink.clone(), control)
+            .await
+            .expect("loop");
+
+        let events = sink.events.lock().expect("events");
+        let updates = events
+            .iter()
+            .filter(|event| matches!(event, AgentEvent::MessageUpdate { .. }))
+            .count();
+        assert_eq!(updates, 1);
+    }
+
+    #[tokio::test]
+    async fn complete_inline_think_blocks_are_folded_reasoning() {
+        let provider = Arc::new(FakeProvider::new(vec![vec![
+            RawStreamEvent::Text("visible <think>secret</think> done".to_string()),
+            RawStreamEvent::Done(Outcome::Normal),
+        ]]));
+        let sink = Arc::new(CaptureSink::default());
+        let (_, control) = ControlHandle::new();
+        let completion = run_agent_loop(provider, request(), sink.clone(), control)
+            .await
+            .expect("loop");
+        let assistant = completion
+            .messages
+            .iter()
+            .find(|message| matches!(message, Message::Assistant { .. }))
+            .expect("assistant");
+        let Message::Assistant { content, .. } = assistant else {
+            unreachable!();
+        };
+        assert!(content.contains(&AssistantBlock::Reasoning {
+            text: "secret".to_string(),
+            provider_evidence: None,
+        }));
+        assert!(content.contains(&AssistantBlock::Text {
+            text: "visible  done".to_string()
+        }));
+
+        let events = sink.events.lock().expect("events");
+        assert!(events.iter().any(|event| {
+            matches!(event, AgentEvent::ReasoningEnd { text } if text == "secret")
+        }));
+    }
+
+    #[tokio::test]
+    async fn reasoning_details_attach_to_reasoning_block_evidence() {
+        let provider = Arc::new(StaticProvider {
+            events: vec![
+                StreamEvent::ReasoningDelta {
+                    text: "scratch".to_string(),
+                    reasoning_content: Some("scratch".to_string()),
+                },
+                StreamEvent::ReasoningDetails {
+                    details: json!([{ "type": "thinking", "text": "opaque" }]),
+                },
+                StreamEvent::TextDelta {
+                    text: "visible".to_string(),
+                },
+                StreamEvent::Done {
+                    outcome: Outcome::Normal,
+                    finish_reason: Some("stop".to_string()),
+                },
+            ],
+        });
+        let sink = Arc::new(CaptureSink::default());
+        let (_, control) = ControlHandle::new();
+        let completion = run_agent_loop(provider, request(), sink, control)
+            .await
+            .expect("loop");
+        let assistant = completion
+            .messages
+            .iter()
+            .find(|message| matches!(message, Message::Assistant { .. }))
+            .expect("assistant");
+        let Message::Assistant { content, .. } = assistant else {
+            unreachable!();
+        };
+        let reasoning = content
+            .iter()
+            .find_map(|block| match block {
+                AssistantBlock::Reasoning {
+                    text,
+                    provider_evidence,
+                } => Some((text, provider_evidence)),
+                _ => None,
+            })
+            .expect("reasoning block");
+        assert_eq!(reasoning.0, "scratch");
+        assert_eq!(
+            reasoning.1.as_ref().expect("evidence")["reasoning_details"][0]["type"],
+            "thinking"
+        );
     }
 }

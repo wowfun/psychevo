@@ -111,6 +111,25 @@ fn sse_text(text: &str) -> String {
     )
 }
 
+fn sse_reasoning_then_text(reasoning: &str, text: &str) -> String {
+    format!(
+        "data: {{\"choices\":[{{\"delta\":{{\"reasoning_content\":{}}},\"finish_reason\":null}}]}}\n\n\
+         data: {{\"choices\":[{{\"delta\":{{\"content\":{}}},\"finish_reason\":\"stop\"}}]}}\n\n\
+         data: [DONE]\n\n",
+        serde_json::to_string(reasoning).expect("reasoning"),
+        serde_json::to_string(text).expect("text")
+    )
+}
+
+fn sse_metadata_usage_then_text(text: &str) -> String {
+    format!(
+        "data: {{\"id\":\"resp_1\",\"model\":\"mock-model\",\"choices\":[],\"usage\":{{\"total_tokens\":7}}}}\n\n\
+         data: {{\"id\":\"resp_1\",\"model\":\"mock-model\",\"choices\":[{{\"delta\":{{\"content\":{}}},\"finish_reason\":\"stop\"}}]}}\n\n\
+         data: [DONE]\n\n",
+        serde_json::to_string(text).expect("text")
+    )
+}
+
 fn sse_tool_read_then_done() -> String {
     concat!(
         "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_read\",\"function\":{\"name\":\"read\",\"arguments\":\"{\\\"path\\\":\\\"fixture.txt\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
@@ -198,7 +217,7 @@ fn cli_init_creates_home_tree_and_is_idempotent() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 1);
+    assert_eq!(user_version, 2);
 
     std::fs::write(home.join("config.jsonc"), "custom config").expect("custom config");
     std::fs::write(home.join(".env"), "CUSTOM=1\n").expect("custom env");
@@ -216,6 +235,59 @@ fn cli_init_creates_home_tree_and_is_idempotent() {
         std::fs::read_to_string(home.join(".env")).expect("env"),
         "CUSTOM=1\n"
     );
+}
+
+#[test]
+fn cli_init_reset_state_backs_up_existing_sqlite_files() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let init = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &home)
+        .arg("init")
+        .output()
+        .expect("pevo init");
+    assert!(init.status.success());
+    std::fs::write(home.join("state.db-wal"), "wal").expect("wal");
+    std::fs::write(home.join("state.db-shm"), "shm").expect("shm");
+
+    let reset = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &home)
+        .args(["init", "--reset-state"])
+        .output()
+        .expect("pevo init reset");
+    assert!(
+        reset.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&reset.stderr)
+    );
+    let stdout = String::from_utf8(reset.stdout).expect("stdout");
+    assert!(stdout.contains("state_backup:"));
+    assert!(home.join("state.db").exists());
+    assert!(!home.join("state.db-wal").exists());
+    assert!(!home.join("state.db-shm").exists());
+
+    let backup_root = home.join("backups");
+    let backups = std::fs::read_dir(&backup_root)
+        .expect("backups")
+        .collect::<std::io::Result<Vec<_>>>()
+        .expect("backup entries");
+    assert_eq!(backups.len(), 1);
+    let backup = backups[0].path();
+    assert!(backup.join("state.db").exists());
+    assert_eq!(
+        std::fs::read_to_string(backup.join("state.db-wal")).expect("wal"),
+        "wal"
+    );
+    assert_eq!(
+        std::fs::read_to_string(backup.join("state.db-shm")).expect("shm"),
+        "shm"
+    );
+
+    let conn = Connection::open(home.join("state.db")).expect("db");
+    let user_version: i64 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .expect("user_version");
+    assert_eq!(user_version, 2);
 }
 
 #[test]
@@ -364,6 +436,134 @@ fn cli_run_json_outputs_ndjson_events() {
     assert!(events.iter().any(|event| event["type"] == "message_end"));
     assert!(events.iter().any(|event| event["type"] == "agent_end"));
     assert!(!stdout.contains("json final\njson final"));
+}
+
+#[test]
+fn cli_run_json_hides_reasoning_by_default_and_debug_flag_emits_it() {
+    let server = MockSseServer::start(vec![
+        sse_reasoning_then_text("private chain", "visible final"),
+        sse_reasoning_then_text("debug chain", "debug final"),
+    ]);
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = temp.path().join("work");
+    let config = write_run_config(&temp.path().join("config"), &server.base_url);
+
+    let hidden = isolated_run_cmd(temp.path(), &config, &db)
+        .args([
+            "run",
+            "--dir",
+            workdir.to_str().expect("workdir"),
+            "--format",
+            "json",
+            "hello",
+        ])
+        .output()
+        .expect("pevo run hidden");
+    assert!(
+        hidden.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&hidden.stderr)
+    );
+    let hidden_stdout = String::from_utf8(hidden.stdout).expect("stdout");
+    assert!(hidden_stdout.contains("visible final"));
+    assert!(!hidden_stdout.contains("private chain"));
+    assert!(!hidden_stdout.contains("reasoning_content"));
+
+    let shown = isolated_run_cmd(temp.path(), &config, &db)
+        .args([
+            "run",
+            "--dir",
+            workdir.to_str().expect("workdir"),
+            "--format",
+            "json",
+            "--include-reasoning",
+            "hello",
+        ])
+        .output()
+        .expect("pevo run shown");
+    assert!(
+        shown.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&shown.stderr)
+    );
+    let shown_stdout = String::from_utf8(shown.stdout).expect("stdout");
+    let events = shown_stdout
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("json line"))
+        .collect::<Vec<_>>();
+    assert!(
+        events
+            .iter()
+            .any(|event| { event["type"] == "reasoning_delta" && event["text"] == "debug chain" })
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| { event["type"] == "reasoning_end" && event["text"] == "debug chain" })
+    );
+    assert!(shown_stdout.contains("debug final"));
+}
+
+#[test]
+fn cli_run_include_reasoning_requires_json_format() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = temp.path().join("work");
+    let config = write_run_config(&temp.path().join("config"), "http://127.0.0.1:9");
+    let output = isolated_run_cmd(temp.path(), &config, &db)
+        .args([
+            "run",
+            "--dir",
+            workdir.to_str().expect("workdir"),
+            "--include-reasoning",
+            "hello",
+        ])
+        .output()
+        .expect("pevo run");
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--format json"));
+}
+
+#[test]
+fn cli_run_json_omits_metadata_only_message_updates() {
+    let server = MockSseServer::start(vec![sse_metadata_usage_then_text("metadata final")]);
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = temp.path().join("work");
+    let config = write_run_config(&temp.path().join("config"), &server.base_url);
+    let output = isolated_run_cmd(temp.path(), &config, &db)
+        .args([
+            "run",
+            "--dir",
+            workdir.to_str().expect("workdir"),
+            "--format",
+            "json",
+            "hello",
+        ])
+        .output()
+        .expect("pevo run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+    let events = stdout
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("json line"))
+        .collect::<Vec<_>>();
+    let empty_updates = events
+        .iter()
+        .filter(|event| {
+            event["type"] == "message_update"
+                && event["message"]["role"] == "assistant"
+                && event["message"]["content"]
+                    .as_array()
+                    .is_some_and(|content| content.is_empty())
+        })
+        .count();
+    assert_eq!(empty_updates, 0);
 }
 
 #[test]

@@ -74,6 +74,10 @@ pub enum StreamEvent {
     },
     ReasoningDelta {
         text: String,
+        reasoning_content: Option<String>,
+    },
+    ReasoningDetails {
+        details: Value,
     },
     ToolCallStart {
         content_index: usize,
@@ -176,7 +180,7 @@ impl GenerationProvider for OpenAiChatProvider {
             }
 
             let endpoint = chat_completions_endpoint(&base_url);
-            let body = build_chat_request(&request);
+            let body = build_chat_request(&request, &base_url);
             let response = client
                 .post(endpoint)
                 .bearer_auth(api_key)
@@ -302,10 +306,10 @@ fn chat_completions_endpoint(base_url: &str) -> String {
     }
 }
 
-fn build_chat_request(request: &GenerationRequest) -> Value {
+fn build_chat_request(request: &GenerationRequest, base_url: &str) -> Value {
     let mut body = json!({
         "model": request.model.model,
-        "messages": translate_messages(&request.messages),
+        "messages": translate_messages(&request.messages, &request.model, base_url),
         "stream": true,
         "stream_options": { "include_usage": true },
     });
@@ -338,17 +342,18 @@ fn build_chat_request(request: &GenerationRequest) -> Value {
     body
 }
 
-fn translate_messages(messages: &[Value]) -> Vec<Value> {
-    messages
+fn translate_messages(messages: &[Value], target: &ModelTarget, base_url: &str) -> Vec<Value> {
+    let projected = messages
         .iter()
-        .flat_map(translate_message)
-        .collect::<Vec<_>>()
+        .flat_map(|message| translate_message(message, target, base_url))
+        .collect::<Vec<_>>();
+    merge_adjacent_user_messages(projected)
 }
 
-fn translate_message(message: &Value) -> Vec<Value> {
+fn translate_message(message: &Value, target: &ModelTarget, base_url: &str) -> Vec<Value> {
     match message.get("role").and_then(Value::as_str) {
         Some("user") => user_messages(message),
-        Some("assistant") => assistant_messages(message),
+        Some("assistant") => assistant_messages(message, target, base_url),
         Some("tool_result") => tool_result_messages(message),
         _ => Vec::new(),
     }
@@ -366,9 +371,10 @@ fn user_messages(message: &Value) -> Vec<Value> {
         .collect()
 }
 
-fn assistant_messages(message: &Value) -> Vec<Value> {
+fn assistant_messages(message: &Value, target: &ModelTarget, base_url: &str) -> Vec<Value> {
     let mut text = String::new();
     let mut tool_calls = Vec::new();
+    let mut normalized_reasoning = Vec::new();
     if let Some(blocks) = message.get("content").and_then(Value::as_array) {
         for block in blocks {
             match block.get("type").and_then(Value::as_str) {
@@ -398,6 +404,13 @@ fn assistant_messages(message: &Value) -> Vec<Value> {
                         }));
                     }
                 }
+                Some("reasoning") => {
+                    if let Some(value) = block.get("text").and_then(Value::as_str)
+                        && !value.is_empty()
+                    {
+                        normalized_reasoning.push(value.to_string());
+                    }
+                }
                 _ => {}
             }
         }
@@ -405,14 +418,112 @@ fn assistant_messages(message: &Value) -> Vec<Value> {
     if text.is_empty() && tool_calls.is_empty() {
         return Vec::new();
     }
+    let has_text = !text.is_empty();
     let mut output = json!({
         "role": "assistant",
-        "content": (!text.is_empty()).then_some(text),
+        "content": has_text.then_some(text),
     });
     if !tool_calls.is_empty() {
         output["tool_calls"] = Value::Array(tool_calls);
     }
+    let has_tool_calls = output
+        .get("tool_calls")
+        .and_then(Value::as_array)
+        .is_some_and(|calls| !calls.is_empty());
+    apply_reasoning_content_for_api(
+        message,
+        &mut output,
+        has_text,
+        has_tool_calls,
+        &normalized_reasoning.join("\n\n"),
+        target,
+        base_url,
+    );
     vec![output]
+}
+
+fn merge_adjacent_user_messages(messages: Vec<Value>) -> Vec<Value> {
+    let mut merged: Vec<Value> = Vec::new();
+    for message in messages {
+        let is_user = message.get("role").and_then(Value::as_str) == Some("user");
+        if is_user
+            && let Some(last) = merged.last_mut()
+            && last.get("role").and_then(Value::as_str) == Some("user")
+        {
+            let previous = last
+                .get("content")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let current = message
+                .get("content")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            last["content"] = Value::String(format!("{previous}\n\n{current}"));
+            continue;
+        }
+        merged.push(message);
+    }
+    merged
+}
+
+fn apply_reasoning_content_for_api(
+    source: &Value,
+    output: &mut Value,
+    has_text: bool,
+    has_tool_calls: bool,
+    normalized_reasoning: &str,
+    target: &ModelTarget,
+    base_url: &str,
+) {
+    if !needs_thinking_reasoning_pad(target, base_url) {
+        return;
+    }
+    if !has_text && !has_tool_calls {
+        return;
+    }
+    if !source_provider_matches_target(source, target) {
+        output["reasoning_content"] = Value::String(" ".to_string());
+        return;
+    }
+    let value = if normalized_reasoning.trim().is_empty() {
+        " ".to_string()
+    } else {
+        normalized_reasoning.to_string()
+    };
+    output["reasoning_content"] = Value::String(value);
+}
+
+fn source_provider_matches_target(source: &Value, target: &ModelTarget) -> bool {
+    source
+        .get("provider")
+        .and_then(Value::as_str)
+        .is_some_and(|provider| provider.eq_ignore_ascii_case(&target.provider))
+}
+
+fn needs_thinking_reasoning_pad(target: &ModelTarget, base_url: &str) -> bool {
+    let provider = target.provider.to_lowercase();
+    let model = target.model.to_lowercase();
+    provider == "deepseek"
+        || model.contains("deepseek")
+        || base_url_host_matches(base_url, "api.deepseek.com")
+        || provider == "kimi-coding"
+        || provider == "kimi-coding-cn"
+        || base_url_host_matches(base_url, "api.kimi.com")
+        || base_url_host_matches(base_url, "moonshot.ai")
+        || base_url_host_matches(base_url, "moonshot.cn")
+}
+
+fn base_url_host_matches(base_url: &str, needle: &str) -> bool {
+    let lower = base_url.to_lowercase();
+    lower
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(lower.as_str())
+        .split('/')
+        .next()
+        .unwrap_or_default()
+        .ends_with(needle)
 }
 
 fn tool_result_messages(message: &Value) -> Vec<Value> {
@@ -622,6 +733,9 @@ struct ChatChoice {
 #[derive(Debug, Deserialize)]
 struct ChatDelta {
     content: Option<String>,
+    reasoning: Option<String>,
+    reasoning_content: Option<String>,
+    reasoning_details: Option<Value>,
     #[serde(default, deserialize_with = "null_as_empty_vec")]
     tool_calls: Vec<ChatDeltaToolCall>,
 }
@@ -683,6 +797,29 @@ impl ChatChunkNormalizer {
         }
 
         for choice in chunk.choices {
+            if let Some(reasoning_content) = choice
+                .delta
+                .reasoning_content
+                .filter(|value| !value.is_empty())
+            {
+                output.push(StreamEvent::ReasoningDelta {
+                    text: reasoning_content.clone(),
+                    reasoning_content: Some(reasoning_content),
+                });
+            }
+            if let Some(reasoning) = choice.delta.reasoning.filter(|value| !value.is_empty()) {
+                output.push(StreamEvent::ReasoningDelta {
+                    text: reasoning,
+                    reasoning_content: None,
+                });
+            }
+            if let Some(details) = choice
+                .delta
+                .reasoning_details
+                .filter(|value| !value.is_null())
+            {
+                output.push(StreamEvent::ReasoningDetails { details });
+            }
             if let Some(text) = choice.delta.content.filter(|value| !value.is_empty()) {
                 output.push(StreamEvent::TextDelta { text });
             }
@@ -777,7 +914,10 @@ impl RawStreamEvent {
     fn normalize(self) -> StreamEvent {
         match self {
             Self::Text(text) => StreamEvent::TextDelta { text },
-            Self::Reasoning(text) => StreamEvent::ReasoningDelta { text },
+            Self::Reasoning(text) => StreamEvent::ReasoningDelta {
+                text,
+                reasoning_content: None,
+            },
             Self::ToolStart {
                 content_index,
                 call_index,
@@ -908,7 +1048,7 @@ mod tests {
             metadata: json!({ "reasoning_effort": "medium" }),
         };
 
-        let body = build_chat_request(&request);
+        let body = build_chat_request(&request, "https://api.openai.com/v1");
         assert_eq!(body["model"], "gpt-test");
         assert_eq!(body["stream"], true);
         assert_eq!(
@@ -922,6 +1062,147 @@ mod tests {
         assert_eq!(body["messages"][2]["role"], "tool");
         assert_eq!(body["tools"][0]["function"]["name"], "read");
         assert_eq!(body["reasoning_effort"], "medium");
+    }
+
+    #[test]
+    fn chat_request_hides_reasoning_unless_target_derives_protocol_echo() {
+        let assistant = json!({
+            "role": "assistant",
+            "content": [
+                { "type": "reasoning", "text": "private thought" },
+                { "type": "text", "text": "visible" }
+            ],
+            "timestamp_ms": 2,
+            "finish_reason": "stop",
+            "outcome": "normal",
+            "model": "m",
+            "provider": "deepseek"
+        });
+        let mut request = GenerationRequest {
+            model: ModelTarget {
+                provider: "openai".to_string(),
+                model: "gpt-test".to_string(),
+            },
+            messages: vec![assistant.clone()],
+            tools: Vec::new(),
+            metadata: json!({}),
+        };
+
+        let body = build_chat_request(&request, "https://api.openai.com/v1");
+        assert_eq!(
+            body["messages"][0],
+            json!({"role":"assistant","content":"visible"})
+        );
+
+        request.model.provider = "deepseek".to_string();
+        request.model.model = "deepseek-v4-pro".to_string();
+        let body = build_chat_request(&request, "https://api.deepseek.com/v1");
+        assert_eq!(body["messages"][0]["content"], "visible");
+        assert_eq!(body["messages"][0]["reasoning_content"], "private thought");
+    }
+
+    #[test]
+    fn chat_request_pads_target_reasoning_without_cross_provider_leak() {
+        let request = GenerationRequest {
+            model: ModelTarget {
+                provider: "deepseek".to_string(),
+                model: "deepseek-v4-pro".to_string(),
+            },
+            messages: vec![json!({
+                "role": "assistant",
+                "content": [
+                    { "type": "reasoning", "text": "other provider thought" },
+                    {
+                        "type": "tool_call",
+                        "id": "call_1",
+                        "name": "read",
+                        "arguments": { "path": "a" },
+                        "arguments_json": "{\"path\":\"a\"}",
+                        "arguments_error": null,
+                        "content_index": 0,
+                        "call_index": 0
+                    }
+                ],
+                "timestamp_ms": 2,
+                "finish_reason": "tool_calls",
+                "outcome": "normal",
+                "model": "m",
+                "provider": "other"
+            })],
+            tools: Vec::new(),
+            metadata: json!({}),
+        };
+
+        let body = build_chat_request(&request, "https://api.deepseek.com/v1");
+        assert_eq!(body["messages"][0]["reasoning_content"], " ");
+        assert!(
+            !serde_json::to_string(&body)
+                .expect("body")
+                .contains("other provider thought")
+        );
+    }
+
+    #[test]
+    fn chat_request_does_not_replay_cross_provider_reasoning_text() {
+        let request = GenerationRequest {
+            model: ModelTarget {
+                provider: "deepseek".to_string(),
+                model: "deepseek-v4-pro".to_string(),
+            },
+            messages: vec![json!({
+                "role": "assistant",
+                "content": [
+                    { "type": "reasoning", "text": "xiaomi scratchpad" },
+                    { "type": "text", "text": "visible" }
+                ],
+                "timestamp_ms": 2,
+                "finish_reason": "stop",
+                "outcome": "normal",
+                "model": "mimo",
+                "provider": "xiaomi"
+            })],
+            tools: Vec::new(),
+            metadata: json!({}),
+        };
+
+        let body = build_chat_request(&request, "https://api.deepseek.com/v1");
+        assert_eq!(body["messages"][0]["reasoning_content"], " ");
+        assert!(
+            !serde_json::to_string(&body)
+                .expect("body")
+                .contains("xiaomi scratchpad")
+        );
+    }
+
+    #[test]
+    fn translate_messages_drops_thinking_only_and_merges_users() {
+        let request = GenerationRequest {
+            model: ModelTarget {
+                provider: "openai".to_string(),
+                model: "gpt-test".to_string(),
+            },
+            messages: vec![
+                json!({"role":"user","content":[{"text":"first"}],"timestamp_ms":1}),
+                json!({
+                    "role":"assistant",
+                    "content":[{"type":"reasoning","text":"thinking only"}],
+                    "timestamp_ms":2,
+                    "finish_reason":"stop",
+                    "outcome":"normal",
+                    "model":"m",
+                    "provider":"p"
+                }),
+                json!({"role":"user","content":[{"text":"second"}],"timestamp_ms":3}),
+            ],
+            tools: Vec::new(),
+            metadata: json!({}),
+        };
+
+        let body = build_chat_request(&request, "https://api.openai.com/v1");
+        assert_eq!(
+            body["messages"],
+            json!([{"role":"user","content":"first\n\nsecond"}])
+        );
     }
 
     #[test]
@@ -1064,6 +1345,36 @@ mod tests {
                 outcome: Outcome::Normal,
                 finish_reason: Some("stop".to_string())
             })
+        );
+    }
+
+    #[test]
+    fn chat_chunk_normalizer_streams_reasoning_fields() {
+        let mut normalizer = ChatChunkNormalizer::new("gpt-test".to_string());
+        let chunk = serde_json::from_str::<ChatCompletionChunk>(
+            r#"{"choices":[{"delta":{"reasoning_content":"deep thought","reasoning_details":[{"type":"thinking","text":"detail"}],"content":"answer"},"finish_reason":"stop"}]}"#,
+        )
+        .expect("chunk");
+        let events = normalizer.ingest(chunk).expect("ingest");
+
+        assert!(events.iter().any(|event| {
+            matches!(
+                event,
+                StreamEvent::ReasoningDelta { text, reasoning_content: Some(provider_text) }
+                    if text == "deep thought" && provider_text == "deep thought"
+            )
+        }));
+        assert!(events.iter().any(|event| {
+            matches!(
+                event,
+                StreamEvent::ReasoningDetails { details }
+                    if details[0]["type"] == "thinking"
+            )
+        }));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, StreamEvent::TextDelta { text } if text == "answer"))
         );
     }
 }
