@@ -83,7 +83,7 @@ Required semantics include:
 - optional tool-result relationship aids
 - optional token count, finish, outcome, reasoning, model, or provider metadata
 
-The first implementation slice must preserve the logical message field support required by [030 Session Record Model](../030-state-and-data-model/session-record-model.md), including tool-call fields, tool-result relationship aids, reasoning fields, and model/provider metadata when present.
+The first implementation slice must preserve the logical message field support required by [030 Session Record Model](../030-state-and-data-model/session-record-model.md), including tool-call fields, tool-result relationship aids, local folded reasoning blocks, and model/provider metadata when present.
 
 The first implementation slice stores large tool material in message material or metadata when practical. External artifact storage belongs to a later attachment or spec.
 
@@ -104,11 +104,13 @@ The first implementation slice stores these message columns:
 - `model` text nullable
 - `provider` text nullable
 - `usage_json` text nullable
-- `reasoning_json` text nullable
 - `metadata_json` text nullable
 
 `message_json` is the authoritative retained message material. The other
-message columns are relationship, query, and summary aids.
+message columns are relationship, query, and summary aids. Reasoning is stored
+only in `message_json` as assistant content blocks; provider wire fields such
+as `reasoning_content` are request projections and are not persisted as
+separate columns.
 
 Message ordering is authoritative by `(session_id, session_seq)`, not by
 timestamp. The first implementation enforces `UNIQUE(session_id, session_seq)`.
@@ -129,9 +131,13 @@ SQLite persistence should perform periodic WAL checkpoint work when supported by
 
 Storage failures that affect session or message persistence must be observable to runtime or caller-facing layers that depend on persistence.
 
-The first implementation uses `PRAGMA user_version = 1`, WAL, foreign keys,
+The current implementation uses `PRAGMA user_version = 2`, WAL, foreign keys,
 short busy timeouts, `BEGIN IMMEDIATE`, bounded jitter retry, and best-effort
 periodic `wal_checkpoint(PASSIVE)`.
+
+The version 2 slice does not automatically migrate version 1 state databases.
+Opening an older state database must fail with an explicit cutover/reset
+instruction instead of silently mutating retained state.
 
 ## Retrieval
 

@@ -69,9 +69,9 @@ The first implementation slice must also be able to store these fields when they
 - `tool_name`
 - `token_count`
 - `finish_reason` or outcome metadata
-- `reasoning`
-- `reasoning_content`
-- `reasoning_details`
+- local folded `reasoning` content blocks
+- optional reasoning provider evidence that cannot be derived from the
+  reasoning text
 - model metadata
 - provider metadata
 
@@ -79,7 +79,10 @@ These names define logical message field support for the first implementation sl
 
 Message role and loop-visible semantics remain owned by [002 Agent Execution](../002-agent-execution/spec.md). Tool-call identity, tool calls, and tool name are relationship aids, not caller-facing API requirements.
 
-Provider-specific replay payload may be preserved as optional metadata. It must not become a public API or redefine provider-neutral message semantics.
+Provider-specific replay payload may be preserved as optional metadata when it
+cannot be derived from local folded reasoning blocks. Provider wire fields such
+as `reasoning_content` must not become stored logical message fields, public
+APIs, or provider-neutral message semantics.
 
 Large tool material may be embedded in message material or metadata for the first implementation slice. External artifact storage belongs to a later attachment or spec.
 

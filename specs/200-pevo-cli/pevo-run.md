@@ -35,6 +35,7 @@ Out of scope:
 - optional `-s, --session <id>`
 - optional `-c, --continue`
 - optional `--format <default|json>`
+- optional `--include-reasoning`
 
 The first-slice default format is `default`.
 
@@ -105,6 +106,12 @@ provider/model, database, and workdir. Subsequent lines project runtime
 observation events: `agent_start`, `turn_start`, `message_start`,
 `message_update`, `message_end`, `tool_execution_start`, `tool_execution_end`,
 `turn_end`, and `agent_end`.
+
+Reasoning/thinking content is folded out of JSON output by default. Supplying
+`--include-reasoning` requires `--format json` and adds separate
+`reasoning_delta` and `reasoning_end` events. The `message_*` and `agent_end`
+events remain visible-transcript projections and must not carry reasoning
+blocks or provider reasoning wire fields.
 
 When `--format json` is selected and a runtime/configuration error happens
 after argument parsing, stdout contains one JSON object:

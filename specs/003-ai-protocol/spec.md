@@ -86,6 +86,11 @@ The stream categories are:
 
 Normalized streams preserve the kind of model output being produced. Agent execution may project these categories onto the message lifecycle events defined by [002 Agent Execution](../002-agent-execution/spec.md), but this spec does not collapse all output progress into a single message-progress shape.
 
+Reasoning/thinking progress is local-only folded transcript material when
+retained. It is distinct from final visible assistant text and must not be
+projected into default visible assistant output. Interfaces may expose it
+through explicit folded/debug views.
+
 Assistant-requested tool-call progress identifies tool requests produced by the model. [002 Agent Execution](../002-agent-execution/spec.md), [004 Runtime Contract](../004-runtime-contract/spec.md), and [007 Tool Surface](../007-tool-surface/spec.md) define downstream execution and tool-result boundaries.
 
 Usage metadata may describe consumption reported by a provider. Usage metadata is optional. Pricing, accounting, provider-specific token fields, and billing policy belong outside this spec.
@@ -100,7 +105,7 @@ Metadata may carry provider-specific identifiers, reasoning/thinking continuity 
 
 Metadata must remain optional for core agent execution unless a later spec promotes a field into core semantics.
 
-Metadata shape, serialization, persistence, replay rules, and provider-specific keys belong outside this spec.
+Metadata shape, serialization, persistence, replay rules, and provider-specific keys belong outside this spec. Provider-specific reasoning continuity fields such as `reasoning_content` remain provider wire fields. Runtime replay may derive or project them only when a compatible provider requires that protocol shape.
 
 ## Terminal Outcomes
 

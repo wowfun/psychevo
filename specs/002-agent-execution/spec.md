@@ -64,6 +64,11 @@ Agent execution defines these canonical event families:
 
 `message_start`, `message_update`, and `message_end` describe loop-visible message production. `message_update` is for assistant streaming. User and tool-result messages may emit only start and end events.
 
+Assistant reasoning/thinking progress is not final visible assistant text. An
+implementation may retain it as folded local transcript material and expose it
+through separate observation events, but reasoning-only provider progress must
+not force an otherwise empty `message_update`.
+
 `tool_execution_start`, `tool_execution_update`, and `tool_execution_end` describe tool execution through a runtime-supplied abstraction. `tool_execution_update` is optional and exists for tools that report progress.
 
 `tool_execution_end` may expose the raw tool-result material and outcome summary needed by observers. Capability or tool specs may define structured result material, but this spec does not freeze those payload schemas.

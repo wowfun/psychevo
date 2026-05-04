@@ -23,7 +23,7 @@ Out of scope:
 
 ## Command Contract
 
-`pevo init` accepts no first-slice flags.
+`pevo init` accepts optional `--reset-state`.
 
 It resolves `PSYCHEVO_HOME`, or `~/.psychevo` when unset. `~` expands to the
 user's home directory, and relative paths resolve relative to process cwd.
@@ -42,6 +42,11 @@ directories are created.
 
 `state.db` is initialized by opening it through the default SQLite store. The
 command does not write session sidecar files.
+
+When `--reset-state` is supplied, existing `state.db`, `state.db-wal`, and
+`state.db-shm` files are moved into a timestamped backup directory under
+`backups/` before a fresh state database is created. The command still must not
+overwrite existing `config.jsonc` or `.env` files.
 
 ## Starter Config
 

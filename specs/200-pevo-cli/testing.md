@@ -21,6 +21,8 @@ config, or global host state.
 - `pevo init` creates `config.jsonc`, `.env`, `state.db`, `sessions/`, `logs/`,
   and `cache/` under an isolated `PSYCHEVO_HOME`.
 - Existing `config.jsonc` and `.env` are not overwritten.
+- `pevo init --reset-state` backs up `state.db`, `state.db-wal`, and
+  `state.db-shm` before creating a fresh v2 state database.
 - The starter config resolves DeepSeek with `reasoning_effort = medium`.
 - Success output lists paths and does not include credential values.
 - Re-running init is idempotent.
@@ -33,6 +35,10 @@ config, or global host state.
 - empty prompt rejection before session creation.
 - `--dir` controls the tool workdir.
 - `--format json` emits NDJSON beginning with `run_start`.
+- `--format json` hides reasoning by default.
+- `--format json --include-reasoning` emits separate `reasoning_delta` and
+  `reasoning_end` events while keeping `message_*` events sanitized.
+- `--include-reasoning` without JSON format rejects.
 - `--format json` runtime/config errors emit one stdout error JSON object.
 - default-format errors remain human stderr failures.
 - removed old `run` flags are rejected by argument parsing.
@@ -56,12 +62,20 @@ config, or global host state.
 - JSONC `reasoning_effort` uses the same validation as CLI `--variant`.
 - `none` disables lower-level reasoning effort.
 - latest-session lookup filters by canonical workdir and `source = "run"`.
+- SQLite state uses `user_version = 2`; older state databases reject with an
+  explicit reset/cutover instruction.
+- Reasoning is preserved locally as folded assistant content, without entering
+  default visible output or cross-provider replay.
 
 ## Live Validation
 
 Real provider tests remain ignored and opt-in. They may use `PSYCHEVO_HOME` or
 explicit `PSYCHEVO_CONFIG`/`PSYCHEVO_DB` isolation, but they must not run in the
 default validation path.
+
+The repo-local live development environment uses `.local/.psychevo-dev/` as an
+isolated `PSYCHEVO_HOME`. Live validation scripts may use that home, but they
+must not copy credential files automatically.
 
 ## Related Topics
 
