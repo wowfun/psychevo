@@ -135,9 +135,12 @@ Provider and model failures must surface as observable failed generation outcome
 - [000 Foundation](../000-foundation/spec.md) defines the upstream project foundation and implementation-neutral principles.
 - [001 Architecture](../001-architecture/spec.md) defines Rust workspace layout, crate boundaries, runtime coordination, and dependency direction.
 - [002 Agent Execution](../002-agent-execution/spec.md) defines agent-core execution semantics and core event families.
+- [003 Normalized Stream](normalized-stream.md) defines the first implementation slice stream contract.
+- [003 OpenAI Chat Stream](openai-chat-stream.md) defines the first live Chat-compatible stream adapter contract.
 - [004 Runtime Contract](../004-runtime-contract/spec.md) defines agent-invocation assembly and evidence sink wiring.
 - [005 Durable Evidence](../005-durable-evidence/spec.md) defines durable evidence semantics for AI outcomes and optional metadata preservation.
 - [006 Context Assembly](../006-context-assembly/spec.md) defines model context assembly consumed by generation requests.
 - [007 Tool Surface](../007-tool-surface/spec.md) defines tool declarations and execution bindings available to generation requests.
 - [009 Resource Surface](../009-resource-surface/spec.md) defines resource gate semantics outside the AI protocol.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines how AI generation facts relate to other state families.
+- [120 Provider Registry](../120-provider-registry/spec.md) defines first live-provider selection and configuration outside the AI protocol boundary.

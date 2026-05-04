@@ -9,7 +9,9 @@ Specs define the long-lived contracts, using topic directories with this structu
 - `tasks.md`: implementation checklist and status tracking; do not create unless necessary.
 - Additional supplementary files; must have entry links in `spec.md` or `plan.md`
 
-`000-099` are foundation specs. `100+` are capability specs (prefer long-lived capability-domain names). Numbering should leave space for future insertion.
+`000-099` are foundation specs. `100+` may be capability or product surface specs
+(prefer long-lived domain names). Numbering should leave space for future
+insertion.
 
 Specs that directly drive implementation should include functional requirements and acceptance criteria when behavior is non-trivial.
 

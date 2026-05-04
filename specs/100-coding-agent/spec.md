@@ -67,4 +67,5 @@ Self-evolution is a later capability domain. Any future evaluate-modify-retain-o
 - [020 Interfaces](../020-interfaces/spec.md) defines caller-facing invocation, observation, and completion semantics.
 - [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines material retrieval through session and evidence relationships.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability source, availability, and conflict boundaries.
+- [100 Runtime Assembly](runtime-assembly.md) defines the first implementation slice assembly contract.
 - [110 Coding Core Tools](../110-coding-core-tools/spec.md) defines the required `coding-core` toolset.

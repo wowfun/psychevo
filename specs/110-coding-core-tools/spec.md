@@ -122,6 +122,7 @@ When the table matches, the result remains a failed tool result but includes `ex
 ## Related Topics
 
 - [100 Coding Agent](../100-coding-agent/spec.md) requires the `coding-core` toolset for default coding-agent invocations.
+- [110 Tool I/O](tool-io.md) defines the first implementation slice parameter and JSON result contract.
 - [004 Runtime Contract](../004-runtime-contract/spec.md) defines agent-invocation assembly and tool surface wiring.
 - [007 Tool Surface](../007-tool-surface/spec.md) defines agent-invocation scoped tool declarations, generation-request tool declaration snapshots, execution bindings, and toolset expansion.
 - [009 Resource Surface](../009-resource-surface/spec.md) defines resource decisions that may affect tool execution.

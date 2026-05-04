@@ -35,7 +35,10 @@ The default first-slice SQLite shape does not create:
 - `refs`
 - `artifacts`
 
-This attachment defines implementation shape, not public contract shape. Column names and indexes are implementation details unless a later spec freezes them. Storage must still preserve the logical record fields required by [030 Session Record Model](../030-state-and-data-model/session-record-model.md).
+This attachment defines implementation shape, not public contract shape. The
+first implementation slice uses the columns below as an internal contract, not
+as a long-term public storage API. Storage must still preserve the logical
+record fields required by [030 Session Record Model](../030-state-and-data-model/session-record-model.md).
 
 ## Sessions
 
@@ -50,6 +53,23 @@ Required semantics include:
 - metadata space for model and working-context summaries
 
 Reopening the same persistent session updates the existing session state rather than creating a new execution root.
+
+The first implementation slice stores these session columns:
+
+- `id` text primary key, UUID v7
+- `source` text
+- `parent_session_id` text nullable
+- `workdir` text
+- `model` text
+- `provider` text
+- `started_at_ms` integer
+- `updated_at_ms` integer
+- `ended_at_ms` integer nullable
+- `end_reason` text nullable
+- `message_count` integer
+- `tool_call_count` integer
+- `title` text nullable
+- `metadata_json` text nullable
 
 ## Messages
 
@@ -67,6 +87,32 @@ The first implementation slice must preserve the logical message field support r
 
 The first implementation slice stores large tool material in message material or metadata when practical. External artifact storage belongs to a later attachment or spec.
 
+The first implementation slice stores these message columns:
+
+- `id` integer primary key autoincrement
+- `session_id` text foreign key
+- `session_seq` integer
+- `role` text
+- `timestamp_ms` integer
+- `message_json` text
+- `content_text` text nullable
+- `tool_call_id` text nullable
+- `tool_name` text nullable
+- `tool_calls_json` text nullable
+- `finish_reason` text nullable
+- `outcome` text nullable
+- `model` text nullable
+- `provider` text nullable
+- `usage_json` text nullable
+- `reasoning_json` text nullable
+- `metadata_json` text nullable
+
+`message_json` is the authoritative retained message material. The other
+message columns are relationship, query, and summary aids.
+
+Message ordering is authoritative by `(session_id, session_seq)`, not by
+timestamp. The first implementation enforces `UNIQUE(session_id, session_seq)`.
+
 ## SQLite Behavior
 
 SQLite persistence should enable WAL mode when supported.
@@ -83,6 +129,10 @@ SQLite persistence should perform periodic WAL checkpoint work when supported by
 
 Storage failures that affect session or message persistence must be observable to runtime or caller-facing layers that depend on persistence.
 
+The first implementation uses `PRAGMA user_version = 1`, WAL, foreign keys,
+short busy timeouts, `BEGIN IMMEDIATE`, bounded jitter retry, and best-effort
+periodic `wal_checkpoint(PASSIVE)`.
+
 ## Retrieval
 
 Final result material, tool result material, and artifact material retained in the first slice are retrieved through session, evidence, message, and material relationships.
@@ -95,3 +145,4 @@ This attachment does not define public locators, path formats, cursor formats, d
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines semantic state relationships.
 - [030 Session Record Model](../030-state-and-data-model/session-record-model.md) defines logical session and message records.
 - [005 Durable Evidence](../005-durable-evidence/spec.md) defines evidence semantics.
+- [100 Runtime Assembly](../100-coding-agent/runtime-assembly.md) defines the first runtime wiring that writes these records.

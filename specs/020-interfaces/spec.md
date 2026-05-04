@@ -103,5 +103,7 @@ Pause, resume, retry, undo, branch navigation, and checkpoint restore are out of
 - [008 Session Continuity](../008-session-continuity/spec.md) defines the session boundary and continuity inputs for invocation.
 - [009 Resource Surface](../009-resource-surface/spec.md) defines resource surface and resource decision semantics.
 - [010 Memory System](../010-memory-system/spec.md) defines optional memory boundaries that may provide invocation hints.
+- [025 CLI](../025-cli/spec.md) defines command-line interface foundation semantics.
+- [200 pevo CLI](../200-pevo-cli/spec.md) defines the concrete `pevo` product CLI.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines semantic state relationships projected through interfaces.
 - [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines persistence boundaries for evidence-backed result material.
