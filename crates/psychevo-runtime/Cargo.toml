@@ -1,0 +1,23 @@
+[package]
+name = "psychevo-runtime"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+futures.workspace = true
+jsonc-parser.workspace = true
+psychevo-agent-core = { path = "../psychevo-agent-core" }
+psychevo-ai = { path = "../psychevo-ai" }
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+similar.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true
+tempfile.workspace = true
