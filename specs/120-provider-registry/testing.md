@@ -8,14 +8,16 @@ Define validation expectations for the first live-provider registry and
 
 ## Default Validation
 
+Automation vocabulary and generic validation boundaries follow
+[060 Automation](../060-automation/spec.md).
+
 The default validation gate is:
 
 ```bash
 scripts/validate.sh broad
 ```
 
-Default validation must be deterministic. It must not require real API keys,
-live provider access, user config, global environment, or external services.
+For this topic, the default gate is the broad deterministic validation path.
 
 ## Deterministic Acceptance
 
@@ -39,8 +41,8 @@ live provider access, user config, global environment, or external services.
 
 ## Live Opt-In Validation
 
-Live provider tests are ignored by default. They are run only when explicitly
-requested, for example:
+Live provider tests are ignored by default. They are run only as live opt-in
+validation, for example:
 
 ```bash
 cargo test --workspace --all-targets -- --ignored live
@@ -57,15 +59,15 @@ model to use the `read` tool, and asserts:
 - at least one successful `read` tool-result message
 - durable session/message persistence
 
-Live test failures do not block the deterministic default validation path
-unless a caller explicitly asks to validate live providers.
+Live test failures do not block this topic's default validation path unless a
+caller explicitly asks to validate live providers.
 
 ## Validation Boundaries
 
 - Tests should compare behavior and stable JSON event categories, not full
   provider wire payloads.
 - Mock SSE tests should use local deterministic servers.
-- `.env` and process environment changes must stay isolated and be cleaned up.
+- `.env` and process environment changes should stay isolated and be cleaned up.
 - Snapshots or golden files should not include volatile provider catalogs,
   generated prose, or real provider responses.
 

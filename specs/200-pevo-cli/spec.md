@@ -16,12 +16,13 @@ behavior, and product-level environment variables.
 - `pevo init`
 - `pevo run`
 - `pevo smoke` product positioning
+- `pevo tui` product positioning
 - reserved future command family boundaries
 
 Out of scope:
 
-- terminal TUI, slash commands, approvals, file attachments, fork/share/server
-  attach, provider login, or auth stores
+- approvals, file attachments, fork/share/server attach,
+  provider login, or auth stores
 - provider transport semantics, provider catalogs, OAuth, or credential pools
 - SQLite schema details beyond product path selection
 - SDK, HTTP, or MCP transports
@@ -60,6 +61,7 @@ Implemented first-slice commands:
 - `pevo init`
 - `pevo run`
 - `pevo smoke`
+- `pevo tui`
 
 Reserved command families:
 
@@ -74,11 +76,19 @@ slice.
 its explicit fake-provider flags and is not redesigned as an OpenCode-style
 product entrypoint in this topic.
 
+`pevo tui` owns interactive terminal projection. It accepts `--debug` for
+TUI-local debug projections such as usage parts and allowlisted provider
+metadata summaries. Debug projection does not change `pevo run --format json`,
+does not expose folded reasoning in sanitized transcript messages, and does not
+turn provider metadata into transcript content.
+
 ## Related Topics
 
 - [025 CLI](../025-cli/spec.md) defines command-line foundation semantics.
 - [200 pevo init](pevo-init.md) defines global home initialization.
 - [200 pevo run](pevo-run.md) defines the live coding-agent command.
+- [210 pevo TUI](../210-pevo-tui/spec.md) defines the fullscreen interactive
+  terminal command.
 - [200 Implementation Plan](plan.md) defines this slice's implementation order.
 - [200 Testing](testing.md) defines acceptance coverage.
 - [120 Provider Registry](../120-provider-registry/spec.md) defines

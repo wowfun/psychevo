@@ -7,14 +7,14 @@ Define acceptance coverage for the `pevo` product CLI.
 
 ## Default Validation
 
+Automation vocabulary and generic validation boundaries follow
+[060 Automation](../060-automation/spec.md).
+
 The default deterministic gate is:
 
 ```bash
 scripts/validate.sh broad
 ```
-
-Default validation must not require live providers, real credentials, user
-config, or global host state.
 
 ## Init Coverage
 
@@ -69,9 +69,9 @@ config, or global host state.
 
 ## Live Validation
 
-Real provider tests remain ignored and opt-in. They may use `PSYCHEVO_HOME` or
-explicit `PSYCHEVO_CONFIG`/`PSYCHEVO_DB` isolation, but they must not run in the
-default validation path.
+Real provider tests remain live opt-in validation. They may use `PSYCHEVO_HOME`
+or explicit `PSYCHEVO_CONFIG`/`PSYCHEVO_DB` isolation, but they do not run in
+the default validation path.
 
 The repo-local live development environment uses `.local/.psychevo-dev/` as an
 isolated `PSYCHEVO_HOME`. Live validation scripts may use that home, but they

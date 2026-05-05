@@ -7,13 +7,15 @@
 - Added `pevo init` and OpenCode-style `pevo run [message..]` with JSONC provider config, `.env` loading, SQLite state, JSON/default output, `--variant`, and `--continue`.
 - Added live-provider specs and deterministic mock SSE/CLI coverage for prompts, tool calls, JSON errors, removed flags, session continuation, plus ignored live-provider tests.
 - Added folded local reasoning blocks, opt-in JSON reasoning events, `pevo init --reset-state`, and repo-local live dev tooling.
+- Added fullscreen `pevo tui` with evidence-ledger turns, composer/sidebar, persistent TUI state, slash commands, `--debug`, transcript/tool expansion, and non-TTY scripted mode.
+- Added enforceable TUI `plan` / `build` modes plus the `060 Automation` foundation spec for structured validation and visual-regression boundaries.
 
 ### Changed
 
 - Hardened OpenAI Chat-compatible SSE parsing across byte chunk boundaries, UTF-8 splits, line ending variants, provider stream errors, and premature EOF.
 - Replaced `PSYCHEVO_CONFIG_DIR` with `PSYCHEVO_HOME`, `PSYCHEVO_CONFIG`, and `PSYCHEVO_DB`.
 - Converted live `pevo run` from low-level provider flags to the positional prompt interface.
-- Moved state to SQLite schema v2 with single-copy reasoning storage in `message_json`; JSON output hides folded reasoning and suppresses metadata-only updates.
+- Moved state to SQLite schema v3 with single-copy reasoning in `message_json`, normalized usage/metadata columns, persistent TUI thinking visibility, and sanitized JSON/session projections.
 
 ## 2026-05-03
 

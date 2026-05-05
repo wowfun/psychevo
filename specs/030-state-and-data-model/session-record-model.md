@@ -74,6 +74,7 @@ The first implementation slice must also be able to store these fields when they
   reasoning text
 - model metadata
 - provider metadata
+- normalized usage metrics
 
 These names define logical message field support for the first implementation slice. They do not require matching SQL column names, transport fields, Rust field names, or caller-facing APIs.
 
@@ -83,6 +84,12 @@ Provider-specific replay payload may be preserved as optional metadata when it
 cannot be derived from local folded reasoning blocks. Provider wire fields such
 as `reasoning_content` must not become stored logical message fields, public
 APIs, or provider-neutral message semantics.
+
+Usage metrics and provider metadata are evidence facts associated with message
+records. They remain outside retained transcript content: they are not
+assistant text, not assistant content blocks, and not serialized into sanitized
+transcript projections. Interfaces may join them with sanitized messages for
+local summaries or debug views.
 
 Large tool material may be embedded in message material or metadata for the first implementation slice. External artifact storage belongs to a later attachment or spec.
 

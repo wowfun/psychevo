@@ -95,17 +95,39 @@ Assistant-requested tool-call progress identifies tool requests produced by the 
 
 Usage metadata may describe consumption reported by a provider. Usage metadata is optional. Pricing, accounting, provider-specific token fields, and billing policy belong outside this spec.
 
+When a provider reports usage, the AI layer should normalize mainstream token
+usage concepts into provider-neutral consumption facts before agent execution
+or runtime projection consumes them. Normalized usage is not assistant content,
+not a transcript block, and not visible message text.
+
 Extension metadata may carry details that do not belong in core generation semantics. Metadata is optional unless a later spec promotes a field into core semantics.
+
+Provider metadata should be treated as diagnostic or continuity evidence. Only
+allowlisted, non-secret metadata should be projected into runtime summaries or
+TUI debug views. Raw provider payloads, credentials, request headers, and
+unbounded metadata maps must not become default transcript material.
 
 The terminal outcome completes the generation stream. A generation stream must not leave agent execution without an observable terminal outcome.
 
 ## Metadata Extensions
 
-Metadata may carry provider-specific identifiers, reasoning/thinking continuity data, tool-call continuity data, cache or usage adjuncts, and diagnostic context.
+Metadata may carry provider-specific identifiers, reasoning/thinking continuity
+data, tool-call continuity data, cache or usage adjuncts, and diagnostic
+context. Usage may be reported separately from extension metadata when the
+provider exposes it as a first-class consumption object.
 
 Metadata must remain optional for core agent execution unless a later spec promotes a field into core semantics.
 
-Metadata shape, serialization, persistence, replay rules, and provider-specific keys belong outside this spec. Provider-specific reasoning continuity fields such as `reasoning_content` remain provider wire fields. Runtime replay may derive or project them only when a compatible provider requires that protocol shape.
+Metadata shape, serialization, persistence, replay rules, and provider-specific
+keys belong outside this spec. Provider-specific reasoning continuity fields
+such as `reasoning_content` remain provider wire fields. Runtime replay may
+derive or project them only when a compatible provider requires that protocol
+shape.
+
+Normalized usage and allowlisted provider metadata may be associated with the
+assistant message lifecycle by agent execution or runtime, but they remain
+metrics/evidence facts. They must not be serialized into provider-neutral
+assistant message content.
 
 ## Terminal Outcomes
 

@@ -81,6 +81,18 @@ Runtime wires stop, abort, and cancellation signals into agent execution, AI gen
 
 Runtime connects agent-invocation assembly facts, tool declaration snapshot facts, `agent_start` and `agent_end` events, AI generation outcomes, tool outcomes, messages, resource decisions, and terminal outcomes to an evidence sink. An evidence sink is the runtime-wired destination for durable session and agent-invocation evidence. [005 Durable Evidence](../005-durable-evidence/spec.md) defines durable evidence semantics. [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines the persistence substrate boundary. This spec does not define record shape, storage format, trace format, replay semantics, or session storage format.
 
+When the AI layer reports normalized usage or allowlisted provider metadata,
+runtime may associate those facts with the nearest completed assistant message
+and persist them through the evidence sink. These facts are metrics and
+diagnostic evidence, not transcript content blocks. Runtime summaries may expose
+sanitized messages together with per-message metrics so interfaces do not need
+direct storage coupling.
+
+Runtime projections must keep metric/debug facts separate from sanitized
+transcript messages. A caller-facing interface may choose to display token
+totals, context percentages, usage parts, or provider metadata summaries, but
+that projection must not redefine message content or provider replay semantics.
+
 ## Related Topics
 
 - [000 Foundation](../000-foundation/spec.md) defines the upstream project foundation and implementation-neutral principles.

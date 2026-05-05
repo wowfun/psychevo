@@ -19,11 +19,15 @@ Define acceptance expectations and validation scenarios for the built-in `coding
 
 ## Current Implementation Slice
 
-There is currently no required validation command for this capability because this repository slice is specification-only. When code exists, the default validation path must use deterministic local harnesses and fake or test providers.
+Automation vocabulary and generic validation boundaries follow
+[060 Automation](../060-automation/spec.md).
 
-The default validation path must not require real API keys, live providers, live services, or user-specific host configuration.
+There is currently no required validation command for this capability because
+this repository slice is specification-only. When code exists, this topic's
+default validation path should use deterministic local harnesses and fake or
+test providers.
 
-Manual real-provider smoke validation is allowed only as an explicit opt-in path. It must not be part of the default validation entrypoint.
+Manual real-provider smoke validation is allowed only as live opt-in validation.
 
 ## Scenario Matrix
 
@@ -41,6 +45,7 @@ Manual real-provider smoke validation is allowed only as an explicit opt-in path
 ## Validation Boundaries
 
 - Acceptance tests should compare behavior and semantic invariants, not storage field layouts or provider payload shapes.
-- Tests should avoid brittle snapshots of prompt text, generated lists, provider catalogs, or workflow prose.
-- Tests must keep fake provider state, resource state, temporary files, and environment changes isolated and cleaned up.
-- Real-provider smoke tests may check basic compatibility, but failures there must not block the deterministic default validation path unless explicitly requested.
+- Tests should avoid brittle snapshots of coding-agent prompt text, generated
+  workflow prose, or implementation-private provider payloads.
+- Fake-provider end-to-end tests should preserve evidence-backed final material
+  without requiring tests to inspect storage schemas directly.

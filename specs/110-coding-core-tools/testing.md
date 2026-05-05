@@ -16,9 +16,17 @@ Define acceptance expectations and validation scenarios for the `coding-core` to
 
 ## Current Implementation Slice
 
-There is currently no required validation command for this toolset because this repository slice is specification-only. When implementation exists, the default validation path must use deterministic local harnesses and fake or test providers.
+Automation vocabulary and generic validation boundaries follow
+[060 Automation](../060-automation/spec.md).
 
-Real provider, real shell, and live service validation must remain opt-in unless a later implementation provides an isolated deterministic harness for those resources.
+There is currently no required validation command for this toolset because this
+repository slice is specification-only. When implementation exists, this topic's
+default validation path should use deterministic local harnesses and fake or
+test providers.
+
+Real provider, real shell, and live service validation remain live opt-in unless
+a later implementation provides an isolated deterministic harness for those
+resources.
 
 ## Scenario Matrix
 
@@ -42,6 +50,7 @@ Real provider, real shell, and live service validation must remain opt-in unless
 ## Validation Boundaries
 
 - Tests should assert stable behavior and stable result fields, not concrete parameter names unless a later API spec freezes them.
-- Tests should avoid relying on host user configuration, credentials, global shell state, persistent temp state, or live services.
-- File and process resources used by tests must be isolated and cleaned up.
-- Snapshot or golden-output tests should be limited to intentional stable JSON result fields and should not include volatile command output.
+- File and process resources used by tool tests should be scoped to explicit
+  fixtures.
+- Snapshot or golden-output tests should be limited to intentional stable JSON
+  result fields and should not include volatile command output.

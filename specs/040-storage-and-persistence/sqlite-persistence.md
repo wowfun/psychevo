@@ -82,6 +82,8 @@ Required semantics include:
 - optional assistant tool-call material
 - optional tool-result relationship aids
 - optional token count, finish, outcome, reasoning, model, or provider metadata
+- optional normalized usage metrics and allowlisted provider metadata associated
+  with completed assistant messages
 
 The first implementation slice must preserve the logical message field support required by [030 Session Record Model](../030-state-and-data-model/session-record-model.md), including tool-call fields, tool-result relationship aids, local folded reasoning blocks, and model/provider metadata when present.
 
@@ -112,6 +114,11 @@ only in `message_json` as assistant content blocks; provider wire fields such
 as `reasoning_content` are request projections and are not persisted as
 separate columns.
 
+`usage_json` stores normalized usage metrics when reported by a provider.
+`metadata_json` stores only allowlisted provider metadata suitable for local
+debug projection. Neither column is part of transcript content, and neither may
+be serialized into sanitized transcript messages.
+
 Message ordering is authoritative by `(session_id, session_seq)`, not by
 timestamp. The first implementation enforces `UNIQUE(session_id, session_seq)`.
 
@@ -131,13 +138,13 @@ SQLite persistence should perform periodic WAL checkpoint work when supported by
 
 Storage failures that affect session or message persistence must be observable to runtime or caller-facing layers that depend on persistence.
 
-The current implementation uses `PRAGMA user_version = 2`, WAL, foreign keys,
+The current implementation uses `PRAGMA user_version = 3`, WAL, foreign keys,
 short busy timeouts, `BEGIN IMMEDIATE`, bounded jitter retry, and best-effort
 periodic `wal_checkpoint(PASSIVE)`.
 
-The version 2 slice does not automatically migrate version 1 state databases.
-Opening an older state database must fail with an explicit cutover/reset
-instruction instead of silently mutating retained state.
+The version 3 slice does not automatically migrate version 1 or version 2 state
+databases. Opening an older state database must fail with an explicit
+cutover/reset instruction instead of silently mutating retained state.
 
 ## Retrieval
 
