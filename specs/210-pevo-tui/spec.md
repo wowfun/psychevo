@@ -21,6 +21,7 @@ the deterministic line-by-line scripted behavior.
 - transcript selection, keyboard expansion, and mouse expansion for bounded
   tool evidence
 - debug projection for usage and provider metadata summaries
+- deterministic visual-regression projections and local diagnostic screenshots
 - hard `plan` / `build` runtime mode selection
 
 Out of scope:
@@ -142,6 +143,9 @@ The sidebar sections are:
 Modified Files prefers session-local diff evidence when available. In the first
 slice, it may fall back to local git status. It shows at most 10 tail-compacted
 paths with compact `+/-` statistics when those statistics are known.
+
+Long local paths in the sidebar should be tail-compacted to preserve the
+rightmost useful path segments and avoid multi-line path walls.
 
 ## Evidence Projection
 
@@ -269,8 +273,17 @@ Thinking display is local UI material only; it is not promoted into visible
 transcript projection, JSON run output, provider replay across providers,
 `/session show`, or rendered `agent_end` material.
 
+TUI should create an answer row only after visible assistant text exists. It
+must not pre-render an empty answer row that pushes thinking or tool evidence
+out of the first visible ledger projection.
+
 Tool starts and ends render as compact evidence blocks. Long tool result bodies
 are summarized rather than dumped unless the block is expanded.
+
+When a background turn task completes, TUI must drain all queued runtime stream
+events before rendering the turn as complete. Final ledger projection must not
+lose late tool or message evidence merely because the task finished between
+input polling ticks.
 
 Session display commands use sanitized transcript projection. Folded reasoning
 blocks and provider reasoning wire fields must not appear in `/session show` or
@@ -280,6 +293,27 @@ For non-terminal stdin/stdout, `pevo tui` keeps deterministic line-by-line
 behavior and renders plain, no-ANSI semantic blocks: `Prompt`, `Thinking`,
 `Explored`, `Ran`, `Changed`, `Answer`, and `Meta`. `--debug` also affects this
 plain projection.
+
+## Visual Regression and Diagnostics
+
+The default checked-in visual regression source is an in-process `ratatui`
+buffer projection with stable text and style-role markers. It is a regression
+golden for layout, emphasis, and color-role discipline, not raw ANSI output or
+a screenshot.
+
+Style-role projections normalize terminal styling into the roles used by this
+spec: default primary text, dim secondary text, cyan status/hints, green
+success, red failures, and magenta `pevo` identity. They must avoid timestamps,
+random session ids, real provider text, real git state, real user config, and
+other host-volatile material.
+
+Real terminal PNG screenshots are diagnostic artifacts. They may be generated
+from a deterministic local mock-provider demo through VHS, but they are not
+checked-in goldens and are not compared pixel-by-pixel in default validation.
+The diagnostic artifact root is `.local/.psychevo-dev/tui-shots/<timestamp>/`.
+The deterministic demo should isolate git state from the parent repository and
+pin terminal color inputs, including clearing inherited `NO_COLOR`, so
+screenshots are useful as visual diagnostics.
 
 ## Related Topics
 

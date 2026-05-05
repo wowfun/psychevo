@@ -9,6 +9,7 @@
 - Added folded local reasoning blocks, opt-in JSON reasoning events, `pevo init --reset-state`, and repo-local live dev tooling.
 - Added fullscreen `pevo tui` with evidence-ledger turns, composer/sidebar, persistent TUI state, slash commands, `--debug`, transcript/tool expansion, and non-TTY scripted mode.
 - Added enforceable TUI `plan` / `build` modes plus the `060 Automation` foundation spec for structured validation and visual-regression boundaries.
+- Added TUI visual snapshots and a VHS diagnostic capture workflow.
 
 ### Changed
 

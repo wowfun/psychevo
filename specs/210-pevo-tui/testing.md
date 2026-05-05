@@ -63,28 +63,47 @@ Required coverage:
 ## Visual Regression
 
 The primary TUI visual regression path is a Codex-style `ratatui`
-`TestBackend` or `Buffer` snapshot. These snapshots should render stable text
-plus stable style markers so tests can assert layout, emphasis, and color-role
-discipline without storing raw ANSI escape sequences as the default golden
-format.
+`TestBackend` or `Buffer` snapshot. These checked-in goldens render stable text
+plus stable style-role markers so tests can assert layout, emphasis, and
+color-role discipline without storing raw ANSI escape sequences as the default
+golden format.
 
-Snapshot changes must use an explicit review flow. The developer or agent
-should inspect the snapshot diff before accepting intentional changes, following
-an `insta`-style pending/show/accept workflow when the implementation uses
-`insta`.
+Snapshot changes must use an explicit `insta`-style review flow. The developer
+or agent should inspect pending diffs before accepting intentional changes.
+These stable buffer/style snapshots are part of default broad validation.
 
 Required visual fixtures cover at least 80-column and 120-column widths with a
 realistic coding-agent turn. The fixture set should include idle composer,
 running thinking, tool evidence, collapsed and expanded output, slash menu,
-debug meta, sidebar visible/hidden, and narrow compact layout.
+debug meta, sidebar visible/hidden, failure/tool-error meta, and narrow compact
+layout.
 
-An optional ANSI test mode may generate diagnostic artifacts for local
-inspection. ANSI artifacts are not the default checked-in golden source and
-should not be required by the broad validation gate.
+When practical, snapshot tests should write untracked Agent-readable diagnostic
+material under `target/pevo-tui-snapshots/<fixture>/` on failure or review:
+plain rendered text, style-role projection, combined projection, and fixture
+metadata. These diagnostics are not the checked-in source of truth.
 
-Optional tmux or PTY capture may be used for E2E diagnostic artifacts and
-scripted interaction evidence. It is not part of the default broad validation
-gate unless a later testing spec explicitly promotes it.
+Optional VHS capture is the first real-terminal PNG diagnostic path. The
+diagnostic script uses a deterministic local mock provider, an isolated
+repo-local `PSYCHEVO_HOME`, and the current workspace `pevo` binary. It writes
+PNG screenshots and companion material under
+`.local/.psychevo-dev/tui-shots/<timestamp>/`.
+
+The demo workdir must be isolated from the parent repository's git state so
+Modified Files does not reflect unrelated uncommitted work. The tape should pin
+terminal color environment, clear inherited `NO_COLOR`, and avoid theme choices
+that squash TUI color-role contrast across repeated runs.
+
+VHS capture is intentionally outside default broad validation and is not a
+pixel golden. Its required tools are `vhs`, `ttyd`, `ffmpeg`, and `python3`.
+The diagnostic script should fail clearly when dependencies are missing and
+provide an explicit dependency-install command. Dependency installation must be
+opt-in because it mutates the host system.
+
+The VHS diagnostic script must clean up its local mock provider on success,
+failure, and interrupt. A successful artifact write must exit successfully
+instead of failing during cleanup, and repeated runs must not leave background
+mock-provider processes behind.
 
 ## Validation
 
