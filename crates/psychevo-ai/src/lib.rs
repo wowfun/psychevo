@@ -108,6 +108,103 @@ pub enum StreamEvent {
     },
 }
 
+pub fn normalize_usage(usage: &Value) -> Option<Value> {
+    let object = usage.as_object()?;
+    let mut out = serde_json::Map::new();
+    copy_number_field(
+        object,
+        &mut out,
+        &["input_tokens", "prompt_tokens", "input"],
+        "input_tokens",
+    );
+    copy_number_field(
+        object,
+        &mut out,
+        &["output_tokens", "completion_tokens", "output"],
+        "output_tokens",
+    );
+    copy_number_field(object, &mut out, &["total_tokens", "total"], "total_tokens");
+    if let Some(reasoning_tokens) = first_nested_number(
+        usage,
+        &[
+            &["reasoning_tokens"],
+            &["completion_tokens_details", "reasoning_tokens"],
+            &["output_tokens_details", "reasoning_tokens"],
+        ],
+    ) {
+        out.insert("reasoning_tokens".to_string(), reasoning_tokens);
+    }
+    if let Some(cached_tokens) = first_nested_number(
+        usage,
+        &[
+            &["cached_tokens"],
+            &["prompt_tokens_details", "cached_tokens"],
+            &["input_tokens_details", "cached_tokens"],
+        ],
+    ) {
+        out.insert("cached_tokens".to_string(), cached_tokens);
+    }
+    (!out.is_empty()).then_some(Value::Object(out))
+}
+
+pub fn allowlisted_provider_metadata(metadata: &Value) -> Option<Value> {
+    let object = metadata.as_object()?;
+    let mut out = serde_json::Map::new();
+    for key in [
+        "provider_response_id",
+        "response_id",
+        "model",
+        "system_fingerprint",
+        "service_tier",
+        "created",
+        "finish_reason",
+        "request_id",
+    ] {
+        if let Some(value) = object.get(key)
+            && is_safe_metadata_value(value)
+        {
+            out.insert(key.to_string(), value.clone());
+        }
+    }
+    if !out.contains_key("provider_response_id")
+        && let Some(value) = object.get("id")
+        && is_safe_metadata_value(value)
+    {
+        out.insert("provider_response_id".to_string(), value.clone());
+    }
+    (!out.is_empty()).then_some(Value::Object(out))
+}
+
+fn copy_number_field(
+    object: &serde_json::Map<String, Value>,
+    out: &mut serde_json::Map<String, Value>,
+    candidates: &[&str],
+    target: &str,
+) {
+    if let Some(value) = candidates.iter().find_map(|key| object.get(*key))
+        && value.as_i64().is_some()
+    {
+        out.insert(target.to_string(), value.clone());
+    }
+}
+
+fn first_nested_number(value: &Value, paths: &[&[&str]]) -> Option<Value> {
+    paths.iter().find_map(|path| {
+        let mut current = value;
+        for key in *path {
+            current = current.get(*key)?;
+        }
+        current.as_i64().map(|_| current.clone())
+    })
+}
+
+fn is_safe_metadata_value(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::String(_) | Value::Number(_) | Value::Bool(_) | Value::Null
+    )
+}
+
 #[derive(Clone)]
 pub struct AbortSignal {
     rx: watch::Receiver<bool>,
@@ -352,11 +449,22 @@ fn translate_messages(messages: &[Value], target: &ModelTarget, base_url: &str) 
 
 fn translate_message(message: &Value, target: &ModelTarget, base_url: &str) -> Vec<Value> {
     match message.get("role").and_then(Value::as_str) {
+        Some("system") => system_messages(message),
         Some("user") => user_messages(message),
         Some("assistant") => assistant_messages(message, target, base_url),
         Some("tool_result") => tool_result_messages(message),
         _ => Vec::new(),
     }
+}
+
+fn system_messages(message: &Value) -> Vec<Value> {
+    message
+        .get("content")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(|text| vec![json!({ "role": "system", "content": text })])
+        .unwrap_or_default()
 }
 
 fn user_messages(message: &Value) -> Vec<Value> {
@@ -1065,6 +1173,31 @@ mod tests {
     }
 
     #[test]
+    fn chat_request_preserves_ephemeral_system_messages() {
+        let request = GenerationRequest {
+            model: ModelTarget {
+                provider: "openai".to_string(),
+                model: "gpt-test".to_string(),
+            },
+            messages: vec![
+                json!({"role":"system","content":"plan mode instruction"}),
+                json!({"role":"user","content":[{"text":"hello"}],"timestamp_ms":1}),
+            ],
+            tools: Vec::new(),
+            metadata: json!({}),
+        };
+
+        let body = build_chat_request(&request, "https://api.openai.com/v1");
+        assert_eq!(
+            body["messages"],
+            json!([
+                {"role":"system","content":"plan mode instruction"},
+                {"role":"user","content":"hello"}
+            ])
+        );
+    }
+
+    #[test]
     fn chat_request_hides_reasoning_unless_target_derives_protocol_echo() {
         let assistant = json!({
             "role": "assistant",
@@ -1346,6 +1479,42 @@ mod tests {
                 finish_reason: Some("stop".to_string())
             })
         );
+    }
+
+    #[test]
+    fn normalizes_usage_to_provider_neutral_fields() {
+        let usage = json!({
+            "prompt_tokens": 11,
+            "completion_tokens": 7,
+            "total_tokens": 18,
+            "completion_tokens_details": { "reasoning_tokens": 3 },
+            "prompt_tokens_details": { "cached_tokens": 5 },
+            "ignored": "x"
+        });
+        let normalized = normalize_usage(&usage).expect("usage");
+        assert_eq!(normalized["input_tokens"], 11);
+        assert_eq!(normalized["output_tokens"], 7);
+        assert_eq!(normalized["total_tokens"], 18);
+        assert_eq!(normalized["reasoning_tokens"], 3);
+        assert_eq!(normalized["cached_tokens"], 5);
+        assert!(normalized.get("ignored").is_none());
+    }
+
+    #[test]
+    fn allowlists_provider_metadata() {
+        let metadata = json!({
+            "id": "resp_1",
+            "model": "gpt-test",
+            "system_fingerprint": "fp",
+            "headers": { "authorization": "secret" },
+            "raw": ["not", "allowed"]
+        });
+        let normalized = allowlisted_provider_metadata(&metadata).expect("metadata");
+        assert_eq!(normalized["provider_response_id"], "resp_1");
+        assert_eq!(normalized["model"], "gpt-test");
+        assert_eq!(normalized["system_fingerprint"], "fp");
+        assert!(normalized.get("headers").is_none());
+        assert!(normalized.get("raw").is_none());
     }
 
     #[test]

@@ -6,6 +6,7 @@ use futures::StreamExt;
 use futures::future::{BoxFuture, join_all};
 use psychevo_ai::{
     AbortSignal, GenerationProvider, GenerationRequest, Outcome, StreamEvent, ToolDeclaration,
+    allowlisted_provider_metadata, normalize_usage,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -152,6 +153,10 @@ pub enum AgentEvent {
     },
     MessageEnd {
         message: Message,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        usage: Option<Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        metadata: Option<Value>,
     },
     ReasoningDelta {
         text: String,
@@ -230,6 +235,7 @@ pub struct AgentLoopRequest {
     pub model_provider: String,
     pub model: String,
     pub generation_metadata: Value,
+    pub system_instructions: Vec<String>,
     pub previous_messages: Vec<Message>,
     pub prompt_messages: Vec<Message>,
     pub tools: Vec<Arc<dyn ToolBinding>>,
@@ -281,7 +287,15 @@ pub async fn run_agent_loop(
             },
         )
         .await?;
-        emit(&sink, AgentEvent::MessageEnd { message }).await?;
+        emit(
+            &sink,
+            AgentEvent::MessageEnd {
+                message,
+                usage: None,
+                metadata: None,
+            },
+        )
+        .await?;
     }
 
     loop {
@@ -388,7 +402,15 @@ pub async fn run_agent_loop(
                     },
                 )
                 .await?;
-                emit(&sink, AgentEvent::MessageEnd { message: result }).await?;
+                emit(
+                    &sink,
+                    AgentEvent::MessageEnd {
+                        message: result,
+                        usage: None,
+                        metadata: None,
+                    },
+                )
+                .await?;
             }
         }
 
@@ -451,16 +473,25 @@ async fn stream_assistant(
     sink: Arc<dyn EventSink>,
     abort: AbortSignal,
 ) -> Result<Message> {
+    let mut messages = request
+        .system_instructions
+        .iter()
+        .filter(|instruction| !instruction.trim().is_empty())
+        .map(|instruction| json!({ "role": "system", "content": instruction }))
+        .collect::<Vec<_>>();
+    messages.extend(
+        context
+            .iter()
+            .map(serde_json::to_value)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|err| Error::Agent(err.to_string()))?,
+    );
     let generation_request = GenerationRequest {
         model: psychevo_ai::ModelTarget {
             provider: request.model_provider.clone(),
             model: request.model.clone(),
         },
-        messages: context
-            .iter()
-            .map(serde_json::to_value)
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(|err| Error::Agent(err.to_string()))?,
+        messages,
         tools: request
             .tools
             .iter()
@@ -477,6 +508,8 @@ async fn stream_assistant(
     let mut raw_text = String::new();
     let mut provider_reasoning = String::new();
     let mut reasoning_details = Vec::new();
+    let mut usage = None;
+    let mut metadata = None;
     let mut emitted_inline_reasoning_len = 0usize;
     let mut tool_builders: BTreeMap<(usize, usize), ToolCallBuilder> = BTreeMap::new();
     let mut finish_reason = None;
@@ -568,7 +601,12 @@ async fn stream_assistant(
                 visible_changed = true;
             }
             StreamEvent::ToolCallEnd { .. } => {}
-            StreamEvent::Usage { .. } | StreamEvent::Metadata { .. } => {}
+            StreamEvent::Usage { usage: reported } => {
+                merge_object(&mut usage, normalize_usage(&reported));
+            }
+            StreamEvent::Metadata { metadata: reported } => {
+                merge_object(&mut metadata, allowlisted_provider_metadata(&reported));
+            }
             StreamEvent::Done {
                 outcome: done_outcome,
                 finish_reason: done_reason,
@@ -640,6 +678,8 @@ async fn stream_assistant(
         &sink,
         AgentEvent::MessageEnd {
             message: assistant.clone(),
+            usage,
+            metadata,
         },
     )
     .await?;
@@ -737,6 +777,18 @@ fn collect_reasoning_details(details: &mut Vec<Value>, value: Value) {
     match value {
         Value::Array(values) => details.extend(values),
         other => details.push(other),
+    }
+}
+
+fn merge_object(target: &mut Option<Value>, value: Option<Value>) {
+    let Some(Value::Object(next)) = value else {
+        return;
+    };
+    match target {
+        Some(Value::Object(existing)) => {
+            existing.extend(next);
+        }
+        _ => *target = Some(Value::Object(next)),
     }
 }
 
@@ -948,6 +1000,7 @@ mod tests {
             model_provider: "fake".to_string(),
             model: "model".to_string(),
             generation_metadata: json!({}),
+            system_instructions: Vec::new(),
             previous_messages: Vec::new(),
             prompt_messages: vec![user_text_message("hello")],
             tools: Vec::new(),
@@ -1011,6 +1064,14 @@ mod tests {
             .filter(|event| matches!(event, AgentEvent::MessageUpdate { .. }))
             .count();
         assert_eq!(updates, 1);
+        assert!(events.iter().any(|event| {
+            matches!(
+                event,
+                AgentEvent::MessageEnd { usage: Some(usage), metadata: Some(metadata), .. }
+                    if usage["total_tokens"] == 1
+                        && metadata["provider_response_id"] == "resp"
+            )
+        }));
     }
 
     #[tokio::test]

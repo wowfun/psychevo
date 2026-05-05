@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -9,9 +9,9 @@ use std::time::Duration;
 
 use futures::future::BoxFuture;
 use psychevo_agent_core::{
-    AgentEvent, AgentLoopRequest, AssistantBlock, ControlHandle, EventSink, Message,
-    Result as CoreResult, ToolBinding, ToolExecutionMode, ToolOutput, now_ms, run_agent_loop,
-    user_text_message,
+    AgentEvent, AgentLoopRequest, AssistantBlock, ControlHandle, ControlReceivers, EventSink,
+    Message, Result as CoreResult, ToolBinding, ToolExecutionMode, ToolOutput, now_ms,
+    run_agent_loop, user_text_message,
 };
 use psychevo_ai::{AbortSignal, FakeProvider, OpenAiChatProvider, Outcome, RawStreamEvent};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -34,7 +34,7 @@ const READ_MAX_BYTES: usize = 50 * 1024;
 const READ_MAX_LINES: usize = 2000;
 const BASH_DEFAULT_TIMEOUT_SECS: u64 = 120;
 const BASH_MAX_TIMEOUT_SECS: u64 = 300;
-const SQLITE_SCHEMA_VERSION: i64 = 2;
+const SQLITE_SCHEMA_VERSION: i64 = 3;
 const REASONING_EFFORT_VALUES: &[&str] =
     &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
@@ -96,7 +96,32 @@ pub struct RunOptions {
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub include_reasoning: bool,
+    pub mode: RunMode,
     pub inherited_env: Option<BTreeMap<String, String>>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RunMode {
+    Plan,
+    #[default]
+    Build,
+}
+
+impl RunMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Plan => "plan",
+            Self::Build => "build",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "plan" => Some(Self::Plan),
+            "build" => Some(Self::Build),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -111,8 +136,76 @@ pub struct RunResult {
     pub base_url: String,
     pub api_key_env: Option<String>,
     pub reasoning_effort: Option<String>,
+    pub context_limit: Option<u64>,
     pub tool_failures: usize,
     pub events: Vec<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionSummary {
+    pub id: String,
+    pub source: String,
+    pub workdir: String,
+    pub model: String,
+    pub provider: String,
+    pub started_at_ms: i64,
+    pub updated_at_ms: i64,
+    pub ended_at_ms: Option<i64>,
+    pub end_reason: Option<String>,
+    pub message_count: i64,
+    pub tool_call_count: i64,
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfiguredModel {
+    pub provider: String,
+    pub provider_label: String,
+    pub model: String,
+    pub reasoning_effort: Option<String>,
+    pub context_limit: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SanitizedMessageSummary {
+    pub message: Message,
+    pub usage: Option<Value>,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum RunStreamEvent {
+    Event(Value),
+    ReasoningDelta { text: String },
+    ReasoningEnd,
+}
+
+pub type RunStreamSink = Arc<dyn Fn(RunStreamEvent) + Send + Sync>;
+
+#[derive(Clone)]
+pub struct RunControlHandle {
+    inner: ControlHandle,
+}
+
+impl RunControlHandle {
+    pub fn stop(&self) {
+        self.inner.stop();
+    }
+
+    pub fn abort(&self) {
+        self.inner.abort();
+    }
+}
+
+pub struct RunControl {
+    handle: RunControlHandle,
+    receivers: ControlReceivers,
+}
+
+pub fn run_control() -> (RunControlHandle, RunControl) {
+    let (inner, receivers) = ControlHandle::new();
+    let handle = RunControlHandle { inner };
+    (handle.clone(), RunControl { handle, receivers })
 }
 
 #[derive(Clone)]
@@ -230,19 +323,62 @@ impl SqliteStore {
     }
 
     pub fn latest_run_session_for_workdir(&self, workdir: &Path) -> Result<Option<String>> {
+        self.latest_session_for_workdir_with_sources(workdir, &["run"])
+    }
+
+    pub fn latest_session_for_workdir_with_sources(
+        &self,
+        workdir: &Path,
+        sources: &[&str],
+    ) -> Result<Option<String>> {
+        Ok(self
+            .list_sessions_for_workdir_with_sources(workdir, sources)?
+            .into_iter()
+            .next()
+            .map(|session| session.id))
+    }
+
+    pub fn list_sessions_for_workdir_with_sources(
+        &self,
+        workdir: &Path,
+        sources: &[&str],
+    ) -> Result<Vec<SessionSummary>> {
         let workdir = workdir.to_string_lossy().to_string();
+        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, source, workdir, model, provider, started_at_ms,
+                   updated_at_ms, ended_at_ms, end_reason, message_count,
+                   tool_call_count, title
+            FROM sessions
+            WHERE workdir = ?1
+            ORDER BY updated_at_ms DESC, started_at_ms DESC
+            "#,
+        )?;
+        let rows = stmt.query_map(params![workdir], session_summary_from_row)?;
+        let mut summaries = Vec::new();
+        for row in rows {
+            let summary = row?;
+            if sources.is_empty() || sources.iter().any(|source| *source == summary.source) {
+                summaries.push(summary);
+            }
+        }
+        Ok(summaries)
+    }
+
+    pub fn session_summary(&self, session_id: &str) -> Result<Option<SessionSummary>> {
         let conn = self.conn.lock().expect("sqlite lock poisoned");
         Ok(conn
             .query_row(
                 r#"
-                SELECT id
+                SELECT id, source, workdir, model, provider, started_at_ms,
+                       updated_at_ms, ended_at_ms, end_reason, message_count,
+                       tool_call_count, title
                 FROM sessions
-                WHERE source = 'run' AND workdir = ?1
-                ORDER BY updated_at_ms DESC, started_at_ms DESC
-                LIMIT 1
+                WHERE id = ?1
                 "#,
-                params![workdir],
-                |row| row.get(0),
+                params![session_id],
+                session_summary_from_row,
             )
             .optional()?)
     }
@@ -274,9 +410,64 @@ impl SqliteStore {
         Ok(messages)
     }
 
+    pub fn load_sanitized_messages(&self, session_id: &str) -> Result<Vec<Message>> {
+        Ok(self
+            .load_messages(session_id)?
+            .iter()
+            .map(sanitize_message_for_output)
+            .collect())
+    }
+
+    pub fn load_sanitized_message_summaries(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<SanitizedMessageSummary>> {
+        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT message_json, usage_json, metadata_json
+            FROM messages
+            WHERE session_id = ?1
+            ORDER BY session_seq ASC
+            "#,
+        )?;
+        let rows = stmt.query_map(params![session_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })?;
+        let mut messages = Vec::new();
+        for row in rows {
+            let (message_json, usage_json, metadata_json) = row?;
+            let message = serde_json::from_str::<Message>(&message_json)?;
+            let usage = parse_optional_json(usage_json)?;
+            let metadata = parse_optional_json(metadata_json)?;
+            messages.push(SanitizedMessageSummary {
+                message: sanitize_message_for_output(&message),
+                usage,
+                metadata,
+            });
+        }
+        Ok(messages)
+    }
+
     pub fn append_message(&self, session_id: &str, message: &Message) -> Result<()> {
+        self.append_message_with_metrics(session_id, message, None, None)
+    }
+
+    pub fn append_message_with_metrics(
+        &self,
+        session_id: &str,
+        message: &Message,
+        usage: Option<Value>,
+        metadata: Option<Value>,
+    ) -> Result<()> {
         let fields = message_fields(message)?;
         let message_json = serde_json::to_string(message)?;
+        let usage_json = optional_json_string(&usage)?;
+        let metadata_json = optional_json_string(&metadata)?;
         let now = now_ms();
         self.write_retry(|conn| {
             let seq = next_session_seq(conn, session_id)?;
@@ -286,7 +477,7 @@ impl SqliteStore {
                     session_id, session_seq, role, timestamp_ms, message_json,
                     content_text, tool_call_id, tool_name, tool_calls_json,
                     finish_reason, outcome, model, provider, usage_json, metadata_json
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, NULL, NULL)
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
                 "#,
                 params![
                     session_id,
@@ -301,7 +492,9 @@ impl SqliteStore {
                     fields.finish_reason,
                     fields.outcome,
                     fields.model,
-                    fields.provider
+                    fields.provider,
+                    usage_json,
+                    metadata_json
                 ],
             )?;
             conn.execute(
@@ -393,6 +586,23 @@ fn sqlite_table_exists(conn: &Connection, table: &str) -> rusqlite::Result<bool>
 fn is_busy(err: &rusqlite::Error) -> bool {
     let msg = err.to_string().to_lowercase();
     msg.contains("busy") || msg.contains("locked")
+}
+
+fn session_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionSummary> {
+    Ok(SessionSummary {
+        id: row.get(0)?,
+        source: row.get(1)?,
+        workdir: row.get(2)?,
+        model: row.get(3)?,
+        provider: row.get(4)?,
+        started_at_ms: row.get(5)?,
+        updated_at_ms: row.get(6)?,
+        ended_at_ms: row.get(7)?,
+        end_reason: row.get(8)?,
+        message_count: row.get(9)?,
+        tool_call_count: row.get(10)?,
+        title: row.get(11)?,
+    })
 }
 
 fn next_session_seq(conn: &Connection, session_id: &str) -> rusqlite::Result<i64> {
@@ -505,6 +715,21 @@ fn message_fields(message: &Message) -> Result<MessageFields> {
     }
 }
 
+fn optional_json_string(value: &Option<Value>) -> Result<Option<String>> {
+    value
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(Into::into)
+}
+
+fn parse_optional_json(value: Option<String>) -> Result<Option<Value>> {
+    value
+        .map(|value| serde_json::from_str(&value))
+        .transpose()
+        .map_err(Into::into)
+}
+
 #[derive(Debug, Clone, Default)]
 struct RunConfig {
     model: ModelSelection,
@@ -533,6 +758,7 @@ struct ConfigProviderOptions {
 #[derive(Debug, Clone, Default)]
 struct ConfigModelEntry {
     reasoning_effort: Option<String>,
+    context_limit: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -554,6 +780,7 @@ struct ResolvedRunProvider {
     api_key_env: Option<String>,
     api_key: String,
     reasoning_effort: Option<String>,
+    context_limit: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -650,6 +877,42 @@ const BUILT_IN_PROVIDERS: &[BuiltInProvider] = &[
 ];
 
 pub async fn run_live(options: RunOptions) -> Result<RunResult> {
+    run_live_internal(options, "run", &["run"], None, None).await
+}
+
+pub async fn run_live_streaming(
+    options: RunOptions,
+    source: &str,
+    continue_sources: &[&str],
+    stream: RunStreamSink,
+) -> Result<RunResult> {
+    run_live_internal(options, source, continue_sources, Some(stream), None).await
+}
+
+pub async fn run_live_streaming_controlled(
+    options: RunOptions,
+    source: &str,
+    continue_sources: &[&str],
+    stream: RunStreamSink,
+    control: RunControl,
+) -> Result<RunResult> {
+    run_live_internal(
+        options,
+        source,
+        continue_sources,
+        Some(stream),
+        Some(control),
+    )
+    .await
+}
+
+async fn run_live_internal(
+    options: RunOptions,
+    source: &str,
+    continue_sources: &[&str],
+    stream_events: Option<RunStreamSink>,
+    control: Option<RunControl>,
+) -> Result<RunResult> {
     let workdir = canonical_workdir(&options.workdir)?;
     if options.prompt.trim().is_empty() {
         return Err(Error::Message("prompt is empty".to_string()));
@@ -662,13 +925,15 @@ pub async fn run_live(options: RunOptions) -> Result<RunResult> {
         store.resume_session(&session_id)?;
         session_id
     } else if options.continue_latest {
-        if let Some(session_id) = store.latest_run_session_for_workdir(&workdir)? {
+        if let Some(session_id) =
+            store.latest_session_for_workdir_with_sources(&workdir, continue_sources)?
+        {
             store.resume_session(&session_id)?;
             session_id
         } else {
             store.create_session_with_metadata(
                 &workdir,
-                "run",
+                source,
                 &resolved.model,
                 &resolved.provider,
                 Some(json!({
@@ -676,13 +941,15 @@ pub async fn run_live(options: RunOptions) -> Result<RunResult> {
                     "base_url": resolved.base_url.clone(),
                     "api_key_env": resolved.api_key_env.clone(),
                     "reasoning_effort": resolved.reasoning_effort.clone(),
+                    "context_limit": resolved.context_limit,
+                    "mode": options.mode.as_str(),
                 })),
             )?
         }
     } else {
         store.create_session_with_metadata(
             &workdir,
-            "run",
+            source,
             &resolved.model,
             &resolved.provider,
             Some(json!({
@@ -690,12 +957,15 @@ pub async fn run_live(options: RunOptions) -> Result<RunResult> {
                 "base_url": resolved.base_url.clone(),
                 "api_key_env": resolved.api_key_env.clone(),
                 "reasoning_effort": resolved.reasoning_effort.clone(),
+                "context_limit": resolved.context_limit,
+                "mode": options.mode.as_str(),
             })),
         )?
     };
 
-    let events = Arc::new(Mutex::new(vec![json!({
+    let run_start = json!({
         "type": "run_start",
+        "source": source,
         "session_id": session_id.clone(),
         "provider": resolved.provider.clone(),
         "model": resolved.model.clone(),
@@ -704,7 +974,13 @@ pub async fn run_live(options: RunOptions) -> Result<RunResult> {
         "base_url": resolved.base_url.clone(),
         "api_key_env": resolved.api_key_env.clone(),
         "reasoning_effort": resolved.reasoning_effort.clone(),
-    })]));
+        "context_limit": resolved.context_limit,
+        "mode": options.mode.as_str(),
+    });
+    if let Some(stream) = &stream_events {
+        stream(RunStreamEvent::Event(run_start.clone()));
+    }
+    let events = Arc::new(Mutex::new(vec![run_start]));
 
     let previous_messages = prune_context(
         store.load_messages(&session_id)?,
@@ -715,13 +991,17 @@ pub async fn run_live(options: RunOptions) -> Result<RunResult> {
         resolved.api_key.clone(),
         resolved.provider.clone(),
     ));
-    let (control_handle, control_receivers) = ControlHandle::new();
+    let (control_handle, control_receivers) = match control {
+        Some(control) => (control.handle.inner.clone(), control.receivers),
+        None => ControlHandle::new(),
+    };
     let sink = Arc::new(PersistenceSink {
         store: store.clone(),
         session_id: session_id.clone(),
         control: SmokeControl::None,
         control_handle: Some(control_handle),
         events: Some(Arc::clone(&events)),
+        stream_events,
         include_reasoning: options.include_reasoning,
     });
     let generation_metadata = resolved
@@ -733,9 +1013,10 @@ pub async fn run_live(options: RunOptions) -> Result<RunResult> {
         model_provider: resolved.provider.clone(),
         model: resolved.model.clone(),
         generation_metadata,
+        system_instructions: vec![mode_instruction(options.mode).to_string()],
         previous_messages,
         prompt_messages: vec![user_text_message(options.prompt.clone())],
-        tools: coding_core_tools(&workdir),
+        tools: coding_core_tools_for_mode(&workdir, options.mode),
         max_turns: 8,
     };
     let completion = run_agent_loop(provider, request, sink, control_receivers).await?;
@@ -763,6 +1044,7 @@ pub async fn run_live(options: RunOptions) -> Result<RunResult> {
         base_url: resolved.base_url,
         api_key_env: resolved.api_key_env,
         reasoning_effort: resolved.reasoning_effort,
+        context_limit: resolved.context_limit,
         tool_failures,
         events,
     })
@@ -1049,6 +1331,7 @@ fn parse_config_model_entry(
             object,
             "reasoning_effort",
         )?)?,
+        context_limit: optional_u64_field(object, "context_limit")?,
     })
 }
 
@@ -1064,6 +1347,18 @@ fn optional_string_field(
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
                 .ok_or_else(|| Error::Config(format!("{key} must be a non-empty string")))
+        })
+        .transpose()
+}
+
+fn optional_u64_field(object: &serde_json::Map<String, Value>, key: &str) -> Result<Option<u64>> {
+    object
+        .get(key)
+        .map(|value| {
+            value
+                .as_u64()
+                .filter(|value| *value > 0)
+                .ok_or_else(|| Error::Config(format!("{key} must be a positive integer")))
         })
         .transpose()
 }
@@ -1259,6 +1554,9 @@ fn resolve_one_provider(
         explicit_reasoning_effort,
         config_model_entry(config_entry, &model).and_then(|entry| entry.reasoning_effort.clone()),
     ]))?;
+    let context_limit = config_model_entry(config_entry, &model)
+        .and_then(|entry| entry.context_limit)
+        .or_else(|| built_in_context_limit(&provider, &model));
     let base_url = first_string([
         config_entry.and_then(|entry| entry.options.base_url.clone()),
         built_in
@@ -1311,7 +1609,17 @@ fn resolve_one_provider(
         api_key_env,
         api_key,
         reasoning_effort,
+        context_limit,
     })
+}
+
+fn built_in_context_limit(provider: &str, model: &str) -> Option<u64> {
+    let model = model.to_lowercase();
+    match normalize_provider_id(provider).as_str() {
+        "deepseek" if model.contains("deepseek") => Some(64_000),
+        "openai" if model.contains("gpt-4.1") || model.contains("gpt-4o") => Some(128_000),
+        _ => None,
+    }
 }
 
 fn built_in_provider(provider: &str) -> Option<&'static BuiltInProvider> {
@@ -1361,6 +1669,89 @@ fn config_model_entry<'a>(
     model: &str,
 ) -> Option<&'a ConfigModelEntry> {
     entry.and_then(|entry| entry.models.get(model))
+}
+
+pub fn configured_models(options: &RunOptions) -> Result<Vec<ConfiguredModel>> {
+    let workdir = canonical_workdir(&options.workdir)?;
+    let loaded = load_run_config(options, &workdir)?;
+    let cli_model = parse_model_override(options.model.as_ref())?;
+    let env_model = loaded
+        .env
+        .get("PSYCHEVO_INFERENCE_MODEL")
+        .map(|value| {
+            parse_model_selection(
+                &Value::String(value.clone()),
+                &loaded.config.provider.keys().cloned().collect(),
+            )
+        })
+        .transpose()?
+        .unwrap_or_default();
+
+    let mut seen = HashSet::new();
+    let mut rows = Vec::new();
+    let mut push_model = |provider: &str,
+                          model: &str,
+                          reasoning_effort: Option<String>,
+                          context_limit: Option<u64>,
+                          rows: &mut Vec<ConfiguredModel>| {
+        let provider = normalize_provider_id(provider);
+        let model = model.trim().to_string();
+        if provider.is_empty() || model.is_empty() || !seen.insert(format!("{provider}/{model}")) {
+            return;
+        }
+        let context_limit = context_limit.or_else(|| built_in_context_limit(&provider, &model));
+        rows.push(ConfiguredModel {
+            provider: provider.clone(),
+            provider_label: provider_label(&provider),
+            model,
+            reasoning_effort,
+            context_limit,
+        });
+    };
+
+    for (provider, entry) in &loaded.config.provider {
+        for (model, config) in &entry.models {
+            push_model(
+                provider,
+                model,
+                config.reasoning_effort.clone(),
+                config.context_limit,
+                &mut rows,
+            );
+        }
+    }
+
+    for selection in [&cli_model, &loaded.config.model, &env_model] {
+        if let (Some(provider), Some(model)) = (&selection.provider, &selection.id) {
+            let reasoning_effort = loaded
+                .config
+                .provider
+                .get(provider)
+                .and_then(|entry| config_model_entry(Some(entry), model))
+                .and_then(|entry| entry.reasoning_effort.clone())
+                .or_else(|| selection.reasoning_effort.clone());
+            let context_limit = loaded
+                .config
+                .provider
+                .get(provider)
+                .and_then(|entry| config_model_entry(Some(entry), model))
+                .and_then(|entry| entry.context_limit);
+            push_model(provider, model, reasoning_effort, context_limit, &mut rows);
+        }
+    }
+
+    rows.sort_by(|left, right| {
+        left.provider
+            .cmp(&right.provider)
+            .then_with(|| left.model.cmp(&right.model))
+    });
+    Ok(rows)
+}
+
+fn provider_label(provider: &str) -> String {
+    built_in_provider(provider)
+        .map(|entry| entry.label.to_string())
+        .unwrap_or_else(|| provider.to_string())
 }
 
 fn env_value(env_map: &BTreeMap<String, String>, key: &str) -> Option<String> {
@@ -1417,12 +1808,14 @@ pub async fn run_smoke(options: SmokeOptions) -> Result<SmokeResult> {
         control: options.control,
         control_handle: Some(control_handle),
         events: None,
+        stream_events: None,
         include_reasoning: false,
     });
     let request = AgentLoopRequest {
         model_provider: "fake".to_string(),
         model: "fake-coding-model".to_string(),
         generation_metadata: json!({}),
+        system_instructions: Vec::new(),
         previous_messages,
         prompt_messages: vec![user_text_message(prompt)],
         tools,
@@ -1461,6 +1854,7 @@ struct PersistenceSink {
     control: SmokeControl,
     control_handle: Option<ControlHandle>,
     events: Option<Arc<Mutex<Vec<Value>>>>,
+    stream_events: Option<RunStreamSink>,
     include_reasoning: bool,
 }
 
@@ -1471,12 +1865,18 @@ impl EventSink for PersistenceSink {
         let control = self.control;
         let control_handle = self.control_handle.clone();
         let events = self.events.clone();
+        let stream_events = self.stream_events.clone();
         let include_reasoning = self.include_reasoning;
         Box::pin(async move {
             if let Some(events) = events
                 && let Some(value) = project_agent_event(&event, include_reasoning)
             {
                 events.lock().expect("event lock poisoned").push(value);
+            }
+            if let Some(stream_events) = stream_events
+                && let Some(value) = project_run_stream_event(&event)
+            {
+                stream_events(value);
             }
             match event {
                 AgentEvent::AgentStart => match control {
@@ -1492,11 +1892,13 @@ impl EventSink for PersistenceSink {
                         }
                     }
                 },
-                AgentEvent::MessageEnd { message } => {
-                    store
-                        .append_message(&session_id, &message)
-                        .map_err(|err| psychevo_agent_core::Error::EventSink(err.to_string()))?
-                }
+                AgentEvent::MessageEnd {
+                    message,
+                    usage,
+                    metadata,
+                } => store
+                    .append_message_with_metrics(&session_id, &message, usage, metadata)
+                    .map_err(|err| psychevo_agent_core::Error::EventSink(err.to_string()))?,
                 AgentEvent::AgentEnd { outcome, .. } => store
                     .finish_session(&session_id, outcome)
                     .map_err(|err| psychevo_agent_core::Error::EventSink(err.to_string()))?,
@@ -1525,12 +1927,45 @@ fn project_agent_event(event: &AgentEvent, include_reasoning: bool) -> Option<Va
         AgentEvent::MessageUpdate { message } => AgentEvent::MessageUpdate {
             message: sanitize_message_for_output(message),
         },
-        AgentEvent::MessageEnd { message } => AgentEvent::MessageEnd {
+        AgentEvent::MessageEnd { message, .. } => AgentEvent::MessageEnd {
             message: sanitize_message_for_output(message),
+            usage: None,
+            metadata: None,
         },
         other => other.clone(),
     };
     serde_json::to_value(projected).ok()
+}
+
+fn project_run_stream_event(event: &AgentEvent) -> Option<RunStreamEvent> {
+    match event {
+        AgentEvent::ReasoningDelta { text } => {
+            Some(RunStreamEvent::ReasoningDelta { text: text.clone() })
+        }
+        AgentEvent::ReasoningEnd { .. } => Some(RunStreamEvent::ReasoningEnd),
+        AgentEvent::MessageEnd {
+            message,
+            usage,
+            metadata,
+        } => {
+            let mut value = json!({
+                "type": "message_end",
+                "message": sanitize_message_for_output(message),
+            });
+            if let Some(usage) = usage
+                && let Some(object) = value.as_object_mut()
+            {
+                object.insert("usage".to_string(), usage.clone());
+            }
+            if let Some(metadata) = metadata
+                && let Some(object) = value.as_object_mut()
+            {
+                object.insert("metadata".to_string(), metadata.clone());
+            }
+            Some(RunStreamEvent::Event(value))
+        }
+        _ => project_agent_event(event, false).map(RunStreamEvent::Event),
+    }
 }
 
 fn sanitize_message_for_output(message: &Message) -> Message {
@@ -1564,13 +1999,54 @@ fn canonical_workdir(path: &Path) -> Result<PathBuf> {
     Ok(path.canonicalize()?)
 }
 
+pub fn canonicalize_workdir(path: &Path) -> Result<PathBuf> {
+    canonical_workdir(path)
+}
+
 fn coding_core_tools(workdir: &Path) -> Vec<Arc<dyn ToolBinding>> {
+    coding_core_tools_for_mode(workdir, RunMode::Build)
+}
+
+fn coding_core_tools_for_mode(workdir: &Path, mode: RunMode) -> Vec<Arc<dyn ToolBinding>> {
+    match mode {
+        RunMode::Plan => read_only_plan_tools(workdir),
+        RunMode::Build => full_build_tools(workdir),
+    }
+}
+
+fn full_build_tools(workdir: &Path) -> Vec<Arc<dyn ToolBinding>> {
     vec![
         Arc::new(ReadTool::new(workdir.to_path_buf())),
         Arc::new(WriteTool::new(workdir.to_path_buf())),
         Arc::new(EditTool::new(workdir.to_path_buf())),
         Arc::new(BashTool::new(workdir.to_path_buf())),
     ]
+}
+
+fn read_only_plan_tools(workdir: &Path) -> Vec<Arc<dyn ToolBinding>> {
+    vec![
+        Arc::new(ReadTool::new(workdir.to_path_buf())),
+        Arc::new(ListTool::new(workdir.to_path_buf())),
+        Arc::new(SearchTool::new(workdir.to_path_buf())),
+    ]
+}
+
+pub fn tool_names_for_mode(mode: RunMode) -> Vec<&'static str> {
+    match mode {
+        RunMode::Plan => vec!["read", "list", "search"],
+        RunMode::Build => vec!["read", "write", "edit", "bash"],
+    }
+}
+
+fn mode_instruction(mode: RunMode) -> &'static str {
+    match mode {
+        RunMode::Build => {
+            "Runtime mode: build. You may use the available coding tools to read, edit, write, and run commands under the selected workdir."
+        }
+        RunMode::Plan => {
+            "Runtime mode: plan. This turn is hard read-only. Use only the available read, list, and search tools to inspect the workdir. Do not write files, edit files, run shell commands, or claim to have modified the workspace."
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1967,6 +2443,213 @@ fn read_tool_impl(tool: WorkdirTool, args: Value) -> Result<Value> {
         "hint": hint,
         "error": null,
         "similar_files": []
+    }))
+}
+
+struct ListTool(WorkdirTool);
+
+impl ListTool {
+    fn new(workdir: PathBuf) -> Self {
+        Self(WorkdirTool::new(workdir))
+    }
+}
+
+impl ToolBinding for ListTool {
+    fn name(&self) -> &str {
+        "list"
+    }
+
+    fn description(&self) -> &str {
+        "List files and directories under the working directory."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({"type":"object","properties":{"path":{"type":"string"},"limit":{"type":"integer"}}})
+    }
+
+    fn execution_mode(&self) -> ToolExecutionMode {
+        ToolExecutionMode::Parallel
+    }
+
+    fn execute(
+        &self,
+        _tool_call_id: String,
+        args: Value,
+        abort: AbortSignal,
+    ) -> BoxFuture<'static, ToolOutput> {
+        let tool = self.0.clone();
+        Box::pin(async move {
+            if abort.aborted() {
+                return ToolOutput::error("aborted");
+            }
+            match list_tool_impl(tool, args) {
+                Ok(value) => ToolOutput::ok(value),
+                Err(err) => ToolOutput::error(err.to_string()),
+            }
+        })
+    }
+}
+
+fn list_tool_impl(tool: WorkdirTool, args: Value) -> Result<Value> {
+    let path = optional_string(&args, "path")?.unwrap_or(".");
+    let limit = bounded_limit(optional_i64(&args, "limit")?, 200, 1000)?;
+    let target = tool.resolve_existing(path)?;
+    let mut entries = Vec::new();
+    if target.is_file() {
+        entries.push(json!({
+            "path": tool.relative(&target),
+            "type": "file",
+        }));
+        return Ok(json!({
+            "path": tool.relative(&target),
+            "entries": entries,
+            "truncated": false,
+            "error": null
+        }));
+    }
+
+    let mut raw_entries = fs::read_dir(&target)?.collect::<std::result::Result<Vec<_>, _>>()?;
+    raw_entries.sort_by_key(|entry| entry.path());
+    let truncated = raw_entries.len() > limit;
+    for entry in raw_entries.into_iter().take(limit) {
+        let file_type = entry.file_type()?;
+        let kind = if file_type.is_dir() {
+            "dir"
+        } else if file_type.is_file() {
+            "file"
+        } else if file_type.is_symlink() {
+            "symlink"
+        } else {
+            "other"
+        };
+        entries.push(json!({
+            "path": tool.relative(&entry.path()),
+            "type": kind,
+        }));
+    }
+
+    Ok(json!({
+        "path": tool.relative(&target),
+        "entries": entries,
+        "truncated": truncated,
+        "error": null
+    }))
+}
+
+struct SearchTool(WorkdirTool);
+
+impl SearchTool {
+    fn new(workdir: PathBuf) -> Self {
+        Self(WorkdirTool::new(workdir))
+    }
+}
+
+impl ToolBinding for SearchTool {
+    fn name(&self) -> &str {
+        "search"
+    }
+
+    fn description(&self) -> &str {
+        "Search UTF-8 text files under the working directory for a literal string."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({"type":"object","required":["query"],"properties":{"query":{"type":"string"},"path":{"type":"string"},"limit":{"type":"integer"}}})
+    }
+
+    fn execution_mode(&self) -> ToolExecutionMode {
+        ToolExecutionMode::Parallel
+    }
+
+    fn execute(
+        &self,
+        _tool_call_id: String,
+        args: Value,
+        abort: AbortSignal,
+    ) -> BoxFuture<'static, ToolOutput> {
+        let tool = self.0.clone();
+        Box::pin(async move {
+            if abort.aborted() {
+                return ToolOutput::error("aborted");
+            }
+            match search_tool_impl(tool, args) {
+                Ok(value) => ToolOutput::ok(value),
+                Err(err) => ToolOutput::error(err.to_string()),
+            }
+        })
+    }
+}
+
+fn search_tool_impl(tool: WorkdirTool, args: Value) -> Result<Value> {
+    let query = required_string(&args, "query")?;
+    if query.is_empty() {
+        return Err(Error::Message("query must not be empty".to_string()));
+    }
+    let path = optional_string(&args, "path")?.unwrap_or(".");
+    let limit = bounded_limit(optional_i64(&args, "limit")?, 100, 1000)?;
+    let target = tool.resolve_existing(path)?;
+    let mut queue = VecDeque::from([target.clone()]);
+    let mut matches = Vec::new();
+    let mut skipped_files = 0usize;
+    let mut truncated = false;
+
+    while let Some(path) = queue.pop_front() {
+        if matches.len() >= limit {
+            truncated = true;
+            break;
+        }
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            skipped_files += 1;
+            continue;
+        }
+        if metadata.is_dir() {
+            let mut entries = fs::read_dir(&path)?.collect::<std::result::Result<Vec<_>, _>>()?;
+            entries.sort_by_key(|entry| entry.path());
+            for entry in entries {
+                let name = entry.file_name();
+                if name == ".git" {
+                    continue;
+                }
+                queue.push_back(entry.path());
+            }
+            continue;
+        }
+        if !metadata.is_file() {
+            skipped_files += 1;
+            continue;
+        }
+        let bytes = fs::read(&path)?;
+        if bytes.contains(&0) {
+            skipped_files += 1;
+            continue;
+        }
+        let Ok(content) = String::from_utf8(bytes) else {
+            skipped_files += 1;
+            continue;
+        };
+        for (idx, line) in content.lines().enumerate() {
+            if line.contains(query) {
+                matches.push(json!({
+                    "path": tool.relative(&path),
+                    "line_number": idx + 1,
+                    "line": truncate_match_line(line),
+                }));
+                if matches.len() >= limit {
+                    truncated = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(json!({
+        "path": tool.relative(&target),
+        "query": query,
+        "matches": matches,
+        "truncated": truncated,
+        "skipped_files": skipped_files,
+        "error": null
     }))
 }
 
@@ -2452,6 +3135,16 @@ fn required_string<'a>(args: &'a Value, key: &str) -> Result<&'a str> {
         .ok_or_else(|| Error::Message(format!("{key} must be a string")))
 }
 
+fn optional_string<'a>(args: &'a Value, key: &str) -> Result<Option<&'a str>> {
+    args.get(key)
+        .map(|value| {
+            value
+                .as_str()
+                .ok_or_else(|| Error::Message(format!("{key} must be a string")))
+        })
+        .transpose()
+}
+
 fn optional_i64(args: &Value, key: &str) -> Result<Option<i64>> {
     args.get(key)
         .map(|value| {
@@ -2460,6 +3153,24 @@ fn optional_i64(args: &Value, key: &str) -> Result<Option<i64>> {
                 .ok_or_else(|| Error::Message(format!("{key} must be an integer")))
         })
         .transpose()
+}
+
+fn bounded_limit(value: Option<i64>, default: usize, max: usize) -> Result<usize> {
+    let limit = value.unwrap_or(default as i64);
+    if limit < 1 {
+        return Err(Error::Message("limit must be >= 1".to_string()));
+    }
+    Ok((limit as usize).min(max))
+}
+
+fn truncate_match_line(line: &str) -> String {
+    const MAX_LINE_CHARS: usize = 240;
+    if line.chars().count() <= MAX_LINE_CHARS {
+        return line.to_string();
+    }
+    let mut value = line.chars().take(MAX_LINE_CHARS).collect::<String>();
+    value.push_str("...");
+    value
 }
 
 fn optional_u64(args: &Value, key: &str) -> Result<Option<u64>> {
@@ -2589,6 +3300,7 @@ mod tests {
             model: None,
             reasoning_effort: None,
             include_reasoning: false,
+            mode: RunMode::Build,
             inherited_env: Some(BTreeMap::from([(
                 "HOME".to_string(),
                 temp.path().to_string_lossy().to_string(),
@@ -2598,6 +3310,42 @@ mod tests {
 
     fn home_dir(temp: &tempfile::TempDir) -> PathBuf {
         temp.path().join(".psychevo")
+    }
+
+    #[test]
+    fn run_mode_tool_names_enforce_plan_read_only_surface() {
+        assert_eq!(
+            tool_names_for_mode(RunMode::Plan),
+            vec!["read", "list", "search"]
+        );
+        assert_eq!(
+            tool_names_for_mode(RunMode::Build),
+            vec!["read", "write", "edit", "bash"]
+        );
+    }
+
+    #[test]
+    fn plan_list_and_search_tools_are_read_only_and_bounded() {
+        let temp = tempdir().expect("temp");
+        let workdir = temp.path().join("work");
+        fs::create_dir_all(workdir.join("src")).expect("dirs");
+        fs::write(workdir.join("src/lib.rs"), "alpha\nneedle one\n").expect("file");
+        fs::write(workdir.join("README.md"), "needle two\n").expect("file");
+        let tool = WorkdirTool::new(workdir.canonicalize().expect("canonical"));
+
+        let listed = list_tool_impl(tool.clone(), json!({"path":".","limit":1})).expect("list");
+        assert_eq!(listed["entries"].as_array().expect("entries").len(), 1);
+        assert_eq!(listed["truncated"], true);
+
+        let searched = search_tool_impl(tool, json!({"query":"needle","path":".","limit":10}))
+            .expect("search");
+        let matches = searched["matches"].as_array().expect("matches");
+        assert_eq!(matches.len(), 2);
+        assert!(
+            matches
+                .iter()
+                .all(|entry| entry["line"].as_str().unwrap().contains("needle"))
+        );
     }
 
     #[test]
@@ -3121,7 +3869,7 @@ mod tests {
     }
 
     #[test]
-    fn sqlite_schema_v2_rejects_old_state_databases() {
+    fn sqlite_schema_v3_rejects_old_state_databases() {
         let temp = tempdir().expect("temp");
         let db = temp.path().join("old.db");
         {
@@ -3138,10 +3886,25 @@ mod tests {
         };
         assert!(err.to_string().contains("schema version 1"));
         assert!(err.to_string().contains("--reset-state"));
+
+        let v2_db = temp.path().join("v2.db");
+        {
+            let conn = Connection::open(&v2_db).expect("db");
+            conn.pragma_update(None, "user_version", 2)
+                .expect("version");
+            conn.execute_batch("CREATE TABLE sessions (id TEXT);")
+                .expect("schema");
+        }
+        let err = match SqliteStore::open(&v2_db) {
+            Ok(_) => panic!("v2 db opened successfully"),
+            Err(err) => err,
+        };
+        assert!(err.to_string().contains("schema version 2"));
+        assert!(err.to_string().contains("--reset-state"));
     }
 
     #[test]
-    fn sqlite_schema_v2_stores_reasoning_only_in_message_json() {
+    fn sqlite_schema_v3_stores_reasoning_only_in_message_json_and_metrics_separately() {
         let temp = tempdir().expect("temp");
         let db = temp.path().join("state.db");
         let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
@@ -3150,7 +3913,7 @@ mod tests {
             .create_session_with_metadata(&workdir, "run", "model", "provider", None)
             .expect("session");
         store
-            .append_message(
+            .append_message_with_metrics(
                 &session_id,
                 &Message::Assistant {
                     content: vec![
@@ -3170,6 +3933,8 @@ mod tests {
                     model: Some("model".to_string()),
                     provider: Some("provider".to_string()),
                 },
+                Some(json!({"total_tokens": 12, "input_tokens": 5, "output_tokens": 7})),
+                Some(json!({"provider_response_id": "resp_1", "model": "model"})),
             )
             .expect("append");
 
@@ -3185,13 +3950,13 @@ mod tests {
         assert!(!columns.iter().any(|name| name == "reasoning_content"));
         assert!(!columns.iter().any(|name| name == "reasoning_details_json"));
 
-        let message_json: String = conn
+        let (message_json, usage_json, metadata_json): (String, Option<String>, Option<String>) = conn
             .query_row(
-                "SELECT message_json FROM messages WHERE session_id = ?1",
+                "SELECT message_json, usage_json, metadata_json FROM messages WHERE session_id = ?1",
                 [&session_id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
-            .expect("message_json");
+            .expect("message row");
         let message: Value = serde_json::from_str(&message_json).expect("message");
         assert_eq!(message["content"][0]["type"], "reasoning");
         assert_eq!(message["content"][0]["text"], "folded");
@@ -3201,6 +3966,25 @@ mod tests {
         );
         assert!(message.get("reasoning_content").is_none());
         assert!(message.get("reasoning_details").is_none());
+        assert!(message.get("usage").is_none());
+        assert!(message.get("metadata").is_none());
+
+        let usage: Value = serde_json::from_str(&usage_json.expect("usage")).expect("usage json");
+        let metadata: Value =
+            serde_json::from_str(&metadata_json.expect("metadata")).expect("metadata json");
+        assert_eq!(usage["total_tokens"], 12);
+        assert_eq!(metadata["provider_response_id"], "resp_1");
+
+        let summaries = store
+            .load_sanitized_message_summaries(&session_id)
+            .expect("summaries");
+        assert_eq!(summaries[0].usage.as_ref().unwrap()["total_tokens"], 12);
+        assert_eq!(
+            summaries[0].metadata.as_ref().unwrap()["provider_response_id"],
+            "resp_1"
+        );
+        let sanitized = serde_json::to_string(&summaries[0].message).expect("sanitized");
+        assert!(!sanitized.contains("folded"));
     }
 
     #[test]
@@ -3225,12 +4009,15 @@ mod tests {
         };
         let event = AgentEvent::MessageEnd {
             message: message.clone(),
+            usage: Some(json!({"total_tokens": 2})),
+            metadata: Some(json!({"provider_response_id": "resp"})),
         };
         let hidden = project_agent_event(&event, false).expect("hidden");
         let hidden_text = serde_json::to_string(&hidden).expect("hidden json");
         assert!(hidden_text.contains("visible"));
         assert!(!hidden_text.contains("private"));
         assert!(!hidden_text.contains("reasoning_content"));
+        assert!(!hidden_text.contains("total_tokens"));
 
         assert!(
             project_agent_event(&AgentEvent::ReasoningDelta { text: "x".into() }, false).is_none()
@@ -3238,5 +4025,23 @@ mod tests {
         let shown = project_agent_event(&AgentEvent::ReasoningDelta { text: "x".into() }, true)
             .expect("shown");
         assert_eq!(shown, json!({"type":"reasoning_delta","text":"x"}));
+
+        let stream = project_run_stream_event(&AgentEvent::ReasoningDelta { text: "x".into() })
+            .expect("stream");
+        assert_eq!(
+            stream,
+            RunStreamEvent::ReasoningDelta {
+                text: "x".to_string()
+            }
+        );
+        let metrics = project_run_stream_event(&event).expect("metrics");
+        match metrics {
+            RunStreamEvent::Event(value) => {
+                assert_eq!(value["usage"]["total_tokens"], 2);
+                assert_eq!(value["metadata"]["provider_response_id"], "resp");
+                assert!(!serde_json::to_string(&value).unwrap().contains("private"));
+            }
+            other => panic!("unexpected stream event: {other:?}"),
+        }
     }
 }
