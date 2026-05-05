@@ -24,9 +24,9 @@ Required coverage:
   unlabeled answer body text, turn meta, and debug meta
 - plain non-terminal renderer output for `Prompt`, `Thinking`, `Explored`,
   `Ran`, `Changed`, `Answer`, and `Meta` blocks, including `--debug`
-- narrow and wide layout rendering, sidebar visible/hidden, thinking
-  visible/hidden, expanded/collapsed tool output, footer, bottom bar, and
-  composer surface
+- narrow and wide layout rendering, sidebar hidden by default, optional sidebar
+  visible state, thinking visible/hidden, expanded/collapsed tool output,
+  minimal bottom state line, and composer surface
 - streaming runtime projection that never leaks folded reasoning into sanitized
   message events while still delivering dedicated TUI thinking events
 - runtime metrics projection that can expose usage and allowlisted metadata to
@@ -35,15 +35,18 @@ Required coverage:
 - `/thinking` toggle behavior: default visible, explicit on/off, global
   persistence, visible reasoning rendered only in TUI output and never in
   sanitized transcript views
-- `/mode` behavior: default `build`, persisted `plan`/`build` per workdir, `Tab`
-  cycling in the fullscreen event loop, and next-turn application while a turn
-  is running
+- `/mode` behavior: default `default`, persisted `plan`/`default` per workdir,
+  `Shift+Tab` cycling in the fullscreen event loop, no transcript status row
+  for mode cycling, and next-turn application while a turn is running
+- slash command completion from `Tab`
 - runtime Plan mode toolset: exposes `read`, `list`, and `search`; does not
   expose `bash`, `write`, or `edit`
 - mode instruction is sent to providers for the current turn and is not
   persisted in `messages`
 - default TUI session selection of latest `run` or `tui` session by canonical
   workdir
+- fullscreen startup history loading for the selected/latest session and
+  session-switch transcript replacement
 - `--new` session creation behavior
 - explicit `--session` behavior
 - non-terminal scripted input with prompt lines and slash commands
@@ -55,8 +58,10 @@ Required coverage:
 - slash menu prefix filtering, disabled `/undo`, `/compact`, and `/export`
   entries, and bounded `upcoming` feedback
 - transcript focus and expansion behavior: `Ctrl+T`, selected block movement,
-  `Enter`/`Space` expand-collapse, `Esc` returning to composer, and mouse click
-  expansion for expandable evidence blocks
+  `Enter`/`Space` expand-collapse, `Esc` returning to composer, and keyboard
+  transcript scrolling
+- native terminal copy compatibility: fullscreen TUI does not enable mouse
+  capture by default
 - sidebar sections for Session, Context, Modified Files, and Footer; Modified
   Files must cap visible entries and tail-compact long paths
 
@@ -76,7 +81,9 @@ Required visual fixtures cover at least 80-column and 120-column widths with a
 realistic coding-agent turn. The fixture set should include idle composer,
 running thinking, tool evidence, collapsed and expanded output, slash menu,
 debug meta, sidebar visible/hidden, failure/tool-error meta, and narrow compact
-layout.
+layout. The default composer fixture should verify the stripped bottom chrome:
+no composer mode title, no shortcut footer, and no `mode=`/`model=`/`variant=`
+prefixes.
 
 When practical, snapshot tests should write untracked Agent-readable diagnostic
 material under `target/pevo-tui-snapshots/<fixture>/` on failure or review:

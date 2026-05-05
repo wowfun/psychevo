@@ -13,16 +13,15 @@ the deterministic line-by-line scripted behavior.
 ## Scope
 
 - `pevo tui` command spelling and startup behavior
-- fullscreen transcript, composer, status/footer, and local context sidebar
+- fullscreen transcript, composer, and minimal bottom state line
 - persisted TUI-local model, variant, mode, and thinking visibility
 - session, model, variant, mode, thinking, status, and help slash commands
 - evidence-ledger rendering for prompts, folded reasoning, tool evidence,
   final answers, and turn metadata
-- transcript selection, keyboard expansion, and mouse expansion for bounded
-  tool evidence
+- transcript selection and keyboard expansion for bounded tool evidence
 - debug projection for usage and provider metadata summaries
 - deterministic visual-regression projections and local diagnostic screenshots
-- hard `plan` / `build` runtime mode selection
+- hard `plan` / `default` runtime mode selection
 
 Out of scope:
 
@@ -68,6 +67,12 @@ submitted prompt creates a new session with `source = "tui"`.
 `--session` resumes the requested session. `--new` defers creation until the
 first prompt is submitted, then creates a `source = "tui"` session.
 
+When TUI starts with a current session, it loads that session's sanitized
+history into the transcript before accepting input. Switching sessions inside
+fullscreen TUI replaces the displayed transcript with the selected session's
+sanitized history. Folded reasoning remains hidden or folded according to TUI
+rendering rules and must not leak provider replay fields.
+
 After a prompt has run, later prompts in the same TUI process append to the
 current session explicitly.
 
@@ -85,7 +90,8 @@ The state file stores:
 - current `mode` per canonical workdir
 - a bounded global recent-model list
 
-`thinking_visible` defaults to `true`. Per-workdir `mode` defaults to `build`.
+`thinking_visible` defaults to `true`. Per-workdir `mode` defaults to
+`default`.
 
 Startup model and variant precedence is:
 
@@ -102,7 +108,7 @@ OpenCode's visibility-only model: it does not enable or disable provider
 reasoning, does not change `--variant`, and does not edit provider
 configuration.
 
-`/mode set <plan|build>` updates the per-workdir mode and persists it. Mode
+`/mode set <plan|default>` updates the per-workdir mode and persists it. Mode
 changes during a running turn affect the next submitted prompt.
 
 ## Layout
@@ -122,12 +128,18 @@ ledger block:
   metrics only when known, and failures only when present
 
 The bottom area contains an OpenCode-style composer: a left accent rail, a
-subtle input surface, status line, and compact shortcut footer. It must not use
-a full bright border around the composer as the primary visual treatment.
+subtle input surface, and one compact state line. It must not use a full bright
+border around the composer as the primary visual treatment.
 
-The right sidebar is fixed at 42 columns when visible on wide terminals. It is
-hidden by default on narrow terminals and toggleable on narrow or wide
-terminals.
+The composer must not show the current mode in its border/title. The state line
+under the composer shows only the model name and variant value, without
+`mode=`, `model=`, or `variant=` prefixes. Non-default modes are shown before
+the model; `default` is omitted. Shortcut hints, session ids, thinking state,
+debug state, and brand text are not part of the default bottom chrome.
+
+The right sidebar is optional local context. It is hidden by default, including
+on wide terminals, and may be toggled explicitly. It must not be required for
+the main transcript/composer workflow.
 
 The sidebar is local-only. It may show session id/source, workdir, git branch,
 model, variant, current mode, thinking state, message/tool counts, and changed
@@ -181,8 +193,9 @@ The first fullscreen keymap is fixed:
 
 - `Enter` submits the composer.
 - `Shift+Enter`, `Ctrl+Enter`, `Alt+Enter`, and `Ctrl+J` insert a newline.
-- `Tab` cycles `plan -> build -> plan`.
-- `Shift+Tab` cycles in reverse.
+- `Tab` completes slash commands in the composer when the current input starts
+  with `/`.
+- `Shift+Tab` cycles `default -> plan -> default`.
 - `Esc` closes a popup or interrupts a running turn. When idle, it performs no
   destructive action.
 - `Ctrl+T` enters transcript selection while leaving composer as the default
@@ -194,9 +207,10 @@ The first fullscreen keymap is fixed:
 - `Ctrl+R` enters history search.
 - `PageUp` and `PageDown` scroll the transcript.
 
-Mouse input is limited to clicking expandable transcript evidence blocks. The
-first slice does not use mouse input for focus management, selection ranges,
-scrollbars, menus, sidebars, or tool execution.
+TUI must not enable terminal mouse capture by default. Native terminal text
+selection and copy must keep working. Mouse wheel behavior is terminal-dependent
+in this slice; deterministic app scrolling is provided by transcript keyboard
+scroll keys.
 
 ## Slash Commands
 
@@ -216,7 +230,7 @@ The first TUI supports:
 - `/variant set <none|minimal|low|medium|high|xhigh|max>`
 - `/mode`
 - `/mode set plan`
-- `/mode set build`
+- `/mode set default`
 - `/thinking`
 - `/thinking on`
 - `/thinking off`
@@ -235,8 +249,8 @@ of executing.
 
 Runtime mode is explicit and enforceable by the tool surface.
 
-`build` is the default for `pevo run` and for `pevo tui` when TUI state has no
-per-workdir mode. Build mode exposes the current full coding-core tools.
+`default` is the default for `pevo run` and for `pevo tui` when TUI state has no
+per-workdir mode. Default mode exposes the current full coding-core tools.
 
 `plan` is hard read-only. It exposes only:
 
@@ -252,7 +266,7 @@ must not depend only on provider instructions.
 The runtime sends an ephemeral mode instruction to the provider for the current
 turn. The instruction is not persisted as a transcript message.
 
-`pevo run` defaults to `build` and does not expose mode flags in this slice.
+`pevo run` defaults to `default` and does not expose mode flags in this slice.
 
 ## Rendering
 
@@ -276,6 +290,14 @@ transcript projection, JSON run output, provider replay across providers,
 TUI should create an answer row only after visible assistant text exists. It
 must not pre-render an empty answer row that pushes thinking or tool evidence
 out of the first visible ledger projection.
+
+The fullscreen transcript must not include a synthetic startup status row. The
+first visible content is existing session history when present, otherwise an
+empty transcript above the composer.
+
+Successful turn completion and mode changes must not add synthetic `Ok` or
+`Status mode` rows to the transcript. The bottom state line is the source of
+truth for the current mode.
 
 Tool starts and ends render as compact evidence blocks. Long tool result bodies
 are summarized rather than dumped unless the block is expanded.
