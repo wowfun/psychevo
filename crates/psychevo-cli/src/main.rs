@@ -9,7 +9,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
 use psychevo_ai::Outcome;
-use psychevo_runtime::{RunOptions, SmokeControl, SmokeOptions, SqliteStore, run_live, run_smoke};
+use psychevo_runtime::{
+    RunMode, RunOptions, SmokeControl, SmokeOptions, SqliteStore, run_live, run_smoke,
+};
+
+mod tui;
+mod tui_render;
+mod tui_slash;
+mod tui_state;
 
 const STARTER_CONFIG: &str = r#"{
   "model": "deepseek/deepseek-chat",
@@ -48,6 +55,7 @@ enum Commands {
     Init(InitArgs),
     Smoke(SmokeArgs),
     Run(RunArgs),
+    Tui(TuiArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -94,6 +102,24 @@ struct RunArgs {
     message: Vec<String>,
 }
 
+#[derive(Debug, Parser)]
+pub(crate) struct TuiArgs {
+    #[arg(long = "dir")]
+    pub(crate) dir: Option<PathBuf>,
+    #[arg(short = 'm', long)]
+    pub(crate) model: Option<String>,
+    #[arg(long, value_enum)]
+    pub(crate) variant: Option<VariantArg>,
+    #[arg(short = 's', long)]
+    pub(crate) session: Option<String>,
+    #[arg(long = "new")]
+    pub(crate) new_session: bool,
+    #[arg(long)]
+    pub(crate) debug: bool,
+    #[arg()]
+    pub(crate) message: Vec<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 #[value(rename_all = "kebab-case")]
 enum ControlArg {
@@ -104,7 +130,7 @@ enum ControlArg {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 #[value(rename_all = "kebab-case")]
-enum VariantArg {
+pub(crate) enum VariantArg {
     None,
     Minimal,
     Low,
@@ -132,7 +158,7 @@ impl From<ControlArg> for SmokeControl {
 }
 
 impl VariantArg {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             VariantArg::None => "none",
             VariantArg::Minimal => "minimal",
@@ -162,6 +188,7 @@ async fn run() -> Result<ExitCode> {
         Commands::Init(args) => run_init_command(args),
         Commands::Smoke(args) => run_smoke_command(args).await,
         Commands::Run(args) => run_run_command(args).await,
+        Commands::Tui(args) => tui::run_tui_command(&args).await,
     }
 }
 
@@ -282,6 +309,7 @@ async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
         model: args.model.clone(),
         reasoning_effort: args.variant.map(|variant| variant.as_str().to_string()),
         include_reasoning: args.include_reasoning,
+        mode: RunMode::Build,
         inherited_env: Some(env_map),
     })
     .await?;
@@ -319,7 +347,7 @@ fn read_prompt(message: &[String]) -> Result<String> {
     Ok(prompt)
 }
 
-fn ensure_home_initialized(home: &Path) -> Result<()> {
+pub(crate) fn ensure_home_initialized(home: &Path) -> Result<()> {
     let config = home.join("config.jsonc");
     if !config.exists() {
         return Err(anyhow!(
@@ -359,7 +387,7 @@ fn backup_state_files(home: &Path, state: &Path) -> Result<()> {
     Ok(())
 }
 
-fn resolve_state_db(
+pub(crate) fn resolve_state_db(
     env_map: &BTreeMap<String, String>,
     home: &Path,
     cwd: &Path,
@@ -375,7 +403,10 @@ fn resolve_state_db(
     }
 }
 
-fn resolve_psychevo_home(env_map: &BTreeMap<String, String>, cwd: &Path) -> Result<PathBuf> {
+pub(crate) fn resolve_psychevo_home(
+    env_map: &BTreeMap<String, String>,
+    cwd: &Path,
+) -> Result<PathBuf> {
     if let Some(value) = env_value("PSYCHEVO_HOME", env_map) {
         resolve_explicit_path(Path::new(&value), env_map, cwd)
     } else {
@@ -383,13 +414,17 @@ fn resolve_psychevo_home(env_map: &BTreeMap<String, String>, cwd: &Path) -> Resu
     }
 }
 
-fn env_path(name: &str, env_map: &BTreeMap<String, String>, cwd: &Path) -> Result<Option<PathBuf>> {
+pub(crate) fn env_path(
+    name: &str,
+    env_map: &BTreeMap<String, String>,
+    cwd: &Path,
+) -> Result<Option<PathBuf>> {
     env_value(name, env_map)
         .map(|value| resolve_explicit_path(Path::new(&value), env_map, cwd))
         .transpose()
 }
 
-fn resolve_explicit_path(
+pub(crate) fn resolve_explicit_path(
     path: &Path,
     env_map: &BTreeMap<String, String>,
     cwd: &Path,
@@ -419,13 +454,13 @@ fn home_path(env_map: &BTreeMap<String, String>) -> Result<PathBuf> {
         .ok_or_else(|| anyhow!("HOME is required to expand ~"))
 }
 
-fn env_value(name: &str, env_map: &BTreeMap<String, String>) -> Option<String> {
+pub(crate) fn env_value(name: &str, env_map: &BTreeMap<String, String>) -> Option<String> {
     env_map
         .get(name)
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
 }
 
-fn inherited_env() -> BTreeMap<String, String> {
+pub(crate) fn inherited_env() -> BTreeMap<String, String> {
     env::vars().collect()
 }
