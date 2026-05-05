@@ -22,14 +22,14 @@ size=120x24
 ▌ The harness snapshots stable buffer text and style roles, then leaves real terminal screenshots as diagnostics.
 
 ▌ Meta
-▌ mode=build  mock/mock-model  tokens=177/64000 0.3%  usage input_tokens=120 total_tokens=177  metadata
+▌ mode=default  mock/mock-model  tokens=177/64000 0.3%  usage input_tokens=120 total_tokens=177  metadata
 provider_response_id=resp_snapshot
+
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-│ build
 │ Ask pevo...
 │
-pevo  idle  mode=build  model=mock/model  variant=high  session=12345678  thinking=on  Ctrl+T transcript
-Enter submit  Ctrl+J newline  Tab mode  Ctrl+B sidebar  Ctrl+R history  Ctrl+T transcript  /help
+│
+mock/model  high
 
 --- styles ---
 [cyan]▌ Prompt[default]
@@ -48,11 +48,11 @@ Enter submit  Ctrl+J newline  Tab mode  Ctrl+B sidebar  Ctrl+R history  Ctrl+T t
 [magenta]▌ [default]The harness snapshots stable buffer text and style roles, then leaves real terminal screenshots as diagnostics.
 [default]
 [dim]▌ Meta[default]
-[dim]▌ mode=build  mock/mock-model  tokens=177/64000 0.3%  usage input_tokens=120 total_tokens=177  metadata[default]
+[dim]▌ mode=default  mock/mock-model  tokens=177/64000 0.3%  usage input_tokens=120 total_tokens=177  metadata[default]
 [dim]provider_response_id=resp_snapshot[default]
+[default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-[cyan]│[default] build
 [cyan]│[dim] Ask pevo...[default]
 [cyan]│[default]
-[magenta]pevo[default]  idle  mode=build  model=mock/model  variant=high  session=12345678  thinking=on  Ctrl+T transcript
-[dim]Enter submit  Ctrl+J newline  Tab mode  Ctrl+B sidebar  Ctrl+R history  Ctrl+T transcript  /help
+[cyan]│[default]
+[default]mock/model  [magenta]high[default]

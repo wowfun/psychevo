@@ -7,8 +7,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event as CrosstermEvent, KeyCode, KeyEvent,
-    KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind,
+    self, Event as CrosstermEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -145,18 +144,14 @@ impl TuiApp {
     async fn run_fullscreen_loop(&mut self, initial_prompt: String) -> Result<()> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+        execute!(stdout, EnterAlternateScreen)?;
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
         let result = self
             .run_fullscreen_loop_inner(&mut terminal, initial_prompt)
             .await;
         disable_raw_mode()?;
-        execute!(
-            terminal.backend_mut(),
-            DisableMouseCapture,
-            LeaveAlternateScreen
-        )?;
+        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
         terminal.show_cursor()?;
         result
     }
@@ -167,6 +162,7 @@ impl TuiApp {
         initial_prompt: String,
     ) -> Result<()> {
         let mut ui = FullscreenUi::new(self);
+        self.load_current_session_history(&mut ui)?;
         if !initial_prompt.trim().is_empty() {
             self.start_fullscreen_turn(&mut ui, initial_prompt)?;
         }
@@ -186,9 +182,7 @@ impl TuiApp {
                             break;
                         }
                     }
-                    CrosstermEvent::Mouse(mouse) => {
-                        ui.handle_mouse(mouse);
-                    }
+                    CrosstermEvent::Mouse(_) => {}
                     _ => {}
                 }
             }
@@ -289,11 +283,14 @@ impl TuiApp {
                 }
                 self.start_fullscreen_turn(ui, line)?;
             }
-            KeyCode::Tab => {
-                self.cycle_mode(ui, true)?;
-            }
             KeyCode::BackTab => {
-                self.cycle_mode(ui, false)?;
+                self.cycle_mode(ui)?;
+            }
+            KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                self.cycle_mode(ui)?;
+            }
+            KeyCode::Tab => {
+                ui.complete_slash_command();
             }
             KeyCode::Esc => {
                 if let Some(running) = &ui.running {
@@ -376,6 +373,7 @@ impl TuiApp {
             SlashCommand::New => {
                 self.current_session = None;
                 self.force_new_once = true;
+                ui.clear_transcript();
                 ui.push_status("new session will start on next prompt");
                 ui.refresh_sidebar(self);
             }
@@ -391,6 +389,8 @@ impl TuiApp {
             }
             SlashCommand::SessionSwitch(reference) => {
                 self.switch_session_no_print(&reference)?;
+                ui.clear_transcript();
+                self.load_current_session_history(ui)?;
                 ui.push_status(format!(
                     "session: {}",
                     self.current_session.as_deref().unwrap_or("(none)")
@@ -425,7 +425,6 @@ impl TuiApp {
             }
             SlashCommand::ModeSet(mode) => {
                 self.set_mode_no_print(&mode)?;
-                ui.push_status(format!("mode: {mode}"));
                 ui.refresh_sidebar(self);
             }
             SlashCommand::ThinkingToggle => {
@@ -587,9 +586,7 @@ impl TuiApp {
                     self.current_session = Some(result.session_id.clone());
                     self.force_new_once = false;
                     let success = result.outcome == Outcome::Normal && result.tool_failures == 0;
-                    if success {
-                        ui.push_success(format!("turn complete: {}", result.outcome.as_str()));
-                    } else {
+                    if !success {
                         self.had_error = true;
                         ui.push_error(format!("turn ended: {}", result.outcome.as_str()));
                     }
@@ -611,8 +608,7 @@ impl TuiApp {
 
     fn render_fullscreen(&self, frame: &mut Frame<'_>, ui: &mut FullscreenUi<'_>) {
         let area = frame.area();
-        let sidebar_allowed = area.width >= 100 || ui.sidebar_forced;
-        let sidebar_visible = sidebar_allowed && !ui.sidebar_hidden;
+        let sidebar_visible = ui.sidebar_forced && area.width >= 100 && !ui.sidebar_hidden;
         ui.last_sidebar_visible = sidebar_visible;
         let horizontal = if sidebar_visible {
             Layout::default()
@@ -640,7 +636,6 @@ impl TuiApp {
                     Constraint::Min(5),
                     Constraint::Length(composer_height),
                     Constraint::Length(1),
-                    Constraint::Length(1),
                 ])
                 .split(main)
         } else {
@@ -651,21 +646,18 @@ impl TuiApp {
                     Constraint::Length(slash_height),
                     Constraint::Length(composer_height),
                     Constraint::Length(1),
-                    Constraint::Length(1),
                 ])
                 .split(main)
         };
         if slash_height == 0 {
             render_transcript(frame, vertical[0], ui);
-            render_composer(frame, vertical[1], ui, self.current_mode);
-            render_status(frame, vertical[2], self, ui);
-            render_footer(frame, vertical[3], ui);
+            render_composer(frame, vertical[1], ui);
+            render_status(frame, vertical[2], self);
         } else {
             render_transcript(frame, vertical[0], ui);
             render_slash_menu(frame, vertical[1], &slash_items);
-            render_composer(frame, vertical[2], ui, self.current_mode);
-            render_status(frame, vertical[3], self, ui);
-            render_footer(frame, vertical[4], ui);
+            render_composer(frame, vertical[2], ui);
+            render_status(frame, vertical[3], self);
         }
         if sidebar_visible {
             render_sidebar(frame, horizontal[1], ui);
@@ -788,7 +780,7 @@ impl TuiApp {
 
     fn help_lines(&self) -> Vec<String> {
         vec![
-            "Enter submit; Shift/Ctrl/Alt+Enter or Ctrl+J newline; Tab mode; Ctrl+B sidebar; Ctrl+T transcript; Esc interrupt".to_string(),
+            "Enter submit; Shift/Ctrl/Alt+Enter or Ctrl+J newline; Tab complete command; Shift+Tab mode; Ctrl+B sidebar; Ctrl+T transcript; Esc interrupt".to_string(),
             "/help".to_string(),
             "/quit /exit /q".to_string(),
             "/status".to_string(),
@@ -802,7 +794,7 @@ impl TuiApp {
             "/variant".to_string(),
             "/variant set <none|minimal|low|medium|high|xhigh|max>".to_string(),
             "/mode".to_string(),
-            "/mode set <plan|build>".to_string(),
+            "/mode set <plan|default>".to_string(),
             "/thinking [on|off]".to_string(),
             "/undo /compact /export (upcoming)".to_string(),
         ]
@@ -927,7 +919,7 @@ impl TuiApp {
 
     fn set_mode_no_print(&mut self, mode: &str) -> Result<()> {
         let Some(parsed) = RunMode::parse(mode) else {
-            return Err(anyhow!("mode must be one of plan, build"));
+            return Err(anyhow!("mode must be one of plan, default"));
         };
         self.current_mode = parsed;
         self.state.set_mode(&self.workdir_key, mode.to_string());
@@ -942,13 +934,12 @@ impl TuiApp {
         Ok(())
     }
 
-    fn cycle_mode(&mut self, ui: &mut FullscreenUi<'_>, _forward: bool) -> Result<()> {
+    fn cycle_mode(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
         let next = match self.current_mode {
             RunMode::Plan => RunMode::Build,
             RunMode::Build => RunMode::Plan,
         };
         self.set_mode_no_print(next.as_str())?;
-        ui.push_status(format!("mode: {}", next.as_str()));
         ui.refresh_sidebar(self);
         Ok(())
     }
@@ -963,6 +954,20 @@ impl TuiApp {
             .list_sessions_for_workdir_with_sources(&self.workdir, TUI_SESSION_SOURCES)
             .map_err(Into::into)
     }
+
+    fn load_current_session_history(&self, ui: &mut FullscreenUi<'_>) -> Result<()> {
+        let Some(session_id) = self.current_session.as_deref() else {
+            return Ok(());
+        };
+        let store = SqliteStore::open(&self.db_path)?;
+        for summary in store.load_sanitized_message_summaries(session_id)? {
+            let value = serde_json::to_value(summary.message)?;
+            ui.push_history_message(&value, summary.usage.as_ref(), summary.metadata.as_ref());
+        }
+        ui.scroll_to_bottom();
+        ui.refresh_sidebar(self);
+        Ok(())
+    }
 }
 
 struct RunningTurn {
@@ -973,7 +978,6 @@ struct RunningTurn {
 
 const TUI_CYAN: Color = Color::Cyan;
 const TUI_MAGENTA: Color = Color::Magenta;
-const TUI_GREEN: Color = Color::Green;
 const TUI_RED: Color = Color::Red;
 const TUI_DIM: Color = Color::DarkGray;
 
@@ -987,7 +991,6 @@ enum TranscriptKind {
     Changed,
     Meta,
     Status,
-    Success,
     Error,
 }
 
@@ -1112,7 +1115,7 @@ impl<'a> FullscreenUi<'a> {
             selected_row: None,
             last_entry_areas: Vec::new(),
             sidebar_forced: false,
-            sidebar_hidden: false,
+            sidebar_hidden: true,
             last_sidebar_visible: false,
             sidebar: SidebarSnapshot::default(),
             history: Vec::new(),
@@ -1121,7 +1124,6 @@ impl<'a> FullscreenUi<'a> {
             history_query: String::new(),
             quit_requested: false,
         };
-        ui.push_status("pevo fullscreen tui");
         ui.refresh_sidebar(app);
         ui
     }
@@ -1169,6 +1171,98 @@ impl<'a> FullscreenUi<'a> {
         };
     }
 
+    fn clear_transcript(&mut self) {
+        self.transcript.clear();
+        self.assistant_row = None;
+        self.reasoning_row = None;
+        self.meta_row = None;
+        self.tool_rows.clear();
+        self.scroll = 0;
+        self.selected_row = None;
+        self.last_entry_areas.clear();
+        self.reasoning_hidden_active = false;
+    }
+
+    fn push_history_message(
+        &mut self,
+        message: &Value,
+        usage: Option<&Value>,
+        metadata: Option<&Value>,
+    ) {
+        match message
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+        {
+            "user" => {
+                if let Some(text) = user_text_from_message(message) {
+                    self.push_user(text);
+                }
+            }
+            "assistant" => {
+                if let Some(text) = assistant_text_from_message(message) {
+                    self.transcript.push(TranscriptRow::with_title(
+                        TranscriptKind::Answer,
+                        "",
+                        text,
+                    ));
+                }
+                if let Some(meta) = history_meta_text(message, usage, metadata) {
+                    self.transcript.push(TranscriptRow::with_title(
+                        TranscriptKind::Meta,
+                        "Meta",
+                        meta,
+                    ));
+                }
+            }
+            "tool_result" => self.push_history_tool_result(message),
+            _ => {}
+        }
+    }
+
+    fn push_history_tool_result(&mut self, message: &Value) {
+        let tool = message
+            .get("tool_name")
+            .and_then(Value::as_str)
+            .unwrap_or("tool");
+        let is_error = message
+            .get("is_error")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let content = message
+            .get("content")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let result = serde_json::from_str::<Value>(content)
+            .unwrap_or_else(|_| serde_json::json!({ "content": content }));
+        let value = serde_json::json!({
+            "tool_name": tool,
+            "result": result,
+            "outcome": if is_error { "failed" } else { "normal" }
+        });
+        let mut row = TranscriptRow::with_title(evidence_kind(tool), tool_title(tool, &value), "");
+        row.failed = is_error;
+        let (collapsed, full) = tool_output_text(&value);
+        row.text = if collapsed.is_empty() {
+            format_tool_summary(&value)
+        } else {
+            collapsed
+        };
+        row.full_text = full;
+        self.transcript.push(row);
+    }
+
+    fn scroll_to_bottom(&mut self) {
+        self.scroll = transcript_line_count(&self.transcript).saturating_sub(1) as u16;
+    }
+
+    fn complete_slash_command(&mut self) {
+        let input = textarea_text(&self.textarea);
+        if let Some(completed) = slash_completion(&input) {
+            self.textarea = textarea_with_text(&completed);
+        }
+    }
+
     fn push_user(&mut self, text: String) {
         self.transcript.push(TranscriptRow::with_title(
             TranscriptKind::Prompt,
@@ -1195,11 +1289,6 @@ impl<'a> FullscreenUi<'a> {
     fn push_status(&mut self, text: impl Into<String>) {
         self.transcript
             .push(TranscriptRow::simple(TranscriptKind::Status, text));
-    }
-
-    fn push_success(&mut self, text: impl Into<String>) {
-        self.transcript
-            .push(TranscriptRow::simple(TranscriptKind::Success, text));
     }
 
     fn push_error(&mut self, text: impl Into<String>) {
@@ -1287,7 +1376,7 @@ impl<'a> FullscreenUi<'a> {
                 self.turn_mode = value
                     .get("mode")
                     .and_then(Value::as_str)
-                    .unwrap_or("build")
+                    .unwrap_or("default")
                     .to_string();
                 self.turn_context_limit = value.get("context_limit").and_then(Value::as_u64);
             }
@@ -1471,23 +1560,6 @@ impl<'a> FullscreenUi<'a> {
             row.expanded = !row.expanded;
         }
     }
-
-    fn handle_mouse(&mut self, mouse: MouseEvent) {
-        if !matches!(mouse.kind, MouseEventKind::Down(_)) {
-            return;
-        }
-        let Some((index, _)) = self.last_entry_areas.iter().find(|(_, rect)| {
-            mouse.column >= rect.x
-                && mouse.column < rect.x.saturating_add(rect.width)
-                && mouse.row >= rect.y
-                && mouse.row < rect.y.saturating_add(rect.height)
-        }) else {
-            return;
-        };
-        self.selected_row = Some(*index);
-        self.focus = FocusMode::Transcript;
-        self.toggle_selected();
-    }
 }
 
 fn default_title(kind: TranscriptKind) -> &'static str {
@@ -1500,9 +1572,108 @@ fn default_title(kind: TranscriptKind) -> &'static str {
         TranscriptKind::Changed => "Changed",
         TranscriptKind::Meta => "Meta",
         TranscriptKind::Status => "Status",
-        TranscriptKind::Success => "Ok",
         TranscriptKind::Error => "Error",
     }
+}
+
+fn user_text_from_message(message: &Value) -> Option<String> {
+    let text = message
+        .get("content")?
+        .as_array()?
+        .iter()
+        .filter_map(|block| block.get("text").and_then(Value::as_str))
+        .collect::<Vec<_>>()
+        .join("\n");
+    (!text.is_empty()).then_some(text)
+}
+
+fn assistant_text_from_message(message: &Value) -> Option<String> {
+    let text = message
+        .get("content")?
+        .as_array()?
+        .iter()
+        .filter_map(|block| {
+            (block.get("type").and_then(Value::as_str) == Some("text"))
+                .then(|| block.get("text").and_then(Value::as_str))
+                .flatten()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    (!text.is_empty()).then_some(text)
+}
+
+fn history_meta_text(
+    message: &Value,
+    usage: Option<&Value>,
+    metadata: Option<&Value>,
+) -> Option<String> {
+    let provider = message
+        .get("provider")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let model = message.get("model").and_then(Value::as_str).unwrap_or("");
+    let mut parts = Vec::new();
+    if !provider.is_empty() || !model.is_empty() {
+        parts.push(format!("{provider}/{model}"));
+    }
+    if let Some(total) = usage.and_then(usage_total_tokens) {
+        parts.push(format!("tokens={total}"));
+    }
+    if let Some(metadata) = metadata.and_then(Value::as_object)
+        && let Some(id) = metadata.get("provider_response_id").and_then(Value::as_str)
+    {
+        parts.push(format!("response={id}"));
+    }
+    (!parts.is_empty()).then(|| parts.join("  "))
+}
+
+fn transcript_line_count(rows: &[TranscriptRow]) -> usize {
+    rows.iter()
+        .map(|row| transcript_lines(row, false).len())
+        .sum()
+}
+
+fn slash_completion(input: &str) -> Option<String> {
+    if input.contains('\n') {
+        return None;
+    }
+    let leading_len = input.len().saturating_sub(input.trim_start().len());
+    let leading = &input[..leading_len];
+    let typed = input.trim_start();
+    if !typed.starts_with('/') {
+        return None;
+    }
+    let items = slash_menu_items(typed);
+    if items.is_empty() {
+        return None;
+    }
+    let commands = items.iter().map(|item| item.command).collect::<Vec<_>>();
+    let common = common_prefix(&commands);
+    let completed = if common.len() > typed.len() {
+        common
+    } else if commands.contains(&typed) {
+        return None;
+    } else {
+        commands[0].to_string()
+    };
+    (completed != typed).then(|| format!("{leading}{completed}"))
+}
+
+fn common_prefix(values: &[&str]) -> String {
+    let Some(first) = values.first() else {
+        return String::new();
+    };
+    let mut end = first.len();
+    for value in values.iter().skip(1) {
+        end = first
+            .as_bytes()
+            .iter()
+            .zip(value.as_bytes())
+            .take_while(|(left, right)| left == right)
+            .count()
+            .min(end);
+    }
+    first[..end].to_string()
 }
 
 fn evidence_kind(tool: &str) -> TranscriptKind {
@@ -1851,7 +2022,6 @@ fn label_style(kind: TranscriptKind, failed: bool) -> Style {
         TranscriptKind::Answer => Style::default().fg(TUI_MAGENTA),
         TranscriptKind::Thinking | TranscriptKind::Meta => Style::default().fg(TUI_DIM),
         TranscriptKind::Status => Style::default().fg(TUI_CYAN),
-        TranscriptKind::Success => Style::default().fg(TUI_GREEN),
         TranscriptKind::Error => Style::default().fg(TUI_RED),
     }
 }
@@ -1864,19 +2034,17 @@ fn style_for_body(kind: TranscriptKind, failed: bool) -> Style {
         TranscriptKind::Thinking | TranscriptKind::Meta | TranscriptKind::Status => {
             Style::default().fg(TUI_DIM)
         }
-        TranscriptKind::Success => Style::default().fg(TUI_GREEN),
         TranscriptKind::Error => Style::default().fg(TUI_RED),
         _ => Style::default(),
     }
 }
 
-fn render_composer(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_>, mode: RunMode) {
+fn render_composer(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_>) {
     ui.textarea.set_block(
         Block::default()
             .borders(Borders::LEFT)
             .border_style(Style::default().fg(TUI_CYAN))
-            .style(Style::default().bg(Color::Rgb(18, 18, 22)))
-            .title(format!(" {} ", mode.as_str())),
+            .style(Style::default().bg(Color::Rgb(18, 18, 22))),
     );
     frame.render_widget(&ui.textarea, area);
 }
@@ -1903,66 +2071,25 @@ fn render_slash_menu(frame: &mut Frame<'_>, area: Rect, items: &[crate::tui_slas
     );
 }
 
-fn render_status(frame: &mut Frame<'_>, area: Rect, app: &TuiApp, ui: &FullscreenUi<'_>) {
-    let running = if ui.running.is_some() {
-        "running"
-    } else {
-        "idle"
-    };
-    let session = app
-        .current_session
-        .as_deref()
-        .map(short_session)
-        .unwrap_or("(new)");
-    let detail = if area.width < 100 {
-        format!(
-            "  {running}  {}  {}  {}  thinking={}  Ctrl+T",
-            app.current_mode.as_str(),
-            app.current_model.as_deref().unwrap_or("config"),
-            session,
-            on_off(app.thinking_visible)
-        )
-    } else {
-        format!(
-            "  {running}  mode={}  model={}  variant={}  session={}  thinking={}  Ctrl+T transcript",
-            app.current_mode.as_str(),
-            app.current_model.as_deref().unwrap_or("config"),
-            app.current_variant.as_deref().unwrap_or("config"),
-            session,
-            on_off(app.thinking_visible)
-        )
-    };
-    let line = Line::from(vec![
-        Span::styled(
-            "pevo",
-            Style::default()
-                .fg(TUI_MAGENTA)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(detail),
-    ]);
+fn render_status(frame: &mut Frame<'_>, area: Rect, app: &TuiApp) {
+    let model = app.current_model.as_deref().unwrap_or("config");
+    let variant = app.current_variant.as_deref().unwrap_or("default");
+    let mut spans = Vec::new();
+    if app.current_mode != RunMode::Build {
+        spans.push(Span::styled(
+            app.current_mode.as_str().to_string(),
+            Style::default().fg(TUI_CYAN),
+        ));
+        spans.push(Span::raw("  "));
+    }
+    spans.push(Span::raw(model.to_string()));
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled(
+        variant.to_string(),
+        Style::default().fg(TUI_MAGENTA),
+    ));
+    let line = Line::from(spans);
     frame.render_widget(Paragraph::new(line), area);
-}
-
-fn render_footer(frame: &mut Frame<'_>, area: Rect, ui: &FullscreenUi<'_>) {
-    let text = if ui.history_search {
-        format!("history search: {}", ui.history_query)
-    } else {
-        match ui.focus {
-            FocusMode::Composer if area.width < 100 => {
-                "Enter submit  Ctrl+J newline  Tab mode  Ctrl+B sidebar  /help".to_string()
-            }
-            FocusMode::Composer => "Enter submit  Ctrl+J newline  Tab mode  Ctrl+B sidebar  Ctrl+R history  Ctrl+T transcript  /help".to_string(),
-            FocusMode::Transcript if area.width < 100 => {
-                "Transcript: Up/Down select  Enter/Space expand  Esc composer".to_string()
-            }
-            FocusMode::Transcript => "Transcript: Up/Down select  Enter/Space expand  Esc composer  PageUp/PageDown scroll".to_string(),
-        }
-    };
-    frame.render_widget(
-        Paragraph::new(text).style(Style::default().fg(TUI_DIM)),
-        area,
-    );
 }
 
 fn render_sidebar(frame: &mut Frame<'_>, area: Rect, ui: &FullscreenUi<'_>) {
@@ -2140,7 +2267,7 @@ impl TurnPrinter {
                 self.run_mode = value
                     .get("mode")
                     .and_then(Value::as_str)
-                    .unwrap_or("build")
+                    .unwrap_or("default")
                     .to_string();
                 self.context_limit = value.get("context_limit").and_then(Value::as_u64);
             }
@@ -2304,11 +2431,21 @@ mod tests {
     }
 
     #[test]
-    fn tui_snapshot_wide_idle_composer_with_sidebar() {
+    fn tui_snapshot_wide_idle_minimal_chrome() {
         let temp = tempdir().expect("temp");
         let app = test_app(&temp);
         let ui = fixture_ui(&app, FixtureKind::Idle);
-        assert_tui_snapshot("wide_idle_composer_with_sidebar", 120, 24, &app, ui);
+        assert_tui_snapshot("wide_idle_minimal_chrome", 120, 24, &app, ui);
+    }
+
+    #[test]
+    fn tui_snapshot_wide_optional_sidebar() {
+        let temp = tempdir().expect("temp");
+        let app = test_app(&temp);
+        let mut ui = fixture_ui(&app, FixtureKind::Idle);
+        ui.sidebar_forced = true;
+        ui.sidebar_hidden = false;
+        assert_tui_snapshot("wide_optional_sidebar", 120, 24, &app, ui);
     }
 
     #[test]
@@ -2380,9 +2517,9 @@ mod tests {
         ui.focus = FocusMode::Transcript;
         ui.ensure_selection();
         ui.toggle_selected();
-        assert!(ui.transcript[1].expanded);
+        assert!(ui.transcript[0].expanded);
         ui.toggle_selected();
-        assert!(!ui.transcript[1].expanded);
+        assert!(!ui.transcript[0].expanded);
     }
 
     #[test]
@@ -2393,7 +2530,7 @@ mod tests {
             "total_tokens": 5
         });
         let default = turn_meta_text(TurnMetaProjection {
-            mode: "build",
+            mode: "default",
             provider: "provider",
             model: "model",
             started: None,
@@ -2406,7 +2543,7 @@ mod tests {
         assert!(!default.contains("tokens="));
         let metadata = serde_json::json!({"provider_response_id":"resp"});
         let debug = turn_meta_text(TurnMetaProjection {
-            mode: "build",
+            mode: "default",
             provider: "provider",
             model: "model",
             started: None,
@@ -2418,6 +2555,51 @@ mod tests {
         });
         assert!(debug.contains("usage input_tokens=2"));
         assert!(debug.contains("metadata provider_response_id=resp"));
+    }
+
+    #[test]
+    fn slash_completion_completes_command_prefixes() {
+        assert_eq!(slash_completion("/he").as_deref(), Some("/help"));
+        assert_eq!(slash_completion("/mo").as_deref(), Some("/mode"));
+        assert_eq!(slash_completion("/model"), None);
+        assert_eq!(slash_completion("hello"), None);
+        assert_eq!(slash_completion("/he\nthere"), None);
+    }
+
+    #[tokio::test]
+    async fn tab_completes_slash_command_without_switching_mode() {
+        let temp = tempdir().expect("temp");
+        let mut app = test_app(&temp);
+        let mut ui = FullscreenUi::new(&app);
+        ui.textarea = textarea_with_text("/he");
+
+        app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+            .await
+            .expect("tab");
+
+        assert_eq!(textarea_text(&ui.textarea), "/help");
+        assert_eq!(app.current_mode, RunMode::Build);
+    }
+
+    #[tokio::test]
+    async fn shift_tab_cycles_mode_without_status_row() {
+        let temp = tempdir().expect("temp");
+        let mut app = test_app(&temp);
+        let mut ui = FullscreenUi::new(&app);
+
+        app.handle_fullscreen_key(
+            &mut ui,
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT),
+        )
+        .await
+        .expect("shift tab");
+
+        assert_eq!(app.current_mode, RunMode::Plan);
+        assert!(
+            !ui.transcript
+                .iter()
+                .any(|row| row.kind == TranscriptKind::Status && row.text.contains("mode:"))
+        );
     }
 
     #[tokio::test]
@@ -2500,9 +2682,75 @@ mod tests {
         assert!(ui.running.is_none());
     }
 
+    #[test]
+    fn fullscreen_loads_current_session_history() {
+        let temp = tempdir().expect("temp");
+        let mut app = test_app(&temp);
+        let store = SqliteStore::open(&app.db_path).expect("store");
+        let session_id = store
+            .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+            .expect("session");
+        app.current_session = Some(session_id.clone());
+        let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
+        conn.execute(
+            r#"
+            INSERT INTO messages (
+                session_id, session_seq, role, timestamp_ms, message_json, content_text
+            ) VALUES (?1, 1, 'user', 1, ?2, 'hello')
+            "#,
+            rusqlite::params![
+                &session_id,
+                serde_json::json!({
+                    "role": "user",
+                    "content": [{"text": "hello"}],
+                    "timestamp_ms": 1
+                })
+                .to_string()
+            ],
+        )
+        .expect("insert user");
+        conn.execute(
+            r#"
+            INSERT INTO messages (
+                session_id, session_seq, role, timestamp_ms, message_json, content_text,
+                usage_json
+            ) VALUES (?1, 2, 'assistant', 2, ?2, 'hi', ?3)
+            "#,
+            rusqlite::params![
+                &session_id,
+                serde_json::json!({
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "hi"}],
+                    "timestamp_ms": 2,
+                    "finish_reason": "stop",
+                    "outcome": "normal",
+                    "model": "mock-model",
+                    "provider": "mock"
+                })
+                .to_string(),
+                serde_json::json!({"total_tokens": 12}).to_string()
+            ],
+        )
+        .expect("insert assistant");
+
+        let mut ui = FullscreenUi::new(&app);
+        app.load_current_session_history(&mut ui).expect("history");
+
+        assert_eq!(ui.transcript[0].kind, TranscriptKind::Prompt);
+        assert_eq!(ui.transcript[0].text, "hello");
+        assert_eq!(ui.transcript[1].kind, TranscriptKind::Answer);
+        assert_eq!(ui.transcript[1].text, "hi");
+        assert!(
+            ui.transcript
+                .iter()
+                .any(|row| row.text.contains("tokens=12"))
+        );
+    }
+
     fn test_app(temp: &tempfile::TempDir) -> TuiApp {
         let home = temp.path().join("home");
         let workdir = temp.path().join("work");
+        std::fs::create_dir_all(&home).expect("home");
         std::fs::create_dir_all(&workdir).expect("workdir");
         let workdir = workdir.canonicalize().expect("canonical");
         TuiApp {
@@ -2550,7 +2798,7 @@ mod tests {
                         "type": "run_start",
                         "provider": "mock",
                         "model": "mock-model",
-                        "mode": "build",
+                        "mode": "default",
                         "context_limit": 64000
                     }),
                     false,
@@ -2596,7 +2844,7 @@ mod tests {
             branch: "main".to_string(),
             model: "mock/mock-model".to_string(),
             variant: "high".to_string(),
-            mode: "build".to_string(),
+            mode: "default".to_string(),
             thinking: "on".to_string(),
             message_count: 2,
             tool_count: 1,
@@ -2664,7 +2912,7 @@ mod tests {
             TranscriptKind::Meta,
             "Meta",
             turn_meta_text(TurnMetaProjection {
-                mode: "build",
+                mode: "default",
                 provider: "mock",
                 model: "mock-model",
                 started: None,
@@ -2694,7 +2942,7 @@ mod tests {
         ui.transcript.push(TranscriptRow::with_title(
             TranscriptKind::Meta,
             "Meta",
-            "mode=build  mock/mock-model  failures=1",
+            "mode=default  mock/mock-model  failures=1",
         ));
     }
 
@@ -2796,7 +3044,7 @@ mod tests {
             "[magenta]"
         } else if color == TUI_CYAN || color == Color::Cyan {
             "[cyan]"
-        } else if color == TUI_GREEN || color == Color::Green {
+        } else if color == Color::Green {
             "[green]"
         } else if color == TUI_RED || color == Color::Red {
             "[red]"

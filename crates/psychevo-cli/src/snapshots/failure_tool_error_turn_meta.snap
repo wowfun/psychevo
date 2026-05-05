@@ -6,53 +6,53 @@ fixture=failure_tool_error_turn_meta
 size=120x24
 
 --- text ---
-▌ Prompt                                                                      │▌ Session
-▌ Run a command that fails.                                                   │session: 12345678
-                                                                              │source: tui
-▌ Ran cargo test -p psychevo-cli                                              │
-▌ exit_code=101                                                               │▌ Context
-▌ compile error: fixture failure                                              │workdir: /repo/psychevo
-                                                                              │branch: main
-▌ The run failed before producing a clean validation result.                  │model: mock/mock-model
-                                                                              │variant: high
-▌ Meta                                                                        │mode: build
-▌ mode=build  mock/mock-model  failures=1                                     │thinking: on
-                                                                              │messages: 2
-                                                                              │tools: 1
-                                                                              │
-                                                                              │▌ Modified Files
-                                                                              │M crates/psychevo-cli/src/tui.rs
-                                                                              │?? specs/210-pevo-tui/testing.md
-                                                                              │
-──────────────────────────────────────────────────────────────────────────────│▌ Footer
-│ build                                                                       │local facts only
-│ Ask pevo...                                                                 │
-│                                                                             │
-pevo  idle  build  mock/model  12345678  thinking=on  Ctrl+T                  │
-Enter submit  Ctrl+J newline  Tab mode  Ctrl+B sidebar  /help                 │
+▌ Prompt
+▌ Run a command that fails.
+
+▌ Ran cargo test -p psychevo-cli
+▌ exit_code=101
+▌ compile error: fixture failure
+
+▌ The run failed before producing a clean validation result.
+
+▌ Meta
+▌ mode=default  mock/mock-model  failures=1
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+│ Ask pevo...
+│
+│
+mock/model  high
 
 --- styles ---
-[cyan]▌ Prompt[default]                                                                      │[magenta]▌ Session[default]
-[cyan]▌ [default]Run a command that fails.                                                   │session: 12345678
-[default]                                                                              │source: tui
-[red]▌ Ran cargo test -p psychevo-cli[default]                                              │
-[red]▌ exit_code=101[default]                                                               │[cyan]▌ Context[default]
-[red]▌ compile error: fixture failure[default]                                              │workdir: /repo/psychevo
-[default]                                                                              │branch: main
-[magenta]▌ [default]The run failed before producing a clean validation result.                  │model: mock/mock-model
-[default]                                                                              │variant: high
-[dim]▌ Meta[default]                                                                        │mode: build
-[dim]▌ mode=build  mock/mock-model  failures=1[default]                                     │thinking: on
-[default]                                                                              │messages: 2
-[default]                                                                              │tools: 1
-[default]                                                                              │
-[default]                                                                              │[cyan]▌ Modified Files[default]
-[default]                                                                              │M crates/psychevo-cli/src/tui.rs
-[default]                                                                              │?? specs/210-pevo-tui/testing.md
-[default]                                                                              │
-[default]──────────────────────────────────────────────────────────────────────────────│[cyan]▌ Footer[default]
-[cyan]│[default] build                                                                       │local facts only
-[cyan]│[dim] Ask pevo...[default]                                                                 │
-[cyan]│[default]                                                                             │
-[magenta]pevo[default]  idle  build  mock/model  12345678  thinking=on  Ctrl+T                  │
-[dim]Enter submit  Ctrl+J newline  Tab mode  Ctrl+B sidebar  /help                 [default]│
+[cyan]▌ Prompt[default]
+[cyan]▌ [default]Run a command that fails.
+[default]
+[red]▌ Ran cargo test -p psychevo-cli[default]
+[red]▌ exit_code=101[default]
+[red]▌ compile error: fixture failure[default]
+[default]
+[magenta]▌ [default]The run failed before producing a clean validation result.
+[default]
+[dim]▌ Meta[default]
+[dim]▌ mode=default  mock/mock-model  failures=1[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[cyan]│[dim] Ask pevo...[default]
+[cyan]│[default]
+[cyan]│[default]
+[default]mock/model  [magenta]high[default]

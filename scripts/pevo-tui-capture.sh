@@ -241,8 +241,23 @@ Screenshot $(json_quote "$out_dir/02-running-thinking.png")
 Wait+Screen /SNAPSHOT_DEMO_FINAL/
 Sleep 300 ms
 Screenshot $(json_quote "$out_dir/03-final-ledger.png")
+Sleep 200 ms
 Ctrl+D
 EOF
+}
+
+check_demo_artifacts() {
+  local out_dir="$1"
+  local missing=()
+  for file in 01-idle-slash.png 02-running-thinking.png 03-final-ledger.png; do
+    if [[ ! -s "$out_dir/$file" ]]; then
+      missing+=("$file")
+    fi
+  done
+  if (( ${#missing[@]} > 0 )); then
+    printf 'error: VHS did not write expected screenshot(s): %s\n' "${missing[*]}" >&2
+    exit 1
+  fi
 }
 
 demo() {
@@ -315,6 +330,7 @@ EOF
     cd "$repo_root"
     PATH="$(dirname "$pevo_bin"):$repo_root/target/debug:$PATH" vhs "$tape"
   )
+  check_demo_artifacts "$out_dir"
 
   printf 'wrote TUI capture artifacts: %s\n' "$out_dir"
   cleanup_mock_server

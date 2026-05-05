@@ -203,7 +203,7 @@ fn parse_mode_command(rest: &[&str]) -> Result<SlashCommand> {
             validate_mode(value)?;
             Ok(SlashCommand::ModeSet((*value).to_string()))
         }
-        _ => Err(anyhow!("usage: /mode | /mode set <plan|build>")),
+        _ => Err(anyhow!("usage: /mode | /mode set <plan|default>")),
     }
 }
 
@@ -236,8 +236,8 @@ pub(crate) fn validate_variant(value: &str) -> Result<()> {
 
 pub(crate) fn validate_mode(value: &str) -> Result<()> {
     match value {
-        "plan" | "build" => Ok(()),
-        _ => Err(anyhow!("mode must be one of plan, build")),
+        "plan" | "default" => Ok(()),
+        _ => Err(anyhow!("mode must be one of plan, default")),
     }
 }
 
@@ -285,9 +285,10 @@ mod tests {
             Some(SlashCommand::ModeSet("plan".to_string()))
         );
         assert_eq!(
-            parse_slash_command("/mode set build").unwrap(),
-            Some(SlashCommand::ModeSet("build".to_string()))
+            parse_slash_command("/mode set default").unwrap(),
+            Some(SlashCommand::ModeSet("default".to_string()))
         );
+        assert!(parse_slash_command("/mode set build").is_err());
         assert!(parse_slash_command("/mode set maybe").is_err());
     }
 

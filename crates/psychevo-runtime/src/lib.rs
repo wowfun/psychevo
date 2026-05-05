@@ -111,14 +111,14 @@ impl RunMode {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Plan => "plan",
-            Self::Build => "build",
+            Self::Build => "default",
         }
     }
 
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "plan" => Some(Self::Plan),
-            "build" => Some(Self::Build),
+            "default" => Some(Self::Build),
             _ => None,
         }
     }
@@ -2041,7 +2041,7 @@ pub fn tool_names_for_mode(mode: RunMode) -> Vec<&'static str> {
 fn mode_instruction(mode: RunMode) -> &'static str {
     match mode {
         RunMode::Build => {
-            "Runtime mode: build. You may use the available coding tools to read, edit, write, and run commands under the selected workdir."
+            "Runtime mode: default. You may use the available coding tools to read, edit, write, and run commands under the selected workdir."
         }
         RunMode::Plan => {
             "Runtime mode: plan. This turn is hard read-only. Use only the available read, list, and search tools to inspect the workdir. Do not write files, edit files, run shell commands, or claim to have modified the workspace."
@@ -3314,6 +3314,9 @@ mod tests {
 
     #[test]
     fn run_mode_tool_names_enforce_plan_read_only_surface() {
+        assert_eq!(RunMode::Build.as_str(), "default");
+        assert_eq!(RunMode::parse("default"), Some(RunMode::Build));
+        assert_eq!(RunMode::parse("build"), None);
         assert_eq!(
             tool_names_for_mode(RunMode::Plan),
             vec!["read", "list", "search"]

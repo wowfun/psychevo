@@ -6,8 +6,9 @@ fixture=narrow_idle_composer_without_sidebar
 size=80x20
 
 --- text ---
-▌ Status
-▌ pevo fullscreen tui
+
+
+
 
 
 
@@ -21,15 +22,15 @@ size=80x20
 
 
 ────────────────────────────────────────────────────────────────────────────────
-│ build
 │ Ask pevo...
 │
-pevo  idle  build  mock/model  12345678  thinking=on  Ctrl+T
-Enter submit  Ctrl+J newline  Tab mode  Ctrl+B sidebar  /help
+│
+mock/model  high
 
 --- styles ---
-[cyan]▌ Status[default]
-[cyan]▌ [dim]pevo fullscreen tui[default]
+[default]
+[default]
+[default]
 [default]
 [default]
 [default]
@@ -43,8 +44,7 @@ Enter submit  Ctrl+J newline  Tab mode  Ctrl+B sidebar  /help
 [default]
 [default]
 [default]────────────────────────────────────────────────────────────────────────────────
-[cyan]│[default] build
 [cyan]│[dim] Ask pevo...[default]
 [cyan]│[default]
-[magenta]pevo[default]  idle  build  mock/model  12345678  thinking=on  Ctrl+T
-[dim]Enter submit  Ctrl+J newline  Tab mode  Ctrl+B sidebar  /help
+[cyan]│[default]
+[default]mock/model  [magenta]high[default]

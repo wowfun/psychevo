@@ -2,7 +2,7 @@
 source: crates/psychevo-cli/src/tui.rs
 expression: combined
 ---
-fixture=slash_menu_prefix_filtering
+fixture=wide_idle_minimal_chrome
 size=120x24
 
 --- text ---
@@ -19,14 +19,14 @@ size=120x24
 
 
 
+
+
+
+
+
+
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-│ commands
-│/model  show current model
-│/models  list configured models
-│/model set  persist workdir model
-│/mode  show current mode
-│
-│/mo
+│ Ask pevo...
 │
 │
 mock/model  high
@@ -45,14 +45,14 @@ mock/model  high
 [default]
 [default]
 [default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-[default]│ commands
-[default]│[cyan]/model[dim]  show current model[default]
-[default]│[cyan]/models[dim]  list configured models[default]
-[default]│[cyan]/model set[dim]  persist workdir model[default]
-[default]│[cyan]/mode[dim]  show current mode[default]
-[default]│
-[cyan]│[default]/mo
+[cyan]│[dim] Ask pevo...[default]
 [cyan]│[default]
 [cyan]│[default]
 [default]mock/model  [magenta]high[default]
