@@ -8,7 +8,7 @@
 - Added live-provider specs and deterministic mock SSE/CLI coverage for prompts, tool calls, JSON errors, removed flags, session continuation, plus ignored live-provider tests.
 - Added folded local reasoning blocks, opt-in JSON reasoning events, `pevo init --reset-state`, and repo-local live dev tooling.
 - Added fullscreen `pevo tui` with evidence-ledger turns, composer/sidebar, persistent TUI state, slash commands, `--debug`, transcript/tool expansion, and non-TTY scripted mode.
-- Added enforceable TUI `plan` / `build` modes plus the `060 Automation` foundation spec for structured validation and visual-regression boundaries.
+- Added TUI `plan` / `default` modes plus automation and visual-regression specs.
 - Added TUI visual snapshots and a VHS diagnostic capture workflow.
 
 ### Changed
@@ -17,6 +17,7 @@
 - Replaced `PSYCHEVO_CONFIG_DIR` with `PSYCHEVO_HOME`, `PSYCHEVO_CONFIG`, and `PSYCHEVO_DB`.
 - Converted live `pevo run` from low-level provider flags to the positional prompt interface.
 - Moved state to SQLite schema v3 with single-copy reasoning in `message_json`, normalized usage/metadata columns, persistent TUI thinking visibility, and sanitized JSON/session projections.
+- Simplified fullscreen TUI chrome, history loading, and keyboard behavior.
 
 ## 2026-05-03
 
