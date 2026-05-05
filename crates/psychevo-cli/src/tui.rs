@@ -577,8 +577,12 @@ impl TuiApp {
             .as_ref()
             .is_some_and(|running| running.task.is_finished())
         {
-            let running = ui.running.take().expect("checked running");
-            match running.task.await {
+            let mut running = ui.running.take().expect("checked running");
+            let result = running.task.await;
+            while let Ok(event) = running.rx.try_recv() {
+                ui.apply_stream_event(event, self.thinking_visible, self.debug);
+            }
+            match result {
                 Ok(Ok(result)) => {
                     self.current_session = Some(result.session_id.clone());
                     self.force_new_once = false;
@@ -967,6 +971,12 @@ struct RunningTurn {
     task: JoinHandle<psychevo_runtime::Result<psychevo_runtime::RunResult>>,
 }
 
+const TUI_CYAN: Color = Color::Cyan;
+const TUI_MAGENTA: Color = Color::Magenta;
+const TUI_GREEN: Color = Color::Green;
+const TUI_RED: Color = Color::Red;
+const TUI_DIM: Color = Color::DarkGray;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TranscriptKind {
     Prompt,
@@ -1126,7 +1136,7 @@ impl<'a> FullscreenUi<'a> {
                 .unwrap_or("(none)")
                 .to_string(),
             source: "tui".to_string(),
-            workdir: app.workdir.display().to_string(),
+            workdir: tail_compact_path(&app.workdir.display().to_string(), 34),
             branch: git.branch,
             model: app
                 .current_model
@@ -1168,7 +1178,7 @@ impl<'a> FullscreenUi<'a> {
     }
 
     fn start_assistant(&mut self) {
-        self.assistant_row = Some(self.transcript.len());
+        self.assistant_row = None;
         self.reasoning_row = None;
         self.meta_row = None;
         self.tool_rows.clear();
@@ -1180,11 +1190,6 @@ impl<'a> FullscreenUi<'a> {
         self.turn_metadata = None;
         self.turn_failures = 0;
         self.reasoning_hidden_active = false;
-        self.transcript.push(TranscriptRow::with_title(
-            TranscriptKind::Answer,
-            "",
-            String::new(),
-        ));
     }
 
     fn push_status(&mut self, text: impl Into<String>) {
@@ -1202,13 +1207,40 @@ impl<'a> FullscreenUi<'a> {
             .push(TranscriptRow::simple(TranscriptKind::Error, text));
     }
 
+    fn insert_transcript_row(&mut self, index: usize, row: TranscriptRow) -> usize {
+        let index = index.min(self.transcript.len());
+        self.transcript.insert(index, row);
+        increment_row_index(&mut self.assistant_row, index);
+        increment_row_index(&mut self.reasoning_row, index);
+        increment_row_index(&mut self.meta_row, index);
+        increment_row_index(&mut self.selected_row, index);
+        for row_index in self.tool_rows.values_mut() {
+            if *row_index >= index {
+                *row_index += 1;
+            }
+        }
+        index
+    }
+
+    fn insert_evidence_row(&mut self, row: TranscriptRow) -> usize {
+        let index = self
+            .assistant_row
+            .or(self.meta_row)
+            .unwrap_or(self.transcript.len());
+        self.insert_transcript_row(index, row)
+    }
+
+    fn insert_answer_row(&mut self, row: TranscriptRow) -> usize {
+        let index = self.meta_row.unwrap_or(self.transcript.len());
+        self.insert_transcript_row(index, row)
+    }
+
     fn apply_stream_event(&mut self, event: RunStreamEvent, thinking_visible: bool, debug: bool) {
         match event {
             RunStreamEvent::ReasoningDelta { text } => {
                 if thinking_visible {
                     let idx = self.reasoning_row.unwrap_or_else(|| {
-                        let idx = self.transcript.len();
-                        self.transcript.push(TranscriptRow::with_title(
+                        let idx = self.insert_evidence_row(TranscriptRow::with_title(
                             TranscriptKind::Thinking,
                             "Thinking",
                             String::new(),
@@ -1219,7 +1251,7 @@ impl<'a> FullscreenUi<'a> {
                     self.transcript[idx].text.push_str(&text);
                 } else if !self.reasoning_hidden_active {
                     self.reasoning_hidden_active = true;
-                    self.transcript.push(TranscriptRow::with_title(
+                    self.insert_evidence_row(TranscriptRow::with_title(
                         TranscriptKind::Thinking,
                         "Thinking",
                         "hidden",
@@ -1262,8 +1294,7 @@ impl<'a> FullscreenUi<'a> {
             "message_update" | "message_end" => {
                 if let Some(text) = assistant_text_from_event(value) {
                     let idx = self.assistant_row.unwrap_or_else(|| {
-                        let idx = self.transcript.len();
-                        self.transcript.push(TranscriptRow::with_title(
+                        let idx = self.insert_answer_row(TranscriptRow::with_title(
                             TranscriptKind::Answer,
                             "",
                             String::new(),
@@ -1289,14 +1320,13 @@ impl<'a> FullscreenUi<'a> {
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string();
-                let idx = self.transcript.len();
                 let mut row = TranscriptRow::with_title(
                     evidence_kind(tool),
                     tool_title(tool, value),
                     "running",
                 );
                 row.tool_call_id = (!tool_call_id.is_empty()).then_some(tool_call_id.clone());
-                self.transcript.push(row);
+                let idx = self.insert_evidence_row(row);
                 if !tool_call_id.is_empty() {
                     self.tool_rows.insert(tool_call_id, idx);
                 }
@@ -1323,13 +1353,11 @@ impl<'a> FullscreenUi<'a> {
                     .get(tool_call_id)
                     .copied()
                     .unwrap_or_else(|| {
-                        let idx = self.transcript.len();
-                        self.transcript.push(TranscriptRow::with_title(
+                        self.insert_evidence_row(TranscriptRow::with_title(
                             evidence_kind(tool),
                             tool_title(tool, value),
                             String::new(),
-                        ));
-                        idx
+                        ))
                     });
                 let row = &mut self.transcript[idx];
                 row.kind = evidence_kind(tool);
@@ -1706,7 +1734,7 @@ fn new_textarea<'a>() -> TextArea<'a> {
     textarea.set_block(
         Block::default()
             .borders(Borders::LEFT)
-            .border_style(Style::default().fg(Color::Cyan)),
+            .border_style(Style::default().fg(TUI_CYAN)),
     );
     textarea.set_wrap_mode(WrapMode::WordOrGlyph);
     textarea.set_cursor_line_style(Style::default());
@@ -1719,7 +1747,7 @@ fn textarea_with_text<'a>(text: &str) -> TextArea<'a> {
     textarea.set_block(
         Block::default()
             .borders(Borders::LEFT)
-            .border_style(Style::default().fg(Color::Cyan)),
+            .border_style(Style::default().fg(TUI_CYAN)),
     );
     textarea.set_wrap_mode(WrapMode::WordOrGlyph);
     textarea.move_cursor(CursorMove::End);
@@ -1776,7 +1804,7 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_
 
 fn transcript_lines(row: &TranscriptRow, selected: bool) -> Vec<Line<'static>> {
     let style = label_style(row.kind, row.failed);
-    let marker = if selected { ">" } else { "|" };
+    let marker = if selected { ">" } else { "▌" };
     let mut out = Vec::new();
     let title = row.title.trim();
     if !title.is_empty() {
@@ -1813,31 +1841,31 @@ fn transcript_lines(row: &TranscriptRow, selected: bool) -> Vec<Line<'static>> {
 
 fn label_style(kind: TranscriptKind, failed: bool) -> Style {
     if failed {
-        return Style::default().fg(Color::Red);
+        return Style::default().fg(TUI_RED);
     }
     match kind {
         TranscriptKind::Prompt
         | TranscriptKind::Explored
         | TranscriptKind::Ran
-        | TranscriptKind::Changed => Style::default().fg(Color::Cyan),
-        TranscriptKind::Answer => Style::default().fg(Color::Magenta),
-        TranscriptKind::Thinking | TranscriptKind::Meta => Style::default().fg(Color::DarkGray),
-        TranscriptKind::Status => Style::default().fg(Color::Cyan),
-        TranscriptKind::Success => Style::default().fg(Color::Green),
-        TranscriptKind::Error => Style::default().fg(Color::Red),
+        | TranscriptKind::Changed => Style::default().fg(TUI_CYAN),
+        TranscriptKind::Answer => Style::default().fg(TUI_MAGENTA),
+        TranscriptKind::Thinking | TranscriptKind::Meta => Style::default().fg(TUI_DIM),
+        TranscriptKind::Status => Style::default().fg(TUI_CYAN),
+        TranscriptKind::Success => Style::default().fg(TUI_GREEN),
+        TranscriptKind::Error => Style::default().fg(TUI_RED),
     }
 }
 
 fn style_for_body(kind: TranscriptKind, failed: bool) -> Style {
     if failed {
-        return Style::default().fg(Color::Red);
+        return Style::default().fg(TUI_RED);
     }
     match kind {
         TranscriptKind::Thinking | TranscriptKind::Meta | TranscriptKind::Status => {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(TUI_DIM)
         }
-        TranscriptKind::Success => Style::default().fg(Color::Green),
-        TranscriptKind::Error => Style::default().fg(Color::Red),
+        TranscriptKind::Success => Style::default().fg(TUI_GREEN),
+        TranscriptKind::Error => Style::default().fg(TUI_RED),
         _ => Style::default(),
     }
 }
@@ -1846,7 +1874,7 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_>,
     ui.textarea.set_block(
         Block::default()
             .borders(Borders::LEFT)
-            .border_style(Style::default().fg(Color::Cyan))
+            .border_style(Style::default().fg(TUI_CYAN))
             .style(Style::default().bg(Color::Rgb(18, 18, 22)))
             .title(format!(" {} ", mode.as_str())),
     );
@@ -1859,10 +1887,10 @@ fn render_slash_menu(frame: &mut Frame<'_>, area: Rect, items: &[crate::tui_slas
         .map(|item| {
             let marker = if item.upcoming { " upcoming" } else { "" };
             Line::from(vec![
-                Span::styled(item.command, Style::default().fg(Color::Cyan)),
+                Span::styled(item.command, Style::default().fg(TUI_CYAN)),
                 Span::styled(
                     format!("  {}{marker}", item.description),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(TUI_DIM),
                 ),
             ])
         })
@@ -1886,21 +1914,32 @@ fn render_status(frame: &mut Frame<'_>, area: Rect, app: &TuiApp, ui: &Fullscree
         .as_deref()
         .map(short_session)
         .unwrap_or("(new)");
-    let line = Line::from(vec![
-        Span::styled(
-            "pevo",
-            Style::default()
-                .fg(Color::Magenta)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(format!(
+    let detail = if area.width < 100 {
+        format!(
+            "  {running}  {}  {}  {}  thinking={}  Ctrl+T",
+            app.current_mode.as_str(),
+            app.current_model.as_deref().unwrap_or("config"),
+            session,
+            on_off(app.thinking_visible)
+        )
+    } else {
+        format!(
             "  {running}  mode={}  model={}  variant={}  session={}  thinking={}  Ctrl+T transcript",
             app.current_mode.as_str(),
             app.current_model.as_deref().unwrap_or("config"),
             app.current_variant.as_deref().unwrap_or("config"),
             session,
             on_off(app.thinking_visible)
-        )),
+        )
+    };
+    let line = Line::from(vec![
+        Span::styled(
+            "pevo",
+            Style::default()
+                .fg(TUI_MAGENTA)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(detail),
     ]);
     frame.render_widget(Paragraph::new(line), area);
 }
@@ -1910,28 +1949,29 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, ui: &FullscreenUi<'_>) {
         format!("history search: {}", ui.history_query)
     } else {
         match ui.focus {
+            FocusMode::Composer if area.width < 100 => {
+                "Enter submit  Ctrl+J newline  Tab mode  Ctrl+B sidebar  /help".to_string()
+            }
             FocusMode::Composer => "Enter submit  Ctrl+J newline  Tab mode  Ctrl+B sidebar  Ctrl+R history  Ctrl+T transcript  /help".to_string(),
+            FocusMode::Transcript if area.width < 100 => {
+                "Transcript: Up/Down select  Enter/Space expand  Esc composer".to_string()
+            }
             FocusMode::Transcript => "Transcript: Up/Down select  Enter/Space expand  Esc composer  PageUp/PageDown scroll".to_string(),
         }
     };
     frame.render_widget(
-        Paragraph::new(text).style(Style::default().fg(Color::DarkGray)),
+        Paragraph::new(text).style(Style::default().fg(TUI_DIM)),
         area,
     );
 }
 
 fn render_sidebar(frame: &mut Frame<'_>, area: Rect, ui: &FullscreenUi<'_>) {
     let mut lines = vec![
-        Line::from(Span::styled(
-            "Session",
-            Style::default()
-                .fg(Color::Magenta)
-                .add_modifier(Modifier::BOLD),
-        )),
+        sidebar_heading("Session", TUI_MAGENTA),
         Line::from(format!("session: {}", ui.sidebar.session)),
         Line::from(format!("source: {}", ui.sidebar.source)),
         Line::from(""),
-        Line::from(Span::styled("Context", Style::default().fg(Color::Cyan))),
+        sidebar_heading("Context", TUI_CYAN),
         Line::from(format!("workdir: {}", ui.sidebar.workdir)),
         Line::from(format!("branch: {}", ui.sidebar.branch)),
         Line::from(format!("model: {}", ui.sidebar.model)),
@@ -1941,15 +1981,12 @@ fn render_sidebar(frame: &mut Frame<'_>, area: Rect, ui: &FullscreenUi<'_>) {
         Line::from(format!("messages: {}", ui.sidebar.message_count)),
         Line::from(format!("tools: {}", ui.sidebar.tool_count)),
         Line::from(""),
-        Line::from(Span::styled(
-            "Modified Files",
-            Style::default().fg(Color::Cyan),
-        )),
+        sidebar_heading("Modified Files", TUI_CYAN),
     ];
     if ui.sidebar.changed_files.is_empty() {
         lines.push(Line::from(Span::styled(
             "(clean)",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(TUI_DIM),
         )));
     } else {
         for file in &ui.sidebar.changed_files {
@@ -1957,10 +1994,7 @@ fn render_sidebar(frame: &mut Frame<'_>, area: Rect, ui: &FullscreenUi<'_>) {
         }
     }
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "Footer",
-        Style::default().fg(Color::Cyan),
-    )));
+    lines.push(sidebar_heading("Footer", TUI_CYAN));
     lines.push(Line::from("local facts only"));
     frame.render_widget(
         Paragraph::new(lines)
@@ -1970,12 +2004,30 @@ fn render_sidebar(frame: &mut Frame<'_>, area: Rect, ui: &FullscreenUi<'_>) {
     );
 }
 
+fn sidebar_heading(label: &'static str, color: Color) -> Line<'static> {
+    Line::from(vec![
+        Span::styled("▌ ", Style::default().fg(color)),
+        Span::styled(
+            label,
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ),
+    ])
+}
+
 fn short_session(id: &str) -> &str {
     &id[..id.len().min(8)]
 }
 
 fn on_off(value: bool) -> &'static str {
     if value { "on" } else { "off" }
+}
+
+fn increment_row_index(value: &mut Option<usize>, inserted_at: usize) {
+    if let Some(index) = value
+        && *index >= inserted_at
+    {
+        *index += 1;
+    }
 }
 
 fn format_configured_model(model: &ConfiguredModel) -> String {
@@ -2175,6 +2227,7 @@ impl TurnPrinter {
 mod tests {
     use super::*;
     use ratatui::backend::TestBackend;
+    use std::fs;
     use tempfile::tempdir;
 
     fn summary(id: &str) -> SessionSummary {
@@ -2251,51 +2304,69 @@ mod tests {
     }
 
     #[test]
-    fn fullscreen_render_shows_sidebar_on_wide_frame() {
+    fn tui_snapshot_wide_idle_composer_with_sidebar() {
         let temp = tempdir().expect("temp");
         let app = test_app(&temp);
-        let mut ui = FullscreenUi::new(&app);
-        ui.push_user("inspect".to_string());
-        ui.transcript.push(TranscriptRow::with_title(
-            TranscriptKind::Thinking,
-            "Thinking",
-            "visible local reasoning",
-        ));
-        ui.transcript.push(TranscriptRow::with_title(
-            TranscriptKind::Explored,
-            "Explored src/lib.rs",
-            "running",
-        ));
-        ui.refresh_sidebar(&app);
-
-        let backend = TestBackend::new(120, 24);
-        let mut terminal = Terminal::new(backend).expect("terminal");
-        terminal
-            .draw(|frame| app.render_fullscreen(frame, &mut ui))
-            .expect("draw");
-        let text = buffer_text(terminal.backend().buffer());
-        let styled = buffer_style_text(terminal.backend().buffer());
-        assert!(text.contains("Session"));
-        assert!(text.contains("mode=build"));
-        assert!(text.contains("visible local reasoning"));
-        assert!(text.contains("Explored src/lib.rs"));
-        assert!(styled.contains("[magenta]Session"));
-        assert!(styled.contains("[cyan]"));
+        let ui = fixture_ui(&app, FixtureKind::Idle);
+        assert_tui_snapshot("wide_idle_composer_with_sidebar", 120, 24, &app, ui);
     }
 
     #[test]
-    fn fullscreen_render_hides_sidebar_on_narrow_frame() {
+    fn tui_snapshot_narrow_idle_composer_without_sidebar() {
         let temp = tempdir().expect("temp");
         let app = test_app(&temp);
-        let mut ui = FullscreenUi::new(&app);
-        let backend = TestBackend::new(80, 20);
-        let mut terminal = Terminal::new(backend).expect("terminal");
-        terminal
-            .draw(|frame| app.render_fullscreen(frame, &mut ui))
-            .expect("draw");
-        let text = buffer_text(terminal.backend().buffer());
-        assert!(!text.contains("Modified Files"));
-        assert!(text.contains("Enter submit"));
+        let ui = fixture_ui(&app, FixtureKind::Idle);
+        assert_tui_snapshot("narrow_idle_composer_without_sidebar", 80, 20, &app, ui);
+    }
+
+    #[test]
+    fn tui_snapshot_slash_menu_prefix_filtering() {
+        let temp = tempdir().expect("temp");
+        let app = test_app(&temp);
+        let mut ui = fixture_ui(&app, FixtureKind::Idle);
+        ui.textarea = textarea_with_text("/mo");
+        assert_tui_snapshot("slash_menu_prefix_filtering", 120, 24, &app, ui);
+    }
+
+    #[test]
+    fn tui_snapshot_running_turn_with_visible_thinking() {
+        let temp = tempdir().expect("temp");
+        let app = test_app(&temp);
+        let ui = fixture_ui(&app, FixtureKind::RunningThinking);
+        assert_tui_snapshot("running_turn_with_visible_thinking", 120, 24, &app, ui);
+    }
+
+    #[test]
+    fn tui_snapshot_completed_ledger_collapsed_tool_output() {
+        let temp = tempdir().expect("temp");
+        let app = test_app(&temp);
+        let ui = fixture_ui(&app, FixtureKind::CollapsedTool);
+        assert_tui_snapshot("completed_ledger_collapsed_tool_output", 120, 24, &app, ui);
+    }
+
+    #[test]
+    fn tui_snapshot_expanded_long_tool_output() {
+        let temp = tempdir().expect("temp");
+        let app = test_app(&temp);
+        let ui = fixture_ui(&app, FixtureKind::ExpandedTool);
+        assert_tui_snapshot("expanded_long_tool_output", 120, 24, &app, ui);
+    }
+
+    #[test]
+    fn tui_snapshot_debug_meta_with_usage_metadata() {
+        let temp = tempdir().expect("temp");
+        let mut app = test_app(&temp);
+        app.debug = true;
+        let ui = fixture_ui(&app, FixtureKind::DebugMeta);
+        assert_tui_snapshot("debug_meta_with_usage_metadata", 120, 24, &app, ui);
+    }
+
+    #[test]
+    fn tui_snapshot_failure_tool_error_turn_meta() {
+        let temp = tempdir().expect("temp");
+        let app = test_app(&temp);
+        let ui = fixture_ui(&app, FixtureKind::FailureMeta);
+        assert_tui_snapshot("failure_tool_error_turn_meta", 120, 24, &app, ui);
     }
 
     #[test]
@@ -2349,6 +2420,86 @@ mod tests {
         assert!(debug.contains("metadata provider_response_id=resp"));
     }
 
+    #[tokio::test]
+    async fn fullscreen_drain_keeps_queued_events_after_task_completion() {
+        let temp = tempdir().expect("temp");
+        let mut app = test_app(&temp);
+        let mut ui = FullscreenUi::new(&app);
+        let (tx, rx) = mpsc::unbounded_channel();
+        tx.send(RunStreamEvent::Event(serde_json::json!({
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "final answer"}],
+                "timestamp_ms": 1,
+                "finish_reason": "stop",
+                "outcome": "normal"
+            }
+        })))
+        .expect("send answer");
+        tx.send(RunStreamEvent::Event(serde_json::json!({
+            "type": "tool_execution_start",
+            "tool_call_id": "call_read_fixture",
+            "tool_name": "read",
+            "args": {"path": "fixture.txt"}
+        })))
+        .expect("send start");
+        tx.send(RunStreamEvent::Event(serde_json::json!({
+            "type": "tool_execution_end",
+            "tool_call_id": "call_read_fixture",
+            "tool_name": "read",
+            "args": {"path": "fixture.txt"},
+            "result": {"path": "fixture.txt", "content": "fixture content"},
+            "outcome": "normal"
+        })))
+        .expect("send end");
+        drop(tx);
+
+        let result = psychevo_runtime::RunResult {
+            session_id: "finished-session".to_string(),
+            outcome: Outcome::Normal,
+            final_answer: "done".to_string(),
+            db_path: app.db_path.clone(),
+            workdir: app.workdir.clone(),
+            provider: "mock".to_string(),
+            model: "mock-model".to_string(),
+            base_url: "http://127.0.0.1".to_string(),
+            api_key_env: Some("TEST_PROVIDER_KEY".to_string()),
+            reasoning_effort: None,
+            context_limit: None,
+            tool_failures: 0,
+            events: Vec::new(),
+        };
+        let task = tokio::spawn(async move { Ok(result) });
+        let (control, _) = run_control();
+        ui.running = Some(RunningTurn { control, rx, task });
+        while !ui.running.as_ref().expect("running").task.is_finished() {
+            tokio::task::yield_now().await;
+        }
+
+        app.drain_fullscreen_events(&mut ui).await.expect("drain");
+
+        let tool_row = ui
+            .transcript
+            .iter()
+            .find(|row| row.title == "Explored fixture.txt")
+            .expect("tool evidence row");
+        assert_eq!(tool_row.kind, TranscriptKind::Explored);
+        assert_eq!(tool_row.text, "fixture content");
+        let tool_index = ui
+            .transcript
+            .iter()
+            .position(|row| row.title == "Explored fixture.txt")
+            .expect("tool index");
+        let answer_index = ui
+            .transcript
+            .iter()
+            .position(|row| row.kind == TranscriptKind::Answer)
+            .expect("answer index");
+        assert!(tool_index < answer_index);
+        assert!(ui.running.is_none());
+    }
+
     fn test_app(temp: &tempfile::TempDir) -> TuiApp {
         let home = temp.path().join("home");
         let workdir = temp.path().join("work");
@@ -2375,13 +2526,246 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Clone, Copy)]
+    enum FixtureKind {
+        Idle,
+        RunningThinking,
+        CollapsedTool,
+        ExpandedTool,
+        DebugMeta,
+        FailureMeta,
+    }
+
+    fn fixture_ui<'a>(app: &TuiApp, kind: FixtureKind) -> FullscreenUi<'a> {
+        let mut ui = FullscreenUi::new(app);
+        ui.sidebar = stable_sidebar();
+        match kind {
+            FixtureKind::Idle => {}
+            FixtureKind::RunningThinking => {
+                ui.transcript.clear();
+                ui.push_user("Inspect the CLI rendering path.".to_string());
+                ui.start_assistant();
+                ui.apply_value_event(
+                    &serde_json::json!({
+                        "type": "run_start",
+                        "provider": "mock",
+                        "model": "mock-model",
+                        "mode": "build",
+                        "context_limit": 64000
+                    }),
+                    false,
+                );
+                ui.turn_started = None;
+                ui.apply_stream_event(
+                    RunStreamEvent::ReasoningDelta {
+                        text: "Read the TUI renderer and identify stable evidence blocks."
+                            .to_string(),
+                    },
+                    true,
+                    false,
+                );
+                ui.transcript.push(TranscriptRow::with_title(
+                    TranscriptKind::Explored,
+                    "Explored crates/psychevo-cli/src/tui.rs",
+                    "running",
+                ));
+            }
+            FixtureKind::CollapsedTool | FixtureKind::ExpandedTool => {
+                ui.transcript.clear();
+                push_completed_turn(&mut ui, kind);
+            }
+            FixtureKind::DebugMeta => {
+                ui.transcript.clear();
+                push_completed_turn(&mut ui, kind);
+                ui.sidebar_hidden = true;
+            }
+            FixtureKind::FailureMeta => {
+                ui.transcript.clear();
+                push_failure_turn(&mut ui);
+            }
+        }
+        ui.sidebar = stable_sidebar();
+        ui
+    }
+
+    fn stable_sidebar() -> SidebarSnapshot {
+        SidebarSnapshot {
+            session: "12345678".to_string(),
+            source: "tui".to_string(),
+            workdir: "/repo/psychevo".to_string(),
+            branch: "main".to_string(),
+            model: "mock/mock-model".to_string(),
+            variant: "high".to_string(),
+            mode: "build".to_string(),
+            thinking: "on".to_string(),
+            message_count: 2,
+            tool_count: 1,
+            changed_files: vec![
+                "M crates/psychevo-cli/src/tui.rs".to_string(),
+                "?? specs/210-pevo-tui/testing.md".to_string(),
+            ],
+        }
+    }
+
+    fn push_completed_turn(ui: &mut FullscreenUi<'_>, kind: FixtureKind) {
+        ui.push_user("Summarize the TUI snapshot harness.".to_string());
+        ui.transcript.push(TranscriptRow::with_title(
+            TranscriptKind::Thinking,
+            "Thinking",
+            "Check layout boundaries, style roles, and expandable evidence.",
+        ));
+        let mut row = TranscriptRow::with_title(
+            TranscriptKind::Explored,
+            "Explored crates/psychevo-cli/src/tui.rs",
+            long_tool_output()
+                .lines()
+                .take(collapsed_fixture_lines(kind))
+                .collect::<Vec<_>>()
+                .join("\n")
+                + &format!("\n... {} more lines", 24 - collapsed_fixture_lines(kind)),
+        );
+        row.full_text = Some(long_tool_output());
+        if matches!(kind, FixtureKind::ExpandedTool) {
+            row.expanded = true;
+            ui.focus = FocusMode::Transcript;
+            ui.selected_row = Some(2);
+        }
+        ui.transcript.push(row);
+        ui.transcript.push(TranscriptRow::with_title(
+            TranscriptKind::Answer,
+            "",
+            "The harness snapshots stable buffer text and style roles, then leaves real terminal screenshots as diagnostics.",
+        ));
+        let debug = matches!(kind, FixtureKind::DebugMeta);
+        let usage = if debug {
+            serde_json::json!({
+                "input_tokens": 120,
+                "total_tokens": 177
+            })
+        } else {
+            serde_json::json!({
+            "input_tokens": 120,
+            "output_tokens": 45,
+            "reasoning_tokens": 12,
+            "total_tokens": 177
+            })
+        };
+        let metadata = if debug {
+            serde_json::json!({
+                "provider_response_id": "resp_snapshot"
+            })
+        } else {
+            serde_json::json!({
+                "provider_response_id": "resp_snapshot",
+                "system_fingerprint": "fp_mock"
+            })
+        };
+        ui.transcript.push(TranscriptRow::with_title(
+            TranscriptKind::Meta,
+            "Meta",
+            turn_meta_text(TurnMetaProjection {
+                mode: "build",
+                provider: "mock",
+                model: "mock-model",
+                started: None,
+                context_limit: Some(64000),
+                usage: Some(&usage),
+                metadata: Some(&metadata),
+                failures: 0,
+                debug,
+            }),
+        ));
+    }
+
+    fn push_failure_turn(ui: &mut FullscreenUi<'_>) {
+        ui.push_user("Run a command that fails.".to_string());
+        let mut row = TranscriptRow::with_title(
+            TranscriptKind::Ran,
+            "Ran cargo test -p psychevo-cli",
+            "exit_code=101\ncompile error: fixture failure",
+        );
+        row.failed = true;
+        ui.transcript.push(row);
+        ui.transcript.push(TranscriptRow::with_title(
+            TranscriptKind::Answer,
+            "",
+            "The run failed before producing a clean validation result.",
+        ));
+        ui.transcript.push(TranscriptRow::with_title(
+            TranscriptKind::Meta,
+            "Meta",
+            "mode=build  mock/mock-model  failures=1",
+        ));
+    }
+
+    fn long_tool_output() -> String {
+        (1..=24)
+            .map(|line| format!("{line:02}: crates/psychevo-cli/src/tui.rs evidence row"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn collapsed_fixture_lines(kind: FixtureKind) -> usize {
+        match kind {
+            FixtureKind::ExpandedTool => 20,
+            _ => 4,
+        }
+    }
+
+    fn assert_tui_snapshot(
+        name: &str,
+        width: u16,
+        height: u16,
+        app: &TuiApp,
+        mut ui: FullscreenUi<'_>,
+    ) {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| app.render_fullscreen(frame, &mut ui))
+            .expect("draw");
+        let buffer = terminal.backend().buffer();
+        let text = buffer_text(buffer);
+        let styles = buffer_style_text(buffer);
+        let combined = format!(
+            "fixture={name}\nsize={width}x{height}\n\n--- text ---\n{text}\n--- styles ---\n{styles}"
+        );
+        write_snapshot_diagnostics(name, &text, &styles, &combined);
+        insta::with_settings!({ prepend_module_to_snapshot => false }, {
+            insta::assert_snapshot!(name, combined);
+        });
+    }
+
+    fn write_snapshot_diagnostics(name: &str, text: &str, styles: &str, combined: &str) {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/pevo-tui-snapshots")
+            .join(name);
+        if fs::create_dir_all(&dir).is_err() {
+            return;
+        }
+        let _ = fs::write(dir.join("text.txt"), text);
+        let _ = fs::write(dir.join("styles.txt"), styles);
+        let _ = fs::write(dir.join("combined.txt"), combined);
+        let _ = fs::write(
+            dir.join("metadata.json"),
+            serde_json::json!({
+                "fixture": name,
+                "source": "ratatui TestBackend",
+                "golden": "insta snapshot"
+            })
+            .to_string(),
+        );
+    }
+
     fn buffer_text(buffer: &ratatui::buffer::Buffer) -> String {
         let area = *buffer.area();
         let mut text = String::new();
         for y in area.y..area.y + area.height {
+            let mut line = String::new();
             for x in area.x..area.x + area.width {
-                text.push_str(buffer.cell((x, y)).expect("cell").symbol());
+                line.push_str(buffer.cell((x, y)).expect("cell").symbol());
             }
+            text.push_str(line.trim_end());
             text.push('\n');
         }
         text
@@ -2390,27 +2774,36 @@ mod tests {
     fn buffer_style_text(buffer: &ratatui::buffer::Buffer) -> String {
         let area = *buffer.area();
         let mut text = String::new();
-        let mut last = None;
         for y in area.y..area.y + area.height {
+            let mut line = String::new();
+            let mut last = None;
             for x in area.x..area.x + area.width {
                 let cell = buffer.cell((x, y)).expect("cell");
                 if last != Some(cell.fg) {
                     last = Some(cell.fg);
-                    let marker = match cell.fg {
-                        Color::Magenta => "[magenta]",
-                        Color::Cyan => "[cyan]",
-                        Color::Green => "[green]",
-                        Color::Red => "[red]",
-                        Color::DarkGray => "[dim]",
-                        _ => "",
-                    };
-                    text.push_str(marker);
+                    line.push_str(style_marker(cell.fg));
                 }
-                text.push_str(cell.symbol());
+                line.push_str(cell.symbol());
             }
+            text.push_str(line.trim_end());
             text.push('\n');
-            last = None;
         }
         text
+    }
+
+    fn style_marker(color: Color) -> &'static str {
+        if color == TUI_MAGENTA || color == Color::Magenta {
+            "[magenta]"
+        } else if color == TUI_CYAN || color == Color::Cyan {
+            "[cyan]"
+        } else if color == TUI_GREEN || color == Color::Green {
+            "[green]"
+        } else if color == TUI_RED || color == Color::Red {
+            "[red]"
+        } else if color == TUI_DIM || color == Color::DarkGray {
+            "[dim]"
+        } else {
+            "[default]"
+        }
     }
 }

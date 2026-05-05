@@ -1,0 +1,50 @@
+---
+source: crates/psychevo-cli/src/tui.rs
+expression: combined
+---
+fixture=narrow_idle_composer_without_sidebar
+size=80x20
+
+--- text ---
+▌ Status
+▌ pevo fullscreen tui
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+│ build
+│ Ask pevo...
+│
+pevo  idle  build  mock/model  12345678  thinking=on  Ctrl+T
+Enter submit  Ctrl+J newline  Tab mode  Ctrl+B sidebar  /help
+
+--- styles ---
+[cyan]▌ Status[default]
+[cyan]▌ [dim]pevo fullscreen tui[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]────────────────────────────────────────────────────────────────────────────────
+[cyan]│[default] build
+[cyan]│[dim] Ask pevo...[default]
+[cyan]│[default]
+[magenta]pevo[default]  idle  build  mock/model  12345678  thinking=on  Ctrl+T
+[dim]Enter submit  Ctrl+J newline  Tab mode  Ctrl+B sidebar  /help

@@ -1,0 +1,58 @@
+---
+source: crates/psychevo-cli/src/tui.rs
+expression: combined
+---
+fixture=debug_meta_with_usage_metadata
+size=120x24
+
+--- text ---
+▌ Prompt
+▌ Summarize the TUI snapshot harness.
+
+▌ Thinking
+▌ Check layout boundaries, style roles, and expandable evidence.
+
+▌ Explored crates/psychevo-cli/src/tui.rs [+]
+▌ 01: crates/psychevo-cli/src/tui.rs evidence row
+▌ 02: crates/psychevo-cli/src/tui.rs evidence row
+▌ 03: crates/psychevo-cli/src/tui.rs evidence row
+▌ 04: crates/psychevo-cli/src/tui.rs evidence row
+▌ ... 20 more lines
+
+▌ The harness snapshots stable buffer text and style roles, then leaves real terminal screenshots as diagnostics.
+
+▌ Meta
+▌ mode=build  mock/mock-model  tokens=177/64000 0.3%  usage input_tokens=120 total_tokens=177  metadata
+provider_response_id=resp_snapshot
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+│ build
+│ Ask pevo...
+│
+pevo  idle  mode=build  model=mock/model  variant=high  session=12345678  thinking=on  Ctrl+T transcript
+Enter submit  Ctrl+J newline  Tab mode  Ctrl+B sidebar  Ctrl+R history  Ctrl+T transcript  /help
+
+--- styles ---
+[cyan]▌ Prompt[default]
+[cyan]▌ [default]Summarize the TUI snapshot harness.
+[default]
+[dim]▌ Thinking[default]
+[dim]▌ Check layout boundaries, style roles, and expandable evidence.[default]
+[default]
+[cyan]▌ Explored crates/psychevo-cli/src/tui.rs [+][default]
+[cyan]▌ [default]01: crates/psychevo-cli/src/tui.rs evidence row
+[cyan]▌ [default]02: crates/psychevo-cli/src/tui.rs evidence row
+[cyan]▌ [default]03: crates/psychevo-cli/src/tui.rs evidence row
+[cyan]▌ [default]04: crates/psychevo-cli/src/tui.rs evidence row
+[cyan]▌ [default]... 20 more lines
+[default]
+[magenta]▌ [default]The harness snapshots stable buffer text and style roles, then leaves real terminal screenshots as diagnostics.
+[default]
+[dim]▌ Meta[default]
+[dim]▌ mode=build  mock/mock-model  tokens=177/64000 0.3%  usage input_tokens=120 total_tokens=177  metadata[default]
+[dim]provider_response_id=resp_snapshot[default]
+[default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[cyan]│[default] build
+[cyan]│[dim] Ask pevo...[default]
+[cyan]│[default]
+[magenta]pevo[default]  idle  mode=build  model=mock/model  variant=high  session=12345678  thinking=on  Ctrl+T transcript
+[dim]Enter submit  Ctrl+J newline  Tab mode  Ctrl+B sidebar  Ctrl+R history  Ctrl+T transcript  /help

@@ -1,0 +1,58 @@
+---
+source: crates/psychevo-cli/src/tui.rs
+expression: combined
+---
+fixture=expanded_long_tool_output
+size=120x24
+
+--- text ---
+▌ Prompt                                                                      │▌ Session
+▌ Summarize the TUI snapshot harness.                                         │session: 12345678
+                                                                              │source: tui
+▌ Thinking                                                                    │
+▌ Check layout boundaries, style roles, and expandable evidence.              │▌ Context
+                                                                              │workdir: /repo/psychevo
+> Explored crates/psychevo-cli/src/tui.rs [-]                                 │branch: main
+> 01: crates/psychevo-cli/src/tui.rs evidence row                             │model: mock/mock-model
+> 02: crates/psychevo-cli/src/tui.rs evidence row                             │variant: high
+> 03: crates/psychevo-cli/src/tui.rs evidence row                             │mode: build
+> 04: crates/psychevo-cli/src/tui.rs evidence row                             │thinking: on
+> 05: crates/psychevo-cli/src/tui.rs evidence row                             │messages: 2
+> 06: crates/psychevo-cli/src/tui.rs evidence row                             │tools: 1
+> 07: crates/psychevo-cli/src/tui.rs evidence row                             │
+> 08: crates/psychevo-cli/src/tui.rs evidence row                             │▌ Modified Files
+> 09: crates/psychevo-cli/src/tui.rs evidence row                             │M crates/psychevo-cli/src/tui.rs
+> 10: crates/psychevo-cli/src/tui.rs evidence row                             │?? specs/210-pevo-tui/testing.md
+> 11: crates/psychevo-cli/src/tui.rs evidence row                             │
+──────────────────────────────────────────────────────────────────────────────│▌ Footer
+│ build                                                                       │local facts only
+│ Ask pevo...                                                                 │
+│                                                                             │
+pevo  idle  build  mock/model  12345678  thinking=on  Ctrl+T                  │
+Transcript: Up/Down select  Enter/Space expand  Esc composer                  │
+
+--- styles ---
+[cyan]▌ Prompt[default]                                                                      │[magenta]▌ Session[default]
+[cyan]▌ [default]Summarize the TUI snapshot harness.                                         │session: 12345678
+[default]                                                                              │source: tui
+[dim]▌ Thinking[default]                                                                    │
+[dim]▌ Check layout boundaries, style roles, and expandable evidence.[default]              │[cyan]▌ Context[default]
+[default]                                                                              │workdir: /repo/psychevo
+[cyan]> Explored crates/psychevo-cli/src/tui.rs [-][default]                                 │branch: main
+[cyan]> [default]01: crates/psychevo-cli/src/tui.rs evidence row                             │model: mock/mock-model
+[cyan]> [default]02: crates/psychevo-cli/src/tui.rs evidence row                             │variant: high
+[cyan]> [default]03: crates/psychevo-cli/src/tui.rs evidence row                             │mode: build
+[cyan]> [default]04: crates/psychevo-cli/src/tui.rs evidence row                             │thinking: on
+[cyan]> [default]05: crates/psychevo-cli/src/tui.rs evidence row                             │messages: 2
+[cyan]> [default]06: crates/psychevo-cli/src/tui.rs evidence row                             │tools: 1
+[cyan]> [default]07: crates/psychevo-cli/src/tui.rs evidence row                             │
+[cyan]> [default]08: crates/psychevo-cli/src/tui.rs evidence row                             │[cyan]▌ Modified Files[default]
+[cyan]> [default]09: crates/psychevo-cli/src/tui.rs evidence row                             │M crates/psychevo-cli/src/tui.rs
+[cyan]> [default]10: crates/psychevo-cli/src/tui.rs evidence row                             │?? specs/210-pevo-tui/testing.md
+[cyan]> [default]11: crates/psychevo-cli/src/tui.rs evidence row                             │
+[default]──────────────────────────────────────────────────────────────────────────────│[cyan]▌ Footer[default]
+[cyan]│[default] build                                                                       │local facts only
+[cyan]│[dim] Ask pevo...[default]                                                                 │
+[cyan]│[default]                                                                             │
+[magenta]pevo[default]  idle  build  mock/model  12345678  thinking=on  Ctrl+T                  │
+[dim]Transcript: Up/Down select  Enter/Space expand  Esc composer                  [default]│

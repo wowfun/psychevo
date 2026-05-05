@@ -1,0 +1,58 @@
+---
+source: crates/psychevo-cli/src/tui.rs
+expression: combined
+---
+fixture=wide_idle_composer_with_sidebar
+size=120x24
+
+--- text ---
+▌ Status                                                                      │▌ Session
+▌ pevo fullscreen tui                                                         │session: 12345678
+                                                                              │source: tui
+                                                                              │
+                                                                              │▌ Context
+                                                                              │workdir: /repo/psychevo
+                                                                              │branch: main
+                                                                              │model: mock/mock-model
+                                                                              │variant: high
+                                                                              │mode: build
+                                                                              │thinking: on
+                                                                              │messages: 2
+                                                                              │tools: 1
+                                                                              │
+                                                                              │▌ Modified Files
+                                                                              │M crates/psychevo-cli/src/tui.rs
+                                                                              │?? specs/210-pevo-tui/testing.md
+                                                                              │
+──────────────────────────────────────────────────────────────────────────────│▌ Footer
+│ build                                                                       │local facts only
+│ Ask pevo...                                                                 │
+│                                                                             │
+pevo  idle  build  mock/model  12345678  thinking=on  Ctrl+T                  │
+Enter submit  Ctrl+J newline  Tab mode  Ctrl+B sidebar  /help                 │
+
+--- styles ---
+[cyan]▌ Status[default]                                                                      │[magenta]▌ Session[default]
+[cyan]▌ [dim]pevo fullscreen tui[default]                                                         │session: 12345678
+[default]                                                                              │source: tui
+[default]                                                                              │
+[default]                                                                              │[cyan]▌ Context[default]
+[default]                                                                              │workdir: /repo/psychevo
+[default]                                                                              │branch: main
+[default]                                                                              │model: mock/mock-model
+[default]                                                                              │variant: high
+[default]                                                                              │mode: build
+[default]                                                                              │thinking: on
+[default]                                                                              │messages: 2
+[default]                                                                              │tools: 1
+[default]                                                                              │
+[default]                                                                              │[cyan]▌ Modified Files[default]
+[default]                                                                              │M crates/psychevo-cli/src/tui.rs
+[default]                                                                              │?? specs/210-pevo-tui/testing.md
+[default]                                                                              │
+[default]──────────────────────────────────────────────────────────────────────────────│[cyan]▌ Footer[default]
+[cyan]│[default] build                                                                       │local facts only
+[cyan]│[dim] Ask pevo...[default]                                                                 │
+[cyan]│[default]                                                                             │
+[magenta]pevo[default]  idle  build  mock/model  12345678  thinking=on  Ctrl+T                  │
+[dim]Enter submit  Ctrl+J newline  Tab mode  Ctrl+B sidebar  /help                 [default]│
