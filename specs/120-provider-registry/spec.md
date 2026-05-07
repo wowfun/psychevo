@@ -25,9 +25,9 @@ Out of scope:
   dynamic routing
 - OAuth, browser login, device code flows, auth stores, or credential refresh
 - billing, rate-limit accounting, cost catalogs, or pricing
-- Anthropic-native, Responses API, Qwen Portal, Codex, Copilot, or MCP
-  provider transports
-- auth stores, OpenCode auth file reading, credential pools, or setup commands
+- provider-native APIs outside the Chat-compatible family, hosted agent-product
+  transports, external portal transports, or tool-protocol provider transports
+- external auth file reading, credential pools, or setup commands
 
 ## Registry Contract
 
@@ -198,8 +198,8 @@ Runtime passes enabled values as a generation metadata hint to the
 Chat-compatible adapter. `none` suppresses the request field. Providers that do
 not support an enabled request field may reject the live invocation.
 
-`qwen` is an alias for the DashScope/Alibaba Chat-compatible endpoint in this
-slice. Qwen Portal OAuth is explicitly deferred.
+`qwen` is a built-in alias for a Chat-compatible endpoint in this slice.
+Browser-based portal OAuth is explicitly deferred.
 
 ## Related Topics
 

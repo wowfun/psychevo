@@ -44,7 +44,7 @@ Plan the first live-provider closure for Chat-compatible `pevo run`.
 
 ## Phase 4: CLI and Observation
 
-- Add OpenCode-style `pevo run [message..]` with `--dir`, `-m/--model`,
+- Add `pevo run [message..]` with `--dir`, `-m/--model`,
   `--variant`, `-s/--session`, `-c/--continue`, and `--format`.
 - Append non-TTY stdin to positional prompt input and reject empty prompt text
   before `agent_start`.

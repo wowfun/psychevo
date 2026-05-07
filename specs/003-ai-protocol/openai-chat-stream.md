@@ -18,8 +18,8 @@ independently numbered spec and does not define a stable public Rust API.
 
 Out of scope:
 
-- Responses API, Anthropic-native APIs, OAuth providers, Qwen Portal, model
-  catalogs, billing, or retries
+- alternate provider-specific APIs, OAuth providers, external portal auth
+  flows, model catalogs, billing, or retries
 - non-streaming whole-response generation
 - stable raw provider payload exposure
 

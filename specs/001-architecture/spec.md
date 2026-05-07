@@ -26,6 +26,21 @@ Out of scope:
 - Component specialization. Each primary architecture component owns one system-level responsibility area and must not absorb responsibilities from adjacent components.
 - Runtime is the coordination and library surface. Session coordination, agent-invocation assembly, resource surface wiring, tool surface assembly, context assembly, durable evidence, persistence, and replay wiring converge in `psychevo-runtime`; non-CLI entry points should depend on runtime libraries directly instead of routing through command-line transport.
 - Transport is replaceable. CLI parsing, terminal rendering, stdin/stdout behavior, exit codes, and environment handling must remain outside the core runtime and lower layers.
+- Large crate implementations should be organized internally by owned responsibility instead of collecting unrelated behavior in a single root source file. Root crate files may act as facades that re-export stable public surfaces while private modules keep implementation details near their owning boundary.
+
+## Internal Module Layout
+
+`psychevo-runtime` may expose public module namespaces for its runtime-owned
+responsibility areas, such as run assembly, provider configuration resolution,
+SQLite-backed state, event projection, context pruning, and built-in tool
+assembly. Root-level re-exports may preserve established caller paths while the
+module layout makes ownership boundaries explicit.
+
+`psychevo-cli` should keep process and terminal concerns in transport-owned
+modules. CLI argument parsing, environment/path setup, command handlers, and
+TUI rendering or event handling may be split into internal modules, but agent
+execution, provider behavior, resource rules, and durable persistence semantics
+must remain in lower layers.
 
 ## Primary Architecture Components
 

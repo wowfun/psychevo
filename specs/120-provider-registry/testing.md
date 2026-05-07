@@ -50,7 +50,7 @@ cargo test --workspace --all-targets -- --ignored live
 
 The first live suite covers DeepSeek and Xiaomi. It must require `PSYCHEVO_HOME`
 or explicit `PSYCHEVO_CONFIG` to point at isolated Psychevo configuration. The
-tests must not read OpenCode auth files or any other external auth store.
+tests must not read third-party auth files or any other external auth store.
 
 Each live provider test creates an isolated temporary workdir fixture, asks the
 model to use the `read` tool, and asserts:

@@ -3,7 +3,7 @@ name: 200. pevo run Attachment
 psychevo_self_edit: deny
 ---
 
-Define the OpenCode-style live coding-agent CLI entrypoint behavior for
+Define the live coding-agent CLI entrypoint behavior for
 `pevo run`.
 
 This attachment is part of [200 pevo CLI](spec.md).

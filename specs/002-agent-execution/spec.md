@@ -69,9 +69,9 @@ implementation may retain it as folded local transcript material and expose it
 through separate observation events, but reasoning-only provider progress must
 not force an otherwise empty `message_update`.
 
-`tool_execution_start`, `tool_execution_update`, and `tool_execution_end` describe tool execution through a runtime-supplied abstraction. `tool_execution_update` is optional and exists for tools that report progress.
+`tool_execution_start`, `tool_execution_update`, and `tool_execution_end` describe tool execution through a runtime-supplied abstraction. `tool_execution_start` includes the execution start timestamp reported by the local runtime clock. `tool_execution_update` is optional and exists for tools that report progress.
 
-`tool_execution_end` may expose the raw tool-result material and outcome summary needed by observers. Capability or tool specs may define structured result material, but this spec does not freeze those payload schemas.
+`tool_execution_end` may expose the raw tool-result material, elapsed execution duration, and outcome summary needed by observers. The elapsed duration covers actual tool binding execution, not time spent waiting behind other sequential tools. Capability or tool specs may define structured result material, but this spec does not freeze those payload schemas.
 
 ## Event Ordering
 

@@ -20,7 +20,7 @@ Define Psychevo's storage and persistence boundary for durable semantic facts.
 Out of scope:
 - JSONL, SQLite, tables, files, indexes, storage engines, migrations, FTS, search, query languages, pagination, or sorting except where an attachment explicitly defines an implementation slice
 - Rust APIs, SDK APIs, CLI behavior, HTTP or JSON payloads, event payloads, schemas, fields, ID formats, cursors, paths, or handles
-- replay algorithms, deterministic replay guarantees, trace formats, transcript formats, session picker behavior, branch UI, or resume commands
+- replay algorithms, deterministic replay guarantees, trace formats, transcript formats, session-selection behavior, branch UI, or resume commands
 - memory retrieval, ranking, vector stores, provider state, authentication storage, secret storage, configuration storage, or provider credential storage
 - retention policy, deletion policy, garbage collection, tombstones, redaction, privacy policy, security policy, or data governance
 
@@ -57,6 +57,11 @@ A persistence outcome is the observable success or failure of a persistence atte
 This spec does not require runtime to fail closed, retry, block, abort an agent invocation, mark an agent invocation as failed, or use ACID transactions when persistence fails. Outcome presentation and execution impact belong to runtime and interface behavior outside this spec unless another spec defines a stricter rule.
 
 The baseline is final-fact persistence. Implementations may persist intermediate updates, streaming progress, or implementation records, but this spec does not require event-by-event persistence.
+
+Per-message metadata may carry durable metric facts for the message they
+annotate. For tool-result messages, implementations may persist tool execution
+duration such as `elapsed_ms` in the message metadata so interfaces can restore
+completed tool timing without replaying live execution events.
 
 ## Retrieval Boundary
 

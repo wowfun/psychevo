@@ -73,7 +73,7 @@ Reserved command families do not define accepted arguments or behavior in this
 slice.
 
 `pevo smoke` is a deterministic development and validation harness. It keeps
-its explicit fake-provider flags and is not redesigned as an OpenCode-style
+its explicit fake-provider flags and is not redesigned as a live-provider
 product entrypoint in this topic.
 
 `pevo tui` owns interactive terminal projection. It accepts `--debug` for

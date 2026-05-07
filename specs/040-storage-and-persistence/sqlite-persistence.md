@@ -115,9 +115,10 @@ as `reasoning_content` are request projections and are not persisted as
 separate columns.
 
 `usage_json` stores normalized usage metrics when reported by a provider.
-`metadata_json` stores only allowlisted provider metadata suitable for local
-debug projection. Neither column is part of transcript content, and neither may
-be serialized into sanitized transcript messages.
+`metadata_json` stores allowlisted provider metadata suitable for local debug
+projection and local per-message metric facts such as tool-result elapsed
+duration. Neither column is part of transcript content, and neither may be
+serialized into sanitized transcript messages.
 
 Message ordering is authoritative by `(session_id, session_seq)`, not by
 timestamp. The first implementation enforces `UNIQUE(session_id, session_seq)`.

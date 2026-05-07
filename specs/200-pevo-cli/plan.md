@@ -3,7 +3,7 @@ name: 200. pevo CLI Implementation Plan
 psychevo_self_edit: deny
 ---
 
-Plan the OpenCode-style `pevo` CLI slice.
+Plan the `pevo` CLI slice.
 
 ## Phase 1: Specs
 
