@@ -5,7 +5,7 @@ use std::path::Path;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-const TUI_STATE_VERSION: u64 = 2;
+const TUI_STATE_VERSION: u64 = 3;
 const RECENT_MODEL_LIMIT: usize = 8;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -14,6 +14,8 @@ pub(crate) struct TuiState {
     pub(crate) version: u64,
     #[serde(default = "default_thinking_visible")]
     pub(crate) thinking_visible: bool,
+    #[serde(default)]
+    pub(crate) sidebar_visible: bool,
     #[serde(default)]
     pub(crate) workdirs: BTreeMap<String, TuiWorkdirState>,
     #[serde(default)]
@@ -35,6 +37,7 @@ impl Default for TuiState {
         Self {
             version: TUI_STATE_VERSION,
             thinking_visible: true,
+            sidebar_visible: false,
             workdirs: BTreeMap::new(),
             recent_models: Vec::new(),
         }
@@ -90,12 +93,22 @@ impl TuiState {
             .variant = Some(variant);
     }
 
+    pub(crate) fn clear_variant(&mut self, workdir: &str) {
+        if let Some(entry) = self.workdirs.get_mut(workdir) {
+            entry.variant = None;
+        }
+    }
+
     pub(crate) fn set_mode(&mut self, workdir: &str, mode: String) {
         self.workdirs.entry(workdir.to_string()).or_default().mode = Some(mode);
     }
 
     pub(crate) fn set_thinking_visible(&mut self, visible: bool) {
         self.thinking_visible = visible;
+    }
+
+    pub(crate) fn set_sidebar_visible(&mut self, visible: bool) {
+        self.sidebar_visible = visible;
     }
 
     fn push_recent_model(&mut self, model: String) {
@@ -131,6 +144,7 @@ mod tests {
         state.set_variant("/repo", "high".to_string());
         state.set_mode("/repo", "plan".to_string());
         state.set_thinking_visible(false);
+        state.set_sidebar_visible(true);
         state.save(&path).expect("save");
 
         let loaded = TuiState::load(&path).expect("load");
@@ -138,7 +152,19 @@ mod tests {
         assert_eq!(loaded.variant_for("/repo").as_deref(), Some("high"));
         assert_eq!(loaded.mode_for("/repo").as_deref(), Some("plan"));
         assert!(!loaded.thinking_visible);
-        assert_eq!(loaded.version, 2);
+        assert!(loaded.sidebar_visible);
+        assert_eq!(loaded.version, 3);
+    }
+
+    #[test]
+    fn state_can_clear_variant_override_without_schema_change() {
+        let mut state = TuiState::default();
+        state.set_model("/repo", "mock/model".to_string());
+        state.set_variant("/repo", "high".to_string());
+        state.clear_variant("/repo");
+
+        assert_eq!(state.model_for("/repo").as_deref(), Some("mock/model"));
+        assert_eq!(state.variant_for("/repo"), None);
     }
 
     #[test]
@@ -155,8 +181,9 @@ mod tests {
         .expect("state");
 
         let loaded = TuiState::load(&path).expect("load");
-        assert_eq!(loaded.version, 2);
+        assert_eq!(loaded.version, 3);
         assert!(loaded.thinking_visible);
+        assert!(!loaded.sidebar_visible);
         assert_eq!(loaded.recent_models.len(), 8);
     }
 }

@@ -1,22 +1,24 @@
 ---
 source: crates/psychevo-cli/src/tui.rs
+assertion_line: 5997
 expression: combined
 ---
 fixture=failure_tool_error_turn_meta
 size=120x24
 
 --- text ---
-▌ Prompt
-▌ Run a command that fails.
+› Run a command that fails.
 
-▌ Ran cargo test -p psychevo-cli
-▌ exit_code=101
-▌ compile error: fixture failure
+• Ran cargo test -p psychevo-cli
+  └ exit_code=101
+    compile error: fixture failure
 
-▌ The run failed before producing a clean validation result.
+The run failed before producing a clean validation result.
+▌ mock/mock-model  1 failure
 
-▌ Meta
-▌ mode=default  mock/mock-model  failures=1
+
+
+
 
 
 
@@ -26,23 +28,23 @@ size=120x24
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-│ Ask pevo...
-│
-│
+› Ask pevo...
+
 mock/model  high
 
 --- styles ---
-[cyan]▌ Prompt[default]
-[cyan]▌ [default]Run a command that fails.
+[dim]› [default]Run a command that fails.
 [default]
-[red]▌ Ran cargo test -p psychevo-cli[default]
-[red]▌ exit_code=101[default]
-[red]▌ compile error: fixture failure[default]
+[red]• Ran cargo test -p psychevo-cli[default]
+[dim]  └ [red]exit_code=101[default]
+[dim]    [red]compile error: fixture failure[default]
 [default]
-[magenta]▌ [default]The run failed before producing a clean validation result.
+[default]The run failed before producing a clean validation result.
+[dim]▌ mock/mock-model  1 failure[default]
 [default]
-[dim]▌ Meta[default]
-[dim]▌ mode=default  mock/mock-model  failures=1[default]
+[default]
+[default]
+[default]
 [default]
 [default]
 [default]
@@ -52,7 +54,6 @@ mock/model  high
 [default]
 [default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-[cyan]│[dim] Ask pevo...[default]
-[cyan]│[default]
-[cyan]│[default]
+[dim]›[default] [dim]Ask pevo...[default]
+[default]
 [default]mock/model  [magenta]high[default]

@@ -1,0 +1,59 @@
+---
+source: crates/psychevo-cli/src/tui.rs
+assertion_line: 5402
+expression: combined
+---
+fixture=model_bottom_panel
+size=120x24
+
+--- text ---
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  Select Model                                                                                                     esc
+  Configured local models only.
+  Search
+  mock
+  › ● mock/mock-model  mock
+  mock/other-model  mock  default high
+
+  Enter select  Esc close  Type search
+
+
+
+
+
+
+
+mock/mock-model  default
+
+--- styles ---
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[default]
+[default]  [default]Select Model[default]                                                                                                     [dim]esc[default]
+[default]  [dim]Configured local models only.[default]
+[default]  [dim]Search [default]
+[default]  [cyan]mock[default]
+[default]  [default]› ● mock/mock-model  mock[default]
+[default]  [default]mock/other-model  mock  default high[default]
+[default]
+[default]  [dim]Enter select  Esc close  Type search[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]mock/mock-model  [magenta]default[default]

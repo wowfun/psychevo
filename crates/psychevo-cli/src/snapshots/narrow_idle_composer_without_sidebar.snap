@@ -1,5 +1,6 @@
 ---
 source: crates/psychevo-cli/src/tui.rs
+assertion_line: 5997
 expression: combined
 ---
 fixture=narrow_idle_composer_without_sidebar
@@ -21,10 +22,10 @@ size=80x20
 
 
 
+
 ────────────────────────────────────────────────────────────────────────────────
-│ Ask pevo...
-│
-│
+› Ask pevo...
+
 mock/model  high
 
 --- styles ---
@@ -43,8 +44,8 @@ mock/model  high
 [default]
 [default]
 [default]
+[default]
 [default]────────────────────────────────────────────────────────────────────────────────
-[cyan]│[dim] Ask pevo...[default]
-[cyan]│[default]
-[cyan]│[default]
+[dim]›[default] [dim]Ask pevo...[default]
+[default]
 [default]mock/model  [magenta]high[default]

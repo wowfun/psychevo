@@ -6,53 +6,53 @@ fixture=wide_optional_sidebar
 size=120x24
 
 --- text ---
-                                                                              │▌ Session
-                                                                              │session: 12345678
-                                                                              │source: tui
-                                                                              │
-                                                                              │▌ Context
-                                                                              │workdir: /repo/psychevo
-                                                                              │branch: main
-                                                                              │model: mock/mock-model
-                                                                              │variant: high
-                                                                              │mode: default
-                                                                              │thinking: on
-                                                                              │messages: 2
-                                                                              │tools: 1
-                                                                              │
-                                                                              │▌ Modified Files
-                                                                              │M crates/psychevo-cli/src/tui.rs
-                                                                              │?? specs/210-pevo-tui/testing.md
-                                                                              │
-                                                                              │▌ Footer
-──────────────────────────────────────────────────────────────────────────────│local facts only
-│ Ask pevo...                                                                 │
-│                                                                             │
-│                                                                             │
-mock/model  high                                                              │
+                                                                              Review sidebar polish
+                                                                              session: 12345678
+
+                                                                              Context
+                                                                              workdir: /repo/psychevo
+                                                                              branch: main
+                                                                              messages: 2  tools: 1
+                                                                              tokens: 12,000
+                                                                              context: 18.8%
+
+                                                                              Modified Files
+                                                                              M crates/psychevo-cli/src/tui.rs
+                                                                              ?? specs/210-pevo-tui/testing.md
+
+
+
+
+
+
+
+──────────────────────────────────────────────────────────────────────────────
+› Ask pevo...
+
+mock/model  high
 
 --- styles ---
-[default]                                                                              │[magenta]▌ Session[default]
-[default]                                                                              │session: 12345678
-[default]                                                                              │source: tui
-[default]                                                                              │
-[default]                                                                              │[cyan]▌ Context[default]
-[default]                                                                              │workdir: /repo/psychevo
-[default]                                                                              │branch: main
-[default]                                                                              │model: mock/mock-model
-[default]                                                                              │variant: high
-[default]                                                                              │mode: default
-[default]                                                                              │thinking: on
-[default]                                                                              │messages: 2
-[default]                                                                              │tools: 1
-[default]                                                                              │
-[default]                                                                              │[cyan]▌ Modified Files[default]
-[default]                                                                              │M crates/psychevo-cli/src/tui.rs
-[default]                                                                              │?? specs/210-pevo-tui/testing.md
-[default]                                                                              │
-[default]                                                                              │[cyan]▌ Footer[default]
-[default]──────────────────────────────────────────────────────────────────────────────│local facts only
-[cyan]│[dim] Ask pevo...[default]                                                                 │
-[cyan]│[default]                                                                             │
-[cyan]│[default]                                                                             │
-[default]mock/model  [magenta]high[default]                                                              │
+[default]                                                                              Review sidebar polish
+[default]                                                                              session: 12345678
+[default]
+[default]                                                                              Context
+[default]                                                                              workdir: /repo/psychevo
+[default]                                                                              branch: main
+[default]                                                                              messages: 2  tools: 1
+[default]                                                                              tokens: 12,000
+[default]                                                                              context: 18.8%
+[default]
+[default]                                                                              Modified Files
+[default]                                                                              M crates/psychevo-cli/src/tui.rs
+[default]                                                                              ?? specs/210-pevo-tui/testing.md
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]──────────────────────────────────────────────────────────────────────────────
+[dim]›[default] [dim]Ask pevo...[default]
+[default]
+[default]mock/model  [magenta]high[default]

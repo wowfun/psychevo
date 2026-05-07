@@ -1,5 +1,6 @@
 ---
 source: crates/psychevo-cli/src/tui.rs
+assertion_line: 5997
 expression: combined
 ---
 fixture=slash_menu_prefix_filtering
@@ -19,16 +20,16 @@ size=120x24
 
 
 
+
+
+
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 │ commands
-│/model  show current model
-│/models  list configured models
-│/model set  persist workdir model
-│/mode  show current mode
+│> /model  select model
+│  /mode  show current mode
 │
-│/mo
-│
-│
+› /mo
+
 mock/model  high
 
 --- styles ---
@@ -45,14 +46,14 @@ mock/model  high
 [default]
 [default]
 [default]
+[default]
+[default]
+[default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [default]│ commands
-[default]│[cyan]/model[dim]  show current model[default]
-[default]│[cyan]/models[dim]  list configured models[default]
-[default]│[cyan]/model set[dim]  persist workdir model[default]
-[default]│[cyan]/mode[dim]  show current mode[default]
+[default]│[cyan]> /model[dim]  select model[default]
+[default]│[cyan]  /mode[dim]  show current mode[default]
 [default]│
-[cyan]│[default]/mo
-[cyan]│[default]
-[cyan]│[default]
+[dim]›[default] /mo
+[default]
 [default]mock/model  [magenta]high[default]

@@ -8,18 +8,15 @@ pub(crate) enum SlashCommand {
     Quit,
     Status,
     New,
-    SessionList,
-    SessionShow(Option<String>),
-    SessionSwitch(String),
+    Sessions,
     ModelShow,
-    Models,
-    ModelSet(String),
     VariantShow,
     VariantSet(String),
     ModeShow,
     ModeSet(String),
     ThinkingToggle,
     ThinkingSet(bool),
+    Rename(String),
     Upcoming(String),
 }
 
@@ -47,28 +44,13 @@ const SLASH_MENU: &[SlashMenuItem] = &[
         upcoming: false,
     },
     SlashMenuItem {
-        command: "/session list",
-        description: "list workdir sessions",
-        upcoming: false,
-    },
-    SlashMenuItem {
-        command: "/session show",
-        description: "show sanitized session transcript",
+        command: "/sessions",
+        description: "switch session",
         upcoming: false,
     },
     SlashMenuItem {
         command: "/model",
-        description: "show current model",
-        upcoming: false,
-    },
-    SlashMenuItem {
-        command: "/models",
-        description: "list configured models",
-        upcoming: false,
-    },
-    SlashMenuItem {
-        command: "/model set",
-        description: "persist workdir model",
+        description: "select model",
         upcoming: false,
     },
     SlashMenuItem {
@@ -82,8 +64,13 @@ const SLASH_MENU: &[SlashMenuItem] = &[
         upcoming: false,
     },
     SlashMenuItem {
-        command: "/thinking",
+        command: "/show-thinking",
         description: "toggle thinking visibility",
+        upcoming: false,
+    },
+    SlashMenuItem {
+        command: "/rename",
+        description: "rename current session",
         upcoming: false,
     },
     SlashMenuItem {
@@ -114,12 +101,19 @@ pub(crate) fn slash_menu_items(input: &str) -> Vec<SlashMenuItem> {
         return Vec::new();
     }
     let prefix = trimmed.to_lowercase();
-    SLASH_MENU
+    let mut items = SLASH_MENU
         .iter()
         .filter(|item| item.command.starts_with(&prefix) || prefix == "/")
         .take(8)
         .cloned()
-        .collect()
+        .collect::<Vec<_>>();
+    if prefix != "/"
+        && let Some(index) = items.iter().position(|item| item.command == prefix)
+    {
+        let exact = items.remove(index);
+        items.insert(0, exact);
+    }
+    items
 }
 
 pub(crate) fn parse_slash_command(line: &str) -> Result<Option<SlashCommand>> {
@@ -135,17 +129,22 @@ pub(crate) fn parse_slash_command(line: &str) -> Result<Option<SlashCommand>> {
         "/quit" | "/exit" | "/q" => SlashCommand::Quit,
         "/status" => SlashCommand::Status,
         "/clear" | "/new" => SlashCommand::New,
-        "/session" => parse_session_command(&rest)?,
-        "/model" => parse_model_command(&rest)?,
-        "/models" => {
+        "/sessions" | "/resume" | "/continue" => {
             if !rest.is_empty() {
-                return Err(anyhow!("/models does not accept arguments"));
+                return Err(anyhow!("{command} does not accept arguments"));
             }
-            SlashCommand::Models
+            SlashCommand::Sessions
         }
+        "/session" => {
+            return Err(anyhow!("usage: /sessions, /resume, or /continue"));
+        }
+        "/model" => parse_model_command(&rest)?,
+        "/models" => return Err(anyhow!("/models has been removed; use /model")),
         "/variant" => parse_variant_command(&rest)?,
         "/mode" => parse_mode_command(&rest)?,
-        "/thinking" => parse_thinking_command(&rest)?,
+        "/show-thinking" => parse_thinking_command(&rest)?,
+        "/thinking" => return Err(anyhow!("/thinking has been removed; use /show-thinking")),
+        "/rename" => parse_rename_command(&rest)?,
         "/undo" | "/compact" | "/export" => {
             if !rest.is_empty() {
                 return Err(anyhow!(
@@ -159,29 +158,11 @@ pub(crate) fn parse_slash_command(line: &str) -> Result<Option<SlashCommand>> {
     Ok(Some(parsed))
 }
 
-fn parse_session_command(rest: &[&str]) -> Result<SlashCommand> {
-    match rest {
-        ["list"] => Ok(SlashCommand::SessionList),
-        ["show"] => Ok(SlashCommand::SessionShow(None)),
-        ["show", id] => Ok(SlashCommand::SessionShow(Some((*id).to_string()))),
-        ["switch", id] => Ok(SlashCommand::SessionSwitch((*id).to_string())),
-        [] => Ok(SlashCommand::SessionList),
-        _ => Err(anyhow!(
-            "usage: /session list | /session show [id] | /session switch <id|prefix|latest>"
-        )),
-    }
-}
-
 fn parse_model_command(rest: &[&str]) -> Result<SlashCommand> {
     match rest {
         [] => Ok(SlashCommand::ModelShow),
-        ["set", model] => {
-            validate_model_spec(model)?;
-            Ok(SlashCommand::ModelSet((*model).to_string()))
-        }
-        _ => Err(anyhow!(
-            "usage: /model | /models | /model set <provider/model>"
-        )),
+        ["set", ..] => Err(anyhow!("/model set has been removed; use /model")),
+        _ => Err(anyhow!("usage: /model")),
     }
 }
 
@@ -212,8 +193,16 @@ fn parse_thinking_command(rest: &[&str]) -> Result<SlashCommand> {
         [] => Ok(SlashCommand::ThinkingToggle),
         ["on"] => Ok(SlashCommand::ThinkingSet(true)),
         ["off"] => Ok(SlashCommand::ThinkingSet(false)),
-        _ => Err(anyhow!("usage: /thinking [on|off]")),
+        _ => Err(anyhow!("usage: /show-thinking [on|off]")),
     }
+}
+
+fn parse_rename_command(rest: &[&str]) -> Result<SlashCommand> {
+    let title = rest.join(" ");
+    if title.trim().is_empty() {
+        return Err(anyhow!("usage: /rename <title>"));
+    }
+    Ok(SlashCommand::Rename(title))
 }
 
 pub(crate) fn validate_model_spec(value: &str) -> Result<()> {
@@ -258,14 +247,26 @@ mod tests {
     #[test]
     fn parses_session_and_model_commands() {
         assert_eq!(
-            parse_slash_command("/session switch abc").unwrap(),
-            Some(SlashCommand::SessionSwitch("abc".to_string()))
+            parse_slash_command("/sessions").unwrap(),
+            Some(SlashCommand::Sessions)
         );
         assert_eq!(
-            parse_slash_command("/model set mock/model").unwrap(),
-            Some(SlashCommand::ModelSet("mock/model".to_string()))
+            parse_slash_command("/resume").unwrap(),
+            Some(SlashCommand::Sessions)
         );
-        assert!(parse_slash_command("/model set model").is_err());
+        assert_eq!(
+            parse_slash_command("/continue").unwrap(),
+            Some(SlashCommand::Sessions)
+        );
+        assert!(parse_slash_command("/session list").is_err());
+        assert!(parse_slash_command("/session show abc").is_err());
+        assert!(parse_slash_command("/session switch abc").is_err());
+        assert_eq!(
+            parse_slash_command("/model").unwrap(),
+            Some(SlashCommand::ModelShow)
+        );
+        assert!(parse_slash_command("/model set mock/model").is_err());
+        assert!(parse_slash_command("/models").is_err());
     }
 
     #[test]
@@ -295,22 +296,39 @@ mod tests {
     #[test]
     fn parses_thinking_visibility_commands() {
         assert_eq!(
-            parse_slash_command("/thinking").unwrap(),
+            parse_slash_command("/show-thinking").unwrap(),
             Some(SlashCommand::ThinkingToggle)
         );
         assert_eq!(
-            parse_slash_command("/thinking on").unwrap(),
+            parse_slash_command("/show-thinking on").unwrap(),
             Some(SlashCommand::ThinkingSet(true))
         );
         assert_eq!(
-            parse_slash_command("/thinking off").unwrap(),
+            parse_slash_command("/show-thinking off").unwrap(),
             Some(SlashCommand::ThinkingSet(false))
         );
-        assert!(parse_slash_command("/thinking maybe").is_err());
+        assert!(parse_slash_command("/show-thinking maybe").is_err());
+        assert!(parse_slash_command("/thinking").is_err());
+    }
+
+    #[test]
+    fn parses_session_rename_command() {
+        assert_eq!(
+            parse_slash_command("/rename My session").unwrap(),
+            Some(SlashCommand::Rename("My session".to_string()))
+        );
+        assert!(parse_slash_command("/rename").is_err());
     }
 
     #[test]
     fn slash_menu_filters_and_marks_upcoming() {
+        assert_eq!(slash_menu_items("/session").len(), 1);
+        assert_eq!(slash_menu_items("/session")[0].command, "/sessions");
+        assert!(slash_menu_items("/session ").is_empty());
+        assert_eq!(slash_menu_items("/model").len(), 1);
+        assert_eq!(slash_menu_items("/model")[0].command, "/model");
+        let mode = slash_menu_items("/mode");
+        assert_eq!(mode[0].command, "/mode");
         let undo = slash_menu_items("/un");
         assert_eq!(undo.len(), 1);
         assert_eq!(undo[0].command, "/undo");

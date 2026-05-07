@@ -1,5 +1,3 @@
-use std::fmt::Write as _;
-
 use crossterm::style::Stylize;
 use serde_json::Value;
 
@@ -136,67 +134,6 @@ pub(crate) fn format_session_line(
 ) -> String {
     let short = &id[..id.len().min(8)];
     format!("{short} {source} {provider}/{model} messages={messages}")
-}
-
-pub(crate) fn format_sanitized_message(value: &Value) -> String {
-    let role = value
-        .get("role")
-        .and_then(Value::as_str)
-        .unwrap_or("message");
-    let mut out = String::new();
-    let _ = write!(out, "{role}: ");
-    match role {
-        "user" => {
-            let text = value
-                .get("content")
-                .and_then(Value::as_array)
-                .map(|content| {
-                    content
-                        .iter()
-                        .filter_map(|block| block.get("text").and_then(Value::as_str))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                })
-                .unwrap_or_default();
-            out.push_str(&truncate_inline(&text, 220));
-        }
-        "assistant" => {
-            let text = assistant_text_from_message(value);
-            if text.is_empty() {
-                out.push_str("[tool call]");
-            } else {
-                out.push_str(&truncate_inline(&text, 220));
-            }
-        }
-        "tool_result" => {
-            let tool = value
-                .get("tool_name")
-                .and_then(Value::as_str)
-                .unwrap_or("tool");
-            let content = value.get("content").and_then(Value::as_str).unwrap_or("");
-            let _ = write!(out, "{tool} {}", truncate_inline(content, 180));
-        }
-        _ => {}
-    }
-    out
-}
-
-fn assistant_text_from_message(message: &Value) -> String {
-    message
-        .get("content")
-        .and_then(Value::as_array)
-        .map(|content| {
-            content
-                .iter()
-                .filter_map(|block| {
-                    (block.get("type").and_then(Value::as_str) == Some("text"))
-                        .then(|| block.get("text").and_then(Value::as_str))
-                        .flatten()
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        })
-        .unwrap_or_default()
 }
 
 fn truncate_inline(input: &str, max_chars: usize) -> String {

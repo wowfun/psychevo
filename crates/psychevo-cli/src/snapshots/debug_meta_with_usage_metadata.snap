@@ -1,58 +1,59 @@
 ---
 source: crates/psychevo-cli/src/tui.rs
+assertion_line: 5997
 expression: combined
 ---
 fixture=debug_meta_with_usage_metadata
 size=120x24
 
 --- text ---
-▌ Prompt
-▌ Summarize the TUI snapshot harness.
+› Summarize the TUI snapshot harness.
 
-▌ Thinking
-▌ Check layout boundaries, style roles, and expandable evidence.
+▌ Thinking: Check layout boundaries, style roles, and expandable evidence.
 
-▌ Explored crates/psychevo-cli/src/tui.rs [+]
-▌ 01: crates/psychevo-cli/src/tui.rs evidence row
-▌ 02: crates/psychevo-cli/src/tui.rs evidence row
-▌ 03: crates/psychevo-cli/src/tui.rs evidence row
-▌ 04: crates/psychevo-cli/src/tui.rs evidence row
-▌ ... 20 more lines
+• Explored crates/psychevo-cli/src/tui.rs [+]
+  └ 01: crates/psychevo-cli/src/tui.rs evidence row
+    02: crates/psychevo-cli/src/tui.rs evidence row
+    03: crates/psychevo-cli/src/tui.rs evidence row
+    04: crates/psychevo-cli/src/tui.rs evidence row
+    ... 20 more lines
 
-▌ The harness snapshots stable buffer text and style roles, then leaves real terminal screenshots as diagnostics.
+The harness snapshots stable buffer text and style roles, then leaves real terminal screenshots as diagnostics.
+▌ mock/mock-model  usage 120 input  metadata response resp_snapshot
 
-▌ Meta
-▌ mode=default  mock/mock-model  tokens=177/64000 0.3%  usage input_tokens=120 total_tokens=177  metadata
-provider_response_id=resp_snapshot
+
+
+
+
+
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-│ Ask pevo...
-│
-│
+› Ask pevo...
+
 mock/model  high
 
 --- styles ---
-[cyan]▌ Prompt[default]
-[cyan]▌ [default]Summarize the TUI snapshot harness.
+[dim]› [default]Summarize the TUI snapshot harness.
 [default]
-[dim]▌ Thinking[default]
-[dim]▌ Check layout boundaries, style roles, and expandable evidence.[default]
+[dim]▌ [paper]Thinking: [dim]Check layout boundaries, style roles, and expandable evidence.[default]
 [default]
-[cyan]▌ Explored crates/psychevo-cli/src/tui.rs [+][default]
-[cyan]▌ [default]01: crates/psychevo-cli/src/tui.rs evidence row
-[cyan]▌ [default]02: crates/psychevo-cli/src/tui.rs evidence row
-[cyan]▌ [default]03: crates/psychevo-cli/src/tui.rs evidence row
-[cyan]▌ [default]04: crates/psychevo-cli/src/tui.rs evidence row
-[cyan]▌ [default]... 20 more lines
+[green]• [default]Explored crates/psychevo-cli/src/tui.rs [+]
+[dim]  └ [default]01: crates/psychevo-cli/src/tui.rs evidence row
+[dim]    [default]02: crates/psychevo-cli/src/tui.rs evidence row
+[dim]    [default]03: crates/psychevo-cli/src/tui.rs evidence row
+[dim]    [default]04: crates/psychevo-cli/src/tui.rs evidence row
+[dim]    [default]... 20 more lines
 [default]
-[magenta]▌ [default]The harness snapshots stable buffer text and style roles, then leaves real terminal screenshots as diagnostics.
+[default]The harness snapshots stable buffer text and style roles, then leaves real terminal screenshots as diagnostics.
+[dim]▌ mock/mock-model  usage 120 input  metadata response resp_snapshot[default]
 [default]
-[dim]▌ Meta[default]
-[dim]▌ mode=default  mock/mock-model  tokens=177/64000 0.3%  usage input_tokens=120 total_tokens=177  metadata[default]
-[dim]provider_response_id=resp_snapshot[default]
+[default]
+[default]
+[default]
+[default]
+[default]
 [default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-[cyan]│[dim] Ask pevo...[default]
-[cyan]│[default]
-[cyan]│[default]
+[dim]›[default] [dim]Ask pevo...[default]
+[default]
 [default]mock/model  [magenta]high[default]

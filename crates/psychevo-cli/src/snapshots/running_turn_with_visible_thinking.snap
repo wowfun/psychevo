@@ -1,19 +1,21 @@
 ---
 source: crates/psychevo-cli/src/tui.rs
+assertion_line: 5997
 expression: combined
 ---
 fixture=running_turn_with_visible_thinking
 size=120x24
 
 --- text ---
-▌ Prompt
-▌ Inspect the CLI rendering path.
+› Inspect the CLI rendering path.
 
-▌ Thinking
-▌ Read the TUI renderer and identify stable evidence blocks.
+▌ Thinking: Read the TUI renderer and identify stable evidence blocks.
 
-▌ Explored crates/psychevo-cli/src/tui.rs
-▌ running
+• Explored crates/psychevo-cli/src/tui.rs
+  └ running
+
+
+
 
 
 
@@ -26,20 +28,20 @@ size=120x24
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-│ Ask pevo...
-│
-│
+› Ask pevo...
+
 mock/model  high
 
 --- styles ---
-[cyan]▌ Prompt[default]
-[cyan]▌ [default]Inspect the CLI rendering path.
+[dim]› [default]Inspect the CLI rendering path.
 [default]
-[dim]▌ Thinking[default]
-[dim]▌ Read the TUI renderer and identify stable evidence blocks.[default]
+[dim]▌ [paper]Thinking: [dim]Read the TUI renderer and identify stable evidence blocks.[default]
 [default]
-[cyan]▌ Explored crates/psychevo-cli/src/tui.rs[default]
-[cyan]▌ [default]running
+[green]• [default]Explored crates/psychevo-cli/src/tui.rs
+[dim]  └ [default]running
+[default]
+[default]
+[default]
 [default]
 [default]
 [default]
@@ -52,7 +54,6 @@ mock/model  high
 [default]
 [default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-[cyan]│[dim] Ask pevo...[default]
-[cyan]│[default]
-[cyan]│[default]
+[dim]›[default] [dim]Ask pevo...[default]
+[default]
 [default]mock/model  [magenta]high[default]

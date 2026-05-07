@@ -144,7 +144,7 @@ fn sse_reasoning_then_text(reasoning: &str, text: &str) -> String {
 
 fn sse_metadata_usage_then_text(text: &str) -> String {
     format!(
-        "data: {{\"id\":\"resp_1\",\"model\":\"mock-model\",\"choices\":[],\"usage\":{{\"total_tokens\":7}}}}\n\n\
+        "data: {{\"id\":\"resp_1\",\"model\":\"mock-model\",\"choices\":[],\"usage\":{{\"prompt_tokens\":3,\"completion_tokens\":4,\"total_tokens\":7}}}}\n\n\
          data: {{\"id\":\"resp_1\",\"model\":\"mock-model\",\"choices\":[{{\"delta\":{{\"content\":{}}},\"finish_reason\":\"stop\"}}]}}\n\n\
          data: [DONE]\n\n",
         serde_json::to_string(text).expect("text")
@@ -407,6 +407,15 @@ fn cli_run_positional_prompt_outputs_final_answer_and_persists_metadata() {
     assert_eq!(source, "run");
     assert_eq!(provider, "mock");
     assert_eq!(model, "mock-model");
+    let metadata_json: String = conn
+        .query_row(
+            "SELECT metadata_json FROM messages WHERE role = 'assistant'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("metadata");
+    let metadata: Value = serde_json::from_str(&metadata_json).expect("metadata json");
+    assert!(metadata["elapsed_ms"].as_u64().is_some());
 }
 
 #[test]
@@ -1043,8 +1052,10 @@ fn cli_tui_debug_shows_usage_metadata_summary() {
     assert!(stdout.contains("Answer:"));
     assert!(stdout.contains("debug metrics"));
     assert!(stdout.contains("Meta:"));
-    assert!(stdout.contains("usage total_tokens=7"));
-    assert!(stdout.contains("provider_response_id=resp_1"));
+    assert!(stdout.contains("usage 3 input 4 output"));
+    assert!(stdout.contains("response resp_1"));
+    assert!(!stdout.contains("total_tokens="));
+    assert!(!stdout.contains("provider_response_id="));
 }
 
 #[test]
@@ -1067,7 +1078,7 @@ fn cli_tui_thinking_toggle_hides_reasoning_and_persists() {
         .stdin
         .as_mut()
         .expect("stdin")
-        .write_all(b"/thinking off\nhello\n/quit\n")
+        .write_all(b"/show-thinking off\nhello\n/quit\n")
         .expect("write stdin");
     let output = child.wait_with_output().expect("output");
     assert!(
@@ -1077,7 +1088,7 @@ fn cli_tui_thinking_toggle_hides_reasoning_and_persists() {
     );
     let stdout = String::from_utf8(output.stdout).expect("stdout");
     assert!(stdout.contains("thinking: off"));
-    assert!(stdout.contains("Thinking: hidden"));
+    assert!(!stdout.contains("Thinking: hidden"));
     assert!(!stdout.contains("debug chain"));
     assert!(stdout.contains("visible tui"));
 
@@ -1086,13 +1097,16 @@ fn cli_tui_thinking_toggle_hides_reasoning_and_persists() {
 }
 
 #[test]
-fn cli_tui_model_set_persists_state_and_affects_later_turns() {
-    let server = MockSseServer::start(vec![sse_text("model switched")]);
+fn cli_tui_status_shows_configured_default_variant() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
     let workdir = temp.path().join("work");
-    let config = write_multi_model_config(&temp.path().join("config"), &server.base_url);
+    let config = write_run_config_with_reasoning(
+        &temp.path().join("config"),
+        "http://127.0.0.1:9",
+        Some("xhigh"),
+    );
 
     let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
         .args(["tui", "--dir", workdir.to_str().expect("workdir")])
@@ -1105,7 +1119,7 @@ fn cli_tui_model_set_persists_state_and_affects_later_turns() {
         .stdin
         .as_mut()
         .expect("stdin")
-        .write_all(b"/model set mock/other-model\nhello\n/quit\n")
+        .write_all(b"/status\n/quit\n")
         .expect("write stdin");
     let output = child.wait_with_output().expect("output");
     assert!(
@@ -1114,14 +1128,39 @@ fn cli_tui_model_set_persists_state_and_affects_later_turns() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8(output.stdout).expect("stdout");
-    assert!(stdout.contains("model: mock/other-model"));
-    assert!(stdout.contains("model switched"));
+    assert!(stdout.contains("model: mock/mock-model"));
+    assert!(stdout.contains("variant: xhigh"));
+}
 
-    let state = std::fs::read_to_string(home.join("tui-state.json")).expect("state");
-    assert!(state.contains("mock/other-model"));
-    let request = server.request_json(0);
-    assert_eq!(request["model"], "other-model");
-    assert_eq!(request["reasoning_effort"], "high");
+#[test]
+fn cli_tui_new_is_silent_until_next_prompt() {
+    let temp = tempdir().expect("temp");
+    let home = init_tui_home(temp.path());
+    let db = temp.path().join("state.db");
+    let workdir = temp.path().join("work");
+    let config = write_run_config(&temp.path().join("config"), "http://127.0.0.1:9");
+
+    let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
+        .args(["tui", "--dir", workdir.to_str().expect("workdir")])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin")
+        .write_all(b"/new\n/quit\n")
+        .expect("write stdin");
+    let output = child.wait_with_output().expect("output");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+    assert!(!stdout.contains("new session will start on next prompt"));
 }
 
 #[test]
@@ -1187,7 +1226,7 @@ fn cli_tui_mode_set_plan_persists_and_uses_read_only_tools() {
 }
 
 #[test]
-fn cli_tui_models_lists_configured_entries_without_prompt() {
+fn cli_tui_model_lists_configured_entries_without_prompt() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
@@ -1205,7 +1244,7 @@ fn cli_tui_models_lists_configured_entries_without_prompt() {
         .stdin
         .as_mut()
         .expect("stdin")
-        .write_all(b"/models\n/quit\n")
+        .write_all(b"/model\n/quit\n")
         .expect("write stdin");
     let output = child.wait_with_output().expect("output");
     assert!(
@@ -1292,7 +1331,7 @@ fn cli_tui_continues_latest_run_or_tui_session_and_new_creates_tui_session() {
 }
 
 #[test]
-fn cli_tui_session_show_uses_sanitized_transcript() {
+fn cli_tui_sessions_lists_sessions_and_session_show_is_removed() {
     let server = MockSseServer::start(vec![sse_reasoning_then_text("hidden chain", "visible")]);
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
@@ -1321,7 +1360,52 @@ fn cli_tui_session_show_uses_sanitized_transcript() {
         .stdin
         .as_mut()
         .expect("stdin")
-        .write_all(b"/session show latest\n/quit\n")
+        .write_all(b"/sessions\n/session show latest\n/quit\n")
+        .expect("write stdin");
+    let output = child.wait_with_output().expect("output");
+    assert!(
+        !output.status.success(),
+        "stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr = String::from_utf8(output.stderr).expect("stderr");
+    assert!(stderr.contains("usage: /sessions, /resume, or /continue"));
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+    assert!(stdout.contains("mock/mock-model"));
+    assert!(!stdout.contains("hidden chain"));
+}
+
+#[test]
+fn cli_tui_sessions_scripted_fallback_lists_sessions() {
+    let server = MockSseServer::start(vec![sse_reasoning_then_text("hidden chain", "visible")]);
+    let temp = tempdir().expect("temp");
+    let home = init_tui_home(temp.path());
+    let db = temp.path().join("state.db");
+    let workdir = temp.path().join("work");
+    let config = write_run_config(&temp.path().join("config"), &server.base_url);
+
+    let first = isolated_tui_cmd(temp.path(), &home, &config, &db)
+        .args(["tui", "--dir", workdir.to_str().expect("workdir"), "hello"])
+        .output()
+        .expect("pevo tui");
+    assert!(
+        first.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+
+    let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
+        .args(["tui", "--dir", workdir.to_str().expect("workdir")])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin")
+        .write_all(b"/sessions\n/quit\n")
         .expect("write stdin");
     let output = child.wait_with_output().expect("output");
     assert!(
@@ -1330,6 +1414,6 @@ fn cli_tui_session_show_uses_sanitized_transcript() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8(output.stdout).expect("stdout");
-    assert!(stdout.contains("assistant: visible"));
+    assert!(stdout.contains("mock/mock-model"));
     assert!(!stdout.contains("hidden chain"));
 }
