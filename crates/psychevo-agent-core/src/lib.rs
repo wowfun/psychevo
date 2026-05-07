@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use futures::StreamExt;
 use futures::future::{BoxFuture, join_all};
@@ -168,6 +168,7 @@ pub enum AgentEvent {
         tool_call_id: String,
         tool_name: String,
         args: Value,
+        started_at_ms: i64,
     },
     ToolExecutionUpdate {
         tool_call_id: String,
@@ -179,6 +180,7 @@ pub enum AgentEvent {
         tool_name: String,
         result: Value,
         outcome: Outcome,
+        elapsed_ms: u64,
     },
 }
 
@@ -853,18 +855,6 @@ async fn execute_tool_batch(
             .is_none_or(|tool| tool.execution_mode() == ToolExecutionMode::Sequential)
     });
 
-    for call in tool_calls {
-        emit(
-            &sink,
-            AgentEvent::ToolExecutionStart {
-                tool_call_id: call.id.clone(),
-                tool_name: call.name.clone(),
-                args: call.arguments.clone(),
-            },
-        )
-        .await?;
-    }
-
     let outputs = if has_sequential {
         let mut outputs = Vec::new();
         for call in tool_calls {
@@ -898,6 +888,18 @@ async fn execute_one_tool(
     sink: Arc<dyn EventSink>,
     abort: AbortSignal,
 ) -> Result<(ToolCallBlock, ToolOutput)> {
+    let started_at_ms = now_ms();
+    let started = Instant::now();
+    emit(
+        &sink,
+        AgentEvent::ToolExecutionStart {
+            tool_call_id: call.id.clone(),
+            tool_name: call.name.clone(),
+            args: call.arguments.clone(),
+            started_at_ms,
+        },
+    )
+    .await?;
     let output = if let Some(err) = &call.arguments_error {
         ToolOutput::error(format!("invalid tool arguments JSON: {err}"))
     } else if let Some(tool) = tools.iter().find(|tool| tool.name() == call.name) {
@@ -918,6 +920,7 @@ async fn execute_one_tool(
             tool_name: call.name.clone(),
             result: output.json.clone(),
             outcome,
+            elapsed_ms: duration_ms_u64(started.elapsed()),
         },
     )
     .await?;
@@ -947,6 +950,10 @@ pub fn now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
+}
+
+fn duration_ms_u64(duration: Duration) -> u64 {
+    duration.as_millis().min(u128::from(u64::MAX)) as u64
 }
 
 pub struct NoopEventSink;

@@ -62,6 +62,35 @@ impl ToolBinding for DelayTool {
     }
 }
 
+struct SequentialDelayTool;
+
+impl ToolBinding for SequentialDelayTool {
+    fn name(&self) -> &str {
+        "read"
+    }
+
+    fn description(&self) -> &str {
+        "test sequential delay"
+    }
+
+    fn parameters(&self) -> Value {
+        json!({})
+    }
+
+    fn execution_mode(&self) -> ToolExecutionMode {
+        ToolExecutionMode::Sequential
+    }
+
+    fn execute(
+        &self,
+        tool_call_id: String,
+        args: Value,
+        abort: AbortSignal,
+    ) -> BoxFuture<'static, ToolOutput> {
+        DelayTool.execute(tool_call_id, args, abort)
+    }
+}
+
 fn tool_script() -> Vec<Vec<RawStreamEvent>> {
     vec![
         vec![
@@ -102,6 +131,123 @@ fn tool_script() -> Vec<Vec<RawStreamEvent>> {
             RawStreamEvent::Done(Outcome::Normal),
         ],
     ]
+}
+
+#[tokio::test]
+async fn tool_execution_events_include_timing_fields() {
+    let provider = Arc::new(FakeProvider::new(vec![
+        vec![
+            RawStreamEvent::ToolStart {
+                content_index: 0,
+                call_index: 0,
+                id: "timed".to_string(),
+                name: "read".to_string(),
+            },
+            RawStreamEvent::ToolArgs {
+                content_index: 0,
+                call_index: 0,
+                delta: "{\"delay\":5}".to_string(),
+            },
+            RawStreamEvent::ToolEnd {
+                content_index: 0,
+                call_index: 0,
+            },
+            RawStreamEvent::Done(Outcome::Normal),
+        ],
+        vec![
+            RawStreamEvent::Text("done".to_string()),
+            RawStreamEvent::Done(Outcome::Normal),
+        ],
+    ]));
+    let sink = RecordingSink::default();
+    let events = Arc::clone(&sink.events);
+    let (_control, receivers) = ControlHandle::new();
+    run_agent_loop(
+        provider,
+        AgentLoopRequest {
+            model_provider: "fake".to_string(),
+            model: "fake".to_string(),
+            generation_metadata: json!({}),
+            system_instructions: Vec::new(),
+            previous_messages: vec![],
+            prompt_messages: vec![user_text_message("run")],
+            tools: vec![Arc::new(DelayTool)],
+            max_turns: 4,
+        },
+        Arc::new(sink),
+        receivers,
+    )
+    .await
+    .expect("loop");
+
+    let guard = events.lock().expect("events");
+    let started_at_ms = guard
+        .iter()
+        .find_map(|event| match event {
+            AgentEvent::ToolExecutionStart {
+                tool_call_id,
+                started_at_ms,
+                ..
+            } if tool_call_id == "timed" => Some(*started_at_ms),
+            _ => None,
+        })
+        .expect("tool start");
+    let elapsed_ms = guard
+        .iter()
+        .find_map(|event| match event {
+            AgentEvent::ToolExecutionEnd {
+                tool_call_id,
+                elapsed_ms,
+                ..
+            } if tool_call_id == "timed" => Some(*elapsed_ms),
+            _ => None,
+        })
+        .expect("tool end");
+    assert!(started_at_ms > 0);
+    assert!(elapsed_ms > 0);
+}
+
+#[tokio::test]
+async fn sequential_tool_elapsed_excludes_queue_time() {
+    let provider = Arc::new(FakeProvider::new(tool_script()));
+    let sink = RecordingSink::default();
+    let events = Arc::clone(&sink.events);
+    let (_control, receivers) = ControlHandle::new();
+    run_agent_loop(
+        provider,
+        AgentLoopRequest {
+            model_provider: "fake".to_string(),
+            model: "fake".to_string(),
+            generation_metadata: json!({}),
+            system_instructions: Vec::new(),
+            previous_messages: vec![],
+            prompt_messages: vec![user_text_message("run")],
+            tools: vec![Arc::new(SequentialDelayTool)],
+            max_turns: 4,
+        },
+        Arc::new(sink),
+        receivers,
+    )
+    .await
+    .expect("loop");
+
+    let guard = events.lock().expect("events");
+    let elapsed_for = |id: &str| {
+        guard
+            .iter()
+            .find_map(|event| match event {
+                AgentEvent::ToolExecutionEnd {
+                    tool_call_id,
+                    elapsed_ms,
+                    ..
+                } if tool_call_id == id => Some(*elapsed_ms),
+                _ => None,
+            })
+            .expect("tool end")
+    };
+    let slow_elapsed = elapsed_for("slow");
+    let fast_elapsed = elapsed_for("fast");
+    assert!(fast_elapsed < slow_elapsed);
 }
 
 #[tokio::test]
