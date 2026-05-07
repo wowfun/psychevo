@@ -122,7 +122,18 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("cache-control", "no-cache")
         self.end_headers()
 
-        if Handler.request_count == 1:
+        if "Title this user request" in body or "Generate a concise title" in body:
+            self.send_event({
+                "id": "resp_tui_capture_title",
+                "model": "mock-model",
+                "choices": [{
+                    "delta": {
+                        "content": "Inspect Fixture Ledger"
+                    },
+                    "finish_reason": "stop"
+                }]
+            }, delay=0.1)
+        elif Handler.request_count == 1:
             self.send_event({
                 "id": "resp_tui_capture_1",
                 "model": "mock-model",
@@ -229,16 +240,20 @@ Env TEST_PROVIDER_KEY "test-key"
 Type $(json_quote "$pevo_cmd")
 Enter
 Wait+Screen /Ask pevo|pevo/
-Type "/mo"
+Type "/model"
+Enter
+Wait+Screen /Select Model/
 Sleep 500 ms
-Screenshot $(json_quote "$out_dir/01-idle-slash.png")
-Backspace 3
+Screenshot $(json_quote "$out_dir/01-model-picker.png")
+Escape
 Type "Inspect the snapshot harness and read fixture.txt"
 Enter
 Wait+Screen /Thinking|Inspecting fixture|Preparing a read tool call/
 Sleep 200 ms
 Screenshot $(json_quote "$out_dir/02-running-thinking.png")
 Wait+Screen /SNAPSHOT_DEMO_FINAL/
+Sleep 300 ms
+Ctrl+B
 Sleep 300 ms
 Screenshot $(json_quote "$out_dir/03-final-ledger.png")
 Sleep 200 ms
@@ -249,7 +264,7 @@ EOF
 check_demo_artifacts() {
   local out_dir="$1"
   local missing=()
-  for file in 01-idle-slash.png 02-running-thinking.png 03-final-ledger.png; do
+  for file in 01-model-picker.png 02-running-thinking.png 03-final-ledger.png; do
     if [[ ! -s "$out_dir/$file" ]]; then
       missing+=("$file")
     fi
@@ -312,6 +327,10 @@ EOF
         "mock-model": {
           "reasoning_effort": "high",
           "context_limit": 64000
+        },
+        "other-model": {
+          "reasoning_effort": "medium",
+          "context_limit": 32000
         }
       }
     }
