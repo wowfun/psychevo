@@ -1,10 +1,36 @@
 # Changelog
 
+## 2026-05-07
+
+### Changed
+
+- Split `psychevo-runtime` and `psychevo-cli` internals into focused Rust
+  modules while preserving the existing runtime re-exports and `pevo` behavior.
+- Added tool-call timing to runtime streams and persistence, with TUI evidence
+  rows that keep actual `bash` titles and stable live/completed durations.
+- Tightened fullscreen TUI session, sidebar, history, `/new`, title-generation,
+  and wide-character picker behavior.
+- Improved fullscreen TUI text selection and clipboard handling from rendered
+  transcript/sidebar rows, including active highlights and Linux fallbacks.
+
+## 2026-05-06
+
+### Changed
+
+- Reworked fullscreen `pevo tui` session/model flows around searchable bottom
+  panes, session titles, `/rename`, `/show-thinking`, and removed commands.
+- Refined TUI ledger rendering, sidebar/composer chrome, prompt surfaces,
+  visible thinking, metadata, usage/context display, and visual snapshots.
+- Improved fullscreen TUI keyboard, mouse, auto-follow, long-output, and
+  selected-text copy behavior across transcript, sidebar, and slash menus.
+- Required VHS screenshot review for fullscreen TUI visual display changes,
+  backed by deterministic local capture artifacts.
+
 ## 2026-05-04
 
 ### Added
 
-- Added `pevo init` and OpenCode-style `pevo run [message..]` with JSONC provider config, `.env` loading, SQLite state, JSON/default output, `--variant`, and `--continue`.
+- Added `pevo init` and `pevo run [message..]` with JSONC provider config, `.env` loading, SQLite state, JSON/default output, `--variant`, and `--continue`.
 - Added live-provider specs and deterministic mock SSE/CLI coverage for prompts, tool calls, JSON errors, removed flags, session continuation, plus ignored live-provider tests.
 - Added folded local reasoning blocks, opt-in JSON reasoning events, `pevo init --reset-state`, and repo-local live dev tooling.
 - Added fullscreen `pevo tui` with evidence-ledger turns, composer/sidebar, persistent TUI state, slash commands, `--debug`, transcript/tool expansion, and non-TTY scripted mode.
