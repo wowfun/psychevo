@@ -433,6 +433,32 @@ fn turn_meta_prefers_completed_elapsed_metadata() {
 }
 
 #[test]
+fn turn_meta_places_variant_after_model_and_filters_debug_duplicate() {
+    let metadata = serde_json::json!({
+        "elapsed_ms": 120,
+        "reasoning_effort": "high",
+        "provider_response_id": "resp"
+    });
+    let usage = serde_json::json!({"input_tokens": 2});
+
+    let meta = turn_meta_text(TurnMetaProjection {
+        mode: "plan",
+        provider: "provider",
+        model: "model",
+        started: None,
+        usage: Some(&usage),
+        metadata: Some(&metadata),
+        failures: 1,
+        debug: true,
+    });
+
+    assert_eq!(
+        meta,
+        "provider/model high  0.1s  1 failure  usage 2 input  metadata response resp  plan"
+    );
+}
+
+#[test]
 fn slash_completion_completes_command_prefixes() {
     assert_eq!(slash_completion("/he").as_deref(), Some("/help"));
     assert_eq!(slash_completion("/mo").as_deref(), Some("/mode"));
@@ -1572,6 +1598,39 @@ fn history_tool_result_restores_elapsed_duration() {
 }
 
 #[test]
+fn history_meta_uses_persisted_variant_not_current_variant() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    app.current_variant = Some("xhigh".to_string());
+    let mut ui = FullscreenUi::new(&app);
+
+    ui.push_history_message(
+        &serde_json::json!({
+            "role": "assistant",
+            "content": [{"type": "text", "text": "answer"}],
+            "timestamp_ms": 2,
+            "finish_reason": "stop",
+            "outcome": "normal",
+            "model": "mock-model",
+            "provider": "mock"
+        }),
+        None,
+        Some(&serde_json::json!({
+            "elapsed_ms": 230,
+            "reasoning_effort": "high"
+        })),
+    );
+
+    let row = ui
+        .transcript
+        .iter()
+        .find(|row| row.kind == TranscriptKind::Meta)
+        .expect("meta row");
+    assert_eq!(row.text, "mock/mock-model high  0.2s");
+    assert!(!row.text.contains("xhigh"));
+}
+
+#[test]
 fn prompt_block_uses_full_width_background_without_left_rail() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
@@ -2704,11 +2763,15 @@ fn push_completed_turn(ui: &mut FullscreenUi<'_>, kind: FixtureKind) {
     };
     let metadata = if debug {
         serde_json::json!({
-            "provider_response_id": "resp_snapshot"
+            "elapsed_ms": 2500,
+            "provider_response_id": "resp_snapshot",
+            "reasoning_effort": "high"
         })
     } else {
         serde_json::json!({
+            "elapsed_ms": 2500,
             "provider_response_id": "resp_snapshot",
+            "reasoning_effort": "high",
             "system_fingerprint": "fp_mock"
         })
     };

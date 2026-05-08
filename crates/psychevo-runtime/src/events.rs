@@ -6,7 +6,9 @@ use futures::future::BoxFuture;
 use psychevo_agent_core::{AgentEvent, ControlHandle, EventSink, Message, Result as CoreResult};
 use serde_json::{Value, json};
 
-use crate::messages::{add_elapsed_metadata, add_elapsed_ms_metadata, sanitize_message_for_output};
+use crate::messages::{
+    add_assistant_metadata, add_elapsed_ms_metadata, sanitize_message_for_output,
+};
 use crate::store::SqliteStore;
 use crate::types::{RunStreamEvent, RunStreamSink, SmokeControl};
 
@@ -22,6 +24,7 @@ pub(crate) struct PersistenceSink {
     pub(crate) events: Option<Arc<Mutex<Vec<Value>>>>,
     pub(crate) stream_events: Option<RunStreamSink>,
     pub(crate) include_reasoning: bool,
+    pub(crate) reasoning_effort: Option<String>,
 }
 
 impl EventSink for PersistenceSink {
@@ -35,6 +38,7 @@ impl EventSink for PersistenceSink {
         let events = self.events.clone();
         let stream_events = self.stream_events.clone();
         let include_reasoning = self.include_reasoning;
+        let reasoning_effort = self.reasoning_effort.clone();
         let started = self.started;
         let tool_elapsed_ms = Arc::clone(&self.tool_elapsed_ms);
         Box::pin(async move {
@@ -50,7 +54,12 @@ impl EventSink for PersistenceSink {
                     .expect("tool elapsed lock poisoned")
                     .insert(tool_call_id.clone(), *elapsed_ms);
             }
-            let event = annotate_sink_event(event, elapsed, &tool_elapsed_ms);
+            let event = annotate_sink_event(
+                event,
+                elapsed,
+                &tool_elapsed_ms,
+                reasoning_effort.as_deref(),
+            );
             if let Some(events) = events
                 && let Some(value) = project_agent_event(&event, include_reasoning)
             {
@@ -125,6 +134,7 @@ fn annotate_sink_event(
     event: AgentEvent,
     elapsed: Duration,
     tool_elapsed_ms: &Arc<Mutex<BTreeMap<String, u64>>>,
+    reasoning_effort: Option<&str>,
 ) -> AgentEvent {
     match event {
         AgentEvent::MessageEnd {
@@ -133,7 +143,9 @@ fn annotate_sink_event(
             metadata,
         } => {
             let metadata = match &message {
-                Message::Assistant { .. } => add_elapsed_metadata(metadata, elapsed),
+                Message::Assistant { .. } => {
+                    add_assistant_metadata(metadata, elapsed, reasoning_effort)
+                }
                 Message::ToolResult { tool_call_id, .. } => {
                     let elapsed_ms = tool_elapsed_ms
                         .lock()

@@ -178,8 +178,9 @@ ledger block:
 - the final assistant answer as unlabeled body text with no left rail or role
   label
 - turn metadata directly after a visible answer with its compact left rail preserved:
-  provider/model, elapsed time, failures only when present, debug details only
-  when enabled, and non-default mode last
+  provider/model with the resolved variant one space to its right only when
+  present, elapsed time, failures only when present, debug details only when
+  enabled, and non-default mode last
 
 Assistant messages that contain only folded reasoning and/or tool calls do not
 render turn metadata. Tool-only Thinking blocks must remain compact evidence
@@ -274,23 +275,29 @@ Long tool outputs default to a maximum of 20 visible lines. Expandable evidence
 keeps the full stored output available for local inspection in this TUI process
 or from persisted message/tool-result material when available.
 
-Usage and provider metadata are not transcript content blocks. Provider/model,
-elapsed time, failures, debug usage parts, and allowlisted provider metadata
-may be projected into turn metadata, but total token usage and context
-percentage are projected to the sidebar. Usage and provider metadata must not
-appear in sanitized transcript messages, provider replay across incompatible
-providers, or `pevo run --format json` by default.
+Usage and provider metadata are not transcript content blocks. Provider/model
+with an optional resolved variant, elapsed time, failures, debug usage parts,
+and allowlisted provider metadata may be projected into turn metadata, but
+total token usage and context percentage are projected to the sidebar. Usage
+and provider metadata must not appear in sanitized transcript messages,
+provider replay across incompatible providers, or `pevo run --format json` by
+default.
 
 Default metadata projection omits `default` mode and renders elapsed time in
 seconds, for example `2.5s`. Completed model messages use the runtime-supplied
 `elapsed_ms` captured at message completion when available; fullscreen TUI must
 not recompute completed elapsed time from later render or event-drain time.
-Non-default mode is the final metadata item.
+When runtime resolves an enabled per-turn `reasoning_effort`, assistant message
+metadata preserves it as `reasoning_effort`, and TUI renders that value
+directly after the model label separated by one space. Missing reasoning effort
+and the `none` variant are omitted because they do not produce a provider
+request field. Non-default mode is the final metadata item.
 Fullscreen TUI history reload restores persisted elapsed time when available
 instead of showing only provider/model and response metadata for completed
 turns.
 Debug projection shows usage parts and an allowlisted provider metadata summary
-without `key=value` prefixes.
+without `key=value` prefixes and without duplicating `elapsed_ms` or
+`reasoning_effort`.
 
 ## Keymap
 

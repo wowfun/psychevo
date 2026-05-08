@@ -2825,7 +2825,7 @@ fn history_meta_text(
     let model = message.get("model").and_then(Value::as_str).unwrap_or("");
     let mut parts = Vec::new();
     if !provider.is_empty() || !model.is_empty() {
-        parts.push(model_label(provider, model));
+        parts.push(model_meta_label(provider, model, metadata));
     }
     if let Some(elapsed) = history_elapsed_duration(message, metadata, prompt_started_ms) {
         parts.push(format_duration_s(elapsed));
@@ -2852,6 +2852,14 @@ fn metadata_elapsed_duration(metadata: Option<&Value>) -> Option<Duration> {
         .and_then(|metadata| metadata.get("elapsed_ms"))
         .and_then(Value::as_u64)
         .map(Duration::from_millis)
+}
+
+fn metadata_reasoning_effort(metadata: Option<&Value>) -> Option<&str> {
+    metadata
+        .and_then(|metadata| metadata.get("reasoning_effort"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "none")
 }
 
 fn tool_started_instant(value: &Value) -> Instant {
@@ -3234,6 +3242,15 @@ fn model_label(provider: &str, model: &str) -> String {
     }
 }
 
+fn model_meta_label(provider: &str, model: &str, metadata: Option<&Value>) -> String {
+    let label = model_label(provider, model);
+    match metadata_reasoning_effort(metadata) {
+        Some(reasoning_effort) if !label.is_empty() => format!("{label} {reasoning_effort}"),
+        Some(reasoning_effort) => reasoning_effort.to_string(),
+        None => label,
+    }
+}
+
 struct TurnMetaProjection<'a> {
     mode: &'a str,
     provider: &'a str,
@@ -3248,7 +3265,7 @@ struct TurnMetaProjection<'a> {
 fn turn_meta_text(meta: TurnMetaProjection<'_>) -> String {
     let mut parts = Vec::new();
     if !meta.provider.is_empty() || !meta.model.is_empty() {
-        parts.push(model_label(meta.provider, meta.model));
+        parts.push(model_meta_label(meta.provider, meta.model, meta.metadata));
     }
     if let Some(elapsed) = metadata_elapsed_duration(meta.metadata)
         .or_else(|| meta.started.map(|started| started.elapsed()))
@@ -3285,7 +3302,7 @@ fn turn_meta_text(meta: TurnMetaProjection<'_>) -> String {
         {
             let summary = metadata
                 .iter()
-                .filter(|(key, _)| key.as_str() != "elapsed_ms")
+                .filter(|(key, _)| !matches!(key.as_str(), "elapsed_ms" | "reasoning_effort"))
                 .take(5)
                 .map(|(key, value)| format!("{} {}", metadata_label(key), compact_value(value)))
                 .collect::<Vec<_>>()

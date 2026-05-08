@@ -85,6 +85,32 @@ pub(crate) fn add_elapsed_metadata(metadata: Option<Value>, elapsed: Duration) -
     )
 }
 
+pub(crate) fn add_assistant_metadata(
+    metadata: Option<Value>,
+    elapsed: Duration,
+    reasoning_effort: Option<&str>,
+) -> Option<Value> {
+    let mut object = match add_elapsed_metadata(metadata, elapsed) {
+        Some(Value::Object(object)) => object,
+        Some(other) => {
+            let mut object = serde_json::Map::new();
+            object.insert("provider_metadata".to_string(), other);
+            object
+        }
+        None => serde_json::Map::new(),
+    };
+    if let Some(reasoning_effort) = reasoning_effort
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "none")
+    {
+        object.insert(
+            "reasoning_effort".to_string(),
+            json!(reasoning_effort.to_string()),
+        );
+    }
+    Some(Value::Object(object))
+}
+
 pub(crate) fn add_elapsed_ms_metadata(metadata: Option<Value>, elapsed_ms: u64) -> Option<Value> {
     let mut object = match metadata {
         Some(Value::Object(object)) => object,

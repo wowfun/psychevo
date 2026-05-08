@@ -70,6 +70,7 @@ pub async fn run_smoke(options: SmokeOptions) -> Result<SmokeResult> {
         events: None,
         stream_events: None,
         include_reasoning: false,
+        reasoning_effort: None,
     });
     let request = AgentLoopRequest {
         model_provider: "fake".to_string(),

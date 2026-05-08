@@ -1,15 +1,21 @@
 # Changelog
 
+## 2026-05-08
+
+### Added
+
+- Added resolved assistant variant metadata to TUI turn rows, restored from persisted per-message metadata beside the model name.
+
 ## 2026-05-07
 
 ### Added
 
 - Added snapshot-backed `pevo tui` `/undo` and `/redo` commands that restore Git-tracked file state, hide/restore message ranges, and clean reverted messages before the next prompt.
+- Added tool-call timing to runtime streams and persistence, with TUI evidence rows that keep actual `bash` titles and stable live/completed durations.
 
 ### Changed
 
 - Split `psychevo-runtime` and `psychevo-cli` internals into focused Rust modules while preserving the existing runtime re-exports and `pevo` behavior.
-- Added tool-call timing to runtime streams and persistence, with TUI evidence rows that keep actual `bash` titles and stable live/completed durations.
 - Tightened fullscreen TUI session, sidebar, history, `/new`, title-generation, and wide-character picker behavior.
 - Improved fullscreen TUI text selection and clipboard handling from rendered transcript/sidebar rows, including active highlights and Linux fallbacks.
 

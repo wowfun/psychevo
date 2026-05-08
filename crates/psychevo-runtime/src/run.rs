@@ -170,6 +170,7 @@ async fn run_live_internal(
         events: Some(Arc::clone(&events)),
         stream_events,
         include_reasoning: options.include_reasoning,
+        reasoning_effort: resolved.reasoning_effort.clone(),
     });
     let generation_metadata = resolved
         .reasoning_effort

@@ -1171,6 +1171,7 @@ async fn persistence_sink_streams_elapsed_metadata_for_assistant_message_end() {
         events: None,
         stream_events: Some(stream),
         include_reasoning: false,
+        reasoning_effort: None,
     };
 
     sink.emit(AgentEvent::MessageEnd {
@@ -1210,6 +1211,75 @@ async fn persistence_sink_streams_elapsed_metadata_for_assistant_message_end() {
             .expect("stored elapsed"),
         elapsed
     );
+    assert!(
+        summaries[0].metadata.as_ref().unwrap()["reasoning_effort"].is_null(),
+        "absent or none reasoning effort must not be stored"
+    );
+}
+
+#[tokio::test]
+async fn persistence_sink_persists_assistant_reasoning_effort_metadata() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let store = SqliteStore::open(&db).expect("store");
+    let session_id = store
+        .create_session_with_metadata(&workdir, "tui", "model", "provider", None)
+        .expect("session");
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let captured_for_stream = Arc::clone(&captured);
+    let stream: RunStreamSink = Arc::new(move |event| {
+        captured_for_stream
+            .lock()
+            .expect("captured stream lock")
+            .push(event);
+    });
+    let sink = PersistenceSink {
+        store: store.clone(),
+        session_id: session_id.clone(),
+        prompt_snapshot: None,
+        prompt_snapshot_written: Arc::new(Mutex::new(false)),
+        started: Instant::now(),
+        tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
+        control: SmokeControl::None,
+        control_handle: None,
+        events: None,
+        stream_events: Some(stream),
+        include_reasoning: false,
+        reasoning_effort: Some("high".to_string()),
+    };
+
+    sink.emit(AgentEvent::MessageEnd {
+        message: Message::Assistant {
+            content: vec![AssistantBlock::Text {
+                text: "hi".to_string(),
+            }],
+            timestamp_ms: 1,
+            finish_reason: Some("stop".to_string()),
+            outcome: Outcome::Normal,
+            model: Some("model".to_string()),
+            provider: Some("provider".to_string()),
+        },
+        usage: None,
+        metadata: None,
+    })
+    .await
+    .expect("message end");
+
+    match captured.lock().expect("captured stream lock").as_slice() {
+        [RunStreamEvent::Event(value)] => {
+            assert_eq!(value["metadata"]["reasoning_effort"], "high");
+            assert!(value["metadata"]["elapsed_ms"].as_u64().is_some());
+        }
+        other => panic!("unexpected stream events: {other:?}"),
+    }
+    let summaries = store
+        .load_tui_message_summaries(&session_id)
+        .expect("summaries");
+    assert_eq!(
+        summaries[0].metadata.as_ref().unwrap()["reasoning_effort"],
+        "high"
+    );
 }
 
 #[tokio::test]
@@ -1241,6 +1311,7 @@ async fn persistence_sink_persists_tool_elapsed_metadata() {
         events: None,
         stream_events: Some(stream),
         include_reasoning: false,
+        reasoning_effort: None,
     };
 
     sink.emit(AgentEvent::ToolExecutionEnd {
