@@ -40,6 +40,7 @@ pub struct SmokeResult {
 pub struct RunOptions {
     pub db_path: PathBuf,
     pub workdir: PathBuf,
+    pub snapshot_root: Option<PathBuf>,
     pub session: Option<String>,
     pub continue_latest: bool,
     pub prompt: String,
@@ -91,6 +92,28 @@ pub struct RunResult {
     pub context_limit: Option<u64>,
     pub tool_failures: usize,
     pub events: Vec<Value>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionUndoOptions {
+    pub db_path: PathBuf,
+    pub workdir: PathBuf,
+    pub snapshot_root: PathBuf,
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionUndoResult {
+    pub session_id: String,
+    pub prompt: String,
+    pub reverted_messages: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionRedoResult {
+    pub session_id: String,
+    pub restored_messages: usize,
+    pub complete: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

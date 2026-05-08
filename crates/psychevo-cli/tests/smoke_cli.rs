@@ -1164,6 +1164,51 @@ fn cli_tui_new_is_silent_until_next_prompt() {
 }
 
 #[test]
+fn cli_tui_scripted_undo_and_redo_print_deterministic_status() {
+    let server = MockSseServer::start(vec![sse_text("visible tui")]);
+    let temp = tempdir().expect("temp");
+    let home = init_tui_home(temp.path());
+    let db = temp.path().join("state.db");
+    let workdir = temp.path().join("work");
+    std::fs::create_dir_all(&workdir).expect("workdir");
+    assert!(
+        Command::new("git")
+            .arg("-C")
+            .arg(&workdir)
+            .arg("init")
+            .output()
+            .expect("git init")
+            .status
+            .success()
+    );
+    let config = write_run_config(&temp.path().join("config"), &server.base_url);
+
+    let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
+        .args(["tui", "--dir", workdir.to_str().expect("workdir")])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin")
+        .write_all(b"hello\n/undo\n/redo\n/quit\n")
+        .expect("write stdin");
+    let output = child.wait_with_output().expect("output");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+    assert!(stdout.contains("visible tui"));
+    assert!(stdout.contains("undone 2 messages; prompt restored"));
+    assert!(stdout.contains("redone 2 messages; complete"));
+}
+
+#[test]
 fn cli_tui_mode_set_plan_persists_and_uses_read_only_tools() {
     let server = MockSseServer::start(vec![sse_text("planned")]);
     let temp = tempdir().expect("temp");

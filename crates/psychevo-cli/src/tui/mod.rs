@@ -17,8 +17,9 @@ use crossterm::terminal::{
 use psychevo_ai::Outcome;
 use psychevo_runtime::{
     ConfiguredModel, RunControlHandle, RunMode, RunOptions, RunStreamEvent, RunStreamSink,
-    SessionSummary, SqliteStore, TuiMessageSummary, canonicalize_workdir, configured_models,
-    run_control, run_live_streaming, run_live_streaming_controlled, selected_configured_model,
+    SessionSummary, SessionUndoOptions, SqliteStore, TuiMessageSummary, canonicalize_workdir,
+    configured_models, redo_session, run_control, run_live_streaming,
+    run_live_streaming_controlled, selected_configured_model, undo_session,
 };
 use ratatui::Frame;
 use ratatui::Terminal;
@@ -672,6 +673,28 @@ impl TuiApp {
                 }
                 Err(err) => ui.push_error(format!("error: {err:#}")),
             },
+            SlashCommand::Undo => {
+                if let Some(running) = &ui.running {
+                    running.control.abort();
+                    ui.push_error("interrupt requested; run /undo again after the turn settles");
+                } else {
+                    match self.undo_session_no_print(ui) {
+                        Ok(message) => ui.push_status(message),
+                        Err(err) => ui.push_error(format!("error: {err:#}")),
+                    }
+                }
+            }
+            SlashCommand::Redo => {
+                if let Some(running) = &ui.running {
+                    running.control.abort();
+                    ui.push_error("interrupt requested; run /redo again after the turn settles");
+                } else {
+                    match self.redo_session_no_print(ui) {
+                        Ok(message) => ui.push_status(message),
+                        Err(err) => ui.push_error(format!("error: {err:#}")),
+                    }
+                }
+            }
             SlashCommand::Upcoming(command) => {
                 ui.push_status(format!("/{command} upcoming"));
             }
@@ -717,6 +740,8 @@ impl TuiApp {
             SlashCommand::ThinkingToggle => self.toggle_thinking(),
             SlashCommand::ThinkingSet(enabled) => self.set_thinking(enabled),
             SlashCommand::Rename(title) => self.rename_session(title),
+            SlashCommand::Undo => self.undo_session_print(),
+            SlashCommand::Redo => self.redo_session_print(),
             SlashCommand::Upcoming(command) => {
                 println!("{}", self.renderer.status(&format!("/{command} upcoming")));
                 Ok(())
@@ -972,6 +997,7 @@ impl TuiApp {
         RunOptions {
             db_path: self.db_path.clone(),
             workdir: self.workdir.clone(),
+            snapshot_root: Some(self.home.join("snapshots")),
             session: self.current_session.clone(),
             continue_latest: self.current_session.is_none() && !self.force_new_once,
             prompt,
@@ -1065,6 +1091,35 @@ impl TuiApp {
         Ok(())
     }
 
+    fn undo_session_print(&mut self) -> Result<()> {
+        let result = undo_session(self.undo_options()?)?;
+        println!(
+            "{}",
+            self.renderer.status(&format!(
+                "undone {} messages; prompt restored",
+                result.reverted_messages
+            ))
+        );
+        Ok(())
+    }
+
+    fn redo_session_print(&mut self) -> Result<()> {
+        let result = redo_session(self.undo_options()?)?;
+        let suffix = if result.complete {
+            "complete"
+        } else {
+            "partial"
+        };
+        println!(
+            "{}",
+            self.renderer.status(&format!(
+                "redone {} messages; {suffix}",
+                result.restored_messages
+            ))
+        );
+        Ok(())
+    }
+
     fn help_lines(&self) -> Vec<String> {
         vec![
             "Enter submit; Shift/Ctrl/Alt+Enter or Ctrl+J newline; Tab complete command; Shift+Tab mode; Ctrl+B sidebar; Ctrl+T transcript; Esc interrupt".to_string(),
@@ -1080,7 +1135,9 @@ impl TuiApp {
             "/mode set <plan|default>".to_string(),
             "/show-thinking [on|off]".to_string(),
             "/rename <title>".to_string(),
-            "/undo /compact /export (upcoming)".to_string(),
+            "/undo".to_string(),
+            "/redo".to_string(),
+            "/compact /export (upcoming)".to_string(),
         ]
     }
 
@@ -1403,6 +1460,47 @@ impl TuiApp {
         let title = SqliteStore::open(&self.db_path)?.set_session_title(session_id, &title)?;
         self.current_session_title = Some(title.clone());
         Ok(title)
+    }
+
+    fn undo_options(&self) -> Result<SessionUndoOptions> {
+        let Some(session_id) = self.current_session.clone() else {
+            return Err(anyhow!("no current session to undo"));
+        };
+        Ok(SessionUndoOptions {
+            db_path: self.db_path.clone(),
+            workdir: self.workdir.clone(),
+            snapshot_root: self.home.join("snapshots"),
+            session_id,
+        })
+    }
+
+    fn undo_session_no_print(&mut self, ui: &mut FullscreenUi<'_>) -> Result<String> {
+        let result = undo_session(self.undo_options()?)?;
+        ui.clear_transcript();
+        self.load_current_session_history(ui)?;
+        ui.textarea = textarea_with_text(&result.prompt);
+        ui.refresh_sidebar(self);
+        Ok(format!(
+            "undone {} messages; prompt restored",
+            result.reverted_messages
+        ))
+    }
+
+    fn redo_session_no_print(&mut self, ui: &mut FullscreenUi<'_>) -> Result<String> {
+        let result = redo_session(self.undo_options()?)?;
+        ui.clear_transcript();
+        self.load_current_session_history(ui)?;
+        ui.textarea = new_textarea();
+        ui.refresh_sidebar(self);
+        let suffix = if result.complete {
+            "complete"
+        } else {
+            "partial"
+        };
+        Ok(format!(
+            "redone {} messages; {suffix}",
+            result.restored_messages
+        ))
     }
 
     fn set_sidebar_visible_no_print(&mut self, visible: bool) -> Result<()> {

@@ -55,6 +55,7 @@ async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
     let result = run_live(RunOptions {
         db_path,
         workdir,
+        snapshot_root: Some(home.join("snapshots")),
         session: args.session.clone(),
         continue_latest: args.continue_latest,
         prompt,

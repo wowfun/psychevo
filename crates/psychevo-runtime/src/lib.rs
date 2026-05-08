@@ -7,9 +7,11 @@ mod paths;
 mod run;
 mod session_lookup;
 mod smoke;
+mod snapshot;
 mod store;
 mod tools;
 mod types;
+mod undo;
 
 #[cfg(test)]
 mod tests;
@@ -25,6 +27,7 @@ pub use store::SqliteStore;
 pub use tools::tool_names_for_mode;
 pub use types::{
     ConfiguredModel, RunControl, RunControlHandle, RunMode, RunOptions, RunResult, RunStreamEvent,
-    RunStreamSink, SanitizedMessageSummary, SessionSummary, SmokeControl, SmokeOptions,
-    SmokeResult, TuiMessageSummary, run_control,
+    RunStreamSink, SanitizedMessageSummary, SessionRedoResult, SessionSummary, SessionUndoOptions,
+    SessionUndoResult, SmokeControl, SmokeOptions, SmokeResult, TuiMessageSummary, run_control,
 };
+pub use undo::{redo_session, undo_session};

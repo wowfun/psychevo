@@ -7,7 +7,7 @@ use std::time::Duration;
 use psychevo_agent_core::{AssistantBlock, Message, now_ms};
 use psychevo_ai::Outcome;
 use rusqlite::{Connection, OptionalExtension, params};
-use serde_json::Value;
+use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
 use crate::error::{Error, Result};
@@ -16,6 +16,22 @@ use crate::run::normalize_session_title;
 use crate::types::{SanitizedMessageSummary, SessionSummary, TuiMessageSummary};
 
 const SQLITE_SCHEMA_VERSION: i64 = 3;
+const SESSION_REVERT_METADATA_KEY: &str = "revert";
+const MESSAGE_UNDO_METADATA_KEY: &str = "undo";
+const MESSAGE_PRE_SNAPSHOT_KEY: &str = "pre_snapshot";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionRevertState {
+    pub start_seq: i64,
+    pub original_snapshot: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UndoTarget {
+    pub seq: i64,
+    pub prompt: String,
+    pub snapshot: Option<String>,
+}
 
 #[derive(Clone)]
 pub struct SqliteStore {
@@ -207,6 +223,129 @@ impl SqliteStore {
         Ok(title)
     }
 
+    pub fn session_revert_state(&self, session_id: &str) -> Result<Option<SessionRevertState>> {
+        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let metadata_json = conn
+            .query_row(
+                "SELECT metadata_json FROM sessions WHERE id = ?1",
+                params![session_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .ok_or_else(|| Error::Message(format!("session not found: {session_id}")))?;
+        parse_session_revert(metadata_json.as_deref())
+    }
+
+    pub fn set_session_revert_state(
+        &self,
+        session_id: &str,
+        revert: SessionRevertState,
+    ) -> Result<()> {
+        let changed = self.write_retry(|conn| {
+            let metadata_json = session_metadata_json(conn, session_id)?;
+            let mut metadata = metadata_object_sql(metadata_json.as_deref())?;
+            metadata.insert(
+                SESSION_REVERT_METADATA_KEY.to_string(),
+                json!({
+                    "start_seq": revert.start_seq,
+                    "original_snapshot": revert.original_snapshot,
+                }),
+            );
+            let metadata_json =
+                serde_json::to_string(&Value::Object(metadata)).map_err(json_to_sql)?;
+            conn.execute(
+                "UPDATE sessions SET metadata_json = ?1, updated_at_ms = ?2 WHERE id = ?3",
+                params![metadata_json, now_ms(), session_id],
+            )
+        })?;
+        if changed == 0 {
+            return Err(Error::Message(format!("session not found: {session_id}")));
+        }
+        Ok(())
+    }
+
+    pub fn clear_session_revert_state(&self, session_id: &str) -> Result<()> {
+        let changed = self.write_retry(|conn| {
+            let metadata_json = session_metadata_json(conn, session_id)?;
+            let mut metadata = metadata_object_sql(metadata_json.as_deref())?;
+            metadata.remove(SESSION_REVERT_METADATA_KEY);
+            let metadata_json = metadata_json_sql(metadata)?;
+            conn.execute(
+                "UPDATE sessions SET metadata_json = ?1, updated_at_ms = ?2 WHERE id = ?3",
+                params![metadata_json, now_ms(), session_id],
+            )
+        })?;
+        if changed == 0 {
+            return Err(Error::Message(format!("session not found: {session_id}")));
+        }
+        Ok(())
+    }
+
+    pub fn latest_undo_target(&self, session_id: &str) -> Result<Option<UndoTarget>> {
+        let boundary = self
+            .session_revert_state(session_id)?
+            .map(|revert| revert.start_seq)
+            .unwrap_or(i64::MAX);
+        self.user_target_before(session_id, boundary)
+    }
+
+    pub fn next_redo_target(&self, session_id: &str) -> Result<Option<UndoTarget>> {
+        let Some(revert) = self.session_revert_state(session_id)? else {
+            return Ok(None);
+        };
+        self.user_target_after(session_id, revert.start_seq)
+    }
+
+    pub fn messages_from_count(&self, session_id: &str, start_seq: i64) -> Result<usize> {
+        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM messages WHERE session_id = ?1 AND session_seq >= ?2",
+            params![session_id, start_seq],
+            |row| row.get(0),
+        )?;
+        Ok(count.max(0) as usize)
+    }
+
+    pub fn cleanup_reverted_messages(&self, session_id: &str) -> Result<usize> {
+        self.write_retry(|conn| {
+            let metadata_json = session_metadata_json(conn, session_id)?;
+            let Some(revert) = parse_session_revert_sql(metadata_json.as_deref())? else {
+                return Ok(0);
+            };
+            let removed = conn.execute(
+                "DELETE FROM messages WHERE session_id = ?1 AND session_seq >= ?2",
+                params![session_id, revert.start_seq],
+            )?;
+            let mut metadata = metadata_object_sql(metadata_json.as_deref())?;
+            metadata.remove(SESSION_REVERT_METADATA_KEY);
+            let metadata_json = metadata_json_sql(metadata)?;
+            let message_count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM messages WHERE session_id = ?1",
+                params![session_id],
+                |row| row.get(0),
+            )?;
+            let tool_call_count = session_tool_call_count(conn, session_id)?;
+            conn.execute(
+                r#"
+                UPDATE sessions
+                SET metadata_json = ?1,
+                    message_count = ?2,
+                    tool_call_count = ?3,
+                    updated_at_ms = ?4
+                WHERE id = ?5
+                "#,
+                params![
+                    metadata_json,
+                    message_count,
+                    tool_call_count,
+                    now_ms(),
+                    session_id
+                ],
+            )?;
+            Ok(removed)
+        })
+    }
+
     pub fn resume_session(&self, session_id: &str) -> Result<()> {
         let now = now_ms();
         let changed = self.write_retry(|conn| {
@@ -278,16 +417,20 @@ impl SqliteStore {
     }
 
     pub fn load_tui_message_summaries(&self, session_id: &str) -> Result<Vec<TuiMessageSummary>> {
+        let boundary = self
+            .session_revert_state(session_id)?
+            .map(|revert| revert.start_seq)
+            .unwrap_or(i64::MAX);
         let conn = self.conn.lock().expect("sqlite lock poisoned");
         let mut stmt = conn.prepare(
             r#"
             SELECT message_json, usage_json, metadata_json
             FROM messages
-            WHERE session_id = ?1
+            WHERE session_id = ?1 AND session_seq < ?2
             ORDER BY session_seq ASC
             "#,
         )?;
-        let rows = stmt.query_map(params![session_id], |row| {
+        let rows = stmt.query_map(params![session_id, boundary], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<String>>(1)?,
@@ -311,6 +454,22 @@ impl SqliteStore {
 
     pub fn append_message(&self, session_id: &str, message: &Message) -> Result<()> {
         self.append_message_with_metrics(session_id, message, None, None)
+    }
+
+    pub fn append_message_with_undo_snapshot(
+        &self,
+        session_id: &str,
+        message: &Message,
+        snapshot: Option<String>,
+    ) -> Result<()> {
+        let metadata = snapshot.map(|snapshot| {
+            json!({
+                MESSAGE_UNDO_METADATA_KEY: {
+                    MESSAGE_PRE_SNAPSHOT_KEY: snapshot
+                }
+            })
+        });
+        self.append_message_with_metrics(session_id, message, None, metadata)
     }
 
     pub fn append_message_with_metrics(
@@ -387,6 +546,38 @@ impl SqliteStore {
             )?;
             Ok(())
         })
+    }
+
+    fn user_target_before(&self, session_id: &str, boundary: i64) -> Result<Option<UndoTarget>> {
+        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT session_seq, message_json, content_text, metadata_json
+            FROM messages
+            WHERE session_id = ?1 AND role = 'user' AND session_seq < ?2
+            ORDER BY session_seq DESC
+            LIMIT 1
+            "#,
+        )?;
+        stmt.query_row(params![session_id, boundary], undo_target_from_row)
+            .optional()
+            .map_err(Into::into)
+    }
+
+    fn user_target_after(&self, session_id: &str, boundary: i64) -> Result<Option<UndoTarget>> {
+        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT session_seq, message_json, content_text, metadata_json
+            FROM messages
+            WHERE session_id = ?1 AND role = 'user' AND session_seq > ?2
+            ORDER BY session_seq ASC
+            LIMIT 1
+            "#,
+        )?;
+        stmt.query_row(params![session_id, boundary], undo_target_from_row)
+            .optional()
+            .map_err(Into::into)
     }
 
     fn write_retry<T>(&self, mut f: impl FnMut(&Connection) -> rusqlite::Result<T>) -> Result<T> {
@@ -584,4 +775,128 @@ fn parse_optional_json(value: Option<String>) -> Result<Option<Value>> {
         .map(|value| serde_json::from_str(&value))
         .transpose()
         .map_err(Into::into)
+}
+
+fn session_metadata_json(conn: &Connection, session_id: &str) -> rusqlite::Result<Option<String>> {
+    conn.query_row(
+        "SELECT metadata_json FROM sessions WHERE id = ?1",
+        params![session_id],
+        |row| row.get::<_, Option<String>>(0),
+    )
+}
+
+fn metadata_object(value: Option<&str>) -> Result<Map<String, Value>> {
+    let Some(value) = value else {
+        return Ok(Map::new());
+    };
+    let parsed = serde_json::from_str::<Value>(value)?;
+    Ok(parsed.as_object().cloned().unwrap_or_default())
+}
+
+fn metadata_object_sql(value: Option<&str>) -> rusqlite::Result<Map<String, Value>> {
+    let Some(value) = value else {
+        return Ok(Map::new());
+    };
+    let parsed = serde_json::from_str::<Value>(value).map_err(json_to_sql)?;
+    Ok(parsed.as_object().cloned().unwrap_or_default())
+}
+
+fn metadata_json_sql(metadata: Map<String, Value>) -> rusqlite::Result<Option<String>> {
+    (!metadata.is_empty())
+        .then(|| serde_json::to_string(&Value::Object(metadata)).map_err(json_to_sql))
+        .transpose()
+}
+
+fn json_to_sql(err: serde_json::Error) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(err))
+}
+
+fn parse_session_revert(value: Option<&str>) -> Result<Option<SessionRevertState>> {
+    let metadata = metadata_object(value)?;
+    parse_session_revert_from_metadata(&metadata).map_err(Into::into)
+}
+
+fn parse_session_revert_sql(value: Option<&str>) -> rusqlite::Result<Option<SessionRevertState>> {
+    let metadata = metadata_object_sql(value)?;
+    parse_session_revert_from_metadata(&metadata)
+}
+
+fn parse_session_revert_from_metadata(
+    metadata: &Map<String, Value>,
+) -> rusqlite::Result<Option<SessionRevertState>> {
+    let Some(revert) = metadata
+        .get(SESSION_REVERT_METADATA_KEY)
+        .and_then(Value::as_object)
+    else {
+        return Ok(None);
+    };
+    let Some(start_seq) = revert.get("start_seq").and_then(Value::as_i64) else {
+        return Ok(None);
+    };
+    let Some(original_snapshot) = revert
+        .get("original_snapshot")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return Ok(None);
+    };
+    Ok(Some(SessionRevertState {
+        start_seq,
+        original_snapshot,
+    }))
+}
+
+fn undo_target_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<UndoTarget> {
+    let seq = row.get::<_, i64>(0)?;
+    let message_json = row.get::<_, String>(1)?;
+    let content_text = row.get::<_, Option<String>>(2)?;
+    let metadata_json = row.get::<_, Option<String>>(3)?;
+    let prompt = content_text
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| user_prompt_from_message_json(&message_json).unwrap_or_default());
+    Ok(UndoTarget {
+        seq,
+        prompt,
+        snapshot: undo_snapshot_from_metadata(metadata_json.as_deref()),
+    })
+}
+
+fn undo_snapshot_from_metadata(value: Option<&str>) -> Option<String> {
+    let metadata = metadata_object(value).ok()?;
+    metadata
+        .get(MESSAGE_UNDO_METADATA_KEY)
+        .and_then(Value::as_object)
+        .and_then(|undo| undo.get(MESSAGE_PRE_SNAPSHOT_KEY))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn user_prompt_from_message_json(value: &str) -> Option<String> {
+    let message = serde_json::from_str::<Message>(value).ok()?;
+    let Message::User { content, .. } = message else {
+        return None;
+    };
+    Some(
+        content
+            .iter()
+            .map(|block| block.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+}
+
+fn session_tool_call_count(conn: &Connection, session_id: &str) -> rusqlite::Result<i64> {
+    let mut stmt =
+        conn.prepare("SELECT tool_calls_json FROM messages WHERE session_id = ?1 AND tool_calls_json IS NOT NULL")?;
+    let rows = stmt.query_map(params![session_id], |row| row.get::<_, String>(0))?;
+    let mut count = 0i64;
+    for row in rows {
+        let value = row?;
+        if let Ok(tool_calls) = serde_json::from_str::<Vec<Value>>(&value) {
+            count += tool_calls.len() as i64;
+        }
+    }
+    Ok(count)
 }

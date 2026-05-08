@@ -13,6 +13,8 @@ use crate::types::{RunStreamEvent, RunStreamSink, SmokeControl};
 pub(crate) struct PersistenceSink {
     pub(crate) store: SqliteStore,
     pub(crate) session_id: String,
+    pub(crate) prompt_snapshot: Option<String>,
+    pub(crate) prompt_snapshot_written: Arc<Mutex<bool>>,
     pub(crate) started: Instant,
     pub(crate) tool_elapsed_ms: Arc<Mutex<BTreeMap<String, u64>>>,
     pub(crate) control: SmokeControl,
@@ -26,6 +28,8 @@ impl EventSink for PersistenceSink {
     fn emit(&self, event: AgentEvent) -> BoxFuture<'static, CoreResult<()>> {
         let store = self.store.clone();
         let session_id = self.session_id.clone();
+        let prompt_snapshot = self.prompt_snapshot.clone();
+        let prompt_snapshot_written = Arc::clone(&self.prompt_snapshot_written);
         let control = self.control;
         let control_handle = self.control_handle.clone();
         let events = self.events.clone();
@@ -75,9 +79,38 @@ impl EventSink for PersistenceSink {
                     message,
                     usage,
                     metadata,
-                } => store
-                    .append_message_with_metrics(&session_id, &message, usage, metadata)
-                    .map_err(|err| psychevo_agent_core::Error::EventSink(err.to_string()))?,
+                } => {
+                    let should_attach_snapshot = if matches!(message, Message::User { .. }) {
+                        let mut written = prompt_snapshot_written
+                            .lock()
+                            .expect("prompt snapshot lock poisoned");
+                        if *written {
+                            false
+                        } else {
+                            *written = true;
+                            true
+                        }
+                    } else {
+                        false
+                    };
+                    if should_attach_snapshot {
+                        store
+                            .append_message_with_undo_snapshot(
+                                &session_id,
+                                &message,
+                                prompt_snapshot.clone(),
+                            )
+                            .map_err(|err| {
+                                psychevo_agent_core::Error::EventSink(err.to_string())
+                            })?;
+                    } else {
+                        store
+                            .append_message_with_metrics(&session_id, &message, usage, metadata)
+                            .map_err(|err| {
+                                psychevo_agent_core::Error::EventSink(err.to_string())
+                            })?;
+                    }
+                }
                 AgentEvent::AgentEnd { outcome, .. } => store
                     .finish_session(&session_id, outcome)
                     .map_err(|err| psychevo_agent_core::Error::EventSink(err.to_string()))?,

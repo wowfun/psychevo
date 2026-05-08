@@ -361,8 +361,9 @@ The first TUI supports:
 - `/show-thinking on`
 - `/show-thinking off`
 - `/rename <title>`
-- future disabled entries in the slash menu: `/undo`, `/compact`, and
-  `/export`
+- `/undo`
+- `/redo`
+- future disabled entries in the slash menu: `/compact` and `/export`
 
 Fullscreen `/sessions`, `/resume`, `/continue`, and `/model` use the shared
 bottom selection pane. The pane includes title/subtitle text, search,
@@ -388,6 +389,30 @@ information instead of opening a pane.
 
 `/models`, `/model set <provider/model>`, `/session list`, `/session show`, and
 `/session switch` are not TUI commands in this slice.
+
+`/undo` reverts the most recent visible user message in the current session,
+all later messages, and associated file changes. `/redo` restores a previously
+undone message range. Undo and redo use runtime-managed Git snapshots captured
+before user prompts; if the target snapshot is unavailable or cannot be
+restored, the command reports a bounded error and must not change session
+metadata. The command does not require provider credentials and must not start
+provider network work.
+
+After `/undo`, the fullscreen composer is populated with the undone user prompt
+so the user can edit and resubmit it. Reverted messages are hidden from TUI
+history and later model context while the soft revert marker is active. Running
+`/undo` repeatedly moves the revert boundary to earlier user messages. Running
+`/redo` moves the boundary forward; when no later hidden user message remains,
+`/redo` restores the full pre-undo snapshot and clears the revert marker.
+
+Before the next non-command prompt is appended to a session with an active
+revert marker, runtime removes the reverted message range and clears the marker.
+This cleanup is part of prompt submission and must happen before context
+assembly for the new prompt.
+
+If a fullscreen turn is running, `/undo` and `/redo` request interruption first.
+If the turn does not settle promptly, the command reports a bounded error and
+does not apply the undo or redo operation.
 
 Slash command errors are bounded user-visible text. They must not panic, hang,
 or start provider network work unless the command explicitly submits a prompt.

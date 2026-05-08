@@ -15,6 +15,7 @@ use crate::error::{Error, Result};
 use crate::events::PersistenceSink;
 use crate::messages::assistant_text;
 use crate::paths::canonical_workdir;
+use crate::snapshot::SnapshotStore;
 use crate::store::SqliteStore;
 use crate::tools::{coding_core_tools_for_mode, mode_instruction};
 use crate::types::{
@@ -117,6 +118,14 @@ async fn run_live_internal(
         )
     };
 
+    store.cleanup_reverted_messages(&session_id)?;
+    let prompt_snapshot = options.snapshot_root.as_ref().and_then(|root| {
+        SnapshotStore::new(root.clone(), session_id.clone(), workdir.clone())
+            .track()
+            .ok()
+            .flatten()
+    });
+
     let run_start = json!({
         "type": "run_start",
         "source": source,
@@ -152,6 +161,8 @@ async fn run_live_internal(
     let sink = Arc::new(PersistenceSink {
         store: store.clone(),
         session_id: session_id.clone(),
+        prompt_snapshot,
+        prompt_snapshot_written: Arc::new(Mutex::new(false)),
         started: Instant::now(),
         tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
         control: SmokeControl::None,

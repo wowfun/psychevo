@@ -1,6 +1,7 @@
 use super::*;
 use ratatui::backend::TestBackend;
 use std::fs;
+use std::path::PathBuf;
 use tempfile::tempdir;
 
 fn line_text(line: &Line<'_>) -> String {
@@ -44,6 +45,75 @@ fn insert_tui_message(
         rusqlite::params![session_id, seq, role, timestamp_ms, message.to_string()],
     )
     .expect("insert tui message");
+}
+
+fn insert_tui_message_with_metadata(
+    db_path: &PathBuf,
+    session_id: &str,
+    seq: i64,
+    role: &str,
+    content_text: &str,
+    message: Value,
+    metadata: Option<Value>,
+) {
+    let conn = rusqlite::Connection::open(db_path).expect("conn");
+    conn.execute(
+        r#"
+            INSERT INTO messages (
+                session_id, session_seq, role, timestamp_ms, message_json,
+                content_text, metadata_json
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "#,
+        rusqlite::params![
+            session_id,
+            seq,
+            role,
+            seq,
+            message.to_string(),
+            content_text,
+            metadata.map(|value| value.to_string())
+        ],
+    )
+    .expect("insert tui message");
+}
+
+fn test_track_snapshot(app: &TuiApp, session_id: &str) -> String {
+    let git_dir = app.home.join("snapshots").join("sessions").join(session_id);
+    fs::create_dir_all(&git_dir).expect("snapshot dir");
+    if !git_dir.join("HEAD").exists() {
+        assert!(
+            std::process::Command::new("git")
+                .env("GIT_DIR", &git_dir)
+                .env("GIT_WORK_TREE", &app.workdir)
+                .arg("init")
+                .output()
+                .expect("snapshot init")
+                .status
+                .success()
+        );
+    }
+    assert!(
+        std::process::Command::new("git")
+            .arg("--git-dir")
+            .arg(&git_dir)
+            .arg("--work-tree")
+            .arg(&app.workdir)
+            .args(["add", "--all", "--", "."])
+            .output()
+            .expect("snapshot add")
+            .status
+            .success()
+    );
+    let output = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(&git_dir)
+        .arg("--work-tree")
+        .arg(&app.workdir)
+        .arg("write-tree")
+        .output()
+        .expect("snapshot tree");
+    assert!(output.status.success());
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
 fn write_tui_model_config(temp: &tempfile::TempDir) -> PathBuf {
@@ -450,6 +520,129 @@ async fn exact_mode_slash_command_executes_mode_not_model() {
         ui.transcript
             .iter()
             .any(|row| row.kind == TranscriptKind::Status && row.text == "mode: default")
+    );
+}
+
+#[tokio::test]
+async fn fullscreen_undo_restores_prompt_and_redo_restores_transcript() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    assert!(
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&app.workdir)
+            .arg("init")
+            .output()
+            .expect("git init")
+            .status
+            .success()
+    );
+    let file = app.workdir.join("tracked.txt");
+    fs::write(&file, "base\n").expect("base");
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let session_id = store
+        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .expect("session");
+    app.current_session = Some(session_id.clone());
+
+    let before_first = test_track_snapshot(&app, &session_id);
+    insert_tui_message_with_metadata(
+        &app.db_path,
+        &session_id,
+        1,
+        "user",
+        "first prompt",
+        serde_json::json!({
+            "role": "user",
+            "content": [{"text": "first prompt"}],
+            "timestamp_ms": 1
+        }),
+        Some(serde_json::json!({"undo": {"pre_snapshot": before_first}})),
+    );
+    fs::write(&file, "after first\n").expect("after first");
+    insert_tui_message_with_metadata(
+        &app.db_path,
+        &session_id,
+        2,
+        "assistant",
+        "first answer",
+        serde_json::json!({
+            "role": "assistant",
+            "content": [{"type": "text", "text": "first answer"}],
+            "timestamp_ms": 2,
+            "finish_reason": "stop",
+            "outcome": "normal",
+            "model": "mock-model",
+            "provider": "mock"
+        }),
+        None,
+    );
+    let before_second = test_track_snapshot(&app, &session_id);
+    insert_tui_message_with_metadata(
+        &app.db_path,
+        &session_id,
+        3,
+        "user",
+        "second prompt",
+        serde_json::json!({
+            "role": "user",
+            "content": [{"text": "second prompt"}],
+            "timestamp_ms": 3
+        }),
+        Some(serde_json::json!({"undo": {"pre_snapshot": before_second}})),
+    );
+    fs::write(&file, "after second\n").expect("after second");
+    insert_tui_message_with_metadata(
+        &app.db_path,
+        &session_id,
+        4,
+        "assistant",
+        "second answer",
+        serde_json::json!({
+            "role": "assistant",
+            "content": [{"type": "text", "text": "second answer"}],
+            "timestamp_ms": 4,
+            "finish_reason": "stop",
+            "outcome": "normal",
+            "model": "mock-model",
+            "provider": "mock"
+        }),
+        None,
+    );
+
+    let mut ui = FullscreenUi::new(&app);
+    app.load_current_session_history(&mut ui)
+        .expect("load history");
+    ui.textarea = textarea_with_text("/undo");
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .expect("undo");
+
+    assert_eq!(textarea_text(&ui.textarea), "second prompt");
+    assert_eq!(fs::read_to_string(&file).expect("file"), "after first\n");
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.kind == TranscriptKind::Answer && row.text == "first answer")
+    );
+    assert!(ui.transcript.iter().all(|row| row.text != "second answer"));
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.kind == TranscriptKind::Status && row.text.contains("prompt restored"))
+    );
+
+    ui.textarea = textarea_with_text("/redo");
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .expect("redo");
+
+    assert_eq!(textarea_text(&ui.textarea), "");
+    assert_eq!(fs::read_to_string(&file).expect("file"), "after second\n");
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.kind == TranscriptKind::Answer && row.text == "second answer")
     );
 }
 

@@ -61,6 +61,8 @@ pub async fn run_smoke(options: SmokeOptions) -> Result<SmokeResult> {
     let sink = Arc::new(PersistenceSink {
         store: store.clone(),
         session_id: session_id.clone(),
+        prompt_snapshot: None,
+        prompt_snapshot_written: Arc::new(Mutex::new(false)),
         started: Instant::now(),
         tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
         control: options.control,

@@ -17,6 +17,8 @@ pub(crate) enum SlashCommand {
     ThinkingToggle,
     ThinkingSet(bool),
     Rename(String),
+    Undo,
+    Redo,
     Upcoming(String),
 }
 
@@ -75,8 +77,13 @@ const SLASH_MENU: &[SlashMenuItem] = &[
     },
     SlashMenuItem {
         command: "/undo",
-        description: "upcoming",
-        upcoming: true,
+        description: "undo last message",
+        upcoming: false,
+    },
+    SlashMenuItem {
+        command: "/redo",
+        description: "redo undone messages",
+        upcoming: false,
     },
     SlashMenuItem {
         command: "/compact",
@@ -145,7 +152,19 @@ pub(crate) fn parse_slash_command(line: &str) -> Result<Option<SlashCommand>> {
         "/show-thinking" => parse_thinking_command(&rest)?,
         "/thinking" => return Err(anyhow!("/thinking has been removed; use /show-thinking")),
         "/rename" => parse_rename_command(&rest)?,
-        "/undo" | "/compact" | "/export" => {
+        "/undo" => {
+            if !rest.is_empty() {
+                return Err(anyhow!("/undo does not accept arguments"));
+            }
+            SlashCommand::Undo
+        }
+        "/redo" => {
+            if !rest.is_empty() {
+                return Err(anyhow!("/redo does not accept arguments"));
+            }
+            SlashCommand::Redo
+        }
+        "/compact" | "/export" => {
             if !rest.is_empty() {
                 return Err(anyhow!(
                     "{command} is upcoming and does not accept arguments"
@@ -332,10 +351,16 @@ mod tests {
         let undo = slash_menu_items("/un");
         assert_eq!(undo.len(), 1);
         assert_eq!(undo[0].command, "/undo");
-        assert!(undo[0].upcoming);
+        assert!(!undo[0].upcoming);
         assert_eq!(
             parse_slash_command("/undo").unwrap(),
-            Some(SlashCommand::Upcoming("undo".to_string()))
+            Some(SlashCommand::Undo)
         );
+        assert_eq!(
+            parse_slash_command("/redo").unwrap(),
+            Some(SlashCommand::Redo)
+        );
+        assert!(parse_slash_command("/undo now").is_err());
+        assert!(parse_slash_command("/redo now").is_err());
     }
 }

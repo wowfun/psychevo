@@ -93,9 +93,14 @@ Required coverage:
   the updated time right-aligned on the same physical row
 - `/models`, `/model set`, `/session list`, `/session show`, and
   `/session switch` rejected as removed commands and absent from the slash menu
+- `/undo` and `/redo` parsing, menu rows, fullscreen behavior, scripted output,
+  Git snapshot restore, repeated undo/redo boundary movement, composer prompt
+  restoration after undo, cleanup before the next prompt, and bounded no-op or
+  error paths for no session, no user message, missing snapshot, non-Git
+  workdir, and unsettled running turns
 - `Esc` interrupts a running turn through runtime control in fullscreen mode
-- slash menu prefix filtering, disabled `/undo`, `/compact`, and `/export`
-  entries, and bounded `upcoming` feedback
+- slash menu prefix filtering, disabled `/compact` and `/export` entries, and
+  bounded `upcoming` feedback
 - transcript focus and expansion behavior: `Ctrl+T`, selected block movement,
   `Enter`/`Space` expand-collapse, `Esc` returning to composer, and keyboard
   transcript scrolling

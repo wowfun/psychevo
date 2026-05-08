@@ -31,6 +31,7 @@ async fn run_live_read_tool(provider: &str) {
     let result = run_live(RunOptions {
         db_path: db.clone(),
         workdir: workdir.clone(),
+        snapshot_root: Some(temp.path().join("snapshots")),
         session: None,
         continue_latest: false,
         prompt: "Use the read tool to read fixture.txt, then answer with one short sentence."
