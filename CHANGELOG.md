@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-05-09
+
+### Added
+
+- Added explicit fullscreen TUI `/model` catalog fetching from selectable provider rows, with process-local fetched model caching and fetched model selection through the existing variant flow.
+
+### Changed
+
+- Removed bottom selection pane subtitles, updated `/model` slash help text to reflect model selection and fetching, and made bottom selection pane Up/Down navigation wrap between first and last rows.
+
 ## 2026-05-08
 
 ### Added

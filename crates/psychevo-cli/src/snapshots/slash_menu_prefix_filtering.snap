@@ -1,6 +1,5 @@
 ---
 source: crates/psychevo-cli/src/tui/tests.rs
-assertion_line: 2851
 expression: combined
 ---
 fixture=slash_menu_prefix_filtering
@@ -25,7 +24,7 @@ size=120x24
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 │ commands
-│> /model  select model
+│> /model  select/fetch model
 │  /mode  set <plan|default>
 │
 › /mo
@@ -51,7 +50,7 @@ mock/model  high
 [default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [default]│ commands
-[default]│[cyan]> /model[dim]  select model[default]
+[default]│[cyan]> /model[dim]  select/fetch model[default]
 [default]│[cyan]  /mode[dim]  set <plan|default>[default]
 [default]│
 [dim]›[default] /mo

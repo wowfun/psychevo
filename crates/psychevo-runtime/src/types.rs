@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -138,6 +139,46 @@ pub struct ConfiguredModel {
     pub provider_label: String,
     pub model: String,
     pub reasoning_effort: Option<String>,
+    pub context_limit: Option<u64>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct ModelCatalogProvider {
+    pub provider: String,
+    pub display_label: String,
+    pub base_url: String,
+    pub api_key_env: Option<String>,
+    pub missing_credentials: Option<String>,
+    pub unavailable_reason: Option<String>,
+    pub no_auth: bool,
+    pub(crate) api_key: Option<String>,
+}
+
+impl ModelCatalogProvider {
+    pub fn fetchable(&self) -> bool {
+        self.missing_credentials.is_none() && self.unavailable_reason.is_none()
+    }
+}
+
+impl fmt::Debug for ModelCatalogProvider {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ModelCatalogProvider")
+            .field("provider", &self.provider)
+            .field("display_label", &self.display_label)
+            .field("base_url", &self.base_url)
+            .field("api_key_env", &self.api_key_env)
+            .field("missing_credentials", &self.missing_credentials)
+            .field("unavailable_reason", &self.unavailable_reason)
+            .field("no_auth", &self.no_auth)
+            .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelCatalogEntry {
+    pub id: String,
     pub context_limit: Option<u64>,
 }
 

@@ -1,6 +1,5 @@
 ---
-source: crates/psychevo-cli/src/tui.rs
-assertion_line: 5402
+source: crates/psychevo-cli/src/tui/tests.rs
 expression: combined
 ---
 fixture=model_bottom_panel
@@ -16,9 +15,9 @@ size=120x24
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
   Select Model                                                                                                     esc
-  Configured local models only.
   Search
-  mock
+  All providers  not fetched
+  mock  not fetched
   › ● mock/mock-model  mock
   mock/other-model  mock  default high
 
@@ -42,9 +41,9 @@ mock/mock-model  default
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [default]
 [default]  [default]Select Model[default]                                                                                                     [dim]esc[default]
-[default]  [dim]Configured local models only.[default]
 [default]  [dim]Search [default]
-[default]  [cyan]mock[default]
+[default]  [cyan]All providers[dim]  not fetched[default]
+[default]  [cyan]mock[dim]  not fetched[default]
 [default]  [default]› ● mock/mock-model  mock[default]
 [default]  [default]mock/other-model  mock  default high[default]
 [default]

@@ -8,6 +8,8 @@ pub enum Error {
     Sqlite(#[from] rusqlite::Error),
     #[error("io failed: {0}")]
     Io(#[from] std::io::Error),
+    #[error("HTTP request failed: {0}")]
+    Http(#[from] reqwest::Error),
     #[error("json failed: {0}")]
     Json(#[from] serde_json::Error),
     #[error("agent failed: {0}")]

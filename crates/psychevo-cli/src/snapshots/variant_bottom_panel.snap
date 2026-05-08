@@ -1,6 +1,5 @@
 ---
-source: crates/psychevo-cli/src/tui.rs
-assertion_line: 5402
+source: crates/psychevo-cli/src/tui/tests.rs
 expression: combined
 ---
 fixture=variant_bottom_panel
@@ -16,7 +15,6 @@ size=120x24
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
   Select Variant for mock/other-model                                                                              esc
-  Use config default or persist an explicit variant override.
   Search
   › ◆ Config default  configured default: high
   none  suppress provider reasoning field
@@ -28,6 +26,7 @@ size=120x24
   max  maximum configured reasoning
 
   Enter select  Esc back  Type search
+
 
 
 mock/mock-model  default
@@ -42,7 +41,6 @@ mock/mock-model  default
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [default]
 [default]  [default]Select Variant for mock/other-model[default]                                                                              [dim]esc[default]
-[default]  [dim]Use config default or persist an explicit variant override.[default]
 [default]  [dim]Search [default]
 [default]  [default]› ◆ Config default  configured default: high[default]
 [default]  [default]none  suppress provider reasoning field[default]
@@ -54,6 +52,7 @@ mock/mock-model  default
 [default]  [default]max  maximum configured reasoning[default]
 [default]
 [default]  [dim]Enter select  Esc back  Type search[default]
+[default]
 [default]
 [default]
 [default]mock/mock-model  [magenta]default[default]

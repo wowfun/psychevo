@@ -1,12 +1,17 @@
 use super::*;
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::config::{ResolvedRunProvider, load_run_config, resolve_run_provider};
+use crate::config::{
+    ResolvedRunProvider, fetch_model_catalog_with_client, load_run_config, model_catalog_endpoint,
+    model_catalog_providers, resolve_run_provider,
+};
 use crate::events::{PersistenceSink, project_agent_event, project_run_stream_event};
 use crate::paths::canonical_workdir;
 use crate::run::{SESSION_TITLE_MAX_CHARS, ensure_new_tui_session_title};
@@ -42,6 +47,68 @@ fn base_options(temp: &tempfile::TempDir) -> RunOptions {
 
 fn home_dir(temp: &tempfile::TempDir) -> PathBuf {
     temp.path().join(".psychevo")
+}
+
+struct CatalogServer {
+    base_url: String,
+    requests: Arc<Mutex<Vec<String>>>,
+}
+
+impl CatalogServer {
+    fn new(body: &'static str) -> Self {
+        Self::with_delay(body, Duration::ZERO)
+    }
+
+    fn with_delay(body: &'static str, delay: Duration) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let requests_for_thread = Arc::clone(&requests);
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let request = read_http_request(&mut stream);
+                requests_for_thread.lock().expect("requests").push(request);
+                if !delay.is_zero() {
+                    thread::sleep(delay);
+                }
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        Self {
+            base_url: format!("http://{addr}/v1"),
+            requests,
+        }
+    }
+
+    fn request(&self) -> String {
+        self.requests
+            .lock()
+            .expect("requests")
+            .first()
+            .cloned()
+            .expect("request")
+    }
+}
+
+fn read_http_request(stream: &mut std::net::TcpStream) -> String {
+    let mut request = Vec::new();
+    let mut buf = [0; 1024];
+    loop {
+        let n = stream.read(&mut buf).expect("request");
+        if n == 0 {
+            break;
+        }
+        request.extend_from_slice(&buf[..n]);
+        if request.windows(4).any(|window| window == b"\r\n\r\n") {
+            break;
+        }
+    }
+    String::from_utf8_lossy(&request).to_string()
 }
 
 #[test]
@@ -81,6 +148,167 @@ fn plan_list_and_search_tools_are_read_only_and_bounded() {
             .iter()
             .all(|entry| entry["line"].as_str().unwrap().contains("needle"))
     );
+}
+
+#[test]
+fn model_catalog_endpoint_follows_chat_base_url() {
+    assert_eq!(
+        model_catalog_endpoint("https://api.example.com/v1"),
+        "https://api.example.com/v1/models"
+    );
+    assert_eq!(
+        model_catalog_endpoint("https://api.example.com/v1/"),
+        "https://api.example.com/v1/models"
+    );
+    assert_eq!(
+        model_catalog_endpoint("https://api.example.com/v1/chat/completions"),
+        "https://api.example.com/v1/models"
+    );
+    assert_eq!(
+        model_catalog_endpoint("https://api.example.com/v1/chat/completions/"),
+        "https://api.example.com/v1/models"
+    );
+}
+
+#[test]
+fn model_catalog_providers_resolve_auth_and_no_auth() {
+    let temp = tempdir().expect("temp");
+    let mut options = base_options(&temp);
+    let config_dir = home_dir(&temp);
+    fs::create_dir_all(&config_dir).expect("config dir");
+    fs::write(
+        config_dir.join("config.jsonc"),
+        r#"
+            {
+              "model": "openai/gpt-4.1",
+              "provider": {
+                "openai": {
+                  "options": {
+                    "base_url": "http://api.example/v1",
+                    "api_key_env": "OPENAI_API_KEY"
+                  },
+                  "models": { "gpt-4.1": {} }
+                },
+                "lmstudio": {
+                  "options": { "base_url": "http://127.0.0.1:1234/v1" },
+                  "models": {}
+                }
+              }
+            }
+            "#,
+    )
+    .expect("config");
+    options.inherited_env = Some(BTreeMap::from([(
+        "HOME".to_string(),
+        temp.path().to_string_lossy().to_string(),
+    )]));
+
+    let providers = model_catalog_providers(&options).expect("providers");
+    let openai = providers
+        .iter()
+        .find(|provider| provider.provider == "openai")
+        .expect("openai");
+    assert_eq!(
+        openai.missing_credentials.as_deref(),
+        Some("OPENAI_API_KEY")
+    );
+    assert!(!openai.fetchable());
+    let lmstudio = providers
+        .iter()
+        .find(|provider| provider.provider == "lmstudio")
+        .expect("lmstudio");
+    assert_eq!(lmstudio.missing_credentials, None);
+    assert!(lmstudio.no_auth);
+    assert!(lmstudio.fetchable());
+}
+
+#[tokio::test]
+async fn model_catalog_fetch_parses_models_and_sends_auth() {
+    let server = CatalogServer::new(r#"{"data":[{"id":"zeta"},{"id":"alpha"},{"id":""}]}"#);
+    let provider = ModelCatalogProvider {
+        provider: "openai".to_string(),
+        display_label: "OpenAI".to_string(),
+        base_url: server.base_url.clone(),
+        api_key_env: Some("OPENAI_API_KEY".to_string()),
+        missing_credentials: None,
+        unavailable_reason: None,
+        no_auth: false,
+        api_key: Some("secret-key".to_string()),
+    };
+
+    let models =
+        fetch_model_catalog_with_client(&provider, &reqwest::Client::new(), Duration::from_secs(2))
+            .await
+            .expect("fetch");
+
+    assert_eq!(
+        models,
+        vec![
+            ModelCatalogEntry {
+                id: "alpha".to_string(),
+                context_limit: None,
+            },
+            ModelCatalogEntry {
+                id: "zeta".to_string(),
+                context_limit: None,
+            },
+        ]
+    );
+    let request = server.request();
+    assert!(request.starts_with("GET /v1/models HTTP/1.1"));
+    assert!(
+        request
+            .to_lowercase()
+            .contains("authorization: bearer secret-key")
+    );
+}
+
+#[tokio::test]
+async fn model_catalog_fetch_omits_auth_for_no_auth_providers() {
+    let server = CatalogServer::new(r#"{"data":[]}"#);
+    let provider = ModelCatalogProvider {
+        provider: "lmstudio".to_string(),
+        display_label: "LM Studio".to_string(),
+        base_url: server.base_url.clone(),
+        api_key_env: None,
+        missing_credentials: None,
+        unavailable_reason: None,
+        no_auth: true,
+        api_key: None,
+    };
+
+    fetch_model_catalog_with_client(&provider, &reqwest::Client::new(), Duration::from_secs(2))
+        .await
+        .expect("fetch");
+
+    let request = server.request();
+    assert!(request.starts_with("GET /v1/models HTTP/1.1"));
+    assert!(!request.to_lowercase().contains("authorization:"));
+}
+
+#[tokio::test]
+async fn model_catalog_fetch_times_out() {
+    let server = CatalogServer::with_delay(r#"{"data":[]}"#, Duration::from_millis(80));
+    let provider = ModelCatalogProvider {
+        provider: "lmstudio".to_string(),
+        display_label: "LM Studio".to_string(),
+        base_url: server.base_url.clone(),
+        api_key_env: None,
+        missing_credentials: None,
+        unavailable_reason: None,
+        no_auth: true,
+        api_key: None,
+    };
+
+    let err = fetch_model_catalog_with_client(
+        &provider,
+        &reqwest::Client::new(),
+        Duration::from_millis(5),
+    )
+    .await
+    .expect_err("timeout");
+
+    assert_eq!(err.to_string(), "timeout");
 }
 
 #[test]

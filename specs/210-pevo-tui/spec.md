@@ -133,10 +133,13 @@ Startup model and variant precedence is:
 2. per-workdir TUI state
 3. existing provider config and environment resolution
 
-Fullscreen `/model` opens an interactive local model picker. Selecting a model
-then opens a variant picker. Selecting `Config default` clears the per-workdir
-variant override so runtime uses the selected model's configured
-`reasoning_effort`; selecting an explicit variant persists that override.
+Fullscreen `/model` opens an interactive model picker. It starts from local
+configured models and never fetches remote model catalogs until the user
+selects an explicit fetch row. Selecting a model then opens a variant picker.
+Selecting `Config default` clears the per-workdir variant override so runtime
+uses the selected model's configured `reasoning_effort` when it has one, or the
+provider default for fetched-only models; selecting an explicit variant persists
+that override.
 `/variant <none|minimal|low|medium|high|xhigh|max>` continues to update only
 the per-workdir variant override. Bare `/variant` is not a display command and
 returns a bounded usage error. The removed `/variant set <value>` form returns
@@ -382,9 +385,10 @@ status transcript block, and non-terminal scripted TUI writes the same
 multi-line status text as one output block.
 
 Fullscreen `/sessions`, `/resume`, `/continue`, and `/model` use the shared
-bottom selection pane. The pane includes title/subtitle text, search,
-current/default markers, selected-row highlighting, footer hints, `Enter`
-selection, `Esc` close or back, arrow/Page/Home/End navigation, and scrolling.
+bottom selection pane. The pane includes title text, search directly below the
+title, current/default markers, selected-row highlighting, footer hints,
+`Enter` selection, `Esc` close or back, arrow/Page/Home/End navigation, and
+scrolling. Shared bottom selection panes do not render subtitles.
 
 `/sessions`, `/resume`, and `/continue` show date-grouped session rows sorted by
 most recently updated with right-aligned updated time and visible-message
@@ -395,13 +399,70 @@ history and does not add a status row. In non-terminal scripted mode,
 `/sessions`, `/resume`, and `/continue` print a deterministic session list
 instead of opening a panel.
 
-Fullscreen `/model` shows configured provider/model rows from local
-configuration only. It must not call live provider catalogs or require provider
-credentials. Selecting a model opens a second bottom pane for variant selection.
-For a newly selected model, `Config default` is selected by default; for the
-current model, the current explicit variant override is selected when one
-exists. In non-terminal scripted mode, `/model` prints deterministic local model
-information instead of opening a pane.
+Fullscreen `/model` shows a status-style `All providers` row at the top and a
+selectable provider status row before each provider's models. These action rows
+replace non-selectable provider group headers. Selecting `All providers`
+concurrently fetches every fetchable provider catalog; selecting a provider row
+fetches or retries only that provider. Fetch rows use `Enter fetch` in the
+footer. Model rows use `Enter select`.
+
+`/model` fetch is explicit and fullscreen-only. There is no `/model fetch`
+slash command, opening `/model` does not call remote catalogs, and
+non-terminal scripted `/model` prints deterministic local model information
+only.
+
+Model fetch rows use status words instead of command text. `All providers` and
+provider rows may show `not fetched`, `fetching`, `fetched N models`,
+`no models`, `partial failed`, `failed: <short error>`, or
+`missing <ENV>`. Missing credentials reuse runtime credential resolution, so
+loopback/no-auth providers can fetch without an Authorization header while
+non-local providers with no key show the missing environment variable. A
+provider fetch times out after five seconds and shows `failed: timeout`.
+
+Fetchable providers come from the current configured provider map and the
+provider currently implied by CLI, environment, top-level config, or TUI state
+model selection. Providers are not added only because a credential environment
+variable is present. Catalog requests reuse runtime provider base URL and
+credential resolution. The OpenAI-compatible models endpoint is derived by
+replacing a trailing `/chat/completions` path with `/models`, otherwise by
+appending `/models` to the resolved base URL. The first slice does not add a
+catalog URL config field and does not filter non-chat model ids from remote
+catalog results.
+
+Fetch results are cached only for the current TUI process. Closing and
+reopening `/model` preserves provider fetch state and fetched models but starts
+with an empty search query. Fetch failure does not clear the previous fetched
+models for that provider. `Esc` cancels unfinished provider requests and keeps
+completed results. Selecting an existing model while a fetch is in progress is
+allowed and cancels unfinished catalog requests when the pane closes or moves to
+variant selection.
+
+The model picker keeps local rows authoritative. When a local configured model
+and fetched model have the same provider/model id, the local row is shown and
+the fetched source is not displayed. Pure fetched rows show only `fetched` plus
+known remote metadata. Fetched model ids are displayed unchanged and sorted by
+model id within their provider. Refresh removes stale fetched-only rows unless
+the stale model is the current TUI selection, in which case the current row
+remains visible. If TUI state references a current model that is no longer in
+local config, `/model` still shows that current model row; runtime execution
+continues to use existing provider/model resolution errors if the provider can
+no longer be resolved.
+
+When `/model` opens, focus starts on the current model when present, on the
+first local model when no current model is present but local models exist, and
+on `All providers` only when there are no model rows. `All providers` is always
+visible during search. A provider query shows the provider row and that
+provider's models; a model match also keeps its provider row visible. If no
+model matches a query, `All providers` remains visible and a fetch preserves the
+current query.
+
+Selecting a fetched-only model opens the existing variant pane. For such rows,
+the `Config default` variant row describes `use provider default`. Final model
+selection writes only TUI state for the current workdir and updates recent
+models. It does not edit JSONC provider configuration.
+
+All bottom selection panes keep `Home` and `End` as direct first/last jumps, and
+their `Up` and `Down` navigation wraps between the first and last visible rows.
 
 `/models`, `/model set <provider/model>`, `/session list`, `/session show`, and
 `/session switch` are not TUI commands in this slice.
@@ -442,8 +503,8 @@ Slash menu command labels stay canonical and do not include parameter
 placeholders. Parameter hints appear only in description text, such as
 `<title> rename current session` for `/rename`, `set <value>` for `/variant`,
 `set <plan|default>` for `/mode`, and `toggle; set <on|off>` for
-`/show-thinking`. Tab completion inserts only the command token, never a
-placeholder template.
+`/show-thinking`. `/model` is described as `select/fetch model`. Tab
+completion inserts only the command token, never a placeholder template.
 
 The first slash menu row is selected by default. Pressing `Enter` while
 suggestions are visible executes that selected command instead of submitting the

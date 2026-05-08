@@ -1,13 +1,14 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 use crate::paths::canonical_workdir;
-use crate::types::{ConfiguredModel, RunOptions};
+use crate::types::{ConfiguredModel, ModelCatalogEntry, ModelCatalogProvider, RunOptions};
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct RunConfig {
@@ -82,6 +83,7 @@ const AUTO_PROVIDER_ORDER: &[&str] = &[
 
 const REASONING_EFFORT_VALUES: &[&str] =
     &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+const MODEL_CATALOG_TIMEOUT: Duration = Duration::from_secs(5);
 
 const BUILT_IN_PROVIDERS: &[BuiltInProvider] = &[
     BuiltInProvider {
@@ -736,6 +738,100 @@ fn built_in_provider(provider: &str) -> Option<&'static BuiltInProvider> {
         .find(|entry| entry.id == normalize_provider_id(provider))
 }
 
+fn catalog_provider_for(provider: &str, loaded: &LoadedRunConfig) -> Option<ModelCatalogProvider> {
+    let provider = normalize_provider_id(provider);
+    let config_entry = loaded.config.provider.get(&provider);
+    let built_in = built_in_provider(&provider);
+    if built_in.is_none() && config_entry.is_none() {
+        return None;
+    }
+    let display_label = provider_label(&provider);
+    let base_url = first_string([
+        config_entry.and_then(|entry| entry.options.base_url.clone()),
+        built_in
+            .and_then(|provider| provider.base_url_env)
+            .and_then(|key| loaded.env.get(key).cloned())
+            .filter(|value| !value.trim().is_empty()),
+        built_in.and_then(|provider| provider.base_url.map(str::to_string)),
+    ]);
+    let api_key_env = first_string([
+        config_entry.and_then(|entry| entry.options.api_key_env.clone()),
+        built_in.and_then(|provider| {
+            provider
+                .api_key_envs
+                .iter()
+                .find(|key| env_value(&loaded.env, key).is_some())
+                .or_else(|| provider.api_key_envs.first())
+                .map(|key| (*key).to_string())
+        }),
+    ]);
+    let Some(base_url) = base_url else {
+        return Some(ModelCatalogProvider {
+            provider,
+            display_label,
+            base_url: String::new(),
+            api_key_env,
+            missing_credentials: None,
+            unavailable_reason: Some("requires base_url".to_string()),
+            no_auth: false,
+            api_key: None,
+        });
+    };
+    let api_key = api_key_env
+        .as_deref()
+        .and_then(|key| env_value(&loaded.env, key));
+    let no_auth_allowed =
+        built_in.is_some_and(|provider| provider.allow_no_auth) || is_loopback_base_url(&base_url);
+    let no_auth = api_key.is_none() && no_auth_allowed;
+    let missing_credentials = (api_key.is_none() && !no_auth_allowed).then(|| {
+        api_key_env
+            .clone()
+            .unwrap_or_else(|| "credentials".to_string())
+    });
+    Some(ModelCatalogProvider {
+        provider,
+        display_label,
+        base_url,
+        api_key_env,
+        missing_credentials,
+        unavailable_reason: None,
+        no_auth,
+        api_key,
+    })
+}
+
+fn parse_model_catalog_response(provider: &str, value: &Value) -> Result<Vec<ModelCatalogEntry>> {
+    let data = value
+        .get("data")
+        .and_then(Value::as_array)
+        .ok_or_else(|| Error::Message("model catalog response missing data".to_string()))?;
+    let mut seen = BTreeSet::new();
+    let mut models = data
+        .iter()
+        .filter_map(|entry| entry.get("id").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .filter(|id| seen.insert((*id).to_string()))
+        .map(|id| ModelCatalogEntry {
+            id: id.to_string(),
+            context_limit: built_in_context_limit(provider, id),
+        })
+        .collect::<Vec<_>>();
+    models.sort_by(|left, right| left.id.cmp(&right.id));
+    Ok(models)
+}
+
+fn truncate_error(value: &str) -> String {
+    let trimmed = value.trim().replace(['\r', '\n', '\t'], " ");
+    if trimmed.chars().count() <= 160 {
+        trimmed
+    } else {
+        let mut out = trimmed.chars().take(157).collect::<String>();
+        out.push_str("...");
+        out
+    }
+}
+
 fn normalize_provider_id(provider: &str) -> String {
     let key = provider.trim().to_lowercase();
     match key.as_str() {
@@ -854,6 +950,120 @@ pub fn configured_models(options: &RunOptions) -> Result<Vec<ConfiguredModel>> {
             .then_with(|| left.model.cmp(&right.model))
     });
     Ok(rows)
+}
+
+pub fn model_catalog_endpoint(base_url: &str) -> String {
+    let trimmed = base_url.trim_end_matches('/');
+    if let Some(prefix) = trimmed.strip_suffix("/chat/completions") {
+        format!("{prefix}/models")
+    } else {
+        format!("{trimmed}/models")
+    }
+}
+
+pub fn model_catalog_providers(options: &RunOptions) -> Result<Vec<ModelCatalogProvider>> {
+    let workdir = canonical_workdir(&options.workdir)?;
+    let loaded = load_run_config(options, &workdir)?;
+    let cli_model = parse_model_override(options.model.as_ref())?;
+    let env_model = loaded
+        .env
+        .get("PSYCHEVO_INFERENCE_MODEL")
+        .map(|value| {
+            parse_model_selection(
+                &Value::String(value.clone()),
+                &loaded.config.provider.keys().cloned().collect(),
+            )
+        })
+        .transpose()?
+        .unwrap_or_default();
+
+    let mut providers = BTreeSet::new();
+    providers.extend(loaded.config.provider.keys().cloned());
+    if let Some(provider) = cli_model.provider {
+        providers.insert(provider);
+    }
+    if let Some(provider) = loaded.config.model.provider.clone().or_else(|| {
+        loaded
+            .config
+            .model
+            .id
+            .as_deref()
+            .and_then(|model| infer_provider_for_model(&loaded.config, model))
+    }) {
+        providers.insert(provider);
+    }
+    if let Some(provider) = loaded
+        .env
+        .get("PSYCHEVO_INFERENCE_PROVIDER")
+        .map(|value| normalize_provider_id(value))
+    {
+        providers.insert(provider);
+    }
+    if let Some(provider) = env_model.provider.or_else(|| {
+        env_model
+            .id
+            .as_deref()
+            .and_then(|model| infer_provider_for_model(&loaded.config, model))
+    }) {
+        providers.insert(provider);
+    }
+
+    let mut rows = providers
+        .into_iter()
+        .filter_map(|provider| catalog_provider_for(&provider, &loaded))
+        .collect::<Vec<_>>();
+    rows.sort_by(|left, right| {
+        left.display_label
+            .cmp(&right.display_label)
+            .then_with(|| left.provider.cmp(&right.provider))
+    });
+    Ok(rows)
+}
+
+pub async fn fetch_model_catalog(
+    provider: &ModelCatalogProvider,
+) -> Result<Vec<ModelCatalogEntry>> {
+    let client = reqwest::Client::new();
+    fetch_model_catalog_with_client(provider, &client, MODEL_CATALOG_TIMEOUT).await
+}
+
+pub async fn fetch_model_catalog_with_client(
+    provider: &ModelCatalogProvider,
+    client: &reqwest::Client,
+    timeout: Duration,
+) -> Result<Vec<ModelCatalogEntry>> {
+    if let Some(reason) = &provider.unavailable_reason {
+        return Err(Error::Config(reason.clone()));
+    }
+    if let Some(missing) = &provider.missing_credentials {
+        return Err(Error::Config(format!("missing {missing}")));
+    }
+    let endpoint = model_catalog_endpoint(&provider.base_url);
+    let request = client.get(endpoint).header("accept", "application/json");
+    let request = if let Some(api_key) = &provider.api_key {
+        request.bearer_auth(api_key)
+    } else {
+        request
+    };
+    let value = tokio::time::timeout(timeout, async move {
+        let response = request.send().await?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|err| format!("<failed to read error body: {err}>"));
+            return Err(Error::Message(format!(
+                "HTTP {status}: {}",
+                truncate_error(&body)
+            )));
+        }
+        let value = response.json::<Value>().await?;
+        Ok(value)
+    })
+    .await
+    .map_err(|_| Error::Message("timeout".to_string()))??;
+    parse_model_catalog_response(&provider.provider, &value)
 }
 
 pub fn selected_configured_model(options: &RunOptions) -> Result<Option<ConfiguredModel>> {

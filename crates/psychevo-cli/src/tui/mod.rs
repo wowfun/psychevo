@@ -16,9 +16,10 @@ use crossterm::terminal::{
 };
 use psychevo_ai::Outcome;
 use psychevo_runtime::{
-    ConfiguredModel, RunControlHandle, RunMode, RunOptions, RunStreamEvent, RunStreamSink,
-    SessionSummary, SessionUndoOptions, SqliteStore, TuiMessageSummary, canonicalize_workdir,
-    configured_models, redo_session, run_control, run_live_streaming,
+    ConfiguredModel, ModelCatalogEntry, ModelCatalogProvider, RunControlHandle, RunMode,
+    RunOptions, RunStreamEvent, RunStreamSink, SessionSummary, SessionUndoOptions, SqliteStore,
+    TuiMessageSummary, canonicalize_workdir, configured_models, fetch_model_catalog,
+    model_catalog_providers, redo_session, run_control, run_live_streaming,
     run_live_streaming_controlled, selected_configured_model, undo_session,
 };
 use ratatui::Frame;
@@ -113,6 +114,7 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
         renderer: TuiRenderer::new(color),
         debug: args.debug,
         had_error: false,
+        model_catalog: ModelCatalogCache::default(),
     };
     app.refresh_selected_model();
     app.refresh_current_session_title()?;
@@ -140,6 +142,7 @@ struct TuiApp {
     renderer: TuiRenderer,
     debug: bool,
     had_error: bool,
+    model_catalog: ModelCatalogCache,
 }
 
 impl TuiApp {
@@ -222,6 +225,7 @@ impl TuiApp {
             running.control.abort();
             let _ = running.task.await;
         }
+        self.model_catalog.abort_unfinished();
         Ok(())
     }
 
@@ -469,6 +473,9 @@ impl TuiApp {
                 if let Some(BottomPanel::Variants { models, .. }) = ui.bottom_panel.take() {
                     ui.bottom_panel = Some(BottomPanel::Models(*models));
                 } else {
+                    if matches!(ui.bottom_panel, Some(BottomPanel::Models(_))) {
+                        self.model_catalog.abort_unfinished();
+                    }
                     ui.bottom_panel = None;
                 }
             }
@@ -481,12 +488,12 @@ impl TuiApp {
             }
             KeyCode::Up => {
                 if let Some(panel) = &mut ui.bottom_panel {
-                    panel.selection_mut().move_selection(-1);
+                    panel.move_selection(-1);
                 }
             }
             KeyCode::Down => {
                 if let Some(panel) = &mut ui.bottom_panel {
-                    panel.selection_mut().move_selection(1);
+                    panel.move_selection(1);
                 }
             }
             KeyCode::PageUp => {
@@ -540,9 +547,34 @@ impl TuiApp {
                 self.load_current_session_history(ui)?;
                 ui.refresh_sidebar(self);
             }
-            Some(BottomSelectionValue::Model(model)) => {
+            Some(BottomSelectionValue::FetchAllModels) => {
+                self.start_model_catalog_fetch_all(ui)?;
+            }
+            Some(BottomSelectionValue::FetchProvider(provider)) => {
+                self.start_model_catalog_fetch_provider(ui, &provider)?;
+            }
+            Some(BottomSelectionValue::ProviderInfo(provider)) => {
+                let message = if provider == "all" {
+                    if self.model_catalog.providers.is_empty() {
+                        "no configured providers".to_string()
+                    } else if self.model_catalog.any_fetching() {
+                        "already fetching".to_string()
+                    } else {
+                        "no fetchable providers".to_string()
+                    }
+                } else {
+                    self.model_catalog
+                        .providers
+                        .get(&provider)
+                        .map(|state| self.provider_status_text(state))
+                        .unwrap_or_else(|| "provider unavailable".to_string())
+                };
+                ui.set_bottom_panel_notice(message);
+            }
+            Some(BottomSelectionValue::Model { model, source }) => {
+                self.model_catalog.abort_unfinished();
                 if let Some(BottomPanel::Models(models)) = ui.bottom_panel.take() {
-                    ui.bottom_panel = Some(self.variant_panel(model, models));
+                    ui.bottom_panel = Some(self.variant_panel(model, source, models));
                 }
             }
             Some(BottomSelectionValue::Variant { model, variant }) => {
@@ -556,6 +588,150 @@ impl TuiApp {
             }
             None => {}
         }
+        Ok(())
+    }
+
+    fn start_model_catalog_fetch_all(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
+        if self.model_catalog.any_fetching() {
+            ui.set_bottom_panel_notice("already fetching");
+            return Ok(());
+        }
+        let providers = self
+            .model_catalog_provider_order()
+            .into_iter()
+            .filter(|provider| {
+                self.model_catalog
+                    .providers
+                    .get(provider)
+                    .is_some_and(|state| state.provider.fetchable())
+            })
+            .collect::<Vec<_>>();
+        if providers.is_empty() {
+            ui.set_bottom_panel_notice(if self.model_catalog.providers.is_empty() {
+                "no configured providers"
+            } else {
+                "no fetchable providers"
+            });
+            return Ok(());
+        }
+        for provider in providers {
+            self.start_model_catalog_fetch_task(&provider);
+        }
+        self.rebuild_model_panel(ui, Some("fetch:all".to_string()))?;
+        Ok(())
+    }
+
+    fn start_model_catalog_fetch_provider(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        provider: &str,
+    ) -> Result<()> {
+        let Some(state) = self.model_catalog.providers.get(provider) else {
+            ui.set_bottom_panel_notice("provider unavailable");
+            return Ok(());
+        };
+        if matches!(state.status, ModelCatalogStatus::Fetching) {
+            ui.set_bottom_panel_notice("already fetching");
+            return Ok(());
+        }
+        if !state.provider.fetchable() {
+            ui.set_bottom_panel_notice(self.provider_status_text(state));
+            return Ok(());
+        }
+        let key = format!("fetch:provider:{provider}");
+        self.start_model_catalog_fetch_task(provider);
+        self.rebuild_model_panel(ui, Some(key))?;
+        Ok(())
+    }
+
+    fn start_model_catalog_fetch_task(&mut self, provider: &str) {
+        if self.model_catalog.tasks.contains_key(provider) {
+            return;
+        }
+        let Some(state) = self.model_catalog.providers.get_mut(provider) else {
+            return;
+        };
+        if !state.provider.fetchable() {
+            return;
+        }
+        state.status = ModelCatalogStatus::Fetching;
+        let provider_config = state.provider.clone();
+        let provider_id = provider_config.provider.clone();
+        let task = tokio::spawn(async move {
+            let result = fetch_model_catalog(&provider_config)
+                .await
+                .map_err(|err| short_fetch_error(&err.to_string()));
+            ModelCatalogFetchResult {
+                provider: provider_id,
+                result,
+            }
+        });
+        self.model_catalog.tasks.insert(provider.to_string(), task);
+    }
+
+    async fn drain_model_catalog_fetches(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
+        let finished = self
+            .model_catalog
+            .tasks
+            .iter()
+            .filter(|(_, task)| task.is_finished())
+            .map(|(provider, _)| provider.clone())
+            .collect::<Vec<_>>();
+        if finished.is_empty() {
+            return Ok(());
+        }
+        let selected_key = ui
+            .bottom_panel
+            .as_ref()
+            .map(|panel| panel.selection().selected_key());
+        for provider in finished {
+            let Some(task) = self.model_catalog.tasks.remove(&provider) else {
+                continue;
+            };
+            match task.await {
+                Ok(result) => {
+                    if let Some(state) = self.model_catalog.providers.get_mut(&result.provider) {
+                        match result.result {
+                            Ok(models) => {
+                                state.fetched = models;
+                                state.status = ModelCatalogStatus::Fetched;
+                            }
+                            Err(error) => {
+                                state.status = ModelCatalogStatus::Failed(error);
+                            }
+                        }
+                    }
+                }
+                Err(err) if err.is_cancelled() => {}
+                Err(err) => {
+                    if let Some(state) = self.model_catalog.providers.get_mut(&provider) {
+                        state.status =
+                            ModelCatalogStatus::Failed(short_fetch_error(&err.to_string()));
+                    }
+                }
+            }
+        }
+        self.rebuild_model_panel(ui, selected_key)?;
+        Ok(())
+    }
+
+    fn rebuild_model_panel(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        selected_key: Option<String>,
+    ) -> Result<()> {
+        let Some(BottomPanel::Models(panel)) = ui.bottom_panel.as_ref() else {
+            return Ok(());
+        };
+        let query = panel.query.clone();
+        let notice = panel.notice.clone();
+        let mut panel = self.model_selection_panel()?;
+        panel.query = query;
+        panel.notice = notice;
+        if let Some(key) = selected_key {
+            panel.select_value_key(&key);
+        }
+        ui.bottom_panel = Some(BottomPanel::Models(panel));
         Ok(())
     }
 
@@ -800,6 +976,7 @@ impl TuiApp {
     }
 
     async fn drain_fullscreen_events(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
+        self.drain_model_catalog_fetches(ui).await?;
         let mut pending = Vec::new();
         if let Some(running) = &mut ui.running {
             while let Ok(event) = running.rx.try_recv() {
@@ -1154,6 +1331,8 @@ impl TuiApp {
                     search_text,
                     is_current: current_session.is_some_and(|id| id == summary.id),
                     is_default: false,
+                    style: BottomRowStyle::Normal,
+                    footer: None,
                     value: BottomSelectionValue::Session(summary.id),
                 }
             })
@@ -1166,53 +1345,141 @@ impl TuiApp {
         ))
     }
 
-    fn model_selection_panel(&self) -> Result<BottomSelectionPanel> {
+    fn model_selection_panel(&mut self) -> Result<BottomSelectionPanel> {
+        self.sync_model_catalog_providers()?;
         let current = self.model_display_value();
-        let rows = configured_models(&self.run_options(String::new()))?
-            .into_iter()
-            .map(|model| {
-                let model_spec = format_model_spec(&model);
-                let mut details = Vec::new();
-                if let Some(variant) = &model.reasoning_effort {
-                    details.push(format!("default {variant}"));
-                }
-                if let Some(limit) = model.context_limit {
-                    details.push(format!("context {}", format_count(limit)));
-                }
-                let description = if details.is_empty() {
-                    Some(model.provider_label.clone())
+        let local_models = configured_models(&self.run_options(String::new()))?;
+        let mut local_by_provider: BTreeMap<String, Vec<ConfiguredModel>> = BTreeMap::new();
+        let mut known_specs = BTreeMap::new();
+        for model in local_models {
+            known_specs.insert(format_model_spec(&model), ModelRowSource::Local);
+            local_by_provider
+                .entry(model.provider.clone())
+                .or_default()
+                .push(model);
+        }
+
+        let mut rows = Vec::new();
+        let all_fetchable = self.model_catalog.providers.values().any(|state| {
+            state.provider.fetchable() && !matches!(state.status, ModelCatalogStatus::Fetching)
+        });
+        rows.push(BottomSelectionRow {
+            label: "All providers".to_string(),
+            description: Some(self.all_providers_status()),
+            detail: None,
+            group: None,
+            search_text: "all providers fetch models".to_string(),
+            is_current: false,
+            is_default: false,
+            style: BottomRowStyle::Action,
+            footer: Some("Enter fetch  Esc close  Type search".to_string()),
+            value: if all_fetchable {
+                BottomSelectionValue::FetchAllModels
+            } else {
+                BottomSelectionValue::ProviderInfo("all".to_string())
+            },
+        });
+
+        let mut first_model_key = None;
+        let mut first_local_key = None;
+        let mut current_key = None;
+        for provider_id in self.model_catalog_provider_order() {
+            let Some(state) = self.model_catalog.providers.get(&provider_id) else {
+                continue;
+            };
+            rows.push(BottomSelectionRow {
+                label: state.provider.display_label.clone(),
+                description: Some(self.provider_status_text(state)),
+                detail: None,
+                group: None,
+                search_text: format!(
+                    "{} {}",
+                    state.provider.provider, state.provider.display_label
+                ),
+                is_current: false,
+                is_default: false,
+                style: BottomRowStyle::Action,
+                footer: Some("Enter fetch  Esc close  Type search".to_string()),
+                value: if state.provider.fetchable() {
+                    BottomSelectionValue::FetchProvider(state.provider.provider.clone())
                 } else {
-                    Some(format!("{}  {}", model.provider_label, details.join("  ")))
-                };
-                let search_text = format!(
-                    "{} {} {} {}",
-                    model_spec,
-                    model.provider_label,
-                    model.reasoning_effort.clone().unwrap_or_default(),
-                    model.context_limit.unwrap_or_default()
-                );
-                BottomSelectionRow {
-                    label: model_spec,
-                    description,
-                    detail: None,
-                    group: Some(model.provider_label.clone()),
-                    search_text,
-                    is_current: format_model_spec(&model) == current,
-                    is_default: self.current_model.is_none()
-                        && format_model_spec(&model) == current,
-                    value: BottomSelectionValue::Model(model),
+                    BottomSelectionValue::ProviderInfo(state.provider.provider.clone())
+                },
+            });
+
+            if let Some(models) = local_by_provider.get_mut(&provider_id) {
+                models.sort_by(|left, right| left.model.cmp(&right.model));
+                for model in models.iter().cloned() {
+                    let key = format!("model:{}", format_model_spec(&model));
+                    first_model_key.get_or_insert_with(|| key.clone());
+                    first_local_key.get_or_insert_with(|| key.clone());
+                    if format_model_spec(&model) == current {
+                        current_key = Some(key.clone());
+                    }
+                    rows.push(self.model_row(model, ModelRowSource::Local, &current));
                 }
-            })
-            .collect();
-        Ok(BottomSelectionPanel::new(
-            "Select Model",
-            "Configured local models only.",
-            "No configured models",
-            rows,
-        ))
+            }
+
+            for entry in &state.fetched {
+                let spec = format!("{}/{}", state.provider.provider, entry.id);
+                if known_specs.contains_key(&spec) {
+                    continue;
+                }
+                let model = ConfiguredModel {
+                    provider: state.provider.provider.clone(),
+                    provider_label: state.provider.display_label.clone(),
+                    model: entry.id.clone(),
+                    reasoning_effort: None,
+                    context_limit: entry.context_limit,
+                };
+                let key = format!("model:{spec}");
+                first_model_key.get_or_insert_with(|| key.clone());
+                if spec == current {
+                    current_key = Some(key.clone());
+                }
+                rows.push(self.model_row(model, ModelRowSource::Fetched, &current));
+                known_specs.insert(spec, ModelRowSource::Fetched);
+            }
+        }
+
+        if current != "config"
+            && !known_specs.contains_key(&current)
+            && let Some((provider, model)) = current.split_once('/')
+        {
+            let provider_label = self
+                .model_catalog
+                .providers
+                .get(provider)
+                .map(|state| state.provider.display_label.clone())
+                .unwrap_or_else(|| provider.to_string());
+            let model = ConfiguredModel {
+                provider: provider.to_string(),
+                provider_label,
+                model: model.to_string(),
+                reasoning_effort: None,
+                context_limit: None,
+            };
+            let key = format!("model:{current}");
+            current_key = Some(key.clone());
+            first_model_key.get_or_insert(key);
+            rows.push(self.model_row(model, ModelRowSource::CurrentOnly, &current));
+        }
+
+        let mut panel = BottomSelectionPanel::new("Select Model", "", "No models", rows);
+        let initial_key = current_key
+            .or(first_local_key)
+            .or(first_model_key)
+            .unwrap_or_else(|| "fetch:all".to_string());
+        panel.select_value_key(&initial_key);
+        Ok(panel)
     }
 
-    fn variant_panel(&self, model: ConfiguredModel, models: BottomSelectionPanel) -> BottomPanel {
+    fn variant_panel(
+        &self,
+        model: ConfiguredModel,
+        source: ModelRowSource,
+        models: BottomSelectionPanel,
+    ) -> BottomPanel {
         let model_spec = format_model_spec(&model);
         let current_model = self.model_display_value();
         let is_current_model = current_model == model_spec;
@@ -1220,7 +1487,12 @@ impl TuiApp {
             .reasoning_effort
             .as_deref()
             .map(|variant| format!("configured default: {variant}"))
-            .unwrap_or_else(|| "use provider configuration".to_string());
+            .unwrap_or_else(|| match source {
+                ModelRowSource::Local => "use provider configuration".to_string(),
+                ModelRowSource::Fetched | ModelRowSource::CurrentOnly => {
+                    "use provider default".to_string()
+                }
+            });
         let mut rows = vec![BottomSelectionRow {
             label: "Config default".to_string(),
             description: Some(configured),
@@ -1229,6 +1501,8 @@ impl TuiApp {
             search_text: "config default provider configuration".to_string(),
             is_current: is_current_model && self.current_variant.is_none(),
             is_default: true,
+            style: BottomRowStyle::Normal,
+            footer: None,
             value: BottomSelectionValue::Variant {
                 model: model_spec.clone(),
                 variant: None,
@@ -1242,6 +1516,8 @@ impl TuiApp {
             search_text: format!("{variant} {}", variant_description(variant)),
             is_current: is_current_model && self.current_variant.as_deref() == Some(*variant),
             is_default: false,
+            style: BottomRowStyle::Normal,
+            footer: None,
             value: BottomSelectionValue::Variant {
                 model: model_spec.clone(),
                 variant: Some((*variant).to_string()),
@@ -1266,6 +1542,161 @@ impl TuiApp {
         BottomPanel::Variants {
             models: Box::new(models),
             panel,
+        }
+    }
+
+    fn sync_model_catalog_providers(&mut self) -> Result<()> {
+        let providers = model_catalog_providers(&self.run_options(String::new()))?;
+        let active = providers
+            .iter()
+            .map(|provider| provider.provider.clone())
+            .collect::<Vec<_>>();
+        for provider in providers {
+            self.model_catalog
+                .providers
+                .entry(provider.provider.clone())
+                .and_modify(|state| state.provider = provider.clone())
+                .or_insert_with(|| ModelProviderCatalogState {
+                    provider,
+                    status: ModelCatalogStatus::NotFetched,
+                    fetched: Vec::new(),
+                });
+        }
+        self.model_catalog
+            .providers
+            .retain(|provider, _| active.contains(provider));
+        Ok(())
+    }
+
+    fn model_catalog_provider_order(&self) -> Vec<String> {
+        let mut providers = self
+            .model_catalog
+            .providers
+            .values()
+            .map(|state| {
+                (
+                    state.provider.display_label.clone(),
+                    state.provider.provider.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        providers.sort();
+        providers
+            .into_iter()
+            .map(|(_, provider)| provider)
+            .collect()
+    }
+
+    fn all_providers_status(&self) -> String {
+        if self.model_catalog.providers.is_empty() {
+            return "no providers".to_string();
+        }
+        if self.model_catalog.any_fetching() {
+            return "fetching".to_string();
+        }
+        let mut fetchable = 0usize;
+        let mut failed = 0usize;
+        let mut fetched = 0usize;
+        let mut models = 0usize;
+        let mut missing = 0usize;
+        for state in self.model_catalog.providers.values() {
+            if !state.provider.fetchable() {
+                missing += 1;
+                continue;
+            }
+            fetchable += 1;
+            match &state.status {
+                ModelCatalogStatus::Failed(_) => failed += 1,
+                ModelCatalogStatus::Fetched => {
+                    fetched += 1;
+                    models += state.fetched.len();
+                }
+                ModelCatalogStatus::Fetching | ModelCatalogStatus::NotFetched => {}
+            }
+        }
+        if fetchable == 0 && missing > 0 {
+            return "missing credentials".to_string();
+        }
+        if failed > 0 && fetched > 0 {
+            return "partial failed".to_string();
+        }
+        if failed > 0 {
+            return "failed".to_string();
+        }
+        if fetched > 0 {
+            if models == 0 {
+                "no models".to_string()
+            } else {
+                format!("fetched {models} models")
+            }
+        } else {
+            "not fetched".to_string()
+        }
+    }
+
+    fn provider_status_text(&self, state: &ModelProviderCatalogState) -> String {
+        if let Some(missing) = &state.provider.missing_credentials {
+            return format!("missing {missing}");
+        }
+        if let Some(reason) = &state.provider.unavailable_reason {
+            return format!("failed: {}", short_fetch_error(reason));
+        }
+        match &state.status {
+            ModelCatalogStatus::NotFetched => "not fetched".to_string(),
+            ModelCatalogStatus::Fetching => "fetching".to_string(),
+            ModelCatalogStatus::Fetched if state.fetched.is_empty() => "no models".to_string(),
+            ModelCatalogStatus::Fetched => format!("fetched {} models", state.fetched.len()),
+            ModelCatalogStatus::Failed(error) => format!("failed: {error}"),
+        }
+    }
+
+    fn model_row(
+        &self,
+        model: ConfiguredModel,
+        source: ModelRowSource,
+        current: &str,
+    ) -> BottomSelectionRow {
+        let model_spec = format_model_spec(&model);
+        let mut details = Vec::new();
+        if source == ModelRowSource::Fetched {
+            details.push("fetched".to_string());
+        }
+        if source == ModelRowSource::Local
+            && let Some(variant) = &model.reasoning_effort
+        {
+            details.push(format!("default {variant}"));
+        }
+        if let Some(limit) = model.context_limit {
+            details.push(format!("context {}", format_count(limit)));
+        }
+        let description = if details.is_empty() {
+            Some(model.provider_label.clone())
+        } else {
+            Some(format!("{}  {}", model.provider_label, details.join("  ")))
+        };
+        let search_text = format!(
+            "{} {} {} {} {}",
+            model_spec,
+            model.provider_label,
+            model.reasoning_effort.clone().unwrap_or_default(),
+            model.context_limit.unwrap_or_default(),
+            if source == ModelRowSource::Fetched {
+                "fetched"
+            } else {
+                ""
+            }
+        );
+        BottomSelectionRow {
+            label: model_spec.clone(),
+            description,
+            detail: None,
+            group: None,
+            search_text,
+            is_current: model_spec == current,
+            is_default: self.current_model.is_none() && model_spec == current,
+            style: BottomRowStyle::Normal,
+            footer: None,
+            value: BottomSelectionValue::Model { model, source },
         }
     }
 
@@ -1529,6 +1960,54 @@ struct TuiSessionDisplaySummary {
 
 type ClipboardSink = Arc<dyn Fn(&str) -> io::Result<()> + Send + Sync>;
 
+#[derive(Default)]
+struct ModelCatalogCache {
+    providers: BTreeMap<String, ModelProviderCatalogState>,
+    tasks: BTreeMap<String, JoinHandle<ModelCatalogFetchResult>>,
+}
+
+struct ModelProviderCatalogState {
+    provider: ModelCatalogProvider,
+    status: ModelCatalogStatus,
+    fetched: Vec<ModelCatalogEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ModelCatalogStatus {
+    NotFetched,
+    Fetching,
+    Fetched,
+    Failed(String),
+}
+
+struct ModelCatalogFetchResult {
+    provider: String,
+    result: std::result::Result<Vec<ModelCatalogEntry>, String>,
+}
+
+impl ModelCatalogCache {
+    fn any_fetching(&self) -> bool {
+        self.providers
+            .values()
+            .any(|state| matches!(state.status, ModelCatalogStatus::Fetching))
+    }
+
+    fn abort_unfinished(&mut self) {
+        for (_, task) in std::mem::take(&mut self.tasks) {
+            task.abort();
+        }
+        for state in self.providers.values_mut() {
+            if matches!(state.status, ModelCatalogStatus::Fetching) {
+                state.status = if state.fetched.is_empty() {
+                    ModelCatalogStatus::NotFetched
+                } else {
+                    ModelCatalogStatus::Fetched
+                };
+            }
+        }
+    }
+}
+
 const TUI_CYAN: Color = Color::Cyan;
 const TUI_MAGENTA: Color = Color::Magenta;
 const TUI_RED: Color = Color::Red;
@@ -1702,9 +2181,9 @@ struct SidebarSnapshot {
 #[derive(Debug, Clone)]
 struct BottomSelectionPanel {
     title: String,
-    subtitle: String,
     empty_label: String,
     footer: String,
+    notice: Option<String>,
     rows: Vec<BottomSelectionRow>,
     query: String,
     selected: usize,
@@ -1720,17 +2199,38 @@ struct BottomSelectionRow {
     search_text: String,
     is_current: bool,
     is_default: bool,
+    style: BottomRowStyle,
+    footer: Option<String>,
     value: BottomSelectionValue,
 }
 
 #[derive(Debug, Clone)]
 enum BottomSelectionValue {
     Session(String),
-    Model(ConfiguredModel),
+    FetchAllModels,
+    FetchProvider(String),
+    ProviderInfo(String),
+    Model {
+        model: ConfiguredModel,
+        source: ModelRowSource,
+    },
     Variant {
         model: String,
         variant: Option<String>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BottomRowStyle {
+    Normal,
+    Action,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModelRowSource {
+    Local,
+    Fetched,
+    CurrentOnly,
 }
 
 #[derive(Debug, Clone)]
@@ -1744,12 +2244,12 @@ enum BottomPanel {
 }
 
 impl BottomSelectionPanel {
-    fn new(title: &str, subtitle: &str, empty_label: &str, rows: Vec<BottomSelectionRow>) -> Self {
+    fn new(title: &str, _subtitle: &str, empty_label: &str, rows: Vec<BottomSelectionRow>) -> Self {
         Self {
             title: title.to_string(),
-            subtitle: subtitle.to_string(),
             empty_label: empty_label.to_string(),
             footer: "Enter select  Esc close  Type search".to_string(),
+            notice: None,
             rows,
             query: String::new(),
             selected: 0,
@@ -1759,6 +2259,13 @@ impl BottomSelectionPanel {
 
     fn filtered_indices(&self) -> Vec<usize> {
         let query = self.query.trim().to_lowercase();
+        if self
+            .rows
+            .iter()
+            .any(|row| matches!(row.value, BottomSelectionValue::FetchAllModels))
+        {
+            return self.filtered_model_indices(&query);
+        }
         self.rows
             .iter()
             .enumerate()
@@ -1772,6 +2279,52 @@ impl BottomSelectionPanel {
             .collect()
     }
 
+    fn filtered_model_indices(&self, query: &str) -> Vec<usize> {
+        if query.is_empty() {
+            return (0..self.rows.len()).collect();
+        }
+        let mut include = BTreeMap::new();
+        let mut provider_rows = BTreeMap::new();
+        for (index, row) in self.rows.iter().enumerate() {
+            match &row.value {
+                BottomSelectionValue::FetchAllModels => {
+                    include.insert(index, ());
+                }
+                BottomSelectionValue::ProviderInfo(provider) if provider == "all" => {
+                    include.insert(index, ());
+                }
+                BottomSelectionValue::FetchProvider(provider)
+                | BottomSelectionValue::ProviderInfo(provider) => {
+                    provider_rows.insert(provider.clone(), index);
+                    if row.search_text.to_lowercase().contains(query)
+                        || row.label.to_lowercase().contains(query)
+                    {
+                        include.insert(index, ());
+                        for (model_index, model_row) in self.rows.iter().enumerate() {
+                            if let BottomSelectionValue::Model { model, .. } = &model_row.value
+                                && &model.provider == provider
+                            {
+                                include.insert(model_index, ());
+                            }
+                        }
+                    }
+                }
+                BottomSelectionValue::Model { model, .. } => {
+                    if row.search_text.to_lowercase().contains(query)
+                        || row.label.to_lowercase().contains(query)
+                    {
+                        include.insert(index, ());
+                        if let Some(provider_index) = provider_rows.get(&model.provider) {
+                            include.insert(*provider_index, ());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        include.into_keys().collect()
+    }
+
     fn selected_value(&self) -> Option<BottomSelectionValue> {
         self.filtered_indices()
             .get(self.selected)
@@ -1779,16 +2332,43 @@ impl BottomSelectionPanel {
             .map(|row| row.value.clone())
     }
 
+    fn selected_key(&self) -> String {
+        self.selected_value()
+            .map(|value| value.key())
+            .unwrap_or_else(|| "fetch:all".to_string())
+    }
+
+    fn select_value_key(&mut self, key: &str) {
+        let filtered = self.filtered_indices();
+        if let Some(index) = filtered
+            .iter()
+            .position(|row_index| self.rows[*row_index].value.key() == key)
+        {
+            self.selected = index;
+            self.ensure_selected_visible(8);
+        }
+    }
+
+    fn footer_text(&self) -> String {
+        self.filtered_indices()
+            .get(self.selected)
+            .and_then(|index| self.rows.get(*index))
+            .and_then(|row| row.footer.clone())
+            .unwrap_or_else(|| self.footer.clone())
+    }
+
     fn set_query_char(&mut self, c: char) {
         self.query.push(c);
         self.selected = 0;
         self.scroll = 0;
+        self.notice = None;
     }
 
     fn backspace_query(&mut self) {
         self.query.pop();
         self.selected = 0;
         self.scroll = 0;
+        self.notice = None;
     }
 
     fn move_selection(&mut self, direction: isize) {
@@ -1797,12 +2377,9 @@ impl BottomSelectionPanel {
             self.selected = 0;
             return;
         }
-        let next = if direction < 0 {
-            self.selected.saturating_sub(direction.unsigned_abs())
-        } else {
-            self.selected.saturating_add(direction as usize)
-        };
-        self.selected = next.min(len.saturating_sub(1));
+        let current = self.selected.min(len.saturating_sub(1)) as isize;
+        self.selected = (current + direction).rem_euclid(len as isize) as usize;
+        self.notice = None;
         self.ensure_selected_visible(8);
     }
 
@@ -1814,6 +2391,7 @@ impl BottomSelectionPanel {
             return;
         }
         self.selected = index.min(len.saturating_sub(1));
+        self.notice = None;
         self.ensure_selected_visible(8);
     }
 
@@ -1837,6 +2415,35 @@ impl BottomSelectionPanel {
     fn set_selected(&mut self, index: usize) {
         self.selected = index.min(self.filtered_indices().len().saturating_sub(1));
         self.scroll = 0;
+        self.notice = None;
+    }
+}
+
+impl BottomSelectionValue {
+    fn key(&self) -> String {
+        match self {
+            BottomSelectionValue::Session(id) => format!("session:{id}"),
+            BottomSelectionValue::FetchAllModels => "fetch:all".to_string(),
+            BottomSelectionValue::FetchProvider(provider) => {
+                format!("fetch:provider:{provider}")
+            }
+            BottomSelectionValue::ProviderInfo(provider) => {
+                if provider == "all" {
+                    "fetch:all".to_string()
+                } else {
+                    format!("fetch:provider:{provider}")
+                }
+            }
+            BottomSelectionValue::Model { model, .. } => {
+                format!("model:{}", format_model_spec(model))
+            }
+            BottomSelectionValue::Variant { model, variant } => {
+                format!(
+                    "variant:{model}:{}",
+                    variant.as_deref().unwrap_or("default")
+                )
+            }
+        }
     }
 }
 
@@ -1857,6 +2464,10 @@ impl BottomPanel {
 
     fn selected_value(&self) -> Option<BottomSelectionValue> {
         self.selection().selected_value()
+    }
+
+    fn move_selection(&mut self, direction: isize) {
+        self.selection_mut().move_selection(direction);
     }
 }
 
@@ -2249,6 +2860,12 @@ impl<'a> FullscreenUi<'a> {
             .iter()
             .find(|(_, area)| rect_contains(*area, column, row))
             .map(|(index, _)| *index)
+    }
+
+    fn set_bottom_panel_notice(&mut self, text: impl Into<String>) {
+        if let Some(panel) = &mut self.bottom_panel {
+            panel.selection_mut().notice = Some(text.into());
+        }
     }
 
     fn push_user(&mut self, text: String) {
@@ -4066,7 +4683,8 @@ fn render_bottom_panel(
         height: area.height.saturating_sub(2),
     };
     let selection = panel.selection_mut();
-    let visible_rows = inner.height.saturating_sub(5).max(1);
+    let reserved = 4 + if selection.notice.is_some() { 1 } else { 0 };
+    let visible_rows = inner.height.saturating_sub(reserved).max(1);
     selection.ensure_selected_visible(visible_rows);
 
     let mut lines = Vec::new();
@@ -4086,10 +4704,6 @@ fn render_bottom_panel(
         Span::raw(" ".repeat(header_padding)),
         Span::styled(esc_hint, Style::default().fg(TUI_DIM)),
     ]));
-    lines.push(Line::from(Span::styled(
-        selection.subtitle.clone(),
-        Style::default().fg(TUI_DIM),
-    )));
     lines.push(Line::from(vec![
         Span::styled("Search ", Style::default().fg(TUI_DIM)),
         Span::styled(selection.query.clone(), Style::default().fg(Color::Gray)),
@@ -4140,8 +4754,14 @@ fn render_bottom_panel(
         }
     }
     lines.push(Line::from(""));
+    if let Some(notice) = &selection.notice {
+        lines.push(Line::from(Span::styled(
+            notice.clone(),
+            Style::default().fg(TUI_DIM),
+        )));
+    }
     lines.push(Line::from(Span::styled(
-        selection.footer.clone(),
+        selection.footer_text(),
         Style::default().fg(TUI_DIM),
     )));
 
@@ -4157,7 +4777,8 @@ fn bottom_panel_row(row: &BottomSelectionRow, selected: bool, width: u16) -> Lin
     } else {
         "  "
     };
-    let mut left = format!("{select_marker} {state_marker}{}", row.label);
+    let prefix = format!("{select_marker} {state_marker}{}", row.label);
+    let mut left = prefix.clone();
     if let Some(description) = &row.description {
         left.push_str("  ");
         left.push_str(description);
@@ -4187,7 +4808,23 @@ fn bottom_panel_row(row: &BottomSelectionRow, selected: bool, width: u16) -> Lin
     } else {
         Style::default().fg(Color::Gray)
     };
-    Line::from(Span::styled(text, style))
+    if selected || row.style == BottomRowStyle::Normal || !detail.is_empty() {
+        return Line::from(Span::styled(text, style));
+    }
+    let prefix = truncate_display_width(&prefix, width as usize);
+    let prefix_width = UnicodeWidthStr::width(prefix.as_str());
+    let rest = text
+        .chars()
+        .skip(prefix.chars().count())
+        .collect::<String>();
+    let rest = truncate_display_width(&rest, (width as usize).saturating_sub(prefix_width));
+    Line::from(vec![
+        Span::styled(
+            prefix,
+            Style::default().fg(TUI_CYAN).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(rest, Style::default().fg(TUI_DIM)),
+    ])
 }
 
 fn bottom_panel_height(height: u16) -> u16 {
@@ -4218,6 +4855,20 @@ fn truncate_chars(value: &str, max_chars: usize) -> String {
     }
     let keep = max_chars.saturating_sub(1);
     format!("{}…", value.chars().take(keep).collect::<String>())
+}
+
+fn short_fetch_error(value: &str) -> String {
+    let value = value
+        .trim()
+        .replace(['\r', '\n', '\t'], " ")
+        .trim_start_matches("config failed: ")
+        .trim_start_matches("HTTP request failed: ")
+        .trim_start_matches("error: ")
+        .to_string();
+    if value == "timeout" {
+        return value;
+    }
+    truncate_chars(&value, 120)
 }
 
 fn format_session_date(timestamp_ms: i64) -> String {

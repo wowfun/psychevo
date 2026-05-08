@@ -1,6 +1,5 @@
 ---
-source: crates/psychevo-cli/src/tui.rs
-assertion_line: 5402
+source: crates/psychevo-cli/src/tui/tests.rs
 expression: combined
 ---
 fixture=session_bottom_panel
@@ -16,7 +15,6 @@ size=120x24
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
   Sessions                                                                                                         esc
-  Search local run and TUI sessions.
   Search
   2026-05-06
   › ● Implement model picker  mock/mock-model  messages=5                                                        12:10
@@ -24,6 +22,7 @@ size=120x24
   Review session pane  mock/other-model  messages=3                                                          09:44
 
   Enter select  Esc close  Type search
+
 
 
 
@@ -42,7 +41,6 @@ mock/model  high
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [default]
 [default]  [default]Sessions[default]                                                                                                         [dim]esc[default]
-[default]  [dim]Search local run and TUI sessions.[default]
 [default]  [dim]Search [default]
 [default]  [cyan]2026-05-06[default]
 [default]  [default]› ● Implement model picker  mock/mock-model  messages=5                                                        12:10[default]
@@ -50,6 +48,7 @@ mock/model  high
 [default]  [default]Review session pane  mock/other-model  messages=3                                                          09:44[default]
 [default]
 [default]  [dim]Enter select  Esc close  Type search[default]
+[default]
 [default]
 [default]
 [default]

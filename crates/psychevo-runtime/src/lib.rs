@@ -16,7 +16,10 @@ mod undo;
 #[cfg(test)]
 mod tests;
 
-pub use config::{configured_models, selected_configured_model};
+pub use config::{
+    configured_models, fetch_model_catalog, model_catalog_endpoint, model_catalog_providers,
+    selected_configured_model,
+};
 pub use context::prune_context;
 pub use error::{Error, Result};
 pub use paths::canonicalize_workdir;
@@ -26,8 +29,9 @@ pub use smoke::run_smoke;
 pub use store::SqliteStore;
 pub use tools::tool_names_for_mode;
 pub use types::{
-    ConfiguredModel, RunControl, RunControlHandle, RunMode, RunOptions, RunResult, RunStreamEvent,
-    RunStreamSink, SanitizedMessageSummary, SessionRedoResult, SessionSummary, SessionUndoOptions,
-    SessionUndoResult, SmokeControl, SmokeOptions, SmokeResult, TuiMessageSummary, run_control,
+    ConfiguredModel, ModelCatalogEntry, ModelCatalogProvider, RunControl, RunControlHandle,
+    RunMode, RunOptions, RunResult, RunStreamEvent, RunStreamSink, SanitizedMessageSummary,
+    SessionRedoResult, SessionSummary, SessionUndoOptions, SessionUndoResult, SmokeControl,
+    SmokeOptions, SmokeResult, TuiMessageSummary, run_control,
 };
 pub use undo::{redo_session, undo_session};

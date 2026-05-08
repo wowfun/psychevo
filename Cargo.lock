@@ -1555,6 +1555,7 @@ dependencies = [
  "pretty_assertions",
  "psychevo-agent-core",
  "psychevo-ai",
+ "reqwest",
  "rusqlite",
  "serde",
  "serde_json",

@@ -44,7 +44,7 @@ const SLASH_MENU: &[SlashMenuItem] = &[
     },
     SlashMenuItem {
         command: "/model",
-        description: "select model",
+        description: "select/fetch model",
         upcoming: false,
     },
     SlashMenuItem {
@@ -277,6 +277,7 @@ mod tests {
             Some(SlashCommand::ModelShow)
         );
         assert!(parse_slash_command("/model set mock/model").is_err());
+        assert!(parse_slash_command("/model fetch").is_err());
         assert!(parse_slash_command("/models").is_err());
     }
 
@@ -356,6 +357,10 @@ mod tests {
         assert!(slash_menu_items("/session ").is_empty());
         assert_eq!(slash_menu_items("/model").len(), 1);
         assert_eq!(slash_menu_items("/model")[0].command, "/model");
+        assert_eq!(
+            slash_menu_items("/model")[0].description,
+            "select/fetch model"
+        );
         let mode = slash_menu_items("/mode");
         assert_eq!(mode[0].command, "/mode");
         assert_eq!(mode[0].description, "set <plan|default>");

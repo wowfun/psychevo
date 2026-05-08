@@ -83,9 +83,23 @@ Required coverage:
 - explicit `--session` behavior
 - non-terminal scripted input with prompt lines and slash commands
 - fullscreen `/model` bottom-pane selection sourced from local configured
-  models only, including search, current/default markers, model-to-variant
-  transition, `Config default` clearing the variant override, explicit variant
-  persistence, and `Esc` close/back behavior
+  models plus explicit current-process fetched catalogs, including no subtitle
+  row, top-level `All providers` status row, selectable provider fetch rows,
+  dynamic `Enter fetch`/`Enter select` footer text, initial focus on current
+  model or first local model before fetch rows, search that keeps `All
+  providers` visible and preserves provider rows for model matches, current
+  query preservation after fetch, local-model precedence over duplicate fetched
+  rows, stale fetched-row removal except for the current model, model-to-variant
+  transition, `Config default` clearing the variant override or using provider
+  default for fetched-only rows, explicit variant persistence, and `Esc`
+  close/back/cancel behavior
+- fullscreen `/model` fetch behavior: explicit Enter-triggered fetch only,
+  concurrent all-provider fetch, single-provider retry, skipped missing
+  credentials with env-var hints, loopback/no-auth catalog requests without
+  Authorization, five-second provider timeout reported as `failed: timeout`,
+  provider success counts, `no models` empty results, partial failure status,
+  failure preserving old fetched cache, cancellation preserving completed
+  provider results, and in-progress duplicate Enter bounded feedback
 - `/variant <value>` persistence, bare `/variant` rejection, removed
   `/variant set <value>` rejection with guidance, and fullscreen bottom state
   rendering of the current effective variant instead of falling back to
@@ -97,6 +111,9 @@ Required coverage:
   row rendering, visible-message counts matching the sidebar, selection, and
   transcript/history replacement; rows with CJK/wide-character titles must keep
   the updated time right-aligned on the same physical row
+- shared bottom selection pane Up/Down navigation wraps between first and last
+  visible rows for sessions, model selection, and variant selection, while
+  Home/End remain direct first/last jumps
 - `/help`, `/models`, `/model set`, `/session list`, `/session show`, and
   `/session switch` rejected as removed commands and absent from the slash menu
 - `/undo` and `/redo` parsing, menu rows, fullscreen behavior, scripted output,
@@ -106,7 +123,8 @@ Required coverage:
   workdir, and unsettled running turns
 - `Esc` interrupts a running turn through runtime control in fullscreen mode
 - slash menu prefix filtering, argument placeholder hints in description text,
-  disabled `/compact` and `/export` entries, and bounded `upcoming` feedback
+  `/model` described as `select/fetch model`, disabled `/compact` and `/export`
+  entries, and bounded `upcoming` feedback
 - transcript focus and expansion behavior: `Ctrl+T`, selected block movement,
   `Enter`/`Space` expand-collapse, `Esc` returning to composer, and keyboard
   transcript scrolling
