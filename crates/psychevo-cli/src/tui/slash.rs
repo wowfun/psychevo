@@ -95,24 +95,81 @@ const SLASH_MENU: &[SlashMenuItem] = &[
 ];
 
 pub(crate) fn slash_menu_items(input: &str) -> Vec<SlashMenuItem> {
+    slash_menu_items_for(input, MatchMode::Fuzzy)
+}
+
+pub(crate) fn slash_prefix_menu_items(input: &str) -> Vec<SlashMenuItem> {
+    slash_menu_items_for(input, MatchMode::Prefix)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MatchMode {
+    Prefix,
+    Fuzzy,
+}
+
+fn slash_menu_items_for(input: &str, mode: MatchMode) -> Vec<SlashMenuItem> {
     let trimmed = input.trim_start();
-    if !trimmed.starts_with('/') || trimmed.contains('\n') {
+    if !trimmed.starts_with('/') || trimmed.chars().any(char::is_whitespace) {
         return Vec::new();
     }
-    let prefix = trimmed.to_lowercase();
+    let query = trimmed.to_lowercase();
     let mut items = SLASH_MENU
         .iter()
-        .filter(|item| item.command.starts_with(&prefix) || prefix == "/")
+        .enumerate()
+        .filter_map(|(index, item)| {
+            slash_match_score(item.command, &query, mode).map(|score| (score, index, item))
+        })
+        .collect::<Vec<_>>();
+    items.sort_by_key(|(score, index, _)| (*score, *index));
+    let mut items = items
+        .into_iter()
+        .map(|(_, _, item)| item)
         .take(8)
         .cloned()
         .collect::<Vec<_>>();
-    if prefix != "/"
-        && let Some(index) = items.iter().position(|item| item.command == prefix)
+    if query != "/"
+        && let Some(index) = items.iter().position(|item| item.command == query)
     {
         let exact = items.remove(index);
         items.insert(0, exact);
     }
     items
+}
+
+fn slash_match_score(command: &str, query: &str, mode: MatchMode) -> Option<u16> {
+    if query == "/" {
+        return Some(300);
+    }
+    if command == query {
+        return Some(0);
+    }
+    if command.starts_with(query) {
+        return Some(100);
+    }
+    if mode == MatchMode::Fuzzy
+        && let Some(score) = fuzzy_subsequence_score(command, query)
+    {
+        return Some(200 + score);
+    }
+    None
+}
+
+fn fuzzy_subsequence_score(command: &str, query: &str) -> Option<u16> {
+    let command = command.chars().collect::<Vec<_>>();
+    let mut last_match = 0usize;
+    let mut start = 0usize;
+    let mut gap_score = 0usize;
+    for needle in query.chars() {
+        let relative = command[start..]
+            .iter()
+            .position(|candidate| *candidate == needle)?;
+        let index = start + relative;
+        gap_score = gap_score.saturating_add(index.saturating_sub(last_match));
+        last_match = index;
+        start = index.saturating_add(1);
+    }
+    Some(gap_score.min(u16::MAX as usize) as u16)
 }
 
 pub(crate) fn parse_slash_command(line: &str) -> Result<Option<SlashCommand>> {
@@ -375,6 +432,11 @@ mod tests {
         assert_eq!(rename.len(), 1);
         assert_eq!(rename[0].command, "/rename");
         assert_eq!(rename[0].description, "<title> rename current session");
+        let fuzzy_rename = slash_menu_items("/rn");
+        assert_eq!(fuzzy_rename[0].command, "/rename");
+        let fuzzy_model = slash_menu_items("/mdl");
+        assert_eq!(fuzzy_model[0].command, "/model");
+        assert!(slash_prefix_menu_items("/rn").is_empty());
         assert_eq!(
             parse_slash_command("/undo").unwrap(),
             Some(SlashCommand::Undo)

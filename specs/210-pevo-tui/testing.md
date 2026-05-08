@@ -122,9 +122,11 @@ Required coverage:
   error paths for no session, no user message, missing snapshot, non-Git
   workdir, and unsettled running turns
 - `Esc` interrupts a running turn through runtime control in fullscreen mode
-- slash menu prefix filtering, argument placeholder hints in description text,
-  `/model` described as `select/fetch model`, disabled `/compact` and `/export`
-  entries, and bounded `upcoming` feedback
+- slash menu exact, prefix, and subsequence fuzzy matching over command labels,
+  argument placeholder hints in description text, `/model` described as
+  `select/fetch model`, prefix-only Tab completion that does not complete
+  fuzzy-only matches, disabled `/compact` and `/export` entries, and bounded
+  `upcoming` feedback
 - transcript focus and expansion behavior: `Ctrl+T`, selected block movement,
   `Enter`/`Space` expand-collapse, `Esc` returning to composer, and keyboard
   transcript scrolling

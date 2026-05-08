@@ -495,16 +495,20 @@ Slash command errors are bounded user-visible text. They must not panic, hang,
 or start provider network work unless the command explicitly submits a prompt.
 
 The slash menu appears above the composer while the composer contains a slash
-command prefix. It shows at most 8 prefix-filtered rows. Disabled future
-commands render with an `upcoming` marker and produce bounded feedback instead
-of executing.
+command token. It shows at most 8 matched rows. Matching uses the canonical
+command label and orders exact matches first, prefix matches next, and
+subsequence fuzzy matches last while preserving menu order within each class.
+Whitespace after the command token hides the menu so argument text does not
+produce slash suggestions. Disabled future commands render with an `upcoming`
+marker and produce bounded feedback instead of executing.
 
 Slash menu command labels stay canonical and do not include parameter
 placeholders. Parameter hints appear only in description text, such as
 `<title> rename current session` for `/rename`, `set <value>` for `/variant`,
 `set <plan|default>` for `/mode`, and `toggle; set <on|off>` for
 `/show-thinking`. `/model` is described as `select/fetch model`. Tab
-completion inserts only the command token, never a placeholder template.
+completion remains prefix-only and inserts only the command token, never a
+placeholder template or a fuzzy-only match.
 
 The first slash menu row is selected by default. Pressing `Enter` while
 suggestions are visible executes that selected command instead of submitting the

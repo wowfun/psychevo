@@ -9,6 +9,7 @@
 ### Changed
 
 - Removed bottom selection pane subtitles, updated `/model` slash help text to reflect model selection and fetching, and made bottom selection pane Up/Down navigation wrap between first and last rows.
+- Added fuzzy slash menu matching while keeping Tab completion prefix-only.
 
 ## 2026-05-08
 

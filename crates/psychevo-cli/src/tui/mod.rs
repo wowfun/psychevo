@@ -45,10 +45,10 @@ mod tests;
 use self::plain::{
     TuiRenderer, assistant_text_from_event, format_session_line, format_tool_summary,
 };
-use self::slash::slash_menu_items;
 use self::slash::{
     SlashCommand, VARIANTS, parse_slash_command, validate_model_spec, validate_variant,
 };
+use self::slash::{slash_menu_items, slash_prefix_menu_items};
 use self::state::TuiState;
 use crate::args::TuiArgs;
 use crate::env::{
@@ -3666,7 +3666,7 @@ fn slash_completion(input: &str) -> Option<String> {
     if !typed.starts_with('/') {
         return None;
     }
-    let items = slash_menu_items(typed);
+    let items = slash_prefix_menu_items(typed);
     if items.is_empty() {
         return None;
     }

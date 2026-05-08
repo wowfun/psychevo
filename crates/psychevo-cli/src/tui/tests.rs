@@ -513,6 +513,7 @@ fn turn_meta_places_variant_after_model_and_filters_debug_duplicate() {
 fn slash_completion_completes_command_prefixes() {
     assert_eq!(slash_completion("/he"), None);
     assert_eq!(slash_completion("/ren").as_deref(), Some("/rename"));
+    assert_eq!(slash_completion("/rn"), None);
     assert_eq!(slash_completion("/mo").as_deref(), Some("/mode"));
     assert_eq!(slash_completion("/model"), None);
     assert_eq!(slash_completion("hello"), None);
