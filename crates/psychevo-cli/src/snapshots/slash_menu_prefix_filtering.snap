@@ -1,6 +1,6 @@
 ---
-source: crates/psychevo-cli/src/tui.rs
-assertion_line: 5997
+source: crates/psychevo-cli/src/tui/tests.rs
+assertion_line: 2851
 expression: combined
 ---
 fixture=slash_menu_prefix_filtering
@@ -26,7 +26,7 @@ size=120x24
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 │ commands
 │> /model  select model
-│  /mode  show current mode
+│  /mode  set <plan|default>
 │
 › /mo
 
@@ -52,7 +52,7 @@ mock/model  high
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [default]│ commands
 [default]│[cyan]> /model[dim]  select model[default]
-[default]│[cyan]  /mode[dim]  show current mode[default]
+[default]│[cyan]  /mode[dim]  set <plan|default>[default]
 [default]│
 [dim]›[default] /mo
 [default]

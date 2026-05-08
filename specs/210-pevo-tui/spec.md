@@ -17,7 +17,7 @@ the deterministic line-by-line scripted behavior.
 - persisted TUI-local model, variant, mode, thinking visibility, and sidebar
   visibility
 - session selection, session renaming, model, variant, mode, thinking visibility,
-  status, and help slash commands
+  and status slash commands
 - evidence-ledger rendering for prompts, folded reasoning, tool evidence,
   final answers, and turn metadata
 - transcript selection and keyboard expansion for bounded tool evidence
@@ -137,9 +137,12 @@ Fullscreen `/model` opens an interactive local model picker. Selecting a model
 then opens a variant picker. Selecting `Config default` clears the per-workdir
 variant override so runtime uses the selected model's configured
 `reasoning_effort`; selecting an explicit variant persists that override.
-`/variant set <value>` continues to update only the per-workdir variant
-override. These TUI state changes affect later prompts in the current process
-and do not edit JSONC provider configuration.
+`/variant <none|minimal|low|medium|high|xhigh|max>` continues to update only
+the per-workdir variant override. Bare `/variant` is not a display command and
+returns a bounded usage error. The removed `/variant set <value>` form returns
+bounded guidance to use `/variant <value>`. These TUI state changes affect
+later prompts in the current process and do not edit JSONC provider
+configuration.
 
 `/show-thinking` toggles global thinking visibility and persists it. It is a
 visibility-only control: it does not enable or disable provider reasoning, does
@@ -149,7 +152,9 @@ append a status row for thinking visibility changes. `/show-thinking on` and
 `/show-thinking off` set the value explicitly. `/thinking` is removed and must
 return a bounded error that points users to `/show-thinking`.
 
-`/mode set <plan|default>` updates the per-workdir mode and persists it. Mode
+`/mode <plan|default>` updates the per-workdir mode and persists it. Bare
+`/mode` is not a display command and returns a bounded usage error. The removed
+`/mode set <value>` form returns bounded guidance to use `/mode <value>`. Mode
 changes during a running turn affect the next submitted prompt.
 
 ## Layout
@@ -353,17 +358,13 @@ idle behavior.
 
 The first TUI supports:
 
-- `/help`
 - `/quit`, `/exit`, `/q`
 - `/status`
 - `/clear`, `/new`
 - `/sessions`, `/resume`, `/continue`
 - `/model`
-- `/variant`
-- `/variant set <none|minimal|low|medium|high|xhigh|max>`
-- `/mode`
-- `/mode set plan`
-- `/mode set default`
+- `/variant <none|minimal|low|medium|high|xhigh|max>`
+- `/mode <plan|default>`
 - `/show-thinking`
 - `/show-thinking on`
 - `/show-thinking off`
@@ -371,6 +372,14 @@ The first TUI supports:
 - `/undo`
 - `/redo`
 - future disabled entries in the slash menu: `/compact` and `/export`
+
+`/help` is not a TUI slash command. It returns the bounded unknown-command
+error used for unsupported slash commands.
+
+`/status` shows workdir, home, db, session, model, variant, mode, thinking,
+and debug state as one multi-line status block. Fullscreen TUI appends one
+status transcript block, and non-terminal scripted TUI writes the same
+multi-line status text as one output block.
 
 Fullscreen `/sessions`, `/resume`, `/continue`, and `/model` use the shared
 bottom selection pane. The pane includes title/subtitle text, search,
@@ -429,15 +438,23 @@ command prefix. It shows at most 8 prefix-filtered rows. Disabled future
 commands render with an `upcoming` marker and produce bounded feedback instead
 of executing.
 
+Slash menu command labels stay canonical and do not include parameter
+placeholders. Parameter hints appear only in description text, such as
+`<title> rename current session` for `/rename`, `set <value>` for `/variant`,
+`set <plan|default>` for `/mode`, and `toggle; set <on|off>` for
+`/show-thinking`. Tab completion inserts only the command token, never a
+placeholder template.
+
 The first slash menu row is selected by default. Pressing `Enter` while
 suggestions are visible executes that selected command instead of submitting the
 partial composer text as an unknown command.
 
 The slash menu supports Up/Down/Home/End selection and left-click row
-selection. The highlighted slash command, not always the first row, executes on
-`Enter`. The slash menu is hidden while a bottom selection pane is open, and
-keyboard input is routed to the pane search and navigation controls until it
-closes.
+selection. Up and Down wrap between the first and last visible slash menu rows;
+Home and End jump directly to the first and last row. The highlighted slash
+command, not always the first row, executes on `Enter`. The slash menu is
+hidden while a bottom selection pane is open, and keyboard input is routed to
+the pane search and navigation controls until it closes.
 
 ## Runtime Modes
 

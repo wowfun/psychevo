@@ -11,10 +11,6 @@ impl TuiRenderer {
         Self { color }
     }
 
-    pub(crate) fn brand(&self, text: &str) -> String {
-        self.paint(text, StyleKind::Brand)
-    }
-
     pub(crate) fn dim(&self, text: &str) -> String {
         self.paint(text, StyleKind::Dim)
     }
@@ -36,7 +32,6 @@ impl TuiRenderer {
             return text.to_string();
         }
         match kind {
-            StyleKind::Brand => format!("{}", text.magenta()),
             StyleKind::Dim => format!("{}", text.dark_grey()),
             StyleKind::Status => format!("{}", text.cyan()),
             StyleKind::Success => format!("{}", text.green()),
@@ -47,7 +42,6 @@ impl TuiRenderer {
 
 #[derive(Debug, Clone, Copy)]
 enum StyleKind {
-    Brand,
     Dim,
     Status,
     Success,
@@ -157,7 +151,6 @@ mod tests {
     #[test]
     fn plain_renderer_has_no_ansi_sequences() {
         let renderer = TuiRenderer::new(false);
-        assert_eq!(renderer.brand("pevo"), "pevo");
         assert_eq!(renderer.status("ready"), "ready");
     }
 

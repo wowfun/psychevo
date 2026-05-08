@@ -460,7 +460,8 @@ fn turn_meta_places_variant_after_model_and_filters_debug_duplicate() {
 
 #[test]
 fn slash_completion_completes_command_prefixes() {
-    assert_eq!(slash_completion("/he").as_deref(), Some("/help"));
+    assert_eq!(slash_completion("/he"), None);
+    assert_eq!(slash_completion("/ren").as_deref(), Some("/rename"));
     assert_eq!(slash_completion("/mo").as_deref(), Some("/mode"));
     assert_eq!(slash_completion("/model"), None);
     assert_eq!(slash_completion("hello"), None);
@@ -525,12 +526,41 @@ async fn slash_menu_selection_can_choose_mode_over_model() {
     assert!(
         ui.transcript
             .iter()
-            .any(|row| row.kind == TranscriptKind::Status && row.text == "mode: default")
+            .any(|row| row.kind == TranscriptKind::Error
+                && row.text.contains("usage: /mode <plan|default>"))
     );
 }
 
 #[tokio::test]
-async fn exact_mode_slash_command_executes_mode_not_model() {
+async fn slash_menu_up_down_wrap_between_first_and_last_rows() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.textarea = textarea_with_text("/mo");
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))
+        .await
+        .expect("up");
+    assert_eq!(ui.slash_menu_selected, 1);
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .await
+        .expect("down");
+    assert_eq!(ui.slash_menu_selected, 0);
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .await
+        .expect("down");
+    assert_eq!(ui.slash_menu_selected, 1);
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .await
+        .expect("down");
+    assert_eq!(ui.slash_menu_selected, 0);
+}
+
+#[tokio::test]
+async fn mode_slash_command_requires_value() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -545,8 +575,51 @@ async fn exact_mode_slash_command_executes_mode_not_model() {
     assert!(
         ui.transcript
             .iter()
-            .any(|row| row.kind == TranscriptKind::Status && row.text == "mode: default")
+            .any(|row| row.kind == TranscriptKind::Error
+                && row.text.contains("usage: /mode <plan|default>"))
     );
+}
+
+#[tokio::test]
+async fn mode_slash_command_sets_mode_with_direct_value() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.textarea = textarea_with_text("/mode plan");
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .expect("enter");
+
+    assert_eq!(ui.history.last().map(String::as_str), Some("/mode plan"));
+    assert_eq!(app.current_mode, RunMode::Plan);
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.kind != TranscriptKind::Error)
+    );
+}
+
+#[tokio::test]
+async fn fullscreen_status_uses_single_multiline_status_row() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Status)
+        .await
+        .expect("status");
+
+    let status_rows = ui
+        .transcript
+        .iter()
+        .filter(|row| row.kind == TranscriptKind::Status)
+        .collect::<Vec<_>>();
+    assert_eq!(status_rows.len(), 1);
+    assert!(status_rows[0].text.contains("workdir:"));
+    assert!(status_rows[0].text.contains("\nmodel: mock/model\n"));
+    assert!(status_rows[0].text.contains("\nvariant: high\n"));
+    assert!(status_rows[0].text.contains("\ndebug: off"));
 }
 
 #[tokio::test]
@@ -927,13 +1000,13 @@ async fn tab_completes_slash_command_without_switching_mode() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
-    ui.textarea = textarea_with_text("/he");
+    ui.textarea = textarea_with_text("/ren");
 
     app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
         .await
         .expect("tab");
 
-    assert_eq!(textarea_text(&ui.textarea), "/help");
+    assert_eq!(textarea_text(&ui.textarea), "/rename");
     assert_eq!(app.current_mode, RunMode::Build);
 }
 

@@ -4,15 +4,12 @@ pub(crate) const VARIANTS: &[&str] = &["none", "minimal", "low", "medium", "high
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SlashCommand {
-    Help,
     Quit,
     Status,
     New,
     Sessions,
     ModelShow,
-    VariantShow,
     VariantSet(String),
-    ModeShow,
     ModeSet(String),
     ThinkingToggle,
     ThinkingSet(bool),
@@ -30,11 +27,6 @@ pub(crate) struct SlashMenuItem {
 }
 
 const SLASH_MENU: &[SlashMenuItem] = &[
-    SlashMenuItem {
-        command: "/help",
-        description: "show commands",
-        upcoming: false,
-    },
     SlashMenuItem {
         command: "/status",
         description: "show local status",
@@ -57,22 +49,22 @@ const SLASH_MENU: &[SlashMenuItem] = &[
     },
     SlashMenuItem {
         command: "/variant",
-        description: "show current variant",
+        description: "set <value>",
         upcoming: false,
     },
     SlashMenuItem {
         command: "/mode",
-        description: "show current mode",
+        description: "set <plan|default>",
         upcoming: false,
     },
     SlashMenuItem {
         command: "/show-thinking",
-        description: "toggle thinking visibility",
+        description: "toggle; set <on|off>",
         upcoming: false,
     },
     SlashMenuItem {
         command: "/rename",
-        description: "rename current session",
+        description: "<title> rename current session",
         upcoming: false,
     },
     SlashMenuItem {
@@ -132,7 +124,6 @@ pub(crate) fn parse_slash_command(line: &str) -> Result<Option<SlashCommand>> {
     let command = parts.next().unwrap_or_default();
     let rest = parts.collect::<Vec<_>>();
     let parsed = match command {
-        "/help" => SlashCommand::Help,
         "/quit" | "/exit" | "/q" => SlashCommand::Quit,
         "/status" => SlashCommand::Status,
         "/clear" | "/new" => SlashCommand::New,
@@ -187,23 +178,27 @@ fn parse_model_command(rest: &[&str]) -> Result<SlashCommand> {
 
 fn parse_variant_command(rest: &[&str]) -> Result<SlashCommand> {
     match rest {
-        [] => Ok(SlashCommand::VariantShow),
-        ["set", value] => {
+        [] => Err(anyhow!("usage: /variant <value>")),
+        ["set", ..] => Err(anyhow!(
+            "/variant set has been removed; use /variant <value>"
+        )),
+        [value] => {
             validate_variant(value)?;
             Ok(SlashCommand::VariantSet((*value).to_string()))
         }
-        _ => Err(anyhow!("usage: /variant | /variant set <value>")),
+        _ => Err(anyhow!("usage: /variant <value>")),
     }
 }
 
 fn parse_mode_command(rest: &[&str]) -> Result<SlashCommand> {
     match rest {
-        [] => Ok(SlashCommand::ModeShow),
-        ["set", value] => {
+        [] => Err(anyhow!("usage: /mode <plan|default>")),
+        ["set", ..] => Err(anyhow!("/mode set has been removed; use /mode <value>")),
+        [value] => {
             validate_mode(value)?;
             Ok(SlashCommand::ModeSet((*value).to_string()))
         }
-        _ => Err(anyhow!("usage: /mode | /mode set <plan|default>")),
+        _ => Err(anyhow!("usage: /mode <plan|default>")),
     }
 }
 
@@ -255,10 +250,7 @@ mod tests {
 
     #[test]
     fn parses_basic_slash_commands() {
-        assert_eq!(
-            parse_slash_command("/help").unwrap(),
-            Some(SlashCommand::Help)
-        );
+        assert!(parse_slash_command("/help").is_err());
         assert_eq!(parse_slash_command("/q").unwrap(), Some(SlashCommand::Quit));
         assert_eq!(parse_slash_command("hello").unwrap(), None);
     }
@@ -290,26 +282,43 @@ mod tests {
 
     #[test]
     fn validates_variants() {
-        assert!(parse_slash_command("/variant set high").is_ok());
-        assert!(parse_slash_command("/variant set turbo").is_err());
+        assert_eq!(
+            parse_slash_command("/variant high").unwrap(),
+            Some(SlashCommand::VariantSet("high".to_string()))
+        );
+        assert_eq!(
+            parse_slash_command("/variant none").unwrap(),
+            Some(SlashCommand::VariantSet("none".to_string()))
+        );
+        assert!(parse_slash_command("/variant").is_err());
+        assert!(
+            parse_slash_command("/variant set high")
+                .unwrap_err()
+                .to_string()
+                .contains("use /variant <value>")
+        );
+        assert!(parse_slash_command("/variant turbo").is_err());
     }
 
     #[test]
     fn parses_mode_commands() {
         assert_eq!(
-            parse_slash_command("/mode").unwrap(),
-            Some(SlashCommand::ModeShow)
-        );
-        assert_eq!(
-            parse_slash_command("/mode set plan").unwrap(),
+            parse_slash_command("/mode plan").unwrap(),
             Some(SlashCommand::ModeSet("plan".to_string()))
         );
         assert_eq!(
-            parse_slash_command("/mode set default").unwrap(),
+            parse_slash_command("/mode default").unwrap(),
             Some(SlashCommand::ModeSet("default".to_string()))
         );
-        assert!(parse_slash_command("/mode set build").is_err());
-        assert!(parse_slash_command("/mode set maybe").is_err());
+        assert!(parse_slash_command("/mode").is_err());
+        assert!(
+            parse_slash_command("/mode set plan")
+                .unwrap_err()
+                .to_string()
+                .contains("use /mode <value>")
+        );
+        assert!(parse_slash_command("/mode build").is_err());
+        assert!(parse_slash_command("/mode maybe").is_err());
     }
 
     #[test]
@@ -341,6 +350,7 @@ mod tests {
 
     #[test]
     fn slash_menu_filters_and_marks_upcoming() {
+        assert!(slash_menu_items("/he").is_empty());
         assert_eq!(slash_menu_items("/session").len(), 1);
         assert_eq!(slash_menu_items("/session")[0].command, "/sessions");
         assert!(slash_menu_items("/session ").is_empty());
@@ -348,10 +358,18 @@ mod tests {
         assert_eq!(slash_menu_items("/model")[0].command, "/model");
         let mode = slash_menu_items("/mode");
         assert_eq!(mode[0].command, "/mode");
+        assert_eq!(mode[0].description, "set <plan|default>");
+        let variant = slash_menu_items("/var");
+        assert_eq!(variant[0].command, "/variant");
+        assert_eq!(variant[0].description, "set <value>");
         let undo = slash_menu_items("/un");
         assert_eq!(undo.len(), 1);
         assert_eq!(undo[0].command, "/undo");
         assert!(!undo[0].upcoming);
+        let rename = slash_menu_items("/ren");
+        assert_eq!(rename.len(), 1);
+        assert_eq!(rename[0].command, "/rename");
+        assert_eq!(rename[0].description, "<title> rename current session");
         assert_eq!(
             parse_slash_command("/undo").unwrap(),
             Some(SlashCommand::Undo)

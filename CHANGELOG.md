@@ -6,6 +6,10 @@
 
 - Added resolved assistant variant metadata to TUI turn rows, restored from persisted per-message metadata beside the model name.
 
+### Changed
+
+- Removed the TUI `/help` slash command, simplified `/variant` and `/mode` value-setting syntax, aggregated `/status` output, improved slash menu hint text, and made slash menu Up/Down navigation wrap between first and last row.
+
 ## 2026-05-07
 
 ### Added

@@ -616,15 +616,8 @@ impl TuiApp {
     ) -> Result<bool> {
         match command {
             SlashCommand::Quit => return Ok(true),
-            SlashCommand::Help => {
-                for line in self.help_lines() {
-                    ui.push_status(line);
-                }
-            }
             SlashCommand::Status => {
-                for line in self.status_lines() {
-                    ui.push_status(line);
-                }
+                ui.push_status(self.status_text());
             }
             SlashCommand::New => {
                 self.current_session = None;
@@ -640,16 +633,10 @@ impl TuiApp {
             SlashCommand::ModelShow => {
                 ui.bottom_panel = Some(BottomPanel::Models(self.model_selection_panel()?));
             }
-            SlashCommand::VariantShow => {
-                ui.push_status(self.variant_line());
-            }
             SlashCommand::VariantSet(variant) => {
                 self.set_variant_no_print(variant.clone())?;
                 ui.push_status(format!("variant: {variant}"));
                 ui.refresh_sidebar(self);
-            }
-            SlashCommand::ModeShow => {
-                ui.push_status(format!("mode: {}", self.current_mode.as_str()));
             }
             SlashCommand::ModeSet(mode) => {
                 self.set_mode_no_print(&mode)?;
@@ -722,7 +709,6 @@ impl TuiApp {
 
     async fn handle_command(&mut self, command: SlashCommand) -> Result<bool> {
         let result = match command {
-            SlashCommand::Help => self.show_help(),
             SlashCommand::Quit => return Ok(true),
             SlashCommand::Status => self.show_status(),
             SlashCommand::New => {
@@ -733,9 +719,7 @@ impl TuiApp {
             }
             SlashCommand::Sessions => self.show_session_list(),
             SlashCommand::ModelShow => self.show_model(),
-            SlashCommand::VariantShow => self.show_variant(),
             SlashCommand::VariantSet(variant) => self.set_variant(variant),
-            SlashCommand::ModeShow => self.show_mode(),
             SlashCommand::ModeSet(mode) => self.set_mode(mode),
             SlashCommand::ThinkingToggle => self.toggle_thinking(),
             SlashCommand::ThinkingSet(enabled) => self.set_thinking(enabled),
@@ -1011,18 +995,8 @@ impl TuiApp {
         }
     }
 
-    fn show_help(&self) -> Result<()> {
-        println!("{}", self.renderer.brand("pevo tui commands"));
-        for line in self.help_lines() {
-            println!("{line}");
-        }
-        Ok(())
-    }
-
     fn show_status(&self) -> Result<()> {
-        for line in self.status_lines() {
-            println!("{line}");
-        }
+        println!("{}", self.status_text());
         Ok(())
     }
 
@@ -1037,11 +1011,6 @@ impl TuiApp {
         for line in self.model_lines()? {
             println!("{line}");
         }
-        Ok(())
-    }
-
-    fn show_variant(&self) -> Result<()> {
-        println!("{}", self.variant_line());
         Ok(())
     }
 
@@ -1069,11 +1038,6 @@ impl TuiApp {
             self.renderer
                 .status(&format!("thinking: {}", on_off(self.thinking_visible)))
         );
-    }
-
-    fn show_mode(&self) -> Result<()> {
-        println!("mode: {}", self.current_mode.as_str());
-        Ok(())
     }
 
     fn set_mode(&mut self, mode: String) -> Result<()> {
@@ -1120,27 +1084,6 @@ impl TuiApp {
         Ok(())
     }
 
-    fn help_lines(&self) -> Vec<String> {
-        vec![
-            "Enter submit; Shift/Ctrl/Alt+Enter or Ctrl+J newline; Tab complete command; Shift+Tab mode; Ctrl+B sidebar; Ctrl+T transcript; Esc interrupt".to_string(),
-            "/help".to_string(),
-            "/quit /exit /q".to_string(),
-            "/status".to_string(),
-            "/clear /new".to_string(),
-            "/sessions /resume /continue".to_string(),
-            "/model".to_string(),
-            "/variant".to_string(),
-            "/variant set <none|minimal|low|medium|high|xhigh|max>".to_string(),
-            "/mode".to_string(),
-            "/mode set <plan|default>".to_string(),
-            "/show-thinking [on|off]".to_string(),
-            "/rename <title>".to_string(),
-            "/undo".to_string(),
-            "/redo".to_string(),
-            "/compact /export (upcoming)".to_string(),
-        ]
-    }
-
     fn status_lines(&self) -> Vec<String> {
         vec![
             format!("workdir: {}", self.workdir.display()),
@@ -1156,6 +1099,10 @@ impl TuiApp {
             format!("thinking: {}", on_off(self.thinking_visible)),
             format!("debug: {}", on_off(self.debug)),
         ]
+    }
+
+    fn status_text(&self) -> String {
+        self.status_lines().join("\n")
     }
 
     fn session_list_lines(&self) -> Result<Vec<String>> {
@@ -2277,13 +2224,9 @@ impl<'a> FullscreenUi<'a> {
             self.slash_menu_selected = 0;
             return;
         }
-        let next = if direction < 0 {
-            self.slash_menu_selected
-                .saturating_sub(direction.unsigned_abs())
-        } else {
-            self.slash_menu_selected.saturating_add(direction as usize)
-        };
-        self.set_slash_menu_selection(next, len);
+        let current = self.slash_menu_selected.min(len.saturating_sub(1)) as isize;
+        let next = (current + direction).rem_euclid(len as isize) as usize;
+        self.slash_menu_selected = next;
     }
 
     fn set_slash_menu_selection(&mut self, index: usize, len: usize) {

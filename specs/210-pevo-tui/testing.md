@@ -18,8 +18,7 @@ Required coverage:
 - slash command parsing, model/variant/mode validation, `/rename`,
   `/sessions`/`/resume`/`/continue`, and ambiguous session prefix handling
 - composer behavior for submit, newline, current-session persisted user-prompt
-  history seeding, history recall with draft restoration, history search, and
-  fixed keymap help text
+  history seeding, history recall with draft restoration, and history search
 - slash menu default selection: the first visible completion row is selected
   and pressing `Enter` executes it
 - evidence-ledger projection for unlabeled prompt blocks without left rails,
@@ -55,10 +54,15 @@ Required coverage:
   existing Thinking blocks, and hidden thinking does not render a
   `Thinking: hidden` marker or append a status row; removed `/thinking`
   returns a bounded error that points to `/show-thinking`
-- `/mode` behavior: default `default`, persisted `plan`/`default` per workdir,
-  `Shift+Tab` cycling in the fullscreen event loop, no transcript status row
-  for mode cycling, and next-turn application while a turn is running
-- slash command completion from `Tab`
+- `/mode <plan|default>` behavior: default `default`, persisted
+  `plan`/`default` per workdir, bare `/mode` rejected, removed
+  `/mode set <value>` rejected with guidance, `Shift+Tab` cycling in the
+  fullscreen event loop, no transcript status row for mode cycling, and
+  next-turn application while a turn is running
+- `/status` behavior: fullscreen and scripted TUI project the same local state
+  fields as one multi-line status block
+- slash command completion from `Tab`, keeping argument placeholders in slash
+  menu descriptions only and out of completed composer text
 - runtime Plan mode toolset: exposes `read`, `list`, and `search`; does not
   expose `bash`, `write`, or `edit`
 - mode instruction is sent to providers for the current turn and is not
@@ -82,8 +86,10 @@ Required coverage:
   models only, including search, current/default markers, model-to-variant
   transition, `Config default` clearing the variant override, explicit variant
   persistence, and `Esc` close/back behavior
-- `/variant set` persistence and fullscreen bottom state rendering of the
-  current effective variant instead of falling back to `default`
+- `/variant <value>` persistence, bare `/variant` rejection, removed
+  `/variant set <value>` rejection with guidance, and fullscreen bottom state
+  rendering of the current effective variant instead of falling back to
+  `default`
 - scripted `/model` output from configured provider/model entries without live
   provider catalog calls
 - `/sessions` scripted fallback list output
@@ -91,7 +97,7 @@ Required coverage:
   row rendering, visible-message counts matching the sidebar, selection, and
   transcript/history replacement; rows with CJK/wide-character titles must keep
   the updated time right-aligned on the same physical row
-- `/models`, `/model set`, `/session list`, `/session show`, and
+- `/help`, `/models`, `/model set`, `/session list`, `/session show`, and
   `/session switch` rejected as removed commands and absent from the slash menu
 - `/undo` and `/redo` parsing, menu rows, fullscreen behavior, scripted output,
   Git snapshot restore, repeated undo/redo boundary movement, composer prompt
@@ -99,13 +105,13 @@ Required coverage:
   error paths for no session, no user message, missing snapshot, non-Git
   workdir, and unsettled running turns
 - `Esc` interrupts a running turn through runtime control in fullscreen mode
-- slash menu prefix filtering, disabled `/compact` and `/export` entries, and
-  bounded `upcoming` feedback
+- slash menu prefix filtering, argument placeholder hints in description text,
+  disabled `/compact` and `/export` entries, and bounded `upcoming` feedback
 - transcript focus and expansion behavior: `Ctrl+T`, selected block movement,
   `Enter`/`Space` expand-collapse, `Esc` returning to composer, and keyboard
   transcript scrolling
 - slash menu row selection with Up/Down/Home/End and mouse click, including
-  `/mo` navigation to `/mode` before `Enter`
+  Up/Down wraparound and `/mo` navigation to `/mode` before `Enter`
 - transcript auto-follow behavior: new prompts reset to bottom-following,
   streaming assistant deltas and long generated answers remain visible while at
   bottom, manual scrolling opts out, and returning to the bottom resumes

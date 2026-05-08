@@ -1130,6 +1130,16 @@ fn cli_tui_status_shows_configured_default_variant() {
     let stdout = String::from_utf8(output.stdout).expect("stdout");
     assert!(stdout.contains("model: mock/mock-model"));
     assert!(stdout.contains("variant: xhigh"));
+    let expected_status = format!(
+        "workdir: {}\nhome: {}\ndb: {}\nsession: (none)\nmodel: mock/mock-model\nvariant: xhigh\nmode: default\nthinking: on\ndebug: off",
+        workdir.display(),
+        home.display(),
+        db.display()
+    );
+    assert!(
+        stdout.contains(&expected_status),
+        "stdout did not contain status block:\n{stdout}"
+    );
 }
 
 #[test]
@@ -1228,7 +1238,7 @@ fn cli_tui_mode_set_plan_persists_and_uses_read_only_tools() {
         .stdin
         .as_mut()
         .expect("stdin")
-        .write_all(b"/mode set plan\nhello\n/quit\n")
+        .write_all(b"/mode plan\nhello\n/quit\n")
         .expect("write stdin");
     let output = child.wait_with_output().expect("output");
     assert!(
