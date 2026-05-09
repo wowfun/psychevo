@@ -74,5 +74,4 @@ caller explicitly asks to validate live providers.
 ## Related Topics
 
 - [120 Provider Registry](spec.md) defines the provider/config contract.
-- [120 Implementation Plan](plan.md) defines the implementation phases.
 - [200 pevo run](../200-pevo-cli/pevo-run.md) defines CLI output modes.

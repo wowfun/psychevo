@@ -15,6 +15,8 @@ insertion.
 
 Specs that directly drive implementation should include functional requirements and acceptance criteria when behavior is non-trivial.
 
+When a topic grows beyond a maintainable single file, split supplementary files by durable topic responsibility.
+
 Historical specs should be moved under `_archive/` when superseded, and are read-only by default.
 
 ## Source of Truth

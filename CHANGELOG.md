@@ -1,15 +1,44 @@
 # Changelog
 
+## 2026-05-10
+
+### Added
+
+- Added a fullscreen TUI `/model` custom-provider flow with global
+  OpenAI-compatible providers, `.env`-only API keys, fetched model catalogs,
+  TUI-scoped model selection, and display-only provider labels.
+
+### Changed
+
+- Improved fullscreen TUI running-state and tool-evidence projection with
+  compact elapsed labels, active tool rows, and safer interrupt queue handling.
+
+### Fixed
+
+- Fixed TUI active tool refresh/keying, skill-first session titles, normal
+  tool-failure projection, prompt interruption wakeups, multi-answer
+  preservation, model-turn budget, and Esc priority.
+
 ## 2026-05-09
 
 ### Added
 
 - Added explicit fullscreen TUI `/model` catalog fetching from selectable provider rows, with process-local fetched model caching and fetched model selection through the existing variant flow.
+- Added TUI `@` file completion, `/sessions` archive/delete actions, `!`
+  shell escapes, and first-class Agent Skills support across runtime, CLI, and
+  TUI.
 
 ### Changed
 
 - Removed bottom selection pane subtitles, updated `/model` slash help text to reflect model selection and fetching, and made bottom selection pane Up/Down navigation wrap between first and last rows.
 - Added fuzzy slash menu matching while keeping Tab completion prefix-only.
+- Added skill marker invocation, SQLite schema v4 archive state, focused
+  source/spec splits, and cleanup of obsolete plan docs.
+
+### Fixed
+
+- Fixed TUI transcript auto-follow, scroll performance, and mouse
+  responsiveness.
 
 ## 2026-05-08
 

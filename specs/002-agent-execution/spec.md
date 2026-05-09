@@ -50,6 +50,11 @@ An outcome describes how an agent invocation, turn, message, or tool execution e
 
 Outcomes are represented by end-event semantics. They do not require separate failed, stopped, or aborted event families.
 
+Abort is an active cancellation signal, not only a flag checked between
+operations. Provider generation and runtime-supplied foreground tool waits must
+be able to wake promptly when abort is requested, including while waiting on
+provider transport reads or a local child process.
+
 ## Event Families
 
 Agent execution defines these canonical event families:

@@ -90,6 +90,18 @@ Abort cancels provider generation and tool execution as soon as practical. The
 agent invocation ends with outcome `aborted`. Partial assistant material may be
 observable, but no new turn is started after abort is observed.
 
+## Turn Budget
+
+The first implementation keeps a finite model-turn budget to prevent runaway
+tool loops. The runtime default for the built-in coding agent is 32 model turns,
+so multi-tool workflows can complete after several tool-result feedback cycles
+while still failing closed when the model never reaches a terminal assistant
+answer.
+
+Budget exhaustion ends the agent invocation with outcome `failed` after all
+already-started tool executions and tool-result messages for the previous turn
+have been emitted.
+
 ## Related Topics
 
 - [002 Agent Execution](spec.md) defines the semantic event families.

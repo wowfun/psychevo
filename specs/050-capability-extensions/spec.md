@@ -17,7 +17,8 @@ Define the boundary for capability contributions from built-in, runtime-provided
 Out of scope:
 - plugin manifests, install, update, remove, discovery paths, package formats, marketplaces, hot reload, startup protocols, shutdown protocols, or healthcheck protocols
 - concrete hook names, event APIs, return payloads, interception mechanics, CLI commands, UI APIs, or SDK APIs
-- concrete tool names, tool schemas, tool result formats, provider wire formats, memory provider APIs, context engine APIs, or skill formats
+- concrete tool names, tool schemas, tool result formats, provider wire formats,
+  memory provider APIs, context engine APIs, or skill package formats
 - permission rules, approval UX, sandboxing, security policy, storage schemas, persistence formats, Rust APIs, or payload schemas
 
 ## Capability Flow
@@ -48,9 +49,9 @@ Capability contribution categories are non-exhaustive. They may include:
 - resource gates or resource adjuncts
 - memory candidates or memory providers
 - interface adjuncts
-- future skill-related contributions
+- skill discovery, index, view, and management contributions
 
-Each contribution category keeps its own source-of-truth semantics. Tool surface and toolset expansion semantics remain owned by [007 Tool Surface](../007-tool-surface/spec.md). AI protocol semantics remain owned by [003 AI Protocol](../003-ai-protocol/spec.md). Context projection remains owned by [006 Context Assembly](../006-context-assembly/spec.md). Resource gate semantics remain owned by [009 Resource Surface](../009-resource-surface/spec.md). Memory boundaries remain owned by [010 Memory System](../010-memory-system/spec.md). Caller-facing interface semantics remain owned by [020 Interfaces](../020-interfaces/spec.md).
+Each contribution category keeps its own source-of-truth semantics. Tool surface and toolset expansion semantics remain owned by [007 Tool Surface](../007-tool-surface/spec.md). AI protocol semantics remain owned by [003 AI Protocol](../003-ai-protocol/spec.md). Context projection remains owned by [006 Context Assembly](../006-context-assembly/spec.md). Resource gate semantics remain owned by [009 Resource Surface](../009-resource-surface/spec.md). Memory boundaries remain owned by [010 Memory System](../010-memory-system/spec.md). Skills remain owned by [055 Skills](../055-skills/spec.md). Caller-facing interface semantics remain owned by [020 Interfaces](../020-interfaces/spec.md).
 
 Capability extensions may add candidates or constraints, but they must not turn candidates into model context, model-visible tools, executable operations, retained memory, provider protocol semantics, or caller-facing behavior without passing through the owning boundary.
 
@@ -96,3 +97,4 @@ This spec does not require every discovered source, every candidate contribution
 - [020 Interfaces](../020-interfaces/spec.md) defines caller-facing interface semantics.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines semantic state relationships.
 - [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines persistence boundaries for durable semantic facts.
+- [055 Skills](../055-skills/spec.md) defines skill packages, discovery, tools, CLI commands, scanning, and provenance.

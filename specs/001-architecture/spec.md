@@ -30,6 +30,15 @@ Out of scope:
 
 ## Internal Module Layout
 
+Large source files should be split by durable ownership boundaries, not by
+mechanical line-count slices. Generated files, lockfiles, snapshots, and
+baseline inventories are not ordinary module-layout targets.
+
+Crate roots may act as facades. Established root-level re-exports should remain
+stable unless the owning topic intentionally changes the public interface.
+Private helper modules should use the narrowest practical visibility, normally
+`pub(super)` or `pub(crate)`.
+
 `psychevo-runtime` may expose public module namespaces for its runtime-owned
 responsibility areas, such as run assembly, provider configuration resolution,
 SQLite-backed state, event projection, context pruning, and built-in tool

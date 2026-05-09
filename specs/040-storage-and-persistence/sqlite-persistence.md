@@ -66,6 +66,7 @@ The first implementation slice stores these session columns:
 - `updated_at_ms` integer
 - `ended_at_ms` integer nullable
 - `end_reason` text nullable
+- `archived_at_ms` integer nullable
 - `message_count` integer
 - `tool_call_count` integer
 - `title` text nullable
@@ -139,13 +140,14 @@ SQLite persistence should perform periodic WAL checkpoint work when supported by
 
 Storage failures that affect session or message persistence must be observable to runtime or caller-facing layers that depend on persistence.
 
-The current implementation uses `PRAGMA user_version = 3`, WAL, foreign keys,
+The current implementation uses `PRAGMA user_version = 4`, WAL, foreign keys,
 short busy timeouts, `BEGIN IMMEDIATE`, bounded jitter retry, and best-effort
 periodic `wal_checkpoint(PASSIVE)`.
 
-The version 3 slice does not automatically migrate version 1 or version 2 state
-databases. Opening an older state database must fail with an explicit
-cutover/reset instruction instead of silently mutating retained state.
+The version 4 slice automatically migrates version 3 state databases by adding
+`sessions.archived_at_ms`. It does not automatically migrate version 1 or
+version 2 state databases. Opening an older state database must fail with an
+explicit cutover/reset instruction instead of silently mutating retained state.
 
 ## Retrieval
 

@@ -7,6 +7,10 @@ Define deterministic acceptance coverage for the first `pevo tui` slice.
 
 Automation vocabulary and generic validation boundaries follow
 [060 Automation](../060-automation/spec.md).
+The functional source material is split across the parent
+[TUI spec](spec.md), [sessions](sessions.md), [state and models](state-and-models.md),
+[input and commands](input-and-commands.md), and
+[layout and rendering](layout-and-rendering.md).
 
 ## Deterministic Tests
 
@@ -19,6 +23,19 @@ Required coverage:
   `/sessions`/`/resume`/`/continue`, and ambiguous session prefix handling
 - composer behavior for submit, newline, current-session persisted user-prompt
   history seeding, history recall with draft restoration, and history search
+- user shell escape behavior for fullscreen and scripted TUI: `!` detection
+  after leading whitespace, empty `!` bounded help, local shell execution
+  without provider credentials, `Ran <first command line>` evidence, failure
+  projection, `Esc` clearing empty shell-mode input, aborting active shell work,
+  FIFO queueing with prompts and shell escapes while active work is running,
+  and process-local history that survives session switches without seeding
+  future provider context
+- fullscreen composer `@` file completion: token detection for empty, path-like,
+  Unicode, second-`@`, whitespace-boundary, and multi-line current-line tokens;
+  rejection of mid-word `foo@bar`; workdir-relative search; directory marking;
+  gitignore handling; stale-result rejection; keyboard and mouse insertion;
+  `Esc` dismissal until the token changes; and interop with slash menus and
+  bottom selection panes
 - slash menu default selection: the first visible completion row is selected
   and pressing `Enter` executes it
 - evidence-ledger projection for unlabeled prompt blocks without left rails,
@@ -26,13 +43,29 @@ Required coverage:
   failures inside their original group, unlabeled answer body text without left
   rails, tool blocks without left rails, `Ran <actual first command line>`
   titles that survive start-to-end tool updates even when end events omit tool
-  arguments, metadata left rails, unlabeled turn meta only after visible answers
-  or failure summaries, and debug meta; only the
+  arguments, transient active `Exploring`/`Running`/`Changing` rows created from
+  streaming assistant tool-call blocks before tool execution starts, temporary
+  message-scoped `content_index:call_index` key migration to `tool_call_id`, no
+  duplicate row when `tool_execution_start` follows a pending row, no overwrite
+  when later assistant messages reuse the same `content_index:call_index` pair,
+  interrupted pending rows stopping their timer as failed `interrupted`
+  evidence, metadata left rails, unlabeled turn meta only after visible answers
+  or failure summaries, and
+  no extra red `turn ended: normal` row when the final turn outcome is normal
+  but one or more tool calls failed, and debug meta; only the
   `Thinking:` prefix uses the paper color role, reasoning content uses the
   normal thinking body role, and explicit reasoning paragraphs do not receive
   label-width indentation
-- plain non-terminal renderer output for `Prompt`, `Thinking`, `Explored`,
-  `Ran`, `Changed`, `Answer`, and `Meta` blocks, including `--debug`
+- compact UI duration formatting for model metadata, tool evidence, plain
+  renderer output, and bottom running status: whole seconds below one minute,
+  `XmYYs` at one minute or more, zero-padded minute seconds, and floor rounding
+  from persisted millisecond precision; active fullscreen tool-evidence cache
+  keys must track the current elapsed label and spinner frame so `Running` /
+  `Exploring` / `Changing` rows refresh while live
+- plain non-terminal renderer output for `Prompt`, `Thinking`, active
+  `Exploring`/`Running`/`Changing` preparation notices, completed `Explored`,
+  `Ran`, `Changed`, `Answer`, and `Meta` blocks, including `--debug`, without
+  printing repeated preparation lines for every argument delta
 - narrow and wide layout rendering, sidebar hidden by default for fresh state,
   persisted optional sidebar visible state, thinking visible/hidden,
   expanded/collapsed tool output, minimal bottom state line, and composer
@@ -41,7 +74,9 @@ Required coverage:
   marker, the empty composer must occupy two input rows with surface background
   on both rows, wrapped historical prompt rows including CJK/wide-character
   content must keep full-width prompt background on each physical row, and
-  sidebar headings must be bold without colored left rails
+  sidebar headings must be bold without colored left rails; running-state
+  snapshots must show spinner/elapsed/`Esc` appended to the stable bottom state
+  line and must not contain `Working`
 - streaming runtime projection that never leaks folded reasoning into sanitized
   message events while still delivering dedicated TUI thinking events
 - runtime metrics projection that can expose usage and allowlisted metadata to
@@ -63,6 +98,8 @@ Required coverage:
   fields as one multi-line status block
 - slash command completion from `Tab`, keeping argument placeholders in slash
   menu descriptions only and out of completed composer text
+- `/skills` and `/skill:<name>` behavior: deterministic listing, skill prompt
+  expansion, unknown-skill errors, and dynamic slash menu entries
 - runtime Plan mode toolset: exposes `read`, `list`, and `search`; does not
   expose `bash`, `write`, or `edit`
 - mode instruction is sent to providers for the current turn and is not
@@ -72,7 +109,10 @@ Required coverage:
 - session title persistence, `/rename <title>`, title display in session
   picker/sidebar, automatic title generation with model success, and
   deterministic first-prompt fallback when title generation fails or returns an
-  unusable title
+  unusable title; skill-marker first prompts include selected skill context in
+  the non-persisted title request, fallback to selected skill names when the
+  prompt contains only resolved skill markers, and fullscreen sidebars refresh
+  after detached post-`agent_end` title generation completes
 - fullscreen startup history loading for the selected/latest session and
   session-picker transcript replacement without synthetic status rows, while
   restoring persisted folded reasoning as local `Thinking: <reasoning>` evidence
@@ -111,6 +151,11 @@ Required coverage:
   row rendering, visible-message counts matching the sidebar, selection, and
   transcript/history replacement; rows with CJK/wide-character titles must keep
   the updated time right-aligned on the same physical row
+- fullscreen session management through the shared bottom pane: active and
+  archived view switching, action mode that does not pollute search, archive,
+  restore, hard-delete confirmation/cancellation, current-session clearing
+  after archive/delete, and running-turn rejection for current-session
+  archive/delete
 - shared bottom selection pane Up/Down navigation wraps between first and last
   visible rows for sessions, model selection, and variant selection, while
   Home/End remain direct first/last jumps
@@ -121,7 +166,15 @@ Required coverage:
   restoration after undo, cleanup before the next prompt, and bounded no-op or
   error paths for no session, no user message, missing snapshot, non-Git
   workdir, and unsettled running turns
-- `Esc` interrupts a running turn through runtime control in fullscreen mode
+- `Esc` interrupts a running turn through runtime control in fullscreen mode,
+  shows the transient interrupting state without adding an immediate transcript
+  row, gives selection/file popup/skill popup/slash menu/bottom panel/history
+  search/empty shell composer priority over interruption, wakes provider
+  transport and foreground shell waits promptly, skips post-abort
+  title-generation follow-up, and has no destructive effect while idle
+- interrupted fullscreen turns restore queued prompt and shell inputs to the
+  composer instead of starting the next queue item automatically, while normal
+  completion still drains queued inputs FIFO
 - slash menu exact, prefix, and subsequence fuzzy matching over command labels,
   argument placeholder hints in description text, `/model` described as
   `select/fetch model`, prefix-only Tab completion that does not complete
@@ -134,17 +187,29 @@ Required coverage:
   Up/Down wraparound and `/mo` navigation to `/mode` before `Enter`
 - transcript auto-follow behavior: new prompts reset to bottom-following,
   streaming assistant deltas and long generated answers remain visible while at
-  bottom, manual scrolling opts out, and returning to the bottom resumes
-  auto-follow
+  bottom, transcript scroll height excludes decorative border rows so the final
+  line is not hidden behind the composer, bottom-scroll requests made before
+  real viewport dimensions are known are applied on the next render, redraws
+  after shorter rows do not retain stale glyphs from earlier longer rows,
+  bottom-scroll limits use the same word-wrapped rendered line count as the
+  paragraph widget for long mixed Markdown/CJK text, repeated scroll redraws
+  reuse cached row heights without re-wrapping unchanged rows, bursty mouse
+  wheel redraws are bounded by input coalescing, manual scrolling opts out, and
+  returning to the bottom resumes auto-follow
 - long-output resilience for model-generated long answers and read-tool results:
   wrapped content must not overwrite composer/sidebar, collapsed read output
   must retain expandable full content, and expanded long reads must scroll
   coherently
+- multi-tool turns that emit visible assistant text before and after tool calls
+  preserve each visible assistant message as a separate answer block; later
+  streaming updates must not replace earlier answer text from the same turn
 - fullscreen TUI captures mouse events in alternate screen mode, disables mouse
-  capture on exit, routes mouse wheel to transcript or active bottom pane
-  scrolling, supports left-click selection for slash and bottom-pane rows, and
-  supports app-native mouse drag text selection with `Ctrl+C`/mouse-up copying
-  through test-injected clipboard sinks; selection extraction must use final
+  capture on exit, avoids any-motion mouse tracking, routes mouse wheel to
+  transcript or active bottom pane scrolling, supports left-click selection for
+  slash and bottom-pane rows, and supports app-native mouse drag text selection
+  with `Ctrl+C`/mouse-up copying through test-injected clipboard sinks; mouse
+  drag copy must not synchronously block the input loop; selection extraction
+  must use final
   rendered-buffer transcript/sidebar rows, preserve wrapped and wide-character
   visible text, lock copying/highlighting to the rendered region where dragging
   started so same-row transcript/sidebar text is not mixed, trim only right-side

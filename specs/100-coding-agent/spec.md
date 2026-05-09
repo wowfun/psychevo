@@ -18,7 +18,8 @@ Out of scope:
 - CLI commands, flags, rendering, terminal UI, process behavior, or exit codes
 - project-root discovery, instruction-file discovery, workspace policy, or context-source discovery
 - approval UX, sandbox behavior, deny lists, dangerous-command policy, or concrete resource policy
-- memory, skills, evaluation, self-evolution, self-modification loops, training, or workflow search
+- memory, skill package lifecycle management, evaluation, self-evolution,
+  self-modification loops, training, or workflow search
 - concrete provider behavior, prompt wording, prompt templates, or model-selection policy
 - standalone crate boundaries, Rust APIs, payload schemas, storage schemas, or wire formats
 
@@ -44,7 +45,7 @@ Runtime resolves the `coding-agent` capability target during agent-invocation as
 
 `coding-agent` may contribute instruction context, attached context candidates, or summary context candidates to context assembly. [006 Context Assembly](../006-context-assembly/spec.md) owns whether those candidates become model-visible.
 
-Instruction-file discovery, context-file discovery, skills, and memory are not part of the minimum coding-agent contract. Later implementations may feed those materials through context candidates, memory candidates, or capability contributions owned by [006 Context Assembly](../006-context-assembly/spec.md), [010 Memory System](../010-memory-system/spec.md), and [050 Capability Extensions](../050-capability-extensions/spec.md).
+Instruction-file discovery, context-file discovery, skills, and memory are not part of the minimum coding-agent contract. Optional skill support may feed skill indexes, explicit skill content, and skill adjunct tools through context, tool, or capability contribution boundaries owned by [006 Context Assembly](../006-context-assembly/spec.md), [050 Capability Extensions](../050-capability-extensions/spec.md), and [055 Skills](../055-skills/spec.md). Memory remains owned by [010 Memory System](../010-memory-system/spec.md).
 
 `coding-agent` uses the agent-invocation scoped tool surface assembled by runtime. Toolset expansion, refreshable tool declaration snapshots, and tool declaration visibility stay owned by [007 Tool Surface](../007-tool-surface/spec.md). Source identity, activation, availability, degraded state, and conflicts for contributed capability material stay owned by [050 Capability Extensions](../050-capability-extensions/spec.md).
 
@@ -68,4 +69,6 @@ Self-evolution is a later capability domain. Any future evaluate-modify-retain-o
 - [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines material retrieval through session and evidence relationships.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability source, availability, and conflict boundaries.
 - [100 Runtime Assembly](runtime-assembly.md) defines the first implementation slice assembly contract.
+- [100 Testing](testing.md) defines acceptance scenarios and validation expectations.
 - [110 Coding Core Tools](../110-coding-core-tools/spec.md) defines the required `coding-core` toolset.
+- [055 Skills](../055-skills/spec.md) defines optional skill discovery, view, and management behavior.

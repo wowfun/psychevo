@@ -18,7 +18,7 @@ Out of scope:
 - provider-specific tool-call fields or wire formats
 - CLI commands, terminal rendering, interactive PTY behavior, background process management, or process registry behavior
 - approval UX, sandbox behavior, deny lists, dangerous-command policy, or concrete resource policy
-- binary/image reading, append/delete/rename tools, search/list tools, memory tools, skill tools, or self-evolution tools
+- binary/image reading, append/delete/rename tools, search/list tools, memory tools, skill adjunct tools, or self-evolution tools
 - storage schemas, evidence record shapes, or replay formats
 
 ## Toolset Contract
@@ -29,7 +29,7 @@ Out of scope:
 - `write`
 - `bash`
 
-`coding-core` does not include search, list, grep, find, background process, memory, skill, or project-discovery tools in this slice. A model may use `bash` for command-line search or listing when the runtime resource boundary allows it.
+`coding-core` does not include search, list, grep, find, background process, memory, skill, or project-discovery tools. A model may use `bash` for command-line search or listing when the runtime resource boundary allows it. Optional skill tools are adjacent runtime tools defined by [055 Skills](../055-skills/spec.md), not members of `coding-core`.
 
 Each `coding-core` tool operates through the runtime-resolved working context accepted for the coding-agent invocation. Tools must not independently choose a different project, filesystem, process environment, or resource boundary.
 
@@ -123,7 +123,9 @@ When the table matches, the result remains a failed tool result but includes `ex
 
 - [100 Coding Agent](../100-coding-agent/spec.md) requires the `coding-core` toolset for default coding-agent invocations.
 - [110 Tool I/O](tool-io.md) defines the first implementation slice parameter and JSON result contract.
+- [110 Testing](testing.md) defines acceptance scenarios and validation expectations.
 - [004 Runtime Contract](../004-runtime-contract/spec.md) defines agent-invocation assembly and tool surface wiring.
 - [007 Tool Surface](../007-tool-surface/spec.md) defines agent-invocation scoped tool declarations, generation-request tool declaration snapshots, execution bindings, and toolset expansion.
 - [009 Resource Surface](../009-resource-surface/spec.md) defines resource decisions that may affect tool execution.
 - [005 Durable Evidence](../005-durable-evidence/spec.md) defines durable linkage for tool requests, outcomes, and result artifacts.
+- [055 Skills](../055-skills/spec.md) defines optional skill adjunct tools.

@@ -17,6 +17,7 @@ behavior, and product-level environment variables.
 - `pevo run`
 - `pevo smoke` product positioning
 - `pevo tui` product positioning
+- `pevo skills` product positioning
 - reserved future command family boundaries
 
 Out of scope:
@@ -62,6 +63,7 @@ Implemented first-slice commands:
 - `pevo run`
 - `pevo smoke`
 - `pevo tui`
+- `pevo skills`
 
 Reserved command families:
 
@@ -82,6 +84,10 @@ metadata summaries. Debug projection does not change `pevo run --format json`,
 does not expose folded reasoning in sanitized transcript messages, and does not
 turn provider metadata into transcript content.
 
+`pevo skills` owns local skill lifecycle operations: list, view, create, patch,
+remove, enable, disable, install, and scan. Skill package, discovery, scanner,
+and provenance semantics belong to [055 Skills](../055-skills/spec.md).
+
 ## Related Topics
 
 - [025 CLI](../025-cli/spec.md) defines command-line foundation semantics.
@@ -89,7 +95,8 @@ turn provider metadata into transcript content.
 - [200 pevo run](pevo-run.md) defines the live coding-agent command.
 - [210 pevo TUI](../210-pevo-tui/spec.md) defines the fullscreen interactive
   terminal command.
-- [200 Implementation Plan](plan.md) defines this slice's implementation order.
+- [055 Skills](../055-skills/spec.md) defines the skill package and lifecycle
+  semantics exposed by `pevo skills`.
 - [200 Testing](testing.md) defines acceptance coverage.
 - [120 Provider Registry](../120-provider-registry/spec.md) defines
   provider/model configuration and resolution.

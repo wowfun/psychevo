@@ -44,6 +44,7 @@ Logical session record material includes:
 - `started_at`
 - optional `ended_at`
 - optional `end_reason`
+- optional `archived_at`
 - `message_count`
 - `tool_call_count`
 - optional title
@@ -52,6 +53,12 @@ Logical session record material includes:
 The working context summary and model summary are descriptive metadata. They must not become the source of truth for resource boundaries, model selection, or provider configuration.
 
 `ended_at` and `end_reason` describe session lifecycle state. Reopening the same persistent session may clear or update those fields before appending more messages.
+
+`archived_at` marks a persistent session as hidden from default session
+selection and latest-session resolution without deleting retained evidence.
+Restoring a session clears `archived_at`. Hard deletion removes the session
+record and its retained message records; it is a product-surface operation and
+does not redefine durable evidence semantics for completed agent invocations.
 
 ## Message Record
 

@@ -36,6 +36,8 @@ Out of scope:
 - optional `-c, --continue`
 - optional `--format <default|json>`
 - optional `--include-reasoning`
+- optional `--no-skills`
+- repeatable optional `--skill <name-or-path>`
 
 The first-slice default format is `default`.
 
@@ -95,6 +97,11 @@ default:
 The same working-directory containment and tool JSON contracts used by
 `pevo smoke` apply to `pevo run`.
 
+When skills are enabled, `pevo run` may add skill adjunct tools and a compact
+skill index as defined by [055 Skills](../055-skills/spec.md). `--no-skills`
+disables default and configured skill discovery. Explicit `--skill` values
+remain additive and may name a discovered skill or point at a skill path.
+
 ## Output
 
 `--format default` writes only the final assistant text to stdout.
@@ -140,3 +147,4 @@ must not require credentials, live network access, or user configuration.
   and model resolution.
 - [100 Runtime Assembly](../100-coding-agent/runtime-assembly.md) defines how
   runtime assembles the built-in coding agent.
+- [055 Skills](../055-skills/spec.md) defines optional skill discovery and tools.

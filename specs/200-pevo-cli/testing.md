@@ -22,7 +22,7 @@ scripts/validate.sh broad
   and `cache/` under an isolated `PSYCHEVO_HOME`.
 - Existing `config.jsonc` and `.env` are not overwritten.
 - `pevo init --reset-state` backs up `state.db`, `state.db-wal`, and
-  `state.db-shm` before creating a fresh v2 state database.
+  `state.db-shm` before creating a fresh v4 state database.
 - The starter config resolves DeepSeek with `reasoning_effort = medium`.
 - Success output lists paths and does not include credential values.
 - Re-running init is idempotent.
@@ -62,7 +62,7 @@ scripts/validate.sh broad
 - JSONC `reasoning_effort` uses the same validation as CLI `--variant`.
 - `none` disables lower-level reasoning effort.
 - latest-session lookup filters by canonical workdir and `source = "run"`.
-- SQLite state uses `user_version = 2`; older state databases reject with an
+- SQLite state uses `user_version = 4`; older unsupported state databases reject with an
   explicit reset/cutover instruction.
 - Reasoning is preserved locally as folded assistant content, without entering
   default visible output or cross-provider replay.
@@ -80,5 +80,4 @@ must not copy credential files automatically.
 ## Related Topics
 
 - [200 pevo CLI](spec.md) defines the product CLI surface.
-- [200 Implementation Plan](plan.md) defines implementation sequencing.
 - [200 pevo run](pevo-run.md) defines run output modes.

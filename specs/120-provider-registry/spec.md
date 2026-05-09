@@ -87,6 +87,8 @@ Configuration may define:
 
 - top-level `model` as a default model string or model object
 - top-level `provider` map keyed by provider id or user provider name
+- optional per-provider `label` for display in human-facing selectors and
+  status surfaces
 - per-provider `options.base_url`
 - per-provider `options.api_key_env`
 - per-provider `models` map keyed by configured model id
@@ -129,6 +131,15 @@ plus explicit model-level options.
 Configuration must not contain raw API keys. Credentials are resolved from the
 local environment map through `api_key_env` or built-in credential environment
 variable candidates.
+
+Provider labels are display-only. They do not change provider identity,
+selection, config merge keys, or the `provider/model` model-spec form.
+
+Interactive clients may create user-defined OpenAI Chat-compatible providers in
+the global config. The created provider id must be a new normalized user
+provider id and must not collide with built-in provider ids or aliases. The
+generated credential variable is stored in `options.api_key_env`; raw API keys
+must be written only to `.env` files, never JSONC configuration.
 
 ## Environment
 
@@ -212,6 +223,4 @@ Browser-based portal OAuth is explicitly deferred.
   behavior.
 - [100 Runtime Assembly](../100-coding-agent/runtime-assembly.md) defines how
   the built-in coding agent is assembled by runtime.
-- [120 Implementation Plan](plan.md) defines the current vertical closure
-  implementation plan.
 - [120 Testing](testing.md) defines deterministic and live opt-in validation.

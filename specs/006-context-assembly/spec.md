@@ -22,7 +22,8 @@ Out of scope:
 - exact source discovery rules, concrete file names, attachment syntax, or lookup syntax
 - token counting, context-window thresholds, reserve budgets, or truncation limits
 - compaction algorithms, summarization algorithms, or summary schemas
-- memory retention behavior, skills, session storage layouts, branches, replay formats, or workflow behavior
+- memory retention behavior, skill package formats or lifecycle management,
+  session storage layouts, branches, replay formats, or workflow behavior
 - tool declarations, tool schemas, tool execution behavior, or concrete tools
 - resource permission schemas, policy rules, approval behavior, sandbox behavior, path rules, or enforcement mechanics
 - Rust APIs, payload schemas, storage formats, persistence formats, or CLI rendering
@@ -57,6 +58,11 @@ Memory recall candidates are not automatically model-visible. This spec owns whe
 
 Capability selection may contribute instruction context, attached context candidates, or summary context candidates. Contribution does not make those candidates model-visible; runtime projection still owns visibility.
 
+Skill discovery may contribute a compact skill index, explicit skill invocation
+material, or skill-related context candidates as defined by
+[055 Skills](../055-skills/spec.md). This spec owns whether that material is
+projected into model context for a generation request.
+
 Instruction context, attached context, and summary context may be model-visible without becoming finalized loop-visible message artifacts. A later spec may promote a source category into message semantics, but this spec does not do so.
 
 The assembled model context is an input to the generation request defined by [003 AI Protocol](../003-ai-protocol/spec.md). Model target, tool declarations, and generation controls are adjacent generation request inputs and remain outside model context. [007 Tool Surface](../007-tool-surface/spec.md) defines tool declaration semantics.
@@ -89,3 +95,4 @@ Transformation policy may depend on caller inputs, runtime configuration, provid
 - [010 Memory System](../010-memory-system/spec.md) defines memory recall candidates that may feed context projection.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines how context facts relate to other state families.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability contribution boundaries for context candidates.
+- [055 Skills](../055-skills/spec.md) defines skill package discovery and model-visible skill index semantics.

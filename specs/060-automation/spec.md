@@ -96,13 +96,20 @@ credentials, persistent host state, global mocks, wall-clock timing, open
 sockets, live services, and provider availability unless the owning topic
 explicitly defines those dependencies as opt-in or isolated.
 
+Structural refactors should run the closest deterministic narrow validation for
+the touched subsystem. When a refactor spans multiple crates or product
+surfaces, it should also run the broad deterministic validation gate when one
+exists.
+
 Tests should assert behavior and stable invariants before volatile inventories,
 generated prose, provider catalogs, incidental terminal formatting, or
 implementation-private storage layouts.
 
-Snapshot and golden updates should be treated as review material by the owning
-topic. This spec defines the category; the topic testing spec owns the exact
-review workflow, checked-in artifact policy, and acceptance commands.
+Snapshot, golden, baseline, generated inventory, and expected-failure updates
+should happen only for intentional behavior or artifact-boundary changes, and
+should be treated as review material by the owning topic. This spec defines the
+category; the topic testing spec owns the exact review workflow, checked-in
+artifact policy, and acceptance commands.
 
 Automation that mutates files, state, sessions, processes, terminals, or
 environment variables should keep those resources isolated and clean up after
