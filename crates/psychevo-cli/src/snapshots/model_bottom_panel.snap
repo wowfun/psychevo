@@ -1,5 +1,6 @@
 ---
-source: crates/psychevo-cli/src/tui/tests.rs
+source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 323
 expression: combined
 ---
 fixture=model_bottom_panel
@@ -16,13 +17,13 @@ size=120x24
 
   Select Model                                                                                                     esc
   Search
+  Add provider  configure global OpenAI-compatible provider
   All providers  not fetched
   mock  not fetched
   › ● mock/mock-model  mock
   mock/other-model  mock  default high
 
   Enter select  Esc close  Type search
-
 
 
 
@@ -42,13 +43,13 @@ mock/mock-model  default
 [default]
 [default]  [default]Select Model[default]                                                                                                     [dim]esc[default]
 [default]  [dim]Search [default]
+[default]  [cyan]Add provider[dim]  configure global OpenAI-compatible provider[default]
 [default]  [cyan]All providers[dim]  not fetched[default]
 [default]  [cyan]mock[dim]  not fetched[default]
 [default]  [default]› ● mock/mock-model  mock[default]
 [default]  [default]mock/other-model  mock  default high[default]
 [default]
 [default]  [dim]Enter select  Esc close  Type search[default]
-[default]
 [default]
 [default]
 [default]

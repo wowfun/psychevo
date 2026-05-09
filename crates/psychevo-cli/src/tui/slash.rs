@@ -16,90 +16,65 @@ pub(crate) enum SlashCommand {
     Rename(String),
     Undo,
     Redo,
+    Skills,
+    SkillInvoke { name: String, args: String },
     Upcoming(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SlashMenuItem {
-    pub(crate) command: &'static str,
-    pub(crate) description: &'static str,
+    pub(crate) command: String,
+    pub(crate) description: String,
     pub(crate) upcoming: bool,
 }
 
-const SLASH_MENU: &[SlashMenuItem] = &[
-    SlashMenuItem {
-        command: "/status",
-        description: "show local status",
-        upcoming: false,
-    },
-    SlashMenuItem {
-        command: "/new",
-        description: "start a new session on next prompt",
-        upcoming: false,
-    },
-    SlashMenuItem {
-        command: "/sessions",
-        description: "switch session",
-        upcoming: false,
-    },
-    SlashMenuItem {
-        command: "/model",
-        description: "select/fetch model",
-        upcoming: false,
-    },
-    SlashMenuItem {
-        command: "/variant",
-        description: "set <value>",
-        upcoming: false,
-    },
-    SlashMenuItem {
-        command: "/mode",
-        description: "set <plan|default>",
-        upcoming: false,
-    },
-    SlashMenuItem {
-        command: "/show-thinking",
-        description: "toggle; set <on|off>",
-        upcoming: false,
-    },
-    SlashMenuItem {
-        command: "/rename",
-        description: "<title> rename current session",
-        upcoming: false,
-    },
-    SlashMenuItem {
-        command: "/undo",
-        description: "undo last message",
-        upcoming: false,
-    },
-    SlashMenuItem {
-        command: "/redo",
-        description: "redo undone messages",
-        upcoming: false,
-    },
-    SlashMenuItem {
-        command: "/compact",
-        description: "upcoming",
-        upcoming: true,
-    },
-    SlashMenuItem {
-        command: "/export",
-        description: "upcoming",
-        upcoming: true,
-    },
-    SlashMenuItem {
-        command: "/quit",
-        description: "quit TUI",
-        upcoming: false,
-    },
+const SLASH_MENU: &[(&str, &str, bool)] = &[
+    ("/status", "show local status", false),
+    ("/new", "start a new session on next prompt", false),
+    ("/sessions", "switch session", false),
+    ("/model", "select/fetch model", false),
+    ("/variant", "set <value>", false),
+    ("/mode", "set <plan|default>", false),
+    ("/show-thinking", "toggle; set <on|off>", false),
+    ("/rename", "<title> rename current session", false),
+    ("/undo", "undo last message", false),
+    ("/redo", "redo undone messages", false),
+    ("/skills", "list skills", false),
+    ("/compact", "upcoming", true),
+    ("/export", "upcoming", true),
+    ("/quit", "quit TUI", false),
 ];
 
-pub(crate) fn slash_menu_items(input: &str) -> Vec<SlashMenuItem> {
-    slash_menu_items_for(input, MatchMode::Fuzzy)
+pub(crate) fn base_slash_menu_items() -> Vec<SlashMenuItem> {
+    SLASH_MENU
+        .iter()
+        .map(|(command, description, upcoming)| SlashMenuItem {
+            command: (*command).to_string(),
+            description: (*description).to_string(),
+            upcoming: *upcoming,
+        })
+        .collect()
 }
 
+#[cfg(test)]
+pub(crate) fn slash_menu_items(input: &str) -> Vec<SlashMenuItem> {
+    slash_menu_items_for(input, &base_slash_menu_items(), MatchMode::Fuzzy)
+}
+
+#[cfg(test)]
 pub(crate) fn slash_prefix_menu_items(input: &str) -> Vec<SlashMenuItem> {
-    slash_menu_items_for(input, MatchMode::Prefix)
+    slash_menu_items_for(input, &base_slash_menu_items(), MatchMode::Prefix)
+}
+
+pub(crate) fn slash_menu_items_from(input: &str, items: &[SlashMenuItem]) -> Vec<SlashMenuItem> {
+    slash_menu_items_for(input, items, MatchMode::Fuzzy)
+}
+
+pub(crate) fn slash_prefix_menu_items_from(
+    input: &str,
+    items: &[SlashMenuItem],
+) -> Vec<SlashMenuItem> {
+    slash_menu_items_for(input, items, MatchMode::Prefix)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,17 +83,21 @@ enum MatchMode {
     Fuzzy,
 }
 
-fn slash_menu_items_for(input: &str, mode: MatchMode) -> Vec<SlashMenuItem> {
+fn slash_menu_items_for(
+    input: &str,
+    menu: &[SlashMenuItem],
+    mode: MatchMode,
+) -> Vec<SlashMenuItem> {
     let trimmed = input.trim_start();
     if !trimmed.starts_with('/') || trimmed.chars().any(char::is_whitespace) {
         return Vec::new();
     }
     let query = trimmed.to_lowercase();
-    let mut items = SLASH_MENU
+    let mut items = menu
         .iter()
         .enumerate()
         .filter_map(|(index, item)| {
-            slash_match_score(item.command, &query, mode).map(|score| (score, index, item))
+            slash_match_score(&item.command, &query, mode).map(|score| (score, index, item))
         })
         .collect::<Vec<_>>();
     items.sort_by_key(|(score, index, _)| (*score, *index));
@@ -180,47 +159,63 @@ pub(crate) fn parse_slash_command(line: &str) -> Result<Option<SlashCommand>> {
     let mut parts = trimmed.split_whitespace();
     let command = parts.next().unwrap_or_default();
     let rest = parts.collect::<Vec<_>>();
-    let parsed = match command {
-        "/quit" | "/exit" | "/q" => SlashCommand::Quit,
-        "/status" => SlashCommand::Status,
-        "/clear" | "/new" => SlashCommand::New,
-        "/sessions" | "/resume" | "/continue" => {
-            if !rest.is_empty() {
-                return Err(anyhow!("{command} does not accept arguments"));
+    let parsed = if let Some(name) = command.strip_prefix("/skill:") {
+        if name.trim().is_empty() {
+            return Err(anyhow!("usage: /skill:<name> [args]"));
+        }
+        SlashCommand::SkillInvoke {
+            name: name.to_string(),
+            args: rest.join(" "),
+        }
+    } else {
+        match command {
+            "/quit" | "/exit" | "/q" => SlashCommand::Quit,
+            "/status" => SlashCommand::Status,
+            "/clear" | "/new" => SlashCommand::New,
+            "/sessions" | "/resume" | "/continue" => {
+                if !rest.is_empty() {
+                    return Err(anyhow!("{command} does not accept arguments"));
+                }
+                SlashCommand::Sessions
             }
-            SlashCommand::Sessions
-        }
-        "/session" => {
-            return Err(anyhow!("usage: /sessions, /resume, or /continue"));
-        }
-        "/model" => parse_model_command(&rest)?,
-        "/models" => return Err(anyhow!("/models has been removed; use /model")),
-        "/variant" => parse_variant_command(&rest)?,
-        "/mode" => parse_mode_command(&rest)?,
-        "/show-thinking" => parse_thinking_command(&rest)?,
-        "/thinking" => return Err(anyhow!("/thinking has been removed; use /show-thinking")),
-        "/rename" => parse_rename_command(&rest)?,
-        "/undo" => {
-            if !rest.is_empty() {
-                return Err(anyhow!("/undo does not accept arguments"));
+            "/session" => {
+                return Err(anyhow!("usage: /sessions, /resume, or /continue"));
             }
-            SlashCommand::Undo
-        }
-        "/redo" => {
-            if !rest.is_empty() {
-                return Err(anyhow!("/redo does not accept arguments"));
+            "/model" => parse_model_command(&rest)?,
+            "/models" => return Err(anyhow!("/models has been removed; use /model")),
+            "/variant" => parse_variant_command(&rest)?,
+            "/mode" => parse_mode_command(&rest)?,
+            "/show-thinking" => parse_thinking_command(&rest)?,
+            "/thinking" => return Err(anyhow!("/thinking has been removed; use /show-thinking")),
+            "/rename" => parse_rename_command(&rest)?,
+            "/undo" => {
+                if !rest.is_empty() {
+                    return Err(anyhow!("/undo does not accept arguments"));
+                }
+                SlashCommand::Undo
             }
-            SlashCommand::Redo
-        }
-        "/compact" | "/export" => {
-            if !rest.is_empty() {
-                return Err(anyhow!(
-                    "{command} is upcoming and does not accept arguments"
-                ));
+            "/redo" => {
+                if !rest.is_empty() {
+                    return Err(anyhow!("/redo does not accept arguments"));
+                }
+                SlashCommand::Redo
             }
-            SlashCommand::Upcoming(command.trim_start_matches('/').to_string())
+            "/skills" => {
+                if !rest.is_empty() {
+                    return Err(anyhow!("/skills does not accept arguments"));
+                }
+                SlashCommand::Skills
+            }
+            "/compact" | "/export" => {
+                if !rest.is_empty() {
+                    return Err(anyhow!(
+                        "{command} is upcoming and does not accept arguments"
+                    ));
+                }
+                SlashCommand::Upcoming(command.trim_start_matches('/').to_string())
+            }
+            _ => return Err(anyhow!("unknown slash command: {command}")),
         }
-        _ => return Err(anyhow!("unknown slash command: {command}")),
     };
     Ok(Some(parsed))
 }
@@ -407,6 +402,23 @@ mod tests {
     }
 
     #[test]
+    fn parses_skills_commands() {
+        assert_eq!(
+            parse_slash_command("/skills").unwrap(),
+            Some(SlashCommand::Skills)
+        );
+        assert!(parse_slash_command("/skills now").is_err());
+        assert_eq!(
+            parse_slash_command("/skill:reviewer extra context").unwrap(),
+            Some(SlashCommand::SkillInvoke {
+                name: "reviewer".to_string(),
+                args: "extra context".to_string(),
+            })
+        );
+        assert!(parse_slash_command("/skill:").is_err());
+    }
+
+    #[test]
     fn slash_menu_filters_and_marks_upcoming() {
         assert!(slash_menu_items("/he").is_empty());
         assert_eq!(slash_menu_items("/session").len(), 1);
@@ -447,5 +459,20 @@ mod tests {
         );
         assert!(parse_slash_command("/undo now").is_err());
         assert!(parse_slash_command("/redo now").is_err());
+    }
+
+    #[test]
+    fn slash_menu_can_filter_dynamic_skill_entries() {
+        let mut items = base_slash_menu_items();
+        items.push(SlashMenuItem {
+            command: "/skill:reviewer".to_string(),
+            description: "Review code changes".to_string(),
+            upcoming: false,
+        });
+
+        let matches = slash_menu_items_from("/skill:r", &items);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].command, "/skill:reviewer");
+        assert_eq!(matches[0].description, "Review code changes");
     }
 }

@@ -19,7 +19,7 @@ size=120x24
     ... 20 more lines
 
 The harness snapshots stable buffer text and style roles, then leaves real terminal screenshots as diagnostics.
-▌ mock/mock-model high  2.5s
+▌ mock/mock-model high  2s
 
 
 
@@ -45,7 +45,7 @@ mock/model  high
 [dim]    [default]... 20 more lines
 [default]
 [default]The harness snapshots stable buffer text and style roles, then leaves real terminal screenshots as diagnostics.
-[dim]▌ mock/mock-model high  2.5s[default]
+[dim]▌ mock/mock-model high  2s[default]
 [default]
 [default]
 [default]

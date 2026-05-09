@@ -256,6 +256,12 @@ Sleep 300 ms
 Ctrl+B
 Sleep 300 ms
 Screenshot $(json_quote "$out_dir/03-final-ledger.png")
+Escape
+Sleep 100 ms
+Type "!"
+Sleep 200 ms
+Screenshot $(json_quote "$out_dir/04-shell-mode.png")
+Escape
 Sleep 200 ms
 Ctrl+D
 EOF
@@ -264,7 +270,7 @@ EOF
 check_demo_artifacts() {
   local out_dir="$1"
   local missing=()
-  for file in 01-model-picker.png 02-running-thinking.png 03-final-ledger.png; do
+  for file in 01-model-picker.png 02-running-thinking.png 03-final-ledger.png 04-shell-mode.png; do
     if [[ ! -s "$out_dir/$file" ]]; then
       missing+=("$file")
     fi

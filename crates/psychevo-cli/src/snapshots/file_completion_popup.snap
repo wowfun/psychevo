@@ -1,18 +1,12 @@
 ---
-source: crates/psychevo-cli/src/tui/tests/fixtures.rs
-assertion_line: 323
+source: crates/psychevo-cli/src/tui/tests.rs
 expression: combined
 ---
-fixture=running_turn_with_visible_thinking
+fixture=file_completion_popup
 size=120x24
 
 --- text ---
-› Inspect the CLI rendering path.
 
-▌ Thinking: Read the TUI renderer and identify stable evidence blocks.
-
-• Explored crates/psychevo-cli/src/tui.rs
-  └ running
 
 
 
@@ -28,17 +22,17 @@ size=120x24
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-› Ask pevo...
+│ files
+│  dir   src
+│> file  src/main.rs
+│  file  crates/psychevo-cli/src/tui/mod.rs
+│
+› review @src
 
-mock/model  high  ⠼ 12s · Esc
+mock/model  high
 
 --- styles ---
-[dim]› [default]Inspect the CLI rendering path.
 [default]
-[dim]▌ [paper]Thinking: [dim]Read the TUI renderer and identify stable evidence blocks.[default]
-[default]
-[green]• [default]Explored crates/psychevo-cli/src/tui.rs
-[dim]  └ [default]running
 [default]
 [default]
 [default]
@@ -54,6 +48,11 @@ mock/model  high  ⠼ 12s · Esc
 [default]
 [default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-[dim]›[default] [dim]Ask pevo...[default]
+[default]│ files
+[default]│[cyan]  [magenta]dir [default]  src
+[default]│[cyan]> [magenta]file[default]  src/main.rs
+[default]│[cyan]  [magenta]file[default]  crates/psychevo-cli/src/tui/mod.rs
+[default]│
+[dim]›[default] review @src
 [default]
-[default]mock/model  [magenta]high[default]  [cyan]⠼[default] [dim]12s · [cyan]Esc[default]
+[default]mock/model  [magenta]high[default]

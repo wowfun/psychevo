@@ -1,0 +1,543 @@
+impl TuiApp {
+    async fn run(&mut self, initial_prompt: String) -> Result<ExitCode> {
+        let interactive = io::stdin().is_terminal() && io::stdout().is_terminal();
+        if interactive {
+            self.run_fullscreen_loop(initial_prompt).await?;
+        } else {
+            if !initial_prompt.trim().is_empty() {
+                self.handle_line(&initial_prompt).await?;
+            }
+            self.run_scripted_loop().await?;
+        }
+
+        Ok(if self.had_error {
+            ExitCode::from(1)
+        } else {
+            ExitCode::SUCCESS
+        })
+    }
+
+    async fn run_fullscreen_loop(&mut self, initial_prompt: String) -> Result<()> {
+        enable_raw_mode()?;
+        let mut stdout = io::stdout();
+        execute!(stdout, EnterAlternateScreen, EnableTuiMouseCapture)?;
+        let backend = CrosstermBackend::new(stdout);
+        let mut terminal = Terminal::new(backend)?;
+        let result = self
+            .run_fullscreen_loop_inner(&mut terminal, initial_prompt)
+            .await;
+        disable_raw_mode()?;
+        execute!(
+            terminal.backend_mut(),
+            DisableMouseCapture,
+            LeaveAlternateScreen
+        )?;
+        terminal.show_cursor()?;
+        result
+    }
+
+    async fn run_fullscreen_loop_inner(
+        &mut self,
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+        initial_prompt: String,
+    ) -> Result<()> {
+        let mut ui = FullscreenUi::new(self);
+        self.load_current_session_history(&mut ui)?;
+        let mut needs_draw = true;
+        if !initial_prompt.trim().is_empty()
+            && self
+                .submit_fullscreen_text(&mut ui, initial_prompt, false)
+                .await?
+        {
+            return Ok(());
+        }
+        loop {
+            needs_draw |= self.drain_fullscreen_events(&mut ui).await?;
+            if ui.take_terminal_clear_request() {
+                terminal.clear()?;
+                needs_draw = true;
+            }
+            if needs_draw {
+                terminal.draw(|frame| self.render_fullscreen(frame, &mut ui))?;
+                needs_draw = false;
+            }
+            if ui.quit_requested && ui.running.is_none() {
+                break;
+            }
+            if event::poll(FULLSCREEN_EVENT_POLL_INTERVAL)? {
+                let outcome = self
+                    .handle_fullscreen_event_batch(&mut ui, event::read()?)
+                    .await?;
+                needs_draw |= outcome.needs_draw;
+                if outcome.should_quit {
+                    break;
+                }
+            } else if ui.running.is_some() {
+                needs_draw = true;
+            }
+        }
+        if let Some(running) = ui.running.take() {
+            running.control.abort();
+            match running.task {
+                RunningTask::Agent(task) => {
+                    let _ = task.await;
+                }
+                RunningTask::UserShell(task) => {
+                    let _ = task.await;
+                }
+            }
+        }
+        self.model_catalog.abort_unfinished();
+        Ok(())
+    }
+
+    async fn handle_fullscreen_event_batch(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        first: CrosstermEvent,
+    ) -> Result<FullscreenEventOutcome> {
+        let mut outcome = FullscreenEventOutcome::default();
+        let mut event = first;
+        for _ in 0..MAX_READY_EVENTS_PER_FRAME {
+            let current = self.handle_fullscreen_event(ui, event).await?;
+            outcome.needs_draw |= current.needs_draw;
+            outcome.should_quit |= current.should_quit;
+            if outcome.should_quit || !event::poll(Duration::ZERO)? {
+                break;
+            }
+            event = event::read()?;
+        }
+        Ok(outcome)
+    }
+
+    async fn handle_fullscreen_event(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        event: CrosstermEvent,
+    ) -> Result<FullscreenEventOutcome> {
+        match event {
+            CrosstermEvent::Key(key) => {
+                if key.kind == KeyEventKind::Release {
+                    return Ok(FullscreenEventOutcome::default());
+                }
+                Ok(FullscreenEventOutcome {
+                    needs_draw: true,
+                    should_quit: self.handle_fullscreen_key(ui, key).await?,
+                })
+            }
+            CrosstermEvent::Mouse(mouse) => Ok(FullscreenEventOutcome {
+                needs_draw: mouse_event_needs_redraw(mouse.kind),
+                should_quit: self.handle_fullscreen_mouse(ui, mouse).await?,
+            }),
+            CrosstermEvent::Resize(_, _) => Ok(FullscreenEventOutcome {
+                needs_draw: true,
+                should_quit: false,
+            }),
+            _ => Ok(FullscreenEventOutcome::default()),
+        }
+    }
+
+    async fn run_scripted_loop(&mut self) -> Result<()> {
+        let stdin = io::stdin();
+        for line in stdin.lock().lines() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            if self.handle_line(&line).await? {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_fullscreen_key(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        key: KeyEvent,
+    ) -> Result<bool> {
+        if key.code == KeyCode::Char('c')
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+            && self.copy_selected_text(ui)?
+        {
+            return Ok(false);
+        }
+        if key.code == KeyCode::Esc && ui.selection.anchor.is_some() {
+            ui.clear_selection();
+            return Ok(false);
+        }
+        if ui.bottom_panel.is_some() {
+            return self.handle_bottom_panel_key(ui, key);
+        }
+        if ui.history_search {
+            return self.handle_history_search_key(ui, key);
+        }
+        if ui.focus == FocusMode::Transcript {
+            match key.code {
+                KeyCode::Esc => {
+                    ui.focus = FocusMode::Composer;
+                }
+                KeyCode::Up => ui.move_selection(-1),
+                KeyCode::Down => ui.move_selection(1),
+                KeyCode::Enter | KeyCode::Char(' ') => ui.toggle_selected(),
+                KeyCode::PageUp => ui.scroll_transcript(-6),
+                KeyCode::PageDown => ui.scroll_transcript(6),
+                _ => {}
+            }
+            return Ok(false);
+        }
+        if ui.file_popup_visible() {
+            match key.code {
+                KeyCode::Up => {
+                    ui.move_file_popup_selection(-1);
+                    return Ok(false);
+                }
+                KeyCode::Down => {
+                    ui.move_file_popup_selection(1);
+                    return Ok(false);
+                }
+                KeyCode::Home => {
+                    ui.set_file_popup_selection(0);
+                    return Ok(false);
+                }
+                KeyCode::End => {
+                    ui.set_file_popup_selection(FILE_POPUP_MAX_ROWS.saturating_sub(1));
+                    return Ok(false);
+                }
+                KeyCode::Esc => {
+                    ui.dismiss_file_popup();
+                    return Ok(false);
+                }
+                KeyCode::Tab => {
+                    ui.insert_selected_file_path();
+                    ui.sync_file_popup(&self.workdir);
+                    self.sync_skill_popup(ui);
+                    return Ok(false);
+                }
+                KeyCode::Enter if ui.selected_file_path().is_some() => {
+                    ui.insert_selected_file_path();
+                    ui.sync_file_popup(&self.workdir);
+                    self.sync_skill_popup(ui);
+                    return Ok(false);
+                }
+                _ => {}
+            }
+        }
+        if ui.skill_popup_visible() {
+            match key.code {
+                KeyCode::Up => {
+                    ui.move_skill_popup_selection(-1);
+                    return Ok(false);
+                }
+                KeyCode::Down => {
+                    ui.move_skill_popup_selection(1);
+                    return Ok(false);
+                }
+                KeyCode::Home => {
+                    ui.set_skill_popup_selection(0);
+                    return Ok(false);
+                }
+                KeyCode::End => {
+                    ui.set_skill_popup_selection(FILE_POPUP_MAX_ROWS.saturating_sub(1));
+                    return Ok(false);
+                }
+                KeyCode::Esc => {
+                    ui.dismiss_skill_popup();
+                    return Ok(false);
+                }
+                KeyCode::Tab | KeyCode::Enter if ui.selected_skill_name().is_some() => {
+                    ui.insert_selected_skill_marker();
+                    self.sync_skill_popup(ui);
+                    return Ok(false);
+                }
+                _ => {}
+            }
+        }
+        let slash_input = textarea_text(&ui.textarea);
+        let slash_count = if ui.current_file_token().is_some()
+            || ui.current_skill_token().is_some()
+            || ui.slash_menu_dismissed(&slash_input)
+        {
+            0
+        } else {
+            self.slash_menu_items(&slash_input).len()
+        };
+        if slash_count > 0 {
+            match key.code {
+                KeyCode::Up => {
+                    ui.move_slash_menu_selection(-1, slash_count);
+                    return Ok(false);
+                }
+                KeyCode::Down => {
+                    ui.move_slash_menu_selection(1, slash_count);
+                    return Ok(false);
+                }
+                KeyCode::Home => {
+                    ui.set_slash_menu_selection(0, slash_count);
+                    return Ok(false);
+                }
+                KeyCode::End => {
+                    ui.set_slash_menu_selection(slash_count.saturating_sub(1), slash_count);
+                    return Ok(false);
+                }
+                KeyCode::Esc => {
+                    ui.dismiss_slash_menu();
+                    return Ok(false);
+                }
+                _ => {}
+            }
+        }
+        match key.code {
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if ui.running.is_some() {
+                    ui.push_status("press Ctrl+C again to quit after the running turn");
+                    ui.quit_requested = true;
+                    return Ok(false);
+                }
+                return Ok(true);
+            }
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return Ok(true);
+            }
+            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                ui.close_file_popup();
+                ui.history_search = true;
+                ui.history_query.clear();
+                ui.push_status("history search");
+            }
+            KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                ui.focus = FocusMode::Transcript;
+                ui.auto_follow_transcript = false;
+                ui.ensure_selection();
+            }
+            KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                let visible = !ui.sidebar_enabled();
+                self.set_sidebar_visible_no_print(visible)?;
+                ui.sidebar_forced = visible;
+                ui.sidebar_hidden = !visible;
+                ui.refresh_sidebar(self);
+            }
+            KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                ui.textarea.insert_newline();
+            }
+            KeyCode::Enter if is_newline_key(key) => {
+                ui.textarea.insert_newline();
+            }
+            KeyCode::Enter => {
+                let line = textarea_text(&ui.textarea);
+                if line.trim().is_empty() {
+                    return Ok(false);
+                }
+                let submitted = if parse_shell_escape_input(&line).is_some()
+                    || should_submit_typed_slash(&line)
+                {
+                    line.clone()
+                } else {
+                    if let Some(command) = selected_slash_menu_command_with_items(
+                        &line,
+                        ui.slash_menu_selected,
+                        &self.slash_items(),
+                    ) {
+                        if let Some(name) = slash_skill_name(&command) {
+                            ui.insert_skill_marker(&name);
+                            self.sync_skill_popup(ui);
+                            return Ok(false);
+                        }
+                        command
+                    } else {
+                        line.clone()
+                    }
+                };
+                ui.textarea = new_textarea();
+                ui.slash_menu_selected = 0;
+                ui.clear_slash_menu_dismissal();
+                ui.close_skill_popup();
+                if self.submit_fullscreen_text(ui, submitted, true).await? {
+                    return Ok(true);
+                }
+            }
+            KeyCode::BackTab => {
+                self.cycle_mode(ui)?;
+            }
+            KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                self.cycle_mode(ui)?;
+            }
+            KeyCode::Tab => {
+                ui.complete_slash_command();
+            }
+            KeyCode::Char('1')
+                if key.modifiers.contains(KeyModifiers::SHIFT)
+                    && !key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                ui.clear_history_navigation_for_edit();
+                ui.textarea.insert_char('!');
+                ui.clear_slash_menu_dismissal();
+            }
+            KeyCode::Esc => {
+                if is_empty_shell_escape_input(&textarea_text(&ui.textarea)) {
+                    ui.textarea = new_textarea();
+                    ui.clear_slash_menu_dismissal();
+                    ui.close_file_popup();
+                    ui.close_skill_popup();
+                    return Ok(false);
+                }
+                if ui.request_interrupt() {
+                    return Ok(false);
+                }
+            }
+            KeyCode::PageUp => ui.scroll_transcript(-6),
+            KeyCode::PageDown => ui.scroll_transcript(6),
+            KeyCode::Up if ui.can_recall_history_previous() => {
+                ui.recall_history(-1);
+            }
+            KeyCode::Down if ui.can_recall_history_next() => {
+                ui.recall_history(1);
+            }
+            _ => {
+                ui.clear_history_navigation_for_edit();
+                ui.textarea.input(key);
+                ui.clear_slash_menu_dismissal();
+            }
+        }
+        ui.sync_file_popup(&self.workdir);
+        self.sync_skill_popup(ui);
+        Ok(false)
+    }
+
+    async fn handle_fullscreen_mouse(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        mouse: MouseEvent,
+    ) -> Result<bool> {
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                if let Some(panel) = &mut ui.bottom_panel {
+                    panel.selection_mut().move_selection(-3);
+                } else {
+                    ui.scroll_transcript(-3);
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                if let Some(panel) = &mut ui.bottom_panel {
+                    panel.selection_mut().move_selection(3);
+                } else {
+                    ui.scroll_transcript(3);
+                }
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                if let Some(index) = ui.bottom_panel_hit(mouse.column, mouse.row) {
+                    ui.clear_selection();
+                    if let Some(panel) = &mut ui.bottom_panel {
+                        panel.selection_mut().set_selected(index);
+                    }
+                    let selected = ui
+                        .bottom_panel
+                        .as_ref()
+                        .and_then(BottomPanel::selected_value);
+                    self.apply_bottom_panel_selection(ui, selected)?;
+                } else if let Some(index) = ui.file_popup_hit(mouse.column, mouse.row) {
+                    ui.clear_selection();
+                    ui.set_file_popup_selection(index);
+                    ui.insert_selected_file_path();
+                    ui.sync_file_popup(&self.workdir);
+                    self.sync_skill_popup(ui);
+                } else if let Some(index) = ui.skill_popup_hit(mouse.column, mouse.row) {
+                    ui.clear_selection();
+                    ui.set_skill_popup_selection(index);
+                    ui.insert_selected_skill_marker();
+                    self.sync_skill_popup(ui);
+                } else if let Some(index) = ui.slash_menu_hit(mouse.column, mouse.row) {
+                    ui.clear_selection();
+                    let line = textarea_text(&ui.textarea);
+                    ui.set_slash_menu_selection(index, self.slash_menu_items(&line).len());
+                    if let Some(command) = selected_slash_menu_command_with_items(
+                        &line,
+                        ui.slash_menu_selected,
+                        &self.slash_items(),
+                    )
+                    {
+                        if let Some(name) = slash_skill_name(&command) {
+                            ui.insert_skill_marker(&name);
+                            self.sync_skill_popup(ui);
+                            return Ok(false);
+                        }
+                        let submitted = command;
+                        ui.textarea = new_textarea();
+                        ui.slash_menu_selected = 0;
+                        ui.clear_slash_menu_dismissal();
+                        ui.close_skill_popup();
+                        ui.push_submitted_history(submitted.clone());
+                        match parse_slash_command(&submitted) {
+                            Ok(Some(command)) => {
+                                return self.handle_fullscreen_command(ui, command).await;
+                            }
+                            Ok(None) => {}
+                            Err(err) => {
+                                ui.push_error(format!("error: {err:#}"));
+                                return Ok(false);
+                            }
+                        }
+                    }
+                } else if ui.selectable_hit(mouse.column, mouse.row) {
+                    ui.start_selection(mouse.column, mouse.row);
+                } else {
+                    ui.clear_selection();
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                ui.update_selection(mouse.column, mouse.row);
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                ui.update_selection(mouse.column, mouse.row);
+                if !self.start_copy_selected_text(ui) {
+                    ui.clear_selection();
+                }
+            }
+            _ => {}
+        }
+        Ok(false)
+    }
+
+}
+
+const FULLSCREEN_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(16);
+const MAX_READY_EVENTS_PER_FRAME: usize = 64;
+const TUI_MOUSE_CAPTURE_ANSI: &str = concat!(
+    "\x1b[?1000h",
+    "\x1b[?1002h",
+    "\x1b[?1015h",
+    "\x1b[?1006h"
+);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EnableTuiMouseCapture;
+
+impl crossterm::Command for EnableTuiMouseCapture {
+    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        f.write_str(TUI_MOUSE_CAPTURE_ANSI)
+    }
+
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> io::Result<()> {
+        <crossterm::event::EnableMouseCapture as crossterm::Command>::execute_winapi(
+            &crossterm::event::EnableMouseCapture,
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct FullscreenEventOutcome {
+    needs_draw: bool,
+    should_quit: bool,
+}
+
+fn mouse_event_needs_redraw(kind: MouseEventKind) -> bool {
+    !matches!(kind, MouseEventKind::Moved)
+}
+
+fn slash_skill_name(command: &str) -> Option<String> {
+    let name = command.strip_prefix("/skill:")?;
+    let name = name.split_whitespace().next().unwrap_or_default();
+    (!name.is_empty()).then(|| name.to_string())
+}

@@ -14,6 +14,7 @@ pub(crate) struct Cli {
 #[derive(Debug, Subcommand)]
 pub(crate) enum Commands {
     Init(InitArgs),
+    Skills(SkillsArgs),
     Smoke(SmokeArgs),
     Run(RunArgs),
     Tui(TuiArgs),
@@ -59,8 +60,99 @@ pub(crate) struct RunArgs {
     pub(crate) format: RunFormatArg,
     #[arg(long)]
     pub(crate) include_reasoning: bool,
+    #[arg(long)]
+    pub(crate) no_skills: bool,
+    #[arg(long = "skill")]
+    pub(crate) skill: Vec<String>,
     #[arg()]
     pub(crate) message: Vec<String>,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct SkillsArgs {
+    #[command(subcommand)]
+    pub(crate) command: SkillsCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum SkillsCommand {
+    List(SkillsListArgs),
+    View(SkillsViewArgs),
+    Create(SkillsCreateArgs),
+    Patch(SkillsPatchArgs),
+    Remove(SkillsNameArgs),
+    Enable(SkillsNameScopeArgs),
+    Disable(SkillsNameScopeArgs),
+    Install(SkillsInstallArgs),
+    Scan(SkillsScanArgs),
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct SkillsListArgs {
+    #[arg(long)]
+    pub(crate) json: bool,
+    #[arg(long)]
+    pub(crate) all: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct SkillsViewArgs {
+    pub(crate) name: String,
+    pub(crate) file_path: Option<String>,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct SkillsCreateArgs {
+    pub(crate) name: String,
+    #[arg(long)]
+    pub(crate) description: String,
+    #[arg(long = "global", conflicts_with = "project")]
+    pub(crate) global: bool,
+    #[arg(long, conflicts_with = "global")]
+    pub(crate) project: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct SkillsPatchArgs {
+    pub(crate) name: String,
+    #[arg(long)]
+    pub(crate) old: String,
+    #[arg(long)]
+    pub(crate) new: String,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct SkillsNameArgs {
+    pub(crate) name: String,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct SkillsNameScopeArgs {
+    pub(crate) name: String,
+    #[arg(long = "global", conflicts_with = "project")]
+    pub(crate) global: bool,
+    #[arg(long, conflicts_with = "global")]
+    pub(crate) project: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct SkillsInstallArgs {
+    pub(crate) source: String,
+    #[arg(long)]
+    pub(crate) name: Option<String>,
+    #[arg(long, conflicts_with = "name")]
+    pub(crate) all: bool,
+    #[arg(long = "global", conflicts_with = "project")]
+    pub(crate) global: bool,
+    #[arg(long, conflicts_with = "global")]
+    pub(crate) project: bool,
+    #[arg(long)]
+    pub(crate) force: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct SkillsScanArgs {
+    pub(crate) path: PathBuf,
 }
 
 #[derive(Debug, Parser)]
@@ -77,6 +169,10 @@ pub(crate) struct TuiArgs {
     pub(crate) new_session: bool,
     #[arg(long)]
     pub(crate) debug: bool,
+    #[arg(long)]
+    pub(crate) no_skills: bool,
+    #[arg(long = "skill")]
+    pub(crate) skill: Vec<String>,
     #[arg()]
     pub(crate) message: Vec<String>,
 }

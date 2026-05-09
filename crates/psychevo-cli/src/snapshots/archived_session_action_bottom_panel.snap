@@ -1,0 +1,58 @@
+---
+source: crates/psychevo-cli/src/tui/tests.rs
+expression: combined
+---
+fixture=archived_session_action_bottom_panel
+size=120x24
+
+--- text ---
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  Archived Sessions                                                                                                esc
+  Search
+  2026-05-01
+  ›   Archived refactor branch  mock/mock-model  messages=7                                                      18:22
+
+  action: R restore  D delete
+  R restore  D delete  Esc cancel
+
+
+
+
+
+
+
+
+mock/model  high
+
+--- styles ---
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[default]
+[default]  [default]Archived Sessions[default]                                                                                                [dim]esc[default]
+[default]  [dim]Search [default]
+[default]  [cyan]2026-05-01[default]
+[default]  [default]›   Archived refactor branch  mock/mock-model  messages=7                                                      18:22[default]
+[default]
+[default]  [dim]action: R restore  D delete[default]
+[default]  [dim]R restore  D delete  Esc cancel[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]mock/model  [magenta]high[default]

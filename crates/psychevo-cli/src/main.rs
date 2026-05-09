@@ -11,6 +11,7 @@ mod tui;
 use args::{Cli, Commands};
 use commands::init::run_init_command;
 use commands::run::run_run_command;
+use commands::skills::run_skills_command;
 use commands::smoke::run_smoke_command;
 
 #[tokio::main]
@@ -28,6 +29,7 @@ async fn run() -> Result<ExitCode> {
     let cli = Cli::parse();
     match cli.command {
         Commands::Init(args) => run_init_command(args),
+        Commands::Skills(args) => run_skills_command(args),
         Commands::Smoke(args) => run_smoke_command(args).await,
         Commands::Run(args) => run_run_command(args).await,
         Commands::Tui(args) => tui::run_tui_command(&args).await,
