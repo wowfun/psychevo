@@ -1,0 +1,117 @@
+#[derive(Debug)]
+struct MessageFields {
+    role: String,
+    timestamp_ms: i64,
+    content_text: Option<String>,
+    tool_call_id: Option<String>,
+    tool_name: Option<String>,
+    tool_calls_json: Option<String>,
+    finish_reason: Option<String>,
+    outcome: Option<String>,
+    model: Option<String>,
+    provider: Option<String>,
+    tool_call_count: i64,
+}
+
+fn message_fields(message: &Message) -> Result<MessageFields> {
+    match message {
+        Message::User {
+            content,
+            timestamp_ms,
+        } => Ok(MessageFields {
+            role: "user".to_string(),
+            timestamp_ms: *timestamp_ms,
+            content_text: Some(
+                content
+                    .iter()
+                    .map(|block| block.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ),
+            tool_call_id: None,
+            tool_name: None,
+            tool_calls_json: None,
+            finish_reason: None,
+            outcome: None,
+            model: None,
+            provider: None,
+            tool_call_count: 0,
+        }),
+        Message::Assistant {
+            content,
+            timestamp_ms,
+            finish_reason,
+            outcome,
+            model,
+            provider,
+        } => {
+            let text = content
+                .iter()
+                .filter_map(|block| match block {
+                    AssistantBlock::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            let tool_calls = content
+                .iter()
+                .filter_map(|block| match block {
+                    AssistantBlock::ToolCall(call) => Some(call),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            Ok(MessageFields {
+                role: "assistant".to_string(),
+                timestamp_ms: *timestamp_ms,
+                content_text: if text.is_empty() { None } else { Some(text) },
+                tool_call_id: None,
+                tool_name: None,
+                tool_calls_json: if tool_calls.is_empty() {
+                    None
+                } else {
+                    Some(serde_json::to_string(&tool_calls)?)
+                },
+                finish_reason: finish_reason.clone(),
+                outcome: Some(outcome.as_str().to_string()),
+                model: model.clone(),
+                provider: provider.clone(),
+                tool_call_count: tool_calls.len() as i64,
+            })
+        }
+        Message::ToolResult {
+            tool_call_id,
+            tool_name,
+            content,
+            is_error,
+            timestamp_ms,
+        } => Ok(MessageFields {
+            role: "tool_result".to_string(),
+            timestamp_ms: *timestamp_ms,
+            content_text: Some(content.clone()),
+            tool_call_id: Some(tool_call_id.clone()),
+            tool_name: Some(tool_name.clone()),
+            tool_calls_json: None,
+            finish_reason: None,
+            outcome: Some(if *is_error { "failed" } else { "normal" }.to_string()),
+            model: None,
+            provider: None,
+            tool_call_count: 0,
+        }),
+    }
+}
+
+fn optional_json_string(value: &Option<Value>) -> Result<Option<String>> {
+    value
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(Into::into)
+}
+
+fn parse_optional_json(value: Option<String>) -> Result<Option<Value>> {
+    value
+        .map(|value| serde_json::from_str(&value))
+        .transpose()
+        .map_err(Into::into)
+}
+

@@ -1,0 +1,181 @@
+#[derive(Debug, Clone, Default)]
+struct ModelSelection {
+    id: Option<String>,
+    provider: Option<String>,
+    reasoning_effort: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ConfigProviderEntry {
+    label: Option<String>,
+    options: ConfigProviderOptions,
+    models: BTreeMap<String, ConfigModelEntry>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ConfigProviderOptions {
+    base_url: Option<String>,
+    api_key_env: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ConfigModelEntry {
+    reasoning_effort: Option<String>,
+    context_limit: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+struct BuiltInProvider {
+    id: &'static str,
+    label: &'static str,
+    base_url: Option<&'static str>,
+    api_key_envs: &'static [&'static str],
+    base_url_env: Option<&'static str>,
+    allow_no_auth: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ResolvedRunProvider {
+    pub(crate) provider: String,
+    pub(crate) display_label: String,
+    pub(crate) model: String,
+    pub(crate) base_url: String,
+    pub(crate) api_key_env: Option<String>,
+    pub(crate) api_key: String,
+    pub(crate) reasoning_effort: Option<String>,
+    pub(crate) context_limit: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct LoadedRunConfig {
+    pub(crate) config: RunConfig,
+    pub(crate) env: BTreeMap<String, String>,
+}
+
+const AUTO_PROVIDER_ORDER: &[&str] = &[
+    "openrouter",
+    "openai",
+    "xai",
+    "zai",
+    "deepseek",
+    "dashscope",
+    "xiaomi",
+    "lmstudio",
+    "custom",
+];
+
+const REASONING_EFFORT_VALUES: &[&str] =
+    &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+const MODEL_CATALOG_TIMEOUT: Duration = Duration::from_secs(5);
+
+const BUILT_IN_PROVIDERS: &[BuiltInProvider] = &[
+    BuiltInProvider {
+        id: "openrouter",
+        label: "OpenRouter",
+        base_url: Some("https://openrouter.ai/api/v1"),
+        api_key_envs: &["OPENROUTER_API_KEY", "OPENAI_API_KEY"],
+        base_url_env: Some("OPENROUTER_BASE_URL"),
+        allow_no_auth: false,
+    },
+    BuiltInProvider {
+        id: "openai",
+        label: "OpenAI",
+        base_url: Some("https://api.openai.com/v1"),
+        api_key_envs: &["OPENAI_API_KEY"],
+        base_url_env: Some("OPENAI_BASE_URL"),
+        allow_no_auth: false,
+    },
+    BuiltInProvider {
+        id: "xai",
+        label: "xAI",
+        base_url: Some("https://api.x.ai/v1"),
+        api_key_envs: &["XAI_API_KEY"],
+        base_url_env: Some("XAI_BASE_URL"),
+        allow_no_auth: false,
+    },
+    BuiltInProvider {
+        id: "zai",
+        label: "Z.AI / GLM",
+        base_url: Some("https://api.z.ai/api/paas/v4"),
+        api_key_envs: &["GLM_API_KEY", "ZAI_API_KEY", "Z_AI_API_KEY"],
+        base_url_env: Some("GLM_BASE_URL"),
+        allow_no_auth: false,
+    },
+    BuiltInProvider {
+        id: "deepseek",
+        label: "DeepSeek",
+        base_url: Some("https://api.deepseek.com/v1"),
+        api_key_envs: &["DEEPSEEK_API_KEY"],
+        base_url_env: Some("DEEPSEEK_BASE_URL"),
+        allow_no_auth: false,
+    },
+    BuiltInProvider {
+        id: "dashscope",
+        label: "Alibaba Cloud DashScope",
+        base_url: Some("https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
+        api_key_envs: &["DASHSCOPE_API_KEY"],
+        base_url_env: Some("DASHSCOPE_BASE_URL"),
+        allow_no_auth: false,
+    },
+    BuiltInProvider {
+        id: "xiaomi",
+        label: "Xiaomi MiMo",
+        base_url: Some("https://api.xiaomimimo.com/v1"),
+        api_key_envs: &["XIAOMI_API_KEY"],
+        base_url_env: Some("XIAOMI_BASE_URL"),
+        allow_no_auth: false,
+    },
+    BuiltInProvider {
+        id: "lmstudio",
+        label: "LM Studio",
+        base_url: Some("http://127.0.0.1:1234/v1"),
+        api_key_envs: &["LM_API_KEY"],
+        base_url_env: Some("LM_BASE_URL"),
+        allow_no_auth: true,
+    },
+    BuiltInProvider {
+        id: "custom",
+        label: "Custom",
+        base_url: None,
+        api_key_envs: &[],
+        base_url_env: None,
+        allow_no_auth: false,
+    },
+];
+
+pub(crate) fn load_run_config(options: &RunOptions, workdir: &Path) -> Result<LoadedRunConfig> {
+    let mut env_map = options
+        .inherited_env
+        .clone()
+        .unwrap_or_else(|| env::vars().collect());
+    let project_dir = workdir.join(".psychevo");
+    let mut value = json!({});
+
+    if let Some(config_path) = resolve_config_path(options, &env_map)? {
+        let loaded = load_jsonc_config_file(&config_path, true)?;
+        deep_merge(&mut value, loaded);
+        if let Some(parent) = config_path.parent() {
+            load_dotenv_file(&parent.join(".env"), &mut env_map)?;
+        }
+    } else {
+        let home = resolve_psychevo_home(&env_map)?;
+        let home_config = home.join("config.jsonc");
+        if !home_config.exists() {
+            return Err(Error::Config(format!(
+                "Psychevo home is not initialized; run `pevo init` to create {}",
+                home_config.display()
+            )));
+        }
+        let loaded = load_jsonc_config_file(&home_config, true)?;
+        deep_merge(&mut value, loaded);
+        load_dotenv_file(&home.join(".env"), &mut env_map)?;
+        let loaded = load_jsonc_config_file(&project_dir.join("config.jsonc"), false)?;
+        deep_merge(&mut value, loaded);
+    }
+
+    load_dotenv_file(&project_dir.join(".env"), &mut env_map)?;
+    Ok(LoadedRunConfig {
+        config: parse_run_config(value)?,
+        env: env_map,
+    })
+}

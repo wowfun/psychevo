@@ -43,6 +43,8 @@ async fn run_live_read_tool(provider: &str) {
         include_reasoning: true,
         mode: psychevo_runtime::RunMode::Build,
         inherited_env: Some(inherited_env),
+        no_skills: false,
+        skill_inputs: Vec::new(),
     })
     .await
     .expect("live run");

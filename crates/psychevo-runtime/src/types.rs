@@ -7,6 +7,8 @@ use psychevo_agent_core::{ControlHandle, ControlReceivers, Message};
 use psychevo_ai::Outcome;
 use serde_json::Value;
 
+use crate::skills::SelectedSkill;
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SmokeControl {
     #[default]
@@ -52,6 +54,27 @@ pub struct RunOptions {
     pub include_reasoning: bool,
     pub mode: RunMode,
     pub inherited_env: Option<BTreeMap<String, String>>,
+    pub no_skills: bool,
+    pub skill_inputs: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CustomProviderInput {
+    pub home: PathBuf,
+    pub provider_id: String,
+    pub label: String,
+    pub base_url: String,
+    pub api_key: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CustomProviderResult {
+    pub provider_id: String,
+    pub label: String,
+    pub base_url: String,
+    pub api_key_env: String,
+    pub wrote_api_key: bool,
+    pub reused_existing_api_key: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -92,7 +115,23 @@ pub struct RunResult {
     pub reasoning_effort: Option<String>,
     pub context_limit: Option<u64>,
     pub tool_failures: usize,
+    pub selected_skills: Vec<SelectedSkill>,
     pub events: Vec<Value>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UserShellOptions {
+    pub workdir: PathBuf,
+    pub command: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct UserShellResult {
+    pub command: String,
+    pub workdir: PathBuf,
+    pub outcome: Outcome,
+    pub tool_failures: usize,
+    pub result: Value,
 }
 
 #[derive(Debug, Clone)]
@@ -128,6 +167,7 @@ pub struct SessionSummary {
     pub updated_at_ms: i64,
     pub ended_at_ms: Option<i64>,
     pub end_reason: Option<String>,
+    pub archived_at_ms: Option<i64>,
     pub message_count: i64,
     pub tool_call_count: i64,
     pub title: Option<String>,
