@@ -815,3 +815,54 @@ fn cli_run_continue_ignores_smoke_sessions() {
         .expect("sessions");
     assert_eq!(sessions, 2);
 }
+
+#[test]
+fn cli_stats_reports_current_workdir_and_json() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = temp.path().join("work");
+    let init = pevo_cmd(temp.path())
+        .arg("init")
+        .output()
+        .expect("init");
+    assert!(
+        init.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+    let smoke = pevo_cmd(temp.path())
+        .args([
+            "smoke",
+            "--db",
+            db.to_str().expect("db"),
+            "--workdir",
+            workdir.to_str().expect("workdir"),
+        ])
+        .output()
+        .expect("smoke");
+    assert!(smoke.status.success());
+
+    let stats = pevo_cmd(temp.path())
+        .env("PSYCHEVO_DB", &db)
+        .args([
+            "stats",
+            "--dir",
+            workdir.to_str().expect("workdir"),
+            "--days",
+            "30",
+            "--limit",
+            "3",
+            "--json",
+        ])
+        .output()
+        .expect("stats");
+    assert!(
+        stats.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&stats.stderr)
+    );
+    let report: Value = serde_json::from_slice(&stats.stdout).expect("stats json");
+    assert_eq!(report["scope"]["all"], false);
+    assert_eq!(report["totals"]["sessions"], 1);
+    assert_eq!(report["totals"]["messages"], 2);
+}

@@ -7,11 +7,455 @@ fn transcript_selection_toggles_expandable_output() {
     row.full_text = Some("a\nb\nc".to_string());
     ui.transcript.push(row);
     ui.focus = FocusMode::Transcript;
-    ui.ensure_selection();
+    ui.selected_target = Some(TranscriptHitTarget::Row(ui.transcript[0].id));
     ui.toggle_selected();
     assert!(ui.transcript[0].expanded);
     ui.toggle_selected();
     assert!(!ui.transcript[0].expanded);
+}
+
+#[test]
+fn transcript_render_blocks_keep_consecutive_tools_flat() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    for index in 0..4 {
+        ui.transcript.push(TranscriptRow::with_title(
+            TranscriptKind::Ran,
+            format!("Ran command {index}"),
+            "ok",
+        ));
+    }
+
+    let blocks = transcript_render_blocks(&ui);
+    assert_eq!(blocks.len(), 4);
+    for (index, block) in blocks.iter().enumerate() {
+        assert!(matches!(block, TranscriptRenderBlock::Row { index: row_index } if *row_index == index));
+    }
+}
+
+#[test]
+fn transcript_render_blocks_keep_thinking_and_tools_flat() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.transcript.push(TranscriptRow::with_title(
+        TranscriptKind::Thinking,
+        "Thinking",
+        "inspect context",
+    ));
+    ui.transcript
+        .push(TranscriptRow::with_title(TranscriptKind::Ran, "Ran ls", "ok"));
+    ui.transcript.push(TranscriptRow::with_title(
+        TranscriptKind::Changed,
+        "Changed report.md",
+        "write normal",
+    ));
+    ui.transcript.push(TranscriptRow::simple(
+        TranscriptKind::Answer,
+        "finished",
+    ));
+
+    let blocks = transcript_render_blocks(&ui);
+    assert_eq!(blocks.len(), 4);
+    assert!(matches!(blocks[0], TranscriptRenderBlock::Row { index: 0 }));
+    assert!(matches!(blocks[1], TranscriptRenderBlock::Row { index: 1 }));
+    assert!(matches!(blocks[2], TranscriptRenderBlock::Row { index: 2 }));
+    assert!(matches!(blocks[3], TranscriptRenderBlock::Row { index: 3 }));
+}
+
+#[test]
+fn long_thinking_defaults_to_row_level_collapse_without_left_rail() {
+    let long = (1..=12)
+        .map(|index| format!("line {index}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let row = TranscriptRow::with_title(TranscriptKind::Thinking, "Thinking", long);
+    assert!(row.is_expandable());
+    assert!(!row.expanded);
+    assert!(row.text.contains("... 4 more lines"));
+
+    let lines = thinking_lines(&row, false, true, 80);
+    let rendered = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+    assert!(rendered.contains("• Thinking"), "{rendered}");
+    assert!(rendered.contains("▸ 4 more lines"), "{rendered}");
+    assert!(rendered.contains("  └ line 1"), "{rendered}");
+    assert!(!rendered.contains("... 4 more lines"), "{rendered}");
+    assert!(!rendered.contains("▌"), "{rendered}");
+    assert!(!rendered.contains("Thinking:"), "{rendered}");
+}
+
+#[test]
+fn active_thinking_row_uses_activity_marker_and_elapsed() {
+    let mut row = TranscriptRow::with_title(TranscriptKind::Thinking, "Thinking", "working");
+    row.tool_started = Some(
+        Instant::now()
+            .checked_sub(Duration::from_secs(2))
+            .expect("instant"),
+    );
+
+    let line = thinking_lines(&row, false, true, 80)
+        .into_iter()
+        .next()
+        .expect("thinking row");
+    assert_eq!(line.spans[0].content.as_ref(), "◦ ");
+    let rendered = line_text(&line);
+    assert!(rendered.contains("Thinking"), "{rendered}");
+    assert!(rendered.contains("2s"), "{rendered}");
+}
+
+#[test]
+fn completed_thinking_row_does_not_show_elapsed() {
+    let mut row = TranscriptRow::with_title(TranscriptKind::Thinking, "Thinking", "done");
+    row.tool_elapsed = Some(Duration::from_secs(4));
+
+    let line = thinking_lines(&row, false, true, 80)
+        .into_iter()
+        .next()
+        .expect("thinking row");
+    let rendered = line_text(&line);
+    assert!(rendered.contains("Thinking"), "{rendered}");
+    assert!(!rendered.contains("4s"), "{rendered}");
+}
+
+#[test]
+fn short_thinking_row_can_collapse_details() {
+    let mut row = TranscriptRow::with_title(
+        TranscriptKind::Thinking,
+        "Thinking",
+        "first thought\nsecond thought",
+    );
+    assert!(row.is_expandable());
+
+    let open = thinking_lines(&row, true, true, 80)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(open.contains("▾ collapse"), "{open}");
+    assert!(open.contains("first thought"), "{open}");
+
+    toggle_transcript_row_details(&mut row);
+    assert!(row.details_collapsed);
+    let collapsed = thinking_lines(&row, false, true, 80)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(collapsed.contains("▸ details"), "{collapsed}");
+    assert!(!collapsed.contains("first thought"), "{collapsed}");
+}
+
+#[test]
+fn completed_tool_row_can_collapse_details() {
+    let mut row = TranscriptRow::with_title(TranscriptKind::Ran, "Ran cargo test", "ok\nmore");
+    assert!(row.is_expandable());
+
+    let open = tool_lines(&row, true, true, 80)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(open.contains("▾ collapse"), "{open}");
+    assert!(open.contains("ok"), "{open}");
+
+    toggle_transcript_row_details(&mut row);
+    let collapsed = tool_lines(&row, false, true, 80)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(collapsed.contains("▸ details"), "{collapsed}");
+    assert!(!collapsed.contains("ok"), "{collapsed}");
+}
+
+#[test]
+fn long_tool_output_uses_shared_default_collapse() {
+    let output = (1..=12)
+        .map(|line| format!("line {line:02}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let row = TranscriptRow::with_title(TranscriptKind::Ran, "Ran cat output.txt", output.clone());
+
+    assert!(row.is_expandable());
+    assert!(!row.expanded);
+    assert_eq!(row.text.lines().count(), 9);
+    assert!(row.text.contains("... 4 more lines"));
+    assert_eq!(row.full_text.as_deref(), Some(output.as_str()));
+
+    let rendered = tool_lines(&row, false, true, 80)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("▸ 4 more lines"), "{rendered}");
+    assert!(rendered.contains("  └ line 01"), "{rendered}");
+    assert!(!rendered.contains("line 12"), "{rendered}");
+    assert!(!rendered.contains("... 4 more lines"), "{rendered}");
+}
+
+#[test]
+fn long_single_line_tool_output_collapses_by_display_width() {
+    let output = format!("{{\"items\":\"{}\"}}", "x".repeat(1400));
+    let row = TranscriptRow::with_title(TranscriptKind::Ran, "Ran sqlite3 export", output.clone());
+
+    assert!(row.is_expandable());
+    assert!(!row.expanded);
+    assert!(row.full_text.is_some());
+    assert!(row.text.ends_with('…'), "{}", row.text);
+
+    let rendered = tool_lines(&row, false, true, 140)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("▸ more output"), "{rendered}");
+    assert!(rendered.len() < output.len(), "rendered output was not bounded");
+}
+
+#[test]
+fn expanded_tool_output_restores_full_text() {
+    let output = (1..=12)
+        .map(|line| format!("line {line:02}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut row = TranscriptRow::with_title(TranscriptKind::Ran, "Ran cat output.txt", output);
+
+    toggle_transcript_row_details(&mut row);
+    assert!(row.expanded);
+    let rendered = tool_lines(&row, false, true, 80)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("▾ collapse"), "{rendered}");
+    assert!(rendered.contains("line 12"), "{rendered}");
+}
+
+#[test]
+fn long_command_and_long_output_expand_together() {
+    let command = "cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db \"SELECT id || '|' || by || '|' || text FROM comments WHERE story_id = 48073680 ORDER BY id\"";
+    let output = (1..=12)
+        .map(|line| format!("json row {line:02}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut row = TranscriptRow::with_title(TranscriptKind::Ran, format!("Ran {command}"), output);
+
+    let collapsed = tool_lines(&row, false, true, 72)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(collapsed.contains("▸ 4 more lines"), "{collapsed}");
+    assert!(!collapsed.contains("command: cd /home/kevin"), "{collapsed}");
+    assert!(!collapsed.contains("json row 12"), "{collapsed}");
+
+    toggle_transcript_row_details(&mut row);
+    let expanded = tool_lines(&row, false, true, 72)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(expanded.contains("▾ collapse"), "{expanded}");
+    assert!(expanded.contains("command: cd /home/kevin/Projects/feedgarden"), "{expanded}");
+    assert!(expanded.contains("json row 12"), "{expanded}");
+}
+
+#[test]
+fn long_running_command_row_expands_full_command() {
+    let command = "cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db \"SELECT id || '|' || by || '|' || text FROM comments WHERE story_id = 48073680 ORDER BY id\"";
+    let mut row = TranscriptRow::with_title(TranscriptKind::Ran, format!("Ran {command}"), "running");
+    row.tool_started = Some(Instant::now());
+    assert!(row.is_expandable());
+
+    let collapsed = tool_lines(&row, false, true, 72)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(collapsed.contains("▸ command"), "{collapsed}");
+    assert!(!collapsed.contains("command: cd /home/kevin"), "{collapsed}");
+
+    toggle_transcript_row_details(&mut row);
+    assert!(row.expanded);
+    let expanded = tool_lines(&row, false, true, 72)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(expanded.contains("▾ collapse"), "{expanded}");
+    assert!(expanded.contains("command: cd /home/kevin/Projects/feedgarden"), "{expanded}");
+    assert!(!expanded.contains("  └ running"), "{expanded}");
+}
+
+#[tokio::test]
+async fn keyboard_enter_toggles_selected_expandable_row() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    let mut row = TranscriptRow::with_title(TranscriptKind::Explored, "Explored log", "a");
+    row.full_text = Some("a\nb\nc".to_string());
+    ui.transcript.push(row);
+    ui.focus = FocusMode::Transcript;
+    ui.selected_target = Some(TranscriptHitTarget::Row(ui.transcript[0].id));
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .expect("enter");
+
+    assert!(ui.transcript[0].expanded);
+}
+
+#[tokio::test]
+async fn keyboard_space_toggles_selected_expandable_row() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    let mut row = TranscriptRow::with_title(TranscriptKind::Explored, "Explored log", "a");
+    row.full_text = Some("a\nb\nc".to_string());
+    ui.transcript.push(row);
+    ui.focus = FocusMode::Transcript;
+    ui.selected_target = Some(TranscriptHitTarget::Row(ui.transcript[0].id));
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+        .await
+        .expect("space");
+
+    assert!(ui.transcript[0].expanded);
+}
+
+#[tokio::test]
+async fn mouse_click_toggles_expandable_transcript_row() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    let mut row = TranscriptRow::with_title(TranscriptKind::Explored, "Explored log", "a");
+    row.full_text = Some("a\nb\nc".to_string());
+    let row_id = row.id;
+    ui.transcript.push(row);
+    draw_fullscreen_for_test(&app, &mut ui, 80, 12);
+
+    click_transcript_target(&mut app, &mut ui, TranscriptHitTarget::Row(row_id)).await;
+
+    assert!(ui.transcript[0].expanded);
+}
+
+#[tokio::test]
+async fn mouse_drag_selection_does_not_toggle_transcript_row() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    app.clipboard = Arc::new(|_| Ok(()));
+    let mut ui = FullscreenUi::new(&app);
+    let mut row = TranscriptRow::with_title(TranscriptKind::Explored, "Explored log", "abcdef");
+    row.full_text = Some("abcdef\nmore".to_string());
+    let row_id = row.id;
+    ui.transcript.push(row);
+    draw_fullscreen_for_test(&app, &mut ui, 80, 12);
+    let area = target_area(&ui, TranscriptHitTarget::Row(row_id));
+
+    app.handle_fullscreen_mouse(
+        &mut ui,
+        mouse_event(MouseEventKind::Down(MouseButton::Left), area.x + 2, area.y),
+    )
+    .await
+    .expect("mouse down");
+    app.handle_fullscreen_mouse(
+        &mut ui,
+        mouse_event(MouseEventKind::Drag(MouseButton::Left), area.x + 7, area.y),
+    )
+    .await
+    .expect("mouse drag");
+    app.handle_fullscreen_mouse(
+        &mut ui,
+        mouse_event(MouseEventKind::Up(MouseButton::Left), area.x + 7, area.y),
+    )
+    .await
+    .expect("mouse up");
+    if app.clipboard_copies_in_flight > 0 {
+        wait_for_clipboard_task(&mut app, &mut ui).await;
+    }
+
+    assert!(!ui.transcript[0].expanded);
+}
+
+#[test]
+fn selected_answer_uses_single_line_focus_marker() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let row = TranscriptRow::simple(
+        TranscriptKind::Answer,
+        "first line\nsecond line\nthird line",
+    );
+
+    let rendered = answer_lines(&row, true, true, &app.workdir)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>();
+
+    assert!(rendered.first().is_some_and(|line| line.starts_with("› ")), "{rendered:?}");
+    assert!(!rendered.iter().skip(1).any(|line| line.starts_with("> ")), "{rendered:?}");
+    assert!(!rendered.iter().skip(1).any(|line| line.starts_with("› ")), "{rendered:?}");
+}
+
+#[test]
+fn selected_thinking_and_tool_rows_use_single_line_focus_marker() {
+    let thinking = TranscriptRow::with_title(
+        TranscriptKind::Thinking,
+        "Thinking",
+        "first thought\nsecond thought",
+    );
+    let thinking = thinking_lines(&thinking, true, true, 80)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>();
+    assert!(thinking.first().is_some_and(|line| line.starts_with("› Thinking")), "{thinking:?}");
+    assert!(thinking.get(1).is_some_and(|line| line.starts_with("  └ ")), "{thinking:?}");
+    assert!(!thinking.iter().skip(1).any(|line| line.starts_with("> ")), "{thinking:?}");
+
+    let tool = TranscriptRow::with_title(TranscriptKind::Ran, "Ran ls", "ok\nmore");
+    let tool = tool_lines(&tool, true, true, 80)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>();
+    assert!(tool.first().is_some_and(|line| line.starts_with("› Ran ls")), "{tool:?}");
+    assert!(tool.get(1).is_some_and(|line| line.starts_with("  └ ")), "{tool:?}");
+    assert!(!tool.iter().skip(1).any(|line| line.starts_with("> ")), "{tool:?}");
+}
+
+async fn click_transcript_target(
+    app: &mut TuiApp,
+    ui: &mut FullscreenUi<'_>,
+    target: TranscriptHitTarget,
+) {
+    let area = target_area(ui, target);
+    app.handle_fullscreen_mouse(
+        ui,
+        mouse_event(MouseEventKind::Down(MouseButton::Left), area.x + 1, area.y),
+    )
+    .await
+    .expect("mouse down");
+    app.handle_fullscreen_mouse(
+        ui,
+        mouse_event(MouseEventKind::Up(MouseButton::Left), area.x + 1, area.y),
+    )
+    .await
+    .expect("mouse up");
+}
+
+fn target_area(ui: &FullscreenUi<'_>, target: TranscriptHitTarget) -> Rect {
+    ui.last_entry_areas
+        .iter()
+        .find_map(|(entry_target, area)| (*entry_target == target).then_some(*area))
+        .expect("target area")
+}
+
+fn mouse_event(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+    MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    }
 }
 
 #[test]
@@ -94,6 +538,7 @@ fn turn_meta_omits_tokens_and_uses_prefixless_debug_parts() {
         started: None,
         usage: Some(&usage),
         metadata: None,
+        accounting: None,
         failures: 0,
         debug: false,
     });
@@ -106,6 +551,7 @@ fn turn_meta_omits_tokens_and_uses_prefixless_debug_parts() {
         started: None,
         usage: Some(&usage),
         metadata: Some(&metadata),
+        accounting: None,
         failures: 0,
         debug: true,
     });
@@ -130,6 +576,7 @@ fn turn_meta_prefers_completed_elapsed_metadata() {
         started: Some(stale_started),
         usage: None,
         metadata: Some(&metadata),
+        accounting: None,
         failures: 0,
         debug: true,
     });
@@ -150,6 +597,7 @@ fn turn_meta_formats_persisted_elapsed_minutes() {
         started: None,
         usage: None,
         metadata: Some(&metadata),
+        accounting: None,
         failures: 0,
         debug: false,
     });
@@ -173,6 +621,7 @@ fn turn_meta_places_variant_after_model_and_filters_debug_duplicate() {
         started: None,
         usage: Some(&usage),
         metadata: Some(&metadata),
+        accounting: None,
         failures: 1,
         debug: true,
     });

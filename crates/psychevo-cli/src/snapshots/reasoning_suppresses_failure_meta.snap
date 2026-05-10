@@ -2,24 +2,18 @@
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
 expression: combined
 ---
-fixture=running_turn_with_visible_thinking
-size=120x24
+fixture=reasoning_suppresses_failure_meta
+size=120x18
 
 --- text ---
-› Inspect the CLI rendering path.
+• Ran command                                                                                                        0s
+  └ failed
 
 ◦ Thinking                                                                                                           0s
-  └ Read the TUI renderer and identify stable evidence blocks.
+  └ The current time is approximately 15:20 UTC. Let me compose the full report now. I have all 10 stories and their
+comments.
 
-◦ Exploring crates/psychevo-cli/src/tui.rs                                                                          12s
-
-
-
-
-
-
-
-
+    Let me compose this carefully.
 
 
 
@@ -29,23 +23,17 @@ size=120x24
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
 
-mock/model  high  ◦ 12s · Esc
+mock/model  high  ◦ 0s · Esc
 
 --- styles ---
-[dim]› [default]Inspect the CLI rendering path.
+[red]• Ran command[default]                                                                                                        [dim]0s[default]
+[dim]  └ [red]failed[default]
 [default]
 [cyan]◦ [paper]Thinking[default]                                                                                                           [dim]0s[default]
-[dim]  └ Read the TUI renderer and identify stable evidence blocks.[default]
-[default]
-[cyan]◦ [default]Exploring crates/psychevo-cli/src/tui.rs                                                                          [dim]12s[default]
-[default]
-[default]
-[default]
-[default]
-[default]
-[default]
-[default]
-[default]
+[dim]  └ The current time is approximately 15:20 UTC. Let me compose the full report now. I have all 10 stories and their[default]
+[dim]comments.[default]
+[dim]    [default]
+[dim]    Let me compose this carefully.[default]
 [default]
 [default]
 [default]
@@ -55,4 +43,4 @@ mock/model  high  ◦ 12s · Esc
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
 [default]
-[default]mock/model  [magenta]high[default]  [cyan]◦[default] [dim]12s · [cyan]Esc[default]
+[default]mock/model  [magenta]high[default]  [cyan]◦[default] [dim]0s · [cyan]Esc[default]

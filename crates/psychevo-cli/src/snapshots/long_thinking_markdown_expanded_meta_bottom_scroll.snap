@@ -1,0 +1,47 @@
+---
+source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 612
+expression: combined
+---
+fixture=long_thinking_markdown_expanded_meta_bottom_scroll
+size=100x18
+
+--- text ---
+    | 2 | **热 门 话 题  2** - 混 合  Markdown/CJK 宽 度 校 验 行  | 182 |
+    | 3 | **热 门 话 题  3** - 混 合  Markdown/CJK 宽 度 校 验 行  | 183 |
+    | 4 | **热 门 话 题  4** - 混 合  Markdown/CJK 宽 度 校 验 行  | 184 |
+    | 5 | **热 门 话 题  5** - 混 合  Markdown/CJK 宽 度 校 验 行  | 185 |
+    | 6 | **热 门 话 题  6** - 混 合  Markdown/CJK 宽 度 校 验 行  | 186 |
+    | 7 | **热 门 话 题  7** - 混 合  Markdown/CJK 宽 度 校 验 行  | 187 |
+    | 8 | **热 门 话 题  8** - 混 合  Markdown/CJK 宽 度 校 验 行  | 188 |
+    | 9 | **热 门 话 题  9** - 混 合  Markdown/CJK 宽 度 校 验 行  | 189 |
+    | 10 | **热 门 话 题  10** - 混 合  Markdown/CJK 宽 度 校 验 行  | 190 |
+    | 11 | **热 门 话 题  11** - 混 合  Markdown/CJK 宽 度 校 验 行  | 191 |
+    | 12 | **热 门 话 题  12** - 混 合  Markdown/CJK 宽 度 校 验 行  | 192 |
+
+▌ xiaomi-token-plan/mimo-v2.5-pro low 7m05s 1 failure
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+› Ask pevo...
+
+mock/model  high
+
+--- styles ---
+[dim]    | 2 | **热[default] [dim]门[default] [dim]话[default] [dim]题[default] [dim] 2** - 混[default] [dim]合[default] [dim] Markdown/CJK 宽[default] [dim]度[default] [dim]校[default] [dim]验[default] [dim]行[default] [dim] | 182 |[default]
+[dim]    | 3 | **热[default] [dim]门[default] [dim]话[default] [dim]题[default] [dim] 3** - 混[default] [dim]合[default] [dim] Markdown/CJK 宽[default] [dim]度[default] [dim]校[default] [dim]验[default] [dim]行[default] [dim] | 183 |[default]
+[dim]    | 4 | **热[default] [dim]门[default] [dim]话[default] [dim]题[default] [dim] 4** - 混[default] [dim]合[default] [dim] Markdown/CJK 宽[default] [dim]度[default] [dim]校[default] [dim]验[default] [dim]行[default] [dim] | 184 |[default]
+[dim]    | 5 | **热[default] [dim]门[default] [dim]话[default] [dim]题[default] [dim] 5** - 混[default] [dim]合[default] [dim] Markdown/CJK 宽[default] [dim]度[default] [dim]校[default] [dim]验[default] [dim]行[default] [dim] | 185 |[default]
+[dim]    | 6 | **热[default] [dim]门[default] [dim]话[default] [dim]题[default] [dim] 6** - 混[default] [dim]合[default] [dim] Markdown/CJK 宽[default] [dim]度[default] [dim]校[default] [dim]验[default] [dim]行[default] [dim] | 186 |[default]
+[dim]    | 7 | **热[default] [dim]门[default] [dim]话[default] [dim]题[default] [dim] 7** - 混[default] [dim]合[default] [dim] Markdown/CJK 宽[default] [dim]度[default] [dim]校[default] [dim]验[default] [dim]行[default] [dim] | 187 |[default]
+[dim]    | 8 | **热[default] [dim]门[default] [dim]话[default] [dim]题[default] [dim] 8** - 混[default] [dim]合[default] [dim] Markdown/CJK 宽[default] [dim]度[default] [dim]校[default] [dim]验[default] [dim]行[default] [dim] | 188 |[default]
+[dim]    | 9 | **热[default] [dim]门[default] [dim]话[default] [dim]题[default] [dim] 9** - 混[default] [dim]合[default] [dim] Markdown/CJK 宽[default] [dim]度[default] [dim]校[default] [dim]验[default] [dim]行[default] [dim] | 189 |[default]
+[dim]    | 10 | **热[default] [dim]门[default] [dim]话[default] [dim]题[default] [dim] 10** - 混[default] [dim]合[default] [dim] Markdown/CJK 宽[default] [dim]度[default] [dim]校[default] [dim]验[default] [dim]行[default] [dim] | 190 |[default]
+[dim]    | 11 | **热[default] [dim]门[default] [dim]话[default] [dim]题[default] [dim] 11** - 混[default] [dim]合[default] [dim] Markdown/CJK 宽[default] [dim]度[default] [dim]校[default] [dim]验[default] [dim]行[default] [dim] | 191 |[default]
+[dim]    | 12 | **热[default] [dim]门[default] [dim]话[default] [dim]题[default] [dim] 12** - 混[default] [dim]合[default] [dim] Markdown/CJK 宽[default] [dim]度[default] [dim]校[default] [dim]验[default] [dim]行[default] [dim] | 192 |[default]
+[default]
+[dim]▌ xiaomi-token-plan/mimo-v2.5-pro low 7m05s 1 failure[default]
+[default]
+[default]────────────────────────────────────────────────────────────────────────────────────────────────────
+[dim]›[default] [dim]Ask pevo...[default]
+[default]
+[default]mock/model  [magenta]high[default]

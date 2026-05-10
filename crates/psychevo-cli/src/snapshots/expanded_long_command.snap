@@ -1,0 +1,46 @@
+---
+source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+expression: combined
+---
+fixture=expanded_long_command
+size=120x18
+
+--- text ---
+› Inspect HN comments with sqlite.
+
+› Ran cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db "SELECT id || '|' || by || '|' || te… ▾ collapse
+  └ command: cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db "SELECT id || '|' || by || '|' || text
+    FROM comments WHERE story_id = 48073680 ORDER BY id" 2>&1 | head -c 3000
+    48073976||aurareturn||6 days of work to do this.
+    48074445||aniclecha||I think the industry is moving to English.
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+› Ask pevo...
+
+mock/model  high
+
+--- styles ---
+[dim]› [default]Inspect HN comments with sqlite.
+[default]
+[cyan]› [default]Ran cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db "SELECT id || '|' || by || '|' || te… [dim]▾ collapse[default]
+[dim]  └ [default]command: cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db "SELECT id || '|' || by || '|' || text
+[dim]    [default]FROM comments WHERE story_id = 48073680 ORDER BY id" 2>&1 | head -c 3000
+[dim]    [default]48073976||aurareturn||6 days of work to do this.
+[dim]    [default]48074445||aniclecha||I think the industry is moving to English.
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[dim]›[default] [dim]Ask pevo...[default]
+[default]
+[default]mock/model  [magenta]high[default]

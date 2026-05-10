@@ -37,6 +37,92 @@ impl TuiApp {
         Ok(BottomSelectionPanel::new_sessions(view, rows))
     }
 
+    fn stats_panel(&self) -> Result<BottomSelectionPanel> {
+        let report = usage_stats(StatsOptions {
+            db_path: self.db_path.clone(),
+            workdir: self.workdir.clone(),
+            all: false,
+            days: None,
+            limit: 8,
+        })?;
+        let totals = report.get("totals").unwrap_or(&Value::Null);
+        let mut rows = vec![
+            stats_row(
+                "totals",
+                "Totals",
+                format!(
+                    "{} sessions  {} messages",
+                    json_i64(totals, "sessions"),
+                    json_i64(totals, "messages")
+                ),
+                Some(format!(
+                    "{} tokens  {}",
+                    json_i64(totals, "reported_total_tokens"),
+                    format_nanodollars(json_i64(totals, "estimated_cost_nanodollars"))
+                )),
+            ),
+            stats_row(
+                "breakdown",
+                "Token breakdown",
+                format!(
+                    "{} input  {} output  {} reasoning",
+                    json_i64(totals, "billable_input_tokens"),
+                    json_i64(totals, "billable_output_tokens"),
+                    json_i64(totals, "reasoning_tokens")
+                ),
+                Some(format!(
+                    "{} cache read  {} cache write",
+                    json_i64(totals, "cache_read_tokens"),
+                    json_i64(totals, "cache_write_tokens")
+                )),
+            ),
+        ];
+        if let Some(models) = report.get("provider_models").and_then(Value::as_array) {
+            for (index, model) in models.iter().enumerate() {
+                rows.push(stats_row(
+                    format!("model-{index}"),
+                    format!(
+                        "{}/{}",
+                        model.get("provider").and_then(Value::as_str).unwrap_or("-"),
+                        model.get("model").and_then(Value::as_str).unwrap_or("-")
+                    ),
+                    format!("{} tokens", json_i64(model, "reported_total_tokens")),
+                    Some(format_nanodollars(json_i64(
+                        model,
+                        "estimated_cost_nanodollars",
+                    ))),
+                ));
+            }
+        }
+        if let Some(tools) = report.get("top_tools").and_then(Value::as_array)
+            && !tools.is_empty()
+        {
+            rows.push(stats_row(
+                "tools-heading",
+                "Top tools",
+                tools
+                    .iter()
+                    .take(5)
+                    .map(|tool| {
+                        format!(
+                            "{} {}",
+                            tool.get("tool").and_then(Value::as_str).unwrap_or("-"),
+                            json_i64(tool, "calls")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("  "),
+                None,
+            ));
+        }
+        Ok(BottomSelectionPanel::new(
+            "Usage Stats",
+            "",
+            "No usage yet",
+            rows,
+        ))
+    }
+
     fn model_selection_panel(&mut self) -> Result<BottomSelectionPanel> {
         self.sync_model_catalog_providers()?;
         let current = self.model_display_value();
@@ -135,6 +221,7 @@ impl TuiApp {
                     model: entry.id.clone(),
                     reasoning_effort: None,
                     context_limit: entry.context_limit,
+                    metadata: entry.metadata.clone(),
                 };
                 let key = format!("model:{spec}");
                 first_model_key.get_or_insert_with(|| key.clone());
@@ -162,6 +249,7 @@ impl TuiApp {
                 model: model.to_string(),
                 reasoning_effort: None,
                 context_limit: None,
+                metadata: Default::default(),
             };
             let key = format!("model:{current}");
             current_key = Some(key.clone());
@@ -373,17 +461,26 @@ impl TuiApp {
         if let Some(limit) = model.context_limit {
             details.push(format!("context {}", format_count(limit)));
         }
+        if let Some(limit) = model.metadata.limits.output {
+            details.push(format!("output {}", format_count(limit)));
+        }
+        details.extend(model_capability_tags(&model));
+        if let Some(price) = model_pricing_label(&model) {
+            details.push(price);
+        }
         let description = if details.is_empty() {
             Some(model.provider_label.clone())
         } else {
             Some(format!("{}  {}", model.provider_label, details.join("  ")))
         };
         let search_text = format!(
-            "{} {} {} {} {}",
+            "{} {} {} {} {} {} {}",
             model_spec,
             model.provider_label,
             model.reasoning_effort.clone().unwrap_or_default(),
             model.context_limit.unwrap_or_default(),
+            model.metadata.limits.output.unwrap_or_default(),
+            model_pricing_label(&model).unwrap_or_default(),
             if source == ModelRowSource::Fetched {
                 "fetched"
             } else {
@@ -400,7 +497,10 @@ impl TuiApp {
             is_default: self.current_model.is_none() && model_spec == current,
             style: BottomRowStyle::Normal,
             footer: None,
-            value: BottomSelectionValue::Model { model, source },
+            value: BottomSelectionValue::Model {
+                model: Box::new(model),
+                source,
+            },
         }
     }
 
@@ -448,4 +548,63 @@ impl TuiApp {
             .unwrap_or_else(|| "default".to_string())
     }
 
+}
+
+fn model_capability_tags(model: &ConfiguredModel) -> Vec<String> {
+    let caps = &model.metadata.capabilities;
+    let mut tags = Vec::new();
+    match caps.reasoning {
+        Some(true) => tags.push("reasoning".to_string()),
+        Some(false) => tags.push("no reasoning".to_string()),
+        None => {}
+    }
+    match caps.tool_call {
+        Some(true) => tags.push("tools".to_string()),
+        Some(false) => tags.push("no tools".to_string()),
+        None => {}
+    }
+    if caps.attachment == Some(true) || caps.input_modalities.iter().any(|value| value != "text")
+    {
+        tags.push("multi-modal".to_string());
+    }
+    if caps.structured_output == Some(true) {
+        tags.push("structured".to_string());
+    }
+    tags
+}
+
+fn model_pricing_label(model: &ConfiguredModel) -> Option<String> {
+    let cost = model.metadata.cost.as_ref()?;
+    let input = cost.input?;
+    let output = cost.output?;
+    if input == 0.0 && output == 0.0 {
+        return Some("free".to_string());
+    }
+    Some(format!("${input:.3}/${output:.3} /1M"))
+}
+
+fn stats_row(
+    key: impl Into<String>,
+    label: impl Into<String>,
+    description: impl Into<String>,
+    detail: Option<String>,
+) -> BottomSelectionRow {
+    let label = label.into();
+    let description = description.into();
+    BottomSelectionRow {
+        label: label.clone(),
+        description: Some(description.clone()),
+        detail,
+        group: None,
+        search_text: format!("{label} {description}"),
+        is_current: false,
+        is_default: false,
+        style: BottomRowStyle::Normal,
+        footer: None,
+        value: BottomSelectionValue::StatsRow(key.into()),
+    }
+}
+
+fn json_i64(value: &Value, key: &str) -> i64 {
+    value.get(key).and_then(Value::as_i64).unwrap_or(0)
 }

@@ -2,6 +2,7 @@ impl<'a> FullscreenUi<'a> {
     fn new(app: &TuiApp) -> Self {
         let mut ui = Self {
             textarea: new_textarea(),
+            workdir: app.workdir.clone(),
             transcript: Vec::new(),
             assistant_row: None,
             reasoning_row: None,
@@ -9,6 +10,7 @@ impl<'a> FullscreenUi<'a> {
             tool_rows: BTreeMap::new(),
             streaming_tool_message_seq: 0,
             streaming_tool_message_open: false,
+            deferred_stream_events: VecDeque::new(),
             history_tool_titles: BTreeMap::new(),
             turn_started: None,
             turn_provider: String::new(),
@@ -17,8 +19,10 @@ impl<'a> FullscreenUi<'a> {
             turn_context_limit: None,
             turn_usage: None,
             turn_metadata: None,
+            turn_accounting: None,
             turn_failures: 0,
             turn_outcome: None,
+            turn_had_reasoning: false,
             history_prompt_started_ms: None,
             thinking_visible: app.thinking_visible,
             running: None,
@@ -35,13 +39,17 @@ impl<'a> FullscreenUi<'a> {
             pending_scroll_to_bottom: false,
             focus: FocusMode::Composer,
             selected_row: None,
+            selected_target: None,
             last_entry_areas: Vec::new(),
+            mouse_down_target: None,
+            mouse_dragged: false,
             sidebar_forced: app.state.sidebar_visible,
             sidebar_hidden: !app.state.sidebar_visible,
             last_sidebar_visible: false,
             sidebar: SidebarSnapshot::default(),
             sidebar_tokens: None,
             sidebar_context_limit: None,
+            sidebar_cost_nanodollars: None,
             history: Vec::new(),
             history_kinds: Vec::new(),
             history_index: None,
@@ -81,6 +89,7 @@ impl<'a> FullscreenUi<'a> {
             branch: git.branch,
             tokens: self.sidebar_tokens,
             context_percent: self.context_percent(),
+            cost_nanodollars: self.sidebar_cost_nanodollars,
             message_count: visible_transcript_message_count(&self.transcript),
             tool_count: self
                 .transcript
@@ -109,12 +118,17 @@ impl<'a> FullscreenUi<'a> {
         self.transcript_layout = TranscriptLayoutCache::default();
         self.auto_follow_transcript = true;
         self.selected_row = None;
+        self.selected_target = None;
         self.last_entry_areas.clear();
+        self.mouse_down_target = None;
+        self.mouse_dragged = false;
         self.selection = SelectionState::default();
         self.terminal_clear_requested = true;
         self.sidebar_tokens = None;
         self.sidebar_context_limit = None;
+        self.sidebar_cost_nanodollars = None;
         self.history_prompt_started_ms = None;
+        self.turn_had_reasoning = false;
     }
 
     fn take_terminal_clear_request(&mut self) -> bool {
@@ -123,12 +137,9 @@ impl<'a> FullscreenUi<'a> {
 
     fn set_thinking_visible(&mut self, visible: bool) {
         self.thinking_visible = visible;
-        if self
-            .selected_row
-            .and_then(|index| self.transcript.get(index))
-            .is_some_and(|row| !row_visible(row, self.thinking_visible))
-        {
+        if self.selected_target.is_some_and(|target| !self.target_visible(target)) {
             self.selected_row = None;
+            self.selected_target = None;
             self.ensure_selection();
         }
         self.clamp_transcript_scroll();
@@ -141,21 +152,9 @@ impl<'a> FullscreenUi<'a> {
             self.scroll = self.scroll.saturating_add(amount as u16);
         }
         self.pending_scroll_to_bottom = false;
-        let max_scroll = if self.transcript_layout.width == self.last_transcript_width
-            && self.transcript_layout.thinking_visible == self.thinking_visible
-            && self.transcript_layout.rows.len() == self.transcript.len()
-        {
-            Some(self.transcript_layout.max_scroll(self.last_transcript_height))
-        } else {
-            None
-        };
-        if let Some(max_scroll) = max_scroll {
-            self.scroll = self.scroll.min(max_scroll);
-            self.auto_follow_transcript = amount > 0 && self.scroll >= max_scroll;
-        } else {
-            self.clamp_transcript_scroll();
-            self.auto_follow_transcript = amount > 0 && self.is_transcript_at_bottom();
-        }
+        let max_scroll = self.max_transcript_scroll();
+        self.scroll = self.scroll.min(max_scroll);
+        self.auto_follow_transcript = amount > 0 && self.scroll >= max_scroll;
     }
 
     fn clamp_transcript_scroll(&mut self) {
@@ -163,17 +162,16 @@ impl<'a> FullscreenUi<'a> {
     }
 
     fn max_transcript_scroll(&self) -> u16 {
-        let total = transcript_line_count(
-            &self.transcript,
-            self.last_transcript_width,
-            self.thinking_visible,
-        )
-        .min(usize::from(u16::MAX)) as u16;
+        if self.transcript_layout_matches_viewport() {
+            return self.transcript_layout.max_scroll(self.last_transcript_height);
+        }
+        let total = transcript_total_height_for_ui(self, self.last_transcript_width)
+            .min(usize::from(u16::MAX)) as u16;
         total.saturating_sub(self.last_transcript_height)
     }
 
-    fn is_transcript_at_bottom(&self) -> bool {
-        self.scroll >= self.max_transcript_scroll()
+    fn transcript_layout_matches_viewport(&self) -> bool {
+        transcript_layout_matches_current(self, self.last_transcript_width)
     }
 
     fn follow_transcript_if_needed(&mut self) {
@@ -206,6 +204,20 @@ impl<'a> FullscreenUi<'a> {
         let tokens = self.sidebar_tokens?;
         let limit = self.sidebar_context_limit?;
         (limit > 0).then_some((tokens as f64 / limit as f64) * 100.0)
+    }
+
+    fn add_sidebar_cost(&mut self, accounting: Option<&Value>) {
+        let Some(cost) = accounting
+            .and_then(|value| value.get("estimated_cost_nanodollars"))
+            .and_then(Value::as_i64)
+        else {
+            return;
+        };
+        self.sidebar_cost_nanodollars = Some(
+            self.sidebar_cost_nanodollars
+                .unwrap_or_default()
+                .saturating_add(cost),
+        );
     }
 
     fn sidebar_enabled(&self) -> bool {
@@ -286,11 +298,22 @@ impl<'a> FullscreenUi<'a> {
         selected_text_from_lines(&self.screen_lines, &self.selection)
     }
 
+    #[cfg(test)]
     fn push_history_message(
         &mut self,
         message: &Value,
         usage: Option<&Value>,
         metadata: Option<&Value>,
+    ) {
+        self.push_history_message_with_accounting(message, usage, metadata, None);
+    }
+
+    fn push_history_message_with_accounting(
+        &mut self,
+        message: &Value,
+        usage: Option<&Value>,
+        metadata: Option<&Value>,
+        accounting: Option<&Value>,
     ) {
         match message
             .get("role")
@@ -304,16 +327,17 @@ impl<'a> FullscreenUi<'a> {
                 self.history_prompt_started_ms = message_timestamp_ms(message);
             }
             "assistant" => {
-                for (tool_call_id, title) in history_tool_titles_from_message(message) {
-                    self.history_tool_titles.insert(tool_call_id, title);
-                }
-                if let Some(reasoning) = assistant_reasoning_from_message(message) {
+                let tool_calls = history_tool_calls_from_message(message);
+                let has_reasoning = if let Some(reasoning) = assistant_reasoning_from_message(message) {
                     self.transcript.push(TranscriptRow::with_title(
                         TranscriptKind::Thinking,
                         "Thinking",
                         reasoning,
                     ));
-                }
+                    true
+                } else {
+                    false
+                };
                 let has_answer = if let Some(text) = assistant_text_from_message(message) {
                     self.transcript.push(TranscriptRow::with_title(
                         TranscriptKind::Answer,
@@ -324,12 +348,28 @@ impl<'a> FullscreenUi<'a> {
                 } else {
                     false
                 };
-                if let Some(total) = usage.and_then(usage_total_tokens) {
-                    self.sidebar_tokens = Some(total);
+                if let Some(tokens) = usage.and_then(usage_context_tokens) {
+                    self.sidebar_tokens = Some(tokens);
                 }
-                if has_answer
+                self.add_sidebar_cost(accounting);
+                let keep_tool_calls_active = assistant_message_keeps_tool_calls_active(message);
+                for call in tool_calls {
+                    if keep_tool_calls_active {
+                        self.push_history_active_tool_call(message, call);
+                    } else {
+                        self.push_history_interrupted_tool_call(call, metadata);
+                    }
+                }
+                if ((has_answer && visible_answer_message_receives_meta(message))
+                    || (has_reasoning && reasoning_only_message_receives_meta(message)))
                     && let Some(meta) =
-                        history_meta_text(message, usage, metadata, self.history_prompt_started_ms)
+                        history_meta_text(
+                            message,
+                            usage,
+                            metadata,
+                            accounting,
+                            self.history_prompt_started_ms,
+                        )
                 {
                     self.transcript
                         .push(TranscriptRow::with_title(TranscriptKind::Meta, "", meta));
@@ -339,6 +379,36 @@ impl<'a> FullscreenUi<'a> {
             "tool_result" => self.push_history_tool_result(message, metadata),
             _ => {}
         }
+    }
+
+    fn push_history_active_tool_call(&mut self, message: &Value, call: HistoryToolCall) {
+        self.history_tool_titles
+            .insert(call.id.clone(), call.completed_title.clone());
+        let mut row =
+            TranscriptRow::with_title(evidence_kind(&call.name), call.active_title, "preparing");
+        row.tool_call_id = Some(call.id.clone());
+        row.tool_started = Some(history_tool_started_instant(message));
+        let idx = self.transcript.len();
+        self.transcript.push(row);
+        self.tool_rows.insert(tool_id_key(&call.id), idx);
+    }
+
+    fn push_history_interrupted_tool_call(
+        &mut self,
+        call: HistoryToolCall,
+        metadata: Option<&Value>,
+    ) {
+        self.history_tool_titles
+            .insert(call.id.clone(), call.completed_title.clone());
+        let mut row = TranscriptRow::with_title(
+            evidence_kind(&call.name),
+            call.completed_title,
+            "interrupted",
+        );
+        row.tool_call_id = Some(call.id);
+        row.tool_elapsed = metadata_elapsed_duration(metadata);
+        row.failed = true;
+        self.transcript.push(row);
     }
 
     fn push_history_tool_result(&mut self, message: &Value, metadata: Option<&Value>) {
@@ -370,9 +440,16 @@ impl<'a> FullscreenUi<'a> {
             .get(tool_call_id)
             .cloned()
             .unwrap_or_else(|| tool_title(tool, &value));
-        let mut row = TranscriptRow::with_title(evidence_kind(tool), title, "");
+        let idx = self.tool_rows.get(&tool_id_key(tool_call_id)).copied();
+        let mut row = idx
+            .and_then(|idx| self.transcript.get(idx).cloned())
+            .unwrap_or_else(|| TranscriptRow::with_title(evidence_kind(tool), title.clone(), ""));
+        row.kind = evidence_kind(tool);
+        row.title = title;
         row.failed = is_error;
-        row.tool_elapsed = metadata_elapsed_duration(metadata);
+        row.tool_elapsed =
+            metadata_elapsed_duration(metadata).or_else(|| row.tool_started.map(|started| started.elapsed()));
+        row.tool_started = None;
         let (collapsed, full) = tool_output_text(&value);
         row.text = if collapsed.is_empty() {
             format_tool_summary(&value)
@@ -380,7 +457,12 @@ impl<'a> FullscreenUi<'a> {
             collapsed
         };
         row.full_text = full;
-        self.transcript.push(row);
+        if let Some(idx) = idx {
+            self.transcript[idx] = row;
+            self.tool_rows.retain(|_, row_index| *row_index != idx);
+        } else {
+            self.transcript.push(row);
+        }
     }
 
     fn scroll_to_bottom(&mut self) {
@@ -653,8 +735,10 @@ impl<'a> FullscreenUi<'a> {
         self.turn_context_limit = None;
         self.turn_usage = None;
         self.turn_metadata = None;
+        self.turn_accounting = None;
         self.turn_failures = 0;
         self.turn_outcome = None;
+        self.turn_had_reasoning = false;
     }
 
     fn push_status(&mut self, text: impl Into<String>) {
@@ -682,11 +766,36 @@ impl<'a> FullscreenUi<'a> {
         index
     }
 
+    fn remove_transcript_row(&mut self, index: usize) {
+        if index >= self.transcript.len() {
+            return;
+        }
+        self.transcript.remove(index);
+        decrement_row_index(&mut self.assistant_row, index);
+        decrement_row_index(&mut self.reasoning_row, index);
+        decrement_row_index(&mut self.meta_row, index);
+        decrement_row_index(&mut self.selected_row, index);
+        self.tool_rows.retain(|_, row_index| *row_index != index);
+        for row_index in self.tool_rows.values_mut() {
+            if *row_index > index {
+                *row_index -= 1;
+            }
+        }
+    }
+
     fn insert_evidence_row(&mut self, row: TranscriptRow) -> usize {
-        let index = self
-            .assistant_row
-            .or(self.meta_row)
-            .unwrap_or(self.transcript.len());
+        let index = if let Some(assistant_row) = self.assistant_row
+            && self
+                .transcript
+                .get(assistant_row)
+                .is_some_and(|row| row.kind == TranscriptKind::Answer && !row.text.trim().is_empty())
+        {
+            assistant_row.saturating_add(1)
+        } else {
+            self.assistant_row
+                .or(self.meta_row)
+                .unwrap_or(self.transcript.len())
+        };
         self.insert_transcript_row(index, row)
     }
 
@@ -695,28 +804,83 @@ impl<'a> FullscreenUi<'a> {
         self.insert_transcript_row(index, row)
     }
 
-    fn apply_stream_event(&mut self, event: RunStreamEvent, _thinking_visible: bool, debug: bool) {
+    fn append_thinking_text(&mut self, index: usize, text: &str) {
+        let Some(row) = self.transcript.get_mut(index) else {
+            return;
+        };
+        if row.kind != TranscriptKind::Thinking {
+            row.text.push_str(text);
+            return;
+        }
+        if let Some(full) = row.full_text.as_mut() {
+            full.push_str(text);
+            if !row.expanded {
+                row.text = ledger_body_collapse_policy().collapse(full).preview;
+            }
+            return;
+        }
+        row.text.push_str(text);
+        row.apply_default_evidence_collapse();
+    }
+
+    fn thinking_full_text(&self, index: usize) -> String {
+        self.transcript
+            .get(index)
+            .and_then(|row| row.full_text.as_ref().or(Some(&row.text)))
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn finish_thinking_row(&mut self, index: usize) {
+        let Some(row) = self.transcript.get_mut(index) else {
+            return;
+        };
+        if row.kind != TranscriptKind::Thinking {
+            return;
+        }
+        if let Some(started) = row.tool_started.take() {
+            row.tool_elapsed = Some(started.elapsed());
+        }
+    }
+
+    fn apply_stream_event(
+        &mut self,
+        event: RunStreamEvent,
+        thinking_visible: bool,
+        debug: bool,
+    ) -> bool {
         match event {
             RunStreamEvent::ReasoningDelta { text } => {
+                if !text.trim().is_empty() {
+                    self.turn_had_reasoning = true;
+                    self.remove_turn_meta();
+                }
                 let idx = self.reasoning_row.unwrap_or_else(|| {
-                    let idx = self.insert_evidence_row(TranscriptRow::with_title(
+                    let mut row = TranscriptRow::with_title(
                         TranscriptKind::Thinking,
                         "Thinking",
                         String::new(),
-                    ));
+                    );
+                    row.tool_started = Some(Instant::now());
+                    let idx = self.insert_evidence_row(row);
                     self.reasoning_row = Some(idx);
                     idx
                 });
-                self.transcript[idx].text.push_str(&text);
+                self.append_thinking_text(idx, &text);
+                let reasoning = self.thinking_full_text(idx);
+                thinking_visible && self.apply_visible_tool_intent(&reasoning)
             }
             RunStreamEvent::ReasoningEnd => {
-                self.reasoning_row = None;
+                if let Some(idx) = self.reasoning_row.take() {
+                    self.finish_thinking_row(idx);
+                }
+                false
             }
             RunStreamEvent::Event(value) => self.apply_value_event(&value, debug),
         }
     }
 
-    fn apply_value_event(&mut self, value: &Value, debug: bool) {
+    fn apply_value_event(&mut self, value: &Value, debug: bool) -> bool {
         match value
             .get("type")
             .and_then(Value::as_str)
@@ -746,9 +910,11 @@ impl<'a> FullscreenUi<'a> {
                 {
                     self.push_status(format!("skill loaded: {}", skills.join(", ")));
                 }
+                false
             }
             "message_update" | "message_end" => {
-                self.apply_streaming_tool_calls(value);
+                let event_type = value.get("type").and_then(Value::as_str);
+                let mut active_tool_frame_requested = false;
                 if let Some(text) =
                     assistant_text_from_event(value).filter(|text| !text.trim().is_empty())
                 {
@@ -761,13 +927,38 @@ impl<'a> FullscreenUi<'a> {
                         self.assistant_row = Some(idx);
                         idx
                     });
-                    self.transcript[idx].text = text;
+                    self.transcript[idx].text = text.clone();
+                    self.remove_turn_meta();
+                    if event_type == Some("message_update") {
+                        active_tool_frame_requested |= self.apply_visible_tool_intent(&text);
+                    }
                 }
-                if value.get("type").and_then(Value::as_str) == Some("message_end") {
+                active_tool_frame_requested |= self.apply_streaming_tool_calls(value);
+                if event_type == Some("message_end") {
+                    let matched_tools = streaming_tool_calls_from_event(value)
+                        .into_iter()
+                        .map(|call| call.tool_name)
+                        .collect::<Vec<_>>();
+                    self.remove_unmatched_provisional_tool_intents(&matched_tools);
                     self.turn_usage = value.get("usage").cloned();
-                    self.sidebar_tokens = self.turn_usage.as_ref().and_then(usage_total_tokens);
+                    if let Some(tokens) = self.turn_usage.as_ref().and_then(usage_context_tokens) {
+                        self.sidebar_tokens = Some(tokens);
+                    }
                     self.turn_metadata = value.get("metadata").cloned();
-                    self.update_turn_meta(debug);
+                    self.turn_accounting = value.get("accounting").cloned();
+                    let turn_accounting = self.turn_accounting.clone();
+                    self.add_sidebar_cost(turn_accounting.as_ref());
+                    let message = value.get("message");
+                    let allow_visible_answer_meta =
+                        message.is_some_and(visible_answer_message_receives_meta);
+                    let allow_reasoning_only_meta =
+                        message.is_some_and(reasoning_only_message_receives_meta);
+                    self.update_turn_meta(
+                        debug,
+                        allow_visible_answer_meta,
+                        allow_reasoning_only_meta,
+                        false,
+                    );
                     if value
                         .get("message")
                         .and_then(|message| message.get("role"))
@@ -777,7 +968,9 @@ impl<'a> FullscreenUi<'a> {
                         self.assistant_row = None;
                     }
                 }
+                active_tool_frame_requested
             }
+            "tool_call_pending" => self.apply_streaming_tool_calls(value),
             "tool_execution_start" => {
                 let tool = value
                     .get("tool_name")
@@ -804,6 +997,7 @@ impl<'a> FullscreenUi<'a> {
                         row.tool_started = Some(tool_started_instant(value));
                         self.insert_evidence_row(row)
                     });
+                self.remove_turn_meta();
                 let row = &mut self.transcript[idx];
                 row.kind = evidence_kind(tool);
                 row.title = active_tool_title(tool, value);
@@ -815,6 +1009,7 @@ impl<'a> FullscreenUi<'a> {
                 if let Some(id_key) = id_key {
                     self.tool_rows.insert(id_key, idx);
                 }
+                true
             }
             "tool_execution_end" => {
                 let user_shell = value.get("source").and_then(Value::as_str) == Some("user_shell");
@@ -849,8 +1044,7 @@ impl<'a> FullscreenUi<'a> {
                 row.kind = evidence_kind(tool);
                 row.title = tool_title_for_update(tool, value, &row.title);
                 row.failed = failed;
-                row.tool_elapsed = metadata_elapsed_duration(Some(value))
-                    .or_else(|| row.tool_started.map(|started| started.elapsed()));
+                row.tool_elapsed = completed_live_tool_elapsed(row, Some(value));
                 row.tool_started = None;
                 let (collapsed, full) = tool_output_text(value);
                 row.text = if collapsed.is_empty() {
@@ -859,44 +1053,104 @@ impl<'a> FullscreenUi<'a> {
                     collapsed
                 };
                 row.full_text = full;
-                if !user_shell {
-                    self.update_turn_meta(debug);
+                if is_write_like_tool(tool) {
+                    self.remove_orphan_provisional_tool_intents(tool, Some(idx));
                 }
+                if !user_shell {
+                    self.update_turn_meta(debug, false, false, true);
+                }
+                false
             }
             "agent_end" => {
                 self.turn_outcome = outcome_from_value(value);
+                false
             }
-            _ => {}
+            _ => false,
         }
     }
 
-    fn apply_streaming_tool_calls(&mut self, value: &Value) {
+    fn apply_streaming_tool_calls(&mut self, value: &Value) -> bool {
         let Some(event_type) = assistant_message_stream_event_type(value) else {
-            return;
+            return false;
         };
         if !self.streaming_tool_message_open {
             self.streaming_tool_message_seq = self.streaming_tool_message_seq.saturating_add(1);
             self.streaming_tool_message_open = true;
         }
         let message_scope = self.streaming_tool_message_seq;
+        let mut active_tool_frame_requested = false;
         for mut call in streaming_tool_calls_from_event(value) {
             call.position_key = scoped_tool_position_key(message_scope, &call.position_key);
-            self.upsert_streaming_tool_call(call);
+            active_tool_frame_requested |= self.upsert_streaming_tool_call(call);
         }
         if event_type == "message_end" {
             self.streaming_tool_message_open = false;
         }
+        active_tool_frame_requested
     }
 
-    fn upsert_streaming_tool_call(&mut self, call: StreamingToolCall) {
+    fn apply_visible_tool_intent(&mut self, text: &str) -> bool {
+        let Some(tool) = visible_tool_intent_from_text(text) else {
+            return false;
+        };
+        let key = tool_intent_key(tool);
+        if self.tool_rows.contains_key(&key) {
+            return false;
+        }
+        if self.has_active_tool_for(tool) {
+            return false;
+        }
+        let mut row = TranscriptRow::with_title(
+            evidence_kind(tool),
+            active_tool_title(tool, &serde_json::json!({ "args": Value::Null })),
+            "preparing",
+        );
+        row.tool_started = Some(Instant::now());
+        let idx = self.insert_evidence_row(row);
+        self.tool_rows.insert(key, idx);
+        self.remove_turn_meta();
+        true
+    }
+
+    fn remove_provisional_tool_intent(&mut self, tool: &str) {
+        let key = tool_intent_key(tool);
+        let Some(index) = self.tool_rows.remove(&key) else {
+            return;
+        };
+        let Some(row) = self.transcript.get(index) else {
+            return;
+        };
+        if row.tool_call_id.is_none() && row.tool_started.is_some() && row.tool_elapsed.is_none() {
+            self.remove_transcript_row(index);
+        }
+    }
+
+    fn remove_unmatched_provisional_tool_intents(&mut self, matched_tools: &[String]) {
+        let tools = self
+            .tool_rows
+            .keys()
+            .filter_map(|key| key.strip_prefix("intent:"))
+            .filter(|tool| !matched_tools.iter().any(|matched| matched == *tool))
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        for tool in tools {
+            self.remove_provisional_tool_intent(&tool);
+        }
+    }
+
+    fn upsert_streaming_tool_call(&mut self, call: StreamingToolCall) -> bool {
         let id_key = call.id.as_deref().map(tool_id_key);
+        let intent_key = tool_intent_key(&call.tool_name);
         let idx = id_key
             .as_ref()
             .and_then(|key| self.tool_rows.get(key))
             .or_else(|| self.tool_rows.get(&call.position_key))
+            .or_else(|| self.tool_rows.get(&intent_key))
             .copied();
         let value = serde_json::json!({ "args": call.args });
+        let mut active_tool_frame_requested = false;
         let idx = if let Some(idx) = idx {
+            self.tool_rows.remove(&intent_key);
             let row = &mut self.transcript[idx];
             row.kind = evidence_kind(&call.tool_name);
             row.title = active_tool_title(&call.tool_name, &value);
@@ -908,6 +1162,7 @@ impl<'a> FullscreenUi<'a> {
             }
             if row.tool_started.is_none() {
                 row.tool_started = Some(Instant::now());
+                active_tool_frame_requested = true;
             }
             idx
         } else {
@@ -918,22 +1173,31 @@ impl<'a> FullscreenUi<'a> {
             );
             row.tool_call_id = call.id.clone();
             row.tool_started = Some(Instant::now());
+            active_tool_frame_requested = true;
             self.insert_evidence_row(row)
         };
         self.tool_rows.insert(call.position_key, idx);
         if let Some(id_key) = id_key {
             self.tool_rows.insert(id_key, idx);
         }
+        self.remove_turn_meta();
+        self.remove_orphan_provisional_tool_intents(&call.tool_name, Some(idx));
+        active_tool_frame_requested
     }
 
     fn finish_turn(&mut self) {
         self.mark_unfinished_tools_interrupted();
+        if let Some(idx) = self.reasoning_row {
+            self.finish_thinking_row(idx);
+        }
         self.assistant_row = None;
         self.reasoning_row = None;
         self.meta_row = None;
         self.tool_rows.clear();
         self.streaming_tool_message_open = false;
+        self.deferred_stream_events.clear();
         self.turn_outcome = None;
+        self.turn_had_reasoning = false;
         self.running_started = None;
         self.interrupt_requested = false;
         self.focus = FocusMode::Composer;
@@ -951,6 +1215,7 @@ impl<'a> FullscreenUi<'a> {
                 continue;
             };
             row.tool_elapsed = Some(started.elapsed());
+            row.title = completed_tool_title_from_active(row.kind, &row.title);
             row.failed = true;
             row.text = "interrupted".to_string();
         }
@@ -1037,8 +1302,21 @@ impl<'a> FullscreenUi<'a> {
         self.textarea = textarea_with_text(&self.history[next]);
     }
 
-    fn update_turn_meta(&mut self, debug: bool) {
-        if self.assistant_row.is_none() && self.turn_failures == 0 {
+    fn update_turn_meta(
+        &mut self,
+        debug: bool,
+        allow_visible_answer: bool,
+        allow_reasoning_only: bool,
+        allow_failure_summary: bool,
+    ) {
+        if self.has_active_tool_rows() {
+            self.remove_turn_meta();
+            return;
+        }
+        if !(allow_visible_answer && self.assistant_row.is_some()
+            || allow_reasoning_only && self.turn_had_reasoning
+            || allow_failure_summary && self.turn_failures > 0)
+        {
             return;
         }
         let meta = turn_meta_text(TurnMetaProjection {
@@ -1048,6 +1326,7 @@ impl<'a> FullscreenUi<'a> {
             started: self.turn_started,
             usage: self.turn_usage.as_ref(),
             metadata: self.turn_metadata.as_ref(),
+            accounting: self.turn_accounting.as_ref(),
             failures: self.turn_failures,
             debug,
         });
@@ -1067,45 +1346,80 @@ impl<'a> FullscreenUi<'a> {
         self.transcript[idx].text = meta;
     }
 
-    fn ensure_selection(&mut self) {
-        if self.selected_row.is_some_and(|idx| {
-            self.transcript
-                .get(idx)
-                .is_some_and(|row| row_visible(row, self.thinking_visible))
-        }) {
-            return;
+    fn remove_turn_meta(&mut self) {
+        if let Some(index) = self.meta_row {
+            self.remove_transcript_row(index);
         }
-        self.selected_row = self
-            .transcript
-            .iter()
-            .position(|row| row_visible(row, self.thinking_visible) && row.is_expandable())
-            .or_else(|| {
-                self.transcript
-                    .iter()
-                    .rposition(|row| row_visible(row, self.thinking_visible))
-            });
     }
 
-    fn move_selection(&mut self, direction: isize) {
-        if self.transcript.is_empty() {
-            self.selected_row = None;
-            return;
-        }
-        self.auto_follow_transcript = false;
-        self.ensure_selection();
-        let visible = self
+    fn has_active_tool_rows(&self) -> bool {
+        self.transcript.iter().any(active_tool_row)
+    }
+
+    fn has_active_tool_for(&self, tool: &str) -> bool {
+        let kind = evidence_kind(tool);
+        self.transcript
+            .iter()
+            .any(|row| row.kind == kind && active_tool_row(row))
+    }
+
+    fn remove_orphan_provisional_tool_intents(&mut self, tool: &str, keep_index: Option<usize>) {
+        let kind = evidence_kind(tool);
+        let fallback_title = active_tool_title(tool, &serde_json::json!({ "args": Value::Null }));
+        let mut indices = self
             .transcript
             .iter()
             .enumerate()
-            .filter_map(|(index, row)| row_visible(row, self.thinking_visible).then_some(index))
+            .filter_map(|(index, row)| {
+                (Some(index) != keep_index
+                    && row.kind == kind
+                    && row.title == fallback_title
+                    && row.tool_call_id.is_none()
+                    && active_tool_row(row))
+                .then_some(index)
+            })
             .collect::<Vec<_>>();
+        indices.sort_unstable_by(|a, b| b.cmp(a));
+        for index in indices {
+            self.remove_transcript_row(index);
+        }
+    }
+
+    fn ensure_selection(&mut self) {
+        if self
+            .selected_target
+            .is_some_and(|target| self.target_visible(target))
+        {
+            return;
+        }
+        if let Some(index) = self.selected_row
+            && let Some(row) = self.transcript.get(index)
+            && self.target_visible(TranscriptHitTarget::Row(row.id))
+        {
+            self.selected_target = Some(TranscriptHitTarget::Row(row.id));
+            return;
+        }
+        let targets = self.visible_transcript_targets();
+        self.selected_target = targets
+            .iter()
+            .copied()
+            .find(|target| self.target_toggleable(*target))
+            .or_else(|| targets.last().copied());
+        self.selected_row = self.selected_target.and_then(|target| self.target_row_index(target));
+    }
+
+    fn move_selection(&mut self, direction: isize) {
+        self.auto_follow_transcript = false;
+        self.ensure_selection();
+        let visible = self.visible_transcript_targets();
         if visible.is_empty() {
             self.selected_row = None;
+            self.selected_target = None;
             return;
         }
         let current_position = self
-            .selected_row
-            .and_then(|current| visible.iter().position(|index| *index == current))
+            .selected_target
+            .and_then(|current| visible.iter().position(|target| *target == current))
             .unwrap_or(0);
         let next_position = if direction < 0 {
             current_position.saturating_sub(direction.unsigned_abs())
@@ -1114,18 +1428,104 @@ impl<'a> FullscreenUi<'a> {
                 .saturating_add(direction as usize)
                 .min(visible.len().saturating_sub(1))
         };
-        self.selected_row = visible.get(next_position).copied();
+        self.set_selected_target(visible.get(next_position).copied());
+        self.scroll_selected_target_into_view();
+    }
+
+    fn scroll_selected_target_into_view(&mut self) {
+        let Some(selected) = self.selected_target else {
+            return;
+        };
+        if !self.transcript_layout_matches_viewport() && self.last_transcript_width > 0 {
+            refresh_transcript_layout(self, self.last_transcript_width);
+        }
+        let Some(block) = self
+            .transcript_layout
+            .blocks
+            .iter()
+            .find(|block| block.target == selected)
+        else {
+            return;
+        };
+        if block.height == 0 || self.last_transcript_height == 0 {
+            return;
+        }
+        let viewport_start = usize::from(self.scroll);
+        let viewport_end = viewport_start.saturating_add(usize::from(self.last_transcript_height));
+        let row_start = block.start;
+        let row_end = block.start.saturating_add(block.height);
+        if row_start < viewport_start {
+            self.scroll = row_start.min(usize::from(u16::MAX)) as u16;
+        } else if row_end > viewport_end {
+            let next = row_end.saturating_sub(usize::from(self.last_transcript_height));
+            self.scroll = next.min(usize::from(u16::MAX)) as u16;
+        }
+        self.clamp_transcript_scroll();
     }
 
     fn toggle_selected(&mut self) {
         self.auto_follow_transcript = false;
-        if let Some(index) = self.selected_row
-            && let Some(row) = self.transcript.get_mut(index)
-            && row_visible(row, self.thinking_visible)
-            && row.is_expandable()
-        {
-            row.expanded = !row.expanded;
+        if self.selected_target.is_none() {
+            self.ensure_selection();
         }
+        if let Some(target) = self.selected_target {
+            self.toggle_target(target);
+        }
+    }
+
+    fn visible_transcript_targets(&self) -> Vec<TranscriptHitTarget> {
+        transcript_render_blocks(self)
+            .iter()
+            .map(|block| render_block_target(block, self))
+            .collect()
+    }
+
+    fn target_visible(&self, target: TranscriptHitTarget) -> bool {
+        self.visible_transcript_targets()
+            .into_iter()
+            .any(|visible| visible == target)
+    }
+
+    fn target_row_index(&self, target: TranscriptHitTarget) -> Option<usize> {
+        match target {
+            TranscriptHitTarget::Row(row_id) => self.transcript.iter().position(|row| row.id == row_id),
+        }
+    }
+
+    fn set_selected_target(&mut self, target: Option<TranscriptHitTarget>) {
+        self.selected_target = target;
+        self.selected_row = target.and_then(|target| self.target_row_index(target));
+    }
+
+    fn target_toggleable(&self, target: TranscriptHitTarget) -> bool {
+        match target {
+            TranscriptHitTarget::Row(row_id) => self
+                .transcript
+                .iter()
+                .find(|row| row.id == row_id)
+                .is_some_and(TranscriptRow::is_expandable),
+        }
+    }
+
+    fn toggle_target(&mut self, target: TranscriptHitTarget) {
+        match target {
+            TranscriptHitTarget::Row(row_id) => {
+                if let Some(row) = self.transcript.iter_mut().find(|row| row.id == row_id)
+                    && row_visible(row, self.thinking_visible)
+                    && row.is_expandable()
+                {
+                    toggle_transcript_row_details(row);
+                }
+            }
+        }
+        self.set_selected_target(Some(target));
+        self.clamp_transcript_scroll();
+    }
+
+    fn transcript_hit(&self, column: u16, row: u16) -> Option<TranscriptHitTarget> {
+        self.last_entry_areas
+            .iter()
+            .find_map(|(target, area)| rect_contains(*area, column, row).then_some(*target))
     }
 }
 

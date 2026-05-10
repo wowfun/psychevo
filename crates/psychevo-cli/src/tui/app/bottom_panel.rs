@@ -151,10 +151,11 @@ impl TuiApp {
                 };
                 ui.set_bottom_panel_notice(message);
             }
+            Some(BottomSelectionValue::StatsRow(_)) => {}
             Some(BottomSelectionValue::Model { model, source }) => {
                 self.model_catalog.abort_unfinished();
                 if let Some(BottomPanel::Models(models)) = ui.bottom_panel.take() {
-                    ui.bottom_panel = Some(self.variant_panel(model, source, models));
+                    ui.bottom_panel = Some(self.variant_panel(*model, source, models));
                 }
             }
             Some(BottomSelectionValue::Variant { model, variant }) => {

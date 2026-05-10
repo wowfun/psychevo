@@ -1,5 +1,5 @@
 ---
-source: crates/psychevo-cli/src/tui.rs
+source: crates/psychevo-cli/src/tui/tests/fixtures.rs
 expression: combined
 ---
 fixture=wide_optional_sidebar
@@ -12,14 +12,14 @@ size=120x24
                                                                               Context
                                                                               workdir: /repo/psychevo
                                                                               branch: main
-                                                                              messages: 2  tools: 1
+                                                                              messages: 2
+                                                                              tool calls: 1
                                                                               tokens: 12,000
                                                                               context: 18.8%
 
                                                                               Modified Files
                                                                               M crates/psychevo-cli/src/tui.rs
                                                                               ?? specs/210-pevo-tui/testing.md
-
 
 
 
@@ -38,14 +38,14 @@ mock/model  high
 [default]                                                                              Context
 [default]                                                                              workdir: /repo/psychevo
 [default]                                                                              branch: main
-[default]                                                                              messages: 2  tools: 1
+[default]                                                                              messages: 2
+[default]                                                                              tool calls: 1
 [default]                                                                              tokens: 12,000
 [default]                                                                              context: 18.8%
 [default]
 [default]                                                                              Modified Files
 [default]                                                                              M crates/psychevo-cli/src/tui.rs
 [default]                                                                              ?? specs/210-pevo-tui/testing.md
-[default]
 [default]
 [default]
 [default]

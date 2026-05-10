@@ -79,7 +79,60 @@ fn assistant_reasoning_from_message(message: &Value) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
-fn history_tool_titles_from_message(message: &Value) -> Vec<(String, String)> {
+fn reasoning_only_message_receives_meta(message: &Value) -> bool {
+    if !assistant_message_allows_terminal_meta(message) {
+        return false;
+    }
+    !assistant_message_has_tool_calls(message)
+}
+
+fn visible_answer_message_receives_meta(message: &Value) -> bool {
+    assistant_message_allows_terminal_meta(message) && !assistant_message_has_tool_calls(message)
+}
+
+fn assistant_message_keeps_tool_calls_active(message: &Value) -> bool {
+    message.get("finish_reason").and_then(Value::as_str) == Some("tool_calls")
+        && message
+            .get("outcome")
+            .and_then(Value::as_str)
+            .is_none_or(|outcome| outcome == "normal")
+}
+
+fn assistant_message_allows_terminal_meta(message: &Value) -> bool {
+    if message
+        .get("finish_reason")
+        .and_then(Value::as_str)
+        .is_some_and(|finish_reason| matches!(finish_reason, "tool_calls" | "aborted"))
+    {
+        return false;
+    }
+    message
+        .get("outcome")
+        .and_then(Value::as_str)
+        .is_none_or(|outcome| outcome == "normal")
+}
+
+fn assistant_message_has_tool_calls(message: &Value) -> bool {
+    message
+        .get("content")
+        .and_then(Value::as_array)
+        .is_some_and(|content| {
+            content.iter().any(|block| {
+                block.get("type").and_then(Value::as_str) == Some("tool_call")
+                    || block.get("tool_calls").is_some()
+            })
+        })
+}
+
+#[derive(Debug, Clone)]
+struct HistoryToolCall {
+    id: String,
+    name: String,
+    active_title: String,
+    completed_title: String,
+}
+
+fn history_tool_calls_from_message(message: &Value) -> Vec<HistoryToolCall> {
     let Some(content) = message.get("content").and_then(Value::as_array) else {
         return Vec::new();
     };
@@ -93,7 +146,12 @@ fn history_tool_titles_from_message(message: &Value) -> Vec<(String, String)> {
             let name = block.get("name").and_then(Value::as_str)?;
             let args = tool_call_args_from_block(block);
             let value = serde_json::json!({ "args": args });
-            Some((id.to_string(), tool_title(name, &value)))
+            Some(HistoryToolCall {
+                id: id.to_string(),
+                name: name.to_string(),
+                active_title: active_tool_title(name, &value),
+                completed_title: tool_title(name, &value),
+            })
         })
         .collect()
 }
@@ -129,6 +187,7 @@ fn history_meta_text(
     message: &Value,
     _usage: Option<&Value>,
     metadata: Option<&Value>,
+    accounting: Option<&Value>,
     prompt_started_ms: Option<i64>,
 ) -> Option<String> {
     let provider = message
@@ -142,6 +201,9 @@ fn history_meta_text(
     }
     if let Some(elapsed) = history_elapsed_duration(message, metadata, prompt_started_ms) {
         parts.push(format_duration_compact(elapsed));
+    }
+    if let Some(cost) = compact_cost(accounting) {
+        parts.push(cost);
     }
     (!parts.is_empty()).then(|| parts.join("  "))
 }
@@ -190,6 +252,19 @@ fn tool_started_instant(value: &Value) -> Instant {
         .unwrap_or(now)
 }
 
+fn history_tool_started_instant(message: &Value) -> Instant {
+    let now = Instant::now();
+    let Some(started_at_ms) = message_timestamp_ms(message) else {
+        return now;
+    };
+    let elapsed_ms = wall_now_ms().saturating_sub(started_at_ms);
+    if elapsed_ms <= 0 {
+        return now;
+    }
+    now.checked_sub(Duration::from_millis(elapsed_ms as u64))
+        .unwrap_or(now)
+}
+
 fn wall_now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -201,6 +276,7 @@ fn row_visible(row: &TranscriptRow, thinking_visible: bool) -> bool {
     thinking_visible || row.kind != TranscriptKind::Thinking
 }
 
+#[cfg(test)]
 fn next_visible_row(
     rows: &[TranscriptRow],
     index: usize,
@@ -211,6 +287,7 @@ fn next_visible_row(
         .find(|row| row_visible(row, thinking_visible))
 }
 
+#[cfg(test)]
 fn compact_trailing_for(
     rows: &[TranscriptRow],
     index: usize,
@@ -221,13 +298,19 @@ fn compact_trailing_for(
         .is_some_and(|next| row.kind == TranscriptKind::Answer && next.kind == TranscriptKind::Meta)
 }
 
-fn transcript_line_count(rows: &[TranscriptRow], width: u16, thinking_visible: bool) -> usize {
+#[cfg(test)]
+fn transcript_line_count(
+    rows: &[TranscriptRow],
+    width: u16,
+    thinking_visible: bool,
+    workdir: &Path,
+) -> usize {
     rows.iter()
         .enumerate()
         .filter(|(_, row)| row_visible(row, thinking_visible))
         .map(|(index, row)| {
             let compact_trailing = compact_trailing_for(rows, index, row, thinking_visible);
-            let lines = transcript_lines(row, false, compact_trailing, width);
+            let lines = transcript_lines(row, false, compact_trailing, width, workdir);
             wrapped_line_count(&lines, width)
         })
         .sum()

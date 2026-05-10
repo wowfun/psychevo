@@ -16,12 +16,18 @@ crossterm.workspace = true
 ignore.workspace = true
 psychevo-ai = { path = "../psychevo-ai" }
 psychevo-runtime = { path = "../psychevo-runtime" }
+pulldown-cmark.workspace = true
 ratatui.workspace = true
 ratatui-textarea.workspace = true
+regex-lite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+supports-color.workspace = true
 tokio.workspace = true
 unicode-width.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

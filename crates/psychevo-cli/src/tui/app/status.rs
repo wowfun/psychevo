@@ -120,7 +120,6 @@ impl TuiApp {
             format!("model: {}", self.model_display_value()),
             self.variant_line(),
             format!("mode: {}", self.current_mode.as_str()),
-            format!("thinking: {}", on_off(self.thinking_visible)),
             format!("debug: {}", on_off(self.debug)),
         ]
     }

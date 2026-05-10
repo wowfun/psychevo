@@ -1,6 +1,5 @@
 ---
-source: crates/psychevo-cli/src/tui.rs
-assertion_line: 5997
+source: crates/psychevo-cli/src/tui/tests/fixtures.rs
 expression: combined
 ---
 fixture=completed_ledger_collapsed_tool_output
@@ -9,21 +8,21 @@ size=120x24
 --- text ---
 › Summarize the TUI snapshot harness.
 
-▌ Thinking: Check layout boundaries, style roles, and expandable evidence.
+• Thinking
+  └ Check layout boundaries, style roles, and expandable evidence.
 
-• Explored crates/psychevo-cli/src/tui.rs [+]
+• Explored crates/psychevo-cli/src/tui.rs                                                               ▸ 16 more lines
   └ 01: crates/psychevo-cli/src/tui.rs evidence row
     02: crates/psychevo-cli/src/tui.rs evidence row
     03: crates/psychevo-cli/src/tui.rs evidence row
     04: crates/psychevo-cli/src/tui.rs evidence row
-    ... 20 more lines
+    05: crates/psychevo-cli/src/tui.rs evidence row
+    06: crates/psychevo-cli/src/tui.rs evidence row
+    07: crates/psychevo-cli/src/tui.rs evidence row
+    08: crates/psychevo-cli/src/tui.rs evidence row
 
 The harness snapshots stable buffer text and style roles, then leaves real terminal screenshots as diagnostics.
 ▌ mock/mock-model high  2s
-
-
-
-
 
 
 
@@ -35,21 +34,21 @@ mock/model  high
 --- styles ---
 [dim]› [default]Summarize the TUI snapshot harness.
 [default]
-[dim]▌ [paper]Thinking: [dim]Check layout boundaries, style roles, and expandable evidence.[default]
+[paper]• Thinking[default]
+[dim]  └ Check layout boundaries, style roles, and expandable evidence.[default]
 [default]
-[green]• [default]Explored crates/psychevo-cli/src/tui.rs [+]
+[green]• [default]Explored crates/psychevo-cli/src/tui.rs                                                               [dim]▸ 16 more lines[default]
 [dim]  └ [default]01: crates/psychevo-cli/src/tui.rs evidence row
 [dim]    [default]02: crates/psychevo-cli/src/tui.rs evidence row
 [dim]    [default]03: crates/psychevo-cli/src/tui.rs evidence row
 [dim]    [default]04: crates/psychevo-cli/src/tui.rs evidence row
-[dim]    [default]... 20 more lines
+[dim]    [default]05: crates/psychevo-cli/src/tui.rs evidence row
+[dim]    [default]06: crates/psychevo-cli/src/tui.rs evidence row
+[dim]    [default]07: crates/psychevo-cli/src/tui.rs evidence row
+[dim]    [default]08: crates/psychevo-cli/src/tui.rs evidence row
 [default]
 [default]The harness snapshots stable buffer text and style roles, then leaves real terminal screenshots as diagnostics.
 [dim]▌ mock/mock-model high  2s[default]
-[default]
-[default]
-[default]
-[default]
 [default]
 [default]
 [default]

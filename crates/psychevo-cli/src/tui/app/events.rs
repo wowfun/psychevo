@@ -5,21 +5,35 @@ impl TuiApp {
         changed |= self.drain_finished_clipboard_copies(ui);
         changed |= self.drain_model_catalog_fetches(ui).await?;
         changed |= ui.drain_file_search_results();
-        let mut pending = Vec::new();
-        if let Some(running) = &mut ui.running {
-            while let Ok(event) = running.rx.try_recv() {
-                pending.push(event);
-            }
-        }
-        let had_pending = !pending.is_empty();
+
+        let (had_pending, active_tool_frame_requested) =
+            self.drain_available_fullscreen_stream_events(ui);
         changed |= had_pending;
-        for event in pending {
-            self.apply_fullscreen_stream_event(ui, event);
-        }
         if had_pending {
             ui.follow_transcript_if_needed();
             ui.refresh_sidebar(self);
         }
+        if active_tool_frame_requested {
+            return Ok(true);
+        }
+
+        if ui
+            .running
+            .as_ref()
+            .is_some_and(|running| running.task.is_finished())
+        {
+            let (had_pending, active_tool_frame_requested) =
+                self.drain_available_fullscreen_stream_events(ui);
+            changed |= had_pending;
+            if had_pending {
+                ui.follow_transcript_if_needed();
+                ui.refresh_sidebar(self);
+            }
+            if active_tool_frame_requested {
+                return Ok(true);
+            }
+        }
+
         if ui
             .running
             .as_ref()
@@ -31,11 +45,16 @@ impl TuiApp {
                 RunningTask::Agent(task) => RunningCompletion::Agent(task.await),
                 RunningTask::UserShell(task) => RunningCompletion::UserShell(task.await),
             };
+            let mut pending = VecDeque::new();
             while let Ok(event) = running.rx.try_recv() {
-                self.apply_fullscreen_stream_event(ui, event);
+                pending.push_back(event);
             }
+            let (had_pending, _active_tool_frame_requested) =
+                self.apply_pending_fullscreen_stream_events(ui, pending);
             changed = true;
-            ui.follow_transcript_if_needed();
+            if had_pending {
+                ui.follow_transcript_if_needed();
+            }
             let mut restore_queued_after_interrupt = false;
             match completed {
                 RunningCompletion::Agent(result) => match result {
@@ -88,18 +107,52 @@ impl TuiApp {
             } else {
                 self.start_next_queued_input(ui)?;
             }
-        } else if ui.turn_outcome.is_some() {
+        } else if ui.turn_outcome.is_some() && ui.deferred_stream_events.is_empty() {
             self.finish_streamed_agent_turn(ui);
             changed = true;
         }
         Ok(changed)
     }
 
-    fn apply_fullscreen_stream_event(&mut self, ui: &mut FullscreenUi<'_>, event: RunStreamEvent) {
+    fn drain_available_fullscreen_stream_events(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+    ) -> (bool, bool) {
+        let mut pending = std::mem::take(&mut ui.deferred_stream_events);
+        if let Some(running) = &mut ui.running {
+            while let Ok(event) = running.rx.try_recv() {
+                pending.push_back(event);
+            }
+        }
+        self.apply_pending_fullscreen_stream_events(ui, pending)
+    }
+
+    fn apply_pending_fullscreen_stream_events(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        mut pending: VecDeque<RunStreamEvent>,
+    ) -> (bool, bool) {
+        let mut had_pending = false;
+        while let Some(event) = pending.pop_front() {
+            had_pending = true;
+            let active_tool_frame_requested = self.apply_fullscreen_stream_event(ui, event);
+            if active_tool_frame_requested {
+                ui.deferred_stream_events.extend(pending);
+                return (true, true);
+            }
+        }
+        (had_pending, false)
+    }
+
+    fn apply_fullscreen_stream_event(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        event: RunStreamEvent,
+    ) -> bool {
         if let RunStreamEvent::Event(value) = &event {
             self.observe_fullscreen_value_event(value);
         }
-        ui.apply_stream_event(event, self.thinking_visible, self.debug);
+        ui.apply_stream_event(event, self.thinking_visible, self.debug)
     }
 
     fn observe_fullscreen_value_event(&mut self, value: &Value) {

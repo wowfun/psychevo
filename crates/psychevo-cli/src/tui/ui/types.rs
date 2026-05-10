@@ -19,13 +19,30 @@ enum TranscriptKind {
     Error,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct TranscriptRowId(u64);
+
+static NEXT_TRANSCRIPT_ROW_ID: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum TranscriptHitTarget {
+    Row(TranscriptRowId),
+}
+
+#[derive(Debug, Clone)]
+enum TranscriptRenderBlock {
+    Row { index: usize },
+}
+
 #[derive(Debug, Clone)]
 struct TranscriptRow {
+    id: TranscriptRowId,
     kind: TranscriptKind,
     title: String,
     text: String,
     full_text: Option<String>,
     expanded: bool,
+    details_collapsed: bool,
     failed: bool,
     tool_call_id: Option<String>,
     tool_started: Option<Instant>,
@@ -36,7 +53,7 @@ struct TranscriptRow {
 struct TranscriptLayoutCache {
     width: u16,
     thinking_visible: bool,
-    rows: Vec<TranscriptLayoutRow>,
+    blocks: Vec<TranscriptLayoutBlock>,
     total_height: usize,
     #[cfg(test)]
     recomputed_rows: usize,
@@ -50,10 +67,19 @@ impl TranscriptLayoutCache {
 }
 
 #[derive(Debug, Clone)]
-struct TranscriptLayoutRow {
-    key: TranscriptLayoutRowKey,
+struct TranscriptLayoutBlock {
+    key: TranscriptLayoutBlockKey,
+    target: TranscriptHitTarget,
     start: usize,
     height: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TranscriptLayoutBlockKey {
+    target: TranscriptHitTarget,
+    compact_trailing: bool,
+    selected: bool,
+    row_key: TranscriptLayoutRowKey,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +90,7 @@ struct TranscriptLayoutRowKey {
     kind: TranscriptKind,
     failed: bool,
     expanded: bool,
+    details_collapsed: bool,
     expandable: bool,
     tool_elapsed_hash: u64,
     active_tool_marker_hash: u64,
@@ -78,17 +105,21 @@ impl TranscriptRow {
     }
 
     fn with_title(kind: TranscriptKind, title: impl Into<String>, text: impl Into<String>) -> Self {
-        Self {
+        let mut row = Self {
+            id: TranscriptRowId(NEXT_TRANSCRIPT_ROW_ID.fetch_add(1, Ordering::Relaxed)),
             kind,
             title: title.into(),
             text: text.into(),
             full_text: None,
             expanded: false,
+            details_collapsed: false,
             failed: false,
             tool_call_id: None,
             tool_started: None,
             tool_elapsed: None,
-        }
+        };
+        row.apply_default_evidence_collapse();
+        row
     }
 
     fn expandable_text(&self) -> &str {
@@ -103,6 +134,32 @@ impl TranscriptRow {
         self.full_text
             .as_ref()
             .is_some_and(|full| full != &self.text)
+            || foldable_evidence_body(self)
+            || foldable_tool_title(self)
+    }
+
+    fn apply_default_evidence_collapse(&mut self) {
+        if !matches!(
+            self.kind,
+            TranscriptKind::Thinking
+                | TranscriptKind::Explored
+                | TranscriptKind::Ran
+                | TranscriptKind::Changed
+        ) || self.expanded
+        {
+            return;
+        }
+        let source = self
+            .full_text
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| self.text.clone());
+        if !ledger_body_collapse_policy().should_collapse(&source) {
+            return;
+        }
+        let collapsed = ledger_body_collapse_policy().collapse(&source);
+        self.text = collapsed.preview;
+        self.full_text = collapsed.full_text;
     }
 }
 
@@ -114,6 +171,7 @@ enum FocusMode {
 
 struct FullscreenUi<'a> {
     textarea: TextArea<'a>,
+    workdir: PathBuf,
     transcript: Vec<TranscriptRow>,
     assistant_row: Option<usize>,
     reasoning_row: Option<usize>,
@@ -121,6 +179,7 @@ struct FullscreenUi<'a> {
     tool_rows: BTreeMap<String, usize>,
     streaming_tool_message_seq: u64,
     streaming_tool_message_open: bool,
+    deferred_stream_events: VecDeque<RunStreamEvent>,
     history_tool_titles: BTreeMap<String, String>,
     turn_started: Option<Instant>,
     turn_provider: String,
@@ -129,8 +188,10 @@ struct FullscreenUi<'a> {
     turn_context_limit: Option<u64>,
     turn_usage: Option<Value>,
     turn_metadata: Option<Value>,
+    turn_accounting: Option<Value>,
     turn_failures: usize,
     turn_outcome: Option<Outcome>,
+    turn_had_reasoning: bool,
     history_prompt_started_ms: Option<i64>,
     thinking_visible: bool,
     running: Option<RunningTurn>,
@@ -147,13 +208,17 @@ struct FullscreenUi<'a> {
     pending_scroll_to_bottom: bool,
     focus: FocusMode,
     selected_row: Option<usize>,
-    last_entry_areas: Vec<(usize, Rect)>,
+    selected_target: Option<TranscriptHitTarget>,
+    last_entry_areas: Vec<(TranscriptHitTarget, Rect)>,
+    mouse_down_target: Option<TranscriptHitTarget>,
+    mouse_dragged: bool,
     sidebar_forced: bool,
     sidebar_hidden: bool,
     last_sidebar_visible: bool,
     sidebar: SidebarSnapshot,
     sidebar_tokens: Option<u64>,
     sidebar_context_limit: Option<u64>,
+    sidebar_cost_nanodollars: Option<i64>,
     history: Vec<String>,
     history_kinds: Vec<ComposerHistoryKind>,
     history_index: Option<usize>,
@@ -217,6 +282,7 @@ struct SidebarSnapshot {
     branch: String,
     tokens: Option<u64>,
     context_percent: Option<f64>,
+    cost_nanodollars: Option<i64>,
     message_count: usize,
     tool_count: usize,
     changed_files: Vec<String>,
@@ -264,8 +330,9 @@ enum BottomSelectionValue {
     FetchAllModels,
     FetchProvider(String),
     ProviderInfo(String),
+    StatsRow(String),
     Model {
-        model: ConfiguredModel,
+        model: Box<ConfiguredModel>,
         source: ModelRowSource,
     },
     Variant {
@@ -291,6 +358,7 @@ enum ModelRowSource {
 enum BottomPanel {
     Sessions(BottomSelectionPanel),
     Models(BottomSelectionPanel),
+    Stats(BottomSelectionPanel),
     ProviderWizard(ProviderWizardPanel),
     Variants {
         models: Box<BottomSelectionPanel>,
@@ -573,6 +641,7 @@ impl BottomSelectionValue {
                     format!("fetch:provider:{provider}")
                 }
             }
+            BottomSelectionValue::StatsRow(key) => format!("stats:{key}"),
             BottomSelectionValue::Model { model, .. } => {
                 format!("model:{}", format_model_spec(model))
             }
@@ -589,7 +658,7 @@ impl BottomSelectionValue {
 impl BottomPanel {
     fn selection(&self) -> &BottomSelectionPanel {
         match self {
-            BottomPanel::Sessions(panel) | BottomPanel::Models(panel) => panel,
+            BottomPanel::Sessions(panel) | BottomPanel::Models(panel) | BottomPanel::Stats(panel) => panel,
             BottomPanel::ProviderWizard(_) => {
                 panic!("provider wizard does not expose a selection panel")
             }
@@ -599,7 +668,7 @@ impl BottomPanel {
 
     fn selection_mut(&mut self) -> &mut BottomSelectionPanel {
         match self {
-            BottomPanel::Sessions(panel) | BottomPanel::Models(panel) => panel,
+            BottomPanel::Sessions(panel) | BottomPanel::Models(panel) | BottomPanel::Stats(panel) => panel,
             BottomPanel::ProviderWizard(_) => {
                 panic!("provider wizard does not expose a selection panel")
             }
@@ -615,6 +684,7 @@ impl BottomPanel {
         match self {
             BottomPanel::Sessions(panel) => panel.session_view,
             BottomPanel::Models(_)
+            | BottomPanel::Stats(_)
             | BottomPanel::ProviderWizard(_)
             | BottomPanel::Variants { .. } => None,
         }

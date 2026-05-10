@@ -1,5 +1,6 @@
 ---
-source: crates/psychevo-cli/src/tui/tests.rs
+source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 341
 expression: combined
 ---
 fixture=file_completion_popup
@@ -50,7 +51,7 @@ mock/model  high
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [default]│ files
 [default]│[cyan]  [magenta]dir [default]  src
-[default]│[cyan]> [magenta]file[default]  src/main.rs
+[default]│[cyan]> [magenta]file[cyan]  src/main.rs[default]
 [default]│[cyan]  [magenta]file[default]  crates/psychevo-cli/src/tui/mod.rs
 [default]│
 [dim]›[default] review @src

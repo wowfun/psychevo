@@ -66,6 +66,17 @@ enum FixtureKind {
     RunningThinking,
     CollapsedTool,
     ExpandedTool,
+    ExpandedLongCommand,
+    CollapsedJsonTool,
+    LongCommandFoldedOutput,
+    ConsecutiveToolRows,
+    RichMarkdown,
+    ActiveWriteAfterAnswer,
+    ActiveVisibleWritePreamble,
+    ActiveReasoningWrite,
+    LongMarkdownBottom,
+    LongThinkingMarkdownBottom,
+    LongThinkingMarkdownExpandedBottom,
     DebugMeta,
     FailureMeta,
 }
@@ -98,15 +109,73 @@ fn fixture_ui<'a>(app: &TuiApp, kind: FixtureKind) -> FullscreenUi<'a> {
                 false,
             );
             ui.running_elapsed_override = Some(Duration::from_secs(12));
-            ui.transcript.push(TranscriptRow::with_title(
+            let mut row = TranscriptRow::with_title(
                 TranscriptKind::Explored,
                 "Explored crates/psychevo-cli/src/tui.rs",
                 "running",
-            ));
+            );
+            row.tool_started = Some(
+                Instant::now()
+                    .checked_sub(Duration::from_secs(12))
+                    .expect("instant"),
+            );
+            ui.transcript.push(row);
         }
         FixtureKind::CollapsedTool | FixtureKind::ExpandedTool => {
             ui.transcript.clear();
             push_completed_turn(&mut ui, kind);
+        }
+        FixtureKind::ExpandedLongCommand => {
+            ui.transcript.clear();
+            push_expanded_long_command_turn(&mut ui);
+        }
+        FixtureKind::CollapsedJsonTool => {
+            ui.transcript.clear();
+            push_collapsed_json_tool_turn(&mut ui);
+        }
+        FixtureKind::LongCommandFoldedOutput => {
+            ui.transcript.clear();
+            push_long_command_folded_output_turn(&mut ui);
+        }
+        FixtureKind::ConsecutiveToolRows => {
+            ui.transcript.clear();
+            push_consecutive_tool_rows_turn(&mut ui);
+        }
+        FixtureKind::RichMarkdown => {
+            ui.transcript.clear();
+            push_rich_markdown_turn(&mut ui, &app.workdir);
+        }
+        FixtureKind::ActiveWriteAfterAnswer => {
+            ui.transcript.clear();
+            push_active_write_after_answer_turn(&mut ui);
+        }
+        FixtureKind::ActiveVisibleWritePreamble => {
+            ui.transcript.clear();
+            push_active_visible_write_preamble_turn(&mut ui);
+        }
+        FixtureKind::ActiveReasoningWrite => {
+            ui.transcript.clear();
+            push_active_reasoning_write_turn(&mut ui);
+        }
+        FixtureKind::LongMarkdownBottom => {
+            ui.transcript.clear();
+            push_long_markdown_bottom_turn(&mut ui);
+        }
+        FixtureKind::LongThinkingMarkdownBottom => {
+            ui.transcript.clear();
+            push_long_thinking_markdown_bottom_turn(&mut ui);
+        }
+        FixtureKind::LongThinkingMarkdownExpandedBottom => {
+            ui.transcript.clear();
+            push_long_thinking_markdown_bottom_turn(&mut ui);
+            if let Some(row) = ui
+                .transcript
+                .iter_mut()
+                .find(|row| row.kind == TranscriptKind::Thinking)
+            {
+                row.expanded = true;
+            }
+            ui.scroll_to_bottom();
         }
         FixtureKind::DebugMeta => {
             ui.transcript.clear();
@@ -130,6 +199,7 @@ fn stable_sidebar() -> SidebarSnapshot {
         branch: "main".to_string(),
         tokens: Some(12_000),
         context_percent: Some(18.8),
+        cost_nanodollars: None,
         message_count: 2,
         tool_count: 1,
         changed_files: vec![
@@ -200,14 +270,8 @@ fn push_completed_turn(ui: &mut FullscreenUi<'_>, kind: FixtureKind) {
     let mut row = TranscriptRow::with_title(
         TranscriptKind::Explored,
         "Explored crates/psychevo-cli/src/tui.rs",
-        long_tool_output()
-            .lines()
-            .take(collapsed_fixture_lines(kind))
-            .collect::<Vec<_>>()
-            .join("\n")
-            + &format!("\n... {} more lines", 24 - collapsed_fixture_lines(kind)),
+        long_tool_output(),
     );
-    row.full_text = Some(long_tool_output());
     if matches!(kind, FixtureKind::ExpandedTool) {
         row.expanded = true;
         ui.focus = FocusMode::Transcript;
@@ -258,10 +322,95 @@ fn push_completed_turn(ui: &mut FullscreenUi<'_>, kind: FixtureKind) {
             started: None,
             usage: Some(&usage),
             metadata: Some(&metadata),
+            accounting: None,
             failures: 0,
             debug,
         }),
     ));
+}
+
+fn push_consecutive_tool_rows_turn(ui: &mut FullscreenUi<'_>) {
+    ui.push_user("Summarize several tool calls.".to_string());
+    ui.transcript.push(TranscriptRow::with_title(
+        TranscriptKind::Thinking,
+        "Thinking",
+        "I need to inspect files and run checks before answering.",
+    ));
+    ui.transcript.push(TranscriptRow::with_title(
+        TranscriptKind::Explored,
+        "Explored crates/psychevo-cli/src/tui/render/transcript.rs",
+        "read 240 lines",
+    ));
+    ui.transcript.push(TranscriptRow::with_title(
+        TranscriptKind::Ran,
+        "Ran cargo test -p psychevo-cli tui::tests",
+        "ok",
+    ));
+    ui.transcript.push(TranscriptRow::with_title(
+        TranscriptKind::Changed,
+        "Changed crates/psychevo-cli/src/tui/render/transcript.rs",
+        "write normal",
+    ));
+    ui.transcript.push(TranscriptRow::with_title(
+        TranscriptKind::Ran,
+        "Ran cargo fmt",
+        "ok",
+    ));
+    ui.transcript.push(TranscriptRow::with_title(
+        TranscriptKind::Answer,
+        "",
+        "The tool evidence stays flat even when several tool rows arrive consecutively.",
+    ));
+    ui.scroll_to_bottom();
+}
+
+fn push_expanded_long_command_turn(ui: &mut FullscreenUi<'_>) {
+    ui.push_user("Inspect HN comments with sqlite.".to_string());
+    let command = "cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db \"SELECT id || '|' || by || '|' || text FROM comments WHERE story_id = 48073680 ORDER BY id\" 2>&1 | head -c 3000";
+    let mut row = TranscriptRow::with_title(
+        TranscriptKind::Ran,
+        format!("Ran {command}"),
+        "48073976||aurareturn||6 days of work to do this.\n48074445||aniclecha||I think the industry is moving to English.",
+    );
+    row.expanded = true;
+    let row_id = row.id;
+    ui.transcript.push(row);
+    ui.focus = FocusMode::Transcript;
+    ui.selected_target = Some(TranscriptHitTarget::Row(row_id));
+    ui.selected_row = Some(1);
+    ui.scroll_to_bottom();
+}
+
+fn push_collapsed_json_tool_turn(ui: &mut FullscreenUi<'_>) {
+    ui.push_user("Inspect cached HN comments.".to_string());
+    let json = format!(
+        "{{\"comments\":[{}]}}",
+        (1..=32)
+            .map(|index| format!(
+                "{{\"id\":4807{index:04},\"by\":\"user{index}\",\"text\":\"{}\"}}",
+                "identity verification discussion ".repeat(2)
+            ))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    ui.transcript.push(TranscriptRow::with_title(
+        TranscriptKind::Ran,
+        "Ran sqlite3 feeds/.cache/hn.db",
+        json,
+    ));
+    ui.scroll_to_bottom();
+}
+
+fn push_long_command_folded_output_turn(ui: &mut FullscreenUi<'_>) {
+    ui.push_user("Fetch comments from sqlite.".to_string());
+    let command = "cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db \"SELECT id || '|' || by || '|' || text FROM comments WHERE story_id = 48072190 ORDER BY id\"";
+    let output = (1..=12)
+        .map(|index| format!("4807{index:04}||user{index}||cached comment text"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let row = TranscriptRow::with_title(TranscriptKind::Ran, format!("Ran {command}"), output);
+    ui.transcript.push(row);
+    ui.scroll_to_bottom();
 }
 
 fn push_failure_turn(ui: &mut FullscreenUi<'_>) {
@@ -292,11 +441,204 @@ fn long_tool_output() -> String {
         .join("\n")
 }
 
-fn collapsed_fixture_lines(kind: FixtureKind) -> usize {
-    match kind {
-        FixtureKind::ExpandedTool => 20,
-        _ => 4,
-    }
+fn push_rich_markdown_turn(ui: &mut FullscreenUi<'_>, workdir: &Path) {
+    ui.push_user("Render a markdown answer.".to_string());
+    let path = workdir.join("crates/psychevo-cli/src/tui/render/transcript.rs");
+    ui.transcript.push(TranscriptRow::with_title(
+        TranscriptKind::Answer,
+        "",
+        format!(
+            "# Rendering pass\n\n- Keep **ledger** rhythm\n- Style `inline code`\n\n```rust\nfn render() {{}}\n```\n\nSee [transcript]({}:42).",
+            path.display()
+        ),
+    ));
+}
+
+fn push_active_write_after_answer_turn(ui: &mut FullscreenUi<'_>) {
+    ui.push_user("Write the report after collecting data.".to_string());
+    ui.start_assistant();
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "run_start",
+            "provider": "xiaomi-token-plan",
+            "model": "mimo-v2.5-pro",
+            "mode": "default"
+        }),
+        false,
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Now I have all the data I need. Let me write the full report:"
+                    },
+                    {
+                        "type": "tool_call",
+                        "id": "call_write_report",
+                        "name": "write",
+                        "arguments": {
+                            "path": "/tmp/hackernews-hot-05-15.md",
+                            "content": "report body"
+                        },
+                        "arguments_json": "{\"path\":\"/tmp/hackernews-hot-05-15.md\",\"content\":\"report body\"}",
+                        "arguments_error": null,
+                        "content_index": 1,
+                        "call_index": 0
+                    }
+                ],
+                "finish_reason": "tool_calls",
+                "outcome": "normal",
+                "model": "mimo-v2.5-pro",
+                "provider": "xiaomi-token-plan"
+            },
+            "metadata": {
+                "elapsed_ms": 186_260,
+                "reasoning_effort": "low"
+            }
+        }),
+        false,
+    );
+    ui.scroll_to_bottom();
+}
+
+fn push_active_visible_write_preamble_turn(ui: &mut FullscreenUi<'_>) {
+    ui.push_user("Write the complete report.".to_string());
+    ui.start_assistant();
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "run_start",
+            "provider": "xiaomi-token-plan",
+            "model": "mimo-v2.5-pro",
+            "mode": "default"
+        }),
+        false,
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_update",
+            "message": {
+                "role": "assistant",
+                "content": [{
+                    "type": "text",
+                    "text": "Now I have all the data needed. Let me write the complete report."
+                }],
+                "outcome": "normal",
+                "model": "mimo-v2.5-pro",
+                "provider": "xiaomi-token-plan"
+            }
+        }),
+        false,
+    );
+    ui.scroll_to_bottom();
+}
+
+fn push_active_reasoning_write_turn(ui: &mut FullscreenUi<'_>) {
+    ui.push_user("Write the report after reasoning.".to_string());
+    ui.start_assistant();
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "run_start",
+            "provider": "xiaomi-token-plan",
+            "model": "mimo-v2.5-pro",
+            "mode": "default"
+        }),
+        false,
+    );
+    ui.apply_stream_event(
+        RunStreamEvent::ReasoningDelta {
+            text: "Let me compose the full report now. I have all the data. Let me write it out."
+                .to_string(),
+        },
+        true,
+        false,
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [{
+                    "type": "tool_call",
+                    "id": "call_write_report",
+                    "name": "write",
+                    "arguments": {
+                        "path": "/tmp/hackernews-hot-05-39.md",
+                        "content": "report body"
+                    },
+                    "arguments_json": "{\"path\":\"/tmp/hackernews-hot-05-39.md\",\"content\":\"report body\"}",
+                    "arguments_error": null,
+                    "content_index": 0,
+                    "call_index": 0
+                }],
+                "finish_reason": "tool_calls",
+                "outcome": "normal",
+                "model": "mimo-v2.5-pro",
+                "provider": "xiaomi-token-plan"
+            },
+            "metadata": {
+                "elapsed_ms": 190_546,
+                "reasoning_effort": "low"
+            }
+        }),
+        false,
+    );
+    ui.scroll_to_bottom();
+}
+
+fn push_long_markdown_bottom_turn(ui: &mut FullscreenUi<'_>) {
+    ui.push_user("Render long markdown table and scroll to bottom.".to_string());
+    let rows = (1..=32)
+        .map(|index| {
+            format!(
+                "| {index} | **Topic {index}** - mixed Markdown/CJK width validation row | {} |",
+                100 + index
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    ui.transcript.push(TranscriptRow::with_title(
+        TranscriptKind::Answer,
+        "",
+        format!(
+            "# Long Markdown Scroll Fixture\n\n| # | Topic | Score |\n|---|---|---|\n{rows}\n\nLONG_MARKDOWN_BOTTOM_MARKER"
+        ),
+    ));
+    ui.transcript.push(TranscriptRow::with_title(
+        TranscriptKind::Meta,
+        "",
+        "mock/mock-model low 7m05s 1 failure",
+    ));
+    ui.scroll_to_bottom();
+}
+
+fn push_long_thinking_markdown_bottom_turn(ui: &mut FullscreenUi<'_>) {
+    ui.push_user("Restore a reasoning-only daily report.".to_string());
+    let rows = (1..=12)
+        .map(|index| {
+            format!(
+                "| {index} | **热门话题 {index}** - 混合 Markdown/CJK 宽度校验行 | {} |",
+                180 + index
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    ui.transcript.push(TranscriptRow::with_title(
+        TranscriptKind::Thinking,
+        "Thinking",
+        format!(
+            "Hacker News 日报已生成完成！✅\n\n**文件：** `feeds/2026-05-10/hackernews-hot-04-03.md`（25KB）\n\n### 今日 12 条热门话题速览：\n\n| # | 话题 | 💬 |\n|---|------|-----|\n{rows}"
+        ),
+    ));
+    ui.transcript.push(TranscriptRow::with_title(
+        TranscriptKind::Meta,
+        "",
+        "xiaomi-token-plan/mimo-v2.5-pro low 7m05s 1 failure",
+    ));
+    ui.scroll_to_bottom();
 }
 
 fn assert_tui_snapshot(

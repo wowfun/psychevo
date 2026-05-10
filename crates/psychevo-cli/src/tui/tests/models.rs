@@ -307,6 +307,7 @@ async fn fetched_model_selection_uses_provider_default_and_only_persists_tui_sta
     state.fetched = vec![ModelCatalogEntry {
         id: "remote-model".to_string(),
         context_limit: None,
+        metadata: Default::default(),
     }];
     let config_before =
         fs::read_to_string(app.config_path.as_ref().expect("config")).expect("config before");
@@ -449,6 +450,7 @@ async fn model_fetch_failure_preserves_old_fetched_cache() {
     state.fetched = vec![ModelCatalogEntry {
         id: "old-remote".to_string(),
         context_limit: None,
+        metadata: Default::default(),
     }];
     app.model_catalog.tasks.insert(
         "mock".to_string(),
@@ -492,6 +494,7 @@ async fn model_fetch_cancel_preserves_old_fetched_cache() {
     state.fetched = vec![ModelCatalogEntry {
         id: "old-remote".to_string(),
         context_limit: None,
+        metadata: Default::default(),
     }];
     app.model_catalog.tasks.insert(
         "mock".to_string(),

@@ -8,6 +8,7 @@ pub(crate) enum SlashCommand {
     Status,
     New,
     Sessions,
+    Stats,
     ModelShow,
     VariantSet(String),
     ModeSet(String),
@@ -32,6 +33,7 @@ const SLASH_MENU: &[(&str, &str, bool)] = &[
     ("/status", "show local status", false),
     ("/new", "start a new session on next prompt", false),
     ("/sessions", "switch session", false),
+    ("/stats", "usage and cost summary", false),
     ("/model", "select/fetch model", false),
     ("/variant", "set <value>", false),
     ("/mode", "set <plan|default>", false),
@@ -178,6 +180,12 @@ pub(crate) fn parse_slash_command(line: &str) -> Result<Option<SlashCommand>> {
                 }
                 SlashCommand::Sessions
             }
+            "/stats" => {
+                if !rest.is_empty() {
+                    return Err(anyhow!("/stats does not accept arguments"));
+                }
+                SlashCommand::Stats
+            }
             "/session" => {
                 return Err(anyhow!("usage: /sessions, /resume, or /continue"));
             }
@@ -321,7 +329,12 @@ mod tests {
             parse_slash_command("/continue").unwrap(),
             Some(SlashCommand::Sessions)
         );
+        assert_eq!(
+            parse_slash_command("/stats").unwrap(),
+            Some(SlashCommand::Stats)
+        );
         assert!(parse_slash_command("/session list").is_err());
+        assert!(parse_slash_command("/stats all").is_err());
         assert!(parse_slash_command("/session show abc").is_err());
         assert!(parse_slash_command("/session switch abc").is_err());
         assert_eq!(

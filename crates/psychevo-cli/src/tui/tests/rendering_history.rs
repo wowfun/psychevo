@@ -189,6 +189,117 @@ fn transcript_layout_cache_reuses_row_heights_while_scrolling() {
 }
 
 #[test]
+fn manual_down_scroll_reaches_long_markdown_bottom_with_meta() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    let table = (1..=36)
+        .map(|index| format!("| {index} | **Story {index}** with a long mixed-width summary | {index} |"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    ui.transcript.push(TranscriptRow::simple(
+        TranscriptKind::Answer,
+        format!("# Daily report\n\n| # | Title | Score |\n|---|---|---|\n{table}\n\nBOTTOM-MARKER"),
+    ));
+    ui.transcript.push(TranscriptRow::with_title(
+        TranscriptKind::Meta,
+        "",
+        "provider/model low 7m05s 1 failure",
+    ));
+
+    let _ = draw_fullscreen_for_test(&app, &mut ui, 72, 10);
+    ui.scroll = 0;
+    ui.auto_follow_transcript = false;
+    for _ in 0..32 {
+        ui.scroll_transcript(6);
+    }
+
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 72, 10);
+    let text = buffer_text(&buffer);
+    assert!(text.contains("BOTTOM-MARKER"), "{text}");
+    assert!(text.contains("1 failure"), "{text}");
+    assert!(!text.contains("Daily report"), "{text}");
+    assert_eq!(ui.scroll, ui.max_transcript_scroll());
+}
+
+#[test]
+fn manual_down_scroll_reaches_long_thinking_table_bottom() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.transcript.push(TranscriptRow::with_title(
+        TranscriptKind::Ran,
+        "Ran ls -lh /tmp/report.md",
+        "-rw-r--r-- 1 user user 25K report.md",
+    ));
+    let table = (1..=24)
+        .map(|index| {
+            format!(
+                "| {index} | **热门话题 {index}** - 一段较长的中文说明用来验证换行和滚动 | {} |",
+                100 + index
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    ui.transcript.push(TranscriptRow::with_title(
+        TranscriptKind::Thinking,
+        "Thinking",
+        format!(
+            "Hacker News 日报已生成完成！ ✅\n\n**文件：** `feeds/2026-05-10/hackernews-hot-04-03.md`（25KB）\n\n### 今日 12 条热门话题速览：\n\n| # | 话题 | 💬 |\n|---|------|-----|\n{table}\n\nTHINKING_BOTTOM_MARKER"
+        ),
+    ));
+    ui.transcript
+        .last_mut()
+        .expect("thinking row")
+        .expanded = true;
+    ui.transcript.push(TranscriptRow::with_title(
+        TranscriptKind::Meta,
+        "",
+        "mock/mock-model low 7m05s 1 failure",
+    ));
+
+    let _ = draw_fullscreen_for_test(&app, &mut ui, 100, 18);
+    ui.scroll = 0;
+    ui.auto_follow_transcript = false;
+    for _ in 0..64 {
+        ui.scroll_transcript(6);
+    }
+
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 100, 18);
+    let text = buffer_text(&buffer);
+    assert!(text.contains("THINKING_BOTTOM_MARKER"), "{text}");
+    assert!(text.contains("1 failure"), "{text}");
+    assert!(!text.contains("日报已生成"), "{text}");
+    assert_eq!(ui.scroll, ui.max_transcript_scroll());
+}
+
+#[test]
+fn transcript_focus_down_scrolls_selected_row_into_view() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    for index in 0..36 {
+        ui.transcript.push(TranscriptRow::simple(
+            TranscriptKind::Status,
+            format!("focus row {index:02}"),
+        ));
+    }
+    let _ = draw_fullscreen_for_test(&app, &mut ui, 64, 10);
+    ui.focus = FocusMode::Transcript;
+    ui.selected_row = Some(0);
+    ui.scroll = 0;
+    ui.auto_follow_transcript = false;
+
+    ui.move_selection(18);
+
+    assert_eq!(ui.selected_row, Some(18));
+    assert!(ui.scroll > 0);
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 64, 10);
+    let text = buffer_text(&buffer);
+    assert!(text.contains("focus row 18"), "{text}");
+}
+
+#[test]
 fn active_tool_layout_key_tracks_elapsed_for_cache() {
     let mut row = TranscriptRow::with_title(TranscriptKind::Ran, "Running cargo test", "running");
     row.tool_started = Some(
@@ -236,8 +347,8 @@ fn long_read_tool_output_collapses_and_preserves_full_text() {
         .find(|row| row.kind == TranscriptKind::Explored)
         .expect("read evidence row");
     assert_eq!(row.title, "Explored src/long.rs");
-    assert_eq!(row.text.lines().count(), 21);
-    assert!(row.text.contains("... 44 more lines"));
+    assert_eq!(row.text.lines().count(), 9);
+    assert!(row.text.contains("... 56 more lines"));
     assert_eq!(row.full_text.as_deref(), Some(content.as_str()));
     assert!(row.is_expandable());
 }
@@ -257,10 +368,71 @@ fn running_tool_title_right_aligns_elapsed_duration() {
 
     let title = line_text(&tool_lines(&row, false, true, 36)[0]);
 
-    assert!(title.contains("Ran cargo"));
+    assert!(title.contains("Running cargo"));
     assert!(!title.starts_with("• "));
     assert!(title.ends_with("0s"));
-    assert_eq!(UnicodeWidthStr::width(title.as_str()), 36);
+    assert_eq!(UnicodeWidthStr::width(title.as_str()), 35);
+}
+
+#[test]
+fn active_tool_rows_render_present_tense_without_redundant_body() {
+    let started = Instant::now()
+        .checked_sub(Duration::from_secs(2))
+        .expect("instant");
+    for (kind, stored_title, expected_title) in [
+        (
+            TranscriptKind::Explored,
+            "Explored Cargo.toml",
+            "Exploring Cargo.toml",
+        ),
+        (
+            TranscriptKind::Ran,
+            "Ran cargo test -p psychevo-cli",
+            "Running cargo test -p psychevo-cli",
+        ),
+        (
+            TranscriptKind::Changed,
+            "Changed src/lib.rs",
+            "Changing src/lib.rs",
+        ),
+    ] {
+        let mut row = TranscriptRow::with_title(kind, stored_title, "running");
+        row.tool_started = Some(started);
+
+        let lines = tool_lines(&row, false, true, 80);
+        let rendered = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+        assert!(rendered.contains(expected_title), "{rendered}");
+        assert!(!rendered.contains("└ running"), "{rendered}");
+    }
+}
+
+#[test]
+fn expandable_tool_title_uses_text_hint_without_brackets() {
+    let content = (1..=12)
+        .map(|line| format!("line {line:02}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut row = TranscriptRow::with_title(
+        TranscriptKind::Explored,
+        "Explored src/long.rs",
+        "line 01\nline 02\n... 10 more lines",
+    );
+    row.full_text = Some(content);
+
+    let collapsed = tool_lines(&row, false, true, 80)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(collapsed.contains("▸ 10 more lines"), "{collapsed}");
+    assert!(!collapsed.contains("[+]"), "{collapsed}");
+    assert!(!collapsed.contains("... 10 more lines"), "{collapsed}");
+
+    row.expanded = true;
+    let expanded = line_text(&tool_lines(&row, false, true, 80)[0]);
+    assert!(expanded.contains("▾ collapse"), "{expanded}");
+    assert!(!expanded.contains("[-]"), "{expanded}");
 }
 
 #[test]
@@ -344,6 +516,647 @@ fn streaming_tool_call_creates_pending_changing_row_before_execution() {
         .transcript
         .iter()
         .all(|row| row.kind != TranscriptKind::Answer));
+}
+
+#[test]
+fn streaming_tool_call_after_visible_text_stays_below_answer() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_update",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Now let me write the complete report."
+                    },
+                    {
+                        "type": "tool_call",
+                        "id": "call_write",
+                        "name": "write",
+                        "arguments": {"path": "report.md", "content": "body"},
+                        "arguments_json": "{\"path\":\"report.md\",\"content\":\"body\"}",
+                        "arguments_error": null,
+                        "content_index": 1,
+                        "call_index": 0
+                    }
+                ]
+            }
+        }),
+        false,
+    );
+
+    let answer = ui
+        .transcript
+        .iter()
+        .position(|row| row.kind == TranscriptKind::Answer)
+        .expect("answer row");
+    let tool = ui
+        .transcript
+        .iter()
+        .position(|row| row.kind == TranscriptKind::Changed)
+        .expect("tool row");
+    assert!(answer < tool);
+    assert_eq!(ui.transcript[tool].title, "Changing report.md");
+
+    ui.scroll_to_bottom();
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 80, 8);
+    let text = buffer_text(&buffer);
+    assert!(text.contains("Changing report.md"), "{text}");
+    assert!(!text.contains("Tool calls"), "{text}");
+}
+
+#[test]
+fn message_end_text_plus_write_tool_shows_active_row_without_intermediate_meta() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.start_assistant();
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "run_start",
+            "provider": "xiaomi-token-plan",
+            "model": "mimo-v2.5-pro",
+            "mode": "default"
+        }),
+        false,
+    );
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Now I have all the data I need. Let me write the full report:"
+                    },
+                    {
+                        "type": "tool_call",
+                        "id": "call_write_report",
+                        "name": "write",
+                        "arguments": {
+                            "path": "/tmp/hackernews-hot-05-15.md",
+                            "content": "report body"
+                        },
+                        "arguments_json": "{\"path\":\"/tmp/hackernews-hot-05-15.md\",\"content\":\"report body\"}",
+                        "arguments_error": null,
+                        "content_index": 1,
+                        "call_index": 0
+                    }
+                ],
+                "timestamp_ms": 2,
+                "finish_reason": "tool_calls",
+                "outcome": "normal",
+                "model": "mimo-v2.5-pro",
+                "provider": "xiaomi-token-plan"
+            },
+            "metadata": {
+                "elapsed_ms": 186_260,
+                "reasoning_effort": "low"
+            }
+        }),
+        false,
+    );
+
+    let answer = ui
+        .transcript
+        .iter()
+        .position(|row| row.kind == TranscriptKind::Answer)
+        .expect("answer row");
+    let tool = ui
+        .transcript
+        .iter()
+        .position(|row| row.kind == TranscriptKind::Changed)
+        .expect("tool row");
+    assert!(answer < tool);
+    assert_eq!(ui.transcript[tool].title, "Changing /tmp/hackernews-hot-05-15.md");
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.kind != TranscriptKind::Meta),
+        "{:?}",
+        ui.transcript
+    );
+
+    ui.scroll_to_bottom();
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 100, 8);
+    let text = buffer_text(&buffer);
+    assert!(text.contains("Changing /tmp/hackernews-hot-05-15.md"), "{text}");
+    assert!(!text.contains("Tool calls"), "{text}");
+    assert!(!text.contains("xiaomi-token-plan/mimo-v2.5-pro"), "{text}");
+}
+
+#[test]
+fn pending_write_tool_input_shows_changing_before_complete_arguments() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.start_assistant();
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "run_start",
+            "provider": "xiaomi-token-plan",
+            "model": "mimo-v2.5-pro",
+            "mode": "default"
+        }),
+        false,
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_update",
+            "message": {
+                "role": "assistant",
+                "content": [{
+                    "type": "text",
+                    "text": "Now I have all the data needed. Let me write the complete report."
+                }],
+                "timestamp_ms": 2,
+                "outcome": "normal"
+            }
+        }),
+        false,
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_call_pending",
+            "tool_call_id": "call_write_report",
+            "tool_name": "write",
+            "arguments_json": "",
+            "content_index": 1,
+            "call_index": 0
+        }),
+        false,
+    );
+
+    let answer = ui
+        .transcript
+        .iter()
+        .position(|row| row.kind == TranscriptKind::Answer)
+        .expect("answer row");
+    let tool = ui
+        .transcript
+        .iter()
+        .position(|row| row.kind == TranscriptKind::Changed)
+        .expect("tool row");
+    assert!(answer < tool);
+    assert_eq!(ui.transcript[tool].title, "Changing files");
+    assert!(ui.transcript[tool].tool_started.is_some());
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.kind != TranscriptKind::Meta),
+        "{:?}",
+        ui.transcript
+    );
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_call_pending",
+            "tool_call_id": "call_write_report",
+            "tool_name": "write",
+            "arguments_json": "{\"path\":\"feeds/report.md\",\"content\":\"body\"}",
+            "content_index": 1,
+            "call_index": 0
+        }),
+        false,
+    );
+    assert_eq!(ui.transcript[tool].title, "Changing feeds/report.md");
+
+    ui.scroll_to_bottom();
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 100, 8);
+    let text = buffer_text(&buffer);
+    assert!(text.contains("Changing feeds/report.md"), "{text}");
+    assert!(!text.contains("Tool calls"), "{text}");
+    assert!(!text.contains("xiaomi-token-plan/mimo-v2.5-pro"), "{text}");
+}
+
+#[test]
+fn visible_write_preamble_creates_and_reconciles_provisional_changing_row() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.start_assistant();
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_update",
+            "message": {
+                "role": "assistant",
+                "content": [{
+                    "type": "text",
+                    "text": "NYT is behind a paywall. Based on comments, I can still summarize the Meta article. Let me now write the report."
+                }]
+            }
+        }),
+        false,
+    );
+
+    let provisional = ui
+        .transcript
+        .iter()
+        .position(|row| row.title == "Changing files")
+        .expect("provisional row");
+    assert!(ui.transcript[provisional].tool_call_id.is_none());
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_call_pending",
+            "tool_call_id": "call_write_report",
+            "tool_name": "write",
+            "arguments_json": "{\"path\":\"feeds/report.md\",\"content\":\"body\"}",
+            "content_index": 1,
+            "call_index": 0
+        }),
+        false,
+    );
+    assert_eq!(ui.transcript[provisional].title, "Changing feeds/report.md");
+    assert_eq!(
+        ui.transcript[provisional].tool_call_id.as_deref(),
+        Some("call_write_report")
+    );
+    assert_eq!(
+        ui.transcript
+            .iter()
+            .filter(|row| row.kind == TranscriptKind::Changed)
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn visible_write_preamble_does_not_leave_orphan_after_non_write_tool_message() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.start_assistant();
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_update",
+            "message": {
+                "role": "assistant",
+                "content": [{
+                    "type": "text",
+                    "text": "Now I have all the data. Let me create the output directory and write the report."
+                }]
+            }
+        }),
+        false,
+    );
+    assert!(ui
+        .transcript
+        .iter()
+        .any(|row| row.title == "Changing files"));
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Now I have all the data. Let me create the output directory and write the report."
+                    },
+                    {
+                        "type": "tool_call",
+                        "id": "call_time",
+                        "name": "bash",
+                        "arguments": {"command": "date -u +%H-%M"},
+                        "arguments_json": "{\"command\":\"date -u +%H-%M\"}",
+                        "arguments_error": null,
+                        "content_index": 0,
+                        "call_index": 0
+                    }
+                ],
+                "finish_reason": "tool_calls",
+                "outcome": "normal"
+            }
+        }),
+        false,
+    );
+
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.title != "Changing files"),
+        "{:?}",
+        ui.transcript
+    );
+    assert!(ui
+        .transcript
+        .iter()
+        .any(|row| row.title == "Running date -u +%H-%M"));
+}
+
+#[test]
+fn repeated_visible_write_preamble_does_not_duplicate_after_concrete_write_signal() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.start_assistant();
+    let preamble = "Now let me write the full report:";
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_update",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": preamble}]
+            }
+        }),
+        false,
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_call_pending",
+            "tool_call_id": "call_write_report",
+            "tool_name": "write",
+            "arguments_json": "",
+            "content_index": 0,
+            "call_index": 0
+        }),
+        false,
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_update",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": preamble}]
+            }
+        }),
+        false,
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": preamble},
+                    {
+                        "type": "tool_call",
+                        "id": "call_write_report",
+                        "name": "write",
+                        "arguments": {"path": "feeds/report.md", "content": "body"},
+                        "arguments_json": "{\"path\":\"feeds/report.md\",\"content\":\"body\"}",
+                        "arguments_error": null,
+                        "content_index": 0,
+                        "call_index": 0
+                    }
+                ],
+                "finish_reason": "tool_calls",
+                "outcome": "normal"
+            }
+        }),
+        false,
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_execution_end",
+            "tool_call_id": "call_write_report",
+            "tool_name": "write",
+            "result": {"path": "feeds/report.md", "bytes_written": 4},
+            "outcome": "normal",
+            "elapsed_ms": 0
+        }),
+        false,
+    );
+
+    assert!(ui
+        .transcript
+        .iter()
+        .all(|row| row.title != "Changing files"));
+    let changed = ui
+        .transcript
+        .iter()
+        .filter(|row| row.kind == TranscriptKind::Changed)
+        .collect::<Vec<_>>();
+    assert_eq!(changed.len(), 1);
+    assert_eq!(changed[0].title, "Changed feeds/report.md");
+}
+
+#[test]
+fn active_write_removes_confusing_failure_meta_until_it_settles() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.start_assistant();
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "run_start",
+            "provider": "xiaomi-token-plan",
+            "model": "mimo-v2.5-pro",
+            "mode": "default"
+        }),
+        false,
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_execution_end",
+            "tool_call_id": "call_failed",
+            "tool_name": "bash",
+            "result": {"output": "failed", "exit_code": 1},
+            "outcome": "failed",
+            "elapsed_ms": 0
+        }),
+        false,
+    );
+    assert!(ui
+        .transcript
+        .iter()
+        .any(|row| row.kind == TranscriptKind::Meta && row.text.contains("1 failure")));
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_update",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "Now let me write the full report:"}]
+            }
+        }),
+        false,
+    );
+
+    assert!(ui
+        .transcript
+        .iter()
+        .any(|row| row.title == "Changing files"));
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.kind != TranscriptKind::Meta),
+        "{:?}",
+        ui.transcript
+    );
+}
+
+#[test]
+fn reasoning_delta_removes_prior_failure_meta_while_turn_continues() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.start_assistant();
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "run_start",
+            "provider": "xiaomi-token-plan",
+            "model": "mimo-v2.5-pro",
+            "mode": "default"
+        }),
+        false,
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_execution_end",
+            "tool_call_id": "call_failed",
+            "tool_name": "bash",
+            "result": {"output": "failed", "exit_code": 1},
+            "outcome": "failed",
+            "elapsed_ms": 0
+        }),
+        false,
+    );
+    assert!(ui
+        .transcript
+        .iter()
+        .any(|row| row.kind == TranscriptKind::Meta && row.text.contains("1 failure")));
+
+    ui.apply_stream_event(
+        RunStreamEvent::ReasoningDelta {
+            text: "Let me compose the report carefully.".to_string(),
+        },
+        true,
+        false,
+    );
+
+    assert!(ui
+        .transcript
+        .iter()
+        .any(|row| row.kind == TranscriptKind::Thinking));
+    assert!(ui
+        .transcript
+        .iter()
+        .all(|row| row.kind != TranscriptKind::Meta));
+    assert!(ui
+        .transcript
+        .iter()
+        .all(|row| row.title != "Changing files"));
+}
+
+#[test]
+fn aborted_reasoning_only_message_does_not_recreate_failure_meta() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.start_assistant();
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "run_start",
+            "provider": "xiaomi-token-plan",
+            "model": "mimo-v2.5-pro",
+            "mode": "default"
+        }),
+        false,
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_execution_end",
+            "tool_call_id": "call_failed",
+            "tool_name": "bash",
+            "result": {"output": "failed", "exit_code": 1},
+            "outcome": "failed",
+            "elapsed_ms": 0
+        }),
+        false,
+    );
+    ui.apply_stream_event(
+        RunStreamEvent::ReasoningDelta {
+            text: "Let me compose this carefully. I'll write the full report.".to_string(),
+        },
+        true,
+        false,
+    );
+    ui.apply_stream_event(RunStreamEvent::ReasoningEnd, true, false);
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [],
+                "finish_reason": "aborted",
+                "outcome": "aborted",
+                "model": "mimo-v2.5-pro",
+                "provider": "xiaomi-token-plan"
+            },
+            "metadata": {
+                "elapsed_ms": 138_768,
+                "reasoning_effort": "low"
+            }
+        }),
+        false,
+    );
+
+    assert!(ui
+        .transcript
+        .iter()
+        .any(|row| row.kind == TranscriptKind::Thinking));
+    assert!(ui
+        .transcript
+        .iter()
+        .all(|row| row.kind != TranscriptKind::Meta));
+}
+
+#[test]
+fn visible_write_preamble_provisional_row_is_removed_without_tool_call() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.start_assistant();
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_update",
+            "message": {
+                "role": "assistant",
+                "content": [{
+                    "type": "text",
+                    "text": "Now I have all the data needed. Let me write the complete report."
+                }]
+            }
+        }),
+        false,
+    );
+    assert!(ui
+        .transcript
+        .iter()
+        .any(|row| row.title == "Changing files"));
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [{
+                    "type": "text",
+                    "text": "Actually, here is the final answer without writing."
+                }],
+                "timestamp_ms": 2,
+                "finish_reason": "stop",
+                "outcome": "normal"
+            }
+        }),
+        false,
+    );
+
+    assert!(ui
+        .transcript
+        .iter()
+        .all(|row| row.title != "Changing files"));
 }
 
 #[test]
@@ -458,6 +1271,95 @@ fn streaming_tool_completion_reuses_pending_row_as_completed_evidence() {
 }
 
 #[test]
+fn completed_live_tool_elapsed_keeps_visible_active_duration_for_all_tool_phases() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let cases = vec![
+        (
+            "read",
+            serde_json::json!({"path": "Cargo.toml"}),
+            serde_json::json!({"path": "Cargo.toml", "content": "body"}),
+            TranscriptKind::Explored,
+            "Explored Cargo.toml",
+        ),
+        (
+            "search",
+            serde_json::json!({"query": "Changing"}),
+            serde_json::json!({"query": "Changing", "matches": []}),
+            TranscriptKind::Explored,
+            "Explored search Changing",
+        ),
+        (
+            "bash",
+            serde_json::json!({"command": "cargo test -p psychevo-cli"}),
+            serde_json::json!({"output": "ok"}),
+            TranscriptKind::Ran,
+            "Ran cargo test -p psychevo-cli",
+        ),
+        (
+            "write",
+            serde_json::json!({"path": "report.md", "content": "body"}),
+            serde_json::json!({"path": "report.md", "bytes_written": 4}),
+            TranscriptKind::Changed,
+            "Changed report.md",
+        ),
+        (
+            "edit",
+            serde_json::json!({"path": "report.md", "old": "a", "new": "b"}),
+            serde_json::json!({"path": "report.md", "replacements": 1}),
+            TranscriptKind::Changed,
+            "Changed report.md",
+        ),
+    ];
+
+    for (tool, args, result, expected_kind, expected_title) in cases {
+        let mut ui = FullscreenUi::new(&app);
+        let tool_call_id = format!("call_{tool}");
+        ui.apply_value_event(
+            &serde_json::json!({
+                "type": "tool_execution_start",
+                "tool_call_id": tool_call_id,
+                "tool_name": tool,
+                "args": args
+            }),
+            false,
+        );
+        let active_idx = ui
+            .transcript
+            .iter()
+            .position(active_tool_row)
+            .expect("active tool row");
+        ui.transcript[active_idx].tool_started = Some(
+            Instant::now()
+                .checked_sub(Duration::from_secs(16))
+                .expect("instant"),
+        );
+        ui.apply_value_event(
+            &serde_json::json!({
+                "type": "tool_execution_end",
+                "tool_call_id": format!("call_{tool}"),
+                "tool_name": tool,
+                "result": result,
+                "outcome": "normal",
+                "elapsed_ms": 0
+            }),
+            false,
+        );
+
+        let row = ui
+            .transcript
+            .iter()
+            .find(|row| row.kind == expected_kind)
+            .expect("completed tool row");
+        assert_eq!(row.title, expected_title, "{tool}");
+        let elapsed = row.tool_elapsed.expect("elapsed");
+        assert!(elapsed >= Duration::from_secs(16), "{tool}: {elapsed:?}");
+        assert!(elapsed < Duration::from_secs(17), "{tool}: {elapsed:?}");
+        assert!(row.tool_started.is_none(), "{tool}");
+    }
+}
+
+#[test]
 fn interrupted_pending_tool_row_stops_timer_as_failed() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
@@ -486,7 +1388,7 @@ fn interrupted_pending_tool_row_stops_timer_as_failed() {
     ui.finish_turn();
 
     let row = &ui.transcript[0];
-    assert_eq!(row.title, "Changing src/lib.rs");
+    assert_eq!(row.title, "Changed src/lib.rs");
     assert_eq!(row.text, "interrupted");
     assert!(row.failed);
     assert!(row.tool_elapsed.is_some());
@@ -683,6 +1585,680 @@ fn history_meta_uses_persisted_variant_not_current_variant() {
 }
 
 #[test]
+fn history_reasoning_only_final_message_gets_turn_meta() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    ui.push_history_message(
+        &serde_json::json!({
+            "role": "assistant",
+            "content": [{"type": "reasoning", "text": "final folded report"}],
+            "timestamp_ms": 2,
+            "finish_reason": "stop",
+            "outcome": "normal",
+            "model": "mimo-v2.5-pro",
+            "provider": "xiaomi-token-plan"
+        }),
+        None,
+        Some(&serde_json::json!({
+            "elapsed_ms": 425_887,
+            "reasoning_effort": "low"
+        })),
+    );
+
+    assert_eq!(ui.transcript[0].kind, TranscriptKind::Thinking);
+    assert_eq!(ui.transcript[0].text, "final folded report");
+    let row = ui
+        .transcript
+        .iter()
+        .find(|row| row.kind == TranscriptKind::Meta)
+        .expect("meta row");
+    assert_eq!(row.text, "xiaomi-token-plan/mimo-v2.5-pro low  7m05s");
+}
+
+#[test]
+fn history_aborted_reasoning_only_message_does_not_get_turn_meta() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    ui.push_history_message(
+        &serde_json::json!({
+            "role": "assistant",
+            "content": [{
+                "type": "reasoning",
+                "text": "Let me compose this carefully. I'll write the full report."
+            }],
+            "timestamp_ms": 2,
+            "finish_reason": "aborted",
+            "outcome": "aborted",
+            "model": "mimo-v2.5-pro",
+            "provider": "xiaomi-token-plan"
+        }),
+        None,
+        Some(&serde_json::json!({
+            "elapsed_ms": 138_768,
+            "reasoning_effort": "low"
+        })),
+    );
+
+    assert_eq!(ui.transcript[0].kind, TranscriptKind::Thinking);
+    assert!(ui
+        .transcript
+        .iter()
+        .all(|row| row.kind != TranscriptKind::Meta));
+}
+
+#[test]
+fn history_tool_call_reasoning_message_does_not_get_turn_meta() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    ui.push_history_message(
+        &serde_json::json!({
+            "role": "assistant",
+            "content": [
+                {"type": "reasoning", "text": "I need to inspect a file."},
+                {
+                    "type": "tool_call",
+                    "id": "call_read",
+                    "name": "read",
+                    "arguments": {"path": "Cargo.toml"},
+                    "arguments_json": "{\"path\":\"Cargo.toml\"}",
+                    "arguments_error": null,
+                    "content_index": 1,
+                    "call_index": 0
+                }
+            ],
+            "timestamp_ms": 2,
+            "finish_reason": "tool_calls",
+            "outcome": "normal",
+            "model": "mock-model",
+            "provider": "mock"
+        }),
+        None,
+        Some(&serde_json::json!({"elapsed_ms": 230})),
+    );
+
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.kind != TranscriptKind::Meta)
+    );
+    assert!(ui
+        .transcript
+        .iter()
+        .any(|row| row.title == "Exploring Cargo.toml"));
+}
+
+#[test]
+fn history_aborted_tool_calls_render_interrupted_without_live_timer() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    ui.push_history_message(
+        &serde_json::json!({
+            "role": "assistant",
+            "content": [
+                {"type": "reasoning", "text": "Let me continue fetching the remaining stories."},
+                {
+                    "type": "tool_call",
+                    "id": "call_story",
+                    "name": "bash",
+                    "arguments": {
+                        "command": "cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db \"SELECT content FROM stories WHERE id = 48074265;\" 2>&1 | head -c 3000",
+                        "timeout": 10
+                    },
+                    "arguments_json": "{\"command\":\"cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db \\\"SELECT content FROM stories WHERE id = 48074265;\\\" 2>&1 | head -c 3000\",\"timeout\":10}",
+                    "arguments_error": null,
+                    "content_index": 1,
+                    "call_index": 0
+                }
+            ],
+            "timestamp_ms": 2,
+            "finish_reason": "aborted",
+            "outcome": "aborted",
+            "model": "mimo-v2.5-pro",
+            "provider": "xiaomi-token-plan"
+        }),
+        None,
+        Some(&serde_json::json!({
+            "elapsed_ms": 34_653,
+            "reasoning_effort": "low"
+        })),
+    );
+
+    let row = ui
+        .transcript
+        .iter()
+        .find(|row| row.kind == TranscriptKind::Ran)
+        .expect("interrupted bash row");
+    assert!(row.title.starts_with("Ran cd /home/kevin/Projects/feedgarden"));
+    assert!(!row.title.starts_with("Running "));
+    assert_eq!(row.text, "interrupted");
+    assert!(row.failed);
+    assert_eq!(row.tool_elapsed, Some(Duration::from_millis(34_653)));
+    assert!(row.tool_started.is_none());
+    assert!(ui.tool_rows.is_empty());
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.kind != TranscriptKind::Meta)
+    );
+}
+
+#[test]
+fn history_text_plus_tool_call_message_shows_active_row_without_turn_meta() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    ui.push_history_message(
+        &serde_json::json!({
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": "Now I have all the data I need."},
+                {
+                    "type": "tool_call",
+                    "id": "call_write_report",
+                    "name": "write",
+                    "arguments": {
+                        "path": "/tmp/hackernews-hot-05-15.md",
+                        "content": "report body"
+                    },
+                    "arguments_json": "{\"path\":\"/tmp/hackernews-hot-05-15.md\",\"content\":\"report body\"}",
+                    "arguments_error": null,
+                    "content_index": 1,
+                    "call_index": 0
+                }
+            ],
+            "timestamp_ms": 2,
+            "finish_reason": "tool_calls",
+            "outcome": "normal",
+            "model": "mimo-v2.5-pro",
+            "provider": "xiaomi-token-plan"
+        }),
+        None,
+        Some(&serde_json::json!({
+            "elapsed_ms": 186_260,
+            "reasoning_effort": "low"
+        })),
+    );
+
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.kind == TranscriptKind::Answer)
+    );
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Changed
+            && row.title == "Changing /tmp/hackernews-hot-05-15.md"
+            && row.tool_started.is_some()
+    }));
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.kind != TranscriptKind::Meta)
+    );
+}
+
+#[test]
+fn history_tool_result_updates_rehydrated_pending_write_row() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    ui.push_history_message(
+        &serde_json::json!({
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": "NYT is behind a paywall. Let me now write the report."},
+                {
+                    "type": "tool_call",
+                    "id": "call_write_report",
+                    "name": "write",
+                    "arguments": {
+                        "path": "feeds/2026-05-10/hackernews-hot-06-42.md",
+                        "content": "report body"
+                    },
+                    "arguments_json": "{\"path\":\"feeds/2026-05-10/hackernews-hot-06-42.md\",\"content\":\"report body\"}",
+                    "arguments_error": null,
+                    "content_index": 1,
+                    "call_index": 0
+                }
+            ],
+            "timestamp_ms": 2,
+            "finish_reason": "tool_calls",
+            "outcome": "normal",
+            "model": "mimo-v2.5-pro",
+            "provider": "xiaomi-token-plan"
+        }),
+        None,
+        Some(&serde_json::json!({
+            "elapsed_ms": 174_093,
+            "reasoning_effort": "low"
+        })),
+    );
+
+    assert!(ui
+        .transcript
+        .iter()
+        .any(|row| row.title == "Changing feeds/2026-05-10/hackernews-hot-06-42.md"));
+
+    ui.push_history_message(
+        &serde_json::json!({
+            "role": "tool_result",
+            "tool_call_id": "call_write_report",
+            "tool_name": "write",
+            "content": "{\"bytes_written\":26779,\"dirs_created\":false,\"error\":null,\"path\":\"feeds/2026-05-10/hackernews-hot-06-42.md\"}",
+            "is_error": false,
+            "timestamp_ms": 3
+        }),
+        None,
+        Some(&serde_json::json!({"elapsed_ms": 0})),
+    );
+
+    let changed = ui
+        .transcript
+        .iter()
+        .filter(|row| row.kind == TranscriptKind::Changed)
+        .collect::<Vec<_>>();
+    assert_eq!(changed.len(), 1);
+    assert_eq!(
+        changed[0].title,
+        "Changed feeds/2026-05-10/hackernews-hot-06-42.md"
+    );
+    assert_eq!(changed[0].tool_elapsed, Some(Duration::from_millis(0)));
+    assert!(changed[0].tool_started.is_none());
+    assert!(ui.tool_rows.is_empty());
+}
+
+#[test]
+fn live_reasoning_only_final_message_gets_turn_meta() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.start_assistant();
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "run_start",
+            "provider": "xiaomi-token-plan",
+            "model": "mimo-v2.5-pro",
+            "mode": "default"
+        }),
+        false,
+    );
+    ui.apply_stream_event(
+        RunStreamEvent::ReasoningDelta {
+            text: "final folded report".to_string(),
+        },
+        true,
+        false,
+    );
+    ui.apply_stream_event(RunStreamEvent::ReasoningEnd, true, false);
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [],
+                "timestamp_ms": 2,
+                "finish_reason": "stop",
+                "outcome": "normal",
+                "model": "mimo-v2.5-pro",
+                "provider": "xiaomi-token-plan"
+            },
+            "metadata": {
+                "elapsed_ms": 425_887,
+                "reasoning_effort": "low"
+            }
+        }),
+        false,
+    );
+
+    let row = ui
+        .transcript
+        .iter()
+        .find(|row| row.kind == TranscriptKind::Meta)
+        .expect("meta row");
+    assert_eq!(row.text, "xiaomi-token-plan/mimo-v2.5-pro low  7m05s");
+}
+
+#[test]
+fn sidebar_context_token_count_stays_visible_while_model_answers_without_usage() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.sidebar_tokens = Some(12_345);
+    ui.sidebar_context_limit = Some(64_000);
+    ui.sidebar_forced = true;
+    ui.sidebar_hidden = false;
+    ui.start_assistant();
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_update",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "Streaming answer without usage yet."}]
+            }
+        }),
+        false,
+    );
+    ui.refresh_sidebar(&app);
+
+    assert_eq!(ui.sidebar.tokens, Some(12_345));
+    assert!(ui.sidebar.context_percent.is_some());
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 120, 18);
+    let text = buffer_text(&buffer);
+    assert!(text.contains("tokens:"), "{text}");
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "Final answer without usage."}],
+                "finish_reason": "stop",
+                "outcome": "normal"
+            }
+        }),
+        false,
+    );
+    ui.refresh_sidebar(&app);
+
+    assert_eq!(ui.sidebar.tokens, Some(12_345));
+}
+
+#[test]
+fn sidebar_context_token_count_uses_input_tokens_when_later_usage_arrives() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.sidebar_tokens = Some(12_345);
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "Final answer with usage."}],
+                "finish_reason": "stop",
+                "outcome": "normal"
+            },
+            "usage": {
+                "input_tokens": 20_000,
+                "output_tokens": 3_456,
+                "total_tokens": 23_456
+            }
+        }),
+        false,
+    );
+
+    assert_eq!(ui.sidebar_tokens, Some(20_000));
+}
+
+#[test]
+fn sidebar_context_token_count_ignores_total_tokens_without_input_tokens() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.sidebar_tokens = Some(12_345);
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "Final answer with total-only usage."}],
+                "finish_reason": "stop",
+                "outcome": "normal"
+            },
+            "usage": {"total_tokens": 23_456}
+        }),
+        false,
+    );
+
+    assert_eq!(ui.sidebar_tokens, Some(12_345));
+}
+
+#[test]
+fn live_tool_call_reasoning_message_does_not_get_turn_meta() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.start_assistant();
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "run_start",
+            "provider": "mock",
+            "model": "mock-model",
+            "mode": "default"
+        }),
+        false,
+    );
+    ui.apply_stream_event(
+        RunStreamEvent::ReasoningDelta {
+            text: "I need to inspect a file.".to_string(),
+        },
+        true,
+        false,
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [{
+                    "type": "tool_call",
+                    "id": "call_read",
+                    "name": "read",
+                    "arguments": {"path": "Cargo.toml"},
+                    "arguments_json": "{\"path\":\"Cargo.toml\"}",
+                    "arguments_error": null,
+                    "content_index": 0,
+                    "call_index": 0
+                }],
+                "timestamp_ms": 2,
+                "finish_reason": "tool_calls",
+                "outcome": "normal",
+                "model": "mock-model",
+                "provider": "mock"
+            },
+            "metadata": {"elapsed_ms": 230}
+        }),
+        false,
+    );
+
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.kind != TranscriptKind::Meta)
+    );
+}
+
+#[test]
+fn reasoning_only_write_message_shows_active_changing_without_meta() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.start_assistant();
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "run_start",
+            "provider": "xiaomi-token-plan",
+            "model": "mimo-v2.5-pro",
+            "mode": "default"
+        }),
+        false,
+    );
+    ui.apply_stream_event(
+        RunStreamEvent::ReasoningDelta {
+            text: "Let me compose the full report now. I have all the data. Let me write it out."
+                .to_string(),
+        },
+        true,
+        false,
+    );
+
+    let provisional = ui
+        .transcript
+        .iter()
+        .position(|row| row.title == "Changing files")
+        .expect("provisional changing row");
+    assert!(ui.transcript[provisional].tool_started.is_some());
+    assert_eq!(ui.transcript[provisional].tool_call_id, None);
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.title != "Changing /tmp/hackernews-hot-05-39.md"),
+        "{:?}",
+        ui.transcript
+    );
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [{
+                    "type": "tool_call",
+                    "id": "call_write_report",
+                    "name": "write",
+                    "arguments": {
+                        "path": "/tmp/hackernews-hot-05-39.md",
+                        "content": "report body"
+                    },
+                    "arguments_json": "{\"path\":\"/tmp/hackernews-hot-05-39.md\",\"content\":\"report body\"}",
+                    "arguments_error": null,
+                    "content_index": 0,
+                    "call_index": 0
+                }],
+                "timestamp_ms": 2,
+                "finish_reason": "tool_calls",
+                "outcome": "normal",
+                "model": "mimo-v2.5-pro",
+                "provider": "xiaomi-token-plan"
+            },
+            "metadata": {
+                "elapsed_ms": 190_546,
+                "reasoning_effort": "low"
+            }
+        }),
+        false,
+    );
+
+    let thinking = ui
+        .transcript
+        .iter()
+        .position(|row| row.kind == TranscriptKind::Thinking)
+        .expect("thinking row");
+    let changing = ui
+        .transcript
+        .iter()
+        .position(|row| row.kind == TranscriptKind::Changed)
+        .expect("changing row");
+    assert!(thinking < changing);
+    assert_eq!(
+        ui.transcript[changing].title,
+        "Changing /tmp/hackernews-hot-05-39.md"
+    );
+    assert!(ui.transcript[changing].tool_started.is_some());
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.kind != TranscriptKind::Meta)
+    );
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.kind != TranscriptKind::Answer)
+    );
+}
+
+#[test]
+fn hidden_thinking_write_intent_does_not_create_provisional_changing() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.start_assistant();
+
+    ui.apply_stream_event(
+        RunStreamEvent::ReasoningDelta {
+            text: "Let me compose the full report now. Let me write it out.".to_string(),
+        },
+        false,
+        false,
+    );
+
+    assert!(ui
+        .transcript
+        .iter()
+        .any(|row| row.kind == TranscriptKind::Thinking));
+    assert!(ui
+        .transcript
+        .iter()
+        .all(|row| row.title != "Changing files"));
+}
+
+#[test]
+fn visible_thinking_run_intent_creates_and_reconciles_running_command() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.start_assistant();
+
+    ui.apply_stream_event(
+        RunStreamEvent::ReasoningDelta {
+            text: "Let me run a quick command to verify the file size.".to_string(),
+        },
+        true,
+        false,
+    );
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Ran
+            && row.title == "Running command"
+            && row.tool_started.is_some()
+    }));
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [{
+                    "type": "tool_call",
+                    "id": "call_wc",
+                    "name": "bash",
+                    "arguments": {"command": "wc -c report.md"},
+                    "arguments_json": "{\"command\":\"wc -c report.md\"}",
+                    "arguments_error": null,
+                    "content_index": 0,
+                    "call_index": 0
+                }],
+                "timestamp_ms": 2,
+                "finish_reason": "tool_calls",
+                "outcome": "normal",
+                "model": "mimo-v2.5-pro",
+                "provider": "xiaomi-token-plan"
+            }
+        }),
+        false,
+    );
+
+    let rows = ui
+        .transcript
+        .iter()
+        .filter(|row| row.kind == TranscriptKind::Ran)
+        .collect::<Vec<_>>();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].title, "Running wc -c report.md");
+    assert_eq!(rows[0].tool_call_id.as_deref(), Some("call_wc"));
+}
+
+#[test]
 fn prompt_block_uses_full_width_background_without_left_rail() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
@@ -833,14 +2409,16 @@ fn thinking_new_paragraphs_do_not_use_label_width_indent() {
         "Thinking",
         "First paragraph.\n\nSecond paragraph.",
     );
-    let lines = thinking_lines(&row, false, true);
+    let lines = thinking_lines(&row, false, true, 80);
 
-    assert_eq!(lines.len(), 3);
-    assert_eq!(lines[0].spans[0].content.as_ref(), "▌ ");
-    assert_eq!(lines[0].spans[1].content.as_ref(), "Thinking: ");
-    assert_eq!(lines[0].spans[2].content.as_ref(), "First paragraph.");
-    assert_eq!(lines[2].spans[0].content.as_ref(), "▌ ");
-    assert_eq!(lines[2].spans[1].content.as_ref(), "Second paragraph.");
+    assert_eq!(lines.len(), 4);
+    assert!(line_text(&lines[0]).contains("Thinking"));
+    assert_eq!(lines[1].spans[0].content.as_ref(), "  └ ");
+    assert_eq!(lines[1].spans[1].content.as_ref(), "First paragraph.");
+    assert_eq!(lines[3].spans[0].content.as_ref(), "    ");
+    assert_eq!(lines[3].spans[1].content.as_ref(), "Second paragraph.");
+    assert!(!line_text(&lines[0]).contains("Thinking:"));
+    assert!(!line_text(&lines[0]).contains("▌"));
 }
 
 #[test]
@@ -852,6 +2430,32 @@ fn bash_tool_title_uses_actual_first_command_line() {
         }),
     );
     assert_eq!(title, "Ran cargo test -p psychevo-cli");
+}
+
+#[test]
+fn bash_tool_title_skips_leading_shell_comments() {
+    let title = tool_title(
+        "bash",
+        &serde_json::json!({
+            "args": {
+                "command": "\n# Try webcache for the NYT article\ncurl -sL https://example.com | python3 -c 'print(1)'"
+            }
+        }),
+    );
+    assert_eq!(
+        title,
+        "Ran curl -sL https://example.com | python3 -c 'print(1)'"
+    );
+
+    let active = active_tool_title(
+        "bash",
+        &serde_json::json!({
+            "args": {
+                "command": "  # Get all comments with full text\npython3 -c 'print(42)'"
+            }
+        }),
+    );
+    assert_eq!(active, "Running python3 -c 'print(42)'");
 }
 
 #[test]

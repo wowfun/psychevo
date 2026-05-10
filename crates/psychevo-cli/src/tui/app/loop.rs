@@ -394,6 +394,9 @@ impl TuiApp {
             KeyCode::Down if ui.can_recall_history_next() => {
                 ui.recall_history(1);
             }
+            KeyCode::Down if textarea_text(&ui.textarea).is_empty() => {
+                ui.scroll_transcript(1);
+            }
             _ => {
                 ui.clear_history_navigation_for_edit();
                 ui.textarea.input(key);
@@ -479,20 +482,44 @@ impl TuiApp {
                             }
                         }
                     }
+                } else if let Some(target) = ui.transcript_hit(mouse.column, mouse.row) {
+                    ui.mouse_down_target = Some(target);
+                    ui.mouse_dragged = false;
+                    if ui.selectable_hit(mouse.column, mouse.row) {
+                        ui.start_selection(mouse.column, mouse.row);
+                    } else {
+                        ui.clear_selection();
+                    }
                 } else if ui.selectable_hit(mouse.column, mouse.row) {
+                    ui.mouse_down_target = None;
+                    ui.mouse_dragged = false;
                     ui.start_selection(mouse.column, mouse.row);
                 } else {
+                    ui.mouse_down_target = None;
+                    ui.mouse_dragged = false;
                     ui.clear_selection();
                 }
             }
             MouseEventKind::Drag(MouseButton::Left) => {
+                ui.mouse_dragged = true;
                 ui.update_selection(mouse.column, mouse.row);
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 ui.update_selection(mouse.column, mouse.row);
+                let up_target = ui.transcript_hit(mouse.column, mouse.row);
+                let click_target = (!ui.mouse_dragged
+                    && ui.mouse_down_target.is_some()
+                    && ui.mouse_down_target == up_target)
+                    .then_some(ui.mouse_down_target)
+                    .flatten();
                 if !self.start_copy_selected_text(ui) {
+                    if let Some(target) = click_target {
+                        ui.toggle_target(target);
+                    }
                     ui.clear_selection();
                 }
+                ui.mouse_down_target = None;
+                ui.mouse_dragged = false;
             }
             _ => {}
         }

@@ -204,7 +204,12 @@ impl TuiApp {
             {
                 history_prompts.push(text);
             }
-            ui.push_history_message(&value, summary.usage.as_ref(), summary.metadata.as_ref());
+            ui.push_history_message_with_accounting(
+                &value,
+                summary.usage.as_ref(),
+                summary.metadata.as_ref(),
+                summary.accounting.as_ref(),
+            );
         }
         ui.replace_session_history_prompts(history_prompts);
         ui.scroll_to_bottom();

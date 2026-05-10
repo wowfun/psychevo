@@ -1,0 +1,47 @@
+---
+source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 378
+expression: combined
+---
+fixture=long_markdown_meta_bottom_scroll
+size=100x18
+
+--- text ---
+| 23 | Topic 23 - mixed Markdown/CJK width validation row | 123 |
+| 24 | Topic 24 - mixed Markdown/CJK width validation row | 124 |
+| 25 | Topic 25 - mixed Markdown/CJK width validation row | 125 |
+| 26 | Topic 26 - mixed Markdown/CJK width validation row | 126 |
+| 27 | Topic 27 - mixed Markdown/CJK width validation row | 127 |
+| 28 | Topic 28 - mixed Markdown/CJK width validation row | 128 |
+| 29 | Topic 29 - mixed Markdown/CJK width validation row | 129 |
+| 30 | Topic 30 - mixed Markdown/CJK width validation row | 130 |
+| 31 | Topic 31 - mixed Markdown/CJK width validation row | 131 |
+| 32 | Topic 32 - mixed Markdown/CJK width validation row | 132 |
+
+LONG_MARKDOWN_BOTTOM_MARKER
+▌ mock/mock-model low 7m05s 1 failure
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+› Ask pevo...
+
+mock/model  high
+
+--- styles ---
+[default]| 23 | Topic 23 - mixed Markdown/CJK width validation row | 123 |
+[default]| 24 | Topic 24 - mixed Markdown/CJK width validation row | 124 |
+[default]| 25 | Topic 25 - mixed Markdown/CJK width validation row | 125 |
+[default]| 26 | Topic 26 - mixed Markdown/CJK width validation row | 126 |
+[default]| 27 | Topic 27 - mixed Markdown/CJK width validation row | 127 |
+[default]| 28 | Topic 28 - mixed Markdown/CJK width validation row | 128 |
+[default]| 29 | Topic 29 - mixed Markdown/CJK width validation row | 129 |
+[default]| 30 | Topic 30 - mixed Markdown/CJK width validation row | 130 |
+[default]| 31 | Topic 31 - mixed Markdown/CJK width validation row | 131 |
+[default]| 32 | Topic 32 - mixed Markdown/CJK width validation row | 132 |
+[default]
+[default]LONG_MARKDOWN_BOTTOM_MARKER
+[dim]▌ mock/mock-model low 7m05s 1 failure[default]
+[default]
+[default]────────────────────────────────────────────────────────────────────────────────────────────────────
+[dim]›[default] [dim]Ask pevo...[default]
+[default]
+[default]mock/model  [magenta]high[default]

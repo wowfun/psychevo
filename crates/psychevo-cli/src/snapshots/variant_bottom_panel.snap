@@ -1,5 +1,6 @@
 ---
-source: crates/psychevo-cli/src/tui/tests.rs
+source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 341
 expression: combined
 ---
 fixture=variant_bottom_panel
@@ -40,16 +41,16 @@ mock/mock-model  default
 [default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [default]
-[default]  [default]Select Variant for mock/other-model[default]                                                                              [dim]esc[default]
+[default]  [dim]Select Variant for mock/other-model[default]                                                                              [dim]esc[default]
 [default]  [dim]Search [default]
-[default]  [default]› ◆ Config default  configured default: high[default]
-[default]  [default]none  suppress provider reasoning field[default]
-[default]  [default]minimal  smallest reasoning request[default]
-[default]  [default]low  lighter reasoning[default]
-[default]  [default]medium  balanced reasoning[default]
-[default]  [default]high  deeper reasoning[default]
-[default]  [default]xhigh  extra high reasoning[default]
-[default]  [default]max  maximum configured reasoning[default]
+[default]  [cyan]› ◆ Config default  configured default: high[default]
+[default]  none  suppress provider reasoning field
+[default]  minimal  smallest reasoning request
+[default]  low  lighter reasoning
+[default]  medium  balanced reasoning
+[default]  high  deeper reasoning
+[default]  xhigh  extra high reasoning
+[default]  max  maximum configured reasoning
 [default]
 [default]  [dim]Enter select  Esc back  Type search[default]
 [default]

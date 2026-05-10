@@ -22,6 +22,9 @@ impl TuiApp {
                     self.session_selection_panel(SessionListView::Active)?,
                 ));
             }
+            SlashCommand::Stats => {
+                ui.bottom_panel = Some(BottomPanel::Stats(self.stats_panel()?));
+            }
             SlashCommand::ModelShow => {
                 ui.bottom_panel = Some(BottomPanel::Models(self.model_selection_panel()?));
             }
@@ -190,6 +193,10 @@ impl TuiApp {
                 Ok(())
             }
             SlashCommand::Sessions => self.show_session_list(),
+            SlashCommand::Stats => {
+                println!("{}", self.stats_status_text()?);
+                Ok(())
+            }
             SlashCommand::ModelShow => self.show_model(),
             SlashCommand::VariantSet(variant) => self.set_variant(variant),
             SlashCommand::ModeSet(mode) => self.set_mode(mode),
@@ -231,6 +238,24 @@ impl TuiApp {
             .map(|skill| format!("{}: {}", skill.name, skill.description))
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    fn stats_status_text(&self) -> Result<String> {
+        let report = usage_stats(StatsOptions {
+            db_path: self.db_path.clone(),
+            workdir: self.workdir.clone(),
+            all: false,
+            days: None,
+            limit: 5,
+        })?;
+        let totals = report.get("totals").unwrap_or(&Value::Null);
+        Ok(format!(
+            "sessions: {}  messages: {}  tokens: {}  cost: {}",
+            json_i64(totals, "sessions"),
+            json_i64(totals, "messages"),
+            json_i64(totals, "reported_total_tokens"),
+            format_nanodollars(json_i64(totals, "estimated_cost_nanodollars"))
+        ))
     }
 
     async fn submit_prompt(&mut self, prompt: String) -> Result<()> {

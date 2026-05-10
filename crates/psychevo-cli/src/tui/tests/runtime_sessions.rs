@@ -15,7 +15,7 @@ async fn fullscreen_thinking_toggle_hides_existing_blocks_without_status() {
 
     assert!(!ui.thinking_visible);
     assert_eq!(
-        transcript_line_count(&ui.transcript, 80, ui.thinking_visible),
+        transcript_line_count(&ui.transcript, 80, ui.thinking_visible, &ui.workdir),
         0
     );
     assert!(
@@ -28,7 +28,7 @@ async fn fullscreen_thinking_toggle_hides_existing_blocks_without_status() {
         .await
         .expect("thinking on");
     assert!(ui.thinking_visible);
-    assert!(transcript_line_count(&ui.transcript, 80, ui.thinking_visible) > 0);
+    assert!(transcript_line_count(&ui.transcript, 80, ui.thinking_visible, &ui.workdir) > 0);
     assert!(
         ui.transcript
             .iter()
@@ -72,6 +72,25 @@ async fn shift_tab_cycles_mode_without_status_row() {
     );
 }
 
+fn finished_run_result(app: &TuiApp) -> psychevo_runtime::RunResult {
+    psychevo_runtime::RunResult {
+        session_id: "finished-session".to_string(),
+        outcome: Outcome::Normal,
+        final_answer: "done".to_string(),
+        db_path: app.db_path.clone(),
+        workdir: app.workdir.clone(),
+        provider: "mock".to_string(),
+        model: "mock-model".to_string(),
+        base_url: "http://127.0.0.1".to_string(),
+        api_key_env: Some("TEST_PROVIDER_KEY".to_string()),
+        reasoning_effort: None,
+        context_limit: None,
+        tool_failures: 0,
+        selected_skills: Vec::new(),
+        events: Vec::new(),
+    }
+}
+
 #[tokio::test]
 async fn fullscreen_drain_keeps_queued_events_after_task_completion() {
     let temp = tempdir().expect("temp");
@@ -107,22 +126,7 @@ async fn fullscreen_drain_keeps_queued_events_after_task_completion() {
     .expect("send end");
     drop(tx);
 
-    let result = psychevo_runtime::RunResult {
-        session_id: "finished-session".to_string(),
-        outcome: Outcome::Normal,
-        final_answer: "done".to_string(),
-        db_path: app.db_path.clone(),
-        workdir: app.workdir.clone(),
-        provider: "mock".to_string(),
-        model: "mock-model".to_string(),
-        base_url: "http://127.0.0.1".to_string(),
-        api_key_env: Some("TEST_PROVIDER_KEY".to_string()),
-        reasoning_effort: None,
-        context_limit: None,
-        tool_failures: 0,
-        selected_skills: Vec::new(),
-        events: Vec::new(),
-    };
+    let result = finished_run_result(&app);
     let task = tokio::spawn(async move { Ok(result) });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
@@ -135,6 +139,19 @@ async fn fullscreen_drain_keeps_queued_events_after_task_completion() {
     }
 
     app.drain_fullscreen_events(&mut ui).await.expect("drain");
+
+    let active_tool_row = ui
+        .transcript
+        .iter()
+        .find(|row| row.title == "Exploring fixture.txt")
+        .expect("active tool evidence row");
+    assert!(active_tool_row.tool_started.is_some());
+    assert!(ui.running.is_some());
+    assert_eq!(ui.deferred_stream_events.len(), 1);
+
+    app.drain_fullscreen_events(&mut ui)
+        .await
+        .expect("second drain");
 
     let tool_row = ui
         .transcript
@@ -155,6 +172,220 @@ async fn fullscreen_drain_keeps_queued_events_after_task_completion() {
         .expect("answer index");
     assert!(answer_index < tool_index);
     assert!(ui.running.is_none());
+}
+
+#[tokio::test]
+async fn fast_reasoning_only_write_renders_changing_before_completion() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    let (tx, rx) = mpsc::unbounded_channel();
+    tx.send(RunStreamEvent::ReasoningDelta {
+        text: "Let me compose the full report now. I have all the data. Let me write it out."
+            .to_string(),
+    })
+    .expect("send reasoning");
+    tx.send(RunStreamEvent::Event(serde_json::json!({
+        "type": "message_end",
+        "message": {
+            "role": "assistant",
+            "content": [{
+                "type": "tool_call",
+                "id": "call_write_report",
+                "name": "write",
+                "arguments": {
+                    "path": "/tmp/hackernews-hot-05-39.md",
+                    "content": "report body"
+                },
+                "arguments_json": "{\"path\":\"/tmp/hackernews-hot-05-39.md\",\"content\":\"report body\"}",
+                "arguments_error": null,
+                "content_index": 0,
+                "call_index": 0
+            }],
+            "timestamp_ms": 2,
+            "finish_reason": "tool_calls",
+            "outcome": "normal",
+            "model": "mimo-v2.5-pro",
+            "provider": "xiaomi-token-plan"
+        },
+        "metadata": {
+            "elapsed_ms": 190_546,
+            "reasoning_effort": "low"
+        }
+    })))
+    .expect("send message end");
+    tx.send(RunStreamEvent::Event(serde_json::json!({
+        "type": "tool_execution_start",
+        "tool_call_id": "call_write_report",
+        "tool_name": "write",
+        "args": {
+            "path": "/tmp/hackernews-hot-05-39.md",
+            "content": "report body"
+        }
+    })))
+    .expect("send start");
+    tx.send(RunStreamEvent::Event(serde_json::json!({
+        "type": "tool_execution_end",
+        "tool_call_id": "call_write_report",
+        "tool_name": "write",
+        "result": {
+            "path": "feeds/2026-05-10/hackernews-hot-05-39.md",
+            "bytes_written": 24968,
+            "error": null
+        },
+        "outcome": "normal",
+        "elapsed_ms": 0
+    })))
+    .expect("send end");
+    drop(tx);
+
+    let result = finished_run_result(&app);
+    let task = tokio::spawn(async move { Ok(result) });
+    let (control, _) = run_control();
+    ui.running = Some(RunningTurn {
+        control,
+        rx,
+        task: RunningTask::Agent(task),
+    });
+    while !ui.running.as_ref().expect("running").task.is_finished() {
+        tokio::task::yield_now().await;
+    }
+
+    app.drain_fullscreen_events(&mut ui)
+        .await
+        .expect("first drain");
+    let thinking = ui
+        .transcript
+        .iter()
+        .position(|row| row.kind == TranscriptKind::Thinking)
+        .expect("thinking row");
+    let changing = ui
+        .transcript
+        .iter()
+        .position(|row| row.title == "Changing files")
+        .expect("provisional changing row");
+    assert!(thinking < changing);
+    assert!(ui.transcript[changing].tool_started.is_some());
+    assert!(ui.transcript[changing].tool_call_id.is_none());
+    assert!(ui
+        .transcript
+        .iter()
+        .all(|row| row.kind != TranscriptKind::Meta));
+    assert!(ui.running.is_some());
+    assert_eq!(ui.deferred_stream_events.len(), 3);
+
+    app.drain_fullscreen_events(&mut ui)
+        .await
+        .expect("second drain");
+    assert!(ui.running.is_some());
+    assert_eq!(ui.deferred_stream_events.len(), 1);
+    assert!(ui
+        .transcript
+        .iter()
+        .any(|row| row.title == "Changing /tmp/hackernews-hot-05-39.md"));
+
+    app.drain_fullscreen_events(&mut ui)
+        .await
+        .expect("third drain");
+    assert!(ui.running.is_none());
+    assert!(ui
+        .transcript
+        .iter()
+        .any(|row| row.title == "Changed feeds/2026-05-10/hackernews-hot-05-39.md"));
+}
+
+#[tokio::test]
+async fn pending_write_tool_input_defers_later_completion_events() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    let (tx, rx) = mpsc::unbounded_channel();
+    tx.send(RunStreamEvent::Event(serde_json::json!({
+        "type": "message_update",
+        "message": {
+            "role": "assistant",
+            "content": [{
+                "type": "text",
+                "text": "Now I have all the data needed. Let me write the complete report."
+            }],
+            "timestamp_ms": 2,
+            "outcome": "normal"
+        }
+    })))
+    .expect("send text");
+    tx.send(RunStreamEvent::Event(serde_json::json!({
+        "type": "tool_call_pending",
+        "tool_call_id": "call_write_report",
+        "tool_name": "write",
+        "arguments_json": "",
+        "content_index": 1,
+        "call_index": 0
+    })))
+    .expect("send pending");
+    tx.send(RunStreamEvent::Event(serde_json::json!({
+        "type": "tool_execution_start",
+        "tool_call_id": "call_write_report",
+        "tool_name": "write",
+        "args": {
+            "path": "/tmp/hackernews-hot-05-39.md",
+            "content": "report body"
+        }
+    })))
+    .expect("send start");
+    tx.send(RunStreamEvent::Event(serde_json::json!({
+        "type": "tool_execution_end",
+        "tool_call_id": "call_write_report",
+        "tool_name": "write",
+        "result": {
+            "path": "feeds/2026-05-10/hackernews-hot-05-39.md",
+            "bytes_written": 24968,
+            "error": null
+        },
+        "outcome": "normal",
+        "elapsed_ms": 0
+    })))
+    .expect("send end");
+    drop(tx);
+
+    let result = finished_run_result(&app);
+    let task = tokio::spawn(async move { Ok(result) });
+    let (control, _) = run_control();
+    ui.running = Some(RunningTurn {
+        control,
+        rx,
+        task: RunningTask::Agent(task),
+    });
+    while !ui.running.as_ref().expect("running").task.is_finished() {
+        tokio::task::yield_now().await;
+    }
+
+    app.drain_fullscreen_events(&mut ui)
+        .await
+        .expect("first drain");
+    assert!(ui
+        .transcript
+        .iter()
+        .any(|row| row.title == "Changing files"));
+    assert_eq!(ui.deferred_stream_events.len(), 3);
+    assert!(ui.running.is_some());
+
+    app.drain_fullscreen_events(&mut ui)
+        .await
+        .expect("second drain");
+    assert!(ui
+        .transcript
+        .iter()
+        .any(|row| row.title == "Changing /tmp/hackernews-hot-05-39.md"));
+    assert_eq!(ui.deferred_stream_events.len(), 1);
+
+    app.drain_fullscreen_events(&mut ui)
+        .await
+        .expect("third drain");
+    assert!(ui.running.is_none());
+    assert!(ui
+        .transcript
+        .iter()
+        .any(|row| row.title == "Changed feeds/2026-05-10/hackernews-hot-05-39.md"));
 }
 
 #[test]
@@ -617,7 +848,12 @@ fn fullscreen_loads_current_session_history() {
                 "provider": "mock"
             })
             .to_string(),
-            serde_json::json!({"total_tokens": 12}).to_string(),
+            serde_json::json!({
+                "input_tokens": 9,
+                "output_tokens": 3,
+                "total_tokens": 12
+            })
+            .to_string(),
             serde_json::json!({"provider_response_id": "resp_1"}).to_string()
         ],
     )
@@ -656,13 +892,171 @@ fn fullscreen_loads_current_session_history() {
             .iter()
             .all(|row| !row.text.contains("tokens="))
     );
-    assert_eq!(ui.sidebar_tokens, Some(12));
+    assert_eq!(ui.sidebar_tokens, Some(9));
     assert_eq!(ui.history, ["hello", "follow-up"]);
     ui.textarea = textarea_with_text("draft");
     ui.recall_history(-1);
     assert_eq!(textarea_text(&ui.textarea), "follow-up");
     ui.recall_history(1);
     assert_eq!(textarea_text(&ui.textarea), "draft");
+}
+
+#[test]
+fn load_history_rehydrates_pending_write_tool_call() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let session_id = store
+        .create_session_with_metadata(
+            &app.workdir,
+            "tui",
+            "mimo-v2.5-pro",
+            "xiaomi-token-plan",
+            None,
+        )
+        .expect("session");
+    app.current_session = Some(session_id.clone());
+    let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
+
+    insert_tui_message(
+        &conn,
+        &session_id,
+        1,
+        "assistant",
+        1,
+        serde_json::json!({
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "NYT is behind a paywall. Based on comments, I can still summarize the Meta article. Let me now write the report."
+                },
+                {
+                    "type": "tool_call",
+                    "id": "call_write_report",
+                    "name": "write",
+                    "arguments": {
+                        "path": "feeds/2026-05-10/hackernews-hot-06-42.md",
+                        "content": "report body"
+                    },
+                    "arguments_json": "{\"path\":\"feeds/2026-05-10/hackernews-hot-06-42.md\",\"content\":\"report body\"}",
+                    "arguments_error": null,
+                    "content_index": 1,
+                    "call_index": 0
+                }
+            ],
+            "timestamp_ms": 1,
+            "finish_reason": "tool_calls",
+            "outcome": "normal",
+            "model": "mimo-v2.5-pro",
+            "provider": "xiaomi-token-plan"
+        }),
+    );
+
+    let mut ui = FullscreenUi::new(&app);
+    app.load_current_session_history(&mut ui).expect("history");
+    assert!(ui.transcript.iter().any(|row| {
+        row.title == "Changing feeds/2026-05-10/hackernews-hot-06-42.md"
+            && row.tool_started.is_some()
+    }));
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.kind != TranscriptKind::Meta)
+    );
+
+    insert_tui_message(
+        &conn,
+        &session_id,
+        2,
+        "tool_result",
+        2,
+        serde_json::json!({
+            "role": "tool_result",
+            "tool_call_id": "call_write_report",
+            "tool_name": "write",
+            "content": "{\"bytes_written\":26779,\"dirs_created\":false,\"error\":null,\"path\":\"feeds/2026-05-10/hackernews-hot-06-42.md\"}",
+            "is_error": false,
+            "timestamp_ms": 2
+        }),
+    );
+    ui.clear_transcript();
+    app.load_current_session_history(&mut ui).expect("history");
+    let rows = ui
+        .transcript
+        .iter()
+        .filter(|row| row.kind == TranscriptKind::Changed)
+        .collect::<Vec<_>>();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].title,
+        "Changed feeds/2026-05-10/hackernews-hot-06-42.md"
+    );
+    assert!(rows[0].tool_started.is_none());
+}
+
+#[test]
+fn load_history_does_not_rehydrate_aborted_tool_calls_as_running() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let session_id = store
+        .create_session_with_metadata(
+            &app.workdir,
+            "tui",
+            "mimo-v2.5-pro",
+            "xiaomi-token-plan",
+            None,
+        )
+        .expect("session");
+    app.current_session = Some(session_id.clone());
+    let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
+
+    insert_tui_message(
+        &conn,
+        &session_id,
+        1,
+        "assistant",
+        1,
+        serde_json::json!({
+            "role": "assistant",
+            "content": [
+                {"type": "reasoning", "text": "Let me continue fetching the remaining stories."},
+                {
+                    "type": "tool_call",
+                    "id": "call_story",
+                    "name": "bash",
+                    "arguments": {
+                        "command": "cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db \"SELECT content FROM stories WHERE id = 48074265;\" 2>&1 | head -c 3000",
+                        "timeout": 10
+                    },
+                    "arguments_json": "{\"command\":\"cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db \\\"SELECT content FROM stories WHERE id = 48074265;\\\" 2>&1 | head -c 3000\",\"timeout\":10}",
+                    "arguments_error": null,
+                    "content_index": 1,
+                    "call_index": 0
+                }
+            ],
+            "timestamp_ms": 1,
+            "finish_reason": "aborted",
+            "outcome": "aborted",
+            "model": "mimo-v2.5-pro",
+            "provider": "xiaomi-token-plan"
+        }),
+    );
+
+    let mut ui = FullscreenUi::new(&app);
+    app.load_current_session_history(&mut ui).expect("history");
+    let row = ui
+        .transcript
+        .iter()
+        .find(|row| row.kind == TranscriptKind::Ran)
+        .expect("bash row");
+    assert!(row.title.starts_with("Ran cd /home/kevin/Projects/feedgarden"));
+    assert!(!row.title.starts_with("Running "));
+    assert_eq!(row.text, "interrupted");
+    assert!(row.failed);
+    assert!(row.tool_started.is_none());
+    assert!(ui.tool_rows.is_empty());
 }
 
 #[tokio::test]

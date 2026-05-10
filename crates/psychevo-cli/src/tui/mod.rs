@@ -3,7 +3,7 @@ use std::fs;
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command as StdCommand, ExitCode, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -20,11 +20,12 @@ use psychevo_ai::Outcome;
 use psychevo_runtime::{
     ConfiguredModel, CustomProviderInput, ModelCatalogEntry, ModelCatalogProvider,
     RunControlHandle, RunMode, RunOptions, RunStreamEvent, RunStreamSink, SessionSummary,
-    SessionUndoOptions, SkillCatalog, SkillDiscoveryOptions, SqliteStore, TuiMessageSummary,
-    UserShellOptions, canonicalize_workdir, configured_models, create_global_custom_provider,
-    custom_provider_api_key_env, discover_skills, fetch_model_catalog, model_catalog_providers,
-    redo_session, run_control, run_live_streaming, run_live_streaming_controlled,
-    run_user_shell_command_streaming_controlled, selected_configured_model, undo_session,
+    SessionUndoOptions, SkillCatalog, SkillDiscoveryOptions, SqliteStore, StatsOptions,
+    TuiMessageSummary, UserShellOptions, canonicalize_workdir, configured_models,
+    create_global_custom_provider, custom_provider_api_key_env, discover_skills,
+    fetch_model_catalog, model_catalog_providers, redo_session, run_control, run_live_streaming,
+    run_live_streaming_controlled, run_user_shell_command_streaming_controlled,
+    selected_configured_model, undo_session, usage_stats,
 };
 use ratatui::Frame;
 use ratatui::Terminal;
@@ -32,7 +33,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui_textarea::{CursorMove, TextArea, WrapMode};
 use serde_json::Value;
 use tokio::sync::mpsc;
@@ -147,6 +148,10 @@ include!("support/file_search.rs");
 include!("support/skill_search.rs");
 include!("support/model_catalog.rs");
 include!("ui/types.rs");
+include!("support/terminal_probe.rs");
+include!("support/theme.rs");
+include!("support/motion.rs");
+include!("support/markdown_render.rs");
 include!("ui/fullscreen.rs");
 include!("support/history.rs");
 include!("support/selection.rs");

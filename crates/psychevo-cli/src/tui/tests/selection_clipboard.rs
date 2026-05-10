@@ -127,6 +127,58 @@ fn sidebar_omits_source_mode_and_footer_chrome() {
 }
 
 #[test]
+fn sidebar_render_clears_stale_terminal_cells() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.sidebar_forced = true;
+    ui.sidebar_hidden = false;
+    ui.sidebar_tokens = Some(36_019);
+    ui.refresh_sidebar(&app);
+    ui.sidebar.changed_files = vec![
+        "?? .gitignore".to_string(),
+        "?? .opencode/".to_string(),
+        "?? .psychevo/".to_string(),
+    ];
+
+    let backend = TestBackend::new(120, 24);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| {
+            let lines = (0..24)
+                .map(|_| Line::from("g".repeat(120)))
+                .collect::<Vec<_>>();
+            frame.render_widget(
+                Paragraph::new(lines),
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 120,
+                    height: 24,
+                },
+            );
+        })
+        .expect("pollute frame");
+
+    terminal
+        .draw(|frame| app.render_fullscreen(frame, &mut ui))
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let text = buffer_text(&buffer);
+    let sidebar_x = 120 - 42;
+
+    assert!(text.contains("tokens: 36,019"), "{text}");
+    assert!(!text.contains("gokens"), "{text}");
+    assert_eq!(
+        buffer
+            .cell((sidebar_x + 4, 21))
+            .expect("blank sidebar cell")
+            .symbol(),
+        " "
+    );
+}
+
+#[test]
 fn multiline_transcript_selection_ignores_same_row_sidebar_text() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);

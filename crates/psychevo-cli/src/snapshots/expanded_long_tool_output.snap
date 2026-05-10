@@ -1,6 +1,6 @@
 ---
-source: crates/psychevo-cli/src/tui.rs
-assertion_line: 5997
+source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 612
 expression: combined
 ---
 fixture=expanded_long_tool_output
@@ -9,9 +9,10 @@ size=120x24
 --- text ---
 › Summarize the TUI snapshot harness.
 
-▌ Thinking: Check layout boundaries, style roles, and expandable evidence.
+• Thinking
+  └ Check layout boundaries, style roles, and expandable evidence.
 
-> Explored crates/psychevo-cli/src/tui.rs [-]
+› Explored crates/psychevo-cli/src/tui.rs                                                                    ▾ collapse
   └ 01: crates/psychevo-cli/src/tui.rs evidence row
     02: crates/psychevo-cli/src/tui.rs evidence row
     03: crates/psychevo-cli/src/tui.rs evidence row
@@ -26,7 +27,6 @@ size=120x24
     12: crates/psychevo-cli/src/tui.rs evidence row
     13: crates/psychevo-cli/src/tui.rs evidence row
     14: crates/psychevo-cli/src/tui.rs evidence row
-    15: crates/psychevo-cli/src/tui.rs evidence row
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
 
@@ -35,9 +35,10 @@ mock/model  high
 --- styles ---
 [dim]› [default]Summarize the TUI snapshot harness.
 [default]
-[dim]▌ [paper]Thinking: [dim]Check layout boundaries, style roles, and expandable evidence.[default]
+[paper]• Thinking[default]
+[dim]  └ Check layout boundaries, style roles, and expandable evidence.[default]
 [default]
-[cyan]> [default]Explored crates/psychevo-cli/src/tui.rs [-]
+[cyan]› [default]Explored crates/psychevo-cli/src/tui.rs                                                                    [dim]▾ collapse[default]
 [dim]  └ [default]01: crates/psychevo-cli/src/tui.rs evidence row
 [dim]    [default]02: crates/psychevo-cli/src/tui.rs evidence row
 [dim]    [default]03: crates/psychevo-cli/src/tui.rs evidence row
@@ -52,7 +53,6 @@ mock/model  high
 [dim]    [default]12: crates/psychevo-cli/src/tui.rs evidence row
 [dim]    [default]13: crates/psychevo-cli/src/tui.rs evidence row
 [dim]    [default]14: crates/psychevo-cli/src/tui.rs evidence row
-[dim]    [default]15: crates/psychevo-cli/src/tui.rs evidence row
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
 [default]

@@ -168,7 +168,7 @@ fn cli_tui_status_shows_configured_default_variant() {
     assert!(stdout.contains("model: mock/mock-model"));
     assert!(stdout.contains("variant: xhigh"));
     let expected_status = format!(
-        "workdir: {}\nhome: {}\ndb: {}\nsession: (none)\nmodel: mock/mock-model\nvariant: xhigh\nmode: default\nthinking: on\ndebug: off",
+        "workdir: {}\nhome: {}\ndb: {}\nsession: (none)\nmodel: mock/mock-model\nvariant: xhigh\nmode: default\ndebug: off",
         workdir.display(),
         home.display(),
         db.display()

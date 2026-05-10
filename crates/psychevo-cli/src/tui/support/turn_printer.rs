@@ -91,6 +91,9 @@ impl TurnPrinter {
                     self.last_assistant_text = text;
                 }
             }
+            "tool_call_pending" => {
+                self.render_streaming_tool_calls(value, out)?;
+            }
             "message_end" => {
                 self.render_streaming_tool_calls(value, out)?;
                 if let Some(text) = assistant_text_from_event(value) {
@@ -106,6 +109,7 @@ impl TurnPrinter {
                     started: None,
                     usage: value.get("usage"),
                     metadata: value.get("metadata"),
+                    accounting: value.get("accounting"),
                     failures: 0,
                     debug: self.debug,
                 });

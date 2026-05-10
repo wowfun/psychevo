@@ -6,6 +6,16 @@ fn increment_row_index(value: &mut Option<usize>, inserted_at: usize) {
     }
 }
 
+fn decrement_row_index(value: &mut Option<usize>, removed_at: usize) {
+    if let Some(index) = value {
+        if *index == removed_at {
+            *value = None;
+        } else if *index > removed_at {
+            *index -= 1;
+        }
+    }
+}
+
 fn format_configured_model(model: &ConfiguredModel) -> String {
     let mut parts = vec![format!("{}/{}", model.provider, model.model)];
     if let Some(variant) = &model.reasoning_effort {
@@ -57,4 +67,3 @@ fn resolve_session_ref_from_summaries(
         _ => Err(anyhow!("ambiguous session prefix: {reference}")),
     }
 }
-

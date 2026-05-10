@@ -47,7 +47,7 @@ fn apply_selection_highlight(
             let cell_end = cell.x.saturating_add(cell.width);
             for x in cell.x..cell_end {
                 if let Some(buffer_cell) = buffer.cell_mut((x, line.y)) {
-                    buffer_cell.set_bg(TUI_SELECTION_BG);
+                    buffer_cell.set_bg(tui_theme().selection_bg);
                 }
             }
         }
@@ -61,6 +61,7 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_
     ui.last_transcript_width = area.width;
     refresh_transcript_layout(ui, area.width);
     ui.resolve_transcript_scroll_for_render_with_total(ui.transcript_layout.total_height);
+    let render_blocks = transcript_render_blocks(ui);
     let mut lines = Vec::new();
     let mut surface_rows = Vec::new();
     let mut areas = Vec::new();
@@ -68,25 +69,25 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_
     let window_end = window_start.saturating_add(usize::from(viewport_height));
     let mut slice_start = None;
     let mut rendered_height = 0usize;
-    for (index, row) in ui.transcript.iter().enumerate() {
-        let Some(layout_row) = ui.transcript_layout.rows.get(index) else {
+    for (block_index, block) in render_blocks.iter().enumerate() {
+        let Some(layout_block) = ui.transcript_layout.blocks.get(block_index) else {
             continue;
         };
-        if layout_row.height == 0 {
+        if layout_block.height == 0 {
             continue;
         }
-        let row_start = layout_row.start;
-        let row_end = row_start.saturating_add(layout_row.height);
-        if row_start >= window_end || row_end <= window_start {
+        let block_start = layout_block.start;
+        let block_end = block_start.saturating_add(layout_block.height);
+        if block_start >= window_end || block_end <= window_start {
             continue;
         }
-        let visible_start = row_start.max(window_start);
-        let visible_end = row_end.min(window_end);
+        let visible_start = block_start.max(window_start);
+        let visible_end = block_end.min(window_end);
         let y = area
             .y
             .saturating_add((visible_start.saturating_sub(window_start)) as u16);
         areas.push((
-            index,
+            layout_block.target,
             Rect {
                 x: area.x,
                 y,
@@ -95,30 +96,27 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_
                     as u16,
             },
         ));
-        let first_slice_start = *slice_start.get_or_insert(row_start);
-        let compact_trailing =
-            compact_trailing_for(&ui.transcript, index, row, ui.thinking_visible);
-        let row_lines = transcript_lines(
-            row,
-            ui.selected_row == Some(index),
-            compact_trailing,
-            area.width,
-        );
-        let prompt_surface_rows = if row.kind == TranscriptKind::Prompt {
-            row_lines
-                .len()
-                .saturating_sub(usize::from(!compact_trailing))
-        } else {
-            0
+        let first_slice_start = *slice_start.get_or_insert(block_start);
+        let block_lines = render_block_lines(ui, &render_blocks, block_index, area.width);
+        let prompt_surface_rows = match block {
+            TranscriptRenderBlock::Row { index }
+                if ui.transcript[*index].kind == TranscriptKind::Prompt =>
+            {
+                let compact_trailing = compact_trailing_for_render_block(&render_blocks, block_index, ui);
+                block_lines
+                    .len()
+                    .saturating_sub(usize::from(!compact_trailing))
+            }
+            _ => 0,
         };
-        for (line_index, line) in row_lines.iter().enumerate() {
+        for (line_index, line) in block_lines.iter().enumerate() {
             let has_surface_bg = line_index < prompt_surface_rows;
             for _ in 0..wrapped_line_count(std::slice::from_ref(line), area.width) {
                 surface_rows.push(has_surface_bg);
             }
         }
-        lines.extend(row_lines);
-        rendered_height = rendered_height.saturating_add(layout_row.height);
+        lines.extend(block_lines);
+        rendered_height = rendered_height.saturating_add(layout_block.height);
         if first_slice_start.saturating_add(rendered_height) >= window_end {
             break;
         }
@@ -142,7 +140,7 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_
         }
         let y = area.y.saturating_add(offset as u16);
         for x in area.x..area.x.saturating_add(area.width) {
-            frame.buffer_mut()[(x, y)].set_bg(TUI_SURFACE_BG);
+            frame.buffer_mut()[(x, y)].set_bg(tui_theme().surface_bg);
         }
     }
     ui.capture_selectable_rows(
@@ -153,26 +151,23 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_
 }
 
 fn refresh_transcript_layout(ui: &mut FullscreenUi<'_>, width: u16) {
-    let old_rows = if ui.transcript_layout.width == width
+    let old_blocks = if ui.transcript_layout.width == width
         && ui.transcript_layout.thinking_visible == ui.thinking_visible
     {
-        Some(ui.transcript_layout.rows.as_slice())
+        Some(ui.transcript_layout.blocks.as_slice())
     } else {
         None
     };
-    let mut rows = Vec::with_capacity(ui.transcript.len());
+    let render_blocks = transcript_render_blocks(ui);
+    let mut blocks = Vec::with_capacity(render_blocks.len());
     let mut total_height = 0usize;
     #[cfg(test)]
     let mut recomputed_rows = 0usize;
-    for (index, row) in ui.transcript.iter().enumerate() {
-        let visible = row_visible(row, ui.thinking_visible);
-        let compact_trailing = visible
-            && compact_trailing_for(&ui.transcript, index, row, ui.thinking_visible);
-        let selected = ui.selected_row == Some(index);
-        let key = transcript_layout_row_key(row, visible, compact_trailing, selected);
-        let height = if visible {
-            old_rows
-                .and_then(|rows| rows.get(index))
+    for (block_index, block) in render_blocks.iter().enumerate() {
+        let key = transcript_layout_block_key(ui, &render_blocks, block_index);
+        let target = render_block_target(block, ui);
+        let height = old_blocks
+                .and_then(|blocks| blocks.get(block_index))
                 .filter(|cached| cached.key == key)
                 .map(|cached| cached.height)
                 .unwrap_or_else(|| {
@@ -180,14 +175,12 @@ fn refresh_transcript_layout(ui: &mut FullscreenUi<'_>, width: u16) {
                     {
                         recomputed_rows += 1;
                     }
-                    let lines = transcript_lines(row, selected, compact_trailing, width);
+                    let lines = render_block_lines(ui, &render_blocks, block_index, width);
                     wrapped_line_count(&lines, width)
-                })
-        } else {
-            0
-        };
-        rows.push(TranscriptLayoutRow {
+                });
+        blocks.push(TranscriptLayoutBlock {
             key,
+            target,
             start: total_height,
             height,
         });
@@ -196,11 +189,128 @@ fn refresh_transcript_layout(ui: &mut FullscreenUi<'_>, width: u16) {
     ui.transcript_layout = TranscriptLayoutCache {
         width,
         thinking_visible: ui.thinking_visible,
-        rows,
+        blocks,
         total_height,
         #[cfg(test)]
         recomputed_rows,
     };
+}
+
+fn transcript_layout_matches_current(ui: &FullscreenUi<'_>, width: u16) -> bool {
+    if ui.transcript_layout.width != width
+        || ui.transcript_layout.thinking_visible != ui.thinking_visible
+    {
+        return false;
+    }
+    let render_blocks = transcript_render_blocks(ui);
+    if ui.transcript_layout.blocks.len() != render_blocks.len() {
+        return false;
+    }
+    render_blocks.iter().enumerate().all(|(index, _)| {
+        let key = transcript_layout_block_key(ui, &render_blocks, index);
+        ui.transcript_layout
+            .blocks
+            .get(index)
+            .is_some_and(|cached| cached.key == key)
+    })
+}
+
+fn transcript_total_height_for_ui(ui: &FullscreenUi<'_>, width: u16) -> usize {
+    let render_blocks = transcript_render_blocks(ui);
+    render_blocks
+        .iter()
+        .enumerate()
+        .map(|(index, _)| {
+            let lines = render_block_lines(ui, &render_blocks, index, width);
+            wrapped_line_count(&lines, width)
+        })
+        .sum()
+}
+
+fn transcript_render_blocks(ui: &FullscreenUi<'_>) -> Vec<TranscriptRenderBlock> {
+    ui.transcript
+        .iter()
+        .enumerate()
+        .filter_map(|(index, row)| {
+            row_visible(row, ui.thinking_visible).then_some(TranscriptRenderBlock::Row { index })
+        })
+        .collect()
+}
+
+fn render_block_target(block: &TranscriptRenderBlock, ui: &FullscreenUi<'_>) -> TranscriptHitTarget {
+    match block {
+        TranscriptRenderBlock::Row { index } => TranscriptHitTarget::Row(ui.transcript[*index].id),
+    }
+}
+
+fn target_selected(ui: &FullscreenUi<'_>, target: TranscriptHitTarget) -> bool {
+    if ui.selected_target == Some(target) {
+        return true;
+    }
+    let TranscriptHitTarget::Row(row_id) = target;
+    ui.selected_row
+        .and_then(|index| ui.transcript.get(index))
+        .is_some_and(|row| row.id == row_id)
+}
+
+fn compact_trailing_for_render_block(
+    blocks: &[TranscriptRenderBlock],
+    index: usize,
+    ui: &FullscreenUi<'_>,
+) -> bool {
+    let Some(block) = blocks.get(index) else {
+        return false;
+    };
+    let TranscriptRenderBlock::Row { index: row_index } = block;
+    let row = &ui.transcript[*row_index];
+    blocks.get(index + 1).is_some_and(|next| {
+        let TranscriptRenderBlock::Row { index: next_index } = next;
+        let next_kind = ui.transcript[*next_index].kind;
+        (row.kind == TranscriptKind::Answer && next_kind == TranscriptKind::Meta)
+            || (matches!(
+                row.kind,
+                TranscriptKind::Explored | TranscriptKind::Ran | TranscriptKind::Changed
+            ) && matches!(
+                next_kind,
+                TranscriptKind::Explored | TranscriptKind::Ran | TranscriptKind::Changed
+            ))
+    })
+}
+
+fn render_block_lines(
+    ui: &FullscreenUi<'_>,
+    blocks: &[TranscriptRenderBlock],
+    index: usize,
+    width: u16,
+) -> Vec<Line<'static>> {
+    let Some(block) = blocks.get(index) else {
+        return Vec::new();
+    };
+    let TranscriptRenderBlock::Row { index: row_index } = block;
+    let row = &ui.transcript[*row_index];
+    let target = TranscriptHitTarget::Row(row.id);
+    let selected = target_selected(ui, target);
+    let compact_trailing = compact_trailing_for_render_block(blocks, index, ui);
+    transcript_lines(row, selected, compact_trailing, width, &ui.workdir)
+}
+
+fn transcript_layout_block_key(
+    ui: &FullscreenUi<'_>,
+    blocks: &[TranscriptRenderBlock],
+    index: usize,
+) -> TranscriptLayoutBlockKey {
+    let block = &blocks[index];
+    let target = render_block_target(block, ui);
+    let selected = target_selected(ui, target);
+    let compact_trailing = compact_trailing_for_render_block(blocks, index, ui);
+    let TranscriptRenderBlock::Row { index } = block;
+    let row = &ui.transcript[*index];
+    TranscriptLayoutBlockKey {
+        target,
+        compact_trailing,
+        selected,
+        row_key: transcript_layout_row_key(row, true, compact_trailing, selected),
+    }
 }
 
 fn transcript_layout_row_key(
@@ -211,7 +321,7 @@ fn transcript_layout_row_key(
 ) -> TranscriptLayoutRowKey {
     let tool_elapsed = tool_elapsed_label(row);
     let active_tool_marker = active_tool_elapsed(row)
-        .map(status_spinner_frame)
+        .map(activity_spinner_frame)
         .unwrap_or("");
     TranscriptLayoutRowKey {
         visible,
@@ -220,6 +330,7 @@ fn transcript_layout_row_key(
         kind: row.kind,
         failed: row.failed,
         expanded: row.expanded,
+        details_collapsed: row.details_collapsed,
         expandable: row.is_expandable(),
         tool_elapsed_hash: hash_layout_text(tool_elapsed.as_deref().unwrap_or("")),
         active_tool_marker_hash: hash_layout_text(active_tool_marker),
@@ -240,15 +351,16 @@ fn transcript_lines(
     selected: bool,
     compact_trailing: bool,
     width: u16,
+    workdir: &Path,
 ) -> Vec<Line<'static>> {
     if row.kind == TranscriptKind::Prompt {
         return prompt_lines(row, selected, compact_trailing, width);
     }
     if row.kind == TranscriptKind::Answer {
-        return answer_lines(row, selected, compact_trailing);
+        return answer_lines(row, selected, compact_trailing, workdir);
     }
     if row.kind == TranscriptKind::Thinking {
-        return thinking_lines(row, selected, compact_trailing);
+        return thinking_lines(row, selected, compact_trailing, width);
     }
     if matches!(
         row.kind,
@@ -258,17 +370,24 @@ fn transcript_lines(
     }
 
     let style = label_style(row.kind, row.failed);
-    let marker = if selected { ">" } else { "▌" };
+    let marker = if selected { "›" } else { "▌" };
+    let marker_style = if selected {
+        focus_marker_style(row.failed)
+    } else {
+        style
+    };
     let mut out = Vec::new();
     let title = row.title.trim();
     if !title.is_empty() {
         let suffix = if row.is_expandable() {
-            if row.expanded { " [-]" } else { " [+]" }
+            row_expand_hint(row, selected, None)
+                .map(|hint| format!(" {hint}"))
+                .unwrap_or_default()
         } else {
-            ""
+            String::new()
         };
         out.push(Line::from(vec![
-            Span::styled(format!("{marker} "), style),
+            Span::styled(format!("{marker} "), marker_style),
             Span::styled(
                 format!("{title}{suffix}"),
                 style.add_modifier(Modifier::BOLD),
@@ -276,18 +395,28 @@ fn transcript_lines(
         ]));
     }
     let body_style = style_for_body(row.kind, row.failed);
-    for line in row.expandable_text().lines() {
+    for (index, line) in row.expandable_text().lines().enumerate() {
         let mut span = Span::styled(line.to_string(), body_style);
         if row.kind == TranscriptKind::Prompt {
-            span = span.style(body_style.bg(Color::Rgb(24, 24, 28)));
+            span = span.style(body_style.bg(tui_theme().menu_selected_bg));
         }
+        let prefix = if selected && (!title.is_empty() || index > 0) {
+            "  ".to_string()
+        } else {
+            format!("{marker} ")
+        };
+        let prefix_style = if selected && (!title.is_empty() || index > 0) {
+            tui_theme().dim_style()
+        } else {
+            marker_style
+        };
         out.push(Line::from(vec![
-            Span::styled(format!("{marker} "), style),
+            Span::styled(prefix, prefix_style),
             span,
         ]));
     }
     if out.is_empty() {
-        out.push(Line::from(Span::styled(marker.to_string(), style)));
+        out.push(Line::from(Span::styled(marker.to_string(), marker_style)));
     }
     if !compact_trailing {
         out.push(Line::from(""));
@@ -302,16 +431,10 @@ fn prompt_lines(
     width: u16,
 ) -> Vec<Line<'static>> {
     let mut out = Vec::new();
-    let body_style = style_for_body(row.kind, row.failed).bg(TUI_SURFACE_BG);
+    let body_style = style_for_body(row.kind, row.failed).bg(tui_theme().surface_bg);
     for (index, line) in row.expandable_text().lines().enumerate() {
-        let first_prefix = if selected {
-            "> "
-        } else if index == 0 {
-            "› "
-        } else {
-            "  "
-        };
-        let continuation_prefix = if selected { "> " } else { "  " };
+        let first_prefix = if index == 0 { "› " } else { "  " };
+        let continuation_prefix = "  ";
         for (wrapped_index, wrapped) in wrap_prompt_text(line, first_prefix, width)
             .into_iter()
             .enumerate()
@@ -321,11 +444,21 @@ fn prompt_lines(
             } else {
                 continuation_prefix
             };
-            out.push(prompt_line(prefix, &wrapped, width, body_style));
+            let prefix_style = if selected && index == 0 && wrapped_index == 0 {
+                focus_marker_style(row.failed)
+            } else {
+                tui_theme().dim_style()
+            };
+            out.push(prompt_line(prefix, &wrapped, width, body_style, prefix_style));
         }
     }
     if out.is_empty() {
-        out.push(prompt_line("› ", "", width, body_style));
+        let prefix_style = if selected {
+            focus_marker_style(row.failed)
+        } else {
+            tui_theme().dim_style()
+        };
+        out.push(prompt_line("› ", "", width, body_style, prefix_style));
     }
     if !compact_trailing {
         out.push(Line::from(""));
@@ -333,11 +466,17 @@ fn prompt_lines(
     out
 }
 
-fn prompt_line(prefix: &str, text: &str, width: u16, style: Style) -> Line<'static> {
+fn prompt_line(
+    prefix: &str,
+    text: &str,
+    width: u16,
+    style: Style,
+    prefix_style: Style,
+) -> Line<'static> {
     let content_width = UnicodeWidthStr::width(prefix).saturating_add(UnicodeWidthStr::width(text));
     let padding = usize::from(width).saturating_sub(content_width);
     Line::from(vec![
-        Span::styled(prefix.to_string(), style.fg(TUI_DIM)),
+        Span::styled(prefix.to_string(), prefix_style.bg(tui_theme().surface_bg)),
         Span::styled(text.to_string(), style),
         Span::styled(" ".repeat(padding), style),
     ])
@@ -370,26 +509,111 @@ fn wrap_prompt_text(text: &str, prefix: &str, width: u16) -> Vec<String> {
     lines
 }
 
-fn answer_lines(row: &TranscriptRow, selected: bool, compact_trailing: bool) -> Vec<Line<'static>> {
-    let body_style = style_for_body(row.kind, row.failed);
-    let mut out = Vec::new();
-    for line in row.expandable_text().lines() {
-        if selected {
-            out.push(Line::from(vec![
-                Span::styled("> ".to_string(), label_style(row.kind, row.failed)),
-                Span::styled(line.to_string(), body_style),
-            ]));
-        } else {
-            out.push(Line::from(Span::styled(line.to_string(), body_style)));
+fn wrap_detail_text(text: &str, prefix: &str, width: u16) -> Vec<String> {
+    let max_width = usize::from(width)
+        .saturating_sub(UnicodeWidthStr::width(prefix))
+        .saturating_sub(1)
+        .max(1);
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut current_width = 0usize;
+    for segment in text.split_inclusive(' ') {
+        let segment_width = UnicodeWidthStr::width(segment);
+        if current_width > 0 && current_width.saturating_add(segment_width) > max_width {
+            lines.push(current.trim_end().to_string());
+            current.clear();
+            current_width = 0;
         }
+        if segment_width > max_width {
+            if !current.is_empty() {
+                lines.push(current.trim_end().to_string());
+                current.clear();
+                current_width = 0;
+            }
+            lines.extend(wrap_prompt_text(segment.trim_start(), "", max_width as u16));
+            continue;
+        }
+        current.push_str(segment.trim_start_matches(|ch| current_width == 0 && ch == ' '));
+        current_width = UnicodeWidthStr::width(current.as_str());
+    }
+    if !current.is_empty() || lines.is_empty() {
+        lines.push(current.trim_end().to_string());
+    }
+    lines
+}
+
+fn answer_lines(
+    row: &TranscriptRow,
+    selected: bool,
+    compact_trailing: bool,
+    workdir: &Path,
+) -> Vec<Line<'static>> {
+    let body_style = style_for_body(row.kind, row.failed);
+    let mut out = render_markdown_lines(row.expandable_text(), workdir);
+    if out.is_empty() {
+        out.extend(row.expandable_text().lines().map(|line| {
+            Line::from(Span::styled(line.to_string(), body_style))
+        }));
+    }
+    if selected
+        && let Some(line) = out.first_mut()
+    {
+        line.spans.insert(
+            0,
+            Span::styled("› ".to_string(), focus_marker_style(row.failed)),
+        );
     }
     if out.is_empty() && selected {
         out.push(Line::from(Span::styled(
-            ">".to_string(),
-            label_style(row.kind, row.failed),
+            "›".to_string(),
+            focus_marker_style(row.failed),
         )));
     }
     if !compact_trailing {
+        out.push(Line::from(""));
+    }
+    out
+}
+
+struct LedgerEvidenceRowView {
+    marker: String,
+    marker_style: Style,
+    title: String,
+    title_style: Style,
+    elapsed: Option<String>,
+    expand_hint: Option<String>,
+    body_lines: Vec<String>,
+    body_style: Style,
+    compact_trailing: bool,
+}
+
+fn ledger_evidence_lines(view: LedgerEvidenceRowView, width: u16) -> Vec<Line<'static>> {
+    let mut out = Vec::new();
+    if !view.title.is_empty() {
+        out.push(ledger_title_line(
+            &view.marker,
+            view.marker_style,
+            view.title.as_str(),
+            view.title_style,
+            view.elapsed.as_deref(),
+            view.expand_hint.as_deref(),
+            width,
+        ));
+    }
+    for (index, line) in view.body_lines.into_iter().enumerate() {
+        let prefix = if index == 0 { "  └ " } else { "    " };
+        out.push(Line::from(vec![
+            Span::styled(prefix.to_string(), tui_theme().dim_style()),
+            Span::styled(line, view.body_style),
+        ]));
+    }
+    if out.is_empty() {
+        out.push(Line::from(Span::styled(
+            view.marker,
+            view.marker_style,
+        )));
+    }
+    if !view.compact_trailing {
         out.push(Line::from(""));
     }
     out
@@ -399,34 +623,74 @@ fn thinking_lines(
     row: &TranscriptRow,
     selected: bool,
     compact_trailing: bool,
+    width: u16,
 ) -> Vec<Line<'static>> {
-    let rail_style = if row.failed {
-        Style::default().fg(TUI_RED)
+    ledger_evidence_lines(
+        thinking_ledger_view(row, selected, compact_trailing),
+        width,
+    )
+}
+
+fn thinking_ledger_view(
+    row: &TranscriptRow,
+    selected: bool,
+    compact_trailing: bool,
+) -> LedgerEvidenceRowView {
+    let active_elapsed = active_tool_elapsed(row);
+    let marker_style = if row.failed {
+        tui_theme().error_style()
+    } else if selected || active_elapsed.is_some() {
+        tui_theme().accent_style()
     } else {
-        Style::default().fg(TUI_DIM)
+        tui_theme().thinking_style()
     };
-    let prefix_style = label_style(row.kind, row.failed);
+    let marker = if selected {
+        "› ".to_string()
+    } else if let Some(elapsed) = active_elapsed {
+        format!("{} ", activity_spinner_frame(elapsed))
+    } else {
+        "• ".to_string()
+    };
+    let title_style = if row.failed {
+        tui_theme().error_style().add_modifier(Modifier::BOLD)
+    } else {
+        tui_theme().thinking_style().add_modifier(Modifier::BOLD)
+    };
+    let hint = row_expand_hint(row, selected, None);
     let body_style = style_for_body(row.kind, row.failed);
-    let marker = if selected { ">" } else { "▌" };
-    let mut out = Vec::new();
-    for (index, line) in row.expandable_text().lines().enumerate() {
-        let mut spans = vec![Span::styled(format!("{marker} "), rail_style)];
-        if index == 0 {
-            spans.push(Span::styled("Thinking: ".to_string(), prefix_style));
-        }
-        spans.push(Span::styled(line.to_string(), body_style));
-        out.push(Line::from(spans));
+    let title = row.title.trim();
+    let title = if title.is_empty() { "Thinking" } else { title };
+    LedgerEvidenceRowView {
+        marker,
+        marker_style,
+        title: title.to_string(),
+        title_style,
+        elapsed: active_elapsed.map(format_duration_compact),
+        expand_hint: hint,
+        body_lines: thinking_body_lines(row),
+        body_style,
+        compact_trailing,
     }
-    if out.is_empty() {
-        out.push(Line::from(vec![
-            Span::styled(format!("{marker} "), rail_style),
-            Span::styled("Thinking:".to_string(), prefix_style),
-        ]));
+}
+
+fn thinking_body_lines(row: &TranscriptRow) -> Vec<String> {
+    if row.details_collapsed {
+        return Vec::new();
     }
-    if !compact_trailing {
-        out.push(Line::from(""));
+    let mut lines = row
+        .expandable_text()
+        .lines()
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    if row.is_expandable()
+        && !row.expanded
+        && lines
+            .last()
+            .is_some_and(|line| collapsed_more_line_count(line).is_some())
+    {
+        lines.pop();
     }
-    out
+    lines
 }
 
 fn tool_lines(
@@ -435,96 +699,385 @@ fn tool_lines(
     compact_trailing: bool,
     width: u16,
 ) -> Vec<Line<'static>> {
-    let active_elapsed = active_tool_elapsed(row);
+    ledger_evidence_lines(tool_ledger_view(row, selected, compact_trailing, width), width)
+}
+
+fn tool_ledger_view(
+    row: &TranscriptRow,
+    selected: bool,
+    compact_trailing: bool,
+    width: u16,
+) -> LedgerEvidenceRowView {
+    let phase = ToolRowPhase::from_row(row);
+    let active_elapsed = (phase == ToolRowPhase::Active).then(|| active_tool_elapsed(row)).flatten();
     let bullet_style = if row.failed {
-        Style::default().fg(TUI_RED)
+        tui_theme().error_style()
     } else if active_elapsed.is_some() || selected {
-        Style::default().fg(TUI_CYAN)
+        tui_theme().accent_style()
     } else {
-        Style::default().fg(Color::Green)
+        tui_theme().success_style()
     };
     let title_style = if row.failed {
-        Style::default().fg(TUI_RED).add_modifier(Modifier::BOLD)
+        tui_theme().error_style().add_modifier(Modifier::BOLD)
     } else {
         Style::default().add_modifier(Modifier::BOLD)
     };
     let body_style = style_for_body(row.kind, row.failed);
     let marker = if selected {
-        "> ".to_string()
+        "› ".to_string()
     } else if let Some(elapsed) = active_elapsed {
-        format!("{} ", status_spinner_frame(elapsed))
+        format!("{} ", activity_spinner_frame(elapsed))
     } else {
         "• ".to_string()
     };
-    let mut out = Vec::new();
-    let title = row.title.trim();
-    if !title.is_empty() {
-        let suffix = if row.is_expandable() {
-            if row.expanded { " [-]" } else { " [+]" }
-        } else {
-            ""
-        };
-        let title = format!("{title}{suffix}");
-        let elapsed = tool_elapsed_label(row);
-        out.push(tool_title_line(
-            &marker,
-            bullet_style,
-            &title,
-            title_style,
-            elapsed.as_deref(),
-            width,
-        ));
+    let title = tool_display_title(row, phase);
+    let title_detail = tool_title_detail(row, title.as_str());
+    let elapsed = tool_elapsed_label(row);
+    let hint = row_expand_hint(row, selected, title_detail.as_deref());
+    LedgerEvidenceRowView {
+        marker,
+        marker_style: bullet_style,
+        title,
+        title_style,
+        elapsed,
+        expand_hint: hint,
+        body_lines: tool_body_lines(row, phase, title_detail, width),
+        body_style,
+        compact_trailing,
     }
-    for (index, line) in row.expandable_text().lines().enumerate() {
-        let prefix = if index == 0 { "  └ " } else { "    " };
-        out.push(Line::from(vec![
-            Span::styled(prefix.to_string(), Style::default().fg(TUI_DIM)),
-            Span::styled(line.to_string(), body_style),
-        ]));
-    }
-    if out.is_empty() {
-        out.push(Line::from(Span::styled(marker, bullet_style)));
-    }
-    if !compact_trailing {
-        out.push(Line::from(""));
-    }
-    out
 }
 
-fn tool_title_line(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToolRowPhase {
+    Active,
+    Completed,
+}
+
+impl ToolRowPhase {
+    fn from_row(row: &TranscriptRow) -> Self {
+        if !row.failed && active_tool_elapsed(row).is_some() {
+            Self::Active
+        } else {
+            Self::Completed
+        }
+    }
+}
+
+fn tool_display_title(row: &TranscriptRow, phase: ToolRowPhase) -> String {
+    let title = row.title.trim();
+    if phase != ToolRowPhase::Active {
+        return title.to_string();
+    }
+    let Some((active_prefix, completed_prefix, fallback)) = tool_title_prefixes(row.kind) else {
+        return title.to_string();
+    };
+    if title.starts_with(active_prefix) {
+        return title.to_string();
+    }
+    let rest = title.strip_prefix(completed_prefix).unwrap_or(title).trim();
+    if rest.is_empty() {
+        fallback.to_string()
+    } else {
+        format!("{active_prefix} {rest}")
+    }
+}
+
+fn tool_title_prefixes(kind: TranscriptKind) -> Option<(&'static str, &'static str, &'static str)> {
+    match kind {
+        TranscriptKind::Explored => Some(("Exploring", "Explored", "Exploring")),
+        TranscriptKind::Ran => Some(("Running", "Ran", "Running command")),
+        TranscriptKind::Changed => Some(("Changing", "Changed", "Changing files")),
+        _ => None,
+    }
+}
+
+fn foldable_evidence_body(row: &TranscriptRow) -> bool {
+    matches!(
+        row.kind,
+        TranscriptKind::Thinking | TranscriptKind::Explored | TranscriptKind::Ran | TranscriptKind::Changed
+    ) && !row.text.trim().is_empty()
+        && !suppressed_active_tool_body(row, &[row.text.trim()])
+}
+
+fn foldable_tool_title(row: &TranscriptRow) -> bool {
+    matches!(row.kind, TranscriptKind::Ran) && tool_title_detail(row, &row.title).is_some()
+}
+
+fn toggle_transcript_row_details(row: &mut TranscriptRow) {
+    if row.details_collapsed {
+        row.details_collapsed = false;
+        return;
+    }
+    if row.full_text.as_ref().is_some_and(|full| full != &row.text) || foldable_tool_title(row) {
+        row.expanded = !row.expanded;
+        return;
+    }
+    if foldable_evidence_body(row) {
+        row.details_collapsed = true;
+    }
+}
+
+const TOOL_TITLE_DETAIL_WIDTH: usize = 80;
+
+fn tool_title_detail(row: &TranscriptRow, title: &str) -> Option<String> {
+    if row.kind != TranscriptKind::Ran {
+        return None;
+    }
+    let command = title
+        .trim()
+        .strip_prefix("Running ")
+        .or_else(|| title.trim().strip_prefix("Ran "))
+        .unwrap_or_else(|| title.trim());
+    if UnicodeWidthStr::width(command) <= TOOL_TITLE_DETAIL_WIDTH {
+        return None;
+    }
+    Some(format!("command: {command}"))
+}
+
+fn suppressed_active_tool_body(row: &TranscriptRow, lines: &[&str]) -> bool {
+    ToolRowPhase::from_row(row) == ToolRowPhase::Active
+        && lines.len() == 1
+        && matches!(lines[0].trim(), "running" | "preparing")
+}
+
+fn tool_body_lines(
+    row: &TranscriptRow,
+    phase: ToolRowPhase,
+    title_detail: Option<String>,
+    width: u16,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    if row.expanded
+        && let Some(title_detail) = title_detail
+    {
+        lines.extend(wrap_detail_text(&title_detail, "  └ ", width));
+    }
+    if row.details_collapsed {
+        return lines;
+    }
+    lines.extend(row.expandable_text().lines().map(ToOwned::to_owned));
+    if row.is_expandable()
+        && !row.expanded
+        && lines
+            .last()
+            .is_some_and(|line| collapsed_more_line_count(line).is_some())
+    {
+        lines.pop();
+    }
+    if phase == ToolRowPhase::Active {
+        lines.retain(|line| !matches!(line.trim(), "running" | "preparing"));
+    }
+    lines
+}
+
+fn row_expand_hint(
+    row: &TranscriptRow,
+    selected: bool,
+    title_detail: Option<&str>,
+) -> Option<String> {
+    if !row.is_expandable() {
+        return None;
+    }
+    if row.details_collapsed {
+        return Some("▸ details".to_string());
+    }
+    if row.expanded {
+        return Some("▾ collapse".to_string());
+    }
+    if let Some(count) = omitted_line_count(row) {
+        return Some(format!("▸ {count} more lines"));
+    }
+    if row_has_collapsed_body(row) {
+        return Some("▸ more output".to_string());
+    }
+    if title_detail.is_some() {
+        return Some("▸ command".to_string());
+    }
+    selected.then(|| "▾ collapse".to_string())
+}
+
+fn omitted_line_count(row: &TranscriptRow) -> Option<usize> {
+    row.text
+        .lines()
+        .last()
+        .and_then(collapsed_more_line_count)
+        .or_else(|| {
+            let full = row.full_text.as_deref()?;
+            let full_count = full.lines().count();
+            let visible_count = row.text.lines().count();
+            (full_count > visible_count).then_some(full_count - visible_count)
+        })
+}
+
+fn collapsed_more_line_count(line: &str) -> Option<usize> {
+    line.trim()
+        .strip_prefix("... ")
+        .and_then(|value| value.strip_suffix(" more lines"))
+        .and_then(|value| value.parse::<usize>().ok())
+}
+
+fn row_has_collapsed_body(row: &TranscriptRow) -> bool {
+    row.full_text
+        .as_ref()
+        .is_some_and(|full| full != &row.text)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LedgerBodyCollapsePolicy {
+    max_lines: usize,
+    max_width: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LedgerBodyCollapse {
+    preview: String,
+    full_text: Option<String>,
+}
+
+const LEDGER_BODY_COLLAPSE_LINES: usize = 8;
+const LEDGER_BODY_COLLAPSE_WIDTH: usize = 1200;
+
+fn ledger_body_collapse_policy() -> LedgerBodyCollapsePolicy {
+    LedgerBodyCollapsePolicy {
+        max_lines: LEDGER_BODY_COLLAPSE_LINES,
+        max_width: LEDGER_BODY_COLLAPSE_WIDTH,
+    }
+}
+
+impl LedgerBodyCollapsePolicy {
+    fn should_collapse(self, text: &str) -> bool {
+        text.lines().count() > self.max_lines || UnicodeWidthStr::width(text) > self.max_width
+    }
+
+    fn collapse(self, text: &str) -> LedgerBodyCollapse {
+        let lines = text.lines().collect::<Vec<_>>();
+        if lines.len() > self.max_lines {
+            let collapsed = lines
+                .iter()
+                .take(self.max_lines)
+                .copied()
+                .collect::<Vec<_>>()
+                .join("\n");
+            return LedgerBodyCollapse {
+                preview: format!("{collapsed}\n... {} more lines", lines.len() - self.max_lines),
+                full_text: Some(text.to_string()),
+            };
+        }
+        if UnicodeWidthStr::width(text) > self.max_width {
+            return LedgerBodyCollapse {
+                preview: truncate_display_width(text, self.max_width),
+                full_text: Some(text.to_string()),
+            };
+        }
+        LedgerBodyCollapse {
+            preview: text.to_string(),
+            full_text: None,
+        }
+    }
+}
+
+fn collapse_ledger_body(text: &str) -> (String, Option<String>) {
+    let collapsed = ledger_body_collapse_policy().collapse(text);
+    (collapsed.preview, collapsed.full_text)
+}
+
+fn ledger_title_line(
     marker: &str,
     marker_style: Style,
     title: &str,
     title_style: Style,
     elapsed: Option<&str>,
+    expand_hint: Option<&str>,
     width: u16,
 ) -> Line<'static> {
-    let Some(elapsed) = elapsed.filter(|value| !value.is_empty()) else {
+    let line_width = width.saturating_sub(1);
+    let right_text = ledger_title_right_text(expand_hint, elapsed, line_width, marker);
+    if right_text.is_empty() {
         return Line::from(vec![
             Span::styled(marker.to_string(), marker_style),
             Span::styled(title.to_string(), title_style),
         ]);
     };
     let marker_width = UnicodeWidthStr::width(marker);
-    let width = usize::from(width);
-    let elapsed = truncate_display_width(elapsed, width.saturating_sub(marker_width));
-    let elapsed_width = UnicodeWidthStr::width(elapsed.as_str());
-    let separator_width = usize::from(elapsed_width > 0);
+    let width = usize::from(line_width);
+    let right_width = UnicodeWidthStr::width(right_text.as_str());
+    let separator_width = usize::from(right_width > 0);
     let title_width = width
         .saturating_sub(marker_width)
-        .saturating_sub(elapsed_width)
+        .saturating_sub(right_width)
         .saturating_sub(separator_width);
     let title = truncate_display_width(title, title_width);
     let padding = width
         .saturating_sub(marker_width)
         .saturating_sub(UnicodeWidthStr::width(title.as_str()))
-        .saturating_sub(elapsed_width);
+        .saturating_sub(right_width);
     Line::from(vec![
         Span::styled(marker.to_string(), marker_style),
         Span::styled(title, title_style),
         Span::raw(" ".repeat(padding)),
-        Span::styled(elapsed, Style::default().fg(TUI_DIM)),
+        Span::styled(right_text, tui_theme().dim_style()),
     ])
+}
+
+fn ledger_title_right_text(
+    expand_hint: Option<&str>,
+    elapsed: Option<&str>,
+    width: u16,
+    marker: &str,
+) -> String {
+    let budget = usize::from(width).saturating_sub(UnicodeWidthStr::width(marker));
+    if budget == 0 {
+        return String::new();
+    }
+    let elapsed = elapsed
+        .filter(|value| !value.is_empty())
+        .map(|value| truncate_display_width(value, budget));
+    let Some(hint) = expand_hint.filter(|value| !value.is_empty()) else {
+        return elapsed.unwrap_or_default();
+    };
+    let Some(elapsed) = elapsed else {
+        return fit_expand_hint(hint, budget);
+    };
+    let elapsed_width = UnicodeWidthStr::width(elapsed.as_str());
+    if elapsed_width >= budget {
+        return elapsed;
+    }
+    let separator = if budget.saturating_sub(elapsed_width) >= 2 {
+        "  "
+    } else {
+        " "
+    };
+    let hint_budget = budget
+        .saturating_sub(elapsed_width)
+        .saturating_sub(UnicodeWidthStr::width(separator));
+    let hint = fit_expand_hint(hint, hint_budget);
+    if hint.is_empty() {
+        elapsed
+    } else {
+        format!("{hint}{separator}{elapsed}")
+    }
+}
+
+fn fit_expand_hint(hint: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    if UnicodeWidthStr::width(hint) <= max_width {
+        return hint.to_string();
+    }
+    if let Some(rest) = hint.strip_prefix("▸ ")
+        && let Some(count) = rest.split_whitespace().next()
+    {
+        let compact = format!("▸ {count}");
+        if UnicodeWidthStr::width(compact.as_str()) <= max_width {
+            return compact;
+        }
+    }
+    let tiny = if hint.starts_with('▾') { "▾" } else { "▸" };
+    if UnicodeWidthStr::width(tiny) <= max_width {
+        return tiny.to_string();
+    }
+    String::new()
 }
 
 fn tool_elapsed_label(row: &TranscriptRow) -> Option<String> {
@@ -567,30 +1120,40 @@ fn truncate_display_width(value: &str, max_width: usize) -> String {
 }
 
 fn label_style(kind: TranscriptKind, failed: bool) -> Style {
+    let theme = tui_theme();
     if failed {
-        return Style::default().fg(TUI_RED);
+        return theme.error_style();
     }
     match kind {
         TranscriptKind::Prompt
         | TranscriptKind::Explored
         | TranscriptKind::Ran
-        | TranscriptKind::Changed => Style::default().fg(TUI_CYAN),
-        TranscriptKind::Answer => Style::default().fg(TUI_MAGENTA),
-        TranscriptKind::Thinking => Style::default().fg(TUI_PAPER),
-        TranscriptKind::Meta => Style::default().fg(TUI_DIM),
-        TranscriptKind::Status => Style::default().fg(TUI_CYAN),
-        TranscriptKind::Error => Style::default().fg(TUI_RED),
+        | TranscriptKind::Changed => theme.accent_style(),
+        TranscriptKind::Answer => theme.identity_style(),
+        TranscriptKind::Thinking => theme.thinking_style(),
+        TranscriptKind::Meta => theme.dim_style(),
+        TranscriptKind::Status => theme.accent_style(),
+        TranscriptKind::Error => theme.error_style(),
+    }
+}
+
+fn focus_marker_style(failed: bool) -> Style {
+    if failed {
+        tui_theme().error_style()
+    } else {
+        tui_theme().accent_style()
     }
 }
 
 fn style_for_body(kind: TranscriptKind, failed: bool) -> Style {
+    let theme = tui_theme();
     if failed {
-        return Style::default().fg(TUI_RED);
+        return theme.error_style();
     }
     match kind {
-        TranscriptKind::Thinking => Style::default().fg(TUI_DIM),
-        TranscriptKind::Meta | TranscriptKind::Status => Style::default().fg(TUI_DIM),
-        TranscriptKind::Error => Style::default().fg(TUI_RED),
+        TranscriptKind::Thinking => theme.dim_style(),
+        TranscriptKind::Meta | TranscriptKind::Status => theme.dim_style(),
+        TranscriptKind::Error => theme.error_style(),
         _ => Style::default(),
     }
 }

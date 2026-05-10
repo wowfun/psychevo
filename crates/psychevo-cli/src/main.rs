@@ -13,6 +13,7 @@ use commands::init::run_init_command;
 use commands::run::run_run_command;
 use commands::skills::run_skills_command;
 use commands::smoke::run_smoke_command;
+use commands::stats::run_stats_command;
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -32,6 +33,7 @@ async fn run() -> Result<ExitCode> {
         Commands::Skills(args) => run_skills_command(args),
         Commands::Smoke(args) => run_smoke_command(args).await,
         Commands::Run(args) => run_run_command(args).await,
+        Commands::Stats(args) => run_stats_command(args),
         Commands::Tui(args) => tui::run_tui_command(&args).await,
     }
 }

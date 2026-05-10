@@ -133,7 +133,114 @@ class Handler(BaseHTTPRequestHandler):
                     "finish_reason": "stop"
                 }]
             }, delay=0.1)
+        elif "visible-write-output.md" in body:
+            self.send_event({
+                "id": "resp_tui_capture_visible_write_final",
+                "model": "mock-model",
+                "choices": [{
+                    "delta": {
+                        "content": "VISIBLE_WRITE_FINAL"
+                    },
+                    "finish_reason": "stop"
+                }]
+            }, delay=0.2)
+        elif "Visible write preamble fixture" in body:
+            self.send_event({
+                "id": "resp_tui_capture_visible_write",
+                "model": "mock-model",
+                "choices": [{
+                    "delta": {
+                        "content": "Now I have all the data needed. Let me write the complete report."
+                    },
+                    "finish_reason": None
+                }]
+            }, delay=1.0)
+            self.send_event({
+                "id": "resp_tui_capture_visible_write",
+                "model": "mock-model",
+                "choices": [{
+                    "delta": {
+                        "tool_calls": [{
+                            "index": 0,
+                            "id": "call_visible_write",
+                            "function": {
+                                "name": "write",
+                                "arguments": "{\"path\":\"visible-write-output.md\",\"content\":\"VISIBLE_WRITE_FINAL\"}"
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }]
+            })
+        elif "Reasoning-only table bottom scroll fixture" in body:
+            rows = "\n".join(
+                f"| {index} | **Thinking Story {index}** - reasoning-only Markdown table row used to validate bottom scrolling | {200 + index} |"
+                for index in range(1, 22)
+            )
+            content = (
+                "Reasoning-only final report\n\n"
+                "| # | Topic | Score |\n"
+                "|---|---|---|\n"
+                f"{rows}\n\n"
+                "REASONING_ONLY_BOTTOM_MARKER: metadata below must remain reachable."
+            )
+            self.send_event({
+                "id": "resp_tui_capture_reasoning_only",
+                "model": "mock-model",
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 260,
+                    "completion_tokens": 160,
+                    "total_tokens": 420
+                }
+            }, delay=0.2)
+            self.send_event({
+                "id": "resp_tui_capture_reasoning_only",
+                "model": "mock-model",
+                "choices": [{
+                    "delta": {"reasoning_content": content},
+                    "finish_reason": "stop"
+                }]
+            })
+        elif "Long markdown bottom scroll fixture" in body:
+            rows = "\n".join(
+                f"| {index} | **Story {index}** - long Markdown table row used to validate transcript bottom scrolling | {100 + index} |"
+                for index in range(1, 34)
+            )
+            content = (
+                "# Long Markdown Scroll Fixture\n\n"
+                "| # | Topic | Score |\n"
+                "|---|---|---|\n"
+                f"{rows}\n\n"
+                "LONG_MARKDOWN_BOTTOM_MARKER: metadata below must remain reachable."
+            )
+            self.send_event({
+                "id": "resp_tui_capture_long",
+                "model": "mock-model",
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 240,
+                    "completion_tokens": 180,
+                    "total_tokens": 420
+                }
+            }, delay=0.2)
+            self.send_event({
+                "id": "resp_tui_capture_long",
+                "model": "mock-model",
+                "choices": [{
+                    "delta": {"content": content},
+                    "finish_reason": "stop"
+                }]
+            })
         elif Handler.request_count == 1:
+            self.send_event({
+                "id": "resp_tui_capture_1",
+                "model": "mock-model",
+                "choices": [{
+                    "delta": {"content": "I'll inspect fixture.txt before summarizing the ledger."},
+                    "finish_reason": None
+                }]
+            }, delay=0.2)
             self.send_event({
                 "id": "resp_tui_capture_1",
                 "model": "mock-model",
@@ -146,7 +253,7 @@ class Handler(BaseHTTPRequestHandler):
                 "id": "resp_tui_capture_1",
                 "model": "mock-model",
                 "choices": [{
-                    "delta": {"reasoning_content": "Preparing a read tool call."},
+                    "delta": {"reasoning_content": "Preparing a bash tool call."},
                     "finish_reason": None
                 }]
             }, delay=0.4)
@@ -157,10 +264,10 @@ class Handler(BaseHTTPRequestHandler):
                     "delta": {
                         "tool_calls": [{
                             "index": 0,
-                            "id": "call_read_fixture",
+                            "id": "call_bash_fixture",
                             "function": {
-                                "name": "read",
-                                "arguments": "{\"path\":\"fixture.txt\"}"
+                                "name": "bash",
+                                "arguments": "{\"command\":\"sleep 2 && cat fixture.txt\"}"
                             }
                         }]
                     },
@@ -248,7 +355,7 @@ Screenshot $(json_quote "$out_dir/01-model-picker.png")
 Escape
 Type "Inspect the snapshot harness and read fixture.txt"
 Enter
-Wait+Screen /Thinking|Inspecting fixture|Preparing a read tool call/
+Wait+Screen /Running sleep 2 && cat fixture.txt/
 Sleep 200 ms
 Screenshot $(json_quote "$out_dir/02-running-thinking.png")
 Wait+Screen /SNAPSHOT_DEMO_FINAL/
@@ -263,6 +370,42 @@ Sleep 200 ms
 Screenshot $(json_quote "$out_dir/04-shell-mode.png")
 Escape
 Sleep 200 ms
+Type "Long markdown bottom scroll fixture"
+Enter
+Wait+Screen /LONG_MARKDOWN_BOTTOM_MARKER/
+Sleep 300 ms
+PageUp 8
+Sleep 100 ms
+Down 80
+Wait+Screen /LONG_MARKDOWN_BOTTOM_MARKER/
+Sleep 300 ms
+Screenshot $(json_quote "$out_dir/05-long-markdown-bottom-scroll.png")
+Type "/new"
+Enter
+Wait+Screen /Ask pevo/
+Sleep 200 ms
+Type "Reasoning-only table bottom scroll fixture"
+Enter
+Wait+Screen /Thinking Story 1/
+Sleep 300 ms
+Screenshot $(json_quote "$out_dir/06-reasoning-only-collapsed.png")
+Ctrl+T
+Space
+Sleep 200 ms
+PageUp 8
+Sleep 100 ms
+Down 80
+Wait+Screen /REASONING_ONLY_BOTTOM_MARKER/
+Sleep 300 ms
+Screenshot $(json_quote "$out_dir/07-reasoning-only-bottom-scroll.png")
+Escape
+Type "Visible write preamble fixture"
+Enter
+Wait+Screen /Changing files/
+Sleep 300 ms
+Screenshot $(json_quote "$out_dir/08-visible-write-preamble.png")
+Wait+Screen /VISIBLE_WRITE_FINAL/
+Sleep 200 ms
 Ctrl+D
 EOF
 }
@@ -270,7 +413,7 @@ EOF
 check_demo_artifacts() {
   local out_dir="$1"
   local missing=()
-  for file in 01-model-picker.png 02-running-thinking.png 03-final-ledger.png 04-shell-mode.png; do
+  for file in 01-model-picker.png 02-running-thinking.png 03-final-ledger.png 04-shell-mode.png 05-long-markdown-bottom-scroll.png 06-reasoning-only-collapsed.png 07-reasoning-only-bottom-scroll.png 08-visible-write-preamble.png; do
     if [[ ! -s "$out_dir/$file" ]]; then
       missing+=("$file")
     fi

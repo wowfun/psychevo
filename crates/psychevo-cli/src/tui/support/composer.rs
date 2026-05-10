@@ -1,7 +1,8 @@
 fn new_textarea<'a>() -> TextArea<'a> {
     let mut textarea = TextArea::default();
-    textarea.set_block(Block::default().style(Style::default().bg(TUI_SURFACE_BG)));
-    textarea.set_style(Style::default().bg(TUI_SURFACE_BG));
+    let style = tui_theme().surface_style();
+    textarea.set_block(Block::default().style(style));
+    textarea.set_style(style);
     textarea.set_wrap_mode(WrapMode::WordOrGlyph);
     textarea.set_cursor_line_style(Style::default());
     textarea
@@ -9,8 +10,9 @@ fn new_textarea<'a>() -> TextArea<'a> {
 
 fn textarea_with_text<'a>(text: &str) -> TextArea<'a> {
     let mut textarea = TextArea::new(text.split('\n').map(ToString::to_string).collect());
-    textarea.set_block(Block::default().style(Style::default().bg(TUI_SURFACE_BG)));
-    textarea.set_style(Style::default().bg(TUI_SURFACE_BG));
+    let style = tui_theme().surface_style();
+    textarea.set_block(Block::default().style(style));
+    textarea.set_style(style);
     textarea.set_wrap_mode(WrapMode::WordOrGlyph);
     textarea.set_cursor_line_style(Style::default());
     textarea.move_cursor(CursorMove::Bottom);
@@ -24,8 +26,9 @@ fn textarea_text(textarea: &TextArea<'_>) -> String {
 
 fn textarea_with_lines_and_cursor<'a>(lines: Vec<String>, row: usize, col: usize) -> TextArea<'a> {
     let mut textarea = TextArea::new(lines);
-    textarea.set_block(Block::default().style(Style::default().bg(TUI_SURFACE_BG)));
-    textarea.set_style(Style::default().bg(TUI_SURFACE_BG));
+    let style = tui_theme().surface_style();
+    textarea.set_block(Block::default().style(style));
+    textarea.set_style(style);
     textarea.set_wrap_mode(WrapMode::WordOrGlyph);
     textarea.set_cursor_line_style(Style::default());
     textarea.move_cursor(CursorMove::Jump(

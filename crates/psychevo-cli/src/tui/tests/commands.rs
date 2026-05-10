@@ -58,7 +58,26 @@ async fn fullscreen_status_uses_single_multiline_status_row() {
     assert!(status_rows[0].text.contains("workdir:"));
     assert!(status_rows[0].text.contains("\nmodel: mock/model\n"));
     assert!(status_rows[0].text.contains("\nvariant: high\n"));
+    assert!(!status_rows[0].text.contains("\nthinking:"));
     assert!(status_rows[0].text.contains("\ndebug: off"));
+}
+
+#[tokio::test]
+async fn fullscreen_stats_command_opens_bottom_panel() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    SqliteStore::open(&app.db_path).expect("store");
+    let mut ui = FullscreenUi::new(&app);
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Stats)
+        .await
+        .expect("stats");
+
+    let Some(BottomPanel::Stats(panel)) = &ui.bottom_panel else {
+        panic!("stats panel missing");
+    };
+    assert_eq!(panel.title, "Usage Stats");
+    assert!(panel.rows.iter().any(|row| row.label == "Totals"));
 }
 
 #[tokio::test]
@@ -307,5 +326,29 @@ async fn mouse_wheel_scrolls_transcript_inside_tui() {
     .expect("scroll");
 
     assert!(ui.scroll < bottom);
+    assert!(!ui.auto_follow_transcript);
+}
+
+#[tokio::test]
+async fn empty_composer_down_scrolls_transcript_toward_bottom() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    for index in 0..18 {
+        ui.transcript.push(TranscriptRow::simple(
+            TranscriptKind::Answer,
+            format!("line {index}"),
+        ));
+    }
+    let _ = draw_fullscreen_for_test(&app, &mut ui, 80, 10);
+    ui.scroll = 0;
+    ui.auto_follow_transcript = false;
+    ui.textarea = new_textarea();
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .await
+        .expect("down");
+
+    assert_eq!(ui.scroll, 1);
     assert!(!ui.auto_follow_transcript);
 }

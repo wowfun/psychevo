@@ -1,0 +1,46 @@
+---
+source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+expression: combined
+---
+fixture=collapsed_long_json_tool_output
+size=120x18
+
+--- text ---
+• Ran sqlite3 feeds/.cache/hn.db                                                                          ▸ more output
+  └ {"comments":[{"id":48070001,"by":"user1","text":"identity verification discussion identity verification discussion
+"},{"id":48070002,"by":"user2","text":"identity verification discussion identity verification discussion
+"},{"id":48070003,"by":"user3","text":"identity verification discussion identity verification discussion
+"},{"id":48070004,"by":"user4","text":"identity verification discussion identity verification discussion
+"},{"id":48070005,"by":"user5","text":"identity verification discussion identity verification discussion
+"},{"id":48070006,"by":"user6","text":"identity verification discussion identity verification discussion
+"},{"id":48070007,"by":"user7","text":"identity verification discussion identity verification discussion
+"},{"id":48070008,"by":"user8","text":"identity verification discussion identity verification discussion
+"},{"id":48070009,"by":"user9","text":"identity verification discussion identity verification discussion
+"},{"id":48070010,"by":"user10","text":"identity verification discussion identity verification discussion
+"},{"id":48070011,"by":"user11","text":"identity verification discussion identity verification discussion
+"},{"id":48070012,"by":"user12",…
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+› Ask pevo...
+
+mock/model  high
+
+--- styles ---
+[green]• [default]Ran sqlite3 feeds/.cache/hn.db                                                                          [dim]▸ more output[default]
+[dim]  └ [default]{"comments":[{"id":48070001,"by":"user1","text":"identity verification discussion identity verification discussion
+[default]"},{"id":48070002,"by":"user2","text":"identity verification discussion identity verification discussion
+[default]"},{"id":48070003,"by":"user3","text":"identity verification discussion identity verification discussion
+[default]"},{"id":48070004,"by":"user4","text":"identity verification discussion identity verification discussion
+[default]"},{"id":48070005,"by":"user5","text":"identity verification discussion identity verification discussion
+[default]"},{"id":48070006,"by":"user6","text":"identity verification discussion identity verification discussion
+[default]"},{"id":48070007,"by":"user7","text":"identity verification discussion identity verification discussion
+[default]"},{"id":48070008,"by":"user8","text":"identity verification discussion identity verification discussion
+[default]"},{"id":48070009,"by":"user9","text":"identity verification discussion identity verification discussion
+[default]"},{"id":48070010,"by":"user10","text":"identity verification discussion identity verification discussion
+[default]"},{"id":48070011,"by":"user11","text":"identity verification discussion identity verification discussion
+[default]"},{"id":48070012,"by":"user12",…
+[default]
+[default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[dim]›[default] [dim]Ask pevo...[default]
+[default]
+[default]mock/model  [magenta]high[default]

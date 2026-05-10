@@ -17,6 +17,7 @@ pub(crate) enum Commands {
     Skills(SkillsArgs),
     Smoke(SmokeArgs),
     Run(RunArgs),
+    Stats(StatsArgs),
     Tui(TuiArgs),
 }
 
@@ -66,6 +67,20 @@ pub(crate) struct RunArgs {
     pub(crate) skill: Vec<String>,
     #[arg()]
     pub(crate) message: Vec<String>,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct StatsArgs {
+    #[arg(long = "dir")]
+    pub(crate) dir: Option<PathBuf>,
+    #[arg(long)]
+    pub(crate) all: bool,
+    #[arg(long)]
+    pub(crate) days: Option<u64>,
+    #[arg(long, default_value_t = 10)]
+    pub(crate) limit: usize,
+    #[arg(long)]
+    pub(crate) json: bool,
 }
 
 #[derive(Debug, Parser)]
