@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added the public-alpha root README, MIT license file, and contribution guide.
 - Added the 070 Experience foundation spec for cross-cutting UX/DX defaults and
   ownership boundaries.
 - Added adaptive TUI theme, terminal-palette probing, static motion fallback,
