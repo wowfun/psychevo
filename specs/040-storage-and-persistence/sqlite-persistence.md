@@ -108,6 +108,16 @@ The first implementation slice stores these message columns:
 - `provider` text nullable
 - `usage_json` text nullable
 - `metadata_json` text nullable
+- `context_input_tokens` integer nullable
+- `billable_input_tokens` integer nullable
+- `billable_output_tokens` integer nullable
+- `reasoning_tokens` integer nullable
+- `cache_read_tokens` integer nullable
+- `cache_write_tokens` integer nullable
+- `reported_total_tokens` integer nullable
+- `estimated_cost_nanodollars` integer nullable
+- `pricing_source` text nullable
+- `pricing_tier` text nullable
 
 `message_json` is the authoritative retained message material. The other
 message columns are relationship, query, and summary aids. Reasoning is stored
@@ -120,6 +130,11 @@ separate columns.
 projection and local per-message metric facts such as tool-result elapsed
 duration. Neither column is part of transcript content, and neither may be
 serialized into sanitized transcript messages.
+
+Dedicated accounting columns store structured token and local estimated-cost
+facts derived from `usage_json` and resolved model pricing. They are summary
+aids for stats and UI projection, not billing records. `NULL` estimated cost
+means pricing was unknown; `0` means pricing was known and free.
 
 Message ordering is authoritative by `(session_id, session_seq)`, not by
 timestamp. The first implementation enforces `UNIQUE(session_id, session_seq)`.
@@ -140,14 +155,16 @@ SQLite persistence should perform periodic WAL checkpoint work when supported by
 
 Storage failures that affect session or message persistence must be observable to runtime or caller-facing layers that depend on persistence.
 
-The current implementation uses `PRAGMA user_version = 4`, WAL, foreign keys,
+The current implementation uses `PRAGMA user_version = 5`, WAL, foreign keys,
 short busy timeouts, `BEGIN IMMEDIATE`, bounded jitter retry, and best-effort
 periodic `wal_checkpoint(PASSIVE)`.
 
-The version 4 slice automatically migrates version 3 state databases by adding
-`sessions.archived_at_ms`. It does not automatically migrate version 1 or
-version 2 state databases. Opening an older state database must fail with an
-explicit cutover/reset instruction instead of silently mutating retained state.
+The version 5 slice automatically migrates version 4 databases by adding
+message accounting columns, and still migrates version 3 state databases by
+adding `sessions.archived_at_ms` before applying version 5 additions. It does
+not automatically migrate version 1 or version 2 state databases. Opening an
+older state database must fail with an explicit cutover/reset instruction
+instead of silently mutating retained state.
 
 ## Retrieval
 

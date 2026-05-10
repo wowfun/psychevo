@@ -64,6 +64,7 @@ Implemented first-slice commands:
 - `pevo smoke`
 - `pevo tui`
 - `pevo skills`
+- `pevo stats`
 
 Reserved command families:
 
@@ -88,11 +89,17 @@ turn provider metadata into transcript content.
 remove, enable, disable, install, and scan. Skill package, discovery, scanner,
 and provenance semantics belong to [055 Skills](../055-skills/spec.md).
 
+`pevo stats` owns local token and estimated-cost reporting from the SQLite
+state database. It does not contact providers, refresh catalogs, or reconcile
+provider invoices.
+
 ## Related Topics
 
 - [025 CLI](../025-cli/spec.md) defines command-line foundation semantics.
 - [200 pevo init](pevo-init.md) defines global home initialization.
 - [200 pevo run](pevo-run.md) defines the live coding-agent command.
+- [200 pevo stats](pevo-stats.md) defines local usage and estimated-cost
+  reporting.
 - [210 pevo TUI](../210-pevo-tui/spec.md) defines the fullscreen interactive
   terminal command.
 - [055 Skills](../055-skills/spec.md) defines the skill package and lifecycle

@@ -22,7 +22,7 @@ scripts/validate.sh broad
   and `cache/` under an isolated `PSYCHEVO_HOME`.
 - Existing `config.jsonc` and `.env` are not overwritten.
 - `pevo init --reset-state` backs up `state.db`, `state.db-wal`, and
-  `state.db-shm` before creating a fresh v4 state database.
+  `state.db-shm` before creating a fresh v5 state database.
 - The starter config resolves DeepSeek with `reasoning_effort = medium`.
 - Success output lists paths and does not include credential values.
 - Re-running init is idempotent.
@@ -62,10 +62,20 @@ scripts/validate.sh broad
 - JSONC `reasoning_effort` uses the same validation as CLI `--variant`.
 - `none` disables lower-level reasoning effort.
 - latest-session lookup filters by canonical workdir and `source = "run"`.
-- SQLite state uses `user_version = 4`; older unsupported state databases reject with an
+- SQLite state uses `user_version = 5`; older unsupported state databases reject with an
   explicit reset/cutover instruction.
 - Reasoning is preserved locally as folded assistant content, without entering
   default visible output or cross-provider replay.
+
+## Stats Coverage
+
+- `pevo stats` defaults to the current workdir and reads only local SQLite
+  state.
+- `pevo stats --all`, `--dir`, `--days`, `--limit`, and `--json` produce
+  deterministic output.
+- Empty stats output is bounded and does not require live providers.
+- Stats distinguish unknown pricing from known free pricing and include model,
+  tool, and top-session breakdowns.
 
 ## Live Validation
 

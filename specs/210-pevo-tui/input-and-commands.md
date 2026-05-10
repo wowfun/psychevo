@@ -84,6 +84,7 @@ The first TUI supports:
 
 - `/quit`, `/exit`, `/q`
 - `/status`
+- `/stats`
 - `/clear`, `/new`
 - `/sessions`, `/resume`, `/continue`
 - `/model`
@@ -102,10 +103,17 @@ The first TUI supports:
 `/help` is not a TUI slash command. It returns the bounded unknown-command
 error used for unsupported slash commands.
 
-`/status` shows workdir, home, db, session, model, variant, mode, thinking,
-and debug state as one multi-line status block. Fullscreen TUI appends one
-status transcript block, and non-terminal scripted TUI writes the same
-multi-line status text as one output block.
+`/status` shows workdir, home, db, session, model, variant, mode, and debug
+state as one multi-line status block. It does not include thinking visibility;
+`/show-thinking` remains the dedicated command for changing and reporting that
+setting. Fullscreen TUI appends one status transcript block, and non-terminal
+scripted TUI writes the same multi-line status text as one output block.
+
+`/stats` shows local usage and estimated-cost statistics for the current
+workdir from persisted SQLite accounting. Fullscreen TUI opens the shared
+bottom selection pane in a read-only stats mode; non-terminal scripted TUI
+prints the same deterministic summary. `/stats` must not call providers or
+refresh model catalogs.
 
 Fullscreen `/sessions`, `/resume`, `/continue`, and `/model` use the shared
 bottom selection pane. The pane includes title text, search directly below the
@@ -184,7 +192,9 @@ completed results. Selecting an existing model while a fetch is in progress is
 allowed and cancels unfinished catalog requests when the pane closes or moves to
 variant selection.
 
-The model picker keeps local rows authoritative. When a local configured model
+Model rows show known model metadata compactly: context and output limits,
+capability tags, and input/output/cache pricing when available. Unknown
+metadata is omitted rather than shown as zero. The model picker keeps local rows authoritative. When a local configured model
 and fetched model have the same provider/model id, the local row is shown and
 the fetched source is not displayed. Pure fetched rows show only `fetched` plus
 known remote metadata. Fetched model ids are displayed unchanged and sorted by

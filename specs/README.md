@@ -3,15 +3,14 @@ name: Specs Guide
 psychevo_self_edit: deny
 ---
 
-Specs define the long-lived contracts, using topic directories with this structure:
-- `spec.md`: stable specification, required; must include at least an opening purpose paragraph, `## Scope` (including explicit out-of-scope items when useful), `## Related Topics`
-- `plan.md`: phased implementation plan; do not create unless necessary
-- `tasks.md`: implementation checklist and status tracking; do not create unless necessary.
-- Additional supplementary files; must have entry links in `spec.md` or `plan.md`
+Specs define the long-lived contracts in numbered topic directories. `000-099` are foundation specs. `100+` specs may define capabilities or product surfaces (prefer long-lived domain names). Numbering should leave space for future insertion.
 
-`000-099` are foundation specs. `100+` may be capability or product surface specs
-(prefer long-lived domain names). Numbering should leave space for future
-insertion.
+Topic directories use this structure:
+- `spec.md`: stable specification, required; must include at least an opening purpose paragraph, `## Scope` (including explicit out-of-scope items when useful), `## Related Topics`
+- `testing.md`: allowed and required for `100+` specs only
+- `plan.md`: phased implementation plan for `100+` specs only; do not create unless necessary
+- `tasks.md`: implementation checklist and status tracking for `100+` specs only; do not create unless necessary
+- Additional supplementary files; must have entry links in `spec.md`, `testing.md` or `plan.md`
 
 Specs that directly drive implementation should include functional requirements and acceptance criteria when behavior is non-trivial.
 

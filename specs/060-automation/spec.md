@@ -128,3 +128,5 @@ owning harness should make the artifact boundary explicit.
   persistence boundaries for evidence-backed material.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines the
   preceding foundation layer for extension contributions.
+- [070 Experience](../070-experience/spec.md) defines the UX and DX defaults
+  that automation evidence and diagnostics should support.

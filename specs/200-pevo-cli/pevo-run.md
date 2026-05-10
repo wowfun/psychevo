@@ -109,7 +109,8 @@ remain additive and may name a discovered skill or point at a skill path.
 `--format json` writes newline-delimited JSON observation events to stdout.
 Output is buffered in this slice. Each line is one JSON object. The first line
 after a started run is `run_start` and identifies the session, selected
-provider/model, database, and workdir. Subsequent lines project runtime
+provider/model, database, workdir, and resolved core model metadata when known.
+Subsequent lines project runtime
 observation events: `agent_start`, `turn_start`, `message_start`,
 `message_update`, `message_end`, `tool_execution_start`, `tool_execution_end`,
 `turn_end`, and `agent_end`.
@@ -138,6 +139,14 @@ non-zero.
 
 Live-provider calls are opt-in by command usage. The default validation path
 must not require credentials, live network access, or user configuration.
+
+## Cost and Metadata
+
+`pevo run` enriches resolved provider/model metadata from local configuration,
+cache-first `models.dev`, explicit catalog metadata when available, and
+deterministic fallbacks. Runtime persists normalized usage metrics and local
+estimated-cost accounting for completed assistant messages when usage is
+reported. Cost is an estimate in local state, not a provider bill.
 
 ## Related Topics
 

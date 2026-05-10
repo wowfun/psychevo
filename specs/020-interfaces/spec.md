@@ -107,3 +107,4 @@ Pause, resume, retry, undo, branch navigation, and checkpoint restore are out of
 - [200 pevo CLI](../200-pevo-cli/spec.md) defines the concrete `pevo` product CLI.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines semantic state relationships projected through interfaces.
 - [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines persistence boundaries for evidence-backed result material.
+- [070 Experience](../070-experience/spec.md) defines cross-cutting UX and DX defaults for caller-facing and developer-facing behavior.

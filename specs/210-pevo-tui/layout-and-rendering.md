@@ -23,16 +23,20 @@ ledger block:
   rows, carries the same full-width background instead of relying on paragraph
   wrapping to preserve row styling.
 - interleaved folded thinking, tool evidence, and assistant answer material
-- folded thinking rendered inline as `Thinking: <reasoning>` rather than a
-  standalone `Thinking` label row; only the `Thinking:` prefix uses the warm,
-  paper-like subdued color role, while reasoning content uses the normal
-  thinking body color, and explicit new paragraphs in reasoning content do not
-  receive label-width indentation
-- tool evidence renders in a compact tool-evidence form: a bullet/title row
-  followed by indented body output, with no vertical left rail
+- folded thinking renders as a flat expandable row, not as a vertical left-rail
+  block or derived section. Active Thinking uses the same shared activity
+  marker as active tool evidence; completed Thinking uses a stable bullet
+  marker. Thinking body lines use compact tool-style indentation (`└` then
+  continuation spaces), and explicit new paragraphs in reasoning content do not
+  receive label-width indentation.
+- consecutive tool evidence rows remain flat ledger rows. Individual tool
+  evidence stays compact: a bullet/title row followed by indented body output,
+  with no vertical left rail or `Tool calls (N)` section header.
 - the final assistant answer as unlabeled body text with no left rail or role
   label
-- turn metadata directly after a visible answer with its compact left rail preserved:
+- turn metadata directly after a visible answer, or after a terminal
+  reasoning-only assistant message when the provider returned no visible text,
+  with its compact left rail preserved:
   provider/model with the resolved variant one space to its right only when
   present, elapsed time, failures only when present, debug details only when
   enabled, and non-default mode last
@@ -43,20 +47,41 @@ as its own answer block. Streaming updates may replace only the currently
 active assistant message; `message_end` freezes that block so later model
 responses in the same foreground turn append new answer blocks instead of
 overwriting earlier visible text.
+If a single assistant message streams visible text and then a tool call, the
+active tool evidence is placed after that visible text and before turn metadata,
+so the current `Exploring`/`Running`/`Changing` state remains visible at the
+bottom of the ledger.
+Assistant messages whose `finish_reason` is `tool_calls` are intermediate
+ledger material, even when they contain visible text. They must not render
+turn metadata until a final visible answer, terminal reasoning-only message, or
+tool failure summary requires it.
+Turn metadata must not render while any active `Exploring`/`Running`/`Changing`
+tool row is still live. If an earlier failure summary meta row exists and a new
+active tool row appears, fullscreen TUI removes that meta row and lets the final
+answer, terminal reasoning-only message, or later failure summary recreate
+metadata after active evidence settles.
+Turn metadata also must not remain below a currently streaming `Thinking` or
+visible assistant block. If a prior tool failure created interim turn metadata
+and the provider continues with reasoning or answer text, fullscreen TUI removes
+that metadata until the assistant message reaches a terminal normal answer,
+terminal normal reasoning-only result, or another failure summary state.
 
-Assistant messages that contain only folded reasoning and/or tool calls do not
-render turn metadata. Tool-only Thinking blocks must remain compact evidence
-and must not be followed by provider/model/elapsed metadata unless a visible
-answer or failure summary requires it.
+Assistant messages that contain only folded reasoning and tool calls do not
+render turn metadata. Tool-only Thinking sections must remain compact evidence.
+If an assistant message ends the turn normally with folded reasoning but no
+visible text, fullscreen TUI may restore turn metadata after that final
+Thinking block so history resume still exposes provider/model/elapsed context.
+Aborted or interrupted reasoning-only messages are not terminal reports and
+must not create a metadata block below `Thinking`.
 
-The bottom area contains a compact composer with the same full-width
-`RGB(38,38,38)` input surface used by historical user prompts, a leading dim
-`›` prompt marker, and one compact state line. It must not use a left accent
-rail or a full bright border around the composer as the primary visual
-treatment. Recalled history and restored drafts use the same composer styling
-as fresh typed input and must not re-enable the textarea default cursor-line
-underline. An empty composer defaults to two visible input rows; non-empty input
-grows with its wrapped/logical line count up to six visible rows.
+The bottom area contains a compact composer with the same full-width adaptive
+input surface used by historical user prompts, a leading dim `›` prompt marker,
+and one compact state line. It must not use a left accent rail or a full bright
+border around the composer as the primary visual treatment. Recalled history and
+restored drafts use the same composer styling as fresh typed input and must not
+re-enable the textarea default cursor-line underline. An empty composer defaults
+to two visible input rows; non-empty input grows with its wrapped/logical line
+count up to six visible rows.
 
 The composer must not show the current mode in its border/title. The state line
 under the composer shows only the model name, variant value, and non-default
@@ -71,9 +96,10 @@ animated spinner frame, elapsed seconds, and `Esc`, for example
 `xiaomi/mimo-v2.5-pro low  ⠋ 12s · Esc`. After the user requests interruption,
 the appended projection changes to `⠋ interrupting 12s` until the turn settles.
 This is the only bottom shortcut hint in the first slice. The TUI must not add a
-separate `Working` label, a multi-line status widget, or a transcript row merely
-because interruption was requested. Existing shell-mode marking remains in the
-same state line and does not move the model or variant text.
+separate `Working` label, active phase text such as `Running`, a multi-line
+status widget, or a transcript row merely because interruption was requested.
+Existing shell-mode marking remains in the same state line and does not move
+the model or variant text. Active phase names belong in ledger tool rows only.
 
 The right sidebar is optional local context. It is hidden by default for fresh
 state, including on wide terminals, and may be toggled explicitly. Fullscreen
@@ -85,6 +111,9 @@ The sidebar is local-only. It may show the current session title, short
 session id, workdir, git branch, message/tool counts, token/context usage, and
 changed files. It must not call live provider catalogs or probe provider APIs.
 It must not show source, mode, model, variant, or thinking visibility.
+Message count and tool-call count render as separate lines. The tool evidence
+count is labeled `tool calls`, not `tools`, so it is not confused with the
+number of tools available to the model.
 
 TUI user-facing `messages` counts are visible-message counts: user prompt
 blocks with text plus assistant answer blocks with visible text. They exclude
@@ -97,15 +126,32 @@ known, it falls back to the short session id; when no session exists, it shows
 `New session`. Sidebar sections use bold headings without colored left rails.
 Sidebar content uses restrained default/dim text unless color carries essential
 state.
+The sidebar render pass must clear/fill its full rectangular area before
+drawing current content. Shorter updates, wrapped path changes, or toggling
+sections must not leave stale terminal glyphs in blank sidebar rows or in the
+first cell of labels such as `tokens`.
 
 The sidebar sections are:
 
 - Context
 - Modified Files
 
-The Context section shows token usage and context percentage when usage and a
-known model context limit are available. Token usage and context percentage are
-sidebar context, not transcript metadata.
+The Context section shows the last known context-window token usage and context
+percentage when provider usage and a known model context limit are available.
+This token count comes from normalized `usage.input_tokens`/provider prompt
+tokens: it represents the most recent request's input context size, which grows
+as conversation history is included in the model window. It is not the current
+message's `total_tokens`, not output tokens, and not a session-wide sum.
+Starting a new assistant turn or receiving a streaming/completed assistant
+message without input-token usage must not clear the last known context count; a
+later message with input-token usage updates it, and explicit
+transcript/session resets may clear it.
+
+The Context section also shows the local session estimated cost when persisted
+assistant-message accounting contains known pricing. Unknown pricing is omitted
+from the dollar total and may be summarized as unknown-priced messages in stats
+views. Cost display is local estimation only and must not imply provider
+billing reconciliation.
 
 Modified Files prefers session-local diff evidence when available. In the first
 slice, it may fall back to local git status. It shows at most 10 tail-compacted
@@ -119,24 +165,33 @@ rightmost useful path segments and avoid multi-line path walls.
 TUI renders runtime events into semantic ledger evidence:
 
 - user prompts become unlabeled dark prompt blocks without a left rail
-- folded reasoning becomes inline `Thinking: <reasoning>` evidence; explicit
-  new paragraphs in reasoning content start without label-width indentation
+- folded reasoning becomes flat `Thinking` evidence; explicit new paragraphs in
+  reasoning content start without label-width indentation
 - `read`, `list`, and `search` tool calls become `Explored` evidence
 - `bash` tool calls become `Ran <first command line>` evidence; the title must
-  expose the actual first command line from the tool arguments rather than a
-  generic `command` placeholder whenever the runtime supplied it, and completed
-  tool updates must preserve the command title captured from the start event
-  when the end event only contains the result
+  expose the first actual shell command from the tool arguments rather than a
+  generic `command` placeholder whenever the runtime supplied it. Leading blank
+  lines and full-line shell comments, including model-written planning comments
+  such as `# Try webcache`, are skipped for title selection so the ledger shows
+  the executable command line. Completed tool updates must preserve the command
+  title captured from the start event when the end event only contains the
+  result.
 - `write` and `edit` tool calls become `Changed` evidence
 - before a tool completes, fullscreen TUI may project transient active evidence
-  from streaming assistant tool-call blocks and tool-execution start events:
+  from streaming assistant tool-call blocks, runtime pending tool-call input
+  events, and tool-execution start events:
   `read`/`list`/`search` render as `Exploring`, `bash` as `Running`, and
   `write`/`edit` as `Changing`; completion converts the same row back to the
-  completed `Explored`/`Ran`/`Changed` title
+  completed `Explored`/`Ran`/`Changed` title. Active tool rows must keep the
+  present-tense display while their local timer is live, even if an intermediate
+  title value was restored as completed-tense text. They should not show a
+  redundant body line that says only `running` or `preparing`; the active title,
+  spinner/activity marker, and right-side elapsed duration carry that state.
 - assistant visible output becomes unlabeled answer body text without a left
   rail
-- turn-level metadata becomes unlabeled material directly after a visible answer
-  and keeps the metadata left rail
+- turn-level metadata becomes unlabeled material directly after a visible
+  answer, or after a terminal reasoning-only assistant message when no visible
+  answer exists, and keeps the metadata left rail
 
 Tool failures remain in their original evidence group and render as failures
 instead of being moved into a separate generic error log.
@@ -145,41 +200,118 @@ failed tool row and turn metadata, not by an additional red `Error` transcript
 row. A red turn-ended error row is reserved for non-normal turn outcomes, so
 the TUI must not render contradictory messages such as `turn ended: normal`.
 
-Active tool evidence is local TUI projection only. When a streaming assistant
-message exposes a tool call before execution starts, the transcript shows a
-short `preparing` body with a generic title if arguments are not yet complete,
-for example `Changing files`, `Exploring`, or `Running command`. Once complete
-arguments are available, or once the corresponding `tool_execution_start`
-arrives, the active title should update to the concrete path/query/command
-without inserting a duplicate row. Active tool rows match primarily by
-`tool_call_id`; if the id has not arrived yet, fullscreen TUI uses the
-assistant tool-call `content_index:call_index` pair scoped to the current
-assistant message as a temporary key and migrates it when the id appears. The
-same `content_index:call_index` pair may recur in later assistant messages in a
-multi-tool turn and must not overwrite prior tool evidence. Pending active rows
-that never reach execution because the turn is interrupted or fails stop their
-timer and render as failed `interrupted` evidence rather than being persisted as
-completed history.
+Active tool evidence is local TUI projection only. Runtime must surface a
+named pending tool-call input event as soon as a provider streams the tool name,
+before waiting for complete JSON arguments or local execution. This mirrors the
+OpenCode pending tool-part model: while the model is still producing tool input,
+the transcript shows a short `preparing` body with a generic title if arguments
+are not yet complete, for example `Changing files`, `Exploring`, or
+`Running command`. Once complete arguments are available, or once the
+corresponding `tool_execution_start` arrives, the active title should update to
+the concrete path/query/command without inserting a duplicate row. Active tool
+rows match primarily by `tool_call_id`; if the id has not arrived yet,
+fullscreen TUI uses the assistant tool-call `content_index:call_index` pair
+scoped to the current assistant message as a temporary key and migrates it when
+the id appears. The same `content_index:call_index` pair may recur in later
+assistant messages in a multi-tool turn and must not overwrite prior tool
+evidence. Pending active rows that never reach execution because the turn is
+interrupted or fails stop their timer and render as failed `interrupted`
+evidence rather than being persisted as completed history.
+
+When Thinking is visible, fullscreen TUI may show a provisional active tool row
+from visible Thinking text that explicitly announces imminent tool use, such as
+`Let me write...` or `Let me run...`, because some providers stream long
+tool-input generation as reasoning before emitting the structured tool-call
+block. This provisional row uses a generic title such as `Changing files` or
+`Running command`, never a guessed path or command. Hidden thinking must not
+create a provisional row from reasoning text. A concrete assistant tool-call
+block, runtime pending tool-call input event, or runtime `tool_execution_start`
+must replace the provisional row with the real active row when it arrives; if an
+assistant message finishes without a matching tool call, the provisional row is
+removed. Once concrete signal arrives, the active `Exploring`, `Running`, or
+`Changing` row must be rendered for at least one frame before later same-turn
+events can convert it to completed `Explored`, `Ran`, or `Changed` evidence.
+This applies even when local tool execution completes in the same event-drain
+tick, such as a 0ms `write` after a long provider-side tool-argument generation
+phase.
+
+Transcript folding is row-level only. The renderer must not synthesize
+`Thinking` or `Tool calls (N)` section headers. `Thinking` rows and tool
+evidence rows (`Explored`/`Ran`/`Changed`, including active
+`Exploring`/`Running`/`Changing` display) are rendered through the same ledger
+evidence row component and are individually foldable when they have rendered
+detail text. Short rows default open; selecting an open foldable row shows
+`▾ collapse`, and collapsed short rows show `▸ details`. Long `Ran`/`Running`
+command titles stay single-line with ellipsis in the title row so elapsed time
+remains visible, but rows with long command titles can expand to show the
+complete wrapped command below the title. Long Thinking bodies and long tool
+outputs use the same default collapse threshold: eight logical lines or roughly
+1200 display characters. Line-count collapses show `▸ N more lines`; width-only
+collapses whose omitted line count is not meaningful show `▸ more output`.
+
+Mouse clicks on expandable rows toggle that row's details. Dragging to select
+transcript text must not toggle rows. Transcript-focus `Enter` and `Space`
+apply the same toggle to the selected row. Transcript focus selection is a
+single-line focus affordance: only the selected row's first visible line uses
+the `›` marker, while body and wrapped continuation lines retain their normal
+ledger indentation. Mouse text selection remains a separate copy-selection
+state and continues to use the semantic selection background. Collapsed rows
+contribute their actual rendered height to the transcript scroll model, and
+selection movement must walk visible rows.
+When fullscreen TUI reconstructs transcript history from persisted messages,
+assistant messages whose `finish_reason` is `tool_calls` and whose outcome is
+still `normal` must also rehydrate their unmatched tool-call blocks as active
+ledger evidence until the matching `tool_result` record is encountered. The
+later `tool_result` updates that same row in place rather than appending a
+duplicate, so reconnecting or reloading a running session still shows
+`Changing <path>` during provider-side or local write gaps. If a persisted
+assistant message is already terminally interrupted (`finish_reason=aborted` or
+an `aborted`/`failed`/`stopped` outcome), unmatched tool calls from that message
+render as static failed `interrupted` evidence with no live timer. History
+reload must never turn those aborted tool calls back into active
+`Exploring`/`Running`/`Changing` rows.
+For providers that buffer tool-call input until the end of a long write
+argument generation, fullscreen TUI may show a provisional `Changing files`
+row from visible assistant preamble text only when that visible text explicitly
+announces an imminent write/change action. This fallback is not allowed for
+folded reasoning text, must be replaced by the real tool row when a concrete
+tool signal arrives, and must be removed if the assistant message finishes
+without a write/edit tool call. Repeated message updates for the same visible
+preamble must not create additional provisional `Changing files` rows once a
+concrete active write/edit row exists. Completion must leave exactly one
+completed `Changed` row for the tool call and no orphan active fallback rows.
 
 Tool evidence shows elapsed execution duration on the right side of the tool
-title row. Running tools refresh that value from the local start instant while
-the turn is live; completed tools use the runtime-supplied `elapsed_ms` and must
-not continue increasing on later redraws. TUI history reload restores completed
-tool duration from the tool-result message metadata when available. Narrow
-views preserve the right-side duration first and truncate the title when needed.
+title row. Active Thinking rows also show a right-side elapsed value while
+reasoning is streaming, but completed Thinking rows do not synthesize a
+duration from turn metadata. Running tools refresh elapsed from the local start
+instant while the turn is live; completed live rows freeze the larger of the
+runtime-supplied `elapsed_ms` and the active ledger duration since the first
+concrete `Exploring`/`Running`/`Changing` signal, so a provider-side pending
+period does not collapse to `0s` when local execution is instant. Completed
+rows must not continue increasing on later redraws. TUI history reload restores
+completed tool duration from the tool-result message metadata when available
+and does not recompute old completed rows from the current wall clock. Narrow
+views preserve the right-side duration first and truncate the title when
+needed.
 Transcript layout caching must not freeze active tool evidence: rows with a
 running local start instant must invalidate cached rendering when their
 right-side elapsed label or activity marker changes, while completed rows remain
 cache-stable.
 
-Long tool outputs default to a maximum of 20 visible lines. Expandable evidence
-keeps the full stored output available for local inspection in this TUI process
-or from persisted message/tool-result material when available.
+Expandable evidence keeps the full stored output available for local inspection
+in this TUI process or from persisted message/tool-result material when
+available. Expandable title rows use a right-side text affordance instead of
+bracket tokens: collapsed rows show `▸ N more lines` when the omitted line
+count is known, width-only collapses show `▸ more output`, and expanded rows
+show `▾ collapse`. Narrow terminals may shorten those hints, but must not
+reintroduce bare `[+]` or `[-]`.
 
 Usage and provider metadata are not transcript content blocks. Provider/model
 with an optional resolved variant, elapsed time, failures, debug usage parts,
-and allowlisted provider metadata may be projected into turn metadata, but
-total token usage and context percentage are projected to the sidebar. Usage
+allowlisted provider metadata, and compact known cost may be projected into
+turn metadata, but total token usage, session cost, and context percentage are
+projected to the sidebar. Usage
 and provider metadata must not appear in sanitized transcript messages,
 provider replay across incompatible providers, or `pevo run --format json` by
 default.
@@ -206,7 +338,7 @@ without `key=value` prefixes and without duplicating `elapsed_ms` or
 
 ## Rendering
 
-The TUI uses a compact terminal palette:
+The TUI uses a compact terminal-adaptive palette:
 
 - default foreground for primary text
 - dim secondary text
@@ -214,6 +346,32 @@ The TUI uses a compact terminal palette:
 - green success markers
 - red failures
 - magenta `pevo` identity
+
+Fullscreen rendering may query the terminal default foreground/background under
+a bounded startup deadline. When the terminal reports a usable background, TUI
+surfaces derive subtle prompt/composer/menu/selection backgrounds from that
+default so dark and light terminal themes remain readable. When the query is
+unsupported, times out, or runs outside an interactive terminal, the renderer
+falls back to the existing dark surface palette, including `RGB(38,38,38)` for
+prompt and composer rows. Terminal probing is best-effort and must never block
+startup beyond the bounded deadline or fail the TUI.
+
+Prompt blocks and the composer must still share the same full-width surface
+within a render profile. Popup, bottom-panel, and selected-row surfaces use the
+same semantic theme roles rather than hardcoded local colors, while preserving
+the compact no-left-rail ledger treatment.
+
+Assistant visible answer text may use lightweight Markdown rendering for local
+display only. Supported styling includes headings, lists, emphasis, inline
+code, fenced code blocks, links, and local file links displayed relative to the
+session working directory where possible. This rendering is a TUI projection
+only and must not change persisted message content, provider replay, or
+non-terminal JSON output.
+
+Activity indicators and shimmer-like running text must flow through a shared
+motion primitive with a deterministic static fallback for tests and reduced
+motion contexts. Time-varying motion must be included in transcript layout cache
+keys only when it changes rendered width or visible content.
 
 Assistant visible text streams inline inside the current turn. Thinking is
 visible by default, rendered as folded/debug material under a `Thinking`
@@ -251,6 +409,14 @@ selected text must not synchronously block the input loop on platform clipboard
 commands. Requests
 to scroll to the bottom during history loading or session switching must be
 resolved after the next render has the real transcript viewport dimensions.
+Scroll boundaries must use the same cached rendered-row total that the viewport
+renderer uses, rather than falling back to a separately estimated transcript
+line count once a layout has been computed. The cache is valid only when row
+content, visibility, selection, expansion state, active elapsed labels, and
+active motion markers still match the transcript. In transcript focus, moving
+the selected ledger row with `Up`/`Down` must scroll the selected row into view.
+When focus is in an empty composer and there is no next recalled history entry,
+`Down` scrolls the transcript down one line instead of becoming a no-op.
 Redraws after scrolling or appending shorter rows must not leave stale glyphs
 from previous longer rows.
 
@@ -323,7 +489,10 @@ agent reviews them. The artifact root is
 `.local/.psychevo-dev/tui-shots/<timestamp>/`. The deterministic demo should
 isolate git state from the parent repository and pin terminal color inputs,
 including clearing inherited `NO_COLOR`, so screenshots are useful as visual
-diagnostics.
+diagnostics. The VHS demo must include a long Markdown/table answer with
+turn metadata, manually scroll away from and back to the bottom, and capture a
+bottom-of-transcript screenshot where the final answer marker and metadata are
+visible.
 
 ## Related Topics
 

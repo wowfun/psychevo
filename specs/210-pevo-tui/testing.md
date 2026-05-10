@@ -39,23 +39,28 @@ Required coverage:
 - slash menu default selection: the first visible completion row is selected
   and pressing `Enter` executes it
 - evidence-ledger projection for unlabeled prompt blocks without left rails,
-  inline `Thinking: <reasoning>` blocks, `Explored`/`Ran`/`Changed` tool groups,
+  expandable flat `Thinking` rows without left rails, flat
+  `Explored`/`Ran`/`Changed` tool rows without `Tool calls` section headers,
   failures inside their original group, unlabeled answer body text without left
   rails, tool blocks without left rails, `Ran <actual first command line>`
-  titles that survive start-to-end tool updates even when end events omit tool
-  arguments, transient active `Exploring`/`Running`/`Changing` rows created from
-  streaming assistant tool-call blocks before tool execution starts, temporary
-  message-scoped `content_index:call_index` key migration to `tool_call_id`, no
-  duplicate row when `tool_execution_start` follows a pending row, no overwrite
-  when later assistant messages reuse the same `content_index:call_index` pair,
+  titles that skip leading blank/comment-only shell lines and survive
+  start-to-end tool updates even when end events omit tool arguments, transient
+  active `Exploring`/`Running`/`Changing` rows created from streaming assistant
+  tool-call blocks before tool execution starts, temporary message-scoped
+  `content_index:call_index` key migration to `tool_call_id`, no duplicate row
+  when `tool_execution_start` follows a pending row, no overwrite when later
+  assistant messages reuse the same `content_index:call_index` pair,
   interrupted pending rows stopping their timer as failed `interrupted`
   evidence, metadata left rails, unlabeled turn meta only after visible answers
-  or failure summaries, and
+  or failure summaries, visible-text-plus-tool-call assistant messages keeping
+  active tool evidence below the visible text and above metadata, intermediate
+  `finish_reason=tool_calls` text-plus-tool-call messages not rendering turn
+  metadata, active tool rows suppressing turn metadata until they settle, and
   no extra red `turn ended: normal` row when the final turn outcome is normal
   but one or more tool calls failed, and debug meta; only the
-  `Thinking:` prefix uses the paper color role, reasoning content uses the
-  normal thinking body role, and explicit reasoning paragraphs do not receive
-  label-width indentation
+  active Thinking uses shared activity motion, completed Thinking uses a stable
+  bullet marker, reasoning content uses the normal thinking body role, and
+  explicit reasoning paragraphs do not receive label-width indentation
 - compact UI duration formatting for model metadata, tool evidence, plain
   renderer output, and bottom running status: whole seconds below one minute,
   `XmYYs` at one minute or more, zero-padded minute seconds, and floor rounding
@@ -70,19 +75,103 @@ Required coverage:
   persisted optional sidebar visible state, thinking visible/hidden,
   expanded/collapsed tool output, minimal bottom state line, and composer
   surface without a left accent rail; user prompt blocks and the composer must
-  share the same `RGB(38,38,38)` full-width surface with a leading `›` prompt
-  marker, the empty composer must occupy two input rows with surface background
-  on both rows, wrapped historical prompt rows including CJK/wide-character
-  content must keep full-width prompt background on each physical row, and
-  sidebar headings must be bold without colored left rails; running-state
-  snapshots must show spinner/elapsed/`Esc` appended to the stable bottom state
-  line and must not contain `Working`
+  share the same adaptive full-width surface with a leading `›` prompt marker,
+  falling back to `RGB(38,38,38)` when no terminal background is known; the
+  empty composer must occupy two input rows with surface background on both
+  rows, wrapped historical prompt rows including CJK/wide-character content
+  must keep full-width prompt background on each physical row, and sidebar
+  headings must be bold without colored left rails; running-state snapshots must
+  show spinner/elapsed/`Esc` appended to the stable bottom state line and must
+  not contain `Working` or active phase words that belong in ledger rows
+- active tool evidence snapshots and unit tests must preserve ledger-only
+  `Exploring`/`Running`/`Changing` state while a tool timer is live, suppress
+  redundant `running`/`preparing` body-only rows, keep completed
+  `Explored`/`Ran`/`Changed` rows stable, and retain the first actual bash
+  command line in active and completed titles after skipping leading blank and
+  comment-only shell lines. A targeted snapshot must cover the provider shape
+  where an intermediate `finish_reason=tool_calls` assistant message contains
+  visible text followed by a `write` tool call, keeping the active `Changing`
+  row visible below that text without premature turn metadata
+- completed live tool evidence tests must cover `Exploring`/`Running`/
+  `Changing` rows settling into `Explored`/`Ran`/`Changed` while preserving the
+  visible active duration when runtime `elapsed_ms` is shorter, including 0ms
+  instant completions
+- fullscreen active tool visibility tests must cover reasoning-only assistant
+  `finish_reason=tool_calls` messages with a `write` tool call, proving
+  `Changing <path>` appears below `Thinking` with no premature metadata; they
+  must also prove visible Thinking text with an explicit write/run intent can
+  create a generic provisional `Changing files`/`Running command` row, hidden
+  Thinking text cannot, runtime pending tool-call input events for `write`
+  create a visible `Changing files` row before complete arguments or local
+  execution arrive, and later concrete tool-call signals adopt the provisional
+  row instead of duplicating it. Same-tick `message_end(write)` /
+  `tool_execution_start(write)` / `tool_execution_end(write)` batches are
+  deferred so `Changing` renders before completion
+- runtime stream projection must expose named pending tool-call input events to
+  fullscreen TUI without leaking folded reasoning into sanitized message events;
+  provider streams that emit tool names before complete JSON arguments must
+  produce active ledger rows during argument generation instead of waiting for
+  local tool execution
+- fullscreen history reload coverage must include a persisted assistant
+  `finish_reason=tool_calls` message with a `write` tool call and no matching
+  tool result yet; it must render an active `Changing <path>` row without turn
+  metadata and must update that same row to `Changed <path>` when the matching
+  persisted or streamed `tool_result` arrives. It must also include a persisted
+  aborted assistant message whose tool calls have no matching tool results;
+  those rows must render as static failed `interrupted` evidence, use completed
+  tool titles such as `Ran <command>`, and must not keep live
+  `Exploring`/`Running`/`Changing` timers after TUI restart. A targeted visual
+  snapshot must lock the pending history `Changing <path>` row shape.
+- visible assistant preamble fallback coverage must prove that text such as
+  `Let me write the complete report` can create a provisional `Changing files`
+  row during a still-open assistant message, that visible Thinking text follows
+  the same explicit-intent provisional/adoption/removal rules while hidden
+  Thinking does not, and that the provisional row is removed if the assistant
+  message finishes without a matching tool call. Repeated visible preamble
+  updates after a concrete write signal must not leave duplicate
+  `Changing files` rows after `Changed` appears. A targeted visual snapshot
+  must prove an active `Changing` row suppresses a prior failure
+  turn-metadata block such as `0s 1 failure`
+- streaming reasoning regression coverage must prove that a prior failure
+  turn-metadata block is removed once `Thinking` continues, and that an aborted
+  reasoning-only assistant message does not recreate metadata below `Thinking`
+- expandable tool output snapshots must show right-side text hints such as
+  `▸ N more lines`, `▸ more output`, and `▾ collapse`, with no bare `[+]` or
+  `[-]` tokens
+- expandable transcript row coverage must include shared collapse thresholds
+  for long Thinking and long tool output, active Thinking elapsed, short
+  Thinking detail collapse, completed and active tool row detail collapse, long
+  `Ran`/`Running` command-title expansion, long JSON/HTML-like single-line tool
+  output collapse, keyboard `Enter`/`Space` row toggles, mouse row toggles, and
+  drag text selection not toggling anything. Snapshot coverage must prove
+  transcript focus uses a single-line `›` marker instead of repeating `>` on
+  every wrapped Markdown/table line
+- terminal-adaptive TUI theme derivation for dark, light, and unknown terminal
+  backgrounds; prompt/composer shared surfaces, popup/menu surfaces, selected
+  row contrast, accent styles, and static motion fallback are covered by
+  deterministic unit tests without relying on a live terminal palette
+- lightweight TUI Markdown projection for assistant answers: headings, lists,
+  emphasis, inline code, fenced code blocks, links, and workdir-relative local
+  file links render in fullscreen snapshots without altering persisted message
+  content or non-terminal renderer output
+- transcript scroll regression coverage must include long Markdown/table
+  answers with metadata, terminal reasoning-only Thinking tables with metadata,
+  manual PageDown or mouse-wheel scrolling to the bottom, empty-composer
+  `Down` scrolling, and transcript-focus `Up`/`Down` movement keeping the
+  selected row visible
 - streaming runtime projection that never leaks folded reasoning into sanitized
   message events while still delivering dedicated TUI thinking events
 - runtime metrics projection that can expose usage and allowlisted metadata to
   TUI without putting them in sanitized transcript messages
 - context-percent display in the sidebar only when a model context limit is
-  known
+  known, sidebar token usage using `usage.input_tokens` as the last known
+  context-window count rather than `total_tokens`, and staying visible while a
+  model is answering events that do not include usage
+- sidebar redraw clearing must be covered by a regression test that renders
+  over a polluted previous terminal frame and proves labels such as `tokens`
+  and blank sidebar rows do not retain stale glyphs
+- sidebar estimated session cost display from persisted accounting, including
+  unknown-priced messages and known free messages
 - `/show-thinking` toggle behavior: default visible, explicit on/off, global
   persistence, visible reasoning rendered only in TUI output and never in
   sanitized transcript views, fullscreen visibility changes immediately refresh
@@ -95,7 +184,9 @@ Required coverage:
   fullscreen event loop, no transcript status row for mode cycling, and
   next-turn application while a turn is running
 - `/status` behavior: fullscreen and scripted TUI project the same local state
-  fields as one multi-line status block
+  fields as one multi-line status block, excluding thinking visibility
+- `/stats` behavior: fullscreen and scripted TUI project deterministic local
+  usage/cost summaries without provider calls
 - slash command completion from `Tab`, keeping argument placeholders in slash
   menu descriptions only and out of completed composer text
 - `/skills` and `/skill:<name>` behavior: deterministic listing, skill prompt
@@ -133,6 +224,8 @@ Required coverage:
   transition, `Config default` clearing the variant override or using provider
   default for fetched-only rows, explicit variant persistence, and `Esc`
   close/back/cancel behavior
+- model rows render known limits, capability tags, and compact pricing metadata
+  from config, cached `models.dev`, or explicit catalog fetches
 - fullscreen `/model` fetch behavior: explicit Enter-triggered fetch only,
   concurrent all-provider fetch, single-provider retry, skipped missing
   credentials with env-var hints, loopback/no-auth catalog requests without
@@ -180,9 +273,9 @@ Required coverage:
   `select/fetch model`, prefix-only Tab completion that does not complete
   fuzzy-only matches, disabled `/compact` and `/export` entries, and bounded
   `upcoming` feedback
-- transcript focus and expansion behavior: `Ctrl+T`, selected block movement,
-  `Enter`/`Space` expand-collapse, `Esc` returning to composer, and keyboard
-  transcript scrolling
+- transcript focus and expansion behavior: `Ctrl+T`, selected row movement,
+  `Enter`/`Space` row expand-collapse, `Esc` returning to composer, and
+  keyboard transcript scrolling
 - slash menu row selection with Up/Down/Home/End and mouse click, including
   Up/Down wraparound and `/mo` navigation to `/mode` before `Enter`
 - transcript auto-follow behavior: new prompts reset to bottom-following,
@@ -193,8 +286,9 @@ Required coverage:
   after shorter rows do not retain stale glyphs from earlier longer rows,
   bottom-scroll limits use the same word-wrapped rendered line count as the
   paragraph widget for long mixed Markdown/CJK text, repeated scroll redraws
-  reuse cached row heights without re-wrapping unchanged rows, bursty mouse
-  wheel redraws are bounded by input coalescing, manual scrolling opts out, and
+  reuse cached row heights without re-wrapping unchanged rows while invalidating
+  stale row-height caches when row content or state changes, bursty mouse wheel
+  redraws are bounded by input coalescing, manual scrolling opts out, and
   returning to the bottom resumes auto-follow
 - long-output resilience for model-generated long answers and read-tool results:
   wrapped content must not overwrite composer/sidebar, collapsed read output
@@ -255,16 +349,21 @@ metadata. These diagnostics are not the checked-in source of truth.
 
 VHS capture is required validation for changes that affect fullscreen TUI
 visual display. This includes layout, color, visible transcript text,
-composer, sidebar, slash menu, and screenshot-visible interaction states. The
-diagnostic script uses a deterministic local mock provider, an isolated
-repo-local `PSYCHEVO_HOME`, and the current workspace `pevo` binary. It writes
-PNG screenshots and companion material under
-`.local/.psychevo-dev/tui-shots/<timestamp>/`.
+composer, sidebar, slash menu, long Markdown/table transcript scrolling, and
+screenshot-visible interaction states. The diagnostic script uses a
+deterministic local mock provider, an isolated repo-local `PSYCHEVO_HOME`, and
+the current workspace `pevo` binary. It writes PNG screenshots and companion
+material under `.local/.psychevo-dev/tui-shots/<timestamp>/`.
 
 The demo workdir must be isolated from the parent repository's git state so
 Modified Files does not reflect unrelated uncommitted work. The tape should pin
 terminal color environment, clear inherited `NO_COLOR`, and avoid theme choices
-that squash TUI color-role contrast across repeated runs.
+that squash TUI color-role contrast across repeated runs. The tape must include
+a long Markdown/table answer and a terminal reasoning-only Thinking table with
+turn metadata, scroll the transcript away from the bottom and then back down,
+capture the default collapsed Thinking/table state, then expand the Thinking
+row and capture a screenshot proving the bottom marker and metadata row are
+visible.
 
 VHS capture remains outside default broad validation and is not a pixel golden.
 Screenshots stay untracked. A person or visually capable agent must inspect the

@@ -18,13 +18,14 @@ provider-neutral AI protocol in [003 AI Protocol](../003-ai-protocol/spec.md).
 - global and project configuration merge for live runs
 - `.env` credential loading
 - provider/model resolution for `pevo run`
+- public model metadata resolution for context limits, capabilities, and cost
 
 Out of scope:
 
-- remote model catalogs, live model probes, provider fallback execution, or
-  dynamic routing
+- provider `/models` catalog fetching outside explicit user-triggered catalog
+  fetch flows, provider fallback execution, or dynamic routing
 - OAuth, browser login, device code flows, auth stores, or credential refresh
-- billing, rate-limit accounting, cost catalogs, or pricing
+- rate-limit accounting or provider-side billing reconciliation
 - provider-native APIs outside the Chat-compatible family, hosted agent-product
   transports, external portal transports, or tool-protocol provider transports
 - external auth file reading, credential pools, or setup commands
@@ -95,6 +96,14 @@ Configuration may define:
 - optional model `reasoning_effort` as the first-slice model thinking
   intensity hint. Valid values are `none`, `minimal`, `low`, `medium`, `high`,
   `xhigh`, and `max`; `none` disables the request field.
+- optional model `context_limit` as a legacy context-window token override
+- optional model `limit` object with `context`, `input`, and `output` token
+  limits
+- optional model `cost` object with USD-per-million-token `input`, `output`,
+  `cache_read`, `cache_write`, and optional `context_over_200k` tier
+- optional model capability overrides using `reasoning`, `tool_call`,
+  `temperature`, `attachment`, `structured_output`, `interleaved`, and
+  `modalities.input`/`modalities.output`
 
 Example:
 
@@ -208,6 +217,44 @@ object, or the selected provider entry's `models.<model>.reasoning_effort`.
 Runtime passes enabled values as a generation metadata hint to the
 Chat-compatible adapter. `none` suppresses the request field. Providers that do
 not support an enabled request field may reject the live invocation.
+
+Model metadata is resolved as advisory local metadata for status surfaces,
+request shaping, cost estimation, and future context-budget decisions. Runtime
+keeps a typed core view plus the raw public registry model JSON for future
+fields. Resolution order is:
+
+1. explicit per-model metadata from JSONC configuration, including legacy
+   `context_limit`
+2. cache-first `models.dev` public registry lookup
+3. metadata present in an explicitly fetched provider `/models` response
+4. built-in context fallback table for known model families
+5. unknown as `None`
+
+The `models.dev` cache is stored under `$PSYCHEVO_HOME/models_dev_cache.json`.
+Fresh cache entries are preferred. A live registry refresh is best effort,
+uses a bounded timeout, and must not fail provider resolution or startup. When
+refresh fails, runtime may use a stale cache; when no cache or fallback
+matches, the context limit remains unknown.
+
+Provider matching first uses known provider-id mappings such as `deepseek`,
+`xiaomi`, and `xiaomi-token-plan-cn`. If the configured provider id differs
+from `models.dev`, runtime may infer the registry provider by matching the
+configured base URL to a registry provider `api` URL. This keeps user-defined
+provider ids such as `xiaomi-token-plan` stable while still resolving
+`xiaomi-token-plan-cn` metadata.
+
+Unknown capabilities are permissive. Only an explicit `false` capability may
+degrade a request projection. For example, runtime suppresses
+`reasoning_effort` when resolved model metadata says `reasoning = false`, and
+may suppress unsupported tool or attachment request fields rather than failing
+startup. Unknown or absent capability data must not block a run.
+
+Cost values are interpreted as USD per one million tokens. Estimated local
+cost uses normalized provider usage, subtracts cache read/write tokens from
+billable input, subtracts reasoning tokens from billable output, charges
+reasoning tokens at the output rate, and applies `context_over_200k` when
+billable input plus cache read exceeds 200,000 tokens. Missing pricing remains
+unknown; known zero pricing is a valid free model cost.
 
 `qwen` is a built-in alias for a Chat-compatible endpoint in this slice.
 Browser-based portal OAuth is explicitly deferred.

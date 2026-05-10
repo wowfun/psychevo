@@ -31,8 +31,16 @@ For this topic, the default gate is the broad deterministic validation path.
 - Provider resolution tests cover aliases, unknown providers, auto order,
   missing credentials, missing model, multiple configured models, single
   configured model default, provider-qualified model strings, model object
-  provider selection, reasoning-effort resolution, base-url env override, and
-  Xiaomi's `XIAOMI_API_KEY`.
+  provider selection, reasoning-effort resolution, base-url env override,
+  metadata precedence, `models.dev` cache lookup, base-url inference for
+  user-defined providers, config metadata overrides, and Xiaomi's
+  `XIAOMI_API_KEY`.
+- Model catalog tests cover limit/capability/cost metadata parsed from provider
+  `/models` responses and `models.dev` cache enrichment without requiring live
+  provider credentials.
+- Cost-accounting tests cover billable input/output subtraction, cache read and
+  write tokens, reasoning-as-output pricing, unknown pricing, known free
+  pricing, and `context_over_200k` tier selection.
 - Runtime tests cover live session metadata, persisted messages, context
   pruning, text-only mock provider completion, and mock provider tool-call
   completion.

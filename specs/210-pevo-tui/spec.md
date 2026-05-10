@@ -17,23 +17,44 @@ the deterministic line-by-line scripted behavior.
 - persisted TUI-local model, variant, mode, thinking visibility, and sidebar
   visibility
 - session selection, session archiving/deletion, session renaming, model,
-  variant, mode, thinking visibility, and status slash commands
-- evidence-ledger rendering for prompts, folded reasoning, tool evidence,
-  final answers, and turn metadata
+  variant, mode, thinking visibility, stats, and status slash commands, with
+  `/status` kept to runtime/session state rather than thinking visibility
+- evidence-ledger rendering for prompts, folded reasoning, tool evidence, final
+  answers, and turn metadata
+- sidebar Context usage showing the last known context-window input token count
+  from provider prompt usage, not assistant `total_tokens` or session-wide
+  token totals
+- sidebar visible message counts and tool-call evidence counts, with tool calls
+  labeled separately from callable tool inventory
+- sidebar estimated session cost and local stats reporting from persisted
+  accounting columns
 - responsive foreground interruption and preservation of every visible
   assistant answer emitted during a multi-tool turn
 - direct user shell escape from the composer and scripted input
 - fullscreen composer `@` file path completion for the selected working
   directory
-- transcript selection and keyboard expansion for bounded tool evidence
+- transcript row focus plus keyboard and mouse expansion for bounded Thinking
+  and tool evidence rows rendered through a shared ledger row component
+- ledger-only active tool status, including pending provider-side tool input
+  and persisted assistant tool calls whose tool results have not arrived yet,
+  with at least one visible active frame, no stale provisional rows after
+  completion, no active-turn metadata blocks while assistant content is still
+  streaming, static interrupted evidence after aborted reloads, and stable
+  transcript scrolling
+- local-only row-level expansion for long Thinking bodies and long tool output
+  using the same collapse thresholds, without derived transcript section
+  headers
 - debug projection for usage and provider metadata summaries
 - deterministic visual-regression projections and local diagnostic screenshots
+- terminal-adaptive semantic rendering for prompt, composer, popup, bottom
+  panel, selection, and evidence-ledger surfaces
+- lightweight terminal Markdown projection for assistant answers
 - hard `plan` / `default` runtime mode selection
 - interactive skill listing and explicit skill invocation slash commands
 
 Out of scope:
 
-- panes, plugins, custom keymaps, or heavy markdown rendering
+- panes, plugins, custom keymaps, or syntax-highlighted rich document rendering
 - approvals, auth, provider login, provider catalogs, or model probing
 - structured `@file` references, automatic file-content attachment, custom
   slash commands, or command-template files
