@@ -4,17 +4,40 @@
 
 ### Added
 
+- Added the 070 Experience foundation spec for cross-cutting UX/DX defaults and
+  ownership boundaries.
+- Added adaptive TUI theme, terminal-palette probing, static motion fallback,
+  and lightweight Markdown answer projection for fullscreen `pevo tui`.
 - Added a fullscreen TUI `/model` custom-provider flow with global
   OpenAI-compatible providers, `.env`-only API keys, fetched model catalogs,
   TUI-scoped model selection, and display-only provider labels.
+- Added cache-first `models.dev` model metadata resolution for context limits,
+  capability tags, and pricing, plus SQLite usage accounting and `pevo stats`
+  / TUI `/stats` summaries.
 
 ### Changed
 
+- Clarified specs guide numbering and topic directory rules, including required
+  `testing.md` files for `100+` specs.
+- Refreshed fullscreen TUI rendering with adaptive surfaces, lightweight
+  Markdown, row-level `Thinking`/tool folding, shared evidence rows, single-line
+  transcript focus, and expandable long command/output details.
+- Enriched TUI model rows, turn metadata, `/status`, and sidebar copy with
+  resolved model metadata, session cost, and clearer `tool calls` labeling.
 - Improved fullscreen TUI running-state and tool-evidence projection with
   compact elapsed labels, active tool rows, and safer interrupt queue handling.
 
 ### Fixed
 
+- Fixed fullscreen TUI active evidence timing, placement, titles, elapsed
+  durations, interruption reloads, and provisional `Changing`/`Running` rows
+  for provider-side tool-input gaps and instant completions.
+- Fixed turn metadata and bottom scrolling across intermediate tool-call
+  messages, reasoning-only final messages, long Markdown/table transcripts, and
+  continued `Thinking` streams.
+- Fixed sidebar context tokens and redraw clearing so usage stays visible while
+  the model answers and stale terminal glyphs cannot corrupt labels or blank
+  rows.
 - Fixed TUI active tool refresh/keying, skill-first session titles, normal
   tool-failure projection, prompt interruption wakeups, multi-answer
   preservation, model-turn budget, and Esc priority.
