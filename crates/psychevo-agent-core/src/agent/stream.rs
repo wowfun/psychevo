@@ -101,6 +101,8 @@ async fn stream_assistant(
                 id,
                 name,
             } => {
+                let pending_id = id.clone();
+                let pending_name = name.clone();
                 tool_builders.insert(
                     (content_index, call_index),
                     ToolCallBuilder {
@@ -111,6 +113,17 @@ async fn stream_assistant(
                         call_index,
                     },
                 );
+                emit(
+                    &sink,
+                    AgentEvent::ToolCallPending {
+                        tool_call_id: pending_id,
+                        tool_name: pending_name,
+                        arguments_json: String::new(),
+                        content_index,
+                        call_index,
+                    },
+                )
+                .await?;
                 visible_changed = true;
             }
             StreamEvent::ToolCallDelta {
@@ -136,6 +149,19 @@ async fn stream_assistant(
                     builder.name = name;
                 }
                 builder.arguments_json.push_str(&arguments_delta);
+                if !builder.name.is_empty() {
+                    emit(
+                        &sink,
+                        AgentEvent::ToolCallPending {
+                            tool_call_id: builder.id.clone(),
+                            tool_name: builder.name.clone(),
+                            arguments_json: builder.arguments_json.clone(),
+                            content_index: builder.content_index,
+                            call_index: builder.call_index,
+                        },
+                    )
+                    .await?;
+                }
                 visible_changed = true;
             }
             StreamEvent::ToolCallEnd { .. } => {}
@@ -223,4 +249,3 @@ async fn stream_assistant(
     .await?;
     Ok(assistant)
 }
-

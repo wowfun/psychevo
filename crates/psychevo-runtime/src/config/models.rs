@@ -19,14 +19,27 @@ pub fn configured_models(options: &RunOptions) -> Result<Vec<ConfiguredModel>> {
     let mut push_model = |provider: &str,
                           model: &str,
                           reasoning_effort: Option<String>,
-                          context_limit: Option<u64>,
                           rows: &mut Vec<ConfiguredModel>| {
         let provider = normalize_provider_id(provider);
         let model = model.trim().to_string();
         if provider.is_empty() || model.is_empty() || !seen.insert(format!("{provider}/{model}")) {
             return;
         }
-        let context_limit = context_limit.or_else(|| built_in_context_limit(&provider, &model));
+        let config_entry = loaded.config.provider.get(&provider);
+        let model_config = config_model_entry(config_entry, &model);
+        let base_url = provider_base_url(&provider, config_entry, &loaded.env);
+        let metadata = resolve_model_metadata_cache_first(
+            &provider,
+            &model,
+            base_url.as_deref(),
+            model_config,
+            &loaded.env,
+        );
+        let reasoning_effort = if metadata.capabilities.reasoning == Some(false) {
+            None
+        } else {
+            reasoning_effort
+        };
         rows.push(ConfiguredModel {
             provider: provider.clone(),
             provider_label: provider_label(
@@ -35,7 +48,8 @@ pub fn configured_models(options: &RunOptions) -> Result<Vec<ConfiguredModel>> {
             ),
             model,
             reasoning_effort,
-            context_limit,
+            context_limit: metadata.context_limit(),
+            metadata,
         });
     };
 
@@ -45,7 +59,6 @@ pub fn configured_models(options: &RunOptions) -> Result<Vec<ConfiguredModel>> {
                 provider,
                 model,
                 config.reasoning_effort.clone(),
-                config.context_limit,
                 &mut rows,
             );
         }
@@ -60,13 +73,7 @@ pub fn configured_models(options: &RunOptions) -> Result<Vec<ConfiguredModel>> {
                 .and_then(|entry| config_model_entry(Some(entry), model))
                 .and_then(|entry| entry.reasoning_effort.clone())
                 .or_else(|| selection.reasoning_effort.clone());
-            let context_limit = loaded
-                .config
-                .provider
-                .get(provider)
-                .and_then(|entry| config_model_entry(Some(entry), model))
-                .and_then(|entry| entry.context_limit);
-            push_model(provider, model, reasoning_effort, context_limit, &mut rows);
+            push_model(provider, model, reasoning_effort, &mut rows);
         }
     }
 
@@ -275,15 +282,27 @@ fn selected_configured_model_for_provider(
         explicit_reasoning_effort,
         config_model_entry(config_entry, &model).and_then(|entry| entry.reasoning_effort.clone()),
     ]))?;
-    let context_limit = config_model_entry(config_entry, &model)
-        .and_then(|entry| entry.context_limit)
-        .or_else(|| built_in_context_limit(&provider, &model));
+    let model_config = config_model_entry(config_entry, &model);
+    let base_url = provider_base_url(&provider, config_entry, &loaded.env);
+    let metadata = resolve_model_metadata_cache_first(
+        &provider,
+        &model,
+        base_url.as_deref(),
+        model_config,
+        &loaded.env,
+    );
+    let reasoning_effort = if metadata.capabilities.reasoning == Some(false) {
+        None
+    } else {
+        reasoning_effort
+    };
     Ok(Some(ConfiguredModel {
         provider: provider.clone(),
         provider_label: provider_label(&provider, config_entry),
         model,
         reasoning_effort,
-        context_limit,
+        context_limit: metadata.context_limit(),
+        metadata,
     }))
 }
 

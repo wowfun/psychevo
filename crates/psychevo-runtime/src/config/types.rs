@@ -21,7 +21,7 @@ struct ConfigProviderOptions {
 #[derive(Debug, Clone, Default)]
 struct ConfigModelEntry {
     reasoning_effort: Option<String>,
-    context_limit: Option<u64>,
+    metadata: ModelMetadata,
 }
 
 #[derive(Debug, Clone)]
@@ -44,6 +44,7 @@ pub(crate) struct ResolvedRunProvider {
     pub(crate) api_key: String,
     pub(crate) reasoning_effort: Option<String>,
     pub(crate) context_limit: Option<u64>,
+    pub(crate) metadata: ModelMetadata,
 }
 
 #[derive(Debug, Clone)]

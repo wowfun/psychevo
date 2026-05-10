@@ -163,23 +163,26 @@ fn resolve_one_provider(
         .or_else(|| unique_config_model(config_entry))
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| Error::Config(format!("provider {provider} requires a model")))?;
+    let model_config = config_model_entry(config_entry, &model);
+    let base_url = provider_base_url(&provider, config_entry, &loaded.env)
+    .ok_or_else(|| Error::Config(format!("provider {provider} requires a base_url")))?;
+    let metadata = resolve_model_metadata_cache_first(
+        &provider,
+        &model,
+        Some(&base_url),
+        model_config,
+        &loaded.env,
+    );
     let reasoning_effort = enabled_reasoning_effort(first_string([
         options.reasoning_effort.clone(),
         explicit_reasoning_effort,
-        config_model_entry(config_entry, &model).and_then(|entry| entry.reasoning_effort.clone()),
+        model_config.and_then(|entry| entry.reasoning_effort.clone()),
     ]))?;
-    let context_limit = config_model_entry(config_entry, &model)
-        .and_then(|entry| entry.context_limit)
-        .or_else(|| built_in_context_limit(&provider, &model));
-    let base_url = first_string([
-        config_entry.and_then(|entry| entry.options.base_url.clone()),
-        built_in
-            .and_then(|provider| provider.base_url_env)
-            .and_then(|key| loaded.env.get(key).cloned())
-            .filter(|value| !value.trim().is_empty()),
-        built_in.and_then(|provider| provider.base_url.map(str::to_string)),
-    ])
-    .ok_or_else(|| Error::Config(format!("provider {provider} requires a base_url")))?;
+    let reasoning_effort = if metadata.capabilities.reasoning == Some(false) {
+        None
+    } else {
+        reasoning_effort
+    };
 
     let api_key_env = first_string([
         config_entry.and_then(|entry| entry.options.api_key_env.clone()),
@@ -221,6 +224,7 @@ fn resolve_one_provider(
         api_key_env,
         api_key,
         reasoning_effort,
-        context_limit,
+        context_limit: metadata.context_limit(),
+        metadata,
     })
 }

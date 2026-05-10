@@ -14,7 +14,7 @@ fn build_chat_request(request: &GenerationRequest, base_url: &str) -> Value {
         "stream": true,
         "stream_options": { "include_usage": true },
     });
-    if !request.tools.is_empty() {
+    if !request.tools.is_empty() && !capability_is_false(&request.metadata, "tool_call") {
         body["tools"] = Value::Array(
             request
                 .tools
@@ -37,10 +37,20 @@ fn build_chat_request(request: &GenerationRequest, base_url: &str) -> Value {
         .get("reasoning_effort")
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
+        .filter(|_| !capability_is_false(&request.metadata, "reasoning"))
     {
         body["reasoning_effort"] = Value::String(reasoning_effort.to_string());
     }
     body
+}
+
+fn capability_is_false(metadata: &Value, key: &str) -> bool {
+    metadata
+        .get("model_metadata")
+        .and_then(|metadata| metadata.get("capabilities"))
+        .and_then(|capabilities| capabilities.get(key))
+        .and_then(Value::as_bool)
+        == Some(false)
 }
 
 fn translate_messages(messages: &[Value], target: &ModelTarget, base_url: &str) -> Vec<Value> {

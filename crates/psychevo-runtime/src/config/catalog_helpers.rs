@@ -1,12 +1,3 @@
-fn built_in_context_limit(provider: &str, model: &str) -> Option<u64> {
-    let model = model.to_lowercase();
-    match normalize_provider_id(provider).as_str() {
-        "deepseek" if model.contains("deepseek") => Some(64_000),
-        "openai" if model.contains("gpt-4.1") || model.contains("gpt-4o") => Some(128_000),
-        _ => None,
-    }
-}
-
 fn built_in_provider(provider: &str) -> Option<&'static BuiltInProvider> {
     BUILT_IN_PROVIDERS
         .iter()
@@ -21,14 +12,7 @@ fn catalog_provider_for(provider: &str, loaded: &LoadedRunConfig) -> Option<Mode
         return None;
     }
     let display_label = provider_label(&provider, config_entry);
-    let base_url = first_string([
-        config_entry.and_then(|entry| entry.options.base_url.clone()),
-        built_in
-            .and_then(|provider| provider.base_url_env)
-            .and_then(|key| loaded.env.get(key).cloned())
-            .filter(|value| !value.trim().is_empty()),
-        built_in.and_then(|provider| provider.base_url.map(str::to_string)),
-    ]);
+    let base_url = provider_base_url(&provider, config_entry, &loaded.env);
     let api_key_env = first_string([
         config_entry.and_then(|entry| entry.options.api_key_env.clone()),
         built_in.and_then(|provider| {
@@ -83,17 +67,41 @@ fn parse_model_catalog_response(provider: &str, value: &Value) -> Result<Vec<Mod
     let mut seen = BTreeSet::new();
     let mut models = data
         .iter()
-        .filter_map(|entry| entry.get("id").and_then(Value::as_str))
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-        .filter(|id| seen.insert((*id).to_string()))
-        .map(|id| ModelCatalogEntry {
+        .filter_map(|entry| {
+            let id = entry.get("id").and_then(Value::as_str)?.trim();
+            (!id.is_empty()).then_some((id, entry))
+        })
+        .filter(|(id, _)| seen.insert((*id).to_string()))
+        .map(|(id, entry)| {
+            let mut metadata = built_in_model_metadata(provider, id).unwrap_or_default();
+            let endpoint_metadata =
+                metadata_from_models_dev_model(provider.to_string(), entry.clone(), "provider");
+            metadata = merge_model_metadata(metadata, endpoint_metadata);
+            ModelCatalogEntry {
             id: id.to_string(),
-            context_limit: built_in_context_limit(provider, id),
+                context_limit: metadata.context_limit(),
+                metadata,
+            }
         })
         .collect::<Vec<_>>();
     models.sort_by(|left, right| left.id.cmp(&right.id));
     Ok(models)
+}
+
+fn provider_base_url(
+    provider: &str,
+    config_entry: Option<&ConfigProviderEntry>,
+    env_map: &BTreeMap<String, String>,
+) -> Option<String> {
+    let built_in = built_in_provider(provider);
+    first_string([
+        config_entry.and_then(|entry| entry.options.base_url.clone()),
+        built_in
+            .and_then(|provider| provider.base_url_env)
+            .and_then(|key| env_map.get(key).cloned())
+            .filter(|value| !value.trim().is_empty()),
+        built_in.and_then(|provider| provider.base_url.map(str::to_string)),
+    ])
 }
 
 fn truncate_error(value: &str) -> String {

@@ -1,5 +1,5 @@
 #[test]
-fn sqlite_schema_v4_migrates_v3_state_databases() {
+fn sqlite_schema_v5_migrates_v3_state_databases() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("v3.db");
     let workdir = temp.path().join("work").to_string_lossy().to_string();
@@ -70,7 +70,7 @@ fn sqlite_schema_v4_migrates_v3_state_databases() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 4);
+    assert_eq!(user_version, 5);
     let archived_at: Option<i64> = conn
         .query_row(
             "SELECT archived_at_ms FROM sessions WHERE id = 'session-v3'",
@@ -79,6 +79,11 @@ fn sqlite_schema_v4_migrates_v3_state_databases() {
         )
         .expect("archived");
     assert_eq!(archived_at, None);
+    assert!(
+        sqlite_columns(&conn, "messages")
+            .iter()
+            .any(|name| name == "estimated_cost_nanodollars")
+    );
     assert_eq!(
         store
             .latest_run_session_for_workdir(&temp.path().join("work"))
@@ -88,7 +93,7 @@ fn sqlite_schema_v4_migrates_v3_state_databases() {
 }
 
 #[test]
-fn sqlite_schema_v4_rejects_old_state_databases() {
+fn sqlite_schema_v5_rejects_old_state_databases() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("old.db");
     {
@@ -180,7 +185,7 @@ fn sqlite_session_archive_restore_delete_filters_active_lists() {
 }
 
 #[test]
-fn sqlite_schema_v4_stores_reasoning_only_in_message_json_and_metrics_separately() {
+fn sqlite_schema_v5_stores_reasoning_only_in_message_json_and_metrics_separately() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
@@ -271,3 +276,107 @@ fn sqlite_schema_v4_stores_reasoning_only_in_message_json_and_metrics_separately
     assert!(tui_message["content"][0].get("provider_evidence").is_none());
 }
 
+#[test]
+fn sqlite_stats_aggregate_accounting_columns() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let store = SqliteStore::open(&db).expect("store");
+    let session_id = store
+        .create_session_with_metadata(&workdir, "run", "mimo-v2.5-pro", "xiaomi", None)
+        .expect("session");
+    store
+        .append_message_with_metrics_and_accounting(
+            &session_id,
+            &Message::Assistant {
+                content: vec![AssistantBlock::Text {
+                    text: "done".to_string(),
+                }],
+                timestamp_ms: 1,
+                finish_reason: Some("stop".to_string()),
+                outcome: Outcome::Normal,
+                model: Some("mimo-v2.5-pro".to_string()),
+                provider: Some("xiaomi".to_string()),
+            },
+            Some(json!({
+                "input_tokens": 120,
+                "output_tokens": 30,
+                "total_tokens": 150
+            })),
+            None,
+            Some(MessageAccounting {
+                context_input_tokens: Some(120),
+                billable_input_tokens: Some(100),
+                billable_output_tokens: Some(25),
+                reasoning_tokens: Some(5),
+                cache_read_tokens: Some(10),
+                cache_write_tokens: Some(10),
+                reported_total_tokens: Some(150),
+                estimated_cost_nanodollars: Some(42),
+                pricing_source: Some("test".to_string()),
+                pricing_tier: Some("standard".to_string()),
+            }),
+        )
+        .expect("append");
+
+    let report = usage_stats(StatsOptions {
+        db_path: db,
+        workdir,
+        all: false,
+        days: None,
+        limit: 5,
+    })
+    .expect("stats");
+    assert_eq!(report["totals"]["estimated_cost_nanodollars"], 42);
+    assert_eq!(report["totals"]["cache_write_tokens"], 10);
+    assert_eq!(report["provider_models"][0]["model"], "mimo-v2.5-pro");
+}
+
+#[test]
+fn accounting_uses_cache_reasoning_and_over_200k_pricing() {
+    let metadata = ModelMetadata {
+        cost: Some(ModelCost {
+            input: Some(1.0),
+            output: Some(2.0),
+            cache_read: Some(0.1),
+            cache_write: Some(0.2),
+            context_over_200k: Some(ModelCostTier {
+                input: Some(3.0),
+                output: Some(4.0),
+                cache_read: Some(0.3),
+                cache_write: Some(0.4),
+            }),
+            source: Some("test-pricing".to_string()),
+        }),
+        ..Default::default()
+    };
+    let accounting = crate::accounting::account_usage(
+        Some(&json!({
+            "input_tokens": 250_020,
+            "output_tokens": 30,
+            "total_tokens": 250_050,
+            "reasoning_tokens": 5,
+            "cached_tokens": 10,
+            "cache_write_tokens": 10
+        })),
+        &metadata,
+    )
+    .expect("accounting");
+    assert_eq!(accounting.billable_input_tokens, Some(250_000));
+    assert_eq!(accounting.billable_output_tokens, Some(25));
+    assert_eq!(accounting.pricing_tier.as_deref(), Some("context_over_200k"));
+    assert_eq!(accounting.pricing_source.as_deref(), Some("test-pricing"));
+    assert_eq!(
+        accounting.estimated_cost_nanodollars,
+        Some(250_000 * 3_000 + 25 * 4_000 + 5 * 4_000 + 10 * 300 + 10 * 400)
+    );
+}
+
+fn sqlite_columns(conn: &Connection, table: &str) -> Vec<String> {
+    conn.prepare(&format!("PRAGMA table_info({table})"))
+        .expect("schema stmt")
+        .query_map([], |row| row.get::<_, String>(1))
+        .expect("schema rows")
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .expect("columns")
+}

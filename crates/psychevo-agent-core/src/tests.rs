@@ -115,6 +115,72 @@ async fn usage_and_metadata_do_not_emit_empty_message_updates() {
 }
 
 #[tokio::test]
+async fn tool_call_pending_is_emitted_before_message_end() {
+    let provider = Arc::new(StaticProvider {
+        events: vec![
+            StreamEvent::ToolCallStart {
+                content_index: 0,
+                call_index: 0,
+                id: "call_write".to_string(),
+                name: "write".to_string(),
+            },
+            StreamEvent::ToolCallDelta {
+                content_index: 0,
+                call_index: 0,
+                id: Some("call_write".to_string()),
+                name: Some("write".to_string()),
+                arguments_delta: "{\"path\":\"report.md\"".to_string(),
+            },
+            StreamEvent::Done {
+                outcome: Outcome::Normal,
+                finish_reason: Some("tool_calls".to_string()),
+            },
+        ],
+    });
+    let sink = Arc::new(CaptureSink::default());
+    let (_, control) = ControlHandle::new();
+    stream_assistant(
+        provider,
+        &request(),
+        &[],
+        sink.clone(),
+        control.abort_signal(),
+    )
+    .await
+    .expect("assistant");
+
+    let events = sink.events.lock().expect("events");
+    let pending_index = events
+        .iter()
+        .position(|event| {
+            matches!(
+                event,
+                AgentEvent::ToolCallPending {
+                    tool_call_id,
+                    tool_name,
+                    arguments_json,
+                    ..
+                } if tool_call_id == "call_write"
+                    && tool_name == "write"
+                    && arguments_json.is_empty()
+            )
+        })
+        .expect("pending tool call");
+    let message_end_index = events
+        .iter()
+        .position(|event| matches!(event, AgentEvent::MessageEnd { .. }))
+        .expect("message end");
+    assert!(pending_index < message_end_index);
+    assert!(events.iter().any(|event| {
+        matches!(
+            event,
+            AgentEvent::ToolCallPending { arguments_json, .. }
+                if arguments_json == "{\"path\":\"report.md\""
+        )
+    }));
+}
+
+#[tokio::test]
 async fn complete_inline_think_blocks_are_folded_reasoning() {
     let provider = Arc::new(FakeProvider::new(vec![vec![
         RawStreamEvent::Text("visible <think>secret</think> done".to_string()),

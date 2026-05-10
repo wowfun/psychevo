@@ -220,6 +220,110 @@ fn selected_configured_model_reports_effective_reasoning_without_credentials() {
 }
 
 #[test]
+fn models_dev_cache_enriches_configured_model_by_base_url() {
+    let temp = tempdir().expect("temp");
+    let options = base_options(&temp);
+    let config_dir = home_dir(&temp);
+    fs::create_dir_all(&config_dir).expect("config dir");
+    fs::write(
+        config_dir.join("models_dev_cache.json"),
+        r#"
+        {
+          "xiaomi-token-plan-cn": {
+            "api": "https://token-plan-cn.xiaomimimo.com/v1",
+            "models": {
+              "mimo-v2.5-pro": {
+                "id": "mimo-v2.5-pro",
+                "reasoning": true,
+                "tool_call": true,
+                "cost": { "input": 0, "output": 0 },
+                "limit": { "context": 1048576, "output": 65536 },
+                "modalities": { "input": ["text"], "output": ["text"] }
+              }
+            }
+          }
+        }
+        "#,
+    )
+    .expect("cache");
+    fs::write(
+        config_dir.join("config.jsonc"),
+        r#"
+        {
+          "provider": {
+            "xiaomi-token-plan": {
+              "label": "Xiaomi Token Plan",
+              "options": {
+                "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+                "api_key_env": "XIAOMI_KEY"
+              },
+              "models": { "mimo-v2.5-pro": {} }
+            }
+          }
+        }
+        "#,
+    )
+    .expect("config");
+
+    let models = configured_models(&options).expect("models");
+    let model = models
+        .iter()
+        .find(|model| model.provider == "xiaomi-token-plan")
+        .expect("token plan model");
+    assert_eq!(model.context_limit, Some(1_048_576));
+    assert_eq!(model.metadata.limits.output, Some(65_536));
+    assert_eq!(model.metadata.capabilities.tool_call, Some(true));
+    assert_eq!(model.metadata.cost.as_ref().and_then(|cost| cost.input), Some(0.0));
+}
+
+#[test]
+fn explicit_metadata_config_override_wins_and_disables_reasoning() {
+    let temp = tempdir().expect("temp");
+    let options = base_options(&temp);
+    let config_dir = home_dir(&temp);
+    fs::create_dir_all(&config_dir).expect("config dir");
+    fs::write(
+        config_dir.join("config.jsonc"),
+        r#"
+        {
+          "model": "deepseek/deepseek-chat",
+          "provider": {
+            "deepseek": {
+              "options": {
+                "base_url": "http://deepseek.example/v1",
+                "api_key_env": "DEEPSEEK_API_KEY"
+              },
+              "models": {
+                "deepseek-chat": {
+                  "reasoning_effort": "high",
+                  "reasoning": false,
+                  "tool_call": false,
+                  "limit": { "context": 1234, "output": 99 },
+                  "cost": { "input": 1.5, "output": 2.5 }
+                }
+              }
+            }
+          }
+        }
+        "#,
+    )
+    .expect("config");
+    fs::write(config_dir.join(".env"), "DEEPSEEK_API_KEY=key\n").expect("env");
+
+    let workdir = canonical_workdir(&options.workdir).expect("workdir");
+    let loaded = load_run_config(&options, &workdir).expect("config");
+    let resolved = resolve_run_provider(&options, &loaded).expect("provider");
+    assert_eq!(resolved.context_limit, Some(1234));
+    assert_eq!(resolved.reasoning_effort, None);
+    assert_eq!(resolved.metadata.limits.output, Some(99));
+    assert_eq!(resolved.metadata.capabilities.tool_call, Some(false));
+    assert_eq!(
+        resolved.metadata.cost.as_ref().and_then(|cost| cost.output),
+        Some(2.5)
+    );
+}
+
+#[test]
 fn raw_api_keys_are_rejected() {
     let temp = tempdir().expect("temp");
     let options = base_options(&temp);

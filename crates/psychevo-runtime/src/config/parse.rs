@@ -112,7 +112,94 @@ fn parse_config_model_entry(
             object,
             "reasoning_effort",
         )?)?,
-        context_limit: optional_u64_field(object, "context_limit")?,
+        metadata: parse_config_model_metadata(object)?,
+    })
+}
+
+fn parse_config_model_metadata(
+    object: &serde_json::Map<String, Value>,
+) -> Result<ModelMetadata> {
+    let mut metadata = ModelMetadata::default();
+    metadata.limits.context = optional_u64_field(object, "context_limit")?;
+    if let Some(limit) = object.get("limit") {
+        metadata.limits = parse_model_limits(limit)?;
+        if metadata.limits.context.is_none() {
+            metadata.limits.context = optional_u64_field(object, "context_limit")?;
+        }
+    }
+    if let Some(cost) = object.get("cost") {
+        metadata.cost = Some(parse_model_cost(cost)?);
+    }
+    metadata.capabilities.reasoning = optional_bool_field(object, "reasoning")?;
+    metadata.capabilities.tool_call = optional_bool_field(object, "tool_call")?;
+    metadata.capabilities.temperature = optional_bool_field(object, "temperature")?;
+    metadata.capabilities.attachment = optional_bool_field(object, "attachment")?;
+    metadata.capabilities.structured_output = optional_bool_field(object, "structured_output")?;
+    metadata.capabilities.interleaved = object.get("interleaved").cloned();
+    if let Some(modalities) = object.get("modalities") {
+        let modalities = modalities
+            .as_object()
+            .ok_or_else(|| Error::Config("modalities must be an object".to_string()))?;
+        metadata.capabilities.input_modalities =
+            string_array_field(modalities, "input", "modalities.input")?;
+        metadata.capabilities.output_modalities =
+            string_array_field(modalities, "output", "modalities.output")?;
+    }
+    if metadata.limits.context.is_some()
+        || metadata.limits.input.is_some()
+        || metadata.limits.output.is_some()
+        || metadata.cost.is_some()
+        || metadata.capabilities.reasoning.is_some()
+        || metadata.capabilities.tool_call.is_some()
+        || metadata.capabilities.temperature.is_some()
+        || metadata.capabilities.attachment.is_some()
+        || metadata.capabilities.structured_output.is_some()
+        || metadata.capabilities.interleaved.is_some()
+        || !metadata.capabilities.input_modalities.is_empty()
+        || !metadata.capabilities.output_modalities.is_empty()
+    {
+        metadata.source = Some("config".to_string());
+    }
+    Ok(metadata)
+}
+
+fn parse_model_limits(value: &Value) -> Result<ModelLimits> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| Error::Config("limit must be an object".to_string()))?;
+    Ok(ModelLimits {
+        context: optional_u64_field(object, "context")?,
+        input: optional_u64_field(object, "input")?,
+        output: optional_u64_field(object, "output")?,
+    })
+}
+
+fn parse_model_cost(value: &Value) -> Result<ModelCost> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| Error::Config("cost must be an object".to_string()))?;
+    Ok(ModelCost {
+        input: optional_f64_field(object, "input")?,
+        output: optional_f64_field(object, "output")?,
+        cache_read: optional_f64_field(object, "cache_read")?,
+        cache_write: optional_f64_field(object, "cache_write")?,
+        context_over_200k: object
+            .get("context_over_200k")
+            .map(parse_model_cost_tier)
+            .transpose()?,
+        source: Some("config".to_string()),
+    })
+}
+
+fn parse_model_cost_tier(value: &Value) -> Result<ModelCostTier> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| Error::Config("cost.context_over_200k must be an object".to_string()))?;
+    Ok(ModelCostTier {
+        input: optional_f64_field(object, "input")?,
+        output: optional_f64_field(object, "output")?,
+        cache_read: optional_f64_field(object, "cache_read")?,
+        cache_write: optional_f64_field(object, "cache_write")?,
     })
 }
 
@@ -142,6 +229,53 @@ fn optional_u64_field(object: &serde_json::Map<String, Value>, key: &str) -> Res
                 .ok_or_else(|| Error::Config(format!("{key} must be a positive integer")))
         })
         .transpose()
+}
+
+fn optional_f64_field(object: &serde_json::Map<String, Value>, key: &str) -> Result<Option<f64>> {
+    object
+        .get(key)
+        .map(|value| {
+            value
+                .as_f64()
+                .filter(|value| value.is_finite() && *value >= 0.0)
+                .ok_or_else(|| Error::Config(format!("{key} must be a non-negative number")))
+        })
+        .transpose()
+}
+
+fn optional_bool_field(object: &serde_json::Map<String, Value>, key: &str) -> Result<Option<bool>> {
+    object
+        .get(key)
+        .map(|value| {
+            value
+                .as_bool()
+                .ok_or_else(|| Error::Config(format!("{key} must be a boolean")))
+        })
+        .transpose()
+}
+
+fn string_array_field(
+    object: &serde_json::Map<String, Value>,
+    key: &str,
+    path: &str,
+) -> Result<Vec<String>> {
+    let Some(value) = object.get(key) else {
+        return Ok(Vec::new());
+    };
+    let values = value
+        .as_array()
+        .ok_or_else(|| Error::Config(format!("{path} must be an array")))?;
+    values
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .ok_or_else(|| Error::Config(format!("{path} entries must be strings")))
+        })
+        .collect()
 }
 
 fn validate_reasoning_effort(value: Option<String>) -> Result<Option<String>> {

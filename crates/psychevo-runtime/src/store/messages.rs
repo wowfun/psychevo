@@ -77,22 +77,28 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("sqlite lock poisoned");
         let mut stmt = conn.prepare(
             r#"
-            SELECT message_json, usage_json, metadata_json
+            SELECT message_json, usage_json, metadata_json,
+                   context_input_tokens, billable_input_tokens, billable_output_tokens,
+                   reasoning_tokens, cache_read_tokens, cache_write_tokens,
+                   reported_total_tokens, estimated_cost_nanodollars,
+                   pricing_source, pricing_tier
             FROM messages
             WHERE session_id = ?1 AND session_seq < ?2
             ORDER BY session_seq ASC
             "#,
         )?;
         let rows = stmt.query_map(params![session_id, boundary], |row| {
+            let accounting = accounting_json_from_row(row, 3)?;
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<String>>(1)?,
                 row.get::<_, Option<String>>(2)?,
+                accounting,
             ))
         })?;
         let mut messages = Vec::new();
         for row in rows {
-            let (message_json, usage_json, metadata_json) = row?;
+            let (message_json, usage_json, metadata_json, accounting) = row?;
             let message = serde_json::from_str::<Message>(&message_json)?;
             let usage = parse_optional_json(usage_json)?;
             let metadata = parse_optional_json(metadata_json)?;
@@ -100,6 +106,7 @@ impl SqliteStore {
                 message: sanitize_message_for_tui_history(&message),
                 usage,
                 metadata,
+                accounting,
             });
         }
         Ok(messages)
@@ -132,6 +139,17 @@ impl SqliteStore {
         usage: Option<Value>,
         metadata: Option<Value>,
     ) -> Result<()> {
+        self.append_message_with_metrics_and_accounting(session_id, message, usage, metadata, None)
+    }
+
+    pub fn append_message_with_metrics_and_accounting(
+        &self,
+        session_id: &str,
+        message: &Message,
+        usage: Option<Value>,
+        metadata: Option<Value>,
+        accounting: Option<MessageAccounting>,
+    ) -> Result<()> {
         let fields = message_fields(message)?;
         let message_json = serde_json::to_string(message)?;
         let usage_json = optional_json_string(&usage)?;
@@ -144,8 +162,15 @@ impl SqliteStore {
                 INSERT INTO messages (
                     session_id, session_seq, role, timestamp_ms, message_json,
                     content_text, tool_call_id, tool_name, tool_calls_json,
-                    finish_reason, outcome, model, provider, usage_json, metadata_json
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+                    finish_reason, outcome, model, provider, usage_json, metadata_json,
+                    context_input_tokens, billable_input_tokens, billable_output_tokens,
+                    reasoning_tokens, cache_read_tokens, cache_write_tokens,
+                    reported_total_tokens, estimated_cost_nanodollars,
+                    pricing_source, pricing_tier
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+                    ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25
+                )
                 "#,
                 params![
                     session_id,
@@ -162,7 +187,44 @@ impl SqliteStore {
                     fields.model,
                     fields.provider,
                     usage_json,
-                    metadata_json
+                    metadata_json,
+                    accounting
+                        .as_ref()
+                        .and_then(|value| value.context_input_tokens)
+                        .map(|value| value as i64),
+                    accounting
+                        .as_ref()
+                        .and_then(|value| value.billable_input_tokens)
+                        .map(|value| value as i64),
+                    accounting
+                        .as_ref()
+                        .and_then(|value| value.billable_output_tokens)
+                        .map(|value| value as i64),
+                    accounting
+                        .as_ref()
+                        .and_then(|value| value.reasoning_tokens)
+                        .map(|value| value as i64),
+                    accounting
+                        .as_ref()
+                        .and_then(|value| value.cache_read_tokens)
+                        .map(|value| value as i64),
+                    accounting
+                        .as_ref()
+                        .and_then(|value| value.cache_write_tokens)
+                        .map(|value| value as i64),
+                    accounting
+                        .as_ref()
+                        .and_then(|value| value.reported_total_tokens)
+                        .map(|value| value as i64),
+                    accounting
+                        .as_ref()
+                        .and_then(|value| value.estimated_cost_nanodollars),
+                    accounting
+                        .as_ref()
+                        .and_then(|value| value.pricing_source.clone()),
+                    accounting
+                        .as_ref()
+                        .and_then(|value| value.pricing_tier.clone())
                 ],
             )?;
             conn.execute(
@@ -179,4 +241,21 @@ impl SqliteStore {
         })
     }
 
+}
+
+fn accounting_json_from_row(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<Option<Value>> {
+    let accounting = MessageAccounting {
+        context_input_tokens: row.get::<_, Option<i64>>(offset)?.map(|value| value as u64),
+        billable_input_tokens: row.get::<_, Option<i64>>(offset + 1)?.map(|value| value as u64),
+        billable_output_tokens: row.get::<_, Option<i64>>(offset + 2)?.map(|value| value as u64),
+        reasoning_tokens: row.get::<_, Option<i64>>(offset + 3)?.map(|value| value as u64),
+        cache_read_tokens: row.get::<_, Option<i64>>(offset + 4)?.map(|value| value as u64),
+        cache_write_tokens: row.get::<_, Option<i64>>(offset + 5)?.map(|value| value as u64),
+        reported_total_tokens: row.get::<_, Option<i64>>(offset + 6)?.map(|value| value as u64),
+        estimated_cost_nanodollars: row.get(offset + 7)?,
+        pricing_source: row.get(offset + 8)?,
+        pricing_tier: row.get(offset + 9)?,
+    };
+    let value = accounting.public_json();
+    Ok((value.as_object().is_some_and(|object| !object.is_empty())).then_some(value))
 }

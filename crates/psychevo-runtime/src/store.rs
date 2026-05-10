@@ -13,9 +13,9 @@ use uuid::Uuid;
 use crate::error::{Error, Result};
 use crate::messages::{sanitize_message_for_output, sanitize_message_for_tui_history};
 use crate::run::normalize_session_title;
-use crate::types::{SanitizedMessageSummary, SessionSummary, TuiMessageSummary};
+use crate::types::{MessageAccounting, SanitizedMessageSummary, SessionSummary, TuiMessageSummary};
 
-const SQLITE_SCHEMA_VERSION: i64 = 4;
+const SQLITE_SCHEMA_VERSION: i64 = 5;
 const SESSION_REVERT_METADATA_KEY: &str = "revert";
 const MESSAGE_UNDO_METADATA_KEY: &str = "undo";
 const MESSAGE_PRE_SNAPSHOT_KEY: &str = "pre_snapshot";

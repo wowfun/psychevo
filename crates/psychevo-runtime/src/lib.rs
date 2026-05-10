@@ -1,3 +1,4 @@
+mod accounting;
 mod config;
 mod context;
 mod error;
@@ -9,6 +10,7 @@ mod session_lookup;
 mod skills;
 mod smoke;
 mod snapshot;
+mod stats;
 mod store;
 mod tools;
 mod types;
@@ -37,13 +39,14 @@ pub use skills::{
     target_skills_dir, view_skill_value,
 };
 pub use smoke::run_smoke;
+pub use stats::usage_stats;
 pub use store::SqliteStore;
 pub use tools::tool_names_for_mode;
 pub use types::{
     ConfiguredModel, CustomProviderInput, CustomProviderResult, ModelCatalogEntry,
     ModelCatalogProvider, RunControl, RunControlHandle, RunMode, RunOptions, RunResult,
     RunStreamEvent, RunStreamSink, SanitizedMessageSummary, SessionRedoResult, SessionSummary,
-    SessionUndoOptions, SessionUndoResult, SmokeControl, SmokeOptions, SmokeResult,
+    SessionUndoOptions, SessionUndoResult, SmokeControl, SmokeOptions, SmokeResult, StatsOptions,
     TuiMessageSummary, UserShellOptions, UserShellResult, run_control,
 };
 pub use undo::{redo_session, undo_session};

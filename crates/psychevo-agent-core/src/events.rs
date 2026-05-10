@@ -32,6 +32,13 @@ pub enum AgentEvent {
     ReasoningEnd {
         text: String,
     },
+    ToolCallPending {
+        tool_call_id: String,
+        tool_name: String,
+        arguments_json: String,
+        content_index: usize,
+        call_index: usize,
+    },
     ToolExecutionStart {
         tool_call_id: String,
         tool_name: String,
@@ -55,4 +62,3 @@ pub enum AgentEvent {
 pub trait EventSink: Send + Sync {
     fn emit(&self, event: AgentEvent) -> BoxFuture<'static, Result<()>>;
 }
-

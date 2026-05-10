@@ -6,11 +6,12 @@ use futures::future::BoxFuture;
 use psychevo_agent_core::{AgentEvent, ControlHandle, EventSink, Message, Result as CoreResult};
 use serde_json::{Value, json};
 
+use crate::accounting::account_usage;
 use crate::messages::{
     add_assistant_metadata, add_elapsed_ms_metadata, sanitize_message_for_output,
 };
 use crate::store::SqliteStore;
-use crate::types::{RunStreamEvent, RunStreamSink, SmokeControl};
+use crate::types::{MessageAccounting, ModelMetadata, RunStreamEvent, RunStreamSink, SmokeControl};
 
 pub(crate) struct PersistenceSink {
     pub(crate) store: SqliteStore,
@@ -25,6 +26,7 @@ pub(crate) struct PersistenceSink {
     pub(crate) stream_events: Option<RunStreamSink>,
     pub(crate) include_reasoning: bool,
     pub(crate) reasoning_effort: Option<String>,
+    pub(crate) model_metadata: ModelMetadata,
 }
 
 impl EventSink for PersistenceSink {
@@ -39,6 +41,7 @@ impl EventSink for PersistenceSink {
         let stream_events = self.stream_events.clone();
         let include_reasoning = self.include_reasoning;
         let reasoning_effort = self.reasoning_effort.clone();
+        let model_metadata = self.model_metadata.clone();
         let started = self.started;
         let tool_elapsed_ms = Arc::clone(&self.tool_elapsed_ms);
         Box::pin(async move {
@@ -60,13 +63,19 @@ impl EventSink for PersistenceSink {
                 &tool_elapsed_ms,
                 reasoning_effort.as_deref(),
             );
+            let accounting = message_accounting_for_event(&event, &model_metadata);
             if let Some(events) = events
-                && let Some(value) = project_agent_event(&event, include_reasoning)
+                && let Some(value) = project_agent_event_with_accounting(
+                    &event,
+                    include_reasoning,
+                    accounting.as_ref(),
+                )
             {
                 events.lock().expect("event lock poisoned").push(value);
             }
             if let Some(stream_events) = stream_events
-                && let Some(value) = project_run_stream_event(&event)
+                && let Some(value) =
+                    project_run_stream_event_with_accounting(&event, accounting.as_ref())
             {
                 stream_events(value);
             }
@@ -114,7 +123,13 @@ impl EventSink for PersistenceSink {
                             })?;
                     } else {
                         store
-                            .append_message_with_metrics(&session_id, &message, usage, metadata)
+                            .append_message_with_metrics_and_accounting(
+                                &session_id,
+                                &message,
+                                usage,
+                                metadata,
+                                accounting,
+                            )
                             .map_err(|err| {
                                 psychevo_agent_core::Error::EventSink(err.to_string())
                             })?;
@@ -127,6 +142,20 @@ impl EventSink for PersistenceSink {
             }
             Ok(())
         })
+    }
+}
+
+fn message_accounting_for_event(
+    event: &AgentEvent,
+    model_metadata: &ModelMetadata,
+) -> Option<MessageAccounting> {
+    match event {
+        AgentEvent::MessageEnd {
+            message: Message::Assistant { .. },
+            usage,
+            ..
+        } => account_usage(usage.as_ref(), model_metadata),
+        _ => None,
     }
 }
 
@@ -169,6 +198,14 @@ fn annotate_sink_event(
 }
 
 pub(crate) fn project_agent_event(event: &AgentEvent, include_reasoning: bool) -> Option<Value> {
+    project_agent_event_with_accounting(event, include_reasoning, None)
+}
+
+fn project_agent_event_with_accounting(
+    event: &AgentEvent,
+    include_reasoning: bool,
+    accounting: Option<&MessageAccounting>,
+) -> Option<Value> {
     let projected = match event {
         AgentEvent::ReasoningDelta { text } => {
             return include_reasoning.then(|| json!({ "type": "reasoning_delta", "text": text }));
@@ -176,6 +213,7 @@ pub(crate) fn project_agent_event(event: &AgentEvent, include_reasoning: bool) -
         AgentEvent::ReasoningEnd { text } => {
             return include_reasoning.then(|| json!({ "type": "reasoning_end", "text": text }));
         }
+        AgentEvent::ToolCallPending { .. } => return None,
         AgentEvent::AgentEnd { outcome, messages } => AgentEvent::AgentEnd {
             outcome: *outcome,
             messages: messages.iter().map(sanitize_message_for_output).collect(),
@@ -186,22 +224,51 @@ pub(crate) fn project_agent_event(event: &AgentEvent, include_reasoning: bool) -
         AgentEvent::MessageUpdate { message } => AgentEvent::MessageUpdate {
             message: sanitize_message_for_output(message),
         },
-        AgentEvent::MessageEnd { message, .. } => AgentEvent::MessageEnd {
-            message: sanitize_message_for_output(message),
-            usage: None,
-            metadata: None,
-        },
+        AgentEvent::MessageEnd { message, .. } => {
+            let mut value = json!({
+                "type": "message_end",
+                "message": sanitize_message_for_output(message),
+            });
+            if let Some(accounting) = accounting
+                && let Some(object) = value.as_object_mut()
+            {
+                object.insert("accounting".to_string(), accounting.public_json());
+            }
+            return Some(value);
+        }
         other => other.clone(),
     };
     serde_json::to_value(projected).ok()
 }
 
+#[cfg(test)]
 pub(crate) fn project_run_stream_event(event: &AgentEvent) -> Option<RunStreamEvent> {
+    project_run_stream_event_with_accounting(event, None)
+}
+
+fn project_run_stream_event_with_accounting(
+    event: &AgentEvent,
+    accounting: Option<&MessageAccounting>,
+) -> Option<RunStreamEvent> {
     match event {
         AgentEvent::ReasoningDelta { text } => {
             Some(RunStreamEvent::ReasoningDelta { text: text.clone() })
         }
         AgentEvent::ReasoningEnd { .. } => Some(RunStreamEvent::ReasoningEnd),
+        AgentEvent::ToolCallPending {
+            tool_call_id,
+            tool_name,
+            arguments_json,
+            content_index,
+            call_index,
+        } => Some(RunStreamEvent::Event(json!({
+            "type": "tool_call_pending",
+            "tool_call_id": tool_call_id,
+            "tool_name": tool_name,
+            "arguments_json": arguments_json,
+            "content_index": content_index,
+            "call_index": call_index,
+        }))),
         AgentEvent::MessageEnd {
             message,
             usage,
@@ -220,6 +287,11 @@ pub(crate) fn project_run_stream_event(event: &AgentEvent) -> Option<RunStreamEv
                 && let Some(object) = value.as_object_mut()
             {
                 object.insert("metadata".to_string(), metadata.clone());
+            }
+            if let Some(accounting) = accounting
+                && let Some(object) = value.as_object_mut()
+            {
+                object.insert("accounting".to_string(), accounting.public_json());
             }
             Some(RunStreamEvent::Event(value))
         }

@@ -28,11 +28,26 @@ pub fn normalize_usage(usage: &Value) -> Option<Value> {
         usage,
         &[
             &["cached_tokens"],
+            &["cache_read_tokens"],
             &["prompt_tokens_details", "cached_tokens"],
             &["input_tokens_details", "cached_tokens"],
+            &["input_tokens_details", "cache_read_tokens"],
         ],
     ) {
         out.insert("cached_tokens".to_string(), cached_tokens);
+    }
+    if let Some(cache_write_tokens) = first_nested_number(
+        usage,
+        &[
+            &["cache_write_tokens"],
+            &["cache_creation_input_tokens"],
+            &["prompt_tokens_details", "cache_write_tokens"],
+            &["prompt_tokens_details", "cache_creation_input_tokens"],
+            &["input_tokens_details", "cache_write_tokens"],
+            &["input_tokens_details", "cache_creation_input_tokens"],
+        ],
+    ) {
+        out.insert("cache_write_tokens".to_string(), cache_write_tokens);
     }
     (!out.is_empty()).then_some(Value::Object(out))
 }

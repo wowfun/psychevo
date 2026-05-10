@@ -210,6 +210,7 @@ fn resolved_title_provider() -> ResolvedRunProvider {
         api_key: "test-key".to_string(),
         reasoning_effort: None,
         context_limit: None,
+        metadata: Default::default(),
     }
 }
 

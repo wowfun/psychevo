@@ -90,17 +90,14 @@ async fn model_catalog_fetch_parses_models_and_sends_auth() {
             .expect("fetch");
 
     assert_eq!(
-        models,
-        vec![
-            ModelCatalogEntry {
-                id: "alpha".to_string(),
-                context_limit: None,
-            },
-            ModelCatalogEntry {
-                id: "zeta".to_string(),
-                context_limit: None,
-            },
-        ]
+        models.iter().map(|model| model.id.as_str()).collect::<Vec<_>>(),
+        vec!["alpha", "zeta"]
+    );
+    assert!(models.iter().all(|model| model.context_limit.is_none()));
+    assert!(
+        models
+            .iter()
+            .all(|model| model.metadata.source.as_deref() == Some("provider"))
     );
     let request = server.request();
     assert!(request.starts_with("GET /v1/models HTTP/1.1"));
@@ -158,4 +155,3 @@ async fn model_catalog_fetch_times_out() {
 
     assert_eq!(err.to_string(), "timeout");
 }
-

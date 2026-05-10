@@ -9,7 +9,10 @@ use psychevo_ai::{GenerationProvider, OpenAiChatProvider, Outcome};
 use serde_json::json;
 use tokio::time;
 
-use crate::config::{ResolvedRunProvider, load_run_config, resolve_run_provider};
+use crate::config::{
+    ResolvedRunProvider, load_run_config, refresh_resolved_run_provider_metadata,
+    resolve_run_provider,
+};
 use crate::context::prune_context;
 use crate::error::{Error, Result};
 use crate::events::PersistenceSink;
@@ -73,7 +76,8 @@ async fn run_live_internal(
     }
 
     let loaded = load_run_config(&options, &workdir)?;
-    let resolved = resolve_run_provider(&options, &loaded)?;
+    let mut resolved = resolve_run_provider(&options, &loaded)?;
+    refresh_resolved_run_provider_metadata(&mut resolved, &loaded).await;
     let skills_home = resolve_skills_home(&loaded.env, &workdir)?;
     let skill_options = SkillDiscoveryOptions {
         home: skills_home.clone(),
@@ -118,6 +122,7 @@ async fn run_live_internal(
                         "api_key_env": resolved.api_key_env.clone(),
                         "reasoning_effort": resolved.reasoning_effort.clone(),
                         "context_limit": resolved.context_limit,
+                        "model_metadata": resolved.metadata.public_json(),
                         "mode": options.mode.as_str(),
                     })),
                 )?,
@@ -137,6 +142,7 @@ async fn run_live_internal(
                     "api_key_env": resolved.api_key_env.clone(),
                     "reasoning_effort": resolved.reasoning_effort.clone(),
                     "context_limit": resolved.context_limit,
+                    "model_metadata": resolved.metadata.public_json(),
                     "mode": options.mode.as_str(),
                 })),
             )?,
@@ -164,6 +170,7 @@ async fn run_live_internal(
         "api_key_env": resolved.api_key_env.clone(),
         "reasoning_effort": resolved.reasoning_effort.clone(),
         "context_limit": resolved.context_limit,
+        "model_metadata": resolved.metadata.public_json(),
         "mode": options.mode.as_str(),
         "selected_skills": selected_skills.clone(),
     });
@@ -198,12 +205,19 @@ async fn run_live_internal(
         stream_events,
         include_reasoning: options.include_reasoning,
         reasoning_effort: resolved.reasoning_effort.clone(),
+        model_metadata: resolved.metadata.clone(),
     });
-    let generation_metadata = resolved
-        .reasoning_effort
-        .as_ref()
-        .map(|effort| json!({ "reasoning_effort": effort }))
-        .unwrap_or_else(|| json!({}));
+    let mut generation_metadata = json!({
+        "model_metadata": resolved.metadata.public_json(),
+    });
+    if let Some(effort) = &resolved.reasoning_effort
+        && let Some(object) = generation_metadata.as_object_mut()
+    {
+        object.insert(
+            "reasoning_effort".to_string(),
+            serde_json::Value::String(effort.clone()),
+        );
+    }
     let mut system_instructions = vec![mode_instruction(options.mode).to_string()];
     let skills_prompt = format_skills_for_prompt(&skill_catalog.skills);
     if !skills_prompt.trim().is_empty() {

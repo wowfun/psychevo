@@ -18,7 +18,7 @@ use crate::messages::assistant_text;
 use crate::paths::canonical_workdir;
 use crate::store::SqliteStore;
 use crate::tools::coding_core_tools;
-use crate::types::{SmokeControl, SmokeOptions, SmokeResult};
+use crate::types::{ModelMetadata, SmokeControl, SmokeOptions, SmokeResult};
 
 const SMOKE_DIR: &str = ".psychevo-smoke";
 const SMOKE_SUBJECT: &str = ".psychevo-smoke/subject.txt";
@@ -71,6 +71,7 @@ pub async fn run_smoke(options: SmokeOptions) -> Result<SmokeResult> {
         stream_events: None,
         include_reasoning: false,
         reasoning_effort: None,
+        model_metadata: ModelMetadata::default(),
     });
     let request = AgentLoopRequest {
         model_provider: "fake".to_string(),

@@ -31,6 +31,7 @@ async fn persistence_sink_streams_elapsed_metadata_for_assistant_message_end() {
         stream_events: Some(stream),
         include_reasoning: false,
         reasoning_effort: None,
+        model_metadata: Default::default(),
     };
 
     sink.emit(AgentEvent::MessageEnd {
@@ -106,6 +107,7 @@ async fn persistence_sink_persists_assistant_reasoning_effort_metadata() {
         stream_events: Some(stream),
         include_reasoning: false,
         reasoning_effort: Some("high".to_string()),
+        model_metadata: Default::default(),
     };
 
     sink.emit(AgentEvent::MessageEnd {
@@ -171,6 +173,7 @@ async fn persistence_sink_persists_tool_elapsed_metadata() {
         stream_events: Some(stream),
         include_reasoning: false,
         reasoning_effort: None,
+        model_metadata: Default::default(),
     };
 
     sink.emit(AgentEvent::ToolExecutionEnd {
@@ -277,6 +280,35 @@ fn json_projection_hides_reasoning_unless_included() {
             text: "x".to_string()
         }
     );
+    assert!(
+        project_agent_event(
+            &AgentEvent::ToolCallPending {
+                tool_call_id: "call_write".to_string(),
+                tool_name: "write".to_string(),
+                arguments_json: String::new(),
+                content_index: 0,
+                call_index: 0,
+            },
+            false,
+        )
+        .is_none()
+    );
+    let pending = project_run_stream_event(&AgentEvent::ToolCallPending {
+        tool_call_id: "call_write".to_string(),
+        tool_name: "write".to_string(),
+        arguments_json: "{\"path\":\"report.md\"".to_string(),
+        content_index: 0,
+        call_index: 0,
+    })
+    .expect("pending");
+    match pending {
+        RunStreamEvent::Event(value) => {
+            assert_eq!(value["type"], "tool_call_pending");
+            assert_eq!(value["tool_name"], "write");
+            assert_eq!(value["arguments_json"], "{\"path\":\"report.md\"");
+        }
+        other => panic!("unexpected pending event: {other:?}"),
+    }
     let metrics = project_run_stream_event(&event).expect("metrics");
     match metrics {
         RunStreamEvent::Event(value) => {

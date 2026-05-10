@@ -13,7 +13,11 @@ impl SqliteStore {
         let user_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
         let has_schema =
             sqlite_table_exists(&conn, "sessions")? || sqlite_table_exists(&conn, "messages")?;
-        if user_version != 0 && user_version != SQLITE_SCHEMA_VERSION && user_version != 3 {
+        if user_version != 0
+            && user_version != SQLITE_SCHEMA_VERSION
+            && user_version != 3
+            && user_version != 4
+        {
             return Err(Error::Config(format!(
                 "state database schema version {user_version} is not supported; run `pevo init --reset-state` or set PSYCHEVO_DB to a new state database"
             )));
@@ -60,6 +64,16 @@ impl SqliteStore {
                 provider TEXT,
                 usage_json TEXT,
                 metadata_json TEXT,
+                context_input_tokens INTEGER,
+                billable_input_tokens INTEGER,
+                billable_output_tokens INTEGER,
+                reasoning_tokens INTEGER,
+                cache_read_tokens INTEGER,
+                cache_write_tokens INTEGER,
+                reported_total_tokens INTEGER,
+                estimated_cost_nanodollars INTEGER,
+                pricing_source TEXT,
+                pricing_tier TEXT,
                 UNIQUE(session_id, session_seq)
             );
 
@@ -69,6 +83,24 @@ impl SqliteStore {
         )?;
         if user_version == 3 && !sqlite_column_exists(&conn, "sessions", "archived_at_ms")? {
             conn.execute_batch("ALTER TABLE sessions ADD COLUMN archived_at_ms INTEGER;")?;
+        }
+        if (user_version == 3 || user_version == 4)
+            && !sqlite_column_exists(&conn, "messages", "context_input_tokens")?
+        {
+            conn.execute_batch(
+                r#"
+                ALTER TABLE messages ADD COLUMN context_input_tokens INTEGER;
+                ALTER TABLE messages ADD COLUMN billable_input_tokens INTEGER;
+                ALTER TABLE messages ADD COLUMN billable_output_tokens INTEGER;
+                ALTER TABLE messages ADD COLUMN reasoning_tokens INTEGER;
+                ALTER TABLE messages ADD COLUMN cache_read_tokens INTEGER;
+                ALTER TABLE messages ADD COLUMN cache_write_tokens INTEGER;
+                ALTER TABLE messages ADD COLUMN reported_total_tokens INTEGER;
+                ALTER TABLE messages ADD COLUMN estimated_cost_nanodollars INTEGER;
+                ALTER TABLE messages ADD COLUMN pricing_source TEXT;
+                ALTER TABLE messages ADD COLUMN pricing_tier TEXT;
+                "#,
+            )?;
         }
         conn.pragma_update(None, "user_version", SQLITE_SCHEMA_VERSION)?;
         Ok(Self {

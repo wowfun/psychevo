@@ -18,6 +18,7 @@ use crate::paths::canonical_workdir;
 use crate::run::{SESSION_TITLE_MAX_CHARS, ensure_new_tui_session_title};
 use crate::snapshot::SnapshotStore;
 use crate::tools::{WorkdirTool, list_tool_impl, search_tool_impl};
+use crate::types::{MessageAccounting, ModelCost, ModelCostTier, ModelMetadata};
 use pretty_assertions::assert_eq;
 use psychevo_agent_core::{AgentEvent, AssistantBlock, EventSink, Message};
 use psychevo_ai::{FakeProvider, Outcome, RawStreamEvent};

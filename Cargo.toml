@@ -20,8 +20,11 @@ crossterm = "0.29"
 futures = "0.3"
 ignore = "0.4.23"
 jsonc-parser = { version = "0.32.3", features = ["cst", "serde"] }
+libc = "0.2.182"
 insta = "1"
 pretty_assertions = "1.4"
+pulldown-cmark = "0.10"
+regex-lite = "0.1.8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 ratatui = { version = "0.30.0", features = ["unstable-rendered-line-info"] }
 ratatui-textarea = "0.9.1"
@@ -30,6 +33,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
 similar = "2.6"
+supports-color = "3.0.2"
 tempfile = "3.15"
 thiserror = "2.0"
 tokio = { version = "1.42", features = ["rt-multi-thread", "macros", "sync", "process", "time", "io-util"] }
