@@ -27,17 +27,32 @@ Those capabilities need the execution substrate first.
 
 ## Source Install
 
-Psychevo is not documented here as a crates.io or binary release. Install from a
-checked-out repository:
+Psychevo is not documented here as a crates.io or binary release. Install from
+the latest source with the helper script:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/wowfun/psychevo/main/scripts/install.sh | sh
+```
+
+From a checked-out repository, install the current checkout:
 
 ```bash
 git clone https://github.com/wowfun/psychevo.git
 cd psychevo
-cargo install --path crates/psychevo-cli
+sh scripts/install.sh
 pevo --help
 ```
 
-The workspace uses Rust 1.94 and edition 2024.
+The install script builds with `cargo install --locked --path
+crates/psychevo-cli --force`, verifies `pevo --help`, and runs the idempotent
+`pevo init` by default. Use `sh scripts/install.sh --no-init` to skip
+initialization.
+
+The workspace uses Rust 1.94 and edition 2024. If Rust/Cargo is missing, the
+script asks before trying to install Rust. Windows Git Bash/MSYS/MINGW shells
+can run the script, but source builds still require a working Rust toolchain and
+native C/C++ build tools such as Visual Studio Build Tools or a compatible
+MinGW setup.
 
 For development without installing:
 
