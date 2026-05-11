@@ -7,6 +7,7 @@ fn default_title(kind: TranscriptKind) -> &'static str {
         TranscriptKind::Ran => "Ran",
         TranscriptKind::Changed => "Changed",
         TranscriptKind::Meta => "",
+        TranscriptKind::Command => "",
         TranscriptKind::Status => "Status",
         TranscriptKind::Error => "Error",
     }
@@ -42,6 +43,7 @@ fn visible_message_count_from_value(message: &Value) -> usize {
     }
 }
 
+#[cfg(test)]
 fn visible_transcript_message_count(rows: &[TranscriptRow]) -> usize {
     rows.iter()
         .filter(|row| matches!(row.kind, TranscriptKind::Prompt | TranscriptKind::Answer))

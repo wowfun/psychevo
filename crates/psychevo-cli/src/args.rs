@@ -13,11 +13,19 @@ pub(crate) struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Commands {
+    #[command(about = "Initialize Psychevo home")]
     Init(InitArgs),
+    #[command(about = "Manage local skills")]
     Skills(SkillsArgs),
+    #[command(about = "Run deterministic fake-provider smoke behavior")]
     Smoke(SmokeArgs),
+    #[command(about = "Run one coding-agent turn")]
     Run(RunArgs),
+    #[command(about = "Show local usage and estimated cost")]
     Stats(StatsArgs),
+    #[command(about = "Inspect context-window usage for a session")]
+    Context(ContextArgs),
+    #[command(about = "Open the interactive terminal UI")]
     Tui(TuiArgs),
 }
 
@@ -79,6 +87,16 @@ pub(crate) struct StatsArgs {
     pub(crate) days: Option<u64>,
     #[arg(long, default_value_t = 10)]
     pub(crate) limit: usize,
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct ContextArgs {
+    #[arg(long = "session")]
+    pub(crate) session: Option<String>,
+    #[arg(long = "dir")]
+    pub(crate) dir: Option<PathBuf>,
     #[arg(long)]
     pub(crate) json: bool,
 }

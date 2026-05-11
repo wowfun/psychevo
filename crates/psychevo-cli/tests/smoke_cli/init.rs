@@ -1,4 +1,25 @@
 #[test]
+fn cli_help_lists_aligned_command_descriptions() {
+    let temp = tempdir().expect("temp");
+    let output = pevo_cmd(temp.path())
+        .arg("--help")
+        .output()
+        .expect("pevo help");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+    assert!(stdout.contains("init"));
+    assert!(stdout.contains("Initialize Psychevo home"));
+    assert!(stdout.contains("Run one coding-agent turn"));
+    assert!(stdout.contains("Open the interactive terminal UI"));
+    assert!(stdout.contains("Inspect context-window usage for a session"));
+}
+
+#[test]
 fn cli_init_creates_home_tree_and_is_idempotent() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");

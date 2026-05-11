@@ -7,7 +7,8 @@ Define Psychevo's command-line interface foundation semantics.
 
 This topic specializes [020 Interfaces](../020-interfaces/spec.md) for
 process-oriented command-line entrypoints. It does not define concrete `pevo`
-commands or flags.
+commands or flags; shared command discovery, naming, argument, alias, and
+output-contract conventions belong to [026 Commands](../026-commands/spec.md).
 
 ## Scope
 
@@ -70,6 +71,8 @@ resolution semantics remain owned by [120 Provider Registry](../120-provider-reg
 
 - [020 Interfaces](../020-interfaces/spec.md) defines caller-facing invocation,
   observation, completion, and control semantics.
+- [026 Commands](../026-commands/spec.md) defines shared command contract
+  conventions across product command surfaces.
 - [200 pevo CLI](../200-pevo-cli/spec.md) defines the concrete `pevo` product
   command line.
 - [120 Provider Registry](../120-provider-registry/spec.md) defines

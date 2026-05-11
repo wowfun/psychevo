@@ -72,3 +72,82 @@ fn tail_compact_path(path: &str, max_chars: usize) -> String {
     format!("...{tail}")
 }
 
+fn home_dir_for_display(app: &TuiApp) -> Option<PathBuf> {
+    app.env_map
+        .get("HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from)
+        })
+}
+
+fn format_directory_display_with_home(
+    directory: &Path,
+    home: Option<&Path>,
+    max_width: usize,
+) -> String {
+    center_truncate_path(&directory_display_value(directory, home), max_width)
+}
+
+fn directory_display_value(directory: &Path, home: Option<&Path>) -> String {
+    if let Some(home) = home
+        && !home.as_os_str().is_empty()
+        && let Ok(relative) = directory.strip_prefix(home)
+    {
+        if relative.as_os_str().is_empty() {
+            return "~".to_string();
+        }
+        return format!("~/{}", relative.display());
+    }
+    directory.display().to_string()
+}
+
+fn center_truncate_path(path: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    if UnicodeWidthStr::width(path) <= max_width {
+        return path.to_string();
+    }
+    if max_width == 1 {
+        return "…".to_string();
+    }
+
+    let available = max_width.saturating_sub(1);
+    let prefix_width = available / 2;
+    let suffix_width = available.saturating_sub(prefix_width);
+    let prefix = take_width_prefix(path, prefix_width);
+    let suffix = take_width_suffix(path, suffix_width);
+    format!("{prefix}…{suffix}")
+}
+
+fn take_width_prefix(text: &str, max_width: usize) -> String {
+    let mut out = String::new();
+    let mut width = 0usize;
+    for ch in text.chars() {
+        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if width.saturating_add(ch_width) > max_width {
+            break;
+        }
+        out.push(ch);
+        width = width.saturating_add(ch_width);
+    }
+    out
+}
+
+fn take_width_suffix(text: &str, max_width: usize) -> String {
+    let mut chars = Vec::new();
+    let mut width = 0usize;
+    for ch in text.chars().rev() {
+        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if width.saturating_add(ch_width) > max_width {
+            break;
+        }
+        chars.push(ch);
+        width = width.saturating_add(ch_width);
+    }
+    chars.into_iter().rev().collect()
+}

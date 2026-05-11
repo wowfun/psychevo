@@ -35,6 +35,8 @@ scripts/validate.sh broad
 - empty prompt rejection before session creation.
 - `--dir` controls the tool workdir.
 - `--format json` emits NDJSON beginning with `run_start`.
+- `--format json` may emit one `context_snapshot` after `agent_end` and never
+  before it.
 - `--format json` hides reasoning by default.
 - `--format json --include-reasoning` emits separate `reasoning_delta` and
   `reasoning_end` events while keeping `message_*` events sanitized.
@@ -67,6 +69,20 @@ scripts/validate.sh broad
 - Reasoning is preserved locally as folded assistant content, without entering
   default visible output or cross-provider replay.
 
+## Command Metadata Coverage
+
+- `pevo --help` exposes subcommand descriptions aligned with the shared command
+  contract vocabulary while argv parsing remains clap-owned.
+
+## Install Script Coverage
+
+- `scripts/install.sh` passes POSIX shell syntax validation with `sh -n`.
+- Dry-run coverage verifies local `--source` install planning, clone-mode
+  defaults and overrides, default post-install initialization, `--no-init`, and
+  Git Bash/MSYS/MINGW binary naming.
+- Dry-run output is deterministic and does not require `git`, `cargo`, network
+  access, provider credentials, or global Psychevo state.
+
 ## Stats Coverage
 
 - `pevo stats` defaults to the current workdir and reads only local SQLite
@@ -76,6 +92,19 @@ scripts/validate.sh broad
 - Empty stats output is bounded and does not require live providers.
 - Stats distinguish unknown pricing from known free pricing and include model,
   tool, and top-session breakdowns.
+
+## Context Coverage
+
+- `pevo context` requires `--session <id|latest>`.
+- `latest` resolves active `run`/`tui` sessions by canonical workdir and
+  honors `--dir`.
+- Exact session ids can inspect archived sessions.
+- Text output includes only implemented categories and no unavailable rows.
+- Text output uses the compact context layout without a bar, hides provider
+  source labels, and lists skill index entry estimates in descending token
+  order.
+- `--json` emits a structured `context_snapshot`; JSON errors use the common
+  `{"type":"error","message":"..."}` shape.
 
 ## Live Validation
 
@@ -91,3 +120,4 @@ must not copy credential files automatically.
 
 - [200 pevo CLI](spec.md) defines the product CLI surface.
 - [200 pevo run](pevo-run.md) defines run output modes.
+- [200 pevo install](install.md) defines the install helper script.

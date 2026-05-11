@@ -19,8 +19,10 @@ Required coverage:
 - TUI state read/write, version tolerance, per-workdir model and variant
   precedence, per-workdir mode persistence, global thinking persistence, global
   sidebar visibility persistence, and recent-model bounding
-- slash command parsing, model/variant/mode validation, `/rename`,
-  `/sessions`/`/resume`/`/continue`, and ambiguous session prefix handling
+- registry-backed slash command parsing and menu rows, fullscreen `/help`
+  bottom help pane and scripted `/help` text output, aliases,
+  model/variant/mode validation, `/rename`, `/sessions`/`/resume`/`/continue`,
+  and ambiguous session prefix handling
 - composer behavior for submit, newline, current-session persisted user-prompt
   history seeding, history recall with draft restoration, and history search
 - user shell escape behavior for fullscreen and scripted TUI: `!` detection
@@ -73,7 +75,8 @@ Required coverage:
   printing repeated preparation lines for every argument delta
 - narrow and wide layout rendering, sidebar hidden by default for fresh state,
   persisted optional sidebar visible state, thinking visible/hidden,
-  expanded/collapsed tool output, minimal bottom state line, and composer
+  expanded/collapsed tool output, minimal bottom state line with no-key
+  `workdir · branch · context_usage` local context items, and composer
   surface without a left accent rail; user prompt blocks and the composer must
   share the same adaptive full-width surface with a leading `›` prompt marker,
   falling back to `RGB(38,38,38)` when no terminal background is known; the
@@ -163,30 +166,53 @@ Required coverage:
   message events while still delivering dedicated TUI thinking events
 - runtime metrics projection that can expose usage and allowlisted metadata to
   TUI without putting them in sanitized transcript messages
-- context-percent display in the sidebar only when a model context limit is
-  known, sidebar token usage using `usage.input_tokens` as the last known
-  context-window count rather than `total_tokens`, and staying visible while a
-  model is answering events that do not include usage
+- bottom context-usage display when a latest context snapshot or latest
+  provider input usage and known model context limit are available; the
+  displayed value must share the `/context` `tokens: ` formatter, omit labels,
+  hide when the limit is unknown, refresh after `/context` computes a session
+  estimate, and stay stable while unrelated model events arrive
+- bottom path display must cover home-relative `~`, non-home absolute paths,
+  long center truncation, and CJK/wide-character display width
+- `/context` fullscreen display coverage must prove the command row echoes
+  `> /context`, the output begins with `└  Context Usage`, the context bar has
+  no `bar:` prefix, the bar width is a multiple of five bounded to 50..100
+  cells, the legend is on the next line with marker colors matching the bar and
+  label text staying body-colored, human text uses `input_messages` for the
+  model-facing message category, and scope/model are rendered after the
+  categories
+- fullscreen slash-command feedback coverage must prove transcript-writing
+  commands such as `/status`, `/context`, `/skills`, `/variant <value>`,
+  `/rename <title>`, `/undo`, `/redo`, upcoming command feedback, and
+  submitted slash errors render as display-only command rows that do not affect
+  visible message counts; bottom-pane commands such as `/help`, `/model`,
+  `/sessions`, and `/stats` must not append command rows
 - sidebar redraw clearing must be covered by a regression test that renders
-  over a polluted previous terminal frame and proves labels such as `tokens`
-  and blank sidebar rows do not retain stale glyphs
-- sidebar estimated session cost display from persisted accounting, including
-  unknown-priced messages and known free messages
+  over a polluted previous terminal frame and proves removed Context labels
+  such as `workdir`, `branch`, `messages`, `tool calls`, `tokens`, `context`,
+  and `cost` do not retain stale glyphs
+- sidebar content must prove title/session and `Modified Files` remain while
+  the former Context section is absent
+- `/usage` and `/stats` alias behavior must keep estimated session cost
+  coverage from persisted accounting, including unknown-priced messages and
+  known free messages
 - `/show-thinking` toggle behavior: default visible, explicit on/off, global
   persistence, visible reasoning rendered only in TUI output and never in
   sanitized transcript views, fullscreen visibility changes immediately refresh
   existing Thinking blocks, and hidden thinking does not render a
-  `Thinking: hidden` marker or append a status row; removed `/thinking`
-  returns a bounded error that points to `/show-thinking`
+  `Thinking: hidden` marker or append a status row; obsolete `/thinking` is
+  unsupported
 - `/mode <plan|default>` behavior: default `default`, persisted
-  `plan`/`default` per workdir, bare `/mode` rejected, removed
-  `/mode set <value>` rejected with guidance, `Shift+Tab` cycling in the
-  fullscreen event loop, no transcript status row for mode cycling, and
-  next-turn application while a turn is running
+  `plan`/`default` per workdir, bare `/mode` rejected, obsolete
+  `/mode set <value>` unsupported, `Shift+Tab` cycling in the fullscreen event
+  loop, no transcript status row for mode cycling, and next-turn application
+  while a turn is running
 - `/status` behavior: fullscreen and scripted TUI project the same local state
   fields as one multi-line status block, excluding thinking visibility
-- `/stats` behavior: fullscreen and scripted TUI project deterministic local
-  usage/cost summaries without provider calls
+- `/usage` behavior: fullscreen and scripted TUI project deterministic local
+  usage/cost summaries without provider calls; `/stats` aliases the same view
+- `/context` behavior: parser rejects arguments, fullscreen appends one
+  compact context block, scripted output omits the bar, and output includes
+  only implemented context categories
 - slash command completion from `Tab`, keeping argument placeholders in slash
   menu descriptions only and out of completed composer text
 - `/skills` and `/skill:<name>` behavior: deterministic listing, skill prompt
@@ -215,17 +241,32 @@ Required coverage:
 - non-terminal scripted input with prompt lines and slash commands
 - fullscreen `/model` bottom-pane selection sourced from local configured
   models plus explicit current-process fetched catalogs, including no subtitle
-  row, top-level `All providers` status row, selectable provider fetch rows,
-  dynamic `Enter fetch`/`Enter select` footer text, initial focus on current
-  model or first local model before fetch rows, search that keeps `All
-  providers` visible and preserves provider rows for model matches, current
-  query preservation after fetch, local-model precedence over duplicate fetched
-  rows, stale fetched-row removal except for the current model, model-to-variant
-  transition, `Config default` clearing the variant override or using provider
-  default for fetched-only rows, explicit variant persistence, and `Esc`
-  close/back/cancel behavior
+  row, default `Models` tab, `Info` tab switching that preserves query,
+  selection, and scroll, top-level `All providers` status row, selectable
+  provider fetch rows, dynamic `Enter fetch`/`Enter select` footer text,
+  initial focus on current model or first local model before fetch rows, search
+  that keeps `All providers` visible and preserves provider rows for model
+  matches, current query preservation after fetch, local-model precedence over
+  duplicate fetched rows, stale fetched-row removal except for the current
+  model, model-to-variant transition from the `Models` tab, `Info` tab
+  Enter-no-op and scroll behavior, `Config default` clearing the variant
+  override or using provider default for fetched-only rows, explicit variant
+  persistence, and `Esc` close/back/cancel behavior
 - model rows render known limits, capability tags, and compact pricing metadata
   from config, cached `models.dev`, or explicit catalog fetches
+- selected model rows render an `Info` tab with identity/source, limits,
+  capabilities, modalities, pricing, pricing source, row source, current/default
+  markers, and default variant when known; unknown values are omitted, known
+  false capabilities render explicit negative labels, and action/provider rows
+  render a bounded empty state
+- TUI startup performs one non-blocking, best-effort `models.dev` metadata
+  warmup only when the cache file is absent; warmup success updates future model
+  panes, writes only the current intended model, recent TUI models, and locally
+  configured model entries, and failure is silent unless debug output is enabled
+- fullscreen `/model` `Ctrl+R` explicitly refreshes the `models.dev` metadata
+  cache, reports bounded panel notices, preserves tab/query/selection/scroll
+  after completion, writes only user-relevant model entries, and never calls
+  provider catalogs
 - fullscreen `/model` fetch behavior: explicit Enter-triggered fetch only,
   concurrent all-provider fetch, single-provider retry, skipped missing
   credentials with env-var hints, loopback/no-auth catalog requests without
@@ -233,8 +274,8 @@ Required coverage:
   provider success counts, `no models` empty results, partial failure status,
   failure preserving old fetched cache, cancellation preserving completed
   provider results, and in-progress duplicate Enter bounded feedback
-- `/variant <value>` persistence, bare `/variant` rejection, removed
-  `/variant set <value>` rejection with guidance, and fullscreen bottom state
+- `/variant <value>` persistence, bare `/variant` rejection, obsolete
+  `/variant set <value>` unsupported, and fullscreen bottom state
   rendering of the current effective variant instead of falling back to
   `default`
 - scripted `/model` output from configured provider/model entries without live
@@ -252,8 +293,21 @@ Required coverage:
 - shared bottom selection pane Up/Down navigation wraps between first and last
   visible rows for sessions, model selection, and variant selection, while
   Home/End remain direct first/last jumps
-- `/help`, `/models`, `/model set`, `/session list`, `/session show`, and
-  `/session switch` rejected as removed commands and absent from the slash menu
+- `/help` fullscreen/scripted output, including `General`, `Commands`, and
+  `Custom commands` groups, compact alias display, no alias menu rows, no
+  slash-menu group headers, no CLI command appendix, fullscreen bottom help
+  panel tabs/navigation, no transcript row, and scripted output without
+  command-row wrapping
+- fullscreen slash-command feedback rows: commands that produce local status
+  or error feedback render as display-only command transcript rows with
+  `> <command>` and `└` result lines, do not count as visible messages, keep
+  the `Context Usage` result title for `/context`, keep context bar and
+  `input_messages` legend marker coloring, default open, collapse and expand
+  through normal transcript row interactions, and do not wrap bottom-panel-only
+  commands such as `/help`, `/model`, `/sessions`, `/stats`, or `/usage`
+- obsolete inputs such as `/models`, `/model set`, `/variant set`, `/mode set`,
+  `/thinking`, `/session list`, `/session show`, and `/session switch` are
+  unsupported and absent from the slash menu
 - `/undo` and `/redo` parsing, menu rows, fullscreen behavior, scripted output,
   Git snapshot restore, repeated undo/redo boundary movement, composer prompt
   restoration after undo, cleanup before the next prompt, and bounded no-op or

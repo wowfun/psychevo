@@ -7,6 +7,7 @@ use psychevo_agent_core::{AgentEvent, ControlHandle, EventSink, Message, Result 
 use serde_json::{Value, json};
 
 use crate::accounting::account_usage;
+use crate::context_usage::ContextRecorder;
 use crate::messages::{
     add_assistant_metadata, add_elapsed_ms_metadata, sanitize_message_for_output,
 };
@@ -27,6 +28,7 @@ pub(crate) struct PersistenceSink {
     pub(crate) include_reasoning: bool,
     pub(crate) reasoning_effort: Option<String>,
     pub(crate) model_metadata: ModelMetadata,
+    pub(crate) context_recorder: Option<ContextRecorder>,
 }
 
 impl EventSink for PersistenceSink {
@@ -42,6 +44,7 @@ impl EventSink for PersistenceSink {
         let include_reasoning = self.include_reasoning;
         let reasoning_effort = self.reasoning_effort.clone();
         let model_metadata = self.model_metadata.clone();
+        let context_recorder = self.context_recorder.clone();
         let started = self.started;
         let tool_elapsed_ms = Arc::clone(&self.tool_elapsed_ms);
         Box::pin(async move {
@@ -63,6 +66,15 @@ impl EventSink for PersistenceSink {
                 &tool_elapsed_ms,
                 reasoning_effort.as_deref(),
             );
+            if let AgentEvent::MessageEnd {
+                message: Message::Assistant { .. },
+                usage,
+                ..
+            } = &event
+                && let Some(recorder) = &context_recorder
+            {
+                recorder.record_provider_usage(usage.as_ref());
+            }
             let accounting = message_accounting_for_event(&event, &model_metadata);
             if let Some(events) = events
                 && let Some(value) = project_agent_event_with_accounting(

@@ -113,7 +113,10 @@ provider/model, database, workdir, and resolved core model metadata when known.
 Subsequent lines project runtime
 observation events: `agent_start`, `turn_start`, `message_start`,
 `message_update`, `message_end`, `tool_execution_start`, `tool_execution_end`,
-`turn_end`, and `agent_end`.
+`turn_end`, and `agent_end`. After `agent_end`, runtime may append at most one
+best-effort `context_snapshot` event for the latest provider generation
+request. If context counting has not completed by run completion, the event is
+omitted rather than delaying output.
 
 Reasoning/thinking content is folded out of JSON output by default. Supplying
 `--include-reasoning` requires `--format json` and adds separate
@@ -142,11 +145,12 @@ must not require credentials, live network access, or user configuration.
 
 ## Cost and Metadata
 
-`pevo run` enriches resolved provider/model metadata from local configuration,
-cache-first `models.dev`, explicit catalog metadata when available, and
-deterministic fallbacks. Runtime persists normalized usage metrics and local
-estimated-cost accounting for completed assistant messages when usage is
-reported. Cost is an estimate in local state, not a provider bill.
+`pevo run` resolves provider/model metadata from local configuration, the
+existing cache-first `models.dev` cache, explicit catalog metadata when
+available, and deterministic fallbacks. It never refreshes `models.dev` on the
+run hot path. Runtime persists normalized usage metrics and local estimated-cost
+accounting for completed assistant messages when usage is reported. Cost is an
+estimate in local state, not a provider bill.
 
 ## Related Topics
 

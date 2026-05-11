@@ -5,13 +5,15 @@ psychevo_self_edit: deny
 
 Define the concrete `pevo` command-line product surface.
 
-This product surface builds on [025 CLI](../025-cli/spec.md) and routes agent
-work through `psychevo-runtime`. It owns command spelling, user-facing process
-behavior, and product-level environment variables.
+This product surface builds on [025 CLI](../025-cli/spec.md) and
+[026 Commands](../026-commands/spec.md), and routes agent work through
+`psychevo-runtime`. It owns command spelling, user-facing process behavior, and
+product-level environment variables.
 
 ## Scope
 
 - `pevo` command families
+- `pevo` command descriptions projected through process help
 - global Psychevo home layout
 - `pevo init`
 - `pevo run`
@@ -65,6 +67,7 @@ Implemented first-slice commands:
 - `pevo tui`
 - `pevo skills`
 - `pevo stats`
+- `pevo context`
 
 Reserved command families:
 
@@ -93,13 +96,26 @@ and provenance semantics belong to [055 Skills](../055-skills/spec.md).
 state database. It does not contact providers, refresh catalogs, or reconcile
 provider invoices.
 
+`pevo context` owns local context-window usage inspection for one existing
+session. It does not contact providers, refresh catalogs, or persist prompt
+snapshots.
+
+`scripts/install.sh` owns source-based installation of the `pevo` binary. It
+supports installing from a local checkout or a cloned Git repository, verifies
+the installed binary, and optionally initializes the global Psychevo home.
+
 ## Related Topics
 
 - [025 CLI](../025-cli/spec.md) defines command-line foundation semantics.
+- [026 Commands](../026-commands/spec.md) defines shared command contract
+  conventions.
 - [200 pevo init](pevo-init.md) defines global home initialization.
 - [200 pevo run](pevo-run.md) defines the live coding-agent command.
 - [200 pevo stats](pevo-stats.md) defines local usage and estimated-cost
   reporting.
+- [200 pevo context](pevo-context.md) defines local context-window usage
+  inspection.
+- [200 pevo install](install.md) defines the source install helper script.
 - [210 pevo TUI](../210-pevo-tui/spec.md) defines the fullscreen interactive
   terminal command.
 - [055 Skills](../055-skills/spec.md) defines the skill package and lifecycle

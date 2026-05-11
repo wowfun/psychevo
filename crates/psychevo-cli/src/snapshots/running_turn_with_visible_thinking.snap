@@ -29,7 +29,7 @@ size=120x24
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
 
-mock/model  high  ◦ 12s · Esc
+mock/model  high  ◦ 12s · Esc  ~/work · main
 
 --- styles ---
 [dim]› [default]Inspect the CLI rendering path.
@@ -55,4 +55,4 @@ mock/model  high  ◦ 12s · Esc
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
 [default]
-[default]mock/model  [magenta]high[default]  [cyan]◦[default] [dim]12s · [cyan]Esc[default]
+[default]mock/model  [magenta]high[default]  [cyan]◦[default] [dim]12s · [cyan]Esc[default]  [dim]~/work · main[default]

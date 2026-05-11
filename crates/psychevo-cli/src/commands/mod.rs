@@ -1,3 +1,4 @@
+pub(crate) mod context;
 pub(crate) mod init;
 pub(crate) mod run;
 pub(crate) mod skills;

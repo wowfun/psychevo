@@ -11,7 +11,7 @@ use crate::paths::canonical_workdir;
 use crate::types::{
     ConfiguredModel, CustomProviderInput, CustomProviderResult, ModelCapabilities,
     ModelCatalogEntry, ModelCatalogProvider, ModelCost, ModelCostTier, ModelLimits, ModelMetadata,
-    RunOptions,
+    ModelMetadataCacheTarget, RunOptions,
 };
 
 #[derive(Debug, Clone, Default)]

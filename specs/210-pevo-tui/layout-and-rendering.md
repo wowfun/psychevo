@@ -84,11 +84,28 @@ to two visible input rows; non-empty input grows with its wrapped/logical line
 count up to six visible rows.
 
 The composer must not show the current mode in its border/title. The state line
-under the composer shows only the model name, variant value, and non-default
-mode, without `mode=`, `model=`, or `variant=` prefixes. Non-default modes are
-shown after the model and variant so model/variant positions stay stable.
-`default` is omitted. Shortcut hints, session ids, thinking state, debug state,
-and brand text are not part of the default bottom chrome.
+under the composer shows the model name, variant value, and non-default mode,
+without `mode=`, `model=`, or `variant=` prefixes. Non-default modes are shown
+after the model and variant so model/variant positions stay stable. `default`
+is omitted. Shortcut hints, session ids, thinking state, debug state, and brand
+text are not part of the default bottom chrome.
+
+The same state line appends quiet local context after the stable model/variant
+segment, in this order when available: workdir, git branch, and compact context
+usage. These items are separated by ` · ` and render without keys. Workdir uses
+Codex-style path display: a `$HOME` prefix is shown as `~`, home itself is `~`,
+non-home paths remain absolute, and long paths are center-truncated with `…`
+using display width. Branch is omitted when no branch is detected. Context
+usage is omitted until a latest `ContextSnapshot` or latest provider input
+usage exists and its context limit is known; when shown, it uses the same
+formatter as the value after `tokens: ` in `/context`, for example
+`39.2k/1.0M (3.7%)`. Running turns may refresh this value from streamed
+context snapshots, provider input usage metadata, or an explicit `/context`
+session estimate.
+
+On narrow terminals, the stable model/variant/mode/running segment takes
+priority. The optional local context segment hides branch first, then truncates
+workdir, and hides context usage only after those reductions cannot fit.
 
 While foreground work is running, the same state line appends a compact running
 projection to the right of the stable model/variant/mode segment. It shows an
@@ -107,13 +124,11 @@ state, including on wide terminals, and may be toggled explicitly. Fullscreen
 last explicit open or closed state when terminal width can fit the sidebar. It
 must not be required for the main transcript/composer workflow.
 
-The sidebar is local-only. It may show the current session title, short
-session id, workdir, git branch, message/tool counts, token/context usage, and
-changed files. It must not call live provider catalogs or probe provider APIs.
-It must not show source, mode, model, variant, or thinking visibility.
-Message count and tool-call count render as separate lines. The tool evidence
-count is labeled `tool calls`, not `tools`, so it is not confused with the
-number of tools available to the model.
+The sidebar is local-only. It shows the current session title, short session
+id, and changed files. It must not call live provider catalogs or probe
+provider APIs. It must not show source, workdir, branch, mode, model, variant,
+thinking visibility, message counts, tool-call counts, token/context usage, or
+cost.
 
 TUI user-facing `messages` counts are visible-message counts: user prompt
 blocks with text plus assistant answer blocks with visible text. They exclude
@@ -131,26 +146,14 @@ drawing current content. Shorter updates, wrapped path changes, or toggling
 sections must not leave stale terminal glyphs in blank sidebar rows or in the
 first cell of labels such as `tokens`.
 
-The sidebar sections are:
+The only sidebar section is:
 
-- Context
 - Modified Files
 
-The Context section shows the last known context-window token usage and context
-percentage when provider usage and a known model context limit are available.
-This token count comes from normalized `usage.input_tokens`/provider prompt
-tokens: it represents the most recent request's input context size, which grows
-as conversation history is included in the model window. It is not the current
-message's `total_tokens`, not output tokens, and not a session-wide sum.
-Starting a new assistant turn or receiving a streaming/completed assistant
-message without input-token usage must not clear the last known context count; a
-later message with input-token usage updates it, and explicit
-transcript/session resets may clear it.
-
-The Context section also shows the local session estimated cost when persisted
-assistant-message accounting contains known pricing. Unknown pricing is omitted
-from the dollar total and may be summarized as unknown-priced messages in stats
-views. Cost display is local estimation only and must not imply provider
+Context-window usage belongs in the bottom state line and `/context`. Token and
+cost summaries belong in `/usage` and its `/stats` alias. Unknown pricing is
+omitted from dollar totals and may be summarized as unknown-priced messages in
+usage views. Cost display is local estimation only and must not imply provider
 billing reconciliation.
 
 Modified Files prefers session-local diff evidence when available. In the first
@@ -310,8 +313,8 @@ reintroduce bare `[+]` or `[-]`.
 Usage and provider metadata are not transcript content blocks. Provider/model
 with an optional resolved variant, elapsed time, failures, debug usage parts,
 allowlisted provider metadata, and compact known cost may be projected into
-turn metadata, but total token usage, session cost, and context percentage are
-projected to the sidebar. Usage
+turn metadata, but total token usage and session cost belong in `/usage`, while
+context percentage belongs in `/context` and the bottom state line. Usage
 and provider metadata must not appear in sanitized transcript messages,
 provider replay across incompatible providers, or `pevo run --format json` by
 default.

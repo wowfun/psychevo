@@ -5,10 +5,11 @@ psychevo_self_edit: deny
 
 Define the first interactive terminal surface for `pevo`.
 
-This topic builds on [200 pevo CLI](../200-pevo-cli/spec.md) and routes live
-coding-agent turns through `psychevo-runtime`. For interactive terminals,
-`pevo tui` is a fullscreen terminal UI. For non-terminal stdin/stdout, it keeps
-the deterministic line-by-line scripted behavior.
+This topic builds on [200 pevo CLI](../200-pevo-cli/spec.md) and
+[026 Commands](../026-commands/spec.md), and routes live coding-agent turns
+through `psychevo-runtime`. For interactive terminals, `pevo tui` is a
+fullscreen terminal UI. For non-terminal stdin/stdout, it keeps the
+deterministic line-by-line scripted behavior.
 
 ## Scope
 
@@ -19,15 +20,13 @@ the deterministic line-by-line scripted behavior.
 - session selection, session archiving/deletion, session renaming, model,
   variant, mode, thinking visibility, stats, and status slash commands, with
   `/status` kept to runtime/session state rather than thinking visibility
+- context usage slash command for the latest provider request or current
+  session estimate
 - evidence-ledger rendering for prompts, folded reasoning, tool evidence, final
   answers, and turn metadata
-- sidebar Context usage showing the last known context-window input token count
-  from provider prompt usage, not assistant `total_tokens` or session-wide
-  token totals
-- sidebar visible message counts and tool-call evidence counts, with tool calls
-  labeled separately from callable tool inventory
-- sidebar estimated session cost and local stats reporting from persisted
-  accounting columns
+- bottom state line workdir, branch, and compact context-window usage derived
+  from the latest context snapshot
+- local stats reporting from persisted accounting columns
 - responsive foreground interruption and preservation of every visible
   assistant answer emitted during a multi-tool turn
 - direct user shell escape from the composer and scripted input
@@ -103,6 +102,8 @@ initialization requirement.
 ## Related Topics
 
 - [200 pevo CLI](../200-pevo-cli/spec.md) defines the product CLI surface.
+- [026 Commands](../026-commands/spec.md) defines shared command contract
+  conventions.
 - [200 pevo run](../200-pevo-cli/pevo-run.md) defines non-interactive live run.
 - [003 AI Protocol](../003-ai-protocol/spec.md) defines provider message
   translation boundaries.

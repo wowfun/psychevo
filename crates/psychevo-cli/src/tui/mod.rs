@@ -18,12 +18,15 @@ use crossterm::terminal::{
 };
 use psychevo_ai::Outcome;
 use psychevo_runtime::{
-    ConfiguredModel, CustomProviderInput, ModelCatalogEntry, ModelCatalogProvider,
-    RunControlHandle, RunMode, RunOptions, RunStreamEvent, RunStreamSink, SessionSummary,
-    SessionUndoOptions, SkillCatalog, SkillDiscoveryOptions, SqliteStore, StatsOptions,
-    TuiMessageSummary, UserShellOptions, canonicalize_workdir, configured_models,
-    create_global_custom_provider, custom_provider_api_key_env, discover_skills,
-    fetch_model_catalog, model_catalog_providers, redo_session, run_control, run_live_streaming,
+    ConfiguredModel, ContextFormatOptions, ContextOptions, ContextSnapshot, CustomProviderInput,
+    ModelCatalogEntry, ModelCatalogProvider, ModelMetadataCacheTarget, RunControlHandle, RunMode,
+    RunOptions, RunStreamEvent, RunStreamSink, SessionSummary, SessionUndoOptions, SkillCatalog,
+    SkillDiscoveryOptions, SqliteStore, StatsOptions, TuiMessageSummary, UserShellOptions,
+    canonicalize_workdir, configured_models, context_snapshot, create_global_custom_provider,
+    custom_provider_api_key_env, discover_skills, fetch_model_catalog,
+    format_context_snapshot_text_with_options, format_context_total_value,
+    format_context_total_value_parts, model_catalog_providers, normalize_context_bar_width,
+    redo_session, refresh_model_metadata_cache, run_control, run_live_streaming,
     run_live_streaming_controlled, run_user_shell_command_streaming_controlled,
     selected_configured_model, undo_session, usage_stats,
 };
@@ -51,8 +54,9 @@ use self::plain::{
     TuiRenderer, assistant_text_from_event, format_session_line, format_tool_summary,
 };
 use self::slash::{
-    SlashCommand, SlashMenuItem, VARIANTS, base_slash_menu_items, parse_slash_command,
-    slash_menu_items_from, slash_prefix_menu_items_from, validate_model_spec, validate_variant,
+    SlashCommand, SlashMenuItem, VARIANTS, base_slash_menu_items, format_slash_help,
+    parse_slash_command, slash_help_sections, slash_menu_items_from, slash_prefix_menu_items_from,
+    validate_model_spec, validate_variant,
 };
 use self::state::TuiState;
 use crate::args::TuiArgs;
@@ -124,11 +128,13 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
         renderer: TuiRenderer::new(color),
         debug: args.debug,
         had_error: false,
+        last_context_snapshot: None,
         model_catalog: ModelCatalogCache::default(),
         clipboard_result_tx,
         clipboard_result_rx,
         clipboard_copies_in_flight: 0,
     };
+    app.start_missing_model_metadata_cache_warmup();
     app.refresh_selected_model();
     app.refresh_current_session_title()?;
     app.run(args.message.join(" ")).await

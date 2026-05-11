@@ -82,9 +82,11 @@ idle behavior.
 
 The first TUI supports:
 
+- `/help`
 - `/quit`, `/exit`, `/q`
 - `/status`
-- `/stats`
+- `/usage`, `/stats`
+- `/context`
 - `/clear`, `/new`
 - `/sessions`, `/resume`, `/continue`
 - `/model`
@@ -100,26 +102,65 @@ The first TUI supports:
 - `/skill:<name> [args]`
 - future disabled entries in the slash menu: `/compact` and `/export`
 
-`/help` is not a TUI slash command. It returns the bounded unknown-command
-error used for unsupported slash commands.
+Slash command discovery is registry-backed. The slash menu shows canonical
+command labels only, stays a flat list with at most 8 rows, and does not show
+hidden aliases or group headers. Fullscreen TUI projects slash-command feedback
+that is written to the transcript as one command transcript row: the first line
+echoes the submitted command as `> <command>`, and the result begins on the
+next line with `└`. This command row is display-only and must not count as a
+user prompt, visible message, durable session message, or provider-context
+input. Slash commands that open bottom panes, including `/help`, do not append a
+command transcript row. Non-terminal scripted TUI keeps deterministic plain text
+output without command-row wrapping. Command transcript rows are foldable
+through the same transcript row keyboard and mouse interactions as Thinking and
+tool evidence rows; they default open, collapse to the echoed command line, and
+expand back to the full local result. `/help` does not accept arguments.
+
+`/help` output uses the three groups defined by [026 Commands](../026-commands/spec.md).
+`General` lists ordinary keyboard shortcuts plus common built-in commands:
+`/status`, `/context`, `/model`, `/sessions`, `/new`, `/undo`, `/redo`, and
+`/quit`. `Commands` lists all built-in slash commands in canonical registry
+order. `Custom commands` summarizes dynamic skill invocation as
+`/skill:<name> [args]` with the discovered skill count, or reports
+`No custom commands available` when skills are disabled or none are discovered.
+Help rows use `<usage> - <summary>` and may append compact alias text on the
+canonical command row. Fullscreen `/help` opens a bottom help pane with
+`Help`, `General`, `Commands`, and `Custom commands` header tabs; `Esc` closes
+the pane, and tab/arrow navigation may switch help sections. Scripted `/help`
+prints the same deterministic help text without opening a pane.
 
 `/status` shows workdir, home, db, session, model, variant, mode, and debug
 state as one multi-line status block. It does not include thinking visibility;
 `/show-thinking` remains the dedicated command for changing and reporting that
-setting. Fullscreen TUI appends one status transcript block, and non-terminal
-scripted TUI writes the same multi-line status text as one output block.
+setting. Fullscreen TUI appends one command transcript row without an extra
+`Status` title, and non-terminal scripted TUI writes the same multi-line status
+text as one output block.
 
-`/stats` shows local usage and estimated-cost statistics for the current
+`/usage` shows local usage and estimated-cost statistics for the current
 workdir from persisted SQLite accounting. Fullscreen TUI opens the shared
-bottom selection pane in a read-only stats mode; non-terminal scripted TUI
-prints the same deterministic summary. `/stats` must not call providers or
-refresh model catalogs.
+bottom selection pane in a read-only usage mode; non-terminal scripted TUI
+prints the same deterministic summary. `/stats` is an alias for `/usage`.
+Neither command may call providers or refresh model catalogs.
 
-Fullscreen `/sessions`, `/resume`, `/continue`, and `/model` use the shared
-bottom selection pane. The pane includes title text, search directly below the
-title, current/default markers, selected-row highlighting, footer hints,
-`Enter` selection, `Esc` close or back, arrow/Page/Home/End navigation, and
-scrolling. Shared bottom selection panes do not render subtitles.
+`/context` shows context-window usage as one compact block. Fullscreen TUI
+appends one command transcript row titled `Context Usage` for the latest
+provider request snapshot when available, otherwise a current-session estimate.
+Fullscreen rendering may include an adaptive colored context bar when a context
+limit is known. The bar uses the available transcript width, rounded down to a
+multiple of five cells, with a minimum of 50 cells and a maximum of 100 cells;
+its legend renders on the following line. In fullscreen rich rendering, legend
+markers `S`, `T`, `K`, `M`, and `.` use the same category colors as the bar
+cells while the label text remains normal body text. Human text renders the
+model-facing `messages` category as `input_messages`, including the legend
+label and role count rows, while structured snapshots keep the `messages`
+category key. Non-terminal scripted TUI prints the same compact text without a
+bar or command-row wrapper. `/context` does not accept arguments and must not
+call providers.
+
+Fullscreen `/sessions`, `/resume`, `/continue`, and `/model` use bottom panes
+with title text, selected-row highlighting, footer hints, `Enter` selection,
+`Esc` close or back, arrow/Page/Home/End navigation, and scrolling. Shared
+bottom selection panes do not render subtitles.
 
 `/sessions`, `/resume`, and `/continue` show date-grouped session rows sorted by
 most recently updated with right-aligned updated time and visible-message
@@ -134,14 +175,30 @@ history, and does not add a status row. In non-terminal scripted mode,
 `/sessions`, `/resume`, and `/continue` print a deterministic active-session
 list instead of opening a panel.
 
-Fullscreen `/model` shows an `Add provider` action row, a status-style
-`All providers` row, and a selectable provider status row before each
-provider's models. These action rows replace non-selectable provider group
-headers. Selecting `Add provider` opens a bottom-panel wizard for creating a
-global user-defined OpenAI Chat-compatible provider. Selecting `All providers`
-concurrently fetches every fetchable provider catalog; selecting a provider row
-fetches or retries only that provider. Fetch rows use `Enter fetch` in the
-footer. Model rows use `Enter select`.
+Fullscreen `/model` opens a tabbed bottom pane with `Models` and `Info` tabs,
+using the same tab header behavior as `/help`. It opens on `Models`. `Tab` and
+`Right` switch to `Info`; `BackTab` and `Left` switch back to `Models`. The
+current query, selected row, and scroll position are preserved when switching
+tabs. `Esc` closes the model pane from either tab and cancels unfinished model
+catalog fetches.
+
+At TUI startup, if `$PSYCHEVO_HOME/models_dev_cache.json` is absent, TUI starts
+one non-blocking, best-effort `models.dev` metadata cache warmup. Startup,
+rendering, and command handling must not wait for this request. Warmup success
+silently refreshes local model metadata for future panes. The cache file stores
+only user-relevant models: the current intended model selection, recent TUI
+models, and locally configured model entries. Warmup failure is silent by
+default and may only surface as a warning when debug output is enabled.
+
+The `Models` tab shows search directly below the tab header, an `Add provider`
+action row, a status-style `All providers` row, and a selectable provider status
+row before each provider's models. These action rows replace non-selectable
+provider group headers. Selecting `Add provider` opens a bottom-panel wizard for
+creating a global user-defined OpenAI Chat-compatible provider. Selecting `All
+providers` concurrently fetches every fetchable provider catalog; selecting a
+provider row fetches or retries only that provider. Fetch rows use `Enter
+fetch` in the footer. Model rows use `Enter select`, and `Enter` continues to
+open variant selection.
 
 The `/model` add-provider wizard writes only global Psychevo provider
 configuration and global `.env` credentials. It prompts for display label,
@@ -165,6 +222,15 @@ the active provider configuration source.
 slash command, opening `/model` does not call remote catalogs, and
 non-terminal scripted `/model` prints deterministic local model information
 only.
+
+Within fullscreen `/model`, `Ctrl+R` explicitly refreshes the `models.dev`
+metadata cache. This action is separate from provider `/models` catalog fetches:
+it does not call provider APIs, does not use API keys, and does not validate live
+providers. It writes only user-relevant model entries to the cache, using the
+same target set as startup warmup. While the refresh is pending the panel shows
+`refreshing metadata`; completion shows `metadata refreshed`; failure shows
+`metadata refresh failed: <short error>`. Refresh completion rebuilds the model
+pane while preserving tab, query, selected row, and info scroll.
 
 Model fetch rows use status words instead of command text. `All providers` and
 provider rows may show `not fetched`, `fetching`, `fetched N models`,
@@ -192,9 +258,22 @@ completed results. Selecting an existing model while a fetch is in progress is
 allowed and cancels unfinished catalog requests when the pane closes or moves to
 variant selection.
 
-Model rows show known model metadata compactly: context and output limits,
-capability tags, and input/output/cache pricing when available. Unknown
-metadata is omitted rather than shown as zero. The model picker keeps local rows authoritative. When a local configured model
+Model rows show known model metadata compactly in the `Models` tab: context and
+output limits, capability tags, and input/output/cache pricing when available.
+Metadata may come from config, existing `models.dev` cache, explicit metadata
+refresh, or explicit provider catalog fetches. Unknown metadata is omitted
+rather than shown as zero. The `Info` tab is a
+read-only detail view for the currently selected model row. Non-model action or
+provider rows show a bounded empty state instead of details. The `Info` tab
+shows known values only and expands the selected model metadata into identity
+and source, limits, capabilities, modalities, pricing, pricing source, row
+source, current/default markers, and configured default variant. Capabilities
+with known `false` values render as explicit negatives such as `no reasoning`
+or `no tools`; unknown capabilities and unknown modalities are omitted. `Info`
+supports `Up`/`Down`/`PageUp`/`PageDown`/`Home`/`End` scrolling and treats
+`Enter` as a no-op.
+
+The model picker keeps local rows authoritative. When a local configured model
 and fetched model have the same provider/model id, the local row is shown and
 the fetched source is not displayed. Pure fetched rows show only `fetched` plus
 known remote metadata. Fetched model ids are displayed unchanged and sorted by
@@ -221,8 +300,10 @@ models. It does not edit JSONC provider configuration.
 All bottom selection panes keep `Home` and `End` as direct first/last jumps, and
 their `Up` and `Down` navigation wraps between the first and last visible rows.
 
-`/models`, `/model set <provider/model>`, `/session list`, `/session show`, and
-`/session switch` are not TUI commands in this slice.
+Obsolete slash commands are not kept as compatibility redirects. Inputs such
+as `/models`, `/model set <provider/model>`, `/variant set <value>`, `/mode set
+<value>`, `/thinking`, `/session list`, `/session show`, and `/session switch`
+are unsupported command forms and must not appear in the slash menu.
 
 `/undo` reverts the most recent visible user message in the current session,
 all later messages, and associated file changes. `/redo` restores a previously

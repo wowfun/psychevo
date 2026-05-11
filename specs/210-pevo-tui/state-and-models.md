@@ -41,23 +41,22 @@ provider default for fetched-only models; selecting an explicit variant persists
 that override.
 `/variant <none|minimal|low|medium|high|xhigh|max>` continues to update only
 the per-workdir variant override. Bare `/variant` is not a display command and
-returns a bounded usage error. The removed `/variant set <value>` form returns
-bounded guidance to use `/variant <value>`. These TUI state changes affect
-later prompts in the current process and do not edit JSONC provider
-configuration.
+returns a bounded usage error. Obsolete `/variant set <value>` input is not a
+compatibility command. These TUI state changes affect later prompts in the
+current process and do not edit JSONC provider configuration.
 
 `/show-thinking` toggles global thinking visibility and persists it. It is a
 visibility-only control: it does not enable or disable provider reasoning, does
 not change `--variant`, and does not edit provider configuration. Fullscreen
 TUI must refresh the current transcript projection immediately and must not
 append a status row for thinking visibility changes. `/show-thinking on` and
-`/show-thinking off` set the value explicitly. `/thinking` is removed and must
-return a bounded error that points users to `/show-thinking`.
+`/show-thinking off` set the value explicitly. `/thinking` is obsolete and is
+not a compatibility command.
 
 `/mode <plan|default>` updates the per-workdir mode and persists it. Bare
-`/mode` is not a display command and returns a bounded usage error. The removed
-`/mode set <value>` form returns bounded guidance to use `/mode <value>`. Mode
-changes during a running turn affect the next submitted prompt.
+`/mode` is not a display command and returns a bounded usage error. Obsolete
+`/mode set <value>` input is not a compatibility command. Mode changes during a
+running turn affect the next submitted prompt.
 
 ## Runtime Modes
 

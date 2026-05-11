@@ -49,6 +49,7 @@ impl<'a> FullscreenUi<'a> {
             sidebar: SidebarSnapshot::default(),
             sidebar_tokens: None,
             sidebar_context_limit: None,
+            last_context_snapshot: app.last_context_snapshot.clone(),
             sidebar_cost_nanodollars: None,
             history: Vec::new(),
             history_kinds: Vec::new(),
@@ -85,22 +86,7 @@ impl<'a> FullscreenUi<'a> {
                 .map(short_session)
                 .unwrap_or("(none)")
                 .to_string(),
-            workdir: tail_compact_path(&app.workdir.display().to_string(), 30),
             branch: git.branch,
-            tokens: self.sidebar_tokens,
-            context_percent: self.context_percent(),
-            cost_nanodollars: self.sidebar_cost_nanodollars,
-            message_count: visible_transcript_message_count(&self.transcript),
-            tool_count: self
-                .transcript
-                .iter()
-                .filter(|row| {
-                    matches!(
-                        row.kind,
-                        TranscriptKind::Explored | TranscriptKind::Ran | TranscriptKind::Changed
-                    )
-                })
-                .count(),
             changed_files: git.changed_files,
         };
     }
@@ -126,6 +112,7 @@ impl<'a> FullscreenUi<'a> {
         self.terminal_clear_requested = true;
         self.sidebar_tokens = None;
         self.sidebar_context_limit = None;
+        self.last_context_snapshot = None;
         self.sidebar_cost_nanodollars = None;
         self.history_prompt_started_ms = None;
         self.turn_had_reasoning = false;
@@ -198,12 +185,6 @@ impl<'a> FullscreenUi<'a> {
                 self.auto_follow_transcript = true;
             }
         }
-    }
-
-    fn context_percent(&self) -> Option<f64> {
-        let tokens = self.sidebar_tokens?;
-        let limit = self.sidebar_context_limit?;
-        (limit > 0).then_some((tokens as f64 / limit as f64) * 100.0)
     }
 
     fn add_sidebar_cost(&mut self, accounting: Option<&Value>) {
@@ -744,6 +725,31 @@ impl<'a> FullscreenUi<'a> {
     fn push_status(&mut self, text: impl Into<String>) {
         self.transcript
             .push(TranscriptRow::simple(TranscriptKind::Status, text));
+    }
+
+    fn push_command_result(
+        &mut self,
+        command: impl Into<String>,
+        title: Option<&str>,
+        text: impl Into<String>,
+        failed: bool,
+    ) {
+        let mut body = String::new();
+        if let Some(title) = title
+            && !title.trim().is_empty()
+        {
+            body.push_str(title.trim());
+        }
+        let text = text.into();
+        if !text.is_empty() {
+            if !body.is_empty() {
+                body.push('\n');
+            }
+            body.push_str(&text);
+        }
+        let mut row = TranscriptRow::with_title(TranscriptKind::Command, command, body);
+        row.failed = failed;
+        self.transcript.push(row);
     }
 
     fn push_error(&mut self, text: impl Into<String>) {

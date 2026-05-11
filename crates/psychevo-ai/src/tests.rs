@@ -191,6 +191,54 @@ fn chat_request_maps_messages_and_tools() {
 }
 
 #[test]
+fn openai_chat_token_count_splits_context_categories() {
+    let request = GenerationRequest {
+        model: ModelTarget {
+            provider: "deepseek".to_string(),
+            model: "deepseek-chat".to_string(),
+        },
+        messages: vec![
+            json!({"role":"system","content":"mode"}),
+            json!({"role":"system","content":"<available_skills>\n  <skill>\n    <name>alpha</name>\n    <description>longer helper</description>\n  </skill>\n  <skill>\n    <name>beta</name>\n    <description>short</description>\n  </skill>\n</available_skills>"}),
+            json!({"role":"user","content":[{"text":"previous"}]}),
+            json!({"role":"user","content":[{"text":"selected skill body"}]}),
+            json!({"role":"assistant","content":[{"type":"text","text":"ok"}]}),
+        ],
+        tools: vec![ToolDeclaration {
+            name: "read".to_string(),
+            description: "read file".to_string(),
+            parameters: json!({"type":"object"}),
+        }],
+        metadata: json!({
+            "context_counting": {
+                "system_prompt_message_count": 1,
+                "skill_index_message_count": 1,
+                "previous_message_count": 1,
+                "selected_skill_context_message_count": 1,
+                "skill_names": ["alpha", "beta"]
+            }
+        }),
+    };
+
+    let count = count_openai_chat_request(&request, "https://api.deepseek.com/v1");
+
+    assert!(count.system_prompt_tokens > 0);
+    assert!(count.system_tools_tokens > 0);
+    assert!(count.skills_tokens > 0);
+    assert!(count.messages_tokens > 0);
+    assert!(count.selected_skill_context_tokens > 0);
+    assert_eq!(count.tool_count, 1);
+    assert_eq!(count.role_counts["user"].count, 1);
+    assert_eq!(count.role_counts["assistant"].count, 1);
+    assert_eq!(count.selected_skill_context_count, 1);
+    assert_eq!(count.skill_names, vec!["alpha", "beta"]);
+    assert_eq!(count.skill_entries.len(), 2);
+    assert_eq!(count.skill_entries[0].name, "alpha");
+    assert!(count.skill_entries[0].tokens > count.skill_entries[1].tokens);
+    assert_eq!(count.encoding, "deepseek_v3");
+}
+
+#[test]
 fn chat_request_preserves_ephemeral_system_messages() {
     let request = GenerationRequest {
         model: ModelTarget {

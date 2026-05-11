@@ -119,13 +119,14 @@ fn parse_config_model_entry(
 fn parse_config_model_metadata(
     object: &serde_json::Map<String, Value>,
 ) -> Result<ModelMetadata> {
+    if object.contains_key("context_limit") {
+        return Err(Error::Config(
+            "context_limit is no longer supported; use limit.context".to_string(),
+        ));
+    }
     let mut metadata = ModelMetadata::default();
-    metadata.limits.context = optional_u64_field(object, "context_limit")?;
     if let Some(limit) = object.get("limit") {
         metadata.limits = parse_model_limits(limit)?;
-        if metadata.limits.context.is_none() {
-            metadata.limits.context = optional_u64_field(object, "context_limit")?;
-        }
     }
     if let Some(cost) = object.get("cost") {
         metadata.cost = Some(parse_model_cost(cost)?);

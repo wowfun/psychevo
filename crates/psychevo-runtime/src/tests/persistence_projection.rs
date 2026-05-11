@@ -32,6 +32,7 @@ async fn persistence_sink_streams_elapsed_metadata_for_assistant_message_end() {
         include_reasoning: false,
         reasoning_effort: None,
         model_metadata: Default::default(),
+        context_recorder: None,
     };
 
     sink.emit(AgentEvent::MessageEnd {
@@ -108,6 +109,7 @@ async fn persistence_sink_persists_assistant_reasoning_effort_metadata() {
         include_reasoning: false,
         reasoning_effort: Some("high".to_string()),
         model_metadata: Default::default(),
+        context_recorder: None,
     };
 
     sink.emit(AgentEvent::MessageEnd {
@@ -174,6 +176,7 @@ async fn persistence_sink_persists_tool_elapsed_metadata() {
         include_reasoning: false,
         reasoning_effort: None,
         model_metadata: Default::default(),
+        context_recorder: None,
     };
 
     sink.emit(AgentEvent::ToolExecutionEnd {

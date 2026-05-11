@@ -29,7 +29,7 @@ The harness snapshots stable buffer text and style roles, then leaves real termi
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
 
-mock/model  high
+mock/model  high  ~/work · main
 
 --- styles ---
 [dim]› [default]Summarize the TUI snapshot harness.
@@ -55,4 +55,4 @@ mock/model  high
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
 [default]
-[default]mock/model  [magenta]high[default]
+[default]mock/model  [magenta]high[default]  [dim]~/work · main[default]

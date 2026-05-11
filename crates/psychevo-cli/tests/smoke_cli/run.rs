@@ -175,8 +175,95 @@ fn cli_run_json_outputs_ndjson_events() {
     assert_eq!(events.first().expect("first")["type"], "run_start");
     assert!(events.iter().any(|event| event["type"] == "agent_start"));
     assert!(events.iter().any(|event| event["type"] == "message_end"));
-    assert!(events.iter().any(|event| event["type"] == "agent_end"));
+    let agent_end = events
+        .iter()
+        .position(|event| event["type"] == "agent_end")
+        .expect("agent_end");
+    let context_snapshots = events
+        .iter()
+        .enumerate()
+        .filter_map(|(index, event)| (event["type"] == "context_snapshot").then_some(index))
+        .collect::<Vec<_>>();
+    assert!(context_snapshots.len() <= 1);
+    if let Some(context_snapshot) = context_snapshots.first() {
+        assert!(*context_snapshot > agent_end);
+    }
     assert!(!stdout.contains("json final\njson final"));
+}
+
+#[test]
+fn cli_context_reports_latest_session_json() {
+    let server = MockSseServer::start(vec![sse_metadata_usage_then_text("context final")]);
+    let temp = tempdir().expect("temp");
+    let psychevo_home = init_tui_home(temp.path());
+    let db = temp.path().join("state.db");
+    let workdir = temp.path().join("work");
+    let config = write_run_config(&temp.path().join("config"), &server.base_url);
+    let run = isolated_tui_cmd(temp.path(), &psychevo_home, &config, &db)
+        .args([
+            "run",
+            "--dir",
+            workdir.to_str().expect("workdir"),
+            "hello",
+        ])
+        .output()
+        .expect("pevo run");
+    assert!(
+        run.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+
+    let context = isolated_tui_cmd(temp.path(), &psychevo_home, &config, &db)
+        .args([
+            "context",
+            "--session",
+            "latest",
+            "--dir",
+            workdir.to_str().expect("workdir"),
+            "--json",
+        ])
+        .output()
+        .expect("pevo context");
+    assert!(
+        context.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&context.stderr)
+    );
+    let snapshot: Value = serde_json::from_slice(&context.stdout).expect("context json");
+    assert_eq!(snapshot["type"], "context_snapshot");
+    assert_eq!(snapshot["scope"], "session_estimate");
+    assert_eq!(snapshot["total"]["tokens"], 3);
+    assert!(snapshot["categories"]["messages"]["tokens"].as_u64().is_some());
+    assert!(snapshot["categories"].get("input_messages").is_none());
+    assert!(!String::from_utf8_lossy(&context.stdout).contains("unavailable"));
+
+    let text_context = isolated_tui_cmd(temp.path(), &psychevo_home, &config, &db)
+        .args([
+            "context",
+            "--session",
+            "latest",
+            "--dir",
+            workdir.to_str().expect("workdir"),
+        ])
+        .output()
+        .expect("pevo context text");
+    assert!(
+        text_context.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&text_context.stderr)
+    );
+    let text = String::from_utf8_lossy(&text_context.stdout);
+    assert!(text.starts_with("Context Usage\n"));
+    assert!(!text.contains("> /context"));
+    assert!(!text.contains('└'));
+    assert!(text.contains("\ntokens: 3 tokens\n"));
+    assert!(text.contains("\ninput_messages:"));
+    assert!(!text.contains("\nmessages:"));
+    assert!(text.contains("\nscope: session estimate\nmodel: mock/mock-model\n"));
+    assert!(!text.contains("bar:"));
+    assert!(!text.contains("provider"));
+    assert!(!text.contains("unavailable"));
 }
 
 #[test]

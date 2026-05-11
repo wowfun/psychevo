@@ -72,6 +72,7 @@ pub async fn run_smoke(options: SmokeOptions) -> Result<SmokeResult> {
         include_reasoning: false,
         reasoning_effort: None,
         model_metadata: ModelMetadata::default(),
+        context_recorder: None,
     });
     let request = AgentLoopRequest {
         model_provider: "fake".to_string(),

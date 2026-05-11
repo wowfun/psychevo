@@ -7,8 +7,14 @@ impl TuiApp {
         if ui.bottom_panel.is_none() {
             return Ok(false);
         }
+        if matches!(ui.bottom_panel, Some(BottomPanel::Help(_))) {
+            return self.handle_help_panel_key(ui, key);
+        }
         if matches!(ui.bottom_panel, Some(BottomPanel::ProviderWizard(_))) {
             return self.handle_provider_wizard_key(ui, key);
+        }
+        if matches!(ui.bottom_panel, Some(BottomPanel::Models(_))) {
+            return self.handle_model_panel_key(ui, key);
         }
         match key.code {
             KeyCode::Esc => {
@@ -20,9 +26,6 @@ impl TuiApp {
                 if let Some(BottomPanel::Variants { models, .. }) = ui.bottom_panel.take() {
                     ui.bottom_panel = Some(BottomPanel::Models(*models));
                 } else {
-                    if matches!(ui.bottom_panel, Some(BottomPanel::Models(_))) {
-                        self.model_catalog.abort_unfinished();
-                    }
                     ui.bottom_panel = None;
                 }
             }
@@ -172,6 +175,183 @@ impl TuiApp {
         Ok(())
     }
 
+    fn handle_model_panel_key(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        key: KeyEvent,
+    ) -> Result<bool> {
+        match key.code {
+            KeyCode::Esc => {
+                self.model_catalog.abort_unfinished();
+                ui.bottom_panel = None;
+            }
+            KeyCode::Char('r') if key.modifiers == KeyModifiers::CONTROL => {
+                self.start_model_metadata_refresh(ui, true);
+            }
+            KeyCode::Tab | KeyCode::Right => {
+                if let Some(BottomPanel::Models(panel)) = &mut ui.bottom_panel {
+                    panel.move_tab(1);
+                }
+            }
+            KeyCode::BackTab | KeyCode::Left => {
+                if let Some(BottomPanel::Models(panel)) = &mut ui.bottom_panel {
+                    panel.move_tab(-1);
+                }
+            }
+            _ => {
+                let tab = ui
+                    .bottom_panel
+                    .as_ref()
+                    .and_then(|panel| match panel {
+                        BottomPanel::Models(panel) => Some(panel.tab),
+                        _ => None,
+                    })
+                    .unwrap_or(ModelTab::Models);
+                match tab {
+                    ModelTab::Models => self.handle_model_list_key(ui, key)?,
+                    ModelTab::Info => self.handle_model_info_key(ui, key),
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    fn handle_model_list_key(&mut self, ui: &mut FullscreenUi<'_>, key: KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Enter => {
+                let selected = ui
+                    .bottom_panel
+                    .as_ref()
+                    .and_then(BottomPanel::selected_value);
+                self.apply_bottom_panel_selection(ui, selected)?;
+            }
+            KeyCode::Up => {
+                if let Some(BottomPanel::Models(panel)) = &mut ui.bottom_panel {
+                    panel.models.move_selection(-1);
+                }
+            }
+            KeyCode::Down => {
+                if let Some(BottomPanel::Models(panel)) = &mut ui.bottom_panel {
+                    panel.models.move_selection(1);
+                }
+            }
+            KeyCode::PageUp => {
+                if let Some(BottomPanel::Models(panel)) = &mut ui.bottom_panel {
+                    panel.models.move_selection(-8);
+                }
+            }
+            KeyCode::PageDown => {
+                if let Some(BottomPanel::Models(panel)) = &mut ui.bottom_panel {
+                    panel.models.move_selection(8);
+                }
+            }
+            KeyCode::Home => {
+                if let Some(BottomPanel::Models(panel)) = &mut ui.bottom_panel {
+                    panel.models.move_to(0);
+                }
+            }
+            KeyCode::End => {
+                if let Some(BottomPanel::Models(panel)) = &mut ui.bottom_panel {
+                    let len = panel.models.filtered_indices().len();
+                    panel.models.move_to(len.saturating_sub(1));
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(BottomPanel::Models(panel)) = &mut ui.bottom_panel {
+                    panel.models.backspace_query();
+                }
+            }
+            KeyCode::Char(c)
+                if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
+            {
+                if let Some(BottomPanel::Models(panel)) = &mut ui.bottom_panel {
+                    panel.models.set_query_char(c);
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn handle_model_info_key(&mut self, ui: &mut FullscreenUi<'_>, key: KeyEvent) {
+        let Some(BottomPanel::Models(panel)) = &mut ui.bottom_panel else {
+            return;
+        };
+        match key.code {
+            KeyCode::Up => panel.scroll_info_by(-1),
+            KeyCode::Down => panel.scroll_info_by(1),
+            KeyCode::PageUp => panel.scroll_info_by(-8),
+            KeyCode::PageDown => panel.scroll_info_by(8),
+            KeyCode::Home => panel.info_scroll = 0,
+            KeyCode::End => panel.info_scroll = u16::MAX,
+            KeyCode::Enter => {}
+            _ => {}
+        }
+    }
+
+    fn handle_help_panel_key(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        key: KeyEvent,
+    ) -> Result<bool> {
+        match key.code {
+            KeyCode::Esc => {
+                ui.bottom_panel = None;
+            }
+            KeyCode::Tab | KeyCode::Right => {
+                if let Some(BottomPanel::Help(panel)) = &mut ui.bottom_panel {
+                    panel.move_tab(1);
+                }
+            }
+            KeyCode::BackTab | KeyCode::Left => {
+                if let Some(BottomPanel::Help(panel)) = &mut ui.bottom_panel {
+                    panel.move_tab(-1);
+                }
+            }
+            KeyCode::Up => {
+                if let Some(BottomPanel::Help(panel)) = &mut ui.bottom_panel {
+                    panel.scroll_by(-1);
+                }
+            }
+            KeyCode::Down => {
+                if let Some(BottomPanel::Help(panel)) = &mut ui.bottom_panel {
+                    panel.scroll_by(1);
+                }
+            }
+            KeyCode::PageUp => {
+                if let Some(BottomPanel::Help(panel)) = &mut ui.bottom_panel {
+                    panel.scroll_by(-8);
+                }
+            }
+            KeyCode::PageDown => {
+                if let Some(BottomPanel::Help(panel)) = &mut ui.bottom_panel {
+                    panel.scroll_by(8);
+                }
+            }
+            KeyCode::Home => {
+                if let Some(BottomPanel::Help(panel)) = &mut ui.bottom_panel {
+                    panel.scroll = 0;
+                }
+            }
+            KeyCode::Char('g') | KeyCode::Char('G')
+                if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
+            {
+                if let Some(BottomPanel::Help(panel)) = &mut ui.bottom_panel {
+                    panel.set_tab(HelpTab::General);
+                }
+            }
+            KeyCode::Char('c') | KeyCode::Char('C')
+                if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
+            {
+                if let Some(BottomPanel::Help(panel)) = &mut ui.bottom_panel {
+                    panel.set_tab(HelpTab::Commands);
+                }
+            }
+            _ => {}
+        }
+        Ok(false)
+    }
+
     fn handle_provider_wizard_key(
         &mut self,
         ui: &mut FullscreenUi<'_>,
@@ -179,7 +359,9 @@ impl TuiApp {
     ) -> Result<bool> {
         match key.code {
             KeyCode::Esc => {
-                ui.bottom_panel = Some(BottomPanel::Models(self.model_selection_panel()?));
+                ui.bottom_panel = Some(BottomPanel::Models(ModelPanel::new(
+                    self.model_selection_panel()?,
+                )));
             }
             KeyCode::Enter => {
                 let save = ui
@@ -296,9 +478,11 @@ impl TuiApp {
             }
         };
         self.sync_model_catalog_providers()?;
-        let mut panel = self.model_selection_panel()?;
-        panel.select_value_key(&format!("fetch:provider:{}", result.provider_id));
-        panel.notice = Some("provider saved; fetching models".to_string());
+        let mut panel = ModelPanel::new(self.model_selection_panel()?);
+        panel
+            .models
+            .select_value_key(&format!("fetch:provider:{}", result.provider_id));
+        panel.models.notice = Some("provider saved; fetching models".to_string());
         ui.bottom_panel = Some(BottomPanel::Models(panel));
         self.start_model_catalog_fetch_provider(ui, &result.provider_id)?;
         ui.set_bottom_panel_notice("provider saved; fetching models");
@@ -478,6 +662,141 @@ impl TuiApp {
         Ok(())
     }
 
+    fn start_missing_model_metadata_cache_warmup(&mut self) {
+        if self.home.join("models_dev_cache.json").is_file() {
+            return;
+        }
+        self.start_model_metadata_refresh_task(false);
+    }
+
+    fn start_model_metadata_refresh(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        user_initiated: bool,
+    ) {
+        if self.model_catalog.metadata_refreshing() {
+            if user_initiated {
+                ui.set_bottom_panel_notice("refreshing metadata");
+            }
+            return;
+        }
+        self.start_model_metadata_refresh_task(user_initiated);
+        if user_initiated {
+            ui.set_bottom_panel_notice("refreshing metadata");
+        }
+    }
+
+    fn start_model_metadata_refresh_task(&mut self, user_initiated: bool) {
+        if self.model_catalog.metadata_refreshing() {
+            return;
+        }
+        let targets = self.model_metadata_cache_targets();
+        if targets.is_empty() {
+            return;
+        }
+        let home = self.home.clone();
+        let env_map = self.env_map.clone();
+        let task = tokio::spawn(async move {
+            refresh_model_metadata_cache(home, env_map, targets)
+                .await
+                .map_err(|err| short_fetch_error(&err.to_string()))
+        });
+        self.model_catalog.metadata_refresh = Some(ModelMetadataRefreshTask {
+            user_initiated,
+            task,
+        });
+    }
+
+    fn model_metadata_cache_targets(&mut self) -> Vec<ModelMetadataCacheTarget> {
+        let _ = self.sync_model_catalog_providers();
+        let mut targets = Vec::new();
+        let mut seen = BTreeMap::new();
+        if let Some(model) = selected_configured_model(&self.run_options(String::new()))
+            .ok()
+            .flatten()
+        {
+            push_model_metadata_target(&mut targets, &mut seen, &model, &self.model_catalog);
+        }
+        if let Some((provider, model)) =
+            self.current_model.as_deref().and_then(|value| value.split_once('/'))
+        {
+            push_raw_model_metadata_target(
+                &mut targets,
+                &mut seen,
+                provider,
+                model,
+                &self.model_catalog,
+            );
+        }
+        if let Ok(models) = configured_models(&self.run_options(String::new())) {
+            let mut by_spec = BTreeMap::new();
+            for model in &models {
+                by_spec.insert(format_model_spec(model), model);
+            }
+            for recent in &self.state.recent_models {
+                if let Some(model) = by_spec.get(recent) {
+                    push_model_metadata_target(&mut targets, &mut seen, model, &self.model_catalog);
+                } else if let Some((provider, model)) = recent.split_once('/') {
+                    push_raw_model_metadata_target(
+                        &mut targets,
+                        &mut seen,
+                        provider,
+                        model,
+                        &self.model_catalog,
+                    );
+                }
+            }
+            for model in &models {
+                push_model_metadata_target(&mut targets, &mut seen, model, &self.model_catalog);
+            }
+        }
+        targets
+    }
+
+    async fn drain_model_metadata_refresh(&mut self, ui: &mut FullscreenUi<'_>) -> Result<bool> {
+        let Some(refresh) = self.model_catalog.metadata_refresh.as_ref() else {
+            return Ok(false);
+        };
+        if !refresh.task.is_finished() {
+            return Ok(false);
+        }
+        let refresh = self
+            .model_catalog
+            .metadata_refresh
+            .take()
+            .expect("checked refresh");
+        let user_initiated = refresh.user_initiated;
+        let result = match refresh.task.await {
+            Ok(result) => result,
+            Err(err) if err.is_cancelled() => return Ok(true),
+            Err(err) => Err(short_fetch_error(&err.to_string())),
+        };
+
+        match result {
+            Ok(()) => {
+                self.refresh_selected_model();
+                if matches!(ui.bottom_panel, Some(BottomPanel::Models(_))) {
+                    let selected_key = ui
+                        .bottom_panel
+                        .as_ref()
+                        .map(|panel| panel.selection().selected_key());
+                    self.rebuild_model_panel(ui, selected_key)?;
+                    if user_initiated {
+                        ui.set_bottom_panel_notice("metadata refreshed");
+                    }
+                }
+            }
+            Err(error) => {
+                if user_initiated {
+                    ui.set_bottom_panel_notice(format!("metadata refresh failed: {error}"));
+                } else if self.debug {
+                    ui.push_status(format!("warning: metadata warmup failed: {error}"));
+                }
+            }
+        }
+        Ok(true)
+    }
+
     fn start_model_catalog_fetch_all(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
         if self.model_catalog.any_fetching() {
             ui.set_bottom_panel_notice("already fetching");
@@ -610,15 +929,21 @@ impl TuiApp {
         let Some(BottomPanel::Models(panel)) = ui.bottom_panel.as_ref() else {
             return Ok(());
         };
-        let query = panel.query.clone();
-        let notice = panel.notice.clone();
-        let mut panel = self.model_selection_panel()?;
-        panel.query = query;
-        panel.notice = notice;
+        let query = panel.models.query.clone();
+        let notice = panel.models.notice.clone();
+        let tab = panel.tab;
+        let info_scroll = panel.info_scroll;
+        let mut models = self.model_selection_panel()?;
+        models.query = query;
+        models.notice = notice;
         if let Some(key) = selected_key {
-            panel.select_value_key(&key);
+            models.select_value_key(&key);
         }
-        ui.bottom_panel = Some(BottomPanel::Models(panel));
+        ui.bottom_panel = Some(BottomPanel::Models(ModelPanel {
+            models,
+            tab,
+            info_scroll,
+        }));
         Ok(())
     }
 

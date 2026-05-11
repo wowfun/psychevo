@@ -1,6 +1,5 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
-assertion_line: 612
 expression: combined
 ---
 fixture=active_visible_write_preamble
@@ -30,7 +29,7 @@ Now I have all the data needed. Let me write the complete report.
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
 
-mock/model  high  ◦ 0s · Esc
+mock/model  high  ◦ 0s · Esc  ~/work · main
 
 --- styles ---
 [dim]› [default]Write the complete report.
@@ -56,4 +55,4 @@ mock/model  high  ◦ 0s · Esc
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
 [default]
-[default]mock/model  [magenta]high[default]  [cyan]◦[default] [dim]0s · [cyan]Esc[default]
+[default]mock/model  [magenta]high[default]  [cyan]◦[default] [dim]0s · [cyan]Esc[default]  [dim]~/work · main[default]

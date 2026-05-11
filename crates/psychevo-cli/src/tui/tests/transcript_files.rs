@@ -65,6 +65,78 @@ fn transcript_render_blocks_keep_thinking_and_tools_flat() {
 }
 
 #[test]
+fn command_row_renders_claude_style_prefixes_and_colored_context_bar() {
+    let row = TranscriptRow::with_title(
+        TranscriptKind::Command,
+        "/context",
+        "Context Usage\n[MMMMM.....]\nS system  T tools  K skills  M input_messages  . free\ntokens: 5/10 (50.0%)",
+    );
+
+    let lines = transcript_lines(&row, false, true, 80, Path::new("/repo"));
+    let rendered = lines.iter().map(line_text).collect::<Vec<_>>();
+    assert_eq!(rendered[0], "> /context");
+    assert_eq!(rendered[1], "  └  Context Usage");
+    assert_eq!(rendered[2], "     [MMMMM.....]");
+    assert_eq!(
+        rendered[3],
+        "     S system  T tools  K skills  M input_messages  . free"
+    );
+    assert_eq!(rendered[4], "     tokens: 5/10 (50.0%)");
+
+    let bar_m_style = lines[2].spans[6].style;
+    let legend_m_style = lines[3].spans[10].style;
+    let legend_label_style = lines[3].spans[11].style;
+    assert_eq!(bar_m_style, legend_m_style);
+    assert_ne!(legend_m_style, legend_label_style);
+    assert_eq!(legend_label_style, tui_theme().dim_style());
+    assert_eq!(lines[3].spans[11].content.as_ref(), " input_messages");
+}
+
+#[test]
+fn command_row_defaults_open_and_toggles_details() {
+    let mut row = TranscriptRow::with_title(
+        TranscriptKind::Command,
+        "/status",
+        "workdir: /repo\nmodel: mock/model",
+    );
+
+    assert!(row.is_expandable());
+    let open = transcript_lines(&row, true, true, 80, Path::new("/repo"))
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>();
+    assert_eq!(open[0], "> /status ▾ collapse");
+    assert!(open.iter().any(|line| line.contains("workdir: /repo")));
+
+    toggle_transcript_row_details(&mut row);
+    assert!(row.details_collapsed);
+    let collapsed = transcript_lines(&row, false, true, 80, Path::new("/repo"))
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>();
+    assert_eq!(collapsed, ["> /status ▸ details"]);
+
+    toggle_transcript_row_details(&mut row);
+    assert!(!row.details_collapsed);
+    let reopened = transcript_lines(&row, true, true, 80, Path::new("/repo"))
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>();
+    assert!(reopened.iter().any(|line| line.contains("model: mock/model")));
+}
+
+#[test]
+fn command_rows_do_not_count_as_visible_messages() {
+    let rows = vec![
+        TranscriptRow::with_title(TranscriptKind::Command, "/status", "workdir: /repo"),
+        TranscriptRow::with_title(TranscriptKind::Prompt, "", "hello"),
+        TranscriptRow::with_title(TranscriptKind::Answer, "", "hi"),
+    ];
+
+    assert_eq!(visible_transcript_message_count(&rows), 2);
+}
+
+#[test]
 fn long_thinking_defaults_to_row_level_collapse_without_left_rail() {
     let long = (1..=12)
         .map(|index| format!("line {index}"))
@@ -634,7 +706,7 @@ fn turn_meta_places_variant_after_model_and_filters_debug_duplicate() {
 
 #[test]
 fn slash_completion_completes_command_prefixes() {
-    assert_eq!(slash_completion("/he"), None);
+    assert_eq!(slash_completion("/he").as_deref(), Some("/help"));
     assert_eq!(slash_completion("/ren").as_deref(), Some("/rename"));
     assert_eq!(slash_completion("/rn"), None);
     assert_eq!(slash_completion("/mo").as_deref(), Some("/mode"));

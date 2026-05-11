@@ -1,6 +1,5 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
-assertion_line: 341
 expression: combined
 ---
 fixture=variant_bottom_panel
@@ -30,7 +29,7 @@ size=120x24
 
 
 
-mock/mock-model  default
+mock/mock-model  default  ~/work · main
 
 --- styles ---
 [default]
@@ -56,4 +55,4 @@ mock/mock-model  default
 [default]
 [default]
 [default]
-[default]mock/mock-model  [magenta]default[default]
+[default]mock/mock-model  [magenta]default[default]  [dim]~/work · main[default]

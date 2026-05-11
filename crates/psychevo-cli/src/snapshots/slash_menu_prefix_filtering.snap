@@ -1,5 +1,5 @@
 ---
-source: crates/psychevo-cli/src/tui/tests.rs
+source: crates/psychevo-cli/src/tui/tests/fixtures.rs
 expression: combined
 ---
 fixture=slash_menu_prefix_filtering
@@ -29,7 +29,7 @@ size=120x24
 │
 › /mo
 
-mock/model  high
+mock/model  high  ~/work · main
 
 --- styles ---
 [default]
@@ -55,4 +55,4 @@ mock/model  high
 [default]│
 [dim]›[default] /mo
 [default]
-[default]mock/model  [magenta]high[default]
+[default]mock/model  [magenta]high[default]  [dim]~/work · main[default]

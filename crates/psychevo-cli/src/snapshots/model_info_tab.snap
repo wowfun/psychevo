@@ -3,7 +3,7 @@ source: crates/psychevo-cli/src/tui/tests/fixtures.rs
 assertion_line: 665
 expression: combined
 ---
-fixture=model_bottom_panel
+fixture=model_info_tab
 size=120x24
 
 --- text ---
@@ -16,19 +16,19 @@ size=120x24
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
   Model   Models    Info
-  Search
-  Add provider  configure global OpenAI-compatible provider
-  All providers  not fetched
-  mock  not fetched
-  › ● mock/mock-model  mock  context 128,000  output 16,000  reasoning  tools  multi-modal  structured  $1.500/$2.500…
-  mock/other-model  mock  default high
 
-  Enter select  Ctrl+R refresh metadata  Tab/Right info  Esc close  Type search
+  model: mock/mock-model  provider: mock (mock)
+  source: current  local  metadata config
+  limits: context 128,000  input 120,000  output 16,000
+  capabilities: reasoning  tools  structured output
+  modalities: input: text, image  output: text
+  pricing: standard: in/out $1.500/$2.500/M
+  cache: read/write $0.150/$0.750/M
+  over-200k: in/out $3.000/$5.000/M
+  source: config
 
 
-
-
-
+  Esc close  Ctrl+R refresh metadata  Tab/Left/Right section  Up/Down scroll
 
 mock/mock-model  default  ~/work · main
 
@@ -41,19 +41,19 @@ mock/mock-model  default  ~/work · main
 [default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [default]
-[default]  [cyan]Model[default]  [cyan] Models [default]   Info
-[default]  [dim]Search [default]
-[default]  [cyan]Add provider[dim]  configure global OpenAI-compatible provider[default]
-[default]  [cyan]All providers[dim]  not fetched[default]
-[default]  [cyan]mock[dim]  not fetched[default]
-[default]  [cyan]› ● mock/mock-model  mock  context 128,000  output 16,000  reasoning  tools  multi-modal  structured  $1.500/$2.500…[default]
-[default]  mock/other-model  mock  default high
+[default]  [cyan]Model[default]   Models   [cyan] Info [default]
 [default]
-[default]  [dim]Enter select  Ctrl+R refresh metadata  Tab/Right info  Esc close  Type search[default]
+[default]  model: mock/mock-model  provider: mock (mock)
+[default]  source: current  local  metadata config
+[default]  limits: context 128,000  input 120,000  output 16,000
+[default]  capabilities: reasoning  tools  structured output
+[default]  modalities: input: text, image  output: text
+[default]  pricing: standard: in/out $1.500/$2.500/M
+[default]  cache: read/write $0.150/$0.750/M
+[default]  over-200k: in/out $3.000/$5.000/M
+[default]  source: config
 [default]
 [default]
-[default]
-[default]
-[default]
+[default]  [dim]Esc close  Ctrl+R refresh metadata  Tab/Left/Right section  Up/Down scroll[default]
 [default]
 [default]mock/mock-model  [magenta]default[default]  [dim]~/work · main[default]

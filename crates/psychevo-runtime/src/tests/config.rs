@@ -277,6 +277,199 @@ fn models_dev_cache_enriches_configured_model_by_base_url() {
 }
 
 #[test]
+fn models_dev_cache_enriches_xiaomi_omni_capabilities_and_modalities() {
+    let temp = tempdir().expect("temp");
+    let options = base_options(&temp);
+    let config_dir = home_dir(&temp);
+    fs::create_dir_all(&config_dir).expect("config dir");
+    fs::write(
+        config_dir.join("models_dev_cache.json"),
+        r#"
+        {
+          "xiaomi-token-plan-cn": {
+            "api": "https://token-plan-cn.xiaomimimo.com/v1",
+            "models": {
+              "mimo-v2-omni": {
+                "id": "mimo-v2-omni",
+                "reasoning": true,
+                "tool_call": true,
+                "temperature": true,
+                "attachment": true,
+                "interleaved": { "field": "reasoning_content" },
+                "limit": { "context": 262144, "output": 131072 },
+                "modalities": {
+                  "input": ["text", "image", "audio", "video", "pdf"],
+                  "output": ["text"]
+                }
+              }
+            }
+          }
+        }
+        "#,
+    )
+    .expect("cache");
+    fs::write(
+        config_dir.join("config.jsonc"),
+        r#"
+        {
+          "provider": {
+            "xiaomi-token-plan": {
+              "label": "Xiaomi Token Plan",
+              "options": {
+                "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+                "api_key_env": "XIAOMI_KEY"
+              },
+              "models": { "mimo-v2-omni": {} }
+            }
+          }
+        }
+        "#,
+    )
+    .expect("config");
+
+    let models = configured_models(&options).expect("models");
+    let model = models
+        .iter()
+        .find(|model| model.provider == "xiaomi-token-plan")
+        .expect("token plan model");
+    assert_eq!(model.context_limit, Some(262_144));
+    assert_eq!(model.metadata.limits.output, Some(131_072));
+    assert_eq!(model.metadata.capabilities.reasoning, Some(true));
+    assert_eq!(model.metadata.capabilities.tool_call, Some(true));
+    assert_eq!(model.metadata.capabilities.attachment, Some(true));
+    assert_eq!(
+        model.metadata.capabilities.input_modalities,
+        ["text", "image", "audio", "video", "pdf"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        model.metadata.capabilities.output_modalities,
+        vec!["text".to_string()]
+    );
+    assert_eq!(
+        model.metadata.source.as_deref(),
+        Some("models.dev:xiaomi-token-plan-cn")
+    );
+}
+
+#[tokio::test]
+async fn refresh_model_metadata_cache_writes_models_dev_cache() {
+    let temp = tempdir().expect("temp");
+    let home = home_dir(&temp);
+    fs::create_dir_all(&home).expect("home");
+    let server = CatalogServer::new(
+        r#"
+        {
+          "mock": {
+            "models": {
+              "mock-model": {
+                "id": "mock-model",
+                "limit": { "context": 8192 }
+              }
+            }
+          }
+        }
+        "#,
+    );
+    let env_map = BTreeMap::from([(
+        "PSYCHEVO_MODELS_DEV_URL".to_string(),
+        server.base_url.clone(),
+    )]);
+
+    refresh_model_metadata_cache(
+        home.clone(),
+        env_map,
+        vec![ModelMetadataCacheTarget {
+            provider: "mock".to_string(),
+            model: "mock-model".to_string(),
+            base_url: None,
+        }],
+    )
+    .await
+    .expect("refresh");
+
+    let cache = fs::read_to_string(home.join("models_dev_cache.json")).expect("cache");
+    assert!(cache.contains("mock-model"), "{cache}");
+    assert!(server.request().starts_with("GET /v1 "));
+}
+
+#[tokio::test]
+async fn refresh_model_metadata_cache_writes_only_requested_models() {
+    let temp = tempdir().expect("temp");
+    let home = home_dir(&temp);
+    fs::create_dir_all(&home).expect("home");
+    let server = CatalogServer::new(
+        r#"
+        {
+          "mock": {
+            "api": "http://mock.example/v1",
+            "models": {
+              "used-model": { "id": "used-model", "limit": { "context": 8192 } },
+              "unused-model": { "id": "unused-model", "limit": { "context": 16384 } }
+            }
+          },
+          "other": {
+            "models": {
+              "other-model": { "id": "other-model" }
+            }
+          }
+        }
+        "#,
+    );
+    let env_map = BTreeMap::from([(
+        "PSYCHEVO_MODELS_DEV_URL".to_string(),
+        server.base_url.clone(),
+    )]);
+
+    refresh_model_metadata_cache(
+        home.clone(),
+        env_map,
+        vec![ModelMetadataCacheTarget {
+            provider: "custom-mock".to_string(),
+            model: "used-model".to_string(),
+            base_url: Some("http://mock.example/v1".to_string()),
+        }],
+    )
+    .await
+    .expect("refresh");
+
+    let cache = fs::read_to_string(home.join("models_dev_cache.json")).expect("cache");
+    assert!(cache.contains("used-model"), "{cache}");
+    assert!(!cache.contains("unused-model"), "{cache}");
+    assert!(!cache.contains("other-model"), "{cache}");
+}
+
+#[tokio::test]
+async fn refresh_model_metadata_cache_preserves_old_cache_on_failure() {
+    let temp = tempdir().expect("temp");
+    let home = home_dir(&temp);
+    fs::create_dir_all(&home).expect("home");
+    let path = home.join("models_dev_cache.json");
+    fs::write(&path, r#"{"old":true}"#).expect("old cache");
+    let env_map = BTreeMap::from([(
+        "PSYCHEVO_MODELS_DEV_URL".to_string(),
+        "http://127.0.0.1:1/api.json".to_string(),
+    )]);
+
+    let err = refresh_model_metadata_cache(
+        home,
+        env_map,
+        vec![ModelMetadataCacheTarget {
+            provider: "mock".to_string(),
+            model: "mock-model".to_string(),
+            base_url: None,
+        }],
+    )
+    .await
+    .expect_err("refresh failure");
+
+    assert!(!err.to_string().is_empty(), "{err}");
+    assert_eq!(fs::read_to_string(path).expect("cache"), r#"{"old":true}"#);
+}
+
+#[test]
 fn explicit_metadata_config_override_wins_and_disables_reasoning() {
     let temp = tempdir().expect("temp");
     let options = base_options(&temp);
@@ -321,6 +514,35 @@ fn explicit_metadata_config_override_wins_and_disables_reasoning() {
         resolved.metadata.cost.as_ref().and_then(|cost| cost.output),
         Some(2.5)
     );
+}
+
+#[test]
+fn legacy_context_limit_config_field_is_rejected() {
+    let temp = tempdir().expect("temp");
+    let options = base_options(&temp);
+    let config_dir = home_dir(&temp);
+    fs::create_dir_all(&config_dir).expect("config dir");
+    fs::write(
+        config_dir.join("config.jsonc"),
+        r#"
+        {
+          "model": "custom/local",
+          "provider": {
+            "custom": {
+              "options": { "base_url": "http://127.0.0.1:1234/v1" },
+              "models": {
+                "local": { "context_limit": 1234 }
+              }
+            }
+          }
+        }
+        "#,
+    )
+    .expect("config");
+
+    let workdir = canonical_workdir(&options.workdir).expect("workdir");
+    let err = load_run_config(&options, &workdir).expect_err("legacy field");
+    assert!(err.to_string().contains("use limit.context"));
 }
 
 #[test]

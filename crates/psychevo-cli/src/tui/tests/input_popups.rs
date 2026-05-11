@@ -33,12 +33,12 @@ async fn slash_menu_selection_can_choose_mode_over_model() {
         .expect("enter");
 
     assert_eq!(ui.history.last().map(String::as_str), Some("/mode"));
-    assert!(
-        ui.transcript
-            .iter()
-            .any(|row| row.kind == TranscriptKind::Error
-                && row.text.contains("usage: /mode <plan|default>"))
-    );
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command
+            && row.title == "/mode"
+            && row.failed
+            && row.text.contains("error: usage: /mode <plan|default>")
+    }));
 }
 
 #[tokio::test]
@@ -153,15 +153,15 @@ fn file_popup_is_hidden_while_bottom_panel_is_open() {
         selected: 0,
         waiting: false,
     });
-    ui.bottom_panel = Some(BottomPanel::Models(
+    ui.bottom_panel = Some(BottomPanel::Models(ModelPanel::new(
         app.model_selection_panel().expect("panel"),
-    ));
+    )));
 
     let buffer = draw_fullscreen_for_test(&app, &mut ui, 100, 20);
     let text = buffer_text(&buffer);
 
     assert!(!text.contains("files"), "{text}");
-    assert!(text.contains("Select Model"), "{text}");
+    assert!(text.contains("Model   Models    Info"), "{text}");
 }
 
 #[tokio::test]

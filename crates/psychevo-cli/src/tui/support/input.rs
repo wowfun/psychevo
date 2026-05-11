@@ -46,7 +46,9 @@ fn selected_slash_menu_command_with_items(
 }
 
 fn should_submit_typed_slash(input: &str) -> bool {
-    matches!(input.trim(), "/thinking")
+    let trimmed = input.trim();
+    matches!(trimmed, "/session" | "/thinking")
+        || crate::command_registry::slash_command_spec(trimmed).is_some()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

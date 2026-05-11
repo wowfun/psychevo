@@ -29,9 +29,14 @@ fn test_app(temp: &tempfile::TempDir) -> TuiApp {
     std::fs::create_dir_all(&home).expect("home");
     std::fs::create_dir_all(&workdir).expect("workdir");
     let workdir = workdir.canonicalize().expect("canonical");
+    let mut env_map = BTreeMap::new();
+    env_map.insert(
+        "HOME".to_string(),
+        temp.path().canonicalize().expect("temp canonical").display().to_string(),
+    );
     let (clipboard_result_tx, clipboard_result_rx) = std::sync::mpsc::channel();
     TuiApp {
-        env_map: BTreeMap::new(),
+        env_map,
         home: home.clone(),
         state_path: home.join("tui-state.json"),
         state: TuiState::default(),
@@ -53,6 +58,7 @@ fn test_app(temp: &tempfile::TempDir) -> TuiApp {
         renderer: TuiRenderer::new(false),
         debug: false,
         had_error: false,
+        last_context_snapshot: None,
         model_catalog: ModelCatalogCache::default(),
         clipboard_result_tx,
         clipboard_result_rx,
@@ -195,13 +201,7 @@ fn stable_sidebar() -> SidebarSnapshot {
     SidebarSnapshot {
         title: "Review sidebar polish".to_string(),
         session: "12345678".to_string(),
-        workdir: "/repo/psychevo".to_string(),
         branch: "main".to_string(),
-        tokens: Some(12_000),
-        context_percent: Some(18.8),
-        cost_nanodollars: None,
-        message_count: 2,
-        tool_count: 1,
         changed_files: vec![
             "M crates/psychevo-cli/src/tui.rs".to_string(),
             "?? specs/210-pevo-tui/testing.md".to_string(),

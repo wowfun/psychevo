@@ -66,18 +66,30 @@ fn tui_snapshot_model_bottom_panel() {
     let temp = tempdir().expect("temp");
     let mut app = test_app_with_models(&temp);
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
-    ui.bottom_panel = Some(BottomPanel::Models(
+    ui.bottom_panel = Some(BottomPanel::Models(ModelPanel::new(
         app.model_selection_panel().expect("model panel"),
-    ));
+    )));
     assert_tui_snapshot("model_bottom_panel", 120, 24, &app, ui);
+}
+
+#[test]
+fn tui_snapshot_model_info_tab() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app_with_models(&temp);
+    let mut ui = fixture_ui(&app, FixtureKind::Idle);
+    let mut panel = ModelPanel::new(app.model_selection_panel().expect("model panel"));
+    panel.tab = ModelTab::Info;
+    ui.bottom_panel = Some(BottomPanel::Models(panel));
+    assert_tui_snapshot("model_info_tab", 120, 24, &app, ui);
 }
 
 #[test]
 fn tui_snapshot_variant_bottom_panel() {
     let temp = tempdir().expect("temp");
     let mut app = test_app_with_models(&temp);
-    let models = app.model_selection_panel().expect("model panel");
+    let models = ModelPanel::new(app.model_selection_panel().expect("model panel"));
     let (other, source) = models
+        .models
         .rows
         .iter()
         .find_map(|row| match &row.value {

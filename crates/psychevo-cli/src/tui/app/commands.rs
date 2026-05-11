@@ -1,13 +1,32 @@
 impl TuiApp {
+    #[cfg(test)]
     async fn handle_fullscreen_command(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         command: SlashCommand,
     ) -> Result<bool> {
+        self.handle_fullscreen_command_with_echo(ui, command, None)
+            .await
+    }
+
+    async fn handle_fullscreen_command_with_echo(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        command: SlashCommand,
+        submitted: Option<String>,
+    ) -> Result<bool> {
+        let command_echo = submitted
+            .as_deref()
+            .map(normalize_submitted_slash_echo)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| slash_command_echo(&command));
         match command {
+            SlashCommand::Help => {
+                ui.bottom_panel = Some(BottomPanel::Help(self.help_panel()));
+            }
             SlashCommand::Quit => return Ok(true),
             SlashCommand::Status => {
-                ui.push_status(self.status_text());
+                ui.push_command_result(command_echo, None, self.status_text(), false);
             }
             SlashCommand::New => {
                 self.current_session = None;
@@ -22,16 +41,59 @@ impl TuiApp {
                     self.session_selection_panel(SessionListView::Active)?,
                 ));
             }
-            SlashCommand::Stats => {
+            SlashCommand::Usage => {
                 ui.bottom_panel = Some(BottomPanel::Stats(self.stats_panel()?));
             }
+            SlashCommand::Context => {
+                let format_options = ContextFormatOptions {
+                    heading: false,
+                    bar_width: Some(fullscreen_context_bar_width(ui)),
+                };
+                let live = ui.last_context_snapshot.clone();
+                match self.context_status_snapshot(live.as_ref()) {
+                    Ok(snapshot) => {
+                        self.last_context_snapshot = Some(snapshot.clone());
+                        ui.last_context_snapshot = Some(snapshot.clone());
+                        let text =
+                            format_context_snapshot_text_with_options(&snapshot, format_options);
+                        ui.push_command_result(command_echo, Some("Context Usage"), text, false);
+                        ui.refresh_sidebar(self);
+                    }
+                    Err(err) => {
+                        ui.push_command_result(
+                            command_echo,
+                            None,
+                            format!("error: {err:#}"),
+                            true,
+                        );
+                    }
+                }
+            }
             SlashCommand::ModelShow => {
-                ui.bottom_panel = Some(BottomPanel::Models(self.model_selection_panel()?));
+                ui.bottom_panel = Some(BottomPanel::Models(ModelPanel::new(
+                    self.model_selection_panel()?,
+                )));
             }
             SlashCommand::VariantSet(variant) => {
-                self.set_variant_no_print(variant.clone())?;
-                ui.push_status(format!("variant: {variant}"));
-                ui.refresh_sidebar(self);
+                match self.set_variant_no_print(variant.clone()) {
+                    Ok(()) => {
+                        ui.push_command_result(
+                            command_echo,
+                            None,
+                            format!("variant: {variant}"),
+                            false,
+                        );
+                        ui.refresh_sidebar(self);
+                    }
+                    Err(err) => {
+                        ui.push_command_result(
+                            command_echo,
+                            None,
+                            format!("error: {err:#}"),
+                            true,
+                        );
+                    }
+                }
             }
             SlashCommand::ModeSet(mode) => {
                 self.set_mode_no_print(&mode)?;
@@ -50,33 +112,60 @@ impl TuiApp {
             }
             SlashCommand::Rename(title) => match self.rename_session_no_print(title) {
                 Ok(title) => {
-                    ui.push_status(format!("session renamed: {title}"));
+                    ui.push_command_result(
+                        command_echo,
+                        None,
+                        format!("session renamed: {title}"),
+                        false,
+                    );
                     ui.refresh_sidebar(self);
                 }
-                Err(err) => ui.push_error(format!("error: {err:#}")),
+                Err(err) => {
+                    ui.push_command_result(command_echo, None, format!("error: {err:#}"), true);
+                }
             },
             SlashCommand::Undo => {
                 if ui.request_interrupt() {
-                    ui.push_error("interrupt requested; run /undo again after the turn settles");
+                    ui.push_command_result(
+                        command_echo,
+                        None,
+                        "error: interrupt requested; run /undo again after the turn settles",
+                        true,
+                    );
                 } else {
                     match self.undo_session_no_print(ui) {
-                        Ok(message) => ui.push_status(message),
-                        Err(err) => ui.push_error(format!("error: {err:#}")),
+                        Ok(message) => ui.push_command_result(command_echo, None, message, false),
+                        Err(err) => ui.push_command_result(
+                            command_echo,
+                            None,
+                            format!("error: {err:#}"),
+                            true,
+                        ),
                     }
                 }
             }
             SlashCommand::Redo => {
                 if ui.request_interrupt() {
-                    ui.push_error("interrupt requested; run /redo again after the turn settles");
+                    ui.push_command_result(
+                        command_echo,
+                        None,
+                        "error: interrupt requested; run /redo again after the turn settles",
+                        true,
+                    );
                 } else {
                     match self.redo_session_no_print(ui) {
-                        Ok(message) => ui.push_status(message),
-                        Err(err) => ui.push_error(format!("error: {err:#}")),
+                        Ok(message) => ui.push_command_result(command_echo, None, message, false),
+                        Err(err) => ui.push_command_result(
+                            command_echo,
+                            None,
+                            format!("error: {err:#}"),
+                            true,
+                        ),
                     }
                 }
             }
             SlashCommand::Skills => {
-                ui.push_status(self.skills_status_text());
+                ui.push_command_result(command_echo, None, self.skills_status_text(), false);
             }
             SlashCommand::SkillInvoke { name, args } => {
                 let text = skill_prompt_marker(&name, &args);
@@ -84,7 +173,12 @@ impl TuiApp {
                 self.sync_skill_popup(ui);
             }
             SlashCommand::Upcoming(command) => {
-                ui.push_status(format!("/{command} upcoming"));
+                ui.push_command_result(
+                    command_echo,
+                    None,
+                    format!("/{command} upcoming"),
+                    false,
+                );
             }
         }
         Ok(false)
@@ -108,13 +202,21 @@ impl TuiApp {
             ui.push_submitted_history(text.clone());
         }
         match parse_slash_command(&text) {
-            Ok(Some(command)) => self.handle_fullscreen_command(ui, command).await,
+            Ok(Some(command)) => {
+                self.handle_fullscreen_command_with_echo(ui, command, Some(text))
+                    .await
+            }
             Ok(None) => {
                 self.submit_fullscreen_prompt(ui, text)?;
                 Ok(false)
             }
             Err(err) => {
-                ui.push_error(format!("error: {err:#}"));
+                ui.push_command_result(
+                    normalize_submitted_slash_echo(&text),
+                    None,
+                    format!("error: {err:#}"),
+                    true,
+                );
                 Ok(false)
             }
         }
@@ -184,6 +286,10 @@ impl TuiApp {
 
     async fn handle_command(&mut self, command: SlashCommand) -> Result<bool> {
         let result = match command {
+            SlashCommand::Help => {
+                println!("{}", self.help_status_text());
+                Ok(())
+            }
             SlashCommand::Quit => return Ok(true),
             SlashCommand::Status => self.show_status(),
             SlashCommand::New => {
@@ -193,8 +299,24 @@ impl TuiApp {
                 Ok(())
             }
             SlashCommand::Sessions => self.show_session_list(),
-            SlashCommand::Stats => {
+            SlashCommand::Usage => {
                 println!("{}", self.stats_status_text()?);
+                Ok(())
+            }
+            SlashCommand::Context => {
+                let live = self.last_context_snapshot.clone();
+                let snapshot = self.context_status_snapshot(live.as_ref())?;
+                self.last_context_snapshot = Some(snapshot.clone());
+                println!(
+                    "{}",
+                    format_context_snapshot_text_with_options(
+                        &snapshot,
+                        ContextFormatOptions {
+                            heading: true,
+                            bar_width: None,
+                        },
+                    )
+                );
                 Ok(())
             }
             SlashCommand::ModelShow => self.show_model(),
@@ -240,6 +362,19 @@ impl TuiApp {
             .join("\n")
     }
 
+    fn help_status_text(&self) -> String {
+        format_slash_help(self.current_skill_count())
+    }
+
+    fn help_panel(&self) -> HelpPanel {
+        HelpPanel::new(self.current_skill_count())
+    }
+
+    fn current_skill_count(&self) -> Option<usize> {
+        self.current_skill_catalog()
+            .map(|catalog| catalog.skills.len())
+    }
+
     fn stats_status_text(&self) -> Result<String> {
         let report = usage_stats(StatsOptions {
             db_path: self.db_path.clone(),
@@ -256,6 +391,26 @@ impl TuiApp {
             json_i64(totals, "reported_total_tokens"),
             format_nanodollars(json_i64(totals, "estimated_cost_nanodollars"))
         ))
+    }
+
+    fn context_status_snapshot(&self, live: Option<&ContextSnapshot>) -> Result<ContextSnapshot> {
+        if let Some(snapshot) = live {
+            return Ok(snapshot.clone());
+        }
+        if let Some(snapshot) = self.last_context_snapshot.as_ref() {
+            return Ok(snapshot.clone());
+        }
+        let session = self
+            .current_session
+            .clone()
+            .ok_or_else(|| anyhow!("no session context yet"))?;
+        Ok(context_snapshot(ContextOptions {
+            db_path: self.db_path.clone(),
+            workdir: self.workdir.clone(),
+            session,
+            config_path: self.config_path.clone(),
+            inherited_env: Some(self.env_map.clone()),
+        })?)
     }
 
     async fn submit_prompt(&mut self, prompt: String) -> Result<()> {
@@ -278,6 +433,7 @@ impl TuiApp {
         });
         let options = self.run_options(prompt);
         let result = run_live_streaming(options, "tui", TUI_SESSION_SOURCES, sink).await?;
+        self.last_context_snapshot = result.context_snapshot.clone();
         {
             let mut turn = turn.lock().expect("turn lock poisoned");
             let mut stdout = stdout.lock().expect("stdout lock poisoned");
@@ -390,6 +546,50 @@ impl TuiApp {
         Ok(())
     }
 
+}
+
+fn fullscreen_context_bar_width(ui: &FullscreenUi<'_>) -> usize {
+    if ui.last_transcript_width == 0 {
+        return 80;
+    }
+    normalize_context_bar_width(usize::from(ui.last_transcript_width).saturating_sub(8))
+}
+
+fn normalize_submitted_slash_echo(value: &str) -> String {
+    value.lines().next().unwrap_or_default().trim().to_string()
+}
+
+fn slash_command_echo(command: &SlashCommand) -> String {
+    match command {
+        SlashCommand::Help => "/help".to_string(),
+        SlashCommand::Quit => "/quit".to_string(),
+        SlashCommand::Status => "/status".to_string(),
+        SlashCommand::New => "/new".to_string(),
+        SlashCommand::Sessions => "/sessions".to_string(),
+        SlashCommand::Usage => "/usage".to_string(),
+        SlashCommand::Context => "/context".to_string(),
+        SlashCommand::ModelShow => "/model".to_string(),
+        SlashCommand::VariantSet(variant) => format!("/variant {variant}"),
+        SlashCommand::ModeSet(mode) => format!("/mode {mode}"),
+        SlashCommand::ThinkingToggle => "/show-thinking".to_string(),
+        SlashCommand::ThinkingSet(enabled) => {
+            format!("/show-thinking {}", if *enabled { "on" } else { "off" })
+        }
+        SlashCommand::Rename(title) => {
+            format!("/rename {}", title.split_whitespace().collect::<Vec<_>>().join(" "))
+        }
+        SlashCommand::Undo => "/undo".to_string(),
+        SlashCommand::Redo => "/redo".to_string(),
+        SlashCommand::Skills => "/skills".to_string(),
+        SlashCommand::SkillInvoke { name, args } => {
+            if args.trim().is_empty() {
+                format!("/skill:{name}")
+            } else {
+                format!("/skill:{name} {}", args.trim())
+            }
+        }
+        SlashCommand::Upcoming(command) => format!("/{command}"),
+    }
 }
 
 fn skill_prompt_marker(name: &str, args: &str) -> String {

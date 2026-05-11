@@ -117,6 +117,7 @@ pub struct RunResult {
     pub context_limit: Option<u64>,
     pub tool_failures: usize,
     pub selected_skills: Vec<SelectedSkill>,
+    pub context_snapshot: Option<crate::context_usage::ContextSnapshot>,
     pub events: Vec<Value>,
 }
 
@@ -232,6 +233,13 @@ pub struct ModelCatalogEntry {
     pub id: String,
     pub context_limit: Option<u64>,
     pub metadata: ModelMetadata,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelMetadataCacheTarget {
+    pub provider: String,
+    pub model: String,
+    pub base_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

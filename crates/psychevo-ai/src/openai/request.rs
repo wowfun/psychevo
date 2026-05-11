@@ -44,6 +44,302 @@ fn build_chat_request(request: &GenerationRequest, base_url: &str) -> Value {
     body
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenAiChatTokenCount {
+    pub encoding: String,
+    pub encoding_source: String,
+    pub encoding_fallback: bool,
+    pub system_prompt_tokens: u64,
+    pub system_tools_tokens: u64,
+    pub skills_tokens: u64,
+    pub messages_tokens: u64,
+    pub total_estimated_tokens: u64,
+    pub tool_count: usize,
+    pub role_counts: BTreeMap<String, OpenAiChatRoleTokenCount>,
+    pub selected_skill_context_tokens: u64,
+    pub selected_skill_context_count: usize,
+    pub skill_names: Vec<String>,
+    pub skill_entries: Vec<OpenAiChatSkillTokenCount>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenAiChatRoleTokenCount {
+    pub count: usize,
+    pub tokens: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenAiChatSkillTokenCount {
+    pub name: String,
+    pub tokens: u64,
+}
+
+pub fn count_openai_chat_request(
+    request: &GenerationRequest,
+    base_url: &str,
+) -> OpenAiChatTokenCount {
+    let encoding = resolve_count_encoding(&request.model.provider, &request.model.model);
+    let Some(enc) = tiktoken::get_encoding(&encoding.name) else {
+        return OpenAiChatTokenCount {
+            encoding: "o200k_base".to_string(),
+            encoding_source: "fallback".to_string(),
+            encoding_fallback: true,
+            ..OpenAiChatTokenCount::default()
+        };
+    };
+    let counting = request_context_counting_metadata(request);
+    let body = build_chat_request(request, base_url);
+    let (system_tools_tokens, tool_count) = body
+        .get("tools")
+        .map(|tools| (count_value(enc, tools), tools.as_array().map_or(0, Vec::len)))
+        .unwrap_or((0, 0));
+    let provider_messages = body
+        .get("messages")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    let mut system_prompt_tokens = 0u64;
+    let mut skills_tokens = 0u64;
+    let mut messages_tokens = 0u64;
+    let mut role_counts = BTreeMap::<String, OpenAiChatRoleTokenCount>::new();
+    let mut seen_provider_system_messages = 0usize;
+    let mut skill_entries = Vec::new();
+
+    for message in &provider_messages {
+        let tokens = count_value(enc, message);
+        if message.get("role").and_then(Value::as_str) == Some("system") {
+            if seen_provider_system_messages < counting.system_prompt_message_count {
+                system_prompt_tokens = system_prompt_tokens.saturating_add(tokens);
+            } else if seen_provider_system_messages
+                < counting
+                    .system_prompt_message_count
+                    .saturating_add(counting.skill_index_message_count)
+            {
+                skills_tokens = skills_tokens.saturating_add(tokens);
+                skill_entries.extend(skill_entry_token_counts(enc, message));
+            } else {
+                system_prompt_tokens = system_prompt_tokens.saturating_add(tokens);
+            }
+            seen_provider_system_messages = seen_provider_system_messages.saturating_add(1);
+            continue;
+        }
+
+        messages_tokens = messages_tokens.saturating_add(tokens);
+        let role = normalized_message_role(message);
+        let entry = role_counts.entry(role).or_default();
+        entry.count = entry.count.saturating_add(1);
+        entry.tokens = entry.tokens.saturating_add(tokens);
+    }
+    let selected_skill_context_messages =
+        selected_skill_context_provider_messages(request, base_url, &counting);
+    let selected_skill_context_tokens = selected_skill_context_messages
+        .iter()
+        .map(|message| count_value(enc, message))
+        .sum::<u64>();
+
+    let total_estimated_tokens = system_prompt_tokens
+        .saturating_add(system_tools_tokens)
+        .saturating_add(skills_tokens)
+        .saturating_add(messages_tokens);
+    OpenAiChatTokenCount {
+        encoding: encoding.name,
+        encoding_source: encoding.source,
+        encoding_fallback: encoding.fallback,
+        system_prompt_tokens,
+        system_tools_tokens,
+        skills_tokens,
+        messages_tokens,
+        total_estimated_tokens,
+        tool_count,
+        role_counts,
+        selected_skill_context_tokens,
+        selected_skill_context_count: selected_skill_context_messages.len(),
+        skill_names: counting.skill_names,
+        skill_entries,
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CountEncoding {
+    name: String,
+    source: String,
+    fallback: bool,
+}
+
+fn resolve_count_encoding(provider: &str, model: &str) -> CountEncoding {
+    if let Some(name) = tiktoken::model_to_encoding(model) {
+        return CountEncoding {
+            name: name.to_string(),
+            source: "model".to_string(),
+            fallback: false,
+        };
+    }
+    let provider = provider.to_lowercase();
+    let model = model.to_lowercase();
+    let guessed = if provider.contains("qwen")
+        || provider.contains("dashscope")
+        || model.contains("qwen")
+        || model.contains("qwq")
+    {
+        Some("qwen2")
+    } else if provider.contains("deepseek") || model.contains("deepseek") {
+        Some("deepseek_v3")
+    } else if provider.contains("llama") || model.contains("llama") {
+        Some("llama3")
+    } else if provider.contains("mistral") || model.contains("mistral") {
+        Some("mistral_v3")
+    } else if provider.contains("openai")
+        || provider.contains("openrouter")
+        || model.starts_with("gpt-")
+        || model.starts_with("o1")
+        || model.starts_with("o3")
+        || model.starts_with("o4")
+    {
+        Some("o200k_base")
+    } else {
+        None
+    };
+    if let Some(name) = guessed
+        && tiktoken::get_encoding(name).is_some()
+    {
+        return CountEncoding {
+            name: name.to_string(),
+            source: "provider_model_guess".to_string(),
+            fallback: false,
+        };
+    }
+    CountEncoding {
+        name: "o200k_base".to_string(),
+        source: "fallback".to_string(),
+        fallback: true,
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct RequestContextCountingMetadata {
+    system_prompt_message_count: usize,
+    skill_index_message_count: usize,
+    previous_message_count: usize,
+    selected_skill_context_message_count: usize,
+    skill_names: Vec<String>,
+}
+
+fn request_context_counting_metadata(
+    request: &GenerationRequest,
+) -> RequestContextCountingMetadata {
+    let Some(value) = request.metadata.get("context_counting") else {
+        return RequestContextCountingMetadata {
+            system_prompt_message_count: request
+                .messages
+                .iter()
+                .filter(|message| message.get("role").and_then(Value::as_str) == Some("system"))
+                .count(),
+            ..RequestContextCountingMetadata::default()
+        };
+    };
+    RequestContextCountingMetadata {
+        system_prompt_message_count: value
+            .get("system_prompt_message_count")
+            .and_then(Value::as_u64)
+            .unwrap_or_default() as usize,
+        skill_index_message_count: value
+            .get("skill_index_message_count")
+            .and_then(Value::as_u64)
+            .unwrap_or_default() as usize,
+        previous_message_count: value
+            .get("previous_message_count")
+            .and_then(Value::as_u64)
+            .unwrap_or_default() as usize,
+        selected_skill_context_message_count: value
+            .get("selected_skill_context_message_count")
+            .and_then(Value::as_u64)
+            .unwrap_or_default() as usize,
+        skill_names: value
+            .get("skill_names")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect(),
+    }
+}
+
+fn count_value(enc: &tiktoken::CoreBpe, value: &Value) -> u64 {
+    serde_json::to_string(value)
+        .map(|text| count_text(enc, &text))
+        .unwrap_or(0)
+}
+
+fn count_text(enc: &tiktoken::CoreBpe, text: &str) -> u64 {
+    enc.encode(text).len() as u64
+}
+
+fn skill_entry_token_counts(
+    enc: &tiktoken::CoreBpe,
+    provider_message: &Value,
+) -> Vec<OpenAiChatSkillTokenCount> {
+    let Some(content) = provider_message.get("content").and_then(Value::as_str) else {
+        return Vec::new();
+    };
+    let mut rest = content;
+    let mut entries = Vec::new();
+    while let Some(start_index) = rest.find("<skill>") {
+        rest = &rest[start_index + "<skill>".len()..];
+        let Some(end_index) = rest.find("</skill>") else {
+            break;
+        };
+        let entry = &rest[..end_index];
+        if let Some(name) = skill_entry_name(entry) {
+            entries.push(OpenAiChatSkillTokenCount {
+                name: name.to_string(),
+                tokens: count_text(enc, entry),
+            });
+        }
+        rest = &rest[end_index + "</skill>".len()..];
+    }
+    entries
+}
+
+fn skill_entry_name(entry: &str) -> Option<&str> {
+    let start = entry.find("<name>")? + "<name>".len();
+    let end = entry[start..].find("</name>")? + start;
+    let name = entry[start..end].trim();
+    (!name.is_empty()).then_some(name)
+}
+
+fn selected_skill_context_provider_messages(
+    request: &GenerationRequest,
+    base_url: &str,
+    counting: &RequestContextCountingMetadata,
+) -> Vec<Value> {
+    if counting.selected_skill_context_message_count == 0 {
+        return Vec::new();
+    }
+    let start = counting.previous_message_count;
+    let end = start.saturating_add(counting.selected_skill_context_message_count);
+    let mut seen_non_system_messages = 0usize;
+    let mut messages = Vec::new();
+    for message in &request.messages {
+        if message.get("role").and_then(Value::as_str) == Some("system") {
+            continue;
+        }
+        if seen_non_system_messages >= start && seen_non_system_messages < end {
+            messages.extend(translate_message(message, &request.model, base_url));
+        }
+        seen_non_system_messages = seen_non_system_messages.saturating_add(1);
+    }
+    merge_adjacent_user_messages(messages)
+}
+
+fn normalized_message_role(message: &Value) -> String {
+    match message.get("role").and_then(Value::as_str).unwrap_or("unknown") {
+        "tool_result" => "tool".to_string(),
+        other => other.to_string(),
+    }
+}
+
 fn capability_is_false(metadata: &Value, key: &str) -> bool {
     metadata
         .get("model_metadata")

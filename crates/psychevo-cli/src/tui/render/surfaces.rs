@@ -270,8 +270,127 @@ fn render_status(frame: &mut Frame<'_>, area: Rect, app: &TuiApp, ui: &Fullscree
             spans.push(Span::styled("Esc", theme.accent_style()));
         }
     }
+    if let Some(context) = bottom_status_context(app, ui, area.width, spans_width(&spans)) {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(context, theme.dim_style()));
+    }
     let line = Line::from(spans);
     frame.render_widget(Paragraph::new(line), area);
+}
+
+fn spans_width(spans: &[Span<'_>]) -> usize {
+    spans
+        .iter()
+        .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+        .sum()
+}
+
+fn bottom_status_context(
+    app: &TuiApp,
+    ui: &FullscreenUi<'_>,
+    area_width: u16,
+    stable_width: usize,
+) -> Option<String> {
+    const STATUS_CONTEXT_GAP: usize = 2;
+    let available = usize::from(area_width)
+        .saturating_sub(stable_width)
+        .saturating_sub(STATUS_CONTEXT_GAP);
+    if available == 0 {
+        return None;
+    }
+    bottom_status_context_for_width(app, ui, available)
+}
+
+fn bottom_status_context_for_width(
+    app: &TuiApp,
+    ui: &FullscreenUi<'_>,
+    available_width: usize,
+) -> Option<String> {
+    const STATUS_WORKDIR_MIN_WIDTH: usize = 8;
+    const SEP_WIDTH: usize = 3;
+
+    let home = home_dir_for_display(app);
+    let full_workdir = directory_display_value(&app.workdir, home.as_deref());
+    let branch = bottom_status_branch(&ui.sidebar.branch);
+    let context = bottom_status_context_usage(ui);
+
+    let mut segments = vec![full_workdir.as_str()];
+    if let Some(branch) = branch.as_deref() {
+        segments.push(branch);
+    }
+    if let Some(context) = context.as_deref() {
+        segments.push(context);
+    }
+    if let Some(value) = joined_segments_if_fits(&segments, available_width) {
+        return Some(value);
+    }
+
+    let mut segments = vec![full_workdir.as_str()];
+    if let Some(context) = context.as_deref() {
+        segments.push(context);
+    }
+    if let Some(value) = joined_segments_if_fits(&segments, available_width) {
+        return Some(value);
+    }
+
+    if let Some(context) = context.as_deref() {
+        let context_width = UnicodeWidthStr::width(context);
+        let required_without_workdir = context_width.saturating_add(SEP_WIDTH);
+        if available_width > required_without_workdir {
+            let workdir_width = available_width.saturating_sub(required_without_workdir);
+            if workdir_width >= STATUS_WORKDIR_MIN_WIDTH {
+                let workdir =
+                    format_directory_display_with_home(&app.workdir, home.as_deref(), workdir_width);
+                return Some(format!("{workdir} · {context}"));
+            }
+        }
+    }
+
+    if available_width < STATUS_WORKDIR_MIN_WIDTH {
+        return None;
+    }
+    let workdir = format_directory_display_with_home(&app.workdir, home.as_deref(), available_width);
+    (!workdir.is_empty()).then_some(workdir)
+}
+
+fn bottom_status_branch(branch: &str) -> Option<String> {
+    let branch = branch.trim();
+    if branch.is_empty() || branch == "(none)" {
+        None
+    } else {
+        Some(branch.to_string())
+    }
+}
+
+fn bottom_status_context_usage(ui: &FullscreenUi<'_>) -> Option<String> {
+    if let Some(snapshot) = ui
+        .last_context_snapshot
+        .as_ref()
+        .filter(|snapshot| snapshot.context_limit.is_some())
+    {
+        return Some(format_context_total_value(snapshot));
+    }
+    let tokens = ui.sidebar_tokens?;
+    let limit = ui.sidebar_context_limit.filter(|limit| *limit > 0)?;
+    let percent = tokens as f64 / limit as f64 * 100.0;
+    Some(format_context_total_value_parts(
+        tokens,
+        false,
+        Some(limit),
+        Some(percent),
+    ))
+}
+
+fn joined_segments_if_fits(segments: &[&str], available_width: usize) -> Option<String> {
+    if segments.is_empty() {
+        return None;
+    }
+    let width = segments
+        .iter()
+        .map(|segment| UnicodeWidthStr::width(*segment))
+        .sum::<usize>()
+        .saturating_add(segments.len().saturating_sub(1) * 3);
+    (width <= available_width).then(|| segments.join(" · "))
 }
 
 fn render_sidebar(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_>) {
@@ -284,23 +403,8 @@ fn render_sidebar(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_>) 
         )),
         Line::from(format!("session: {}", ui.sidebar.session)),
         Line::from(""),
-        sidebar_heading("Context"),
-        Line::from(format!("workdir: {}", ui.sidebar.workdir)),
-        Line::from(format!("branch: {}", ui.sidebar.branch)),
+        sidebar_heading("Modified Files"),
     ];
-    lines.push(Line::from(format!("messages: {}", ui.sidebar.message_count)));
-    lines.push(Line::from(format!("tool calls: {}", ui.sidebar.tool_count)));
-    if let Some(tokens) = ui.sidebar.tokens {
-        lines.push(Line::from(format!("tokens: {}", format_count(tokens))));
-    }
-    if let Some(percent) = ui.sidebar.context_percent {
-        lines.push(Line::from(format!("context: {percent:.1}%")));
-    }
-    if let Some(cost) = ui.sidebar.cost_nanodollars {
-        lines.push(Line::from(format!("cost: {}", format_nanodollars(cost))));
-    }
-    lines.push(Line::from(""));
-    lines.push(sidebar_heading("Modified Files"));
     if ui.sidebar.changed_files.is_empty() {
         lines.push(Line::from(Span::styled(
             "(clean)",
@@ -323,8 +427,16 @@ fn render_bottom_panel(
 ) {
     let theme = tui_theme();
     row_areas.clear();
+    if let BottomPanel::Help(panel) = panel {
+        render_help_panel(frame, area, panel);
+        return;
+    }
     if let BottomPanel::ProviderWizard(panel) = panel {
         render_provider_wizard_panel(frame, area, panel);
+        return;
+    }
+    if let BottomPanel::Models(panel) = panel {
+        render_model_panel(frame, area, panel, row_areas);
         return;
     }
     frame.render_widget(
@@ -338,7 +450,8 @@ fn render_bottom_panel(
         height: area.height.saturating_sub(2),
     };
     let selection = panel.selection_mut();
-    let reserved = 4 + if selection.notice.is_some() { 1 } else { 0 };
+    let notice_rows = if selection.notice.is_some() { 1 } else { 0 };
+    let reserved = 4 + notice_rows;
     let visible_rows = inner.height.saturating_sub(reserved).max(1);
     selection.ensure_selected_visible(visible_rows);
 
@@ -419,6 +532,459 @@ fn render_bottom_panel(
     )));
 
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
+}
+
+fn render_model_panel(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    panel: &mut ModelPanel,
+    row_areas: &mut Vec<(usize, Rect)>,
+) {
+    let theme = tui_theme();
+    row_areas.clear();
+    frame.render_widget(Block::default().style(theme.menu_style()), area);
+    let inner = Rect {
+        x: area.x.saturating_add(2),
+        y: area.y.saturating_add(1),
+        width: area.width.saturating_sub(4),
+        height: area.height.saturating_sub(2),
+    };
+    match panel.tab {
+        ModelTab::Models => render_model_list_tab(frame, inner, panel, row_areas),
+        ModelTab::Info => render_model_info_tab(frame, inner, panel),
+    }
+}
+
+fn render_model_list_tab(
+    frame: &mut Frame<'_>,
+    inner: Rect,
+    panel: &mut ModelPanel,
+    row_areas: &mut Vec<(usize, Rect)>,
+) {
+    let theme = tui_theme();
+    let selection = &mut panel.models;
+    let notice_rows = if selection.notice.is_some() { 1 } else { 0 };
+    let reserved = 4 + notice_rows;
+    let visible_rows = inner.height.saturating_sub(reserved).max(1);
+    selection.ensure_selected_visible(visible_rows);
+
+    let mut lines = Vec::new();
+    lines.push(model_panel_tabs(panel.tab));
+    lines.push(Line::from(vec![
+        Span::styled("Search ", theme.dim_style()),
+        Span::styled(selection.query.clone(), Style::default()),
+    ]));
+    let mut row_y = inner.y.saturating_add(lines.len() as u16);
+
+    let filtered = selection.filtered_indices();
+    if filtered.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            selection.empty_label.clone(),
+            theme.dim_style(),
+        )));
+    } else {
+        let mut last_group: Option<String> = None;
+        for (visible_index, row_index) in filtered
+            .iter()
+            .enumerate()
+            .skip(selection.scroll as usize)
+            .take(visible_rows as usize)
+        {
+            let row = &selection.rows[*row_index];
+            if row.group != last_group
+                && let Some(group) = row.group.clone()
+            {
+                lines.push(Line::from(Span::styled(
+                    group.clone(),
+                    theme.accent_style().add_modifier(Modifier::BOLD),
+                )));
+                row_y = row_y.saturating_add(1);
+                last_group = Some(group);
+            }
+            row_areas.push((
+                visible_index,
+                Rect {
+                    x: inner.x,
+                    y: row_y,
+                    width: inner.width,
+                    height: 1,
+                },
+            ));
+            lines.push(bottom_panel_row(
+                row,
+                visible_index == selection.selected,
+                inner.width,
+            ));
+            row_y = row_y.saturating_add(1);
+        }
+    }
+    lines.push(Line::from(""));
+    if let Some(notice) = &selection.notice {
+        lines.push(Line::from(Span::styled(
+            notice.clone(),
+            theme.dim_style(),
+        )));
+    }
+    lines.push(Line::from(Span::styled(
+        model_list_footer_text(selection),
+        theme.dim_style(),
+    )));
+
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
+}
+
+fn render_model_info_tab(frame: &mut Frame<'_>, inner: Rect, panel: &mut ModelPanel) {
+    let theme = tui_theme();
+    let body = model_info_body(panel);
+    let body_height = inner.height.saturating_sub(3).max(1);
+    let max_scroll = body.len().saturating_sub(body_height as usize) as u16;
+    panel.info_scroll = panel.info_scroll.min(max_scroll);
+
+    let mut lines = vec![model_panel_tabs(panel.tab), Line::from("")];
+    lines.extend(
+        body.into_iter()
+            .skip(panel.info_scroll as usize)
+            .take(body_height as usize),
+    );
+    while lines.len() < inner.height.saturating_sub(1) as usize {
+        lines.push(Line::from(""));
+    }
+    lines.push(Line::from(Span::styled(
+        "Esc close  Ctrl+R refresh metadata  Tab/Left/Right section  Up/Down scroll",
+        theme.dim_style(),
+    )));
+
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+}
+
+fn model_panel_tabs(active: ModelTab) -> Line<'static> {
+    let theme = tui_theme();
+    let mut spans = vec![Span::styled("Model", theme.accent_style())];
+    for tab in ModelPanel::tabs() {
+        spans.push(Span::raw("  "));
+        let style = if *tab == active {
+            theme.selected_row_style()
+        } else {
+            Style::default()
+        };
+        spans.push(Span::styled(format!(" {} ", tab.label()), style));
+    }
+    Line::from(spans)
+}
+
+fn model_list_footer_text(selection: &BottomSelectionPanel) -> String {
+    let footer = selection.footer_text();
+    let footer = if footer.contains("Ctrl+R refresh metadata") {
+        footer
+    } else if let Some((left, right)) = footer.split_once("  Esc close") {
+        format!("{left}  Ctrl+R refresh metadata  Esc close{right}")
+    } else {
+        format!("{footer}  Ctrl+R refresh metadata")
+    };
+    if footer.contains("Tab/Right info") {
+        return footer;
+    }
+    if let Some((left, right)) = footer.split_once("  Esc close") {
+        return format!("{left}  Tab/Right info  Esc close{right}");
+    }
+    format!("{footer}  Tab/Right info")
+}
+
+fn model_info_body(panel: &ModelPanel) -> Vec<Line<'static>> {
+    let theme = tui_theme();
+    let Some(row) = panel.models.selected_row() else {
+        return vec![Line::from(Span::styled(
+            "No model selected",
+            theme.dim_style(),
+        ))];
+    };
+    let BottomSelectionValue::Model { model, source } = &row.value else {
+        return vec![Line::from(Span::styled(
+            "Select a model row to view metadata.",
+            theme.dim_style(),
+        ))];
+    };
+    model_info_lines(model, *source, row)
+}
+
+fn model_info_lines(
+    model: &ConfiguredModel,
+    source: ModelRowSource,
+    row: &BottomSelectionRow,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    lines.push(Line::from(format!(
+        "model: {}  provider: {} ({})",
+        format_model_spec(model),
+        model.provider_label, model.provider
+    )));
+    let mut state = Vec::new();
+    if row.is_current {
+        state.push("current".to_string());
+    }
+    if row.is_default {
+        state.push("config default".to_string());
+    }
+    state.extend(model_detail_source(model, source));
+    if !state.is_empty() {
+        lines.push(Line::from(format!("source: {}", state.join("  "))));
+    }
+
+    let limits = model_detail_limits(model);
+    if !limits.is_empty() {
+        lines.push(Line::from(format!("limits: {}", limits.join("  "))));
+    }
+
+    let capabilities = model_detail_capabilities(model);
+    if !capabilities.is_empty() {
+        lines.push(Line::from(format!(
+            "capabilities: {}",
+            capabilities.join("  ")
+        )));
+    }
+
+    let modalities = model_detail_modalities(model);
+    if !modalities.is_empty() {
+        lines.push(Line::from(format!("modalities: {}", modalities.join("  "))));
+    }
+
+    let mut pricing = model_detail_pricing(model).into_iter();
+    if let Some(first) = pricing.next() {
+        lines.push(Line::from(format!("pricing: {first}")));
+        lines.extend(pricing.map(Line::from));
+    }
+    lines
+}
+
+fn model_detail_limits(model: &ConfiguredModel) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let Some(limit) = model.context_limit {
+        lines.push(format!("context {}", format_count(limit)));
+    }
+    if let Some(limit) = model.metadata.limits.input {
+        lines.push(format!("input {}", format_count(limit)));
+    }
+    if let Some(limit) = model.metadata.limits.output {
+        lines.push(format!("output {}", format_count(limit)));
+    }
+    lines
+}
+
+fn model_detail_capabilities(model: &ConfiguredModel) -> Vec<String> {
+    let caps = &model.metadata.capabilities;
+    let mut parts = Vec::new();
+    push_bool_capability(&mut parts, caps.reasoning, "reasoning", "no reasoning");
+    push_bool_capability(&mut parts, caps.tool_call, "tools", "no tools");
+    push_bool_capability(
+        &mut parts,
+        caps.temperature,
+        "temperature",
+        "no temperature",
+    );
+    push_bool_capability(
+        &mut parts,
+        caps.attachment,
+        "attachments",
+        "no attachments",
+    );
+    push_bool_capability(
+        &mut parts,
+        caps.structured_output,
+        "structured output",
+        "no structured output",
+    );
+    match caps.interleaved.as_ref() {
+        Some(Value::Bool(false)) => parts.push("no interleaved".to_string()),
+        Some(_) => parts.push("interleaved".to_string()),
+        None => {}
+    }
+    parts
+}
+
+fn model_detail_modalities(model: &ConfiguredModel) -> Vec<String> {
+    let caps = &model.metadata.capabilities;
+    let mut lines = Vec::new();
+    if !caps.input_modalities.is_empty() {
+        lines.push(format!("input: {}", caps.input_modalities.join(", ")));
+    }
+    if !caps.output_modalities.is_empty() {
+        lines.push(format!("output: {}", caps.output_modalities.join(", ")));
+    }
+    lines
+}
+
+fn push_bool_capability(
+    parts: &mut Vec<String>,
+    value: Option<bool>,
+    enabled: &str,
+    disabled: &str,
+) {
+    match value {
+        Some(true) => parts.push(enabled.to_string()),
+        Some(false) => parts.push(disabled.to_string()),
+        None => {}
+    }
+}
+
+fn model_detail_pricing(model: &ConfiguredModel) -> Vec<String> {
+    let Some(cost) = &model.metadata.cost else {
+        return Vec::new();
+    };
+    let mut parts = Vec::new();
+    match (cost.input, cost.output) {
+        (Some(0.0), Some(0.0)) => {
+            parts.push("standard: free".to_string());
+        }
+        (Some(input), Some(output)) => {
+            parts.push(format!("standard: in/out {}", format_model_rate_pair(input, output)));
+        }
+        (Some(value), None) => parts.push(format!("standard: input {}", format_model_rate(value))),
+        (None, Some(value)) => {
+            parts.push(format!("standard: output {}", format_model_rate(value)));
+        }
+        (None, None) => {}
+    }
+    match (cost.cache_read, cost.cache_write) {
+        (Some(read), Some(write)) => {
+            parts.push(format!(
+                "cache: read/write {}",
+                format_model_rate_pair(read, write)
+            ));
+        }
+        (Some(value), None) => parts.push(format!("cache: read {}", format_model_rate(value))),
+        (None, Some(value)) => parts.push(format!("cache: write {}", format_model_rate(value))),
+        (None, None) => {}
+    }
+    if let Some(tier) = &cost.context_over_200k {
+        let mut tier_parts = Vec::new();
+        match (tier.input, tier.output) {
+            (Some(input), Some(output)) => {
+                tier_parts.push(format!("in/out {}", format_model_rate_pair(input, output)));
+            }
+            (Some(value), None) => tier_parts.push(format!("input {}", format_model_rate(value))),
+            (None, Some(value)) => {
+                tier_parts.push(format!("output {}", format_model_rate(value)));
+            }
+            (None, None) => {}
+        }
+        match (tier.cache_read, tier.cache_write) {
+            (Some(read), Some(write)) => tier_parts.push(format!(
+                "cache read/write {}",
+                format_model_rate_pair(read, write)
+            )),
+            (Some(value), None) => tier_parts.push(format!("cache read {}", format_model_rate(value))),
+            (None, Some(value)) => tier_parts.push(format!("cache write {}", format_model_rate(value))),
+            (None, None) => {}
+        }
+        if !tier_parts.is_empty() {
+            parts.push(format!("over-200k: {}", tier_parts.join(" ")));
+        }
+    }
+    if let Some(source) = &cost.source {
+        parts.push(format!("source: {source}"));
+    }
+    parts
+}
+
+fn model_detail_source(model: &ConfiguredModel, source: ModelRowSource) -> Vec<String> {
+    let mut parts = vec![match source {
+        ModelRowSource::Local => "local".to_string(),
+        ModelRowSource::Fetched => "fetched".to_string(),
+        ModelRowSource::CurrentOnly => "current only".to_string(),
+    }];
+    if let Some(source) = &model.metadata.source {
+        parts.push(format!("metadata {source}"));
+    }
+    if let Some(variant) = &model.reasoning_effort {
+        parts.push(format!("default {variant}"));
+    }
+    parts
+}
+
+fn format_model_rate(value: f64) -> String {
+    format!("${value:.3}/M")
+}
+
+fn format_model_rate_pair(left: f64, right: f64) -> String {
+    format!("${left:.3}/${right:.3}/M")
+}
+
+fn render_help_panel(frame: &mut Frame<'_>, area: Rect, panel: &mut HelpPanel) {
+    let theme = tui_theme();
+    frame.render_widget(Block::default().style(theme.menu_style()), area);
+    let inner = Rect {
+        x: area.x.saturating_add(2),
+        y: area.y.saturating_add(1),
+        width: area.width.saturating_sub(4),
+        height: area.height.saturating_sub(2),
+    };
+
+    let body = help_panel_body(panel);
+    let body_height = inner.height.saturating_sub(4).max(1);
+    let max_scroll = body.len().saturating_sub(body_height as usize) as u16;
+    panel.scroll = panel.scroll.min(max_scroll);
+
+    let mut lines = vec![help_panel_tabs(panel.tab), Line::from("")];
+    lines.extend(
+        body.into_iter()
+            .skip(panel.scroll as usize)
+            .take(body_height as usize),
+    );
+    while lines.len() < inner.height.saturating_sub(1) as usize {
+        lines.push(Line::from(""));
+    }
+    lines.push(Line::from(Span::styled(
+        "Esc close  Tab/Left/Right section  Up/Down scroll",
+        theme.dim_style(),
+    )));
+
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+}
+
+fn help_panel_tabs(active: HelpTab) -> Line<'static> {
+    let theme = tui_theme();
+    let mut spans = vec![Span::styled("Help", theme.accent_style())];
+    for tab in HelpPanel::tabs() {
+        spans.push(Span::raw("  "));
+        let style = if *tab == active {
+            theme.selected_row_style()
+        } else {
+            Style::default()
+        };
+        spans.push(Span::styled(format!(" {} ", tab.label()), style));
+    }
+    Line::from(spans)
+}
+
+fn help_panel_body(panel: &HelpPanel) -> Vec<Line<'static>> {
+    let sections = slash_help_sections(panel.skill_count);
+    let lines = match panel.tab {
+        HelpTab::General => sections.general,
+        HelpTab::Commands => sections.commands,
+        HelpTab::CustomCommands => sections.custom_commands,
+    };
+    lines
+        .into_iter()
+        .map(|line| help_panel_body_line(&line))
+        .collect()
+}
+
+fn help_panel_body_line(line: &str) -> Line<'static> {
+    let theme = tui_theme();
+    if line.is_empty() {
+        return Line::from("");
+    }
+    if matches!(line, "Shortcuts" | "Common commands") {
+        return Line::from(Span::styled(
+            line.to_string(),
+            Style::default().add_modifier(Modifier::BOLD),
+        ));
+    }
+    if line == "No custom commands available" {
+        return Line::from(Span::styled(line.to_string(), theme.dim_style()));
+    }
+    Line::from(line.to_string())
 }
 
 fn render_provider_wizard_panel(

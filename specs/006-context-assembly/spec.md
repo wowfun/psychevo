@@ -20,7 +20,7 @@ Out of scope:
 - prompt wording, prompt templates, prompt section ordering, or provider role mapping
 - exact provider request fields, response fields, stream fields, or wire formats
 - exact source discovery rules, concrete file names, attachment syntax, or lookup syntax
-- token counting, context-window thresholds, reserve budgets, or truncation limits
+- context-window reserve budgets, truncation limits, or compaction policy
 - compaction algorithms, summarization algorithms, or summary schemas
 - memory retention behavior, skill package formats or lifecycle management,
   session storage layouts, branches, replay formats, or workflow behavior
@@ -70,6 +70,42 @@ The assembled model context is an input to the generation request defined by [00
 Context assembly facts needed for agent-invocation inspection must be connectable to durable evidence. [005 Durable Evidence](../005-durable-evidence/spec.md) defines which durable evidence facts must be representable; this spec does not require full prompt snapshots.
 
 Context projection is not required to write source material or projected material into session messages. If a projection becomes loop-visible message material, [002 Agent Execution](../002-agent-execution/spec.md) owns the message semantics.
+
+## Context Usage Projection
+
+Runtime may expose a context usage projection for the most recent provider
+generation request or for a persisted session estimate. This projection is an
+inspection aid; it must not redefine context assembly semantics, mutate session
+state, or persist full prompt/request text.
+
+The first projection includes only source categories Psychevo can compute:
+
+- system prompt
+- system tools
+- skills
+- messages
+- free space when a context limit is known
+
+Human-readable context usage output may label the model-facing `messages`
+category as `input_messages` to distinguish it from interface-visible message
+counts. Structured snapshots retain the `messages` category key.
+
+Provider-reported input/context token usage, when available, is authoritative
+for the headline total. Category totals are tokenizer estimates. If provider
+usage is unavailable, the estimated category total may be used as the headline
+and must be marked estimated.
+
+Runtime-owned context usage data must retain counts, labels, category names,
+tool counts, role counts, selected skill names, and per-skill index-entry
+token counts only. Per-skill index-entry counts describe the compact skills
+index entry, not loaded skill body text. It must not retain message bodies,
+skill bodies, tool argument bodies, or provider request text after counting
+completes.
+
+For live agent invocations, the latest provider generation request wins. For
+persisted session estimates, the projection uses current local runtime
+assembly rules and persisted session messages; historical selected skill
+bodies are not reconstructed unless explicitly available.
 
 ## Context Transformation
 

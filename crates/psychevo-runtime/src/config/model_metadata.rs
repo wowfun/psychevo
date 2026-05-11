@@ -1,7 +1,7 @@
 const MODELS_DEV_URL: &str = "https://models.dev/api.json";
 const MODELS_DEV_CACHE_FILE: &str = "models_dev_cache.json";
-const MODELS_DEV_CACHE_TTL: Duration = Duration::from_secs(60 * 60);
-const MODELS_DEV_FETCH_TIMEOUT: Duration = Duration::from_secs(3);
+const MODELS_DEV_FETCH_TIMEOUT_SECS: u64 = 15;
+const MODELS_DEV_URL_ENV: &str = "PSYCHEVO_MODELS_DEV_URL";
 
 fn resolve_model_metadata_cache_first(
     provider: &str,
@@ -20,49 +20,6 @@ fn resolve_model_metadata_cache_first(
         metadata = merge_model_metadata(metadata, config_entry.metadata.clone());
     }
     metadata
-}
-
-async fn resolve_model_metadata_live(
-    provider: &str,
-    model: &str,
-    base_url: Option<&str>,
-    config_entry: Option<&ConfigModelEntry>,
-    env_map: &BTreeMap<String, String>,
-) -> ModelMetadata {
-    let mut metadata = built_in_model_metadata(provider, model).unwrap_or_default();
-    if let Some(registry) = load_models_dev_registry(env_map).await
-        && let Some(models_dev) = models_dev_metadata(&registry, provider, model, base_url)
-    {
-        metadata = merge_model_metadata(metadata, models_dev);
-    }
-    if let Some(config_entry) = config_entry {
-        metadata = merge_model_metadata(metadata, config_entry.metadata.clone());
-    }
-    metadata
-}
-
-pub(crate) async fn refresh_resolved_run_provider_metadata(
-    resolved: &mut ResolvedRunProvider,
-    loaded: &LoadedRunConfig,
-) {
-    if is_loopback_base_url(&resolved.base_url) {
-        return;
-    }
-    let config_entry = loaded.config.provider.get(&resolved.provider);
-    let model_config = config_model_entry(config_entry, &resolved.model);
-    let metadata = resolve_model_metadata_live(
-        &resolved.provider,
-        &resolved.model,
-        Some(&resolved.base_url),
-        model_config,
-        &loaded.env,
-    )
-    .await;
-    if metadata.capabilities.reasoning == Some(false) {
-        resolved.reasoning_effort = None;
-    }
-    resolved.context_limit = metadata.context_limit();
-    resolved.metadata = metadata;
 }
 
 fn merge_model_metadata(mut base: ModelMetadata, overlay: ModelMetadata) -> ModelMetadata {
@@ -115,43 +72,90 @@ fn merge_capabilities(base: &mut ModelCapabilities, overlay: ModelCapabilities) 
     }
 }
 
-async fn load_models_dev_registry(env_map: &BTreeMap<String, String>) -> Option<Value> {
-    if let Some(path) = models_dev_cache_path(env_map)
-        && let Ok(metadata) = fs::metadata(&path)
-        && let Ok(modified) = metadata.modified()
-        && modified
-            .elapsed()
-            .is_ok_and(|elapsed| elapsed <= MODELS_DEV_CACHE_TTL)
-        && let Some(value) = read_json_file(&path)
-    {
-        return Some(value);
+pub async fn refresh_model_metadata_cache(
+    home: PathBuf,
+    env_map: BTreeMap<String, String>,
+    targets: Vec<ModelMetadataCacheTarget>,
+) -> Result<()> {
+    if targets.is_empty() {
+        return Err(Error::Message("no model metadata targets".to_string()));
     }
-
-    if let Some(value) = fetch_models_dev_registry().await {
-        if let Some(path) = models_dev_cache_path(env_map) {
-            if let Some(parent) = path.parent() {
-                let _ = fs::create_dir_all(parent);
-            }
-            let _ = fs::write(&path, value.to_string());
-        }
-        return Some(value);
+    let value = fetch_models_dev_registry(&models_dev_url(&env_map)).await?;
+    let value = prune_models_dev_registry(&value, &targets)
+        .ok_or_else(|| Error::Message("no matching models.dev metadata".to_string()))?;
+    let path = models_dev_cache_path_for_home(&home);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
     }
-
-    read_models_dev_cache(env_map)
+    let temp_path = path.with_file_name(format!("{MODELS_DEV_CACHE_FILE}.tmp"));
+    fs::write(&temp_path, serde_json::to_vec(&value)?)?;
+    fs::rename(temp_path, path)?;
+    Ok(())
 }
 
-async fn fetch_models_dev_registry() -> Option<Value> {
+async fn fetch_models_dev_registry(url: &str) -> Result<Value> {
     let client = reqwest::Client::new();
-    tokio::time::timeout(MODELS_DEV_FETCH_TIMEOUT, async {
-        let response = client.get(MODELS_DEV_URL).send().await.ok()?;
+    tokio::time::timeout(Duration::from_secs(MODELS_DEV_FETCH_TIMEOUT_SECS), async {
+        let response = client.get(url).send().await?;
         if !response.status().is_success() {
-            return None;
+            return Err(Error::Message(format!(
+                "models.dev returned {}",
+                response.status()
+            )));
         }
-        response.json::<Value>().await.ok()
+        response.json::<Value>().await.map_err(Error::from)
     })
     .await
-    .ok()
-    .flatten()
+    .map_err(|_| {
+        Error::Message(format!(
+            "models.dev refresh timed out after {MODELS_DEV_FETCH_TIMEOUT_SECS}s"
+        ))
+    })?
+}
+
+fn prune_models_dev_registry(
+    registry: &Value,
+    targets: &[ModelMetadataCacheTarget],
+) -> Option<Value> {
+    let providers = registry.as_object()?;
+    let mut pruned = serde_json::Map::new();
+    for target in targets {
+        let Some(provider_key) =
+            models_dev_provider_key(providers, &target.provider, target.base_url.as_deref())
+        else {
+            continue;
+        };
+        let Some(provider_value) = providers.get(&provider_key) else {
+            continue;
+        };
+        let Some((model_id, model_value)) =
+            models_dev_model_entry(provider_value, &target.model)
+        else {
+            continue;
+        };
+        let provider_entry = pruned
+            .entry(provider_key)
+            .or_insert_with(|| provider_without_models(provider_value));
+        let Some(provider_object) = provider_entry.as_object_mut() else {
+            continue;
+        };
+        let models = provider_object
+            .entry("models".to_string())
+            .or_insert_with(|| Value::Object(serde_json::Map::new()));
+        if let Some(models_object) = models.as_object_mut() {
+            models_object.insert(model_id, model_value);
+        }
+    }
+    (!pruned.is_empty()).then_some(Value::Object(pruned))
+}
+
+fn provider_without_models(provider_value: &Value) -> Value {
+    let mut provider = provider_value
+        .as_object()
+        .cloned()
+        .unwrap_or_else(serde_json::Map::new);
+    provider.insert("models".to_string(), Value::Object(serde_json::Map::new()));
+    Value::Object(provider)
 }
 
 fn read_models_dev_cache(env_map: &BTreeMap<String, String>) -> Option<Value> {
@@ -161,7 +165,20 @@ fn read_models_dev_cache(env_map: &BTreeMap<String, String>) -> Option<Value> {
 fn models_dev_cache_path(env_map: &BTreeMap<String, String>) -> Option<PathBuf> {
     resolve_psychevo_home(env_map)
         .ok()
-        .map(|home| home.join(MODELS_DEV_CACHE_FILE))
+        .map(|home| models_dev_cache_path_for_home(&home))
+}
+
+fn models_dev_cache_path_for_home(home: &Path) -> PathBuf {
+    home.join(MODELS_DEV_CACHE_FILE)
+}
+
+fn models_dev_url(env_map: &BTreeMap<String, String>) -> String {
+    env_map
+        .get(MODELS_DEV_URL_ENV)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .unwrap_or(MODELS_DEV_URL)
+        .to_string()
 }
 
 fn read_json_file(path: &Path) -> Option<Value> {
@@ -178,24 +195,29 @@ fn models_dev_metadata(
     let providers = registry.as_object()?;
     let provider_key = models_dev_provider_key(providers, provider, base_url)?;
     let provider_value = providers.get(&provider_key)?;
-    let model_value = provider_value
+    let (_, model_value) = models_dev_model_entry(provider_value, model)?;
+    Some(metadata_from_models_dev_model(
+        provider_key,
+        model_value,
+        "models.dev",
+    ))
+}
+
+fn models_dev_model_entry(provider_value: &Value, model: &str) -> Option<(String, Value)> {
+    provider_value
         .get("models")
         .and_then(Value::as_object)
         .and_then(|models| {
             models
                 .get(model)
+                .map(|value| (model.to_string(), value.clone()))
                 .or_else(|| {
                     models
                         .iter()
                         .find(|(id, _)| id.eq_ignore_ascii_case(model))
-                        .map(|(_, value)| value)
+                        .map(|(id, value)| (id.clone(), value.clone()))
                 })
-        })?;
-    Some(metadata_from_models_dev_model(
-        provider_key,
-        model_value.clone(),
-        "models.dev",
-    ))
+        })
 }
 
 fn models_dev_provider_key(
@@ -334,38 +356,31 @@ fn parse_metadata_capabilities(value: &Value) -> ModelCapabilities {
 fn built_in_model_metadata(provider: &str, model: &str) -> Option<ModelMetadata> {
     let provider = normalize_provider_id(provider);
     let lower = model.to_lowercase();
+
     let context = match provider.as_str() {
         "deepseek"
             if lower.contains("deepseek-v4")
                 || lower.contains("deepseek-chat")
                 || lower.contains("deepseek-reasoner") =>
         {
-            Some(1_000_000)
+            1_000_000
         }
-        "xiaomi" | "xiaomi-token-plan" | "xiaomi-token-plan-cn"
-            if lower.contains("mimo-v2.5-pro")
-                || lower.contains("mimo-v2-pro")
-                || lower == "mimo-v2.5"
-                || lower == "mimo-v2" =>
-        {
-            Some(1_048_576)
-        }
-        "xiaomi" | "xiaomi-token-plan" | "xiaomi-token-plan-cn"
-            if lower.contains("omni") || lower.contains("flash") =>
-        {
-            Some(262_144)
-        }
-        "openai" if lower.contains("gpt-4.1") || lower.contains("gpt-4o") => Some(128_000),
-        _ => None,
-    }?;
-    Some(ModelMetadata {
+        "openai" if lower.contains("gpt-4.1") || lower.contains("gpt-4o") => 128_000,
+        _ => return None,
+    };
+    Some(built_in_limits_metadata(context, None))
+}
+
+fn built_in_limits_metadata(context: u64, output: Option<u64>) -> ModelMetadata {
+    ModelMetadata {
         limits: ModelLimits {
             context: Some(context),
+            output,
             ..Default::default()
         },
         source: Some("built-in".to_string()),
         ..Default::default()
-    })
+    }
 }
 
 fn u64_from_keys(value: &Value, keys: &[&str]) -> Option<u64> {

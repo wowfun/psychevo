@@ -93,17 +93,17 @@ fn selection_can_copy_sidebar_rendered_text() {
     let line = ui
         .screen_lines
         .iter()
-        .find(|line| line.text() == "Context")
-        .expect("sidebar context line");
+        .find(|line| line.text() == "Modified Files")
+        .expect("sidebar modified files line");
     let (x, y) = (line.first_x(), line.y);
     ui.start_selection(x, y);
-    ui.update_selection(x + 7, y);
+    ui.update_selection(x + 14, y);
 
-    assert_eq!(ui.selected_text().as_deref(), Some("Context"));
+    assert_eq!(ui.selected_text().as_deref(), Some("Modified Files"));
 }
 
 #[test]
-fn sidebar_omits_source_mode_and_footer_chrome() {
+fn sidebar_omits_context_section_and_footer_chrome() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     app.current_mode = RunMode::Plan;
@@ -116,9 +116,21 @@ fn sidebar_omits_source_mode_and_footer_chrome() {
     let text = buffer_text(&buffer);
 
     assert!(text.contains("Review sidebar polish"));
-    assert!(text.contains("Context"));
     assert!(text.contains("Modified Files"));
-    for omitted in ["source: tui", "mode: plan", "Footer", "local facts only"] {
+    for omitted in [
+        "Context",
+        "workdir:",
+        "branch:",
+        "messages:",
+        "tool calls:",
+        "tokens:",
+        "context:",
+        "cost:",
+        "source: tui",
+        "mode: plan",
+        "Footer",
+        "local facts only",
+    ] {
         assert!(
             !text.contains(omitted),
             "sidebar should omit {omitted:?}:\n{text}"
@@ -167,7 +179,8 @@ fn sidebar_render_clears_stale_terminal_cells() {
     let text = buffer_text(&buffer);
     let sidebar_x = 120 - 42;
 
-    assert!(text.contains("tokens: 36,019"), "{text}");
+    assert!(text.contains("Modified Files"), "{text}");
+    assert!(!text.contains("tokens:"), "{text}");
     assert!(!text.contains("gokens"), "{text}");
     assert_eq!(
         buffer

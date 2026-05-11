@@ -1928,12 +1928,11 @@ fn live_reasoning_only_final_message_gets_turn_meta() {
 }
 
 #[test]
-fn sidebar_context_token_count_stays_visible_while_model_answers_without_usage() {
+fn bottom_context_usage_stays_visible_while_model_answers_without_usage() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
-    ui.sidebar_tokens = Some(12_345);
-    ui.sidebar_context_limit = Some(64_000);
+    ui.last_context_snapshot = Some(test_context_snapshot());
     ui.sidebar_forced = true;
     ui.sidebar_hidden = false;
     ui.start_assistant();
@@ -1949,11 +1948,10 @@ fn sidebar_context_token_count_stays_visible_while_model_answers_without_usage()
     );
     ui.refresh_sidebar(&app);
 
-    assert_eq!(ui.sidebar.tokens, Some(12_345));
-    assert!(ui.sidebar.context_percent.is_some());
     let buffer = draw_fullscreen_for_test(&app, &mut ui, 120, 18);
     let text = buffer_text(&buffer);
-    assert!(text.contains("tokens:"), "{text}");
+    assert!(text.contains("~50/100 (50.0%) estimated"), "{text}");
+    assert!(!text.contains("tokens:"), "{text}");
 
     ui.apply_value_event(
         &serde_json::json!({
@@ -1969,11 +1967,109 @@ fn sidebar_context_token_count_stays_visible_while_model_answers_without_usage()
     );
     ui.refresh_sidebar(&app);
 
-    assert_eq!(ui.sidebar.tokens, Some(12_345));
+    assert!(ui.last_context_snapshot.is_some());
 }
 
 #[test]
-fn sidebar_context_token_count_uses_input_tokens_when_later_usage_arrives() {
+fn bottom_status_line_renders_minimal_workdir_branch_and_context() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.sidebar.branch = "main".to_string();
+    ui.last_context_snapshot = Some(test_context_snapshot());
+
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 120, 12);
+    let text = buffer_text(&buffer);
+
+    assert!(
+        text.contains("mock/model  high  ~/work · main · ~50/100 (50.0%) estimated"),
+        "{text}"
+    );
+    assert!(!text.contains("workdir:"), "{text}");
+    assert!(!text.contains("context:"), "{text}");
+}
+
+#[test]
+fn bottom_status_context_hides_missing_branch_and_unknown_limit() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.sidebar.branch = "(none)".to_string();
+    ui.last_context_snapshot = Some(test_context_snapshot());
+
+    let text = bottom_status_context_for_width(&app, &ui, 80).expect("status context");
+    assert_eq!(text, "~/work · ~50/100 (50.0%) estimated");
+
+    let mut snapshot = test_context_snapshot();
+    snapshot.context_limit = None;
+    snapshot.total.percent = None;
+    ui.last_context_snapshot = Some(snapshot);
+    let text = bottom_status_context_for_width(&app, &ui, 80).expect("status context");
+    assert_eq!(text, "~/work");
+}
+
+#[test]
+fn bottom_status_context_uses_live_input_usage_before_snapshot() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.sidebar.branch = "main".to_string();
+    ui.sidebar_tokens = Some(29_800);
+    ui.sidebar_context_limit = Some(1_000_000);
+
+    let text = bottom_status_context_for_width(&app, &ui, 80).expect("status context");
+
+    assert_eq!(text, "~/work · main · 29.8k/1.0M (3.0%)");
+}
+
+#[test]
+fn bottom_status_context_hides_branch_before_context_usage() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.sidebar.branch = "main".to_string();
+    ui.last_context_snapshot = Some(test_context_snapshot());
+
+    let text = bottom_status_context_for_width(&app, &ui, 36).expect("status context");
+
+    assert_eq!(text, "~/work · ~50/100 (50.0%) estimated");
+}
+
+#[test]
+fn directory_display_uses_home_prefix_and_display_width_truncation() {
+    let home = Path::new("/home/kevin");
+
+    assert_eq!(
+        format_directory_display_with_home(Path::new("/home/kevin"), Some(home), 80),
+        "~"
+    );
+    assert_eq!(
+        format_directory_display_with_home(
+            Path::new("/home/kevin/Projects/psychevo"),
+            Some(home),
+            80
+        ),
+        "~/Projects/psychevo"
+    );
+    assert_eq!(
+        format_directory_display_with_home(Path::new("/opt/work"), Some(home), 80),
+        "/opt/work"
+    );
+
+    let truncated = format_directory_display_with_home(
+        Path::new("/home/kevin/项目/非常非常长的目录名/work"),
+        Some(home),
+        12,
+    );
+    assert!(truncated.contains('…'), "{truncated}");
+    assert!(
+        UnicodeWidthStr::width(truncated.as_str()) <= 12,
+        "{truncated}"
+    );
+}
+
+#[test]
+fn last_context_input_token_count_uses_input_tokens_when_later_usage_arrives() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -2001,7 +2097,7 @@ fn sidebar_context_token_count_uses_input_tokens_when_later_usage_arrives() {
 }
 
 #[test]
-fn sidebar_context_token_count_ignores_total_tokens_without_input_tokens() {
+fn last_context_input_token_count_ignores_total_tokens_without_input_tokens() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -2588,6 +2684,11 @@ async fn fullscreen_rename_updates_session_title_and_sidebar() {
         Some("Better Session Title")
     );
     assert_eq!(ui.sidebar.title, "Better Session Title");
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command
+            && row.title == "/rename Better Session Title"
+            && row.text == "session renamed: Better Session Title"
+    }));
     let summary = store
         .session_summary(&session_id)
         .expect("summary")
@@ -2596,7 +2697,7 @@ async fn fullscreen_rename_updates_session_title_and_sidebar() {
 }
 
 #[tokio::test]
-async fn removed_thinking_command_renders_bounded_error_in_fullscreen() {
+async fn obsolete_thinking_command_is_unknown_in_fullscreen() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -2606,9 +2707,10 @@ async fn removed_thinking_command_renders_bounded_error_in_fullscreen() {
         .await
         .expect("enter");
 
-    assert!(
-        ui.transcript.iter().any(|row| {
-            row.kind == TranscriptKind::Error && row.text.contains("/show-thinking")
-        })
-    );
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command
+            && row.title == "/thinking"
+            && row.failed
+            && row.text.contains("error: unknown slash command: /thinking")
+    }));
 }

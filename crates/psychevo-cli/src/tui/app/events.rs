@@ -3,6 +3,7 @@ impl TuiApp {
         let mut changed = false;
         changed |= self.drain_finished_auxiliary_agent_tasks(ui).await?;
         changed |= self.drain_finished_clipboard_copies(ui);
+        changed |= self.drain_model_metadata_refresh(ui).await?;
         changed |= self.drain_model_catalog_fetches(ui).await?;
         changed |= ui.drain_file_search_results();
 
@@ -42,7 +43,7 @@ impl TuiApp {
             let mut running = ui.running.take().expect("checked running");
             let task = running.task;
             let completed = match task {
-                RunningTask::Agent(task) => RunningCompletion::Agent(task.await),
+                RunningTask::Agent(task) => RunningCompletion::Agent(Box::new(task.await)),
                 RunningTask::UserShell(task) => RunningCompletion::UserShell(task.await),
             };
             let mut pending = VecDeque::new();
@@ -57,11 +58,13 @@ impl TuiApp {
             }
             let mut restore_queued_after_interrupt = false;
             match completed {
-                RunningCompletion::Agent(result) => match result {
+                RunningCompletion::Agent(result) => match *result {
                     Ok(Ok(result)) => {
                         let interrupted =
                             ui.interrupt_requested && result.outcome == Outcome::Aborted;
                         restore_queued_after_interrupt |= interrupted;
+                        self.last_context_snapshot = result.context_snapshot.clone();
+                        ui.last_context_snapshot = result.context_snapshot.clone();
                         self.current_session = Some(result.session_id.clone());
                         self.refresh_current_session_title()?;
                         self.force_new_once = false;
@@ -150,6 +153,12 @@ impl TuiApp {
         event: RunStreamEvent,
     ) -> bool {
         if let RunStreamEvent::Event(value) = &event {
+            if value.get("type").and_then(Value::as_str) == Some("context_snapshot")
+                && let Ok(snapshot) = serde_json::from_value::<ContextSnapshot>(value.clone())
+            {
+                self.last_context_snapshot = Some(snapshot.clone());
+                ui.last_context_snapshot = Some(snapshot);
+            }
             self.observe_fullscreen_value_event(value);
         }
         ui.apply_stream_event(event, self.thinking_visible, self.debug)
@@ -199,7 +208,10 @@ impl TuiApp {
         let mut pending = Vec::new();
         for task in std::mem::take(&mut ui.auxiliary_agent_tasks) {
             if task.is_finished() {
-                let _ = task.await;
+                if let Ok(Ok(result)) = task.await {
+                    self.last_context_snapshot = result.context_snapshot.clone();
+                    ui.last_context_snapshot = result.context_snapshot;
+                }
                 self.refresh_current_session_title()?;
                 ui.refresh_sidebar(self);
                 changed = true;

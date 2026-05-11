@@ -1,6 +1,5 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
-assertion_line: 612
 expression: combined
 ---
 fixture=consecutive_tool_rows_flat
@@ -26,7 +25,7 @@ The tool evidence stays flat even when several tool rows arrive consecutively.
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
 
-mock/model  high
+mock/model  high  ~/work · main
 
 --- styles ---
 [dim]› [default]Summarize several tool calls.
@@ -48,4 +47,4 @@ mock/model  high
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
 [default]
-[default]mock/model  [magenta]high[default]
+[default]mock/model  [magenta]high[default]  [dim]~/work · main[default]

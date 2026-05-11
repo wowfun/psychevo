@@ -23,7 +23,7 @@ size=120x18
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
 
-mock/model  high
+mock/model  high  ~/work · main
 
 --- styles ---
 [dim]› [default]Fetch comments from sqlite.
@@ -43,4 +43,4 @@ mock/model  high
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
 [default]
-[default]mock/model  [magenta]high[default]
+[default]mock/model  [magenta]high[default]  [dim]~/work · main[default]

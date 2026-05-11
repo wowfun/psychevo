@@ -1,4 +1,5 @@
 use super::*;
+use psychevo_runtime::{ContextCategory, ContextScope, ContextTokenizer, ContextTotal};
 use ratatui::backend::TestBackend;
 use std::fs;
 use std::io::{Read, Write};
@@ -181,7 +182,21 @@ fn write_tui_model_config(temp: &tempfile::TempDir) -> PathBuf {
                     "api_key_env": "TEST_PROVIDER_KEY"
                   },
                   "models": {
-                    "mock-model": {},
+                    "mock-model": {
+                      "limit": { "context": 128000, "input": 120000, "output": 16000 },
+                      "reasoning": true,
+                      "tool_call": true,
+                      "structured_output": true,
+                      "modalities": { "input": ["text", "image"], "output": ["text"] },
+                      "cost": {
+                        "input": 1.5,
+                        "output": 2.5,
+                        "cache_read": 0.15,
+                        "cache_write": 0.75,
+                        "context_over_200k": { "input": 3.0, "output": 5.0 },
+                        "source": "config"
+                      }
+                    },
                     "other-model": { "reasoning_effort": "high" }
                   }
                 }

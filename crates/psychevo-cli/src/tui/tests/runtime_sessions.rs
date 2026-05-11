@@ -87,6 +87,7 @@ fn finished_run_result(app: &TuiApp) -> psychevo_runtime::RunResult {
         context_limit: None,
         tool_failures: 0,
         selected_skills: Vec::new(),
+        context_snapshot: None,
         events: Vec::new(),
     }
 }
@@ -543,6 +544,7 @@ async fn fullscreen_agent_end_releases_turn_before_auxiliary_task_finishes() {
         context_limit: None,
         tool_failures: 0,
         selected_skills: Vec::new(),
+        context_snapshot: None,
         events: Vec::new(),
     };
     let (done_tx, done_rx) = tokio::sync::oneshot::channel();
@@ -620,6 +622,7 @@ async fn fullscreen_refreshes_title_after_detached_agent_task_finishes() {
             context_limit: None,
             tool_failures: 0,
             selected_skills: Vec::new(),
+            context_snapshot: None,
             events: Vec::new(),
         })
     });
@@ -668,6 +671,7 @@ async fn interrupted_turn_restores_queued_inputs_to_composer_without_autostart()
         context_limit: None,
         tool_failures: 0,
         selected_skills: Vec::new(),
+        context_snapshot: None,
         events: Vec::new(),
     };
     let task = tokio::spawn(async move { Ok(result) });
@@ -772,6 +776,7 @@ async fn completed_normal_task_with_tool_failures_does_not_mark_tui_error() {
         context_limit: None,
         tool_failures: 1,
         selected_skills: Vec::new(),
+        context_snapshot: None,
         events: Vec::new(),
     };
     let task = tokio::spawn(async move { Ok(result) });
@@ -1526,8 +1531,14 @@ fn session_display_messages_count_visible_prompts_and_answers() {
     let mut ui = FullscreenUi::new(&app);
     app.load_current_session_history(&mut ui).expect("history");
 
-    assert_eq!(ui.sidebar.message_count, 2);
-    assert_eq!(ui.sidebar.tool_count, 1);
+    assert_eq!(visible_transcript_message_count(&ui.transcript), 2);
+    assert_eq!(
+        ui.transcript
+            .iter()
+            .filter(|row| matches!(row.kind, TranscriptKind::Explored))
+            .count(),
+        1
+    );
     assert_eq!(
         app.session_list_lines().expect("session list"),
         [format!(

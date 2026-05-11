@@ -115,6 +115,19 @@ impl SqliteStore {
             .optional()?)
     }
 
+    pub fn session_metadata(&self, session_id: &str) -> Result<Option<Value>> {
+        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let metadata = conn
+            .query_row(
+                "SELECT metadata_json FROM sessions WHERE id = ?1",
+                params![session_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten();
+        parse_optional_json(metadata)
+    }
+
     pub fn set_session_title(&self, session_id: &str, title: &str) -> Result<String> {
         let title = normalize_session_title(title)
             .ok_or_else(|| Error::Message("session title is empty".to_string()))?;

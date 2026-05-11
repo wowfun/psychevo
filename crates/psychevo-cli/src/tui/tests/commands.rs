@@ -11,12 +11,12 @@ async fn mode_slash_command_requires_value() {
 
     assert_eq!(ui.history.last().map(String::as_str), Some("/mode"));
     assert!(ui.bottom_panel.is_none());
-    assert!(
-        ui.transcript
-            .iter()
-            .any(|row| row.kind == TranscriptKind::Error
-                && row.text.contains("usage: /mode <plan|default>"))
-    );
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command
+            && row.title == "/mode"
+            && row.failed
+            && row.text.contains("error: usage: /mode <plan|default>")
+    }));
 }
 
 #[tokio::test]
@@ -40,7 +40,7 @@ async fn mode_slash_command_sets_mode_with_direct_value() {
 }
 
 #[tokio::test]
-async fn fullscreen_status_uses_single_multiline_status_row() {
+async fn fullscreen_status_uses_single_multiline_command_row() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -52,9 +52,10 @@ async fn fullscreen_status_uses_single_multiline_status_row() {
     let status_rows = ui
         .transcript
         .iter()
-        .filter(|row| row.kind == TranscriptKind::Status)
+        .filter(|row| row.kind == TranscriptKind::Command)
         .collect::<Vec<_>>();
     assert_eq!(status_rows.len(), 1);
+    assert_eq!(status_rows[0].title, "/status");
     assert!(status_rows[0].text.contains("workdir:"));
     assert!(status_rows[0].text.contains("\nmodel: mock/model\n"));
     assert!(status_rows[0].text.contains("\nvariant: high\n"));
@@ -63,21 +64,262 @@ async fn fullscreen_status_uses_single_multiline_status_row() {
 }
 
 #[tokio::test]
-async fn fullscreen_stats_command_opens_bottom_panel() {
+async fn fullscreen_help_command_opens_bottom_help_panel() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Help)
+        .await
+        .expect("help");
+
+    let Some(BottomPanel::Help(panel)) = &ui.bottom_panel else {
+        panic!("help panel missing");
+    };
+    assert_eq!(panel.tab, HelpTab::General);
+    assert_eq!(panel.skill_count, Some(0));
+    assert!(ui.transcript.is_empty());
+
+    let text = app.help_status_text();
+    assert!(text.contains("General\n"));
+    assert!(text.contains("\nCommands\n"));
+    assert!(text.contains("\nCustom commands\n"));
+    assert!(text.contains("Ctrl+B - toggle sidebar"));
+    assert!(text.contains("/usage - usage and cost summary (aliases: /stats)"));
+    assert!(text.contains("No custom commands available"));
+    assert!(!text.contains("pevo run"));
+}
+
+#[tokio::test]
+async fn fullscreen_help_bottom_panel_switches_sections_and_closes() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Help)
+        .await
+        .expect("help");
+    app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+        .expect("tab");
+    let Some(BottomPanel::Help(panel)) = &ui.bottom_panel else {
+        panic!("help panel missing");
+    };
+    assert_eq!(panel.tab, HelpTab::Commands);
+
+    app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))
+        .expect("right");
+    let Some(BottomPanel::Help(panel)) = &ui.bottom_panel else {
+        panic!("help panel missing");
+    };
+    assert_eq!(panel.tab, HelpTab::CustomCommands);
+
+    app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .expect("esc");
+    assert!(ui.bottom_panel.is_none());
+}
+
+#[tokio::test]
+async fn fullscreen_help_rejects_arguments_and_stats_alias_opens_usage() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    SqliteStore::open(&app.db_path).expect("store");
+    let mut ui = FullscreenUi::new(&app);
+    ui.textarea = textarea_with_text("/help now");
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .expect("help args");
+
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command
+            && row.title == "/help now"
+            && row.failed
+            && row.text.contains("error: /help does not accept arguments")
+    }));
+
+    ui.textarea = textarea_with_text("/usage");
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .expect("usage");
+
+    assert!(matches!(ui.bottom_panel, Some(BottomPanel::Stats(_))));
+
+    ui.bottom_panel = None;
+    ui.textarea = textarea_with_text("/stats");
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .expect("stats alias");
+
+    assert!(matches!(ui.bottom_panel, Some(BottomPanel::Stats(_))));
+}
+
+#[tokio::test]
+async fn fullscreen_usage_command_opens_bottom_panel() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     SqliteStore::open(&app.db_path).expect("store");
     let mut ui = FullscreenUi::new(&app);
 
-    app.handle_fullscreen_command(&mut ui, SlashCommand::Stats)
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Usage)
         .await
-        .expect("stats");
+        .expect("usage");
 
     let Some(BottomPanel::Stats(panel)) = &ui.bottom_panel else {
-        panic!("stats panel missing");
+        panic!("usage panel missing");
     };
-    assert_eq!(panel.title, "Usage Stats");
+    assert_eq!(panel.title, "Usage");
     assert!(panel.rows.iter().any(|row| row.label == "Totals"));
+    assert!(panel.rows.iter().any(|row| row.label == "Cache and reasoning"));
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.kind != TranscriptKind::Command)
+    );
+}
+
+#[test]
+fn usage_panel_groups_persisted_stats_rows() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let session_id = store
+        .create_session_with_metadata(&app.workdir, "tui", "model", "mock", None)
+        .expect("session");
+    store
+        .set_session_title(&session_id, "Usage session")
+        .expect("title");
+    let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
+    conn.execute(
+        r#"
+        INSERT INTO messages (
+            session_id, session_seq, role, timestamp_ms, message_json,
+            content_text, model, provider, context_input_tokens,
+            billable_input_tokens, billable_output_tokens, reasoning_tokens,
+            cache_read_tokens, cache_write_tokens, reported_total_tokens,
+            estimated_cost_nanodollars, pricing_source
+        ) VALUES (
+            ?1, 1, 'assistant', 1, '{"role":"assistant","content":[]}',
+            'done', 'model', 'mock', 321, 200, 80, 21, 20, 7, 321, NULL, NULL
+        )
+        "#,
+        rusqlite::params![&session_id],
+    )
+    .expect("assistant message");
+    conn.execute(
+        r#"
+        INSERT INTO messages (
+            session_id, session_seq, role, timestamp_ms, message_json, tool_name
+        ) VALUES (?1, 2, 'tool_result', 2, '{"role":"tool_result"}', 'bash')
+        "#,
+        rusqlite::params![&session_id],
+    )
+    .expect("tool result");
+
+    let panel = app.stats_panel().expect("usage panel");
+
+    assert_eq!(panel.title, "Usage");
+    assert!(panel.rows.iter().any(|row| {
+        row.label == "Cache and reasoning"
+            && row
+                .description
+                .as_deref()
+                .is_some_and(|text| text.contains("21 reasoning"))
+    }));
+    assert!(panel.rows.iter().any(|row| row.label == "Unknown pricing"));
+    assert!(panel.rows.iter().any(|row| {
+        row.group.as_deref() == Some("Provider / model") && row.label == "mock/model"
+    }));
+    assert!(
+        panel
+            .rows
+            .iter()
+            .any(|row| row.group.as_deref() == Some("Top tools") && row.label == "bash")
+    );
+    assert!(panel.rows.iter().any(|row| {
+        row.group.as_deref() == Some("Top sessions") && row.label == "Usage session"
+    }));
+}
+
+#[tokio::test]
+async fn fullscreen_context_command_appends_compact_command_row() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.last_context_snapshot = Some(test_context_snapshot());
+    ui.last_transcript_width = 79;
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Context)
+        .await
+        .expect("context");
+
+    let row = ui
+        .transcript
+        .iter()
+        .find(|row| row.kind == TranscriptKind::Command && row.title == "/context")
+        .expect("context row");
+    assert!(row.text.starts_with("Context Usage\n"));
+    assert!(row.text.contains("scope: last provider request"));
+    assert!(!row.text.contains("bar:"));
+    let bar_line = row
+        .text
+        .lines()
+        .find(|line| line.starts_with('['))
+        .expect("bar line");
+    let cell_count = bar_line.len().saturating_sub(2);
+    assert_eq!(cell_count, 70);
+    assert_eq!(cell_count % 5, 0);
+    assert!((50..=100).contains(&cell_count));
+    assert!(row
+        .text
+        .contains("\nS system  T tools  K skills  M input_messages  . free\n\n"));
+    assert!(row.text.contains("\ninput_messages:"));
+    assert!(!row.text.contains("\nmessages:"));
+    assert!(!row.text.contains("unavailable"));
+}
+
+#[tokio::test]
+async fn fullscreen_context_command_refreshes_bottom_status_snapshot() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    app.last_context_snapshot = Some(test_context_snapshot());
+    ui.last_context_snapshot = None;
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Context)
+        .await
+        .expect("context");
+
+    assert!(ui.last_context_snapshot.is_some());
+    let text = bottom_status_context_for_width(&app, &ui, 80).expect("status context");
+    assert!(text.contains("~50/100 (50.0%) estimated"), "{text}");
+}
+
+#[tokio::test]
+async fn fullscreen_variant_and_upcoming_feedback_use_command_rows() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.textarea = textarea_with_text("/variant low");
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .expect("variant");
+
+    assert_eq!(app.current_variant.as_deref(), Some("low"));
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command
+            && row.title == "/variant low"
+            && row.text == "variant: low"
+    }));
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Upcoming("compact".to_string()))
+        .await
+        .expect("upcoming");
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command
+            && row.title == "/compact"
+            && row.text == "/compact upcoming"
+    }));
 }
 
 #[tokio::test]
@@ -101,12 +343,11 @@ async fn fullscreen_skills_command_lists_dynamic_entries_and_inserts_skill_marke
     app.handle_fullscreen_command(&mut ui, SlashCommand::Skills)
         .await
         .expect("skills");
-    assert!(
-        ui.transcript
-            .iter()
-            .any(|row| row.kind == TranscriptKind::Status
-                && row.text.contains("helper: Helps with focused edits"))
-    );
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command
+            && row.title == "/skills"
+            && row.text.contains("helper: Helps with focused edits")
+    }));
 
     app.handle_fullscreen_command(
         &mut ui,
@@ -118,6 +359,70 @@ async fn fullscreen_skills_command_lists_dynamic_entries_and_inserts_skill_marke
     .await
     .expect("skill invoke");
     assert_eq!(textarea_text(&ui.textarea), "$helper apply it to src/lib.rs");
+}
+
+fn test_context_snapshot() -> ContextSnapshot {
+    let mut categories = BTreeMap::new();
+    categories.insert(
+        "system_prompt".to_string(),
+        ContextCategory {
+            label: "System prompt".to_string(),
+            tokens: 10,
+            estimated: true,
+            status: "estimated".to_string(),
+            percent: Some(10.0),
+            details: Value::Null,
+        },
+    );
+    categories.insert(
+        "messages".to_string(),
+        ContextCategory {
+            label: "Messages".to_string(),
+            tokens: 40,
+            estimated: true,
+            status: "estimated".to_string(),
+            percent: Some(40.0),
+            details: serde_json::json!({
+                "roles": {"user": {"count": 1, "tokens": 40}},
+                "selected_skill_context": {"count": 0, "tokens": 0}
+            }),
+        },
+    );
+    categories.insert(
+        "free_space".to_string(),
+        ContextCategory {
+            label: "Free space".to_string(),
+            tokens: 50,
+            estimated: true,
+            status: "derived".to_string(),
+            percent: Some(50.0),
+            details: Value::Null,
+        },
+    );
+    ContextSnapshot {
+        event_type: "context_snapshot".to_string(),
+        scope: ContextScope::LastProviderRequest,
+        status: "estimated".to_string(),
+        session_id: Some("session".to_string()),
+        provider: "mock".to_string(),
+        model: "model".to_string(),
+        mode: Some("default".to_string()),
+        context_limit: Some(100),
+        tokenizer: ContextTokenizer {
+            encoding: "o200k_base".to_string(),
+            source: "fallback".to_string(),
+            fallback: true,
+        },
+        total: ContextTotal {
+            tokens: 50,
+            estimated_tokens: 50,
+            estimated: true,
+            source: "estimate".to_string(),
+            percent: Some(50.0),
+        },
+        categories,
+        advice: Vec::new(),
+    }
 }
 
 #[tokio::test]
@@ -223,11 +528,11 @@ async fn fullscreen_undo_restores_prompt_and_redo_restores_transcript() {
             .any(|row| row.kind == TranscriptKind::Answer && row.text == "first answer")
     );
     assert!(ui.transcript.iter().all(|row| row.text != "second answer"));
-    assert!(
-        ui.transcript
-            .iter()
-            .any(|row| row.kind == TranscriptKind::Status && row.text.contains("prompt restored"))
-    );
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command
+            && row.title == "/undo"
+            && row.text.contains("prompt restored")
+    }));
 
     ui.textarea = textarea_with_text("/redo");
     app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
@@ -241,6 +546,9 @@ async fn fullscreen_undo_restores_prompt_and_redo_restores_transcript() {
             .iter()
             .any(|row| row.kind == TranscriptKind::Answer && row.text == "second answer")
     );
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command && row.title == "/redo" && row.text.contains("redone")
+    }));
 }
 
 #[tokio::test]

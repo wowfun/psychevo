@@ -1,6 +1,5 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
-assertion_line: 341
 expression: combined
 ---
 fixture=file_completion_popup
@@ -30,7 +29,7 @@ size=120x24
 │
 › review @src
 
-mock/model  high
+mock/model  high  ~/work · main
 
 --- styles ---
 [default]
@@ -56,4 +55,4 @@ mock/model  high
 [default]│
 [dim]›[default] review @src
 [default]
-[default]mock/model  [magenta]high[default]
+[default]mock/model  [magenta]high[default]  [dim]~/work · main[default]

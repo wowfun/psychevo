@@ -416,14 +416,26 @@ impl TuiApp {
         match mouse.kind {
             MouseEventKind::ScrollUp => {
                 if let Some(panel) = &mut ui.bottom_panel {
-                    panel.selection_mut().move_selection(-3);
+                    match panel {
+                        BottomPanel::Help(panel) => panel.scroll_by(-3),
+                        BottomPanel::Models(panel) if panel.tab == ModelTab::Info => {
+                            panel.scroll_info_by(-3)
+                        }
+                        _ => panel.selection_mut().move_selection(-3),
+                    }
                 } else {
                     ui.scroll_transcript(-3);
                 }
             }
             MouseEventKind::ScrollDown => {
                 if let Some(panel) = &mut ui.bottom_panel {
-                    panel.selection_mut().move_selection(3);
+                    match panel {
+                        BottomPanel::Help(panel) => panel.scroll_by(3),
+                        BottomPanel::Models(panel) if panel.tab == ModelTab::Info => {
+                            panel.scroll_info_by(3)
+                        }
+                        _ => panel.selection_mut().move_selection(3),
+                    }
                 } else {
                     ui.scroll_transcript(3);
                 }
@@ -473,11 +485,22 @@ impl TuiApp {
                         ui.push_submitted_history(submitted.clone());
                         match parse_slash_command(&submitted) {
                             Ok(Some(command)) => {
-                                return self.handle_fullscreen_command(ui, command).await;
+                                return self
+                                    .handle_fullscreen_command_with_echo(
+                                        ui,
+                                        command,
+                                        Some(submitted),
+                                    )
+                                    .await;
                             }
                             Ok(None) => {}
                             Err(err) => {
-                                ui.push_error(format!("error: {err:#}"));
+                                ui.push_command_result(
+                                    normalize_submitted_slash_echo(&submitted),
+                                    None,
+                                    format!("error: {err:#}"),
+                                    true,
+                                );
                                 return Ok(false);
                             }
                         }

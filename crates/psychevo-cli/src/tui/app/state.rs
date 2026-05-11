@@ -21,6 +21,7 @@ struct TuiApp {
     renderer: TuiRenderer,
     debug: bool,
     had_error: bool,
+    last_context_snapshot: Option<ContextSnapshot>,
     model_catalog: ModelCatalogCache,
     clipboard_result_tx: std::sync::mpsc::Sender<Result<(), String>>,
     clipboard_result_rx: std::sync::mpsc::Receiver<Result<(), String>>,

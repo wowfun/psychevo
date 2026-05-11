@@ -1,14 +1,31 @@
 use anyhow::{Result, anyhow};
 
+use crate::command_registry::{
+    CUSTOM_SKILL_COMMAND, CommandArgumentKind, CommandGroup, CommandStatus, CommandSurface,
+    SLASH_COMMANDS, SlashCommandAction, SlashCommandSpec, slash_command_spec,
+};
+
 pub(crate) const VARIANTS: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+const GENERAL_COMMANDS: &[&str] = &[
+    "/status",
+    "/context",
+    "/model",
+    "/sessions",
+    "/new",
+    "/undo",
+    "/redo",
+    "/quit",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SlashCommand {
+    Help,
     Quit,
     Status,
     New,
     Sessions,
-    Stats,
+    Usage,
+    Context,
     ModelShow,
     VariantSet(String),
     ModeSet(String),
@@ -29,33 +46,94 @@ pub(crate) struct SlashMenuItem {
     pub(crate) upcoming: bool,
 }
 
-const SLASH_MENU: &[(&str, &str, bool)] = &[
-    ("/status", "show local status", false),
-    ("/new", "start a new session on next prompt", false),
-    ("/sessions", "switch session", false),
-    ("/stats", "usage and cost summary", false),
-    ("/model", "select/fetch model", false),
-    ("/variant", "set <value>", false),
-    ("/mode", "set <plan|default>", false),
-    ("/show-thinking", "toggle; set <on|off>", false),
-    ("/rename", "<title> rename current session", false),
-    ("/undo", "undo last message", false),
-    ("/redo", "redo undone messages", false),
-    ("/skills", "list skills", false),
-    ("/compact", "upcoming", true),
-    ("/export", "upcoming", true),
-    ("/quit", "quit TUI", false),
-];
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SlashHelpSections {
+    pub(crate) general: Vec<String>,
+    pub(crate) commands: Vec<String>,
+    pub(crate) custom_commands: Vec<String>,
+}
 
 pub(crate) fn base_slash_menu_items() -> Vec<SlashMenuItem> {
-    SLASH_MENU
+    SLASH_COMMANDS
         .iter()
-        .map(|(command, description, upcoming)| SlashMenuItem {
-            command: (*command).to_string(),
-            description: (*description).to_string(),
-            upcoming: *upcoming,
+        .map(|spec| SlashMenuItem {
+            command: spec.canonical.to_string(),
+            description: spec.summary.to_string(),
+            upcoming: spec.status == CommandStatus::Upcoming,
         })
         .collect()
+}
+
+pub(crate) fn format_slash_help(skill_count: Option<usize>) -> String {
+    let sections = slash_help_sections(skill_count);
+    let mut lines = Vec::new();
+    lines.push("General".to_string());
+    lines.extend(sections.general);
+    lines.push(String::new());
+    lines.push("Commands".to_string());
+    lines.extend(sections.commands);
+    lines.push(String::new());
+    lines.push("Custom commands".to_string());
+    lines.extend(sections.custom_commands);
+    lines.join("\n")
+}
+
+pub(crate) fn slash_help_sections(skill_count: Option<usize>) -> SlashHelpSections {
+    let mut general = vec![
+        "Shortcuts".to_string(),
+        "Enter - submit".to_string(),
+        "Shift+Enter/Ctrl+Enter/Alt+Enter/Ctrl+J - insert newline".to_string(),
+        "Tab - complete slash command".to_string(),
+        "Esc - close active UI or interrupt running work".to_string(),
+        "Ctrl+C/Ctrl+D - quit or copy active selection".to_string(),
+        "Ctrl+B - toggle sidebar".to_string(),
+        "Ctrl+T - focus transcript".to_string(),
+        "Ctrl+R - search prompt history".to_string(),
+        "Up/Down - recall history or navigate".to_string(),
+        "PageUp/PageDown - scroll".to_string(),
+        String::new(),
+        "Common commands".to_string(),
+    ];
+    for command in GENERAL_COMMANDS {
+        if let Some(spec) = slash_command_spec(command)
+            && spec.common
+            && spec.status == CommandStatus::Active
+        {
+            general.push(help_command_row(spec));
+        }
+    }
+
+    let mut commands = Vec::new();
+    for spec in SLASH_COMMANDS
+        .iter()
+        .filter(|spec| spec.group == CommandGroup::Commands)
+    {
+        debug_assert_eq!(spec.surface, CommandSurface::TuiSlash);
+        commands.push(help_command_row(spec));
+    }
+
+    let custom_commands = match skill_count {
+        Some(count) if count > 0 => vec![format!(
+            "{} - {} ({count} available)",
+            CUSTOM_SKILL_COMMAND.usage, CUSTOM_SKILL_COMMAND.summary
+        )],
+        _ => vec!["No custom commands available".to_string()],
+    };
+
+    SlashHelpSections {
+        general,
+        commands,
+        custom_commands,
+    }
+}
+
+fn help_command_row(spec: &SlashCommandSpec) -> String {
+    let aliases = if spec.aliases.is_empty() {
+        String::new()
+    } else {
+        format!(" (aliases: {})", spec.aliases.join(", "))
+    };
+    format!("{} - {}{}", spec.usage, spec.summary, aliases)
 }
 
 #[cfg(test)]
@@ -170,111 +248,130 @@ pub(crate) fn parse_slash_command(line: &str) -> Result<Option<SlashCommand>> {
             args: rest.join(" "),
         }
     } else {
-        match command {
-            "/quit" | "/exit" | "/q" => SlashCommand::Quit,
-            "/status" => SlashCommand::Status,
-            "/clear" | "/new" => SlashCommand::New,
-            "/sessions" | "/resume" | "/continue" => {
-                if !rest.is_empty() {
-                    return Err(anyhow!("{command} does not accept arguments"));
-                }
-                SlashCommand::Sessions
-            }
-            "/stats" => {
-                if !rest.is_empty() {
-                    return Err(anyhow!("/stats does not accept arguments"));
-                }
-                SlashCommand::Stats
-            }
-            "/session" => {
-                return Err(anyhow!("usage: /sessions, /resume, or /continue"));
-            }
-            "/model" => parse_model_command(&rest)?,
-            "/models" => return Err(anyhow!("/models has been removed; use /model")),
-            "/variant" => parse_variant_command(&rest)?,
-            "/mode" => parse_mode_command(&rest)?,
-            "/show-thinking" => parse_thinking_command(&rest)?,
-            "/thinking" => return Err(anyhow!("/thinking has been removed; use /show-thinking")),
-            "/rename" => parse_rename_command(&rest)?,
-            "/undo" => {
-                if !rest.is_empty() {
-                    return Err(anyhow!("/undo does not accept arguments"));
-                }
-                SlashCommand::Undo
-            }
-            "/redo" => {
-                if !rest.is_empty() {
-                    return Err(anyhow!("/redo does not accept arguments"));
-                }
-                SlashCommand::Redo
-            }
-            "/skills" => {
-                if !rest.is_empty() {
-                    return Err(anyhow!("/skills does not accept arguments"));
-                }
-                SlashCommand::Skills
-            }
-            "/compact" | "/export" => {
-                if !rest.is_empty() {
-                    return Err(anyhow!(
-                        "{command} is upcoming and does not accept arguments"
-                    ));
-                }
-                SlashCommand::Upcoming(command.trim_start_matches('/').to_string())
-            }
-            _ => return Err(anyhow!("unknown slash command: {command}")),
-        }
+        let Some(spec) = slash_command_spec(command) else {
+            return Err(anyhow!("unknown slash command: {command}"));
+        };
+        parse_registered_slash_command(spec, command, &rest)?
     };
     Ok(Some(parsed))
 }
 
-fn parse_model_command(rest: &[&str]) -> Result<SlashCommand> {
-    match rest {
-        [] => Ok(SlashCommand::ModelShow),
-        ["set", ..] => Err(anyhow!("/model set has been removed; use /model")),
-        _ => Err(anyhow!("usage: /model")),
+fn parse_registered_slash_command(
+    spec: &SlashCommandSpec,
+    command: &str,
+    rest: &[&str],
+) -> Result<SlashCommand> {
+    debug_assert_eq!(spec.surface, CommandSurface::TuiSlash);
+    if spec.status == CommandStatus::Upcoming {
+        if !rest.is_empty() {
+            return Err(anyhow!(
+                "{command} is upcoming and does not accept arguments"
+            ));
+        }
+        return Ok(SlashCommand::Upcoming(
+            spec.canonical.trim_start_matches('/').to_string(),
+        ));
+    }
+
+    match spec.action {
+        SlashCommandAction::Help => {
+            parse_no_arguments(spec, command, rest)?;
+            Ok(SlashCommand::Help)
+        }
+        SlashCommandAction::Quit => {
+            parse_no_arguments(spec, command, rest)?;
+            Ok(SlashCommand::Quit)
+        }
+        SlashCommandAction::Status => {
+            parse_no_arguments(spec, command, rest)?;
+            Ok(SlashCommand::Status)
+        }
+        SlashCommandAction::New => {
+            parse_no_arguments(spec, command, rest)?;
+            Ok(SlashCommand::New)
+        }
+        SlashCommandAction::Sessions => {
+            parse_no_arguments(spec, command, rest)?;
+            Ok(SlashCommand::Sessions)
+        }
+        SlashCommandAction::Usage => {
+            parse_no_arguments(spec, command, rest)?;
+            Ok(SlashCommand::Usage)
+        }
+        SlashCommandAction::Context => {
+            parse_no_arguments(spec, command, rest)?;
+            Ok(SlashCommand::Context)
+        }
+        SlashCommandAction::ModelShow => {
+            parse_no_arguments(spec, command, rest)?;
+            Ok(SlashCommand::ModelShow)
+        }
+        SlashCommandAction::VariantSet => parse_variant_command(spec, rest),
+        SlashCommandAction::ModeSet => parse_mode_command(spec, rest),
+        SlashCommandAction::Thinking => parse_thinking_command(spec, rest),
+        SlashCommandAction::Rename => parse_rename_command(spec, rest),
+        SlashCommandAction::Undo => {
+            parse_no_arguments(spec, command, rest)?;
+            Ok(SlashCommand::Undo)
+        }
+        SlashCommandAction::Redo => {
+            parse_no_arguments(spec, command, rest)?;
+            Ok(SlashCommand::Redo)
+        }
+        SlashCommandAction::Skills => {
+            parse_no_arguments(spec, command, rest)?;
+            Ok(SlashCommand::Skills)
+        }
+        SlashCommandAction::SkillInvoke => {
+            unreachable!("dynamic skill commands are parsed before registry dispatch")
+        }
+        SlashCommandAction::Upcoming => unreachable!("upcoming handled before action dispatch"),
     }
 }
 
-fn parse_variant_command(rest: &[&str]) -> Result<SlashCommand> {
+fn parse_no_arguments(spec: &SlashCommandSpec, command: &str, rest: &[&str]) -> Result<()> {
+    debug_assert_eq!(spec.argument_kind, CommandArgumentKind::None);
+    if !rest.is_empty() {
+        return Err(anyhow!("{command} does not accept arguments"));
+    }
+    Ok(())
+}
+
+fn parse_variant_command(spec: &SlashCommandSpec, rest: &[&str]) -> Result<SlashCommand> {
     match rest {
-        [] => Err(anyhow!("usage: /variant <value>")),
-        ["set", ..] => Err(anyhow!(
-            "/variant set has been removed; use /variant <value>"
-        )),
+        [] => Err(anyhow!("usage: {}", spec.usage)),
         [value] => {
             validate_variant(value)?;
             Ok(SlashCommand::VariantSet((*value).to_string()))
         }
-        _ => Err(anyhow!("usage: /variant <value>")),
+        _ => Err(anyhow!("usage: {}", spec.usage)),
     }
 }
 
-fn parse_mode_command(rest: &[&str]) -> Result<SlashCommand> {
+fn parse_mode_command(spec: &SlashCommandSpec, rest: &[&str]) -> Result<SlashCommand> {
     match rest {
-        [] => Err(anyhow!("usage: /mode <plan|default>")),
-        ["set", ..] => Err(anyhow!("/mode set has been removed; use /mode <value>")),
+        [] => Err(anyhow!("usage: {}", spec.usage)),
         [value] => {
             validate_mode(value)?;
             Ok(SlashCommand::ModeSet((*value).to_string()))
         }
-        _ => Err(anyhow!("usage: /mode <plan|default>")),
+        _ => Err(anyhow!("usage: {}", spec.usage)),
     }
 }
 
-fn parse_thinking_command(rest: &[&str]) -> Result<SlashCommand> {
+fn parse_thinking_command(spec: &SlashCommandSpec, rest: &[&str]) -> Result<SlashCommand> {
     match rest {
         [] => Ok(SlashCommand::ThinkingToggle),
         ["on"] => Ok(SlashCommand::ThinkingSet(true)),
         ["off"] => Ok(SlashCommand::ThinkingSet(false)),
-        _ => Err(anyhow!("usage: /show-thinking [on|off]")),
+        _ => Err(anyhow!("usage: {}", spec.usage)),
     }
 }
 
-fn parse_rename_command(rest: &[&str]) -> Result<SlashCommand> {
+fn parse_rename_command(spec: &SlashCommandSpec, rest: &[&str]) -> Result<SlashCommand> {
     let title = rest.join(" ");
     if title.trim().is_empty() {
-        return Err(anyhow!("usage: /rename <title>"));
+        return Err(anyhow!("usage: {}", spec.usage));
     }
     Ok(SlashCommand::Rename(title))
 }
@@ -310,7 +407,11 @@ mod tests {
 
     #[test]
     fn parses_basic_slash_commands() {
-        assert!(parse_slash_command("/help").is_err());
+        assert_eq!(
+            parse_slash_command("/help").unwrap(),
+            Some(SlashCommand::Help)
+        );
+        assert!(parse_slash_command("/help now").is_err());
         assert_eq!(parse_slash_command("/q").unwrap(), Some(SlashCommand::Quit));
         assert_eq!(parse_slash_command("hello").unwrap(), None);
     }
@@ -331,19 +432,43 @@ mod tests {
         );
         assert_eq!(
             parse_slash_command("/stats").unwrap(),
-            Some(SlashCommand::Stats)
+            Some(SlashCommand::Usage)
         );
-        assert!(parse_slash_command("/session list").is_err());
+        assert_eq!(
+            parse_slash_command("/usage").unwrap(),
+            Some(SlashCommand::Usage)
+        );
+        assert_eq!(
+            parse_slash_command("/context").unwrap(),
+            Some(SlashCommand::Context)
+        );
+        assert!(
+            parse_slash_command("/session list")
+                .unwrap_err()
+                .to_string()
+                .contains("unknown slash command: /session")
+        );
         assert!(parse_slash_command("/stats all").is_err());
+        assert!(parse_slash_command("/context now").is_err());
         assert!(parse_slash_command("/session show abc").is_err());
         assert!(parse_slash_command("/session switch abc").is_err());
         assert_eq!(
             parse_slash_command("/model").unwrap(),
             Some(SlashCommand::ModelShow)
         );
-        assert!(parse_slash_command("/model set mock/model").is_err());
+        assert!(
+            parse_slash_command("/model set mock/model")
+                .unwrap_err()
+                .to_string()
+                .contains("/model does not accept arguments")
+        );
         assert!(parse_slash_command("/model fetch").is_err());
-        assert!(parse_slash_command("/models").is_err());
+        assert!(
+            parse_slash_command("/models")
+                .unwrap_err()
+                .to_string()
+                .contains("unknown slash command: /models")
+        );
     }
 
     #[test]
@@ -361,8 +486,9 @@ mod tests {
             parse_slash_command("/variant set high")
                 .unwrap_err()
                 .to_string()
-                .contains("use /variant <value>")
+                .contains("usage: /variant <none|minimal|low|medium|high|xhigh|max>")
         );
+        assert!(parse_slash_command("/effort high").is_err());
         assert!(parse_slash_command("/variant turbo").is_err());
     }
 
@@ -381,7 +507,7 @@ mod tests {
             parse_slash_command("/mode set plan")
                 .unwrap_err()
                 .to_string()
-                .contains("use /mode <value>")
+                .contains("usage: /mode <plan|default>")
         );
         assert!(parse_slash_command("/mode build").is_err());
         assert!(parse_slash_command("/mode maybe").is_err());
@@ -402,7 +528,12 @@ mod tests {
             Some(SlashCommand::ThinkingSet(false))
         );
         assert!(parse_slash_command("/show-thinking maybe").is_err());
-        assert!(parse_slash_command("/thinking").is_err());
+        assert!(
+            parse_slash_command("/thinking")
+                .unwrap_err()
+                .to_string()
+                .contains("unknown slash command: /thinking")
+        );
     }
 
     #[test]
@@ -433,7 +564,16 @@ mod tests {
 
     #[test]
     fn slash_menu_filters_and_marks_upcoming() {
-        assert!(slash_menu_items("/he").is_empty());
+        assert_eq!(slash_menu_items("/he")[0].command, "/help");
+        assert_eq!(slash_menu_items("/usage")[0].command, "/usage");
+        assert!(
+            slash_menu_items("/stats")
+                .iter()
+                .all(|item| item.command != "/stats")
+        );
+        assert!(slash_prefix_menu_items("/stats").is_empty());
+        assert!(slash_menu_items("/clear").is_empty());
+        assert!(slash_menu_items("/resume").is_empty());
         assert_eq!(slash_menu_items("/session").len(), 1);
         assert_eq!(slash_menu_items("/session")[0].command, "/sessions");
         assert!(slash_menu_items("/session ").is_empty());
@@ -472,6 +612,22 @@ mod tests {
         );
         assert!(parse_slash_command("/undo now").is_err());
         assert!(parse_slash_command("/redo now").is_err());
+    }
+
+    #[test]
+    fn formats_slash_help_from_registry() {
+        let help = format_slash_help(Some(2));
+        assert!(help.contains("General\n"));
+        assert!(help.contains("\nCommands\n"));
+        assert!(help.contains("\nCustom commands\n"));
+        assert!(help.contains("Ctrl+B - toggle sidebar"));
+        assert!(help.contains("/usage - usage and cost summary (aliases: /stats)"));
+        assert!(help.contains("/sessions - switch session (aliases: /resume, /continue)"));
+        assert!(help.contains("/skill:<name> [args] - invoke a skill (2 available)"));
+        assert!(!help.contains("pevo run"));
+
+        let empty = format_slash_help(Some(0));
+        assert!(empty.contains("No custom commands available"));
     }
 
     #[test]

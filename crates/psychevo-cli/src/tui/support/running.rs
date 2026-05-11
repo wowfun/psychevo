@@ -10,12 +10,12 @@ enum RunningTask {
 }
 
 enum RunningCompletion {
-    Agent(
+    Agent(Box<
         std::result::Result<
             psychevo_runtime::Result<psychevo_runtime::RunResult>,
             tokio::task::JoinError,
         >,
-    ),
+    >),
     UserShell(
         std::result::Result<
             psychevo_runtime::Result<psychevo_runtime::UserShellResult>,

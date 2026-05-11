@@ -368,6 +368,9 @@ fn transcript_lines(
     ) {
         return tool_lines(row, selected, compact_trailing, width);
     }
+    if row.kind == TranscriptKind::Command {
+        return command_lines(row, selected, compact_trailing, width);
+    }
 
     let style = label_style(row.kind, row.failed);
     let marker = if selected { "›" } else { "▌" };
@@ -396,9 +399,18 @@ fn transcript_lines(
     }
     let body_style = style_for_body(row.kind, row.failed);
     for (index, line) in row.expandable_text().lines().enumerate() {
-        let mut span = Span::styled(line.to_string(), body_style);
+        let mut spans = if row.kind == TranscriptKind::Status {
+            context_status_line(line, body_style)
+                .map(|line| line.spans)
+                .unwrap_or_else(|| vec![Span::styled(line.to_string(), body_style)])
+        } else {
+            vec![Span::styled(line.to_string(), body_style)]
+        };
         if row.kind == TranscriptKind::Prompt {
-            span = span.style(body_style.bg(tui_theme().menu_selected_bg));
+            spans = spans
+                .into_iter()
+                .map(|span| span.style(body_style.bg(tui_theme().menu_selected_bg)))
+                .collect();
         }
         let prefix = if selected && (!title.is_empty() || index > 0) {
             "  ".to_string()
@@ -410,10 +422,9 @@ fn transcript_lines(
         } else {
             marker_style
         };
-        out.push(Line::from(vec![
-            Span::styled(prefix, prefix_style),
-            span,
-        ]));
+        let mut row_spans = vec![Span::styled(prefix, prefix_style)];
+        row_spans.extend(spans);
+        out.push(Line::from(row_spans));
     }
     if out.is_empty() {
         out.push(Line::from(Span::styled(marker.to_string(), marker_style)));
@@ -422,6 +433,185 @@ fn transcript_lines(
         out.push(Line::from(""));
     }
     out
+}
+
+fn command_lines(
+    row: &TranscriptRow,
+    selected: bool,
+    compact_trailing: bool,
+    width: u16,
+) -> Vec<Line<'static>> {
+    let mut out = Vec::new();
+    let command_style = if row.failed {
+        tui_theme().error_style()
+    } else {
+        Style::default()
+    };
+    let marker_style = if selected || row.failed {
+        focus_marker_style(row.failed)
+    } else {
+        tui_theme().accent_style()
+    };
+    let title = if let Some(hint) = row_expand_hint(row, selected, None) {
+        format!("{} {hint}", row.title.trim())
+    } else {
+        row.title.trim().to_string()
+    };
+    for (index, wrapped) in wrap_command_text(&title, "> ", width)
+        .into_iter()
+        .enumerate()
+    {
+        let prefix = if index == 0 { "> " } else { "  " };
+        let prefix_style = if index == 0 {
+            marker_style
+        } else {
+            tui_theme().dim_style()
+        };
+        out.push(Line::from(vec![
+            Span::styled(prefix.to_string(), prefix_style),
+            Span::styled(wrapped, command_style),
+        ]));
+    }
+
+    let body_style = if row.failed {
+        tui_theme().error_style()
+    } else {
+        tui_theme().dim_style()
+    };
+    if row.details_collapsed {
+        if !compact_trailing {
+            out.push(Line::from(""));
+        }
+        return out;
+    }
+    let mut wrote_body = false;
+    for (line_index, line) in row.expandable_text().lines().enumerate() {
+        let first_prefix = if line_index == 0 { "  └  " } else { "     " };
+        if let Some(context_line) = context_status_line(line, body_style) {
+            let mut spans = vec![Span::styled(first_prefix.to_string(), tui_theme().dim_style())];
+            spans.extend(context_line.spans);
+            out.push(Line::from(spans));
+            wrote_body = true;
+            continue;
+        }
+        for (wrapped_index, wrapped) in wrap_command_text(line, first_prefix, width)
+            .into_iter()
+            .enumerate()
+        {
+            let prefix = if wrapped_index == 0 {
+                first_prefix
+            } else {
+                "     "
+            };
+            let mut row_spans = vec![Span::styled(prefix.to_string(), tui_theme().dim_style())];
+            row_spans.push(Span::styled(wrapped, body_style));
+            out.push(Line::from(row_spans));
+            wrote_body = true;
+        }
+    }
+    if !wrote_body {
+        out.push(Line::from(Span::styled(
+            "  └".to_string(),
+            tui_theme().dim_style(),
+        )));
+    }
+    if !compact_trailing {
+        out.push(Line::from(""));
+    }
+    out
+}
+
+fn wrap_command_text(text: &str, prefix: &str, width: u16) -> Vec<String> {
+    let content_width = usize::from(width)
+        .saturating_sub(UnicodeWidthStr::width(prefix))
+        .max(1);
+    wrap_display_width(text, content_width)
+}
+
+fn wrap_display_width(text: &str, max_width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut current_width = 0usize;
+    for ch in text.chars() {
+        let ch_width = ch.width().unwrap_or(0);
+        if current_width > 0 && current_width.saturating_add(ch_width) > max_width {
+            lines.push(std::mem::take(&mut current));
+            current_width = 0;
+        }
+        current.push(ch);
+        current_width = current_width.saturating_add(ch_width);
+        if current_width >= max_width {
+            lines.push(std::mem::take(&mut current));
+            current_width = 0;
+        }
+    }
+    if !current.is_empty() || lines.is_empty() {
+        lines.push(current);
+    }
+    lines
+}
+
+fn context_status_line(line: &str, body_style: Style) -> Option<Line<'static>> {
+    context_status_bar_line(line, body_style).or_else(|| context_status_legend_line(line, body_style))
+}
+
+fn context_status_bar_line(line: &str, body_style: Style) -> Option<Line<'static>> {
+    let rest = line.strip_prefix('[')?;
+    let (cells, suffix) = rest.split_once(']')?;
+    if !suffix.is_empty() {
+        return None;
+    }
+    if !cells
+        .chars()
+        .all(|cell| matches!(cell, 'S' | 'T' | 'K' | 'M' | '.'))
+    {
+        return None;
+    }
+    let mut spans = vec![Span::styled("[".to_string(), body_style)];
+    spans.extend(cells.chars().map(|cell| {
+        Span::styled(
+            cell.to_string(),
+            context_status_marker_style(cell).unwrap_or(body_style),
+        )
+    }));
+    spans.push(Span::styled("]".to_string(), body_style));
+    Some(Line::from(spans))
+}
+
+fn context_status_legend_line(line: &str, body_style: Style) -> Option<Line<'static>> {
+    if line != "S system  T tools  K skills  M input_messages  . free" {
+        return None;
+    }
+    let mut spans = Vec::new();
+    for (marker, label) in [
+        ('S', " system"),
+        ('T', " tools"),
+        ('K', " skills"),
+        ('M', " input_messages"),
+        ('.', " free"),
+    ] {
+        if !spans.is_empty() {
+            spans.push(Span::styled("  ".to_string(), body_style));
+        }
+        spans.push(Span::styled(
+            marker.to_string(),
+            context_status_marker_style(marker).unwrap_or(body_style),
+        ));
+        spans.push(Span::styled(label.to_string(), body_style));
+    }
+    Some(Line::from(spans))
+}
+
+fn context_status_marker_style(marker: char) -> Option<Style> {
+    let theme = tui_theme();
+    match marker {
+        'S' => Some(theme.identity_style()),
+        'T' => Some(theme.accent_style()),
+        'K' => Some(theme.thinking_style()),
+        'M' => Some(theme.success_style()),
+        '.' => Some(theme.dim_style()),
+        _ => None,
+    }
 }
 
 fn prompt_lines(
@@ -794,7 +984,11 @@ fn tool_title_prefixes(kind: TranscriptKind) -> Option<(&'static str, &'static s
 fn foldable_evidence_body(row: &TranscriptRow) -> bool {
     matches!(
         row.kind,
-        TranscriptKind::Thinking | TranscriptKind::Explored | TranscriptKind::Ran | TranscriptKind::Changed
+        TranscriptKind::Thinking
+            | TranscriptKind::Explored
+            | TranscriptKind::Ran
+            | TranscriptKind::Changed
+            | TranscriptKind::Command
     ) && !row.text.trim().is_empty()
         && !suppressed_active_tool_body(row, &[row.text.trim()])
 }
@@ -1132,6 +1326,7 @@ fn label_style(kind: TranscriptKind, failed: bool) -> Style {
         TranscriptKind::Answer => theme.identity_style(),
         TranscriptKind::Thinking => theme.thinking_style(),
         TranscriptKind::Meta => theme.dim_style(),
+        TranscriptKind::Command => theme.accent_style(),
         TranscriptKind::Status => theme.accent_style(),
         TranscriptKind::Error => theme.error_style(),
     }
@@ -1152,7 +1347,7 @@ fn style_for_body(kind: TranscriptKind, failed: bool) -> Style {
     }
     match kind {
         TranscriptKind::Thinking => theme.dim_style(),
-        TranscriptKind::Meta | TranscriptKind::Status => theme.dim_style(),
+        TranscriptKind::Meta | TranscriptKind::Command | TranscriptKind::Status => theme.dim_style(),
         TranscriptKind::Error => theme.error_style(),
         _ => Style::default(),
     }

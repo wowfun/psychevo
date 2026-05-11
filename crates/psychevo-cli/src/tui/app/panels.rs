@@ -60,23 +60,49 @@ impl TuiApp {
                     json_i64(totals, "reported_total_tokens"),
                     format_nanodollars(json_i64(totals, "estimated_cost_nanodollars"))
                 )),
+                None,
             ),
             stats_row(
                 "breakdown",
                 "Token breakdown",
                 format!(
-                    "{} input  {} output  {} reasoning",
+                    "{} input  {} output  {} context",
                     json_i64(totals, "billable_input_tokens"),
                     json_i64(totals, "billable_output_tokens"),
-                    json_i64(totals, "reasoning_tokens")
+                    json_i64(totals, "context_input_tokens")
                 ),
                 Some(format!(
-                    "{} cache read  {} cache write",
+                    "{} reported total",
+                    json_i64(totals, "reported_total_tokens")
+                )),
+                None,
+            ),
+            stats_row(
+                "cache-reasoning",
+                "Cache and reasoning",
+                format!(
+                    "{} reasoning  {} cache read  {} cache write",
+                    json_i64(totals, "reasoning_tokens"),
                     json_i64(totals, "cache_read_tokens"),
                     json_i64(totals, "cache_write_tokens")
-                )),
+                ),
+                None,
+                None,
             ),
         ];
+        let unknown_priced_messages = json_i64(totals, "unknown_priced_messages");
+        if unknown_priced_messages > 0 {
+            rows.push(stats_row(
+                "unknown-pricing",
+                "Unknown pricing",
+                format!("{unknown_priced_messages} assistant messages had usage without pricing"),
+                Some(format!(
+                    "estimated cost excludes {}",
+                    pluralize_count(unknown_priced_messages, "message")
+                )),
+                None,
+            ));
+        }
         if let Some(models) = report.get("provider_models").and_then(Value::as_array) {
             for (index, model) in models.iter().enumerate() {
                 rows.push(stats_row(
@@ -86,41 +112,64 @@ impl TuiApp {
                         model.get("provider").and_then(Value::as_str).unwrap_or("-"),
                         model.get("model").and_then(Value::as_str).unwrap_or("-")
                     ),
-                    format!("{} tokens", json_i64(model, "reported_total_tokens")),
+                    format!(
+                        "{} messages  {} tokens",
+                        json_i64(model, "messages"),
+                        json_i64(model, "reported_total_tokens")
+                    ),
                     Some(format_nanodollars(json_i64(
                         model,
                         "estimated_cost_nanodollars",
                     ))),
+                    Some("Provider / model".to_string()),
                 ));
             }
         }
         if let Some(tools) = report.get("top_tools").and_then(Value::as_array)
             && !tools.is_empty()
         {
-            rows.push(stats_row(
-                "tools-heading",
-                "Top tools",
-                tools
-                    .iter()
-                    .take(5)
-                    .map(|tool| {
-                        format!(
-                            "{} {}",
-                            tool.get("tool").and_then(Value::as_str).unwrap_or("-"),
-                            json_i64(tool, "calls")
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("  "),
-                None,
-            ));
+            for (index, tool) in tools.iter().enumerate() {
+                rows.push(stats_row(
+                    format!("tool-{index}"),
+                    tool.get("tool").and_then(Value::as_str).unwrap_or("-"),
+                    pluralize_count(json_i64(tool, "calls"), "call"),
+                    None,
+                    Some("Top tools".to_string()),
+                ));
+            }
         }
-        Ok(BottomSelectionPanel::new(
-            "Usage Stats",
-            "",
-            "No usage yet",
-            rows,
-        ))
+        if let Some(sessions) = report.get("top_sessions").and_then(Value::as_array)
+            && !sessions.is_empty()
+        {
+            for (index, session) in sessions.iter().enumerate() {
+                let session_id = session.get("session").and_then(Value::as_str).unwrap_or("-");
+                let title = session
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .filter(|title| !title.trim().is_empty())
+                    .unwrap_or_else(|| short_session(session_id));
+                rows.push(stats_row(
+                    format!("session-{index}"),
+                    title,
+                    format!(
+                        "{}/{}  {} tokens",
+                        session
+                            .get("provider")
+                            .and_then(Value::as_str)
+                            .unwrap_or("-"),
+                        session.get("model").and_then(Value::as_str).unwrap_or("-"),
+                        json_i64(session, "reported_total_tokens")
+                    ),
+                    Some(format!(
+                        "{}  {}",
+                        format_nanodollars(json_i64(session, "estimated_cost_nanodollars")),
+                        format_session_time(json_i64(session, "updated_at_ms"))
+                    )),
+                    Some("Top sessions".to_string()),
+                ));
+            }
+        }
+        Ok(BottomSelectionPanel::new("Usage", "", "No usage yet", rows))
     }
 
     fn model_selection_panel(&mut self) -> Result<BottomSelectionPanel> {
@@ -270,7 +319,7 @@ impl TuiApp {
         &self,
         model: ConfiguredModel,
         source: ModelRowSource,
-        models: BottomSelectionPanel,
+        models: ModelPanel,
     ) -> BottomPanel {
         let model_spec = format_model_spec(&model);
         let current_model = self.model_display_value();
@@ -588,6 +637,7 @@ fn stats_row(
     label: impl Into<String>,
     description: impl Into<String>,
     detail: Option<String>,
+    group: Option<String>,
 ) -> BottomSelectionRow {
     let label = label.into();
     let description = description.into();
@@ -595,7 +645,7 @@ fn stats_row(
         label: label.clone(),
         description: Some(description.clone()),
         detail,
-        group: None,
+        group,
         search_text: format!("{label} {description}"),
         is_current: false,
         is_default: false,
@@ -607,4 +657,12 @@ fn stats_row(
 
 fn json_i64(value: &Value, key: &str) -> i64 {
     value.get(key).and_then(Value::as_i64).unwrap_or(0)
+}
+
+fn pluralize_count(count: i64, singular: &str) -> String {
+    if count == 1 {
+        format!("1 {singular}")
+    } else {
+        format!("{count} {singular}s")
+    }
 }

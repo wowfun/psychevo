@@ -96,7 +96,6 @@ Configuration may define:
 - optional model `reasoning_effort` as the first-slice model thinking
   intensity hint. Valid values are `none`, `minimal`, `low`, `medium`, `high`,
   `xhigh`, and `max`; `none` disables the request field.
-- optional model `context_limit` as a legacy context-window token override
 - optional model `limit` object with `context`, `input`, and `output` token
   limits
 - optional model `cost` object with USD-per-million-token `input`, `output`,
@@ -104,6 +103,9 @@ Configuration may define:
 - optional model capability overrides using `reasoning`, `tool_call`,
   `temperature`, `attachment`, `structured_output`, `interleaved`, and
   `modalities.input`/`modalities.output`
+
+The legacy model `context_limit` field is rejected. Configurations must use
+`limit.context` for context-window token limits.
 
 Example:
 
@@ -223,18 +225,24 @@ request shaping, cost estimation, and future context-budget decisions. Runtime
 keeps a typed core view plus the raw public registry model JSON for future
 fields. Resolution order is:
 
-1. explicit per-model metadata from JSONC configuration, including legacy
-   `context_limit`
+1. built-in metadata fallback table for known model families
 2. cache-first `models.dev` public registry lookup
 3. metadata present in an explicitly fetched provider `/models` response
-4. built-in context fallback table for known model families
+4. explicit per-model metadata from JSONC configuration
 5. unknown as `None`
 
 The `models.dev` cache is stored under `$PSYCHEVO_HOME/models_dev_cache.json`.
-Fresh cache entries are preferred. A live registry refresh is best effort,
-uses a bounded timeout, and must not fail provider resolution or startup. When
-refresh fails, runtime may use a stale cache; when no cache or fallback
-matches, the context limit remains unknown.
+It is a pruned cache of user-relevant models, not a full public registry mirror.
+Provider resolution and `pevo run` never fetch `models.dev`; they only read the
+existing local cache. TUI may start one non-blocking cache warmup when the cache
+file is absent, and `/model` provides an explicit metadata refresh action. Both
+paths are best effort, use a bounded timeout, fetch the public registry as a
+source, and write only models from the current intended model selection, TUI
+recent models, and locally configured model entries. They must not fail provider
+resolution or startup. When refresh fails, runtime keeps the old cache if one
+exists. Built-in fallbacks may provide locally known typed metadata, but remain
+advisory and overridable by `models.dev` or explicit config. When no cache or
+fallback matches, the context limit and other metadata remain unknown.
 
 Provider matching first uses known provider-id mappings such as `deepseek`,
 `xiaomi`, and `xiaomi-token-plan-cn`. If the configured provider id differs

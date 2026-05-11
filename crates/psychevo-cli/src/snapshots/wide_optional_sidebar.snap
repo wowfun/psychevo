@@ -9,14 +9,6 @@ size=120x24
                                                                               Review sidebar polish
                                                                               session: 12345678
 
-                                                                              Context
-                                                                              workdir: /repo/psychevo
-                                                                              branch: main
-                                                                              messages: 2
-                                                                              tool calls: 1
-                                                                              tokens: 12,000
-                                                                              context: 18.8%
-
                                                                               Modified Files
                                                                               M crates/psychevo-cli/src/tui.rs
                                                                               ?? specs/210-pevo-tui/testing.md
@@ -26,22 +18,22 @@ size=120x24
 
 
 
+
+
+
+
+
+
+
+
 ──────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
 
-mock/model  high
+mock/model  high  ~/work · main
 
 --- styles ---
 [default]                                                                              Review sidebar polish
 [default]                                                                              session: 12345678
-[default]
-[default]                                                                              Context
-[default]                                                                              workdir: /repo/psychevo
-[default]                                                                              branch: main
-[default]                                                                              messages: 2
-[default]                                                                              tool calls: 1
-[default]                                                                              tokens: 12,000
-[default]                                                                              context: 18.8%
 [default]
 [default]                                                                              Modified Files
 [default]                                                                              M crates/psychevo-cli/src/tui.rs
@@ -52,7 +44,15 @@ mock/model  high
 [default]
 [default]
 [default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]
+[default]
 [default]──────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
 [default]
-[default]mock/model  [magenta]high[default]
+[default]mock/model  [magenta]high[default]  [dim]~/work · main[default]

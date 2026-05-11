@@ -1,6 +1,5 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
-assertion_line: 612
 expression: combined
 ---
 fixture=long_thinking_markdown_meta_bottom_scroll
@@ -24,7 +23,7 @@ size=100x18
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
 
-mock/model  high
+mock/model  high  ~/work · main
 
 --- styles ---
 [dim]› [default]Restore a reasoning-only daily report.
@@ -44,4 +43,4 @@ mock/model  high
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
 [default]
-[default]mock/model  [magenta]high[default]
+[default]mock/model  [magenta]high[default]  [dim]~/work · main[default]

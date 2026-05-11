@@ -15,6 +15,7 @@ enum TranscriptKind {
     Ran,
     Changed,
     Meta,
+    Command,
     Status,
     Error,
 }
@@ -218,6 +219,7 @@ struct FullscreenUi<'a> {
     sidebar: SidebarSnapshot,
     sidebar_tokens: Option<u64>,
     sidebar_context_limit: Option<u64>,
+    last_context_snapshot: Option<ContextSnapshot>,
     sidebar_cost_nanodollars: Option<i64>,
     history: Vec<String>,
     history_kinds: Vec<ComposerHistoryKind>,
@@ -278,13 +280,7 @@ struct SelectionState {
 struct SidebarSnapshot {
     title: String,
     session: String,
-    workdir: String,
     branch: String,
-    tokens: Option<u64>,
-    context_percent: Option<f64>,
-    cost_nanodollars: Option<i64>,
-    message_count: usize,
-    tool_count: usize,
     changed_files: Vec<String>,
 }
 
@@ -356,14 +352,42 @@ enum ModelRowSource {
 
 #[derive(Debug, Clone)]
 enum BottomPanel {
+    Help(HelpPanel),
     Sessions(BottomSelectionPanel),
-    Models(BottomSelectionPanel),
+    Models(ModelPanel),
     Stats(BottomSelectionPanel),
     ProviderWizard(ProviderWizardPanel),
     Variants {
-        models: Box<BottomSelectionPanel>,
+        models: Box<ModelPanel>,
         panel: BottomSelectionPanel,
     },
+}
+
+#[derive(Debug, Clone)]
+struct HelpPanel {
+    skill_count: Option<usize>,
+    tab: HelpTab,
+    scroll: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HelpTab {
+    General,
+    Commands,
+    CustomCommands,
+}
+
+#[derive(Debug, Clone)]
+struct ModelPanel {
+    models: BottomSelectionPanel,
+    tab: ModelTab,
+    info_scroll: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModelTab {
+    Models,
+    Info,
 }
 
 #[derive(Debug, Clone)]
@@ -498,6 +522,12 @@ impl BottomSelectionPanel {
             .get(self.selected)
             .and_then(|index| self.rows.get(*index))
             .map(|row| row.value.clone())
+    }
+
+    fn selected_row(&self) -> Option<&BottomSelectionRow> {
+        self.filtered_indices()
+            .get(self.selected)
+            .and_then(|index| self.rows.get(*index))
     }
 
     fn selected_key(&self) -> String {
@@ -658,7 +688,11 @@ impl BottomSelectionValue {
 impl BottomPanel {
     fn selection(&self) -> &BottomSelectionPanel {
         match self {
-            BottomPanel::Sessions(panel) | BottomPanel::Models(panel) | BottomPanel::Stats(panel) => panel,
+            BottomPanel::Sessions(panel) | BottomPanel::Stats(panel) => panel,
+            BottomPanel::Models(panel) => &panel.models,
+            BottomPanel::Help(_) => {
+                panic!("help panel does not expose a selection panel")
+            }
             BottomPanel::ProviderWizard(_) => {
                 panic!("provider wizard does not expose a selection panel")
             }
@@ -668,7 +702,11 @@ impl BottomPanel {
 
     fn selection_mut(&mut self) -> &mut BottomSelectionPanel {
         match self {
-            BottomPanel::Sessions(panel) | BottomPanel::Models(panel) | BottomPanel::Stats(panel) => panel,
+            BottomPanel::Sessions(panel) | BottomPanel::Stats(panel) => panel,
+            BottomPanel::Models(panel) => &mut panel.models,
+            BottomPanel::Help(_) => {
+                panic!("help panel does not expose a selection panel")
+            }
             BottomPanel::ProviderWizard(_) => {
                 panic!("provider wizard does not expose a selection panel")
             }
@@ -683,7 +721,8 @@ impl BottomPanel {
     fn session_view(&self) -> Option<SessionListView> {
         match self {
             BottomPanel::Sessions(panel) => panel.session_view,
-            BottomPanel::Models(_)
+            BottomPanel::Help(_)
+            | BottomPanel::Models(_)
             | BottomPanel::Stats(_)
             | BottomPanel::ProviderWizard(_)
             | BottomPanel::Variants { .. } => None,
@@ -692,6 +731,103 @@ impl BottomPanel {
 
     fn move_selection(&mut self, direction: isize) {
         self.selection_mut().move_selection(direction);
+    }
+}
+
+impl HelpPanel {
+    fn new(skill_count: Option<usize>) -> Self {
+        Self {
+            skill_count,
+            tab: HelpTab::General,
+            scroll: 0,
+        }
+    }
+
+    fn move_tab(&mut self, direction: isize) {
+        let current = self.tab_index() as isize;
+        let next = (current + direction).rem_euclid(Self::tabs().len() as isize) as usize;
+        self.tab = Self::tabs()[next];
+        self.scroll = 0;
+    }
+
+    fn set_tab(&mut self, tab: HelpTab) {
+        self.tab = tab;
+        self.scroll = 0;
+    }
+
+    fn scroll_by(&mut self, direction: isize) {
+        if direction.is_negative() {
+            self.scroll = self.scroll.saturating_sub(direction.unsigned_abs() as u16);
+        } else {
+            self.scroll = self.scroll.saturating_add(direction as u16);
+        }
+    }
+
+    fn tab_index(&self) -> usize {
+        Self::tabs()
+            .iter()
+            .position(|tab| *tab == self.tab)
+            .unwrap_or(0)
+    }
+
+    fn tabs() -> &'static [HelpTab] {
+        &[HelpTab::General, HelpTab::Commands, HelpTab::CustomCommands]
+    }
+}
+
+impl HelpTab {
+    fn label(self) -> &'static str {
+        match self {
+            HelpTab::General => "General",
+            HelpTab::Commands => "Commands",
+            HelpTab::CustomCommands => "Custom commands",
+        }
+    }
+}
+
+impl ModelPanel {
+    fn new(models: BottomSelectionPanel) -> Self {
+        Self {
+            models,
+            tab: ModelTab::Models,
+            info_scroll: 0,
+        }
+    }
+
+    fn move_tab(&mut self, direction: isize) {
+        let current = self.tab_index() as isize;
+        let next = (current + direction).rem_euclid(Self::tabs().len() as isize) as usize;
+        self.tab = Self::tabs()[next];
+    }
+
+    fn scroll_info_by(&mut self, direction: isize) {
+        if direction.is_negative() {
+            self.info_scroll = self
+                .info_scroll
+                .saturating_sub(direction.unsigned_abs() as u16);
+        } else {
+            self.info_scroll = self.info_scroll.saturating_add(direction as u16);
+        }
+    }
+
+    fn tab_index(&self) -> usize {
+        Self::tabs()
+            .iter()
+            .position(|tab| *tab == self.tab)
+            .unwrap_or(0)
+    }
+
+    fn tabs() -> &'static [ModelTab] {
+        &[ModelTab::Models, ModelTab::Info]
+    }
+}
+
+impl ModelTab {
+    fn label(self) -> &'static str {
+        match self {
+            ModelTab::Models => "Models",
+            ModelTab::Info => "Info",
+        }
     }
 }
 

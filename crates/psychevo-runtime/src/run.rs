@@ -9,11 +9,11 @@ use psychevo_ai::{GenerationProvider, OpenAiChatProvider, Outcome};
 use serde_json::json;
 use tokio::time;
 
-use crate::config::{
-    ResolvedRunProvider, load_run_config, refresh_resolved_run_provider_metadata,
-    resolve_run_provider,
-};
+use crate::config::{ResolvedRunProvider, load_run_config, resolve_run_provider};
 use crate::context::prune_context;
+use crate::context_usage::{
+    ContextRecorder, ContextRecordingProvider, LiveContextProfile, context_counting_metadata,
+};
 use crate::error::{Error, Result};
 use crate::events::PersistenceSink;
 use crate::messages::assistant_text;
@@ -76,8 +76,7 @@ async fn run_live_internal(
     }
 
     let loaded = load_run_config(&options, &workdir)?;
-    let mut resolved = resolve_run_provider(&options, &loaded)?;
-    refresh_resolved_run_provider_metadata(&mut resolved, &loaded).await;
+    let resolved = resolve_run_provider(&options, &loaded)?;
     let skills_home = resolve_skills_home(&loaded.env, &workdir)?;
     let skill_options = SkillDiscoveryOptions {
         home: skills_home.clone(),
@@ -188,10 +187,23 @@ async fn run_live_internal(
         resolved.api_key.clone(),
         resolved.provider.clone(),
     ));
+    let context_recorder = ContextRecorder::default();
+    let provider_for_title = Arc::clone(&provider);
+    let provider: Arc<dyn GenerationProvider> = Arc::new(ContextRecordingProvider::new(
+        Arc::clone(&provider),
+        context_recorder.clone(),
+        LiveContextProfile {
+            session_id: session_id.clone(),
+            base_url: resolved.base_url.clone(),
+            context_limit: resolved.context_limit,
+            mode: options.mode,
+        },
+    ));
     let (control_handle, control_receivers) = match control {
         Some(control) => (control.handle.inner.clone(), control.receivers),
         None => ControlHandle::new(),
     };
+    let stream_events_after = stream_events.clone();
     let sink = Arc::new(PersistenceSink {
         store: store.clone(),
         session_id: session_id.clone(),
@@ -206,6 +218,7 @@ async fn run_live_internal(
         include_reasoning: options.include_reasoning,
         reasoning_effort: resolved.reasoning_effort.clone(),
         model_metadata: resolved.metadata.clone(),
+        context_recorder: Some(context_recorder.clone()),
     });
     let mut generation_metadata = json!({
         "model_metadata": resolved.metadata.public_json(),
@@ -226,6 +239,22 @@ async fn run_live_internal(
     let mut tools = coding_core_tools_for_mode(&workdir, options.mode);
     if !options.no_skills || !options.skill_inputs.is_empty() {
         tools.extend(skill_tools_for_mode(skill_options, options.mode));
+    }
+    if let Some(object) = generation_metadata.as_object_mut() {
+        object.insert(
+            "context_counting".to_string(),
+            context_counting_metadata(
+                1,
+                system_instructions.len().saturating_sub(1),
+                previous_messages.len(),
+                skill_context_messages.len(),
+                skill_catalog
+                    .skills
+                    .iter()
+                    .map(|skill| skill.name.clone())
+                    .collect(),
+            ),
+        );
     }
     let request = AgentLoopRequest {
         model_provider: resolved.provider.clone(),
@@ -258,13 +287,22 @@ async fn run_live_internal(
             &options.prompt,
             &selected_skills,
             &skill_catalog,
-            provider,
+            provider_for_title,
             &resolved,
         )
         .await?;
     }
 
-    let events = events.lock().expect("event lock poisoned").clone();
+    tokio::task::yield_now().await;
+    let mut events = events.lock().expect("event lock poisoned").clone();
+    let context_snapshot = context_recorder.latest_snapshot();
+    if let Some(snapshot) = &context_snapshot {
+        let value = serde_json::to_value(snapshot)?;
+        events.push(value.clone());
+        if let Some(stream) = stream_events_after {
+            stream(RunStreamEvent::Event(value));
+        }
+    }
     Ok(RunResult {
         session_id,
         outcome: completion.outcome,
@@ -279,6 +317,7 @@ async fn run_live_internal(
         context_limit: resolved.context_limit,
         tool_failures,
         selected_skills,
+        context_snapshot,
         events,
     })
 }
