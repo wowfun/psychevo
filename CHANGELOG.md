@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-05-11
+
+### Added
+
+- Added a POSIX/Git Bash source install helper with `pevo` verification and
+  optional home initialization.
+- Added context-window inspection across `pevo context`, TUI `/context`, and
+  best-effort JSON `context_snapshot` events with shared runtime snapshots and
+  tokenizer-backed estimates.
+- Added the shared command contract and registry-backed CLI/TUI command help,
+  discovery, aliases, command feedback rows, and skill-command summaries.
+- Added a tabbed fullscreen `/model` metadata view plus explicit metadata
+  refresh and pruned `models.dev` cache warmup.
+
+### Changed
+
+- Made TUI `/usage` canonical, kept `/stats` as an alias, and expanded local
+  usage/cost reporting with token, cache, model, tool, session, and pricing
+  details.
+- Tightened model metadata configuration by requiring `limit.context`, keeping
+  `pevo run` cache-only, and lengthening explicit `models.dev` refreshes.
+- Refined fullscreen TUI context/status rendering, command transcript rows,
+  tabbed help, stable markers, and compact metadata presentation.
+
 ## 2026-05-10
 
 ### Added
