@@ -25,7 +25,7 @@ fn chat_completions_endpoint(base_url: &str) -> String {
 fn build_chat_request(request: &GenerationRequest, base_url: &str) -> Value {
     let mut body = json!({
         "model": request.model.model,
-        "messages": translate_messages(&request.messages, &request.model, base_url),
+        "messages": translate_messages(&request.messages, &request.model, &request.metadata, base_url),
         "stream": true,
         "stream_options": { "include_usage": true },
     });
@@ -341,7 +341,12 @@ fn selected_skill_context_provider_messages(
             continue;
         }
         if seen_non_system_messages >= start && seen_non_system_messages < end {
-            messages.extend(translate_message(message, &request.model, base_url));
+            messages.extend(translate_message(
+                message,
+                &request.model,
+                &request.metadata,
+                base_url,
+            ));
         }
         seen_non_system_messages = seen_non_system_messages.saturating_add(1);
     }
@@ -356,27 +361,48 @@ fn normalized_message_role(message: &Value) -> String {
 }
 
 fn capability_is_false(metadata: &Value, key: &str) -> bool {
-    metadata
-        .get("model_metadata")
-        .and_then(|metadata| metadata.get("capabilities"))
+    model_capabilities(metadata)
         .and_then(|capabilities| capabilities.get(key))
         .and_then(Value::as_bool)
         == Some(false)
 }
 
-fn translate_messages(messages: &[Value], target: &ModelTarget, base_url: &str) -> Vec<Value> {
+fn capability_is_true(metadata: &Value, key: &str) -> bool {
+    model_capabilities(metadata)
+        .and_then(|capabilities| capabilities.get(key))
+        .and_then(Value::as_bool)
+        == Some(true)
+}
+
+fn model_capabilities(metadata: &Value) -> Option<&Value> {
+    metadata
+        .get("model_metadata")
+        .and_then(|metadata| metadata.get("capabilities"))
+}
+
+fn translate_messages(
+    messages: &[Value],
+    target: &ModelTarget,
+    metadata: &Value,
+    base_url: &str,
+) -> Vec<Value> {
     let projected = messages
         .iter()
-        .flat_map(|message| translate_message(message, target, base_url))
+        .flat_map(|message| translate_message(message, target, metadata, base_url))
         .collect::<Vec<_>>();
     merge_adjacent_user_messages(projected)
 }
 
-fn translate_message(message: &Value, target: &ModelTarget, base_url: &str) -> Vec<Value> {
+fn translate_message(
+    message: &Value,
+    target: &ModelTarget,
+    metadata: &Value,
+    base_url: &str,
+) -> Vec<Value> {
     match message.get("role").and_then(Value::as_str) {
         Some("system") => system_messages(message),
         Some("user") => user_messages(message),
-        Some("assistant") => assistant_messages(message, target, base_url),
+        Some("assistant") => assistant_messages(message, target, metadata, base_url),
         Some("tool_result") => tool_result_messages(message),
         _ => Vec::new(),
     }
@@ -707,7 +733,12 @@ fn bounded_data_url(mime_type: &str, data: &[u8]) -> Option<String> {
         .then(|| format!("data:{mime_type};base64,{encoded}"))
 }
 
-fn assistant_messages(message: &Value, target: &ModelTarget, base_url: &str) -> Vec<Value> {
+fn assistant_messages(
+    message: &Value,
+    target: &ModelTarget,
+    metadata: &Value,
+    base_url: &str,
+) -> Vec<Value> {
     let mut text = String::new();
     let mut tool_calls = Vec::new();
     let mut normalized_reasoning = Vec::new();
@@ -767,12 +798,12 @@ fn assistant_messages(message: &Value, target: &ModelTarget, base_url: &str) -> 
         .and_then(Value::as_array)
         .is_some_and(|calls| !calls.is_empty());
     apply_reasoning_content_for_api(
-        message,
         &mut output,
         has_text,
         has_tool_calls,
         &normalized_reasoning.join("\n\n"),
         target,
+        metadata,
         base_url,
     );
     vec![output]
@@ -798,22 +829,18 @@ fn merge_adjacent_user_messages(messages: Vec<Value>) -> Vec<Value> {
 }
 
 fn apply_reasoning_content_for_api(
-    source: &Value,
     output: &mut Value,
     has_text: bool,
     has_tool_calls: bool,
     normalized_reasoning: &str,
     target: &ModelTarget,
+    metadata: &Value,
     base_url: &str,
 ) {
-    if !needs_thinking_reasoning_pad(target, base_url) {
+    if !projects_reasoning_content(target, metadata, base_url) {
         return;
     }
     if !has_text && !has_tool_calls {
-        return;
-    }
-    if !source_provider_matches_target(source, target) {
-        output["reasoning_content"] = Value::String(" ".to_string());
         return;
     }
     let value = if normalized_reasoning.trim().is_empty() {
@@ -824,14 +851,32 @@ fn apply_reasoning_content_for_api(
     output["reasoning_content"] = Value::String(value);
 }
 
-fn source_provider_matches_target(source: &Value, target: &ModelTarget) -> bool {
-    source
-        .get("provider")
-        .and_then(Value::as_str)
-        .is_some_and(|provider| provider.eq_ignore_ascii_case(&target.provider))
+fn projects_reasoning_content(target: &ModelTarget, metadata: &Value, base_url: &str) -> bool {
+    if model_interleaved_is_false(metadata) {
+        return false;
+    }
+    if let Some(field) = model_interleaved_field(metadata) {
+        return field == "reasoning_content";
+    }
+    capability_is_true(metadata, "reasoning")
+        || needs_thinking_reasoning_pad_fallback(target, base_url)
 }
 
-fn needs_thinking_reasoning_pad(target: &ModelTarget, base_url: &str) -> bool {
+fn model_interleaved_field(metadata: &Value) -> Option<&str> {
+    model_capabilities(metadata)
+        .and_then(|capabilities| capabilities.get("interleaved"))
+        .and_then(|interleaved| interleaved.get("field"))
+        .and_then(Value::as_str)
+}
+
+fn model_interleaved_is_false(metadata: &Value) -> bool {
+    model_capabilities(metadata)
+        .and_then(|capabilities| capabilities.get("interleaved"))
+        .and_then(Value::as_bool)
+        == Some(false)
+}
+
+fn needs_thinking_reasoning_pad_fallback(target: &ModelTarget, base_url: &str) -> bool {
     let provider = target.provider.to_lowercase();
     let model = target.model.to_lowercase();
     provider == "deepseek"
@@ -842,6 +887,11 @@ fn needs_thinking_reasoning_pad(target: &ModelTarget, base_url: &str) -> bool {
         || base_url_host_matches(base_url, "api.kimi.com")
         || base_url_host_matches(base_url, "moonshot.ai")
         || base_url_host_matches(base_url, "moonshot.cn")
+        || provider == "xiaomi"
+        || provider == "xiaomi-token-plan"
+        || provider == "xiaomi-token-plan-cn"
+        || model.contains("mimo")
+        || base_url_host_matches(base_url, "api.xiaomimimo.com")
 }
 
 fn base_url_host_matches(base_url: &str, needle: &str) -> bool {

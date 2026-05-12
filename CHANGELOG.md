@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-05-13
+
+### Fixed
+
+- Fixed Chat-compatible interleaved reasoning replay for explicit
+  `reasoning_content` metadata and `reasoning=true` default fallback.
+
 ## 2026-05-12
 
 ### Added

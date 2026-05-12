@@ -18,6 +18,52 @@ fn basic_generation_request() -> GenerationRequest {
     }
 }
 
+fn interleaved_reasoning_metadata() -> serde_json::Value {
+    json!({
+        "model_metadata": {
+            "capabilities": {
+                "interleaved": { "field": "reasoning_content" }
+            }
+        }
+    })
+}
+
+fn reasoning_capability_metadata() -> serde_json::Value {
+    json!({
+        "model_metadata": {
+            "capabilities": {
+                "reasoning": true
+            }
+        }
+    })
+}
+
+fn reasoning_capability_with_interleaved(interleaved: serde_json::Value) -> serde_json::Value {
+    json!({
+        "model_metadata": {
+            "capabilities": {
+                "reasoning": true,
+                "interleaved": interleaved
+            }
+        }
+    })
+}
+
+fn assistant_reasoning_text_message(reasoning: &str) -> serde_json::Value {
+    json!({
+        "role": "assistant",
+        "content": [
+            { "type": "reasoning", "text": reasoning },
+            { "type": "text", "text": "visible" }
+        ],
+        "timestamp_ms": 2,
+        "finish_reason": "stop",
+        "outcome": "normal",
+        "model": "source-model",
+        "provider": "source-provider"
+    })
+}
+
 fn read_http_headers(stream: &mut std::net::TcpStream) {
     let mut request = Vec::new();
     let mut buf = [0; 1024];
@@ -418,7 +464,7 @@ fn chat_request_hides_reasoning_unless_target_derives_protocol_echo() {
 }
 
 #[test]
-fn chat_request_pads_target_reasoning_without_cross_provider_leak() {
+fn chat_request_projects_fallback_target_reasoning_across_provider_family() {
     let request = GenerationRequest {
         model: ModelTarget {
             provider: "deepseek".to_string(),
@@ -450,43 +496,303 @@ fn chat_request_pads_target_reasoning_without_cross_provider_leak() {
     };
 
     let body = build_chat_request(&request, "https://api.deepseek.com/v1");
-    assert_eq!(body["messages"][0]["reasoning_content"], " ");
-    assert!(
-        !serde_json::to_string(&body)
-            .expect("body")
-            .contains("other provider thought")
+    assert_eq!(
+        body["messages"][0]["reasoning_content"],
+        "other provider thought"
     );
 }
 
 #[test]
-fn chat_request_does_not_replay_cross_provider_reasoning_text() {
+fn chat_request_projects_metadata_interleaved_reasoning_for_tool_calls() {
+    let request = GenerationRequest {
+        model: ModelTarget {
+            provider: "custom".to_string(),
+            model: "custom-reasoning".to_string(),
+        },
+        messages: vec![json!({
+            "role": "assistant",
+            "content": [
+                { "type": "reasoning", "text": "metadata-driven thought" },
+                {
+                    "type": "tool_call",
+                    "id": "call_1",
+                    "name": "bash",
+                    "arguments": { "cmd": "ls" },
+                    "arguments_json": "{\"cmd\":\"ls\"}",
+                    "arguments_error": null,
+                    "content_index": 0,
+                    "call_index": 0
+                }
+            ],
+            "timestamp_ms": 2,
+            "finish_reason": "tool_calls",
+            "outcome": "normal",
+            "model": "other-model",
+            "provider": "other"
+        })],
+        tools: Vec::new(),
+        metadata: interleaved_reasoning_metadata(),
+    };
+
+    let body = build_chat_request(&request, "https://example.test/v1");
+    assert_eq!(
+        body["messages"][0]["reasoning_content"],
+        "metadata-driven thought"
+    );
+}
+
+#[test]
+fn chat_request_defaults_reasoning_content_when_reasoning_true_without_interleaved() {
+    let request = GenerationRequest {
+        model: ModelTarget {
+            provider: "custom".to_string(),
+            model: "custom-reasoning".to_string(),
+        },
+        messages: vec![assistant_reasoning_text_message("defaulted thought")],
+        tools: Vec::new(),
+        metadata: reasoning_capability_metadata(),
+    };
+
+    let body = build_chat_request(&request, "https://example.test/v1");
+    assert_eq!(
+        body["messages"][0]["reasoning_content"],
+        "defaulted thought"
+    );
+}
+
+#[test]
+fn chat_request_defaults_reasoning_content_when_interleaved_true() {
+    let request = GenerationRequest {
+        model: ModelTarget {
+            provider: "custom".to_string(),
+            model: "custom-reasoning".to_string(),
+        },
+        messages: vec![assistant_reasoning_text_message(
+            "boolean interleaved thought",
+        )],
+        tools: Vec::new(),
+        metadata: reasoning_capability_with_interleaved(json!(true)),
+    };
+
+    let body = build_chat_request(&request, "https://example.test/v1");
+    assert_eq!(
+        body["messages"][0]["reasoning_content"],
+        "boolean interleaved thought"
+    );
+}
+
+#[test]
+fn chat_request_respects_interleaved_false_even_when_reasoning_true() {
     let request = GenerationRequest {
         model: ModelTarget {
             provider: "deepseek".to_string(),
             model: "deepseek-v4-pro".to_string(),
         },
+        messages: vec![assistant_reasoning_text_message("disabled thought")],
+        tools: Vec::new(),
+        metadata: reasoning_capability_with_interleaved(json!(false)),
+    };
+
+    let body = build_chat_request(&request, "https://api.deepseek.com/v1");
+    assert_eq!(
+        body["messages"][0],
+        json!({"role":"assistant","content":"visible"})
+    );
+}
+
+#[test]
+fn chat_request_does_not_rewrite_reasoning_details_to_reasoning_content() {
+    let request = GenerationRequest {
+        model: ModelTarget {
+            provider: "custom".to_string(),
+            model: "custom-reasoning".to_string(),
+        },
+        messages: vec![assistant_reasoning_text_message("details thought")],
+        tools: Vec::new(),
+        metadata: reasoning_capability_with_interleaved(json!({
+            "field": "reasoning_details"
+        })),
+    };
+
+    let body = build_chat_request(&request, "https://example.test/v1");
+    assert_eq!(
+        body["messages"][0],
+        json!({"role":"assistant","content":"visible"})
+    );
+}
+
+#[test]
+fn chat_request_does_not_default_reasoning_content_when_reasoning_false() {
+    let request = GenerationRequest {
+        model: ModelTarget {
+            provider: "custom".to_string(),
+            model: "custom-model".to_string(),
+        },
+        messages: vec![assistant_reasoning_text_message(
+            "disabled reasoning thought",
+        )],
+        tools: Vec::new(),
+        metadata: json!({
+            "model_metadata": {
+                "capabilities": {
+                    "reasoning": false
+                }
+            }
+        }),
+    };
+
+    let body = build_chat_request(&request, "https://example.test/v1");
+    assert_eq!(
+        body["messages"][0],
+        json!({"role":"assistant","content":"visible"})
+    );
+}
+
+#[test]
+fn chat_request_replays_xiaomi_thinking_reasoning_for_tool_calls() {
+    let request = GenerationRequest {
+        model: ModelTarget {
+            provider: "xiaomi-token-plan".to_string(),
+            model: "mimo-v2-omni".to_string(),
+        },
         messages: vec![json!({
             "role": "assistant",
             "content": [
-                { "type": "reasoning", "text": "xiaomi scratchpad" },
+                { "type": "reasoning", "text": "need to inspect files" },
+                {
+                    "type": "tool_call",
+                    "id": "call_1",
+                    "name": "bash",
+                    "arguments": { "cmd": "ls" },
+                    "arguments_json": "{\"cmd\":\"ls\"}",
+                    "arguments_error": null,
+                    "content_index": 0,
+                    "call_index": 0
+                }
+            ],
+            "timestamp_ms": 2,
+            "finish_reason": "tool_calls",
+            "outcome": "normal",
+            "model": "mimo-v2-omni",
+            "provider": "xiaomi-token-plan"
+        })],
+        tools: Vec::new(),
+        metadata: json!({
+            "reasoning_effort": "low",
+            "model_metadata": {
+                "capabilities": {
+                    "interleaved": { "field": "reasoning_content" }
+                }
+            }
+        }),
+    };
+
+    let body = build_chat_request(&request, "https://api.xiaomimimo.com/v1");
+    assert_eq!(
+        body["messages"][0]["reasoning_content"],
+        "need to inspect files"
+    );
+}
+
+#[test]
+fn chat_request_projects_cross_provider_reasoning_for_interleaved_target() {
+    let request = GenerationRequest {
+        model: ModelTarget {
+            provider: "xiaomi-token-plan".to_string(),
+            model: "mimo-v2-omni".to_string(),
+        },
+        messages: vec![json!({
+            "role": "assistant",
+            "content": [
+                { "type": "reasoning", "text": "deepseek scratchpad" },
                 { "type": "text", "text": "visible" }
             ],
             "timestamp_ms": 2,
             "finish_reason": "stop",
             "outcome": "normal",
-            "model": "mimo",
-            "provider": "xiaomi"
+            "model": "deepseek-v4-pro",
+            "provider": "deepseek"
+        })],
+        tools: Vec::new(),
+        metadata: json!({
+            "reasoning_effort": "low",
+            "model_metadata": {
+                "capabilities": {
+                    "interleaved": { "field": "reasoning_content" }
+                }
+            }
+        }),
+    };
+
+    let body = build_chat_request(&request, "https://api.xiaomimimo.com/v1");
+    assert_eq!(
+        body["messages"][0]["reasoning_content"],
+        "deepseek scratchpad"
+    );
+}
+
+#[test]
+fn chat_request_pads_interleaved_reasoning_when_retained_reasoning_empty() {
+    let request = GenerationRequest {
+        model: ModelTarget {
+            provider: "custom".to_string(),
+            model: "custom-reasoning".to_string(),
+        },
+        messages: vec![json!({
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_call",
+                    "id": "call_1",
+                    "name": "bash",
+                    "arguments": { "cmd": "ls" },
+                    "arguments_json": "{\"cmd\":\"ls\"}",
+                    "arguments_error": null,
+                    "content_index": 0,
+                    "call_index": 0
+                }
+            ],
+            "timestamp_ms": 2,
+            "finish_reason": "tool_calls",
+            "outcome": "normal",
+            "model": "custom-reasoning",
+            "provider": "custom"
+        })],
+        tools: Vec::new(),
+        metadata: interleaved_reasoning_metadata(),
+    };
+
+    let body = build_chat_request(&request, "https://example.test/v1");
+    assert_eq!(body["messages"][0]["reasoning_content"], " ");
+}
+
+#[test]
+fn chat_request_does_not_project_reasoning_without_interleaved_or_fallback() {
+    let request = GenerationRequest {
+        model: ModelTarget {
+            provider: "custom".to_string(),
+            model: "custom-model".to_string(),
+        },
+        messages: vec![json!({
+            "role": "assistant",
+            "content": [
+                { "type": "reasoning", "text": "local thought" },
+                { "type": "text", "text": "visible" }
+            ],
+            "timestamp_ms": 2,
+            "finish_reason": "stop",
+            "outcome": "normal",
+            "model": "custom-model",
+            "provider": "custom"
         })],
         tools: Vec::new(),
         metadata: json!({}),
     };
 
-    let body = build_chat_request(&request, "https://api.deepseek.com/v1");
-    assert_eq!(body["messages"][0]["reasoning_content"], " ");
-    assert!(
-        !serde_json::to_string(&body)
-            .expect("body")
-            .contains("xiaomi scratchpad")
+    let body = build_chat_request(&request, "https://example.test/v1");
+    assert_eq!(
+        body["messages"][0],
+        json!({"role":"assistant","content":"visible"})
     );
 }
 

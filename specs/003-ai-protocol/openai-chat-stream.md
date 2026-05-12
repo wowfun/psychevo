@@ -43,6 +43,20 @@ The adapter translates loop-visible messages to mainstream Chat roles:
 - tool results become `role: "tool"` with `tool_call_id`
 
 Assistant messages without tool calls omit the `tool_calls` field.
+Interleaved reasoning replay is a provider wire projection, not provider-neutral
+message semantics. When target model metadata declares
+`capabilities.interleaved.field = "reasoning_content"`, the adapter may project
+retained folded reasoning back as `reasoning_content` on replayed assistant
+messages. A target metadata value of `capabilities.interleaved = false`
+explicitly disables that projection. When `capabilities.reasoning = true` and
+`capabilities.interleaved` is missing, null, or true, the adapter may default the
+wire projection field to `reasoning_content`. Other explicit interleaved fields
+must not be rewritten to `reasoning_content`.
+
+Provider and base-URL fallbacks may enable `reasoning_content` for configured
+targets that lack usable metadata. If the target requires the field but no
+retained reasoning text is available, the adapter may send a compatibility
+placeholder.
 
 ## SSE Parsing
 
