@@ -67,6 +67,22 @@ These concepts should map cleanly to `OpenAI-compatible` or `Anthropic-compatibl
 The model target identifies which model the AI layer should invoke. This spec does not define model catalog structure, provider selection, fallback, or routing policy.
 
 Model context is the semantic input that runtime intends the model to consume. [006 Context Assembly](../006-context-assembly/spec.md) defines model context assembly and projection. Its loop-visible portion uses the message semantics from [002 Agent Execution](../002-agent-execution/spec.md).
+User messages in model context may contain provider-neutral text blocks, local
+image blocks, and remote image URL blocks. Text-only messages preserve the
+existing text semantics and may continue to project to text-only provider
+payloads. Local image blocks represent runtime-resolved local files that the AI
+layer converts to provider-compatible image input when the target adapter
+family supports it. Remote image URL blocks carry provider-consumable image URLs
+without local prefetch. Runtime must avoid sending structured image blocks when
+model metadata explicitly rules image input out; unknown metadata may be
+forwarded for the provider to decide.
+
+Provider adapters that inline local images should validate and bound local
+image data before provider invocation. When practical, adapters should preserve
+small mainstream image payloads and normalize oversized or less portable local
+formats into bounded mainstream image data URLs. A local image that cannot be
+read during historical context replay should degrade to visible text explaining
+the missing attachment instead of aborting request construction.
 
 The tool declaration snapshot describes what the model may request for this generation request. [007 Tool Surface](../007-tool-surface/spec.md) defines declaration snapshot and execution binding semantics. Tool declarations do not define concrete tool behavior, resource gate semantics, permission rules, or execution scheduling.
 

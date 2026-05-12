@@ -52,16 +52,46 @@ The first fullscreen keymap is fixed:
   block when transcript selection is active.
 - When a TUI text selection is active, `Ctrl+C` copies and clears it. Otherwise
   `Ctrl+C` requests quit. `Ctrl+D` quits.
+- `Ctrl+O` copies the latest visible assistant answer as raw Markdown source,
+  equivalent to `/copy`.
 - `Ctrl+B` toggles the local context sidebar.
 - `Ctrl+R` enters history search.
-- `PageUp`/`PageDown` and mouse wheel scroll the transcript or the active
-  bottom selection pane.
+- `PageUp`/`PageDown` scroll the transcript or active bottom selection pane.
+  Mouse wheel events route by the current pointer row: transcript hover scrolls
+  the transcript, bottom-pane hover scrolls the pane, and composer/status/other
+  non-scrollable hover does not trigger composer history recall.
+- In composer focus, plain `Up` and `Down` are input/history boundary keys, not
+  transcript scrolling keys. `Up` recalls the previous submitted prompt only
+  when the composer cursor is on the first logical line; an empty composer at
+  that boundary recalls the latest prompt. `Down` recalls the next submitted
+  prompt only while a history entry is already active and the cursor is on the
+  last logical line, restoring the saved draft after the newest history entry.
+  Otherwise `Up`/`Down` remain textarea navigation or no-op behavior.
 
 Fullscreen TUI enables terminal mouse capture while the alternate screen is
-active so mouse wheel events remain inside the application instead of scrolling
-host terminal scrollback. Leaving fullscreen disables mouse capture. Left-click
-selection is supported for slash menu rows and bottom selection pane rows, and
-those interactive row hits take precedence over starting text selection.
+active and enables xterm alternate-scroll mode so terminal wheel input stays
+inside the fullscreen application instead of scrolling host terminal scrollback.
+Wheel input reported as mouse events with coordinates uses hover-based routing;
+terminals that synthesize plain `Up`/`Down` cursor keys are indistinguishable
+from real keyboard input once delivered to the app and are handled by the
+composer boundary rules above. Leaving fullscreen disables mouse capture and
+leaves alternate-scroll disabled. Fullscreen TUI also enables bracketed paste
+while active and disables it during terminal restoration.
+Bracketed paste events are inserted into the composer as a single paste
+operation after normalizing `\r\n` and bare `\r` to `\n`; pasted text must not be
+reinterpreted as key-by-key input or lose bytes from local filesystem paths.
+Pasting a standalone image source adds it to the pending image attachments
+only when the pasted text resolves to a readable image source, and inserts a
+plain-text attachment placeholder into the composer using the fixed
+`[Image #N]` format. Pasting a standalone image-looking path that is missing,
+unreadable, or unsupported inserts the normalized text unchanged and does not
+show an image error. Pasting ordinary text, including prompts with embedded
+local paths, relative paths, `http(s)://` URLs, or `data:image/*` URLs, inserts
+the normalized text unchanged and must not auto-extract attachments. Pasting
+updates file, skill, and slash completion popup state the same way as ordinary
+composer edits. Left-click selection is
+supported for slash menu rows and bottom selection pane rows, and those
+interactive row hits take precedence over starting text selection.
 Mouse drag selection over rendered transcript and sidebar text is also
 supported. The active selection is highlighted while dragging, uses text from
 the final rendered buffer rather than pre-wrapped logical lines, locks to the
@@ -95,6 +125,11 @@ The first TUI supports:
 - `/show-thinking`
 - `/show-thinking on`
 - `/show-thinking off`
+- `/show-raw`
+- `/show-raw on`
+- `/show-raw off`
+- `/copy`
+- `/image <source> [prompt]`
 - `/rename <title>`
 - `/undo`
 - `/redo`
@@ -118,8 +153,8 @@ expand back to the full local result. `/help` does not accept arguments.
 
 `/help` output uses the three groups defined by [026 Commands](../026-commands/spec.md).
 `General` lists ordinary keyboard shortcuts plus common built-in commands:
-`/status`, `/context`, `/model`, `/sessions`, `/new`, `/undo`, `/redo`, and
-`/quit`. `Commands` lists all built-in slash commands in canonical registry
+`/status`, `/context`, `/model`, `/sessions`, `/new`, `/copy`, `/undo`,
+`/redo`, and `/quit`. `Commands` lists all built-in slash commands in canonical registry
 order. `Custom commands` summarizes dynamic skill invocation as
 `/skill:<name> [args]` with the discovered skill count, or reports
 `No custom commands available` when skills are disabled or none are discovered.
@@ -130,11 +165,64 @@ the pane, and tab/arrow navigation may switch help sections. Scripted `/help`
 prints the same deterministic help text without opening a pane.
 
 `/status` shows workdir, home, db, session, model, variant, mode, and debug
-state as one multi-line status block. It does not include thinking visibility;
-`/show-thinking` remains the dedicated command for changing and reporting that
-setting. Fullscreen TUI appends one command transcript row without an extra
-`Status` title, and non-terminal scripted TUI writes the same multi-line status
-text as one output block.
+state as one multi-line status block. It does not include thinking or raw
+visibility; `/show-thinking` and `/show-raw` remain the dedicated commands for
+changing and reporting those settings. Fullscreen TUI appends one command
+transcript row without an extra `Status` title, and non-terminal scripted TUI
+writes the same multi-line status text as one output block.
+
+Composer submission classifies input before slash parsing. Leading shell
+escapes keep taking precedence. Known slash commands and unknown slash-looking
+commands remain slash command input, including bounded errors such as
+`/unknown`. Ordinary prompt text is not scanned for image paths or image URLs:
+`描述这张图片的内容：img1.avif`, `/home/me/out.avif`, `@img.avif`,
+`https://example.com/image.png`, and `data:image/*;base64,...` are all prompt
+text unless they came from an existing pending image placeholder. This prevents
+output-path prompts from being misclassified as missing input images. The only
+fullscreen attachment entrypoints are `/image <source> [prompt]` and a
+standalone paste that resolves to a readable image source.
+
+Image inputs are tracked as pending composer attachments bound to plain-text
+placeholders. `/image <source> [prompt]` adds one image source to the pending
+set and rewrites the composer to include `[Image #N]` followed by `[prompt]`
+when present. Multiple images are added by repeating `/image` or by multiple
+standalone readable image-source pastes, not by parsing several sources from
+one command. Pending images are shown once in the bottom status line as
+`images N`; successful attachment adds must not also show a second transient
+`attached image N` status. Editing or deleting a placeholder before submission
+unbinds that attachment. On submit, the TUI sends only attachments whose
+complete placeholder text remains in the composer, ordered by first
+placeholder appearance, and compresses the final attachment metadata numbering
+to `image 1..N`. Pending images, attachment placeholders, and ephemeral
+status/error text are cleared after successful submission or `/new`, and move
+with queued prompts when a turn is already running. Image-only submission is
+allowed when at least one pending placeholder remains.
+
+Image sources may be absolute local paths, workdir-relative local paths, quoted
+paths, paths with escaped spaces, `file://` URLs, `http(s)://` URLs, or
+`data:image/*;base64,...` URLs when they are supplied through `/image` or as a
+standalone paste. Local paths must resolve to readable files with supported
+image extensions and must not exceed the configured local source size limit
+before an attachment is created. Remote URLs are not downloaded or preflighted
+locally. If selected model metadata explicitly says image input is unsupported,
+the TUI does not send structured image blocks; it degrades the submission to
+text containing the attachment source list plus the prompt with image
+placeholders removed, with bounded feedback telling the user the image was
+degraded to text.
+
+`/copy` copies the latest visible assistant answer as raw Markdown source. It
+does not copy Thinking, tool evidence, metadata, selected transcript rows, or
+rendered rich text. It is unaffected by `/show-raw`, so rich and raw transcript
+display modes copy the same source text. Fullscreen TUI reports copy success or
+failure through short status feedback and must not append a command transcript
+row. If no assistant answer is visible, it reports a bounded failure status.
+
+`/show-raw` toggles raw transcript visibility. `/show-raw on` and
+`/show-raw off` set it explicitly. It is a display-only mode and does not
+rewrite stored transcript content, provider payloads, non-terminal renderer
+output, or `/copy` results. Fullscreen TUI refreshes existing transcript rows
+immediately and must not append a command transcript row. `/raw` is obsolete
+and unsupported.
 
 `/usage` shows local usage and estimated-cost statistics for the current
 workdir from persisted SQLite accounting. Fullscreen TUI opens the shared
@@ -163,15 +251,17 @@ with title text, selected-row highlighting, footer hints, `Enter` selection,
 bottom selection panes do not render subtitles.
 
 `/sessions`, `/resume`, and `/continue` show date-grouped session rows sorted by
-most recently updated with right-aligned updated time and visible-message
-counts. The pane title identifies whether it is showing active or archived
-sessions, and the footer exposes `Tab` view switching plus the action-mode
-entrypoint. Right alignment and row truncation must use terminal display width
-so CJK/wide-character titles do not wrap the updated time onto a second line.
-Selecting an active session replaces the transcript with that session's
-sanitized history and does not add a status row. Selecting an archived session
-restores it, switches to it, replaces the transcript with its sanitized
-history, and does not add a status row. In non-terminal scripted mode,
+latest persisted activity with right-aligned activity time and visible-message
+counts. Selecting, viewing, or resuming a session does not update that activity
+time; persisting new transcript material does. The pane title identifies whether
+it is showing active or archived sessions, and the footer exposes `Tab` view
+switching plus the action-mode entrypoint. Right alignment and row truncation
+must use terminal display width so CJK/wide-character titles do not wrap the
+activity time onto a second line. Selecting an active session replaces the
+transcript with that session's sanitized history and does not add a status row.
+Selecting an archived session restores it, switches to it, replaces the
+transcript with its sanitized history, and does not add a status row or make the
+session latest by itself. In non-terminal scripted mode,
 `/sessions`, `/resume`, and `/continue` print a deterministic active-session
 list instead of opening a panel.
 
@@ -334,6 +424,9 @@ automatically started after the aborted turn settles. Queued prompt inputs and
 queued shell escapes are restored to the composer in FIFO order; shell commands
 are restored as `!<command>` lines. If the composer already contains a draft,
 the restored queue text is inserted before that draft, separated by newlines.
+The settled transcript renders the aborted foreground work with an explicit
+`interrupted` marker rather than ordinary failure styling. While the interrupt
+is still in progress, the bottom state line continues to show `interrupting`.
 Normal turn completion and ordinary failures retain the existing FIFO
 auto-start behavior.
 

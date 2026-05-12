@@ -101,6 +101,11 @@ This spec defines semantic modes and result material, not concrete patch syntax 
 `bash` executes a foreground bounded command through the runtime-bound process or shell resource for the working context.
 
 `bash` does not provide background process management, PTY interaction, process registry operations, or long-lived server orchestration in this slice.
+The foreground command must run without consuming caller stdin. When runtime
+aborts or times out the command, it must interrupt the foreground command tree
+as far as the local platform permits instead of only marking the direct shell
+wrapper as cancelled. Output collection must also settle promptly when a killed
+command leaves inherited stdout or stderr descriptors open.
 
 `bash` returns a JSON object with stable fields:
 - `output`: bounded command output
@@ -108,7 +113,8 @@ This spec defines semantic modes and result material, not concrete patch syntax 
 - `error`: failure explanation when execution fails or the command is treated as failed
 - `exit_code_meaning`: optional explanation for recognized non-zero exit codes
 
-Timeout, abort, command-start failure, resource denial, and output truncation must be observable.
+Timeout, abort, command-start failure, resource denial, command-tree cleanup
+limits, and output truncation must be observable.
 
 Exit code `0` is success unless another runtime boundary reports failure. Non-zero exit codes are failed tool results by default.
 

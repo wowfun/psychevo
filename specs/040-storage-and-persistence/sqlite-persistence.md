@@ -28,6 +28,7 @@ Out of scope:
 The default first-slice SQLite shape contains:
 - `sessions`
 - `messages`
+- `context_evidence`
 
 The default first-slice SQLite shape does not create:
 - a separate per-invocation execution-root table
@@ -52,7 +53,10 @@ Required semantics include:
 - counters or summaries needed by implementation
 - metadata space for model and working-context summaries
 
-Reopening the same persistent session updates the existing session state rather than creating a new execution root.
+Reopening the same persistent session uses the existing session row rather than
+creating a new execution root. Opening, resuming, or viewing a session is not
+activity for `updated_at_ms`; persisting new transcript material is activity
+and may clear ended or archived state.
 
 The first implementation slice stores these session columns:
 
@@ -139,6 +143,40 @@ means pricing was unknown; `0` means pricing was known and free.
 Message ordering is authoritative by `(session_id, session_seq)`, not by
 timestamp. The first implementation enforces `UNIQUE(session_id, session_seq)`.
 
+## Context Evidence
+
+The `context_evidence` storage shape persists model-visible runtime injections
+that are not loop-visible transcript messages. It is durable evidence for
+agent-invocation assembly, not retained message material.
+
+Required semantics include:
+- durable relationship to one session and one accepted user prompt
+- deterministic ordering among evidence items for that prompt
+- role used in the model-facing context projection
+- source kind and source identity sufficient for local audit
+- retained model-visible injected text
+- optional metadata for source-specific facts
+
+The first implementation slice stores these context evidence columns:
+
+- `id` integer primary key autoincrement
+- `session_id` text foreign key
+- `prompt_session_seq` integer
+- `context_seq` integer
+- `role` text
+- `source_kind` text
+- `source_name` text nullable
+- `source_path` text nullable
+- `timestamp_ms` integer
+- `content_text` text
+- `metadata_json` text nullable
+
+Context evidence is anchored to `messages(session_id, session_seq)` for the
+accepted prompt and enforces `UNIQUE(session_id, prompt_session_seq,
+context_seq)`. Deleting the prompt message deletes its context evidence.
+Context evidence does not increment `sessions.message_count`, is not returned by
+message transcript retrieval, and is not used by default session resume.
+
 ## SQLite Behavior
 
 SQLite persistence should enable WAL mode when supported.
@@ -155,16 +193,17 @@ SQLite persistence should perform periodic WAL checkpoint work when supported by
 
 Storage failures that affect session or message persistence must be observable to runtime or caller-facing layers that depend on persistence.
 
-The current implementation uses `PRAGMA user_version = 5`, WAL, foreign keys,
+The current implementation uses `PRAGMA user_version = 6`, WAL, foreign keys,
 short busy timeouts, `BEGIN IMMEDIATE`, bounded jitter retry, and best-effort
 periodic `wal_checkpoint(PASSIVE)`.
 
-The version 5 slice automatically migrates version 4 databases by adding
-message accounting columns, and still migrates version 3 state databases by
-adding `sessions.archived_at_ms` before applying version 5 additions. It does
-not automatically migrate version 1 or version 2 state databases. Opening an
-older state database must fail with an explicit cutover/reset instruction
-instead of silently mutating retained state.
+The version 6 slice creates `context_evidence` for new databases and supported
+migrations. It still migrates version 4 databases by adding message accounting
+columns, and still migrates version 3 state databases by adding
+`sessions.archived_at_ms` before applying version 5 additions. It does not
+automatically migrate version 1 or version 2 state databases. Opening an older
+state database must fail with an explicit cutover/reset instruction instead of
+silently mutating retained state.
 
 ## Retrieval
 

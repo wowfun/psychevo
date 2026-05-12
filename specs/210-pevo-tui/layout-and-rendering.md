@@ -9,7 +9,12 @@ Define the fullscreen ledger layout, evidence projection, rendering rules, and v
 
 ## Layout
 
-Interactive terminals use raw mode and the alternate screen.
+Interactive terminals use raw mode and the alternate screen. Fullscreen startup
+enters a clean alternate screen, enables alternate-scroll mode, clears the
+alternate buffer, and homes the cursor before the first draw so host scrollback
+cannot bleed into the fullscreen view. Fullscreen shutdown restores cursor
+visibility, raw mode, mouse capture, alternate-scroll mode, and the alternate
+screen on normal exit, errors, and unwinds.
 
 The first fullscreen layout is an evidence ledger, not a row-level event log.
 
@@ -21,7 +26,15 @@ ledger block:
   by the bottom composer. Prompt text is wrapped before rendering so every
   visible physical row, including continuation rows and CJK/wide-character
   rows, carries the same full-width background instead of relying on paragraph
-  wrapping to preserve row styling.
+  wrapping to preserve row styling. If the submitted prompt contains image
+  placeholders, the prompt block preserves the submitted composer text such as
+  `[Image #1] describe this image`.
+- local attachment metadata directly after a prompt with successfully submitted
+  image attachments. It renders as compact `Meta` evidence headed
+  `attachments` with one line per sent image, for example
+  `image 1: screenshots/img.png`. Local paths prefer workdir-relative display
+  and fall back to absolute paths; URL sources render as text. This metadata is
+  local display evidence and is not provider input.
 - interleaved folded thinking, tool evidence, and assistant answer material
 - folded thinking renders as a flat expandable row, not as a vertical left-rail
   block or derived section. Active Thinking uses the same shared activity
@@ -39,7 +52,8 @@ ledger block:
   with its compact left rail preserved:
   provider/model with the resolved variant one space to its right only when
   present, elapsed time, failures only when present, debug details only when
-  enabled, and non-default mode last
+  enabled, and non-default mode last. Turn metadata must not show per-turn
+  cost; cost summaries belong in `/usage` and its `/stats` alias.
 
 When one submitted prompt produces multiple assistant messages separated by
 tool calls, each assistant message with visible text remains in the transcript
@@ -90,14 +104,14 @@ after the model and variant so model/variant positions stay stable. `default`
 is omitted. Shortcut hints, session ids, thinking state, debug state, and brand
 text are not part of the default bottom chrome.
 
-The same state line appends quiet local context after the stable model/variant
+The same state line appends local context after the stable model/variant
 segment, in this order when available: workdir, git branch, and compact context
 usage. These items are separated by ` · ` and render without keys. Workdir uses
-Codex-style path display: a `$HOME` prefix is shown as `~`, home itself is `~`,
-non-home paths remain absolute, and long paths are center-truncated with `…`
-using display width. Branch is omitted when no branch is detected. Context
-usage is omitted until a latest `ContextSnapshot` or latest provider input
-usage exists and its context limit is known; when shown, it uses the same
+the TUI path display convention: a `$HOME` prefix is shown as `~`, home itself
+is `~`, non-home paths remain absolute, and long paths are center-truncated
+with `…` using display width. Branch is omitted when no branch is detected.
+Context usage is omitted until a latest `ContextSnapshot` or latest provider
+input usage exists and its context limit is known; when shown, it uses the same
 formatter as the value after `tokens: ` in `/context`, for example
 `39.2k/1.0M (3.7%)`. Running turns may refresh this value from streamed
 context snapshots, provider input usage metadata, or an explicit `/context`
@@ -131,8 +145,9 @@ thinking visibility, message counts, tool-call counts, token/context usage, or
 cost.
 
 TUI user-facing `messages` counts are visible-message counts: user prompt
-blocks with text plus assistant answer blocks with visible text. They exclude
-thinking, metadata, tool evidence, tool-result records, and assistant
+blocks with text, including image-placeholder-only prompts, plus assistant
+answer blocks with visible text. They exclude attachment metadata, thinking,
+metadata, tool evidence, tool-result records, and assistant
 reasoning-only or tool-call-only records. Runtime and SQLite session
 `message_count` retain their internal persisted-record semantics.
 
@@ -197,28 +212,35 @@ TUI renders runtime events into semantic ledger evidence:
   answer exists, and keeps the metadata left rail
 
 Tool failures remain in their original evidence group and render as failures
-instead of being moved into a separate generic error log.
+instead of being moved into a separate generic error log. Interrupted tool
+evidence is distinct from ordinary failure evidence: a tool result with
+`outcome: "aborted"` or `error: "aborted"` renders a muted `interrupted` marker
+in the existing `Explored`/`Ran`/`Changed` row rather than a red failure body
+or `(no output)`. `bash` timeout failures must render an explicit timeout
+line in the failed `Ran` row even when the command produced partial output.
 When the overall turn outcome is `normal`, tool failures are summarized by the
 failed tool row and turn metadata, not by an additional red `Error` transcript
 row. A red turn-ended error row is reserved for non-normal turn outcomes, so
 the TUI must not render contradictory messages such as `turn ended: normal`.
+User-confirmed interrupted turns show `interrupted` in turn metadata instead of
+counting the interrupted tool as `1 failure`.
 
 Active tool evidence is local TUI projection only. Runtime must surface a
 named pending tool-call input event as soon as a provider streams the tool name,
-before waiting for complete JSON arguments or local execution. This mirrors the
-OpenCode pending tool-part model: while the model is still producing tool input,
-the transcript shows a short `preparing` body with a generic title if arguments
-are not yet complete, for example `Changing files`, `Exploring`, or
-`Running command`. Once complete arguments are available, or once the
-corresponding `tool_execution_start` arrives, the active title should update to
-the concrete path/query/command without inserting a duplicate row. Active tool
+before waiting for complete JSON arguments or local execution. While the model
+is still producing tool input, the transcript shows a short `preparing` body
+with a generic title if arguments are not yet complete, for example
+`Changing files`, `Exploring`, or `Running command`. Once complete arguments
+are available, or once the corresponding `tool_execution_start` arrives, the
+active title should update to the concrete path/query/command without inserting
+a duplicate row. Active tool
 rows match primarily by `tool_call_id`; if the id has not arrived yet,
 fullscreen TUI uses the assistant tool-call `content_index:call_index` pair
 scoped to the current assistant message as a temporary key and migrates it when
 the id appears. The same `content_index:call_index` pair may recur in later
 assistant messages in a multi-tool turn and must not overwrite prior tool
 evidence. Pending active rows that never reach execution because the turn is
-interrupted or fails stop their timer and render as failed `interrupted`
+interrupted or fails stop their timer and render as static `interrupted`
 evidence rather than being persisted as completed history.
 
 When Thinking is visible, fullscreen TUI may show a provisional active tool row
@@ -270,7 +292,7 @@ duplicate, so reconnecting or reloading a running session still shows
 `Changing <path>` during provider-side or local write gaps. If a persisted
 assistant message is already terminally interrupted (`finish_reason=aborted` or
 an `aborted`/`failed`/`stopped` outcome), unmatched tool calls from that message
-render as static failed `interrupted` evidence with no live timer. History
+render as static muted `interrupted` evidence with no live timer. History
 reload must never turn those aborted tool calls back into active
 `Exploring`/`Running`/`Changing` rows.
 For providers that buffer tool-call input until the end of a long write
@@ -312,12 +334,11 @@ reintroduce bare `[+]` or `[-]`.
 
 Usage and provider metadata are not transcript content blocks. Provider/model
 with an optional resolved variant, elapsed time, failures, debug usage parts,
-allowlisted provider metadata, and compact known cost may be projected into
-turn metadata, but total token usage and session cost belong in `/usage`, while
-context percentage belongs in `/context` and the bottom state line. Usage
-and provider metadata must not appear in sanitized transcript messages,
-provider replay across incompatible providers, or `pevo run --format json` by
-default.
+and allowlisted provider metadata may be projected into turn metadata, but cost
+belongs in `/usage` and its `/stats` alias, while context percentage belongs in
+`/context` and the bottom state line. Usage and provider metadata must not
+appear in sanitized transcript messages, provider replay across incompatible
+providers, or `pevo run --format json` by default.
 
 Default metadata projection omits `default` mode and renders elapsed time with
 the UI-only compact duration formatter: under 60 seconds as whole seconds
@@ -364,12 +385,25 @@ within a render profile. Popup, bottom-panel, and selected-row surfaces use the
 same semantic theme roles rather than hardcoded local colors, while preserving
 the compact no-left-rail ledger treatment.
 
-Assistant visible answer text may use lightweight Markdown rendering for local
+Assistant visible answer text uses lightweight Markdown rendering for local
 display only. Supported styling includes headings, lists, emphasis, inline
-code, fenced code blocks, links, and local file links displayed relative to the
+code, fenced code blocks, tables, links, and local file links. Markdown tables
+render as box tables when the available width can fit them; narrow terminals
+fall back to readable pipe-table text. Fenced `md` or `markdown` code blocks
+that contain only table-like Markdown may be smart-unpacked and rendered as
+tables instead of as code blocks. Other fenced code blocks keep clear top and
+bottom boundaries, use the existing long-content folding thresholds, and apply
+lightweight semantic syntax highlighting. Link display exposes destinations:
+normal links show their URL, while local file links show a path relative to the
 session working directory where possible. This rendering is a TUI projection
-only and must not change persisted message content, provider replay, or
-non-terminal JSON output.
+only and must not change persisted message content, provider replay, `/copy`,
+or non-terminal JSON output.
+
+When global raw transcript visibility is enabled, fullscreen TUI keeps the same
+ledger outer structure but renders assistant answer bodies, and visible
+Thinking bodies, as raw Markdown source. Raw mode is display-only and must not
+change persisted message content, provider replay, `/copy`, non-terminal JSON
+output, row identity, or tool evidence rendering.
 
 Activity indicators and shimmer-like running text must flow through a shared
 motion primitive with a deterministic static fallback for tests and reduced
@@ -406,10 +440,16 @@ than re-wrapping the full transcript from the top on every wheel tick. Mouse
 input must not force one full transcript redraw per raw terminal mouse event;
 bursty wheel and drag events should be coalesced into bounded redraws, and the
 terminal mouse mode should avoid all-motion tracking unless a future feature
-requires it. Transcript text selection must remain responsive: dragging should
-only update selection state and redraw at the normal frame cadence, and copying
-selected text must not synchronously block the input loop on platform clipboard
-commands. Requests
+requires it. Wheel scrolling uses the last rendered hover region instead of
+keyboard focus: transcript hover scrolls the transcript, active bottom-pane
+hover scrolls the pane, and composer/status hover is ignored rather than being
+interpreted as composer `Up`/`Down` history navigation. If an outer terminal
+synthesizes wheel input as plain cursor keys, the event is handled exactly like
+real keyboard input because the app no longer has pointer coordinates or event
+origin metadata. Transcript text selection must remain responsive: dragging
+should only update selection state and redraw at the normal frame cadence, and
+copying selected text must not synchronously block the input loop on platform
+clipboard commands. Requests
 to scroll to the bottom during history loading or session switching must be
 resolved after the next render has the real transcript viewport dimensions.
 Scroll boundaries must use the same cached rendered-row total that the viewport
@@ -418,8 +458,9 @@ line count once a layout has been computed. The cache is valid only when row
 content, visibility, selection, expansion state, active elapsed labels, and
 active motion markers still match the transcript. In transcript focus, moving
 the selected ledger row with `Up`/`Down` must scroll the selected row into view.
-When focus is in an empty composer and there is no next recalled history entry,
-`Down` scrolls the transcript down one line instead of becoming a no-op.
+When focus is in the composer and no popup or pane is active, `Up`/`Down` remain
+input/history boundary keys; transcript scrolling uses PageUp/PageDown,
+transcript focus movement, or real mouse-wheel hover events.
 Redraws after scrolling or appending shorter rows must not leave stale glyphs
 from previous longer rows.
 

@@ -15,15 +15,15 @@ deterministic line-by-line scripted behavior.
 
 - `pevo tui` command spelling and startup behavior
 - fullscreen transcript, composer, and minimal bottom state line
-- persisted TUI-local model, variant, mode, thinking visibility, and sidebar
-  visibility
+- persisted TUI-local model, variant, mode, thinking visibility, raw transcript
+  visibility, and sidebar visibility
 - session selection, session archiving/deletion, session renaming, model,
   variant, mode, thinking visibility, stats, and status slash commands, with
   `/status` kept to runtime/session state rather than thinking visibility
 - context usage slash command for the latest provider request or current
   session estimate
 - evidence-ledger rendering for prompts, folded reasoning, tool evidence, final
-  answers, and turn metadata
+  answers, timeout-visible tool failures, and turn metadata
 - bottom state line workdir, branch, and compact context-window usage derived
   from the latest context snapshot
 - local stats reporting from persisted accounting columns
@@ -32,14 +32,17 @@ deterministic line-by-line scripted behavior.
 - direct user shell escape from the composer and scripted input
 - fullscreen composer `@` file path completion for the selected working
   directory
+- image attachments from standalone readable image-source paste and `/image`,
+  with numbered composer placeholders and local attachment metadata
 - transcript row focus plus keyboard and mouse expansion for bounded Thinking
   and tool evidence rows rendered through a shared ledger row component
 - ledger-only active tool status, including pending provider-side tool input
   and persisted assistant tool calls whose tool results have not arrived yet,
   with at least one visible active frame, no stale provisional rows after
   completion, no active-turn metadata blocks while assistant content is still
-  streaming, static interrupted evidence after aborted reloads, and stable
-  transcript scrolling
+  streaming, static interrupted evidence after aborted reloads, stable
+  transcript scrolling, fullscreen alternate-screen scrollback isolation, and
+  hover-routed mouse-wheel scrolling
 - local-only row-level expansion for long Thinking bodies and long tool output
   using the same collapse thresholds, without derived transcript section
   headers
@@ -47,13 +50,15 @@ deterministic line-by-line scripted behavior.
 - deterministic visual-regression projections and local diagnostic screenshots
 - terminal-adaptive semantic rendering for prompt, composer, popup, bottom
   panel, selection, and evidence-ledger surfaces
-- lightweight terminal Markdown projection for assistant answers
+- lightweight terminal Markdown projection for assistant answers, plus raw
+  transcript display and raw Markdown answer copy
 - hard `plan` / `default` runtime mode selection
 - interactive skill listing and explicit skill invocation slash commands
 
 Out of scope:
 
-- panes, plugins, custom keymaps, or syntax-highlighted rich document rendering
+- panes, plugins, custom keymaps, or full rich document rendering beyond
+  bounded Markdown projection
 - approvals, auth, provider login, provider catalogs, or model probing
 - structured `@file` references, automatic file-content attachment, custom
   slash commands, or command-template files
@@ -93,7 +98,7 @@ initialization requirement.
 
 ## Topic Attachments
 
-- [Sessions](sessions.md) defines session resume, switching, history, titles, archive/delete, and undo/redo-adjacent session behavior.
+- [Sessions](sessions.md) defines session resume, switching, stable activity ordering, history, titles, archive/delete, and undo/redo-adjacent session behavior.
 - [State and Models](state-and-models.md) defines TUI-local state, model selection, catalog fetching, variants, and runtime modes.
 - [Input and Commands](input-and-commands.md) defines key handling, slash commands, file completion, user shell escapes, and local text selection.
 - [Layout and Rendering](layout-and-rendering.md) defines ledger layout, evidence projection, rendering rules, and visual diagnostics.

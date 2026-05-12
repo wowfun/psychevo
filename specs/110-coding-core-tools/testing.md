@@ -45,6 +45,11 @@ resources.
 - `bash` treats non-zero exit codes as failed tool results by default.
 - `bash` reports `exit_code_meaning` for the minimum explanation table: grep/rg/ag/ack `1`, diff `1`, test/[ `1`.
 - `bash` reports timeout, abort, start failure, resource denial, and output truncation observably.
+- `bash` abort and timeout terminate same-process-group children created by
+  foreground shell commands, and output collection does not hang on inherited
+  pipes left open by descendants.
+- `bash` closes command stdin so prompt-style commands observe EOF instead of
+  reading from the interactive TUI.
 - Resource denial, boundary failure, or missing working context becomes JSON `error` or before-agent-start rejection according to the owning boundary.
 
 ## Validation Boundaries

@@ -18,11 +18,13 @@ Required coverage:
 
 - TUI state read/write, version tolerance, per-workdir model and variant
   precedence, per-workdir mode persistence, global thinking persistence, global
-  sidebar visibility persistence, and recent-model bounding
+  raw transcript visibility persistence, global sidebar visibility persistence,
+  and recent-model bounding
 - registry-backed slash command parsing and menu rows, fullscreen `/help`
   bottom help pane and scripted `/help` text output, aliases,
-  model/variant/mode validation, `/rename`, `/sessions`/`/resume`/`/continue`,
-  and ambiguous session prefix handling
+  model/variant/mode validation, `/copy`, `Ctrl+O`, `/show-raw`,
+  `/show-raw on`, `/show-raw off`, invalid `/show-raw` arguments, `/rename`,
+  `/sessions`/`/resume`/`/continue`, and ambiguous session prefix handling
 - composer behavior for submit, newline, current-session persisted user-prompt
   history seeding, history recall with draft restoration, and history search
 - user shell escape behavior for fullscreen and scripted TUI: `!` detection
@@ -37,7 +39,17 @@ Required coverage:
   rejection of mid-word `foo@bar`; workdir-relative search; directory marking;
   gitignore handling; stale-result rejection; keyboard and mouse insertion;
   `Esc` dismissal until the token changes; and interop with slash menus and
-  bottom selection panes
+  bottom selection panes. Selecting an image path through `@` must insert path
+  text plus a trailing space rather than create an attachment
+- fullscreen image attachment UX: ordinary prompt text such as
+  `描述这张图片的内容：img1.avif` remains text on paste and submit; standalone
+  readable image-source paste creates a `[Image #N]` placeholder and one
+  pending attachment; standalone missing/unreadable image-looking paste inserts
+  text without error; `/image missing.png` renders a command-style transcript
+  error; `/image image.png describe` inserts `[Image #N] describe`; deleting a
+  placeholder before submit unbinds the image; `/new` clears pending images,
+  placeholders, and ephemeral status; sent image prompts render a prompt row
+  preserving submitted composer text plus an `attachments` metadata row
 - slash menu default selection: the first visible completion row is selected
   and pressing `Enter` executes it
 - evidence-ledger projection for unlabeled prompt blocks without left rails,
@@ -52,9 +64,14 @@ Required coverage:
   `content_index:call_index` key migration to `tool_call_id`, no duplicate row
   when `tool_execution_start` follows a pending row, no overwrite when later
   assistant messages reuse the same `content_index:call_index` pair,
-  interrupted pending rows stopping their timer as failed `interrupted`
-  evidence, metadata left rails, unlabeled turn meta only after visible answers
-  or failure summaries, visible-text-plus-tool-call assistant messages keeping
+  interrupted pending rows stopping their timer as muted `interrupted`
+  evidence, aborted bash results rendering `interrupted` instead of `(no output)`
+  and bash timeout failures rendering an explicit timeout line before any
+  partial output, no `1 failure` metadata for user-confirmed interrupts,
+  metadata left
+  rails, unlabeled turn meta only after visible answers or failure summaries
+  without per-turn cost,
+  visible-text-plus-tool-call assistant messages keeping
   active tool evidence below the visible text and above metadata, intermediate
   `finish_reason=tool_calls` text-plus-tool-call messages not rendering turn
   metadata, active tool rows suppressing turn metadata until they settle, and
@@ -121,7 +138,7 @@ Required coverage:
   metadata and must update that same row to `Changed <path>` when the matching
   persisted or streamed `tool_result` arrives. It must also include a persisted
   aborted assistant message whose tool calls have no matching tool results;
-  those rows must render as static failed `interrupted` evidence, use completed
+  those rows must render as static muted `interrupted` evidence, use completed
   tool titles such as `Ran <command>`, and must not keep live
   `Exploring`/`Running`/`Changing` timers after TUI restart. A targeted visual
   snapshot must lock the pending history `Changing <path>` row shape.
@@ -154,14 +171,22 @@ Required coverage:
   row contrast, accent styles, and static motion fallback are covered by
   deterministic unit tests without relying on a live terminal palette
 - lightweight TUI Markdown projection for assistant answers: headings, lists,
-  emphasis, inline code, fenced code blocks, links, and workdir-relative local
-  file links render in fullscreen snapshots without altering persisted message
+  emphasis, inline code, fenced code blocks, box table rendering, narrow
+  pipe-table fallback, fenced Markdown table unwrapping, code-block
+  folding/highlighting, links that expose URLs, and workdir-relative local file
+  links render in fullscreen snapshots without altering persisted message
   content or non-terminal renderer output
+- raw transcript display snapshots must cover rich and raw assistant answer
+  rendering at narrow and wide widths while preserving the pevo ledger outer
+  structure; visible Thinking content follows raw mode
+- clipboard coverage must prove `/copy` and `Ctrl+O` copy the latest visible
+  assistant answer's raw Markdown independent of raw display mode, and that
+  selection copy continues to copy rendered visible text
 - transcript scroll regression coverage must include long Markdown/table
   answers with metadata, terminal reasoning-only Thinking tables with metadata,
-  manual PageDown or mouse-wheel scrolling to the bottom, empty-composer
-  `Down` scrolling, and transcript-focus `Up`/`Down` movement keeping the
-  selected row visible
+  manual PageDown or mouse-wheel scrolling to the bottom, composer
+  `Up`/`Down` history-boundary behavior that does not scroll the transcript, and
+  transcript-focus `Up`/`Down` movement keeping the selected row visible
 - streaming runtime projection that never leaks folded reasoning into sanitized
   message events while still delivering dedicated TUI thinking events
 - runtime metrics projection that can expose usage and allowlisted metadata to
@@ -201,13 +226,17 @@ Required coverage:
   existing Thinking blocks, and hidden thinking does not render a
   `Thinking: hidden` marker or append a status row; obsolete `/thinking` is
   unsupported
+- `/show-raw` toggle behavior: default hidden, explicit on/off, global
+  persistence, fullscreen visibility changes immediately refresh existing
+  assistant answer and visible Thinking blocks, raw mode does not append a
+  status row or change `/copy`, and obsolete `/raw` is unsupported
 - `/mode <plan|default>` behavior: default `default`, persisted
   `plan`/`default` per workdir, bare `/mode` rejected, obsolete
   `/mode set <value>` unsupported, `Shift+Tab` cycling in the fullscreen event
   loop, no transcript status row for mode cycling, and next-turn application
   while a turn is running
 - `/status` behavior: fullscreen and scripted TUI project the same local state
-  fields as one multi-line status block, excluding thinking visibility
+  fields as one multi-line status block, excluding thinking and raw visibility
 - `/usage` behavior: fullscreen and scripted TUI project deterministic local
   usage/cost summaries without provider calls; `/stats` aliases the same view
 - `/context` behavior: parser rejects arguments, fullscreen appends one
@@ -351,9 +380,17 @@ Required coverage:
 - multi-tool turns that emit visible assistant text before and after tool calls
   preserve each visible assistant message as a separate answer block; later
   streaming updates must not replace earlier answer text from the same turn
-- fullscreen TUI captures mouse events in alternate screen mode, disables mouse
-  capture on exit, avoids any-motion mouse tracking, routes mouse wheel to
-  transcript or active bottom pane scrolling, supports left-click selection for
+- fullscreen TUI captures mouse events in alternate screen mode, enables xterm
+  alternate-scroll mode while fullscreen is active so wheel input cannot scroll
+  host terminal scrollback into the view, disables alternate-scroll on exit,
+  sends clear-and-home startup commands before the first draw, restores
+  terminal modes through a guard on error/unwind, avoids any-motion mouse
+  tracking, routes mouse wheel by hover region to transcript or active bottom
+  pane scrolling, ignores composer/status wheel hover without feeding composer
+  history recall, and handles plain `Up`/`Down` as ordinary keyboard input
+  because synthetic cursor keys cannot be distinguished from real keys,
+  supports left-click
+  selection for
   slash and bottom-pane rows, and supports app-native mouse drag text selection
   with `Ctrl+C`/mouse-up copying through test-injected clipboard sinks; mouse
   drag copy must not synchronously block the input loop; selection extraction
@@ -417,7 +454,8 @@ a long Markdown/table answer and a terminal reasoning-only Thinking table with
 turn metadata, scroll the transcript away from the bottom and then back down,
 capture the default collapsed Thinking/table state, then expand the Thinking
 row and capture a screenshot proving the bottom marker and metadata row are
-visible.
+visible. It must also capture an interrupted foreground bash row so the settled
+`interrupted` marker can be visually inspected.
 
 VHS capture remains outside default broad validation and is not a pixel golden.
 Screenshots stay untracked. A person or visually capable agent must inspect the

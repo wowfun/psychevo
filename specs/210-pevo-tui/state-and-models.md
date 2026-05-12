@@ -17,14 +17,16 @@ The state file stores:
 
 - a version number
 - global `thinking_visible`
+- global `raw_visible`
 - global `sidebar_visible`
 - current model and optional variant override per canonical workdir
 - current `mode` per canonical workdir
 - a bounded global recent-model list
 
-`thinking_visible` defaults to `true`. Per-workdir `mode` defaults to
-`default`. `sidebar_visible` defaults to `false`, preserving the hidden sidebar
-startup behavior unless the user has explicitly toggled it in fullscreen TUI.
+`thinking_visible` defaults to `true`. `raw_visible` defaults to `false`.
+Per-workdir `mode` defaults to `default`. `sidebar_visible` defaults to
+`false`, preserving the hidden sidebar startup behavior unless the user has
+explicitly toggled it in fullscreen TUI.
 
 Startup model and variant precedence is:
 
@@ -52,6 +54,15 @@ TUI must refresh the current transcript projection immediately and must not
 append a status row for thinking visibility changes. `/show-thinking on` and
 `/show-thinking off` set the value explicitly. `/thinking` is obsolete and is
 not a compatibility command.
+
+`/show-raw` toggles global raw transcript visibility and persists it. It is a
+display-only control: it keeps the pevo ledger structure but renders assistant
+answer bodies, and visible Thinking bodies, from raw Markdown source instead of
+rich Markdown projection. It does not alter persisted messages, provider
+payloads, non-terminal output, or `/copy` behavior. Fullscreen TUI must refresh
+the current transcript projection immediately and must not append a transcript
+status row for raw visibility changes. `/show-raw on` and `/show-raw off` set
+the value explicitly. `/raw` is not a compatibility command.
 
 `/mode <plan|default>` updates the per-workdir mode and persists it. Bare
 `/mode` is not a display command and returns a bounded usage error. Obsolete

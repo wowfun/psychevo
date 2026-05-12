@@ -76,10 +76,13 @@ explicitly suppresses the Chat request `reasoning_effort` field.
 
 ## Session Selection
 
-`--session` resumes the specified session id.
+`--session` resumes the specified session id without changing session recency.
+The resumed session becomes recently updated only when new transcript material
+is persisted.
 
 `--continue` selects the latest `source = "run"` session for the canonical
-workdir, ordered by update time then start time. If no matching session exists,
+workdir, ordered by latest persisted activity then start time. Viewing or
+opening a session does not affect this ordering. If no matching session exists,
 runtime creates a new session.
 
 Supplying `--session` and `--continue` together is a usage error.

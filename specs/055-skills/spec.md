@@ -95,11 +95,12 @@ of submitting the prompt. Runtime parses `$skill-name` markers in every user
 entry surface, and also treats `--skill <name-or-path>` as an explicit selected
 skill.
 
-Explicitly selected skills are injected as separate non-persisted user-context
-fragments containing the full skill body. The persisted user message and TUI
-transcript keep the original user text, such as `$reviewer check this diff`.
-Unknown `$name` markers remain ordinary text. Relative references in injected
-skill content are resolved against the skill directory.
+Explicitly selected skills are injected as separate user-context fragments
+containing the full skill body. The injected fragment is persisted as durable
+context evidence anchored to the accepted user prompt, while the persisted user
+message and TUI transcript keep the original user text, such as `$reviewer
+check this diff`. Unknown `$name` markers remain ordinary text. Relative
+references in injected skill content are resolved against the skill directory.
 
 ## Tools
 

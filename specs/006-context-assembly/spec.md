@@ -69,7 +69,12 @@ The assembled model context is an input to the generation request defined by [00
 
 Context assembly facts needed for agent-invocation inspection must be connectable to durable evidence. [005 Durable Evidence](../005-durable-evidence/spec.md) defines which durable evidence facts must be representable; this spec does not require full prompt snapshots.
 
-Context projection is not required to write source material or projected material into session messages. If a projection becomes loop-visible message material, [002 Agent Execution](../002-agent-execution/spec.md) owns the message semantics.
+Context projection is not required to write source material or projected
+material into session messages. Runtime may persist model-visible runtime
+injections as separate durable context evidence without making them
+loop-visible transcript messages. If a projection becomes loop-visible message
+material, [002 Agent Execution](../002-agent-execution/spec.md) owns the message
+semantics.
 
 ## Context Usage Projection
 
@@ -101,6 +106,11 @@ token counts only. Per-skill index-entry counts describe the compact skills
 index entry, not loaded skill body text. It must not retain message bodies,
 skill bodies, tool argument bodies, or provider request text after counting
 completes.
+
+This retention limit applies to the context usage projection. It does not
+forbid the persistence layer from retaining model-visible runtime injections as
+durable context evidence when those injections are intentionally attached to an
+accepted user prompt for auditability.
 
 For live agent invocations, the latest provider generation request wins. For
 persisted session estimates, the projection uses current local runtime

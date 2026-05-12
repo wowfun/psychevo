@@ -26,6 +26,12 @@ evidence, but only from persisted message material that is already marked as
 reasoning and never by replaying provider wire fields as visible assistant
 text.
 
+Opening, resuming, selecting, or viewing a session is read-only for session
+recency. These operations must not update the session's latest-activity time,
+ended state, archive state, messages, usage rows, or evidence. Persisting new
+loop-visible transcript material is session activity: it updates the
+latest-activity time and reopens the session by clearing ended/archive state.
+
 Fullscreen composer history is seeded from the current session's persisted user
 prompts in session order. Switching sessions replaces that persisted prompt
 seed with the selected session's prompts while preserving slash commands and
@@ -71,6 +77,11 @@ default view. Archived sessions are hidden from the default view, from default
 TUI startup resume, and from latest-session resolution until restored.
 Non-terminal scripted `/sessions`, `/resume`, and `/continue` continue to print
 only active sessions.
+
+Both active and archived session views are ordered latest-activity-first by the
+persisted session latest-activity time. Restoring an archived session exposes it
+in the active view at its existing activity position; it does not make the
+session latest unless new transcript material is later appended.
 
 `Tab` toggles the fullscreen session pane between active and archived views.
 Typing still edits the search query. `Ctrl+K` arms a one-shot action mode so
