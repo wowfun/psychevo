@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-05-12
+
+### Added
+
+- Added TUI raw Markdown viewing/copying with `/show-raw`, `/copy`, and
+  `Ctrl+O`, plus improved tables, code blocks, and links.
+- Added durable context evidence for injected system instructions and selected
+  skills outside the transcript.
+- Added TUI troubleshooting docs for terminal and tmux mouse reporting.
+
+### Changed
+
+- Changed TUI image attachments to use `[Image #N]` placeholders from
+  `/image <source> [prompt]` or standalone readable image-source paste.
+- Changed persisted image prompts to keep submitted composer text as
+  `content_text` and store attachment display metadata.
+
+### Fixed
+
+- Fixed `/sessions` recency so viewing, selecting, restoring, or resuming a
+  session does not rewrite latest activity.
+- Fixed image attachment feedback for missing paths, `/image` errors, sent
+  metadata, and `/new` cleanup.
+- Fixed interrupted and timed-out `bash` evidence rendering.
+- Fixed mouse-wheel routing inside the fullscreen alternate screen.
+- Fixed prompt-history `Up`/`Down` behavior at the empty-input boundary.
+
 ## 2026-05-11
 
 ### Added
@@ -23,6 +50,13 @@
   `pevo run` cache-only, and lengthening explicit `models.dev` refreshes.
 - Refined fullscreen TUI context/status rendering, command transcript rows,
   tabbed help, stable markers, and compact metadata presentation.
+
+### Fixed
+
+- Fixed `bash` abort and timeout cleanup so Esc terminates foreground command
+  process groups and pipe collection does not hang.
+- Fixed terminal cleanup and alternate-scroll handling so mouse wheel input
+  stays inside the fullscreen app.
 
 ## 2026-05-10
 
