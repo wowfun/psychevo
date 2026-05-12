@@ -18,12 +18,14 @@ use crate::error::{Error, Result};
 use crate::events::PersistenceSink;
 use crate::messages::assistant_text;
 use crate::paths::canonical_workdir;
+use crate::prompt_image::prompt_message_from_inputs_with_options;
 use crate::skills::{
-    SelectedSkill, SkillCatalog, SkillDiscoveryOptions, discover_skills, format_skills_for_prompt,
-    resolve_skills_home, select_explicit_skills, select_skills_for_prompt, skill_context_messages,
+    SelectedSkill, SkillCatalog, SkillContextFragment, SkillDiscoveryOptions, discover_skills,
+    format_skills_for_prompt, resolve_skills_home, select_explicit_skills,
+    select_skills_for_prompt, skill_context_fragments,
 };
 use crate::snapshot::SnapshotStore;
-use crate::store::SqliteStore;
+use crate::store::{ContextEvidenceInput, SqliteStore};
 use crate::tools::{coding_core_tools_for_mode, mode_instruction, skill_tools_for_mode};
 use crate::types::{
     RunControl, RunOptions, RunResult, RunStreamEvent, RunStreamSink, SmokeControl,
@@ -71,7 +73,7 @@ async fn run_live_internal(
     control: Option<RunControl>,
 ) -> Result<RunResult> {
     let workdir = canonical_workdir(&options.workdir)?;
-    if options.prompt.trim().is_empty() {
+    if options.prompt.trim().is_empty() && options.image_inputs.is_empty() {
         return Err(Error::Message("prompt is empty".to_string()));
     }
 
@@ -94,9 +96,10 @@ async fn run_live_internal(
         &workdir,
         &loaded.env,
     );
-    let skill_context_messages = skill_context_messages(&selected_skills, &skill_catalog)?
-        .into_iter()
-        .map(user_text_message)
+    let skill_context_fragments = skill_context_fragments(&selected_skills, &skill_catalog)?;
+    let skill_context_messages = skill_context_fragments
+        .iter()
+        .map(|fragment| user_text_message(fragment.content.clone()))
         .collect::<Vec<_>>();
     let store = SqliteStore::open(&options.db_path)?;
     let (session_id, created_session) = if let Some(session_id) = options.session.clone() {
@@ -204,22 +207,6 @@ async fn run_live_internal(
         None => ControlHandle::new(),
     };
     let stream_events_after = stream_events.clone();
-    let sink = Arc::new(PersistenceSink {
-        store: store.clone(),
-        session_id: session_id.clone(),
-        prompt_snapshot,
-        prompt_snapshot_written: Arc::new(Mutex::new(false)),
-        started: Instant::now(),
-        tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
-        control: SmokeControl::None,
-        control_handle: Some(control_handle),
-        events: Some(Arc::clone(&events)),
-        stream_events,
-        include_reasoning: options.include_reasoning,
-        reasoning_effort: resolved.reasoning_effort.clone(),
-        model_metadata: resolved.metadata.clone(),
-        context_recorder: Some(context_recorder.clone()),
-    });
     let mut generation_metadata = json!({
         "model_metadata": resolved.metadata.public_json(),
     });
@@ -236,6 +223,26 @@ async fn run_live_internal(
     if !skills_prompt.trim().is_empty() {
         system_instructions.push(skills_prompt);
     }
+    let prompt_context_evidence =
+        context_evidence_for_request(&system_instructions, &skill_context_fragments);
+    let sink = Arc::new(PersistenceSink {
+        store: store.clone(),
+        session_id: session_id.clone(),
+        prompt_snapshot,
+        prompt_snapshot_written: Arc::new(Mutex::new(false)),
+        prompt_context_evidence: Arc::new(prompt_context_evidence),
+        started: Instant::now(),
+        tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
+        control: SmokeControl::None,
+        control_handle: Some(control_handle),
+        events: Some(Arc::clone(&events)),
+        stream_events,
+        include_reasoning: options.include_reasoning,
+        reasoning_effort: resolved.reasoning_effort.clone(),
+        model_metadata: resolved.metadata.clone(),
+        context_recorder: Some(context_recorder.clone()),
+        prompt_display: options.prompt_display.clone(),
+    });
     let mut tools = coding_core_tools_for_mode(&workdir, options.mode);
     if !options.no_skills || !options.skill_inputs.is_empty() {
         tools.extend(skill_tools_for_mode(skill_options, options.mode));
@@ -263,7 +270,16 @@ async fn run_live_internal(
         system_instructions,
         previous_messages,
         context_messages: skill_context_messages,
-        prompt_messages: vec![user_text_message(options.prompt.clone())],
+        prompt_messages: vec![
+            prompt_message_from_inputs_with_options(
+                &options.prompt,
+                &options.image_inputs,
+                &workdir,
+                &resolved.metadata,
+                options.extract_prompt_image_sources,
+            )?
+            .message,
+        ],
         tools,
         max_turns: DEFAULT_AGENT_MAX_TURNS,
     };
@@ -336,6 +352,44 @@ fn selected_skills_for_run(
         .into_iter()
         .filter(|skill| seen.insert(skill.path.clone()))
         .collect()
+}
+
+fn context_evidence_for_request(
+    system_instructions: &[String],
+    skill_fragments: &[SkillContextFragment],
+) -> Vec<ContextEvidenceInput> {
+    let mut evidence = Vec::new();
+    for (index, instruction) in system_instructions.iter().enumerate() {
+        evidence.push(ContextEvidenceInput {
+            role: "system".to_string(),
+            source_kind: "system_instruction".to_string(),
+            source_name: Some(system_instruction_source_name(index)),
+            source_path: None,
+            content_text: instruction.clone(),
+            metadata: Some(json!({ "instruction_index": index })),
+        });
+    }
+    for fragment in skill_fragments {
+        evidence.push(ContextEvidenceInput {
+            role: "user".to_string(),
+            source_kind: "selected_skill".to_string(),
+            source_name: Some(fragment.name.clone()),
+            source_path: Some(fragment.path.display().to_string()),
+            content_text: fragment.content.clone(),
+            metadata: Some(json!({
+                "base_dir": fragment.base_dir.display().to_string(),
+            })),
+        });
+    }
+    evidence
+}
+
+fn system_instruction_source_name(index: usize) -> String {
+    match index {
+        0 => "mode".to_string(),
+        1 => "skills_index".to_string(),
+        _ => format!("system_instruction_{index}"),
+    }
 }
 
 pub(crate) async fn ensure_new_tui_session_title(

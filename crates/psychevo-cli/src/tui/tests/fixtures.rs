@@ -54,6 +54,7 @@ fn test_app(temp: &tempfile::TempDir) -> TuiApp {
         no_skills: false,
         skill_inputs: Vec::new(),
         thinking_visible: true,
+        raw_visible: false,
         clipboard: Arc::new(|_| Ok(())),
         renderer: TuiRenderer::new(false),
         debug: false,
@@ -324,6 +325,7 @@ fn push_completed_turn(ui: &mut FullscreenUi<'_>, kind: FixtureKind) {
             metadata: Some(&metadata),
             accounting: None,
             failures: 0,
+            interrupted: false,
             debug,
         }),
     ));

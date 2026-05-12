@@ -963,6 +963,24 @@ impl TuiApp {
         Ok(true)
     }
 
+    fn copy_latest_answer_markdown(&self, ui: &mut FullscreenUi<'_>) {
+        let Some(text) = ui.latest_visible_answer_markdown() else {
+            ui.set_ephemeral_error("no assistant answer to copy");
+            return;
+        };
+        match (self.clipboard)(&text) {
+            Ok(()) => ui.set_ephemeral_status("copied latest answer Markdown"),
+            Err(err) => ui.set_ephemeral_error(format!(
+                "copy failed: {}",
+                truncate_chars(&err.to_string(), 240)
+            )),
+        }
+    }
+
+    fn copy_latest_answer_markdown_scripted(&self) -> Result<()> {
+        Err(anyhow!("no assistant answer to copy in scripted TUI"))
+    }
+
     fn start_copy_selected_text(&mut self, ui: &mut FullscreenUi<'_>) -> bool {
         let Some(text) = ui.selected_text() else {
             return false;

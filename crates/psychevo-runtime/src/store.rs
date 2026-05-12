@@ -15,7 +15,7 @@ use crate::messages::{sanitize_message_for_output, sanitize_message_for_tui_hist
 use crate::run::normalize_session_title;
 use crate::types::{MessageAccounting, SanitizedMessageSummary, SessionSummary, TuiMessageSummary};
 
-const SQLITE_SCHEMA_VERSION: i64 = 5;
+const SQLITE_SCHEMA_VERSION: i64 = 6;
 const SESSION_REVERT_METADATA_KEY: &str = "revert";
 const MESSAGE_UNDO_METADATA_KEY: &str = "undo";
 const MESSAGE_PRE_SNAPSHOT_KEY: &str = "pre_snapshot";
@@ -33,6 +33,31 @@ pub struct UndoTarget {
     pub snapshot: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContextEvidenceInput {
+    pub role: String,
+    pub source_kind: String,
+    pub source_name: Option<String>,
+    pub source_path: Option<String>,
+    pub content_text: String,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContextEvidenceRecord {
+    pub id: i64,
+    pub session_id: String,
+    pub prompt_session_seq: i64,
+    pub context_seq: i64,
+    pub role: String,
+    pub source_kind: String,
+    pub source_name: Option<String>,
+    pub source_path: Option<String>,
+    pub timestamp_ms: i64,
+    pub content_text: String,
+    pub metadata: Option<Value>,
+}
+
 #[derive(Clone)]
 pub struct SqliteStore {
     conn: Arc<Mutex<Connection>>,
@@ -43,6 +68,7 @@ include!("store/schema.rs");
 include!("store/sessions.rs");
 include!("store/undo_state.rs");
 include!("store/messages.rs");
+include!("store/context_evidence.rs");
 include!("store/lifecycle.rs");
 include!("store/retry.rs");
 include!("store/schema_helpers.rs");

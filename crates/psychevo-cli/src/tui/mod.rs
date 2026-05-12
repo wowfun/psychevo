@@ -9,8 +9,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Result, anyhow};
 use crossterm::event::{
-    self, DisableMouseCapture, Event as CrosstermEvent, KeyCode, KeyEvent, KeyEventKind,
-    KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    self, DisableBracketedPaste, EnableBracketedPaste, Event as CrosstermEvent, KeyCode, KeyEvent,
+    KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -19,16 +19,19 @@ use crossterm::terminal::{
 use psychevo_ai::Outcome;
 use psychevo_runtime::{
     ConfiguredModel, ContextFormatOptions, ContextOptions, ContextSnapshot, CustomProviderInput,
-    ModelCatalogEntry, ModelCatalogProvider, ModelMetadataCacheTarget, RunControlHandle, RunMode,
-    RunOptions, RunStreamEvent, RunStreamSink, SessionSummary, SessionUndoOptions, SkillCatalog,
-    SkillDiscoveryOptions, SqliteStore, StatsOptions, TuiMessageSummary, UserShellOptions,
-    canonicalize_workdir, configured_models, context_snapshot, create_global_custom_provider,
-    custom_provider_api_key_env, discover_skills, fetch_model_catalog,
-    format_context_snapshot_text_with_options, format_context_total_value,
-    format_context_total_value_parts, model_catalog_providers, normalize_context_bar_width,
-    redo_session, refresh_model_metadata_cache, run_control, run_live_streaming,
-    run_live_streaming_controlled, run_user_shell_command_streaming_controlled,
-    selected_configured_model, undo_session, usage_stats,
+    ImageInput, ModelCatalogEntry, ModelCatalogProvider, ModelMetadataCacheTarget,
+    PromptAttachmentDisplay, PromptDisplayMetadata, RunControlHandle, RunMode, RunOptions,
+    RunStreamEvent, RunStreamSink, SessionSummary, SessionUndoOptions, SkillCatalog,
+    SkillDiscoveryOptions, SqliteStore, StatsOptions, TUI_DISPLAY_METADATA_KEY, TuiMessageSummary,
+    UserShellOptions, canonicalize_workdir, configured_models, context_snapshot,
+    create_global_custom_provider, custom_provider_api_key_env, discover_skills,
+    fetch_model_catalog, format_context_snapshot_text_with_options, format_context_total_value,
+    format_context_total_value_parts, model_catalog_providers,
+    model_metadata_explicitly_disallows_image_input, normalize_context_bar_width,
+    prompt_starts_with_supported_image_path, redo_session, refresh_model_metadata_cache,
+    resolve_image_source, run_control, run_live_streaming, run_live_streaming_controlled,
+    run_user_shell_command_streaming_controlled, selected_configured_model, undo_session,
+    usage_stats,
 };
 use ratatui::Frame;
 use ratatui::Terminal;
@@ -94,6 +97,7 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
         .and_then(|value| RunMode::parse(&value))
         .unwrap_or_default();
     let thinking_visible = state.thinking_visible;
+    let raw_visible = state.raw_visible;
     let current_session = if let Some(session) = &args.session {
         Some(session.clone())
     } else if args.new_session {
@@ -124,6 +128,7 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
         no_skills: args.no_skills,
         skill_inputs: args.skill.clone(),
         thinking_visible,
+        raw_visible,
         clipboard: default_clipboard_sink(),
         renderer: TuiRenderer::new(color),
         debug: args.debug,

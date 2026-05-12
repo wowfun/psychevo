@@ -153,6 +153,7 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_
 fn refresh_transcript_layout(ui: &mut FullscreenUi<'_>, width: u16) {
     let old_blocks = if ui.transcript_layout.width == width
         && ui.transcript_layout.thinking_visible == ui.thinking_visible
+        && ui.transcript_layout.raw_visible == ui.raw_visible
     {
         Some(ui.transcript_layout.blocks.as_slice())
     } else {
@@ -189,6 +190,7 @@ fn refresh_transcript_layout(ui: &mut FullscreenUi<'_>, width: u16) {
     ui.transcript_layout = TranscriptLayoutCache {
         width,
         thinking_visible: ui.thinking_visible,
+        raw_visible: ui.raw_visible,
         blocks,
         total_height,
         #[cfg(test)]
@@ -199,6 +201,7 @@ fn refresh_transcript_layout(ui: &mut FullscreenUi<'_>, width: u16) {
 fn transcript_layout_matches_current(ui: &FullscreenUi<'_>, width: u16) -> bool {
     if ui.transcript_layout.width != width
         || ui.transcript_layout.thinking_visible != ui.thinking_visible
+        || ui.transcript_layout.raw_visible != ui.raw_visible
     {
         return false;
     }
@@ -266,7 +269,8 @@ fn compact_trailing_for_render_block(
     blocks.get(index + 1).is_some_and(|next| {
         let TranscriptRenderBlock::Row { index: next_index } = next;
         let next_kind = ui.transcript[*next_index].kind;
-        (row.kind == TranscriptKind::Answer && next_kind == TranscriptKind::Meta)
+        (matches!(row.kind, TranscriptKind::Prompt | TranscriptKind::Answer)
+            && next_kind == TranscriptKind::Meta)
             || (matches!(
                 row.kind,
                 TranscriptKind::Explored | TranscriptKind::Ran | TranscriptKind::Changed
@@ -291,7 +295,14 @@ fn render_block_lines(
     let target = TranscriptHitTarget::Row(row.id);
     let selected = target_selected(ui, target);
     let compact_trailing = compact_trailing_for_render_block(blocks, index, ui);
-    transcript_lines(row, selected, compact_trailing, width, &ui.workdir)
+    transcript_lines(
+        row,
+        selected,
+        compact_trailing,
+        width,
+        &ui.workdir,
+        ui.raw_visible,
+    )
 }
 
 fn transcript_layout_block_key(
@@ -329,6 +340,7 @@ fn transcript_layout_row_key(
         selected,
         kind: row.kind,
         failed: row.failed,
+        interrupted: row.interrupted,
         expanded: row.expanded,
         details_collapsed: row.details_collapsed,
         expandable: row.is_expandable(),
@@ -352,12 +364,13 @@ fn transcript_lines(
     compact_trailing: bool,
     width: u16,
     workdir: &Path,
+    raw_visible: bool,
 ) -> Vec<Line<'static>> {
     if row.kind == TranscriptKind::Prompt {
         return prompt_lines(row, selected, compact_trailing, width);
     }
     if row.kind == TranscriptKind::Answer {
-        return answer_lines(row, selected, compact_trailing, workdir);
+        return answer_lines(row, selected, compact_trailing, width, workdir, raw_visible);
     }
     if row.kind == TranscriptKind::Thinking {
         return thinking_lines(row, selected, compact_trailing, width);
@@ -736,10 +749,16 @@ fn answer_lines(
     row: &TranscriptRow,
     selected: bool,
     compact_trailing: bool,
+    width: u16,
     workdir: &Path,
+    raw_visible: bool,
 ) -> Vec<Line<'static>> {
     let body_style = style_for_body(row.kind, row.failed);
-    let mut out = render_markdown_lines(row.expandable_text(), workdir);
+    let mut out = if raw_visible {
+        raw_markdown_source_lines(row.expandable_text(), body_style)
+    } else {
+        render_markdown_lines(row.expandable_text(), workdir, Some(width))
+    };
     if out.is_empty() {
         out.extend(row.expandable_text().lines().map(|line| {
             Line::from(Span::styled(line.to_string(), body_style))
@@ -763,6 +782,13 @@ fn answer_lines(
         out.push(Line::from(""));
     }
     out
+}
+
+fn raw_markdown_source_lines(input: &str, style: Style) -> Vec<Line<'static>> {
+    input
+        .lines()
+        .map(|line| Line::from(Span::styled(line.to_string(), style)))
+        .collect()
 }
 
 struct LedgerEvidenceRowView {
@@ -900,19 +926,27 @@ fn tool_ledger_view(
 ) -> LedgerEvidenceRowView {
     let phase = ToolRowPhase::from_row(row);
     let active_elapsed = (phase == ToolRowPhase::Active).then(|| active_tool_elapsed(row)).flatten();
-    let bullet_style = if row.failed {
+    let bullet_style = if row.interrupted {
+        interruption_style()
+    } else if row.failed {
         tui_theme().error_style()
     } else if active_elapsed.is_some() || selected {
         tui_theme().accent_style()
     } else {
         tui_theme().success_style()
     };
-    let title_style = if row.failed {
+    let title_style = if row.interrupted {
+        interruption_style().add_modifier(Modifier::BOLD)
+    } else if row.failed {
         tui_theme().error_style().add_modifier(Modifier::BOLD)
     } else {
         Style::default().add_modifier(Modifier::BOLD)
     };
-    let body_style = style_for_body(row.kind, row.failed);
+    let body_style = if row.interrupted {
+        interruption_style()
+    } else {
+        style_for_body(row.kind, row.failed)
+    };
     let marker = if selected {
         "› ".to_string()
     } else if let Some(elapsed) = active_elapsed {
@@ -990,6 +1024,7 @@ fn foldable_evidence_body(row: &TranscriptRow) -> bool {
             | TranscriptKind::Changed
             | TranscriptKind::Command
     ) && !row.text.trim().is_empty()
+        && !row.interrupted
         && !suppressed_active_tool_body(row, &[row.text.trim()])
 }
 
@@ -1281,7 +1316,7 @@ fn tool_elapsed_label(row: &TranscriptRow) -> Option<String> {
 }
 
 fn active_tool_elapsed(row: &TranscriptRow) -> Option<Duration> {
-    if row.tool_elapsed.is_some() {
+    if row.failed || row.interrupted || row.tool_elapsed.is_some() {
         return None;
     }
     row.tool_started.map(|started| started.elapsed())
@@ -1338,6 +1373,10 @@ fn focus_marker_style(failed: bool) -> Style {
     } else {
         tui_theme().accent_style()
     }
+}
+
+fn interruption_style() -> Style {
+    tui_theme().thinking_style()
 }
 
 fn style_for_body(kind: TranscriptKind, failed: bool) -> Style {

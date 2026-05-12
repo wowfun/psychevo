@@ -684,8 +684,14 @@ async fn interrupted_turn_restores_queued_inputs_to_composer_without_autostart()
     ui.start_assistant();
     ui.turn_outcome = Some(Outcome::Aborted);
     ui.interrupt_requested = true;
-    ui.queued_inputs
-        .push_back(QueuedInput::Prompt("queued prompt".to_string()));
+    ui.queued_inputs.push_back(QueuedInput::Prompt {
+        prompt: "queued prompt".to_string(),
+        display_prompt: "[Image #1] queued prompt".to_string(),
+        images: vec![PendingImageAttachment {
+            placeholder: "[Image #1]".to_string(),
+            image: ImageInput::ImageUrl("https://example.test/image.png".to_string()),
+        }],
+    });
     ui.queued_inputs
         .push_back(QueuedInput::Shell("printf queued-shell".to_string()));
     ui.textarea = textarea_with_text("draft");
@@ -696,7 +702,14 @@ async fn interrupted_turn_restores_queued_inputs_to_composer_without_autostart()
     assert!(ui.queued_inputs.is_empty());
     assert_eq!(
         textarea_text(&ui.textarea),
-        "queued prompt\n!printf queued-shell\ndraft"
+        "[Image #1] queued prompt\n!printf queued-shell\ndraft"
+    );
+    assert_eq!(
+        ui.pending_images,
+        vec![PendingImageAttachment {
+            placeholder: "[Image #1]".to_string(),
+            image: ImageInput::ImageUrl("https://example.test/image.png".to_string()),
+        }]
     );
     assert!(!app.had_error);
     assert!(
@@ -1059,7 +1072,8 @@ fn load_history_does_not_rehydrate_aborted_tool_calls_as_running() {
     assert!(row.title.starts_with("Ran cd /home/kevin/Projects/feedgarden"));
     assert!(!row.title.starts_with("Running "));
     assert_eq!(row.text, "interrupted");
-    assert!(row.failed);
+    assert!(row.interrupted);
+    assert!(!row.failed);
     assert!(row.tool_started.is_none());
     assert!(ui.tool_rows.is_empty());
 }
@@ -1147,6 +1161,76 @@ async fn sessions_panel_switches_without_status_row() {
     assert_eq!(textarea_text(&ui.textarea), "/sessions");
     ui.recall_history(1);
     assert_eq!(textarea_text(&ui.textarea), "draft");
+}
+
+#[tokio::test]
+async fn sessions_panel_selection_does_not_reorder_by_view_time() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let older = store
+        .create_session_with_metadata(&app.workdir, "tui", "model-a", "mock", None)
+        .expect("older");
+    let newer = store
+        .create_session_with_metadata(&app.workdir, "tui", "model-b", "mock", None)
+        .expect("newer");
+    let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
+    conn.execute(
+        "UPDATE sessions SET started_at_ms = 1000, updated_at_ms = 1000 WHERE id = ?1",
+        rusqlite::params![&older],
+    )
+    .expect("older times");
+    conn.execute(
+        "UPDATE sessions SET started_at_ms = 2000, updated_at_ms = 2000 WHERE id = ?1",
+        rusqlite::params![&newer],
+    )
+    .expect("newer times");
+    app.current_session = Some(newer.clone());
+    let mut ui = FullscreenUi::new(&app);
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Sessions)
+        .await
+        .expect("sessions");
+    let Some(BottomPanel::Sessions(panel)) = &ui.bottom_panel else {
+        panic!("expected sessions panel");
+    };
+    assert_eq!(session_panel_ids(panel), vec![newer.clone(), older.clone()]);
+
+    for ch in "model-a".chars() {
+        app.handle_bottom_panel_key(
+            &mut ui,
+            KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
+        )
+        .expect("query");
+    }
+    app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("select");
+    assert_eq!(app.current_session.as_deref(), Some(older.as_str()));
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Sessions)
+        .await
+        .expect("sessions again");
+    let Some(BottomPanel::Sessions(panel)) = &ui.bottom_panel else {
+        panic!("expected sessions panel");
+    };
+    assert_eq!(session_panel_ids(panel), vec![newer, older.clone()]);
+    let current_row = panel
+        .rows
+        .iter()
+        .find(|row| matches!(&row.value, BottomSelectionValue::Session(id) if id == &older))
+        .expect("older row");
+    assert!(current_row.is_current);
+}
+
+fn session_panel_ids(panel: &BottomSelectionPanel) -> Vec<String> {
+    panel
+        .rows
+        .iter()
+        .filter_map(|row| match &row.value {
+            BottomSelectionValue::Session(id) => Some(id.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 #[tokio::test]

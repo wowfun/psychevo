@@ -133,6 +133,34 @@ class Handler(BaseHTTPRequestHandler):
                     "finish_reason": "stop"
                 }]
             }, delay=0.1)
+        elif "Interrupted bash fixture" in body:
+            self.send_event({
+                "id": "resp_tui_capture_interrupt",
+                "model": "mock-model",
+                "choices": [{
+                    "delta": {
+                        "content": "Starting a bash command that should be interrupted."
+                    },
+                    "finish_reason": None
+                }]
+            }, delay=0.2)
+            self.send_event({
+                "id": "resp_tui_capture_interrupt",
+                "model": "mock-model",
+                "choices": [{
+                    "delta": {
+                        "tool_calls": [{
+                            "index": 0,
+                            "id": "call_interrupted_bash",
+                            "function": {
+                                "name": "bash",
+                                "arguments": "{\"command\":\"sleep 60\"}"
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }]
+            })
         elif "visible-write-output.md" in body:
             self.send_event({
                 "id": "resp_tui_capture_visible_write_final",
@@ -349,7 +377,7 @@ Enter
 Wait+Screen /Ask pevo|pevo/
 Type "/model"
 Enter
-Wait+Screen /Select Model/
+Wait+Screen /Add provider/
 Sleep 500 ms
 Screenshot $(json_quote "$out_dir/01-model-picker.png")
 Escape
@@ -406,6 +434,14 @@ Sleep 300 ms
 Screenshot $(json_quote "$out_dir/08-visible-write-preamble.png")
 Wait+Screen /VISIBLE_WRITE_FINAL/
 Sleep 200 ms
+Type "Interrupted bash fixture"
+Enter
+Wait+Screen /Running sleep 60/
+Sleep 300 ms
+Escape
+Wait+Screen /interrupted/
+Sleep 300 ms
+Screenshot $(json_quote "$out_dir/09-interrupted-bash.png")
 Ctrl+D
 EOF
 }
@@ -413,7 +449,7 @@ EOF
 check_demo_artifacts() {
   local out_dir="$1"
   local missing=()
-  for file in 01-model-picker.png 02-running-thinking.png 03-final-ledger.png 04-shell-mode.png 05-long-markdown-bottom-scroll.png 06-reasoning-only-collapsed.png 07-reasoning-only-bottom-scroll.png 08-visible-write-preamble.png; do
+  for file in 01-model-picker.png 02-running-thinking.png 03-final-ledger.png 04-shell-mode.png 05-long-markdown-bottom-scroll.png 06-reasoning-only-collapsed.png 07-reasoning-only-bottom-scroll.png 08-visible-write-preamble.png 09-interrupted-bash.png; do
     if [[ ! -s "$out_dir/$file" ]]; then
       missing+=("$file")
     fi
@@ -475,11 +511,11 @@ EOF
       "models": {
         "mock-model": {
           "reasoning_effort": "high",
-          "context_limit": 64000
+          "limit": { "context": 64000 }
         },
         "other-model": {
           "reasoning_effort": "medium",
-          "context_limit": 32000
+          "limit": { "context": 32000 }
         }
       }
     }

@@ -65,6 +65,74 @@ fn transcript_render_blocks_keep_thinking_and_tools_flat() {
 }
 
 #[test]
+fn bash_timeout_failure_shows_timeout_before_partial_output() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_execution_end",
+            "tool_call_id": "call_fetch",
+            "tool_name": "bash",
+            "args": {"command": "python scripts/fetch.py"},
+            "result": {
+                "output": "[fetch] 29 rows done\n[fetch] 1 failed",
+                "exit_code": null,
+                "error": "command timed out after 120 seconds",
+                "truncated": false
+            },
+            "outcome": "failed"
+        }),
+        false,
+    );
+
+    let row = ui
+        .transcript
+        .iter()
+        .find(|row| row.kind == TranscriptKind::Ran)
+        .expect("bash row");
+    assert!(row.failed);
+    assert_eq!(row.title, "Ran python scripts/fetch.py");
+    assert!(row.text.starts_with(
+        "timeout: command timed out after 120 seconds; partial output follows\n"
+    ));
+    assert!(row.text.contains("[fetch] 29 rows done"));
+}
+
+#[test]
+fn bash_timeout_without_output_omits_no_output_placeholder() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_execution_end",
+            "tool_call_id": "call_sleep",
+            "tool_name": "bash",
+            "args": {"command": "sleep 60"},
+            "result": {
+                "output": "(no output)",
+                "exit_code": null,
+                "error": "command timed out after 1 seconds",
+                "truncated": false
+            },
+            "outcome": "failed"
+        }),
+        false,
+    );
+
+    let row = ui
+        .transcript
+        .iter()
+        .find(|row| row.kind == TranscriptKind::Ran)
+        .expect("bash row");
+    assert_eq!(row.text, "timeout: command timed out after 1 seconds");
+    assert!(!row.text.contains("(no output)"));
+}
+
+#[test]
 fn command_row_renders_claude_style_prefixes_and_colored_context_bar() {
     let row = TranscriptRow::with_title(
         TranscriptKind::Command,
@@ -72,7 +140,7 @@ fn command_row_renders_claude_style_prefixes_and_colored_context_bar() {
         "Context Usage\n[MMMMM.....]\nS system  T tools  K skills  M input_messages  . free\ntokens: 5/10 (50.0%)",
     );
 
-    let lines = transcript_lines(&row, false, true, 80, Path::new("/repo"));
+    let lines = transcript_lines(&row, false, true, 80, Path::new("/repo"), false);
     let rendered = lines.iter().map(line_text).collect::<Vec<_>>();
     assert_eq!(rendered[0], "> /context");
     assert_eq!(rendered[1], "  └  Context Usage");
@@ -101,7 +169,7 @@ fn command_row_defaults_open_and_toggles_details() {
     );
 
     assert!(row.is_expandable());
-    let open = transcript_lines(&row, true, true, 80, Path::new("/repo"))
+    let open = transcript_lines(&row, true, true, 80, Path::new("/repo"), false)
         .iter()
         .map(line_text)
         .collect::<Vec<_>>();
@@ -110,7 +178,7 @@ fn command_row_defaults_open_and_toggles_details() {
 
     toggle_transcript_row_details(&mut row);
     assert!(row.details_collapsed);
-    let collapsed = transcript_lines(&row, false, true, 80, Path::new("/repo"))
+    let collapsed = transcript_lines(&row, false, true, 80, Path::new("/repo"), false)
         .iter()
         .map(line_text)
         .collect::<Vec<_>>();
@@ -118,7 +186,7 @@ fn command_row_defaults_open_and_toggles_details() {
 
     toggle_transcript_row_details(&mut row);
     assert!(!row.details_collapsed);
-    let reopened = transcript_lines(&row, true, true, 80, Path::new("/repo"))
+    let reopened = transcript_lines(&row, true, true, 80, Path::new("/repo"), false)
         .iter()
         .map(line_text)
         .collect::<Vec<_>>();
@@ -459,7 +527,7 @@ fn selected_answer_uses_single_line_focus_marker() {
         "first line\nsecond line\nthird line",
     );
 
-    let rendered = answer_lines(&row, true, true, &app.workdir)
+    let rendered = answer_lines(&row, true, true, 80, &app.workdir, false)
         .iter()
         .map(line_text)
         .collect::<Vec<_>>();
@@ -612,6 +680,7 @@ fn turn_meta_omits_tokens_and_uses_prefixless_debug_parts() {
         metadata: None,
         accounting: None,
         failures: 0,
+        interrupted: false,
         debug: false,
     });
     assert_eq!(default, "provider/model");
@@ -625,6 +694,7 @@ fn turn_meta_omits_tokens_and_uses_prefixless_debug_parts() {
         metadata: Some(&metadata),
         accounting: None,
         failures: 0,
+        interrupted: false,
         debug: true,
     });
     assert!(debug.contains("usage 2 input"));
@@ -632,6 +702,29 @@ fn turn_meta_omits_tokens_and_uses_prefixless_debug_parts() {
     assert!(debug.contains("metadata response resp"));
     assert!(debug.ends_with("plan"));
     assert!(!debug.contains('='));
+}
+
+#[test]
+fn turn_meta_omits_accounting_cost() {
+    let accounting = serde_json::json!({
+        "estimated_cost_nanodollars": 42_000,
+        "pricing_source": "catalog"
+    });
+    let meta = turn_meta_text(TurnMetaProjection {
+        mode: "default",
+        provider: "provider",
+        model: "model",
+        started: None,
+        usage: None,
+        metadata: None,
+        accounting: Some(&accounting),
+        failures: 0,
+        interrupted: false,
+        debug: false,
+    });
+
+    assert_eq!(meta, "provider/model");
+    assert!(!meta.contains("cost"));
 }
 
 #[test]
@@ -650,6 +743,7 @@ fn turn_meta_prefers_completed_elapsed_metadata() {
         metadata: Some(&metadata),
         accounting: None,
         failures: 0,
+        interrupted: false,
         debug: true,
     });
 
@@ -671,6 +765,7 @@ fn turn_meta_formats_persisted_elapsed_minutes() {
         metadata: Some(&metadata),
         accounting: None,
         failures: 0,
+        interrupted: false,
         debug: false,
     });
 
@@ -695,6 +790,7 @@ fn turn_meta_places_variant_after_model_and_filters_debug_duplicate() {
         metadata: Some(&metadata),
         accounting: None,
         failures: 1,
+        interrupted: false,
         debug: true,
     });
 

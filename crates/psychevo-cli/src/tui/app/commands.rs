@@ -110,6 +110,45 @@ impl TuiApp {
                 ui.set_thinking_visible(enabled);
                 ui.refresh_sidebar(self);
             }
+            SlashCommand::RawToggle => {
+                let enabled = !self.raw_visible;
+                self.set_raw_no_print(enabled)?;
+                ui.set_raw_visible(enabled);
+                ui.refresh_sidebar(self);
+            }
+            SlashCommand::RawSet(enabled) => {
+                self.set_raw_no_print(enabled)?;
+                ui.set_raw_visible(enabled);
+                ui.refresh_sidebar(self);
+            }
+            SlashCommand::Copy => {
+                self.copy_latest_answer_markdown(ui);
+            }
+            SlashCommand::Image { source, prompt } => {
+                match resolve_image_source(&source, &self.workdir) {
+                    Ok(image) => {
+                        let placeholder = ui.add_pending_image(image);
+                        let prompt = prompt.trim();
+                        let text = if prompt.is_empty() {
+                            placeholder
+                        } else {
+                            format!("{placeholder} {prompt}")
+                        };
+                        ui.textarea = textarea_with_text(&text);
+                        ui.clear_slash_menu_dismissal();
+                        ui.close_file_popup();
+                        ui.close_skill_popup();
+                    }
+                    Err(err) => {
+                        ui.push_command_result(
+                            command_echo,
+                            None,
+                            format!("error: {err:#}"),
+                            true,
+                        );
+                    }
+                }
+            }
             SlashCommand::Rename(title) => match self.rename_session_no_print(title) {
                 Ok(title) => {
                     ui.push_command_result(
@@ -198,16 +237,30 @@ impl TuiApp {
             return Ok(false);
         }
 
-        if record_history {
-            ui.push_submitted_history(text.clone());
+        let display_text = text.clone();
+        if record_history && (!display_text.trim().is_empty() || ui.pending_images.is_empty()) {
+            let process_input = text
+                .trim_start()
+                .chars()
+                .next()
+                .is_some_and(|ch| matches!(ch, '/' | '!'));
+            if ui.pending_images.is_empty() || process_input {
+                ui.push_submitted_history(display_text.clone());
+            }
         }
-        match parse_slash_command(&text) {
+        let slash_command = if should_parse_slash_command_input(&text) {
+            parse_slash_command(&text)
+        } else {
+            Ok(None)
+        };
+        match slash_command {
             Ok(Some(command)) => {
                 self.handle_fullscreen_command_with_echo(ui, command, Some(text))
                     .await
             }
             Ok(None) => {
-                self.submit_fullscreen_prompt(ui, text)?;
+                let images = ui.take_submitted_images(&text);
+                self.submit_fullscreen_prompt(ui, display_text, images)?;
                 Ok(false)
             }
             Err(err) => {
@@ -225,13 +278,19 @@ impl TuiApp {
     fn submit_fullscreen_prompt(
         &mut self,
         ui: &mut FullscreenUi<'_>,
-        prompt: String,
+        display_prompt: String,
+        images: Vec<PendingImageAttachment>,
     ) -> Result<()> {
+        let prompt = prompt_without_image_placeholders(&display_prompt, &images);
         if ui.running.is_some() {
-            ui.queued_inputs.push_back(QueuedInput::Prompt(prompt));
+            ui.queued_inputs.push_back(QueuedInput::Prompt {
+                prompt,
+                display_prompt,
+                images,
+            });
             return Ok(());
         }
-        self.start_fullscreen_turn(ui, prompt)
+        self.start_fullscreen_turn(ui, prompt, display_prompt, images)
     }
 
     fn submit_fullscreen_shell(
@@ -252,7 +311,11 @@ impl TuiApp {
                 break;
             };
             match next {
-                QueuedInput::Prompt(prompt) => self.start_fullscreen_turn(ui, prompt)?,
+                QueuedInput::Prompt {
+                    prompt,
+                    display_prompt,
+                    images,
+                } => self.start_fullscreen_turn(ui, prompt, display_prompt, images)?,
                 QueuedInput::Shell(command) => self.start_fullscreen_shell(ui, command)?,
             }
         }
@@ -267,7 +330,12 @@ impl TuiApp {
             }
             return Ok(false);
         }
-        match parse_slash_command(line) {
+        let slash_command = if should_parse_slash_command_input(line) {
+            parse_slash_command(line)
+        } else {
+            Ok(None)
+        };
+        match slash_command {
             Ok(Some(command)) => self.handle_command(command).await,
             Ok(None) => {
                 if let Err(err) = self.submit_prompt(line.to_string()).await {
@@ -324,6 +392,10 @@ impl TuiApp {
             SlashCommand::ModeSet(mode) => self.set_mode(mode),
             SlashCommand::ThinkingToggle => self.toggle_thinking(),
             SlashCommand::ThinkingSet(enabled) => self.set_thinking(enabled),
+            SlashCommand::RawToggle => self.toggle_raw(),
+            SlashCommand::RawSet(enabled) => self.set_raw(enabled),
+            SlashCommand::Copy => self.copy_latest_answer_markdown_scripted(),
+            SlashCommand::Image { .. } => Err(anyhow!("/image is only available in fullscreen TUI")),
             SlashCommand::Rename(title) => self.rename_session(title),
             SlashCommand::Undo => self.undo_session_print(),
             SlashCommand::Redo => self.redo_session_print(),
@@ -345,6 +417,16 @@ impl TuiApp {
             eprintln!("{}", self.renderer.error(&format!("error: {err:#}")));
         }
         Ok(false)
+    }
+
+    fn image_submission_degrades_to_text(&self, prompt: &str, images: &[ImageInput]) -> bool {
+        let has_image = !images.is_empty();
+        let _ = prompt;
+        has_image
+            && self
+                .selected_model
+                .as_ref()
+                .is_some_and(|model| model_metadata_explicitly_disallows_image_input(&model.metadata))
     }
 
     fn skills_status_text(&self) -> String {
@@ -488,18 +570,36 @@ impl TuiApp {
         Ok(())
     }
 
-    fn start_fullscreen_turn(&mut self, ui: &mut FullscreenUi<'_>, prompt: String) -> Result<()> {
+    fn start_fullscreen_turn(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        prompt: String,
+        display_prompt: String,
+        images: Vec<PendingImageAttachment>,
+    ) -> Result<()> {
         if ui.running.is_some() {
-            ui.queued_inputs.push_back(QueuedInput::Prompt(prompt));
+            ui.queued_inputs.push_back(QueuedInput::Prompt {
+                prompt,
+                display_prompt,
+                images,
+            });
             return Ok(());
         }
-        ui.push_user(prompt.clone());
+        let image_inputs = images
+            .iter()
+            .map(|attachment| attachment.image.clone())
+            .collect::<Vec<_>>();
+        if self.image_submission_degrades_to_text(&prompt, &image_inputs) {
+            ui.set_ephemeral_error("selected model does not support image input; sent image source as text");
+        }
+        ui.push_user_with_images(display_prompt.clone(), &images);
         let (tx, rx) = mpsc::unbounded_channel();
         let sink: RunStreamSink = Arc::new(move |event| {
             let _ = tx.send(event);
         });
         let (control_handle, control) = run_control();
-        let options = self.run_options(prompt);
+        let mut options = self.run_options_with_images(prompt, image_inputs);
+        options.prompt_display = prompt_display_metadata(display_prompt, &images, &self.workdir);
         let task = tokio::spawn(async move {
             run_live_streaming_controlled(options, "tui", TUI_SESSION_SOURCES, sink, control).await
         });
@@ -574,6 +674,18 @@ fn slash_command_echo(command: &SlashCommand) -> String {
         SlashCommand::ThinkingToggle => "/show-thinking".to_string(),
         SlashCommand::ThinkingSet(enabled) => {
             format!("/show-thinking {}", if *enabled { "on" } else { "off" })
+        }
+        SlashCommand::RawToggle => "/show-raw".to_string(),
+        SlashCommand::RawSet(enabled) => {
+            format!("/show-raw {}", if *enabled { "on" } else { "off" })
+        }
+        SlashCommand::Copy => "/copy".to_string(),
+        SlashCommand::Image { source, prompt } => {
+            if prompt.trim().is_empty() {
+                format!("/image {source}")
+            } else {
+                format!("/image {source} {}", prompt.trim())
+            }
         }
         SlashCommand::Rename(title) => {
             format!("/rename {}", title.split_whitespace().collect::<Vec<_>>().join(" "))

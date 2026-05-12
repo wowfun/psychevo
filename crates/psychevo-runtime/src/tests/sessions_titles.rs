@@ -15,8 +15,9 @@ fn latest_run_session_filters_source_and_workdir() {
     let second = store
         .create_session_with_metadata(&workdir, "run", "model", "provider", None)
         .expect("second");
-    thread::sleep(Duration::from_millis(2));
-    store.touch_session(&first).expect("touch");
+    store
+        .append_message(&first, &user_message("real activity", 1))
+        .expect("activity");
 
     let latest = latest_run_session_for_workdir(&db, &workdir)
         .expect("latest")
@@ -216,9 +217,7 @@ fn resolved_title_provider() -> ResolvedRunProvider {
 
 fn user_message(text: &str, timestamp_ms: i64) -> Message {
     Message::User {
-        content: vec![psychevo_agent_core::TextBlock {
-            text: text.to_string(),
-        }],
+        content: vec![psychevo_agent_core::UserContentBlock::text(text)],
         timestamp_ms,
     }
 }

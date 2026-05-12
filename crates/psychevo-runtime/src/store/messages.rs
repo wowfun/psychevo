@@ -1,13 +1,24 @@
+struct AppendMessageParams<'a> {
+    session_id: &'a str,
+    message: &'a Message,
+    usage: Option<Value>,
+    metadata: Option<Value>,
+    accounting: Option<MessageAccounting>,
+    context_evidence: &'a [ContextEvidenceInput],
+    content_text_override: Option<String>,
+}
+
 impl SqliteStore {
     pub fn resume_session(&self, session_id: &str) -> Result<()> {
-        let now = now_ms();
-        let changed = self.write_retry(|conn| {
-            conn.execute(
-                "UPDATE sessions SET updated_at_ms = ?1, ended_at_ms = NULL, end_reason = NULL, archived_at_ms = NULL WHERE id = ?2",
-                params![now, session_id],
+        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let exists = conn
+            .query_row(
+                "SELECT 1 FROM sessions WHERE id = ?1",
+                params![session_id],
+                |row| row.get::<_, i64>(0),
             )
-        })?;
-        if changed == 0 {
+            .optional()?;
+        if exists.is_none() {
             return Err(Error::Message(format!("session not found: {session_id}")));
         }
         Ok(())
@@ -122,6 +133,22 @@ impl SqliteStore {
         message: &Message,
         snapshot: Option<String>,
     ) -> Result<()> {
+        self.append_message_with_undo_snapshot_and_context_evidence(
+            session_id,
+            message,
+            snapshot,
+            &[],
+        )
+        .map(|_| ())
+    }
+
+    pub fn append_message_with_undo_snapshot_and_context_evidence(
+        &self,
+        session_id: &str,
+        message: &Message,
+        snapshot: Option<String>,
+        context_evidence: &[ContextEvidenceInput],
+    ) -> Result<i64> {
         let metadata = snapshot.map(|snapshot| {
             json!({
                 MESSAGE_UNDO_METADATA_KEY: {
@@ -129,7 +156,32 @@ impl SqliteStore {
                 }
             })
         });
-        self.append_message_with_metrics(session_id, message, None, metadata)
+        self.append_message_with_undo_snapshot_metadata_and_context_evidence(
+            session_id,
+            message,
+            metadata,
+            None,
+            context_evidence,
+        )
+    }
+
+    pub fn append_message_with_undo_snapshot_metadata_and_context_evidence(
+        &self,
+        session_id: &str,
+        message: &Message,
+        metadata: Option<Value>,
+        content_text_override: Option<String>,
+        context_evidence: &[ContextEvidenceInput],
+    ) -> Result<i64> {
+        self.append_message_with_metrics_accounting_and_context_evidence(AppendMessageParams {
+            session_id,
+            message,
+            usage: None,
+            metadata,
+            accounting: None,
+            context_evidence,
+            content_text_override,
+        })
     }
 
     pub fn append_message_with_metrics(
@@ -150,10 +202,41 @@ impl SqliteStore {
         metadata: Option<Value>,
         accounting: Option<MessageAccounting>,
     ) -> Result<()> {
-        let fields = message_fields(message)?;
+        self.append_message_with_metrics_accounting_and_context_evidence(AppendMessageParams {
+            session_id,
+            message,
+            usage,
+            metadata,
+            accounting,
+            context_evidence: &[],
+            content_text_override: None,
+        })
+        .map(|_| ())
+    }
+
+    fn append_message_with_metrics_accounting_and_context_evidence(
+        &self,
+        params: AppendMessageParams<'_>,
+    ) -> Result<i64> {
+        let AppendMessageParams {
+            session_id,
+            message,
+            usage,
+            metadata,
+            accounting,
+            context_evidence,
+            content_text_override,
+        } = params;
+        let mut fields = message_fields(message)?;
+        if fields.role == "user"
+            && let Some(content_text) = content_text_override
+        {
+            fields.content_text = Some(content_text);
+        }
         let message_json = serde_json::to_string(message)?;
         let usage_json = optional_json_string(&usage)?;
         let metadata_json = optional_json_string(&metadata)?;
+        let context_evidence = prepare_context_evidence(context_evidence)?;
         let now = now_ms();
         self.write_retry(|conn| {
             let seq = next_session_seq(conn, session_id)?;
@@ -227,17 +310,21 @@ impl SqliteStore {
                         .and_then(|value| value.pricing_tier.clone())
                 ],
             )?;
+            insert_context_evidence_rows(conn, session_id, seq, now, &context_evidence)?;
             conn.execute(
                 r#"
                 UPDATE sessions
                 SET updated_at_ms = ?1,
+                    ended_at_ms = NULL,
+                    end_reason = NULL,
+                    archived_at_ms = NULL,
                     message_count = message_count + 1,
                     tool_call_count = tool_call_count + ?2
                 WHERE id = ?3
                 "#,
                 params![now, fields.tool_call_count, session_id],
             )?;
-            Ok(())
+            Ok(seq)
         })
     }
 

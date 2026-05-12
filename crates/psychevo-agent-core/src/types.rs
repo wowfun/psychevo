@@ -12,7 +12,7 @@ pub enum Error {
 #[serde(tag = "role", rename_all = "snake_case")]
 pub enum Message {
     User {
-        content: Vec<TextBlock>,
+        content: Vec<UserContentBlock>,
         timestamp_ms: i64,
     },
     Assistant {
@@ -45,6 +45,68 @@ impl Message {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TextBlock {
     pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum UserContentBlock {
+    Text(TextBlock),
+    LocalImage(LocalImageBlock),
+    ImageUrl(ImageUrlBlock),
+}
+
+impl UserContentBlock {
+    pub fn text(text: impl Into<String>) -> Self {
+        Self::Text(TextBlock { text: text.into() })
+    }
+
+    pub fn local_image(path: impl Into<std::path::PathBuf>) -> Self {
+        Self::LocalImage(LocalImageBlock {
+            kind: LocalImageBlockKind::LocalImage,
+            path: path.into(),
+        })
+    }
+
+    pub fn image_url(url: impl Into<String>) -> Self {
+        Self::ImageUrl(ImageUrlBlock {
+            kind: ImageUrlBlockKind::ImageUrl,
+            url: url.into(),
+        })
+    }
+
+    pub fn text_value(&self) -> Option<&str> {
+        match self {
+            Self::Text(block) => Some(block.text.as_str()),
+            Self::LocalImage(_) => None,
+            Self::ImageUrl(_) => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LocalImageBlock {
+    #[serde(rename = "type")]
+    pub kind: LocalImageBlockKind,
+    pub path: std::path::PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalImageBlockKind {
+    LocalImage,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ImageUrlBlock {
+    #[serde(rename = "type")]
+    pub kind: ImageUrlBlockKind,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageUrlBlockKind {
+    ImageUrl,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -112,4 +174,3 @@ pub trait ToolBinding: Send + Sync {
         abort: AbortSignal,
     ) -> BoxFuture<'static, ToolOutput>;
 }
-

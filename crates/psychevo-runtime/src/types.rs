@@ -48,6 +48,9 @@ pub struct RunOptions {
     pub session: Option<String>,
     pub continue_latest: bool,
     pub prompt: String,
+    pub image_inputs: Vec<ImageInput>,
+    pub extract_prompt_image_sources: bool,
+    pub prompt_display: Option<PromptDisplayMetadata>,
     pub max_context_messages: Option<usize>,
     pub config_path: Option<PathBuf>,
     pub model: Option<String>,
@@ -57,6 +60,36 @@ pub struct RunOptions {
     pub inherited_env: Option<BTreeMap<String, String>>,
     pub no_skills: bool,
     pub skill_inputs: Vec<String>,
+}
+
+pub const TUI_DISPLAY_METADATA_KEY: &str = "tui_display";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptDisplayMetadata {
+    pub content_text: String,
+    pub attachments: Vec<PromptAttachmentDisplay>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptAttachmentDisplay {
+    pub kind: String,
+    pub placeholder: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImageInput {
+    LocalPath(PathBuf),
+    ImageUrl(String),
+}
+
+impl ImageInput {
+    pub fn display_source(&self) -> String {
+        match self {
+            Self::LocalPath(path) => path.display().to_string(),
+            Self::ImageUrl(url) => url.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

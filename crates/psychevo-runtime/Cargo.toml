@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 futures.workspace = true
 jsonc-parser.workspace = true
+libc.workspace = true
 psychevo-agent-core = { path = "../psychevo-agent-core" }
 psychevo-ai = { path = "../psychevo-ai" }
 reqwest.workspace = true

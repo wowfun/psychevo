@@ -1,4 +1,5 @@
 use super::*;
+use base64::Engine as _;
 use serde_json::json;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -188,6 +189,122 @@ fn chat_request_maps_messages_and_tools() {
     assert_eq!(body["messages"][2]["role"], "tool");
     assert_eq!(body["tools"][0]["function"]["name"], "read");
     assert_eq!(body["reasoning_effort"], "medium");
+}
+
+#[test]
+fn chat_request_maps_local_image_blocks_to_content_parts() {
+    let temp = tempfile::tempdir().expect("temp");
+    let image = temp.path().join("image.avif");
+    std::fs::write(&image, tiny_avif_bytes()).expect("image");
+    let request = GenerationRequest {
+        model: ModelTarget {
+            provider: "openai".to_string(),
+            model: "gpt-test".to_string(),
+        },
+        messages: vec![json!({
+            "role": "user",
+            "content": [
+                { "type": "local_image", "path": image },
+                { "type": "image_url", "url": "https://example.com/image.png" },
+                { "text": "describe it" }
+            ],
+            "timestamp_ms": 1
+        })],
+        tools: Vec::new(),
+        metadata: json!({}),
+    };
+
+    let body = build_chat_request(&request, "https://api.openai.com/v1");
+
+    let content = body["messages"][0]["content"]
+        .as_array()
+        .expect("content parts");
+    assert_eq!(content.len(), 3);
+    assert_eq!(content[0]["type"], "image_url");
+    let data_url = content[0]["image_url"]["url"].as_str().expect("data url");
+    assert!(
+        data_url.starts_with("data:image/png;base64,")
+            || data_url.starts_with("data:image/avif;base64,")
+    );
+    assert_eq!(
+        content[1],
+        json!({
+            "type": "image_url",
+            "image_url": { "url": "https://example.com/image.png" }
+        })
+    );
+    assert_eq!(content[2], json!({ "type": "text", "text": "describe it" }));
+}
+
+#[test]
+fn chat_request_transcodes_bmp_local_image_to_png_part() {
+    let temp = tempfile::tempdir().expect("temp");
+    let image_path = temp.path().join("image.bmp");
+    image::RgbaImage::from_pixel(2, 2, image::Rgba([255, 0, 0, 255]))
+        .save_with_format(&image_path, image::ImageFormat::Bmp)
+        .expect("bmp");
+    let request = GenerationRequest {
+        model: ModelTarget {
+            provider: "openai".to_string(),
+            model: "gpt-test".to_string(),
+        },
+        messages: vec![json!({
+            "role": "user",
+            "content": [{ "type": "local_image", "path": image_path }],
+            "timestamp_ms": 1
+        })],
+        tools: Vec::new(),
+        metadata: json!({}),
+    };
+
+    let body = build_chat_request(&request, "https://api.openai.com/v1");
+    let data_url = body["messages"][0]["content"][0]["image_url"]["url"]
+        .as_str()
+        .expect("data url");
+    assert!(data_url.starts_with("data:image/png;base64,"));
+}
+
+#[test]
+fn chat_request_resizes_large_local_image_part() {
+    let temp = tempfile::tempdir().expect("temp");
+    let image_path = temp.path().join("wide.png");
+    image::RgbaImage::from_pixel(2501, 3, image::Rgba([0, 255, 0, 255]))
+        .save_with_format(&image_path, image::ImageFormat::Png)
+        .expect("png");
+    let request = GenerationRequest {
+        model: ModelTarget {
+            provider: "openai".to_string(),
+            model: "gpt-test".to_string(),
+        },
+        messages: vec![json!({
+            "role": "user",
+            "content": [{ "type": "local_image", "path": image_path }],
+            "timestamp_ms": 1
+        })],
+        tools: Vec::new(),
+        metadata: json!({}),
+    };
+
+    let body = build_chat_request(&request, "https://api.openai.com/v1");
+    let data_url = body["messages"][0]["content"][0]["image_url"]["url"]
+        .as_str()
+        .expect("data url");
+    let encoded = data_url
+        .strip_prefix("data:image/png;base64,")
+        .expect("png data url");
+    let decoded = BASE64_STANDARD.decode(encoded).expect("base64");
+    let resized = image::load_from_memory(&decoded).expect("resized image");
+
+    assert!(resized.width() <= 2000);
+    assert!(resized.height() <= 2000);
+}
+
+fn tiny_avif_bytes() -> Vec<u8> {
+    BASE64_STANDARD
+        .decode(
+            "AAAAIGZ0eXBhdmlmAAAAAGF2aWZtaWYxbWlhZk1BMUIAAAD5bWV0YQAAAAAAAAAvaGRscgAAAAAAAAAAcGljdAAAAAAAAAAAAAAAAFBpY3R1cmVIYW5kbGVyAAAAAA5waXRtAAAAAAABAAAAHmlsb2MAAAAARAAAAQABAAAAAQAAASEAAAAdAAAAKGlpbmYAAAAAAAEAAAAaaW5mZQIAAAAAAQAAYXYwMUNvbG9yAAAAAGppcHJwAAAAS2lwY28AAAAUaXNwZQAAAAAAAAAQAAAAEAAAABBwaXhpAAAAAAMICAgAAAAMYXYxQ4EADAAAAAATY29scm5jbHgAAgACAAIAAAAAF2lwbWEAAAAAAAAAAQABBAECgwQAAAAlbWRhdAoGGAz/2wCAMhMYAAAAUAAAAACpjmy2qrHGtoVA",
+        )
+        .expect("tiny avif")
 }
 
 #[test]

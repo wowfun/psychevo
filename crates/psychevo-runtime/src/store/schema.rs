@@ -17,6 +17,7 @@ impl SqliteStore {
             && user_version != SQLITE_SCHEMA_VERSION
             && user_version != 3
             && user_version != 4
+            && user_version != 5
         {
             return Err(Error::Config(format!(
                 "state database schema version {user_version} is not supported; run `pevo init --reset-state` or set PSYCHEVO_DB to a new state database"
@@ -77,8 +78,28 @@ impl SqliteStore {
                 UNIQUE(session_id, session_seq)
             );
 
+            CREATE TABLE IF NOT EXISTS context_evidence (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                prompt_session_seq INTEGER NOT NULL,
+                context_seq INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                source_kind TEXT NOT NULL,
+                source_name TEXT,
+                source_path TEXT,
+                timestamp_ms INTEGER NOT NULL,
+                content_text TEXT NOT NULL,
+                metadata_json TEXT,
+                UNIQUE(session_id, prompt_session_seq, context_seq),
+                FOREIGN KEY (session_id, prompt_session_seq)
+                    REFERENCES messages(session_id, session_seq)
+                    ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_messages_session_seq
                 ON messages(session_id, session_seq);
+            CREATE INDEX IF NOT EXISTS idx_context_evidence_prompt
+                ON context_evidence(session_id, prompt_session_seq, context_seq);
             "#,
         )?;
         if user_version == 3 && !sqlite_column_exists(&conn, "sessions", "archived_at_ms")? {

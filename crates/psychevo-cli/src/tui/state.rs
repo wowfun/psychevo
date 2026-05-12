@@ -5,7 +5,7 @@ use std::path::Path;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-const TUI_STATE_VERSION: u64 = 3;
+const TUI_STATE_VERSION: u64 = 4;
 const RECENT_MODEL_LIMIT: usize = 8;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -14,6 +14,8 @@ pub(crate) struct TuiState {
     pub(crate) version: u64,
     #[serde(default = "default_thinking_visible")]
     pub(crate) thinking_visible: bool,
+    #[serde(default)]
+    pub(crate) raw_visible: bool,
     #[serde(default)]
     pub(crate) sidebar_visible: bool,
     #[serde(default)]
@@ -37,6 +39,7 @@ impl Default for TuiState {
         Self {
             version: TUI_STATE_VERSION,
             thinking_visible: true,
+            raw_visible: false,
             sidebar_visible: false,
             workdirs: BTreeMap::new(),
             recent_models: Vec::new(),
@@ -107,6 +110,10 @@ impl TuiState {
         self.thinking_visible = visible;
     }
 
+    pub(crate) fn set_raw_visible(&mut self, visible: bool) {
+        self.raw_visible = visible;
+    }
+
     pub(crate) fn set_sidebar_visible(&mut self, visible: bool) {
         self.sidebar_visible = visible;
     }
@@ -144,6 +151,7 @@ mod tests {
         state.set_variant("/repo", "high".to_string());
         state.set_mode("/repo", "plan".to_string());
         state.set_thinking_visible(false);
+        state.set_raw_visible(true);
         state.set_sidebar_visible(true);
         state.save(&path).expect("save");
 
@@ -152,8 +160,9 @@ mod tests {
         assert_eq!(loaded.variant_for("/repo").as_deref(), Some("high"));
         assert_eq!(loaded.mode_for("/repo").as_deref(), Some("plan"));
         assert!(!loaded.thinking_visible);
+        assert!(loaded.raw_visible);
         assert!(loaded.sidebar_visible);
-        assert_eq!(loaded.version, 3);
+        assert_eq!(loaded.version, 4);
     }
 
     #[test]
@@ -181,8 +190,9 @@ mod tests {
         .expect("state");
 
         let loaded = TuiState::load(&path).expect("load");
-        assert_eq!(loaded.version, 3);
+        assert_eq!(loaded.version, 4);
         assert!(loaded.thinking_visible);
+        assert!(!loaded.raw_visible);
         assert!(!loaded.sidebar_visible);
         assert_eq!(loaded.recent_models.len(), 8);
     }

@@ -17,6 +17,7 @@ struct TuiApp {
     no_skills: bool,
     skill_inputs: Vec<String>,
     thinking_visible: bool,
+    raw_visible: bool,
     clipboard: ClipboardSink,
     renderer: TuiRenderer,
     debug: bool,

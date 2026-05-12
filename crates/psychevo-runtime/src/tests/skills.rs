@@ -1,7 +1,7 @@
 use crate::skills::{
     ScanVerdict, SkillDiscoveryOptions, SkillTarget, discover_skills, format_skills_for_prompt,
     list_skills_value, scan_skill_path, select_explicit_skills, select_skills_for_prompt,
-    set_skill_enabled, skill_context_messages, view_skill_value,
+    set_skill_enabled, skill_context_fragments, skill_context_messages, view_skill_value,
 };
 use crate::tools::skill_tools_for_mode;
 
@@ -288,9 +288,15 @@ fn selected_skill_context_contains_body_without_frontmatter() {
     );
     let catalog = discover_skills(&skill_options(&temp, &home, &workdir)).expect("catalog");
     let selected = select_skills_for_prompt(&catalog, "$reviewer do it");
+    let fragments = skill_context_fragments(&selected, &catalog).expect("fragments");
     let contexts = skill_context_messages(&selected, &catalog).expect("contexts");
 
+    assert_eq!(fragments.len(), 1);
     assert_eq!(contexts.len(), 1);
+    assert_eq!(fragments[0].name, "reviewer");
+    assert!(fragments[0].path.ends_with("SKILL.md"));
+    assert!(fragments[0].base_dir.ends_with("reviewer"));
+    assert_eq!(fragments[0].content, contexts[0]);
     assert!(contexts[0].contains("<skill>"));
     assert!(contexts[0].contains("<name>reviewer</name>"));
     assert!(contexts[0].contains("Follow the review workflow."));

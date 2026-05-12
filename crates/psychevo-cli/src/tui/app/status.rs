@@ -1,5 +1,9 @@
 impl TuiApp {
     fn run_options(&self, prompt: String) -> RunOptions {
+        self.run_options_with_images(prompt, Vec::new())
+    }
+
+    fn run_options_with_images(&self, prompt: String, image_inputs: Vec<ImageInput>) -> RunOptions {
         RunOptions {
             db_path: self.db_path.clone(),
             workdir: self.workdir.clone(),
@@ -7,6 +11,9 @@ impl TuiApp {
             session: self.current_session.clone(),
             continue_latest: self.current_session.is_none() && !self.force_new_once,
             prompt,
+            image_inputs,
+            extract_prompt_image_sources: false,
+            prompt_display: None,
             max_context_messages: None,
             config_path: self.config_path.clone(),
             model: self.current_model.clone(),
@@ -56,11 +63,31 @@ impl TuiApp {
         Ok(())
     }
 
+    fn toggle_raw(&mut self) -> Result<()> {
+        self.set_raw_no_print(!self.raw_visible)?;
+        self.show_raw_status();
+        Ok(())
+    }
+
+    fn set_raw(&mut self, enabled: bool) -> Result<()> {
+        self.set_raw_no_print(enabled)?;
+        self.show_raw_status();
+        Ok(())
+    }
+
     fn show_thinking_status(&self) {
         println!(
             "{}",
             self.renderer
                 .status(&format!("thinking: {}", on_off(self.thinking_visible)))
+        );
+    }
+
+    fn show_raw_status(&self) {
+        println!(
+            "{}",
+            self.renderer
+                .status(&format!("raw: {}", on_off(self.raw_visible)))
         );
     }
 

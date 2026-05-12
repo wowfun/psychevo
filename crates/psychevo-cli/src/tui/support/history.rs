@@ -13,12 +13,45 @@ fn default_title(kind: TranscriptKind) -> &'static str {
     }
 }
 
-fn user_text_from_message(message: &Value) -> Option<String> {
+#[derive(Debug, Clone)]
+struct UserPromptDisplay {
+    text: String,
+    attachment_meta: Option<String>,
+}
+
+fn user_display_from_message(
+    message: &Value,
+    metadata: Option<&Value>,
+) -> Option<UserPromptDisplay> {
+    if let Some(display) = tui_display_metadata(metadata) {
+        return Some(UserPromptDisplay {
+            text: display.content_text,
+            attachment_meta: attachment_meta_from_display(&display.attachments),
+        });
+    }
+    let text = legacy_user_text_from_message(message).unwrap_or_default();
+    let attachment_meta = legacy_attachment_meta_from_message(message);
+    (!text.is_empty() || attachment_meta.is_some()).then_some(UserPromptDisplay {
+        text,
+        attachment_meta,
+    })
+}
+
+fn user_text_from_message(message: &Value, metadata: Option<&Value>) -> Option<String> {
+    user_display_from_message(message, metadata).map(|display| display.text)
+}
+
+fn legacy_user_text_from_message(message: &Value) -> Option<String> {
     let text = message
         .get("content")?
         .as_array()?
         .iter()
-        .filter_map(|block| block.get("text").and_then(Value::as_str))
+        .filter_map(|block| {
+            if let Some(text) = block.get("text").and_then(Value::as_str) {
+                return Some(text.to_string());
+            }
+            None
+        })
         .collect::<Vec<_>>()
         .join("\n");
     (!text.is_empty()).then_some(text)
@@ -27,20 +60,65 @@ fn user_text_from_message(message: &Value) -> Option<String> {
 fn visible_tui_message_count(messages: &[TuiMessageSummary]) -> Result<usize> {
     messages.iter().try_fold(0, |count, summary| {
         let message = serde_json::to_value(&summary.message)?;
-        Ok(count + visible_message_count_from_value(&message))
+        Ok(count
+            + match message
+                .get("role")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+            {
+                "user" => usize::from(
+                    user_display_from_message(&message, summary.metadata.as_ref()).is_some(),
+                ),
+                "assistant" => usize::from(assistant_text_from_message(&message).is_some()),
+                _ => 0,
+            })
     })
 }
 
-fn visible_message_count_from_value(message: &Value) -> usize {
-    match message
-        .get("role")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-    {
-        "user" => usize::from(user_text_from_message(message).is_some()),
-        "assistant" => usize::from(assistant_text_from_message(message).is_some()),
-        _ => 0,
+fn tui_display_metadata(metadata: Option<&Value>) -> Option<PromptDisplayMetadata> {
+    metadata
+        .and_then(|metadata| metadata.get(TUI_DISPLAY_METADATA_KEY))
+        .cloned()
+        .and_then(|value| serde_json::from_value(value).ok())
+}
+
+fn attachment_meta_from_display(attachments: &[PromptAttachmentDisplay]) -> Option<String> {
+    if attachments.is_empty() {
+        return None;
     }
+    let mut lines = vec!["attachments".to_string()];
+    for (index, attachment) in attachments.iter().enumerate() {
+        lines.push(format!("{} {}: {}", attachment.kind, index + 1, attachment.source));
+    }
+    Some(lines.join("\n"))
+}
+
+fn legacy_attachment_meta_from_message(message: &Value) -> Option<String> {
+    let content = message.get("content")?.as_array()?;
+    let mut sources = Vec::new();
+    for block in content {
+        match block.get("type").and_then(Value::as_str) {
+            Some("local_image") => {
+                if let Some(path) = block.get("path").and_then(Value::as_str) {
+                    sources.push(path.to_string());
+                }
+            }
+            Some("image_url") => {
+                if let Some(url) = block.get("url").and_then(Value::as_str) {
+                    sources.push(url.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    if sources.is_empty() {
+        return None;
+    }
+    let mut lines = vec!["attachments".to_string()];
+    for (index, source) in sources.iter().enumerate() {
+        lines.push(format!("image {}: {source}", index + 1));
+    }
+    Some(lines.join("\n"))
 }
 
 #[cfg(test)]
@@ -189,7 +267,7 @@ fn history_meta_text(
     message: &Value,
     _usage: Option<&Value>,
     metadata: Option<&Value>,
-    accounting: Option<&Value>,
+    _accounting: Option<&Value>,
     prompt_started_ms: Option<i64>,
 ) -> Option<String> {
     let provider = message
@@ -203,9 +281,6 @@ fn history_meta_text(
     }
     if let Some(elapsed) = history_elapsed_duration(message, metadata, prompt_started_ms) {
         parts.push(format_duration_compact(elapsed));
-    }
-    if let Some(cost) = compact_cost(accounting) {
-        parts.push(cost);
     }
     (!parts.is_empty()).then(|| parts.join("  "))
 }
@@ -312,7 +387,7 @@ fn transcript_line_count(
         .filter(|(_, row)| row_visible(row, thinking_visible))
         .map(|(index, row)| {
             let compact_trailing = compact_trailing_for(rows, index, row, thinking_visible);
-            let lines = transcript_lines(row, false, compact_trailing, width, workdir);
+            let lines = transcript_lines(row, false, compact_trailing, width, workdir, false);
             wrapped_line_count(&lines, width)
         })
         .sum()

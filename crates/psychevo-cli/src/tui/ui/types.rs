@@ -45,6 +45,7 @@ struct TranscriptRow {
     expanded: bool,
     details_collapsed: bool,
     failed: bool,
+    interrupted: bool,
     tool_call_id: Option<String>,
     tool_started: Option<Instant>,
     tool_elapsed: Option<Duration>,
@@ -54,6 +55,7 @@ struct TranscriptRow {
 struct TranscriptLayoutCache {
     width: u16,
     thinking_visible: bool,
+    raw_visible: bool,
     blocks: Vec<TranscriptLayoutBlock>,
     total_height: usize,
     #[cfg(test)]
@@ -90,6 +92,7 @@ struct TranscriptLayoutRowKey {
     selected: bool,
     kind: TranscriptKind,
     failed: bool,
+    interrupted: bool,
     expanded: bool,
     details_collapsed: bool,
     expandable: bool,
@@ -115,6 +118,7 @@ impl TranscriptRow {
             expanded: false,
             details_collapsed: false,
             failed: false,
+            interrupted: false,
             tool_call_id: None,
             tool_started: None,
             tool_elapsed: None,
@@ -170,6 +174,12 @@ enum FocusMode {
     Transcript,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MouseWheelTarget {
+    Transcript,
+    BottomPanel,
+}
+
 struct FullscreenUi<'a> {
     textarea: TextArea<'a>,
     workdir: PathBuf,
@@ -191,10 +201,12 @@ struct FullscreenUi<'a> {
     turn_metadata: Option<Value>,
     turn_accounting: Option<Value>,
     turn_failures: usize,
+    turn_interrupted: bool,
     turn_outcome: Option<Outcome>,
     turn_had_reasoning: bool,
     history_prompt_started_ms: Option<i64>,
     thinking_visible: bool,
+    raw_visible: bool,
     running: Option<RunningTurn>,
     auxiliary_agent_tasks: Vec<JoinHandle<psychevo_runtime::Result<psychevo_runtime::RunResult>>>,
     running_started: Option<Instant>,
@@ -210,6 +222,10 @@ struct FullscreenUi<'a> {
     focus: FocusMode,
     selected_row: Option<usize>,
     selected_target: Option<TranscriptHitTarget>,
+    last_transcript_area: Option<Rect>,
+    last_composer_area: Option<Rect>,
+    last_status_area: Option<Rect>,
+    last_bottom_panel_area: Option<Rect>,
     last_entry_areas: Vec<(TranscriptHitTarget, Rect)>,
     mouse_down_target: Option<TranscriptHitTarget>,
     mouse_dragged: bool,
@@ -226,6 +242,7 @@ struct FullscreenUi<'a> {
     history_index: Option<usize>,
     history_draft: Option<String>,
     queued_inputs: VecDeque<QueuedInput>,
+    pending_images: Vec<PendingImageAttachment>,
     history_search: bool,
     history_query: String,
     slash_menu_selected: usize,
@@ -237,10 +254,17 @@ struct FullscreenUi<'a> {
     last_skill_popup_areas: Vec<(usize, Rect)>,
     last_bottom_panel_areas: Vec<(usize, Rect)>,
     bottom_panel: Option<BottomPanel>,
+    ephemeral_status: Option<UiEphemeralStatus>,
     screen_lines: Vec<ScreenLine>,
     selection: SelectionState,
     terminal_clear_requested: bool,
     quit_requested: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct UiEphemeralStatus {
+    text: String,
+    failed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

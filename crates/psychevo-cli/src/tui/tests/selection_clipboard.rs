@@ -1,9 +1,48 @@
 #[test]
 fn tui_mouse_capture_avoids_any_motion_tracking() {
-    assert!(TUI_MOUSE_CAPTURE_ANSI.contains("?1000h"));
-    assert!(TUI_MOUSE_CAPTURE_ANSI.contains("?1002h"));
-    assert!(TUI_MOUSE_CAPTURE_ANSI.contains("?1006h"));
-    assert!(!TUI_MOUSE_CAPTURE_ANSI.contains("?1003h"));
+    assert!(TUI_MOUSE_CAPTURE_ENABLE_ANSI.contains("?1000h"));
+    assert!(TUI_MOUSE_CAPTURE_ENABLE_ANSI.contains("?1002h"));
+    assert!(TUI_MOUSE_CAPTURE_ENABLE_ANSI.contains("?1006h"));
+    assert!(TUI_MOUSE_CAPTURE_ENABLE_ANSI.contains("?1007h"));
+    assert!(!TUI_MOUSE_CAPTURE_ENABLE_ANSI.contains("?1007l"));
+    assert!(!TUI_MOUSE_CAPTURE_ENABLE_ANSI.contains("?1003h"));
+}
+
+#[test]
+fn tui_mouse_capture_disable_restores_alternate_scroll() {
+    assert!(TUI_MOUSE_CAPTURE_DISABLE_ANSI.contains("?1007l"));
+    assert!(TUI_MOUSE_CAPTURE_DISABLE_ANSI.contains("?1006l"));
+    assert!(TUI_MOUSE_CAPTURE_DISABLE_ANSI.contains("?1002l"));
+    assert!(TUI_MOUSE_CAPTURE_DISABLE_ANSI.contains("?1000l"));
+    assert!(!TUI_MOUSE_CAPTURE_DISABLE_ANSI.contains("?1003l"));
+}
+
+#[test]
+fn fullscreen_enter_commands_enable_clean_alternate_screen() {
+    let mut output = Vec::new();
+    write_fullscreen_enter_commands(&mut output).expect("enter commands");
+    let output = String::from_utf8(output).expect("utf8");
+    assert!(output.contains("?1049h"));
+    assert!(output.contains("?1000h"));
+    assert!(output.contains("?1002h"));
+    assert!(output.contains("?1006h"));
+    assert!(output.contains("?1007h"));
+    assert!(!output.contains("?1007l"));
+    assert!(output.contains("\x1b[2J"));
+    assert!(output.contains("\x1b[1;1H"));
+}
+
+#[test]
+fn fullscreen_exit_commands_restore_terminal_modes() {
+    let mut output = Vec::new();
+    write_fullscreen_exit_commands(&mut output).expect("exit commands");
+    let output = String::from_utf8(output).expect("utf8");
+    assert!(output.contains("?1007l"));
+    assert!(output.contains("?1006l"));
+    assert!(output.contains("?1002l"));
+    assert!(output.contains("?1000l"));
+    assert!(output.contains("?1049l"));
+    assert!(output.contains("?25h"));
 }
 
 #[test]

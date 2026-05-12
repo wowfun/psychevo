@@ -86,6 +86,13 @@ impl TuiApp {
         Ok(())
     }
 
+    fn set_raw_no_print(&mut self, enabled: bool) -> Result<()> {
+        self.raw_visible = enabled;
+        self.state.set_raw_visible(enabled);
+        self.state.save(&self.state_path)?;
+        Ok(())
+    }
+
     fn rename_session_no_print(&mut self, title: String) -> Result<String> {
         let Some(session_id) = self.current_session.as_deref() else {
             return Err(anyhow!("no current session to rename"));
@@ -200,7 +207,7 @@ impl TuiApp {
         for summary in store.load_tui_message_summaries(session_id)? {
             let value = serde_json::to_value(summary.message)?;
             if value.get("role").and_then(Value::as_str) == Some("user")
-                && let Some(text) = user_text_from_message(&value)
+                && let Some(text) = user_text_from_message(&value, summary.metadata.as_ref())
             {
                 history_prompts.push(text);
             }

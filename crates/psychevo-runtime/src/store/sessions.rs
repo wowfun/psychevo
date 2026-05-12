@@ -147,7 +147,7 @@ impl SqliteStore {
         let now = now_ms();
         let changed = self.write_retry(|conn| {
             conn.execute(
-                "UPDATE sessions SET archived_at_ms = ?1, updated_at_ms = ?1 WHERE id = ?2",
+                "UPDATE sessions SET archived_at_ms = ?1 WHERE id = ?2",
                 params![now, session_id],
             )
         })?;
@@ -158,11 +158,10 @@ impl SqliteStore {
     }
 
     pub fn restore_session(&self, session_id: &str) -> Result<()> {
-        let now = now_ms();
         let changed = self.write_retry(|conn| {
             conn.execute(
-                "UPDATE sessions SET archived_at_ms = NULL, updated_at_ms = ?1 WHERE id = ?2",
-                params![now, session_id],
+                "UPDATE sessions SET archived_at_ms = NULL WHERE id = ?1",
+                params![session_id],
             )
         })?;
         if changed == 0 {

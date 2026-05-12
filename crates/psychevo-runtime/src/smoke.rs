@@ -63,6 +63,7 @@ pub async fn run_smoke(options: SmokeOptions) -> Result<SmokeResult> {
         session_id: session_id.clone(),
         prompt_snapshot: None,
         prompt_snapshot_written: Arc::new(Mutex::new(false)),
+        prompt_context_evidence: Arc::new(Vec::new()),
         started: Instant::now(),
         tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
         control: options.control,
@@ -72,6 +73,7 @@ pub async fn run_smoke(options: SmokeOptions) -> Result<SmokeResult> {
         include_reasoning: false,
         reasoning_effort: None,
         model_metadata: ModelMetadata::default(),
+        prompt_display: None,
         context_recorder: None,
     });
     let request = AgentLoopRequest {
@@ -86,7 +88,6 @@ pub async fn run_smoke(options: SmokeOptions) -> Result<SmokeResult> {
         max_turns: 8,
     };
     let completion = run_agent_loop(provider, request, sink, control_receivers).await?;
-    store.touch_session(&session_id)?;
     write_smoke_manifest(&workdir)?;
 
     let final_answer = completion

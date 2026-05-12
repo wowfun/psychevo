@@ -11,14 +11,18 @@ use crate::context_usage::ContextRecorder;
 use crate::messages::{
     add_assistant_metadata, add_elapsed_ms_metadata, sanitize_message_for_output,
 };
-use crate::store::SqliteStore;
-use crate::types::{MessageAccounting, ModelMetadata, RunStreamEvent, RunStreamSink, SmokeControl};
+use crate::store::{ContextEvidenceInput, SqliteStore};
+use crate::types::{
+    MessageAccounting, ModelMetadata, PromptDisplayMetadata, RunStreamEvent, RunStreamSink,
+    SmokeControl, TUI_DISPLAY_METADATA_KEY,
+};
 
 pub(crate) struct PersistenceSink {
     pub(crate) store: SqliteStore,
     pub(crate) session_id: String,
     pub(crate) prompt_snapshot: Option<String>,
     pub(crate) prompt_snapshot_written: Arc<Mutex<bool>>,
+    pub(crate) prompt_context_evidence: Arc<Vec<ContextEvidenceInput>>,
     pub(crate) started: Instant,
     pub(crate) tool_elapsed_ms: Arc<Mutex<BTreeMap<String, u64>>>,
     pub(crate) control: SmokeControl,
@@ -29,6 +33,7 @@ pub(crate) struct PersistenceSink {
     pub(crate) reasoning_effort: Option<String>,
     pub(crate) model_metadata: ModelMetadata,
     pub(crate) context_recorder: Option<ContextRecorder>,
+    pub(crate) prompt_display: Option<PromptDisplayMetadata>,
 }
 
 impl EventSink for PersistenceSink {
@@ -37,6 +42,7 @@ impl EventSink for PersistenceSink {
         let session_id = self.session_id.clone();
         let prompt_snapshot = self.prompt_snapshot.clone();
         let prompt_snapshot_written = Arc::clone(&self.prompt_snapshot_written);
+        let prompt_context_evidence = Arc::clone(&self.prompt_context_evidence);
         let control = self.control;
         let control_handle = self.control_handle.clone();
         let events = self.events.clone();
@@ -45,6 +51,7 @@ impl EventSink for PersistenceSink {
         let reasoning_effort = self.reasoning_effort.clone();
         let model_metadata = self.model_metadata.clone();
         let context_recorder = self.context_recorder.clone();
+        let prompt_display = self.prompt_display.clone();
         let started = self.started;
         let tool_elapsed_ms = Arc::clone(&self.tool_elapsed_ms);
         Box::pin(async move {
@@ -124,12 +131,17 @@ impl EventSink for PersistenceSink {
                         false
                     };
                     if should_attach_snapshot {
+                        let (metadata, content_text_override) =
+                            prompt_user_metadata(prompt_snapshot.clone(), prompt_display.as_ref());
                         store
-                            .append_message_with_undo_snapshot(
+                            .append_message_with_undo_snapshot_metadata_and_context_evidence(
                                 &session_id,
                                 &message,
-                                prompt_snapshot.clone(),
+                                metadata,
+                                content_text_override,
+                                prompt_context_evidence.as_slice(),
                             )
+                            .map(|_| ())
                             .map_err(|err| {
                                 psychevo_agent_core::Error::EventSink(err.to_string())
                             })?;
@@ -207,6 +219,31 @@ fn annotate_sink_event(
         }
         other => other,
     }
+}
+
+fn prompt_user_metadata(
+    snapshot: Option<String>,
+    prompt_display: Option<&PromptDisplayMetadata>,
+) -> (Option<Value>, Option<String>) {
+    let mut metadata = serde_json::Map::new();
+    if let Some(snapshot) = snapshot {
+        metadata.insert(
+            "undo".to_string(),
+            json!({
+                "pre_snapshot": snapshot
+            }),
+        );
+    }
+    let content_text_override = prompt_display.map(|display| display.content_text.clone());
+    if let Some(display) = prompt_display
+        && let Ok(value) = serde_json::to_value(display)
+    {
+        metadata.insert(TUI_DISPLAY_METADATA_KEY.to_string(), value);
+    }
+    (
+        (!metadata.is_empty()).then_some(Value::Object(metadata)),
+        content_text_override,
+    )
 }
 
 pub(crate) fn project_agent_event(event: &AgentEvent, include_reasoning: bool) -> Option<Value> {

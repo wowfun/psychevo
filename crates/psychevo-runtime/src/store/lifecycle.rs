@@ -1,15 +1,4 @@
 impl SqliteStore {
-    pub fn touch_session(&self, session_id: &str) -> Result<()> {
-        let now = now_ms();
-        self.write_retry(|conn| {
-            conn.execute(
-                "UPDATE sessions SET updated_at_ms = ?1 WHERE id = ?2",
-                params![now, session_id],
-            )?;
-            Ok(())
-        })
-    }
-
     pub fn finish_session(&self, session_id: &str, outcome: Outcome) -> Result<()> {
         let now = now_ms();
         self.write_retry(|conn| {

@@ -227,6 +227,7 @@ impl TuiApp {
         let area = frame.area();
         ui.clear_screen_lines();
         ui.set_thinking_visible(self.thinking_visible);
+        ui.set_raw_visible(self.raw_visible);
         let sidebar_visible = ui.sidebar_forced && area.width >= 100 && !ui.sidebar_hidden;
         ui.last_sidebar_visible = sidebar_visible;
         let horizontal = if sidebar_visible {
@@ -254,6 +255,7 @@ impl TuiApp {
                     Constraint::Length(1),
                 ])
                 .split(main);
+            ui.set_render_areas(vertical[0], None, vertical[2], Some(vertical[1]));
             render_transcript(frame, vertical[0], ui);
             if let Some(panel) = &mut ui.bottom_panel {
                 render_bottom_panel(frame, vertical[1], panel, &mut ui.last_bottom_panel_areas);
@@ -313,20 +315,24 @@ impl TuiApp {
                 .split(main)
         };
         if popup_height == 0 {
+            ui.set_render_areas(vertical[0], Some(vertical[1]), vertical[2], None);
             render_transcript(frame, vertical[0], ui);
             render_composer(frame, vertical[1], ui);
             render_status(frame, vertical[2], self, ui);
         } else if file_popup_height > 0 {
+            ui.set_render_areas(vertical[0], Some(vertical[2]), vertical[3], None);
             render_transcript(frame, vertical[0], ui);
             render_file_popup(frame, vertical[1], ui);
             render_composer(frame, vertical[2], ui);
             render_status(frame, vertical[3], self, ui);
         } else if skill_popup_height > 0 {
+            ui.set_render_areas(vertical[0], Some(vertical[2]), vertical[3], None);
             render_transcript(frame, vertical[0], ui);
             render_skill_popup(frame, vertical[1], ui);
             render_composer(frame, vertical[2], ui);
             render_status(frame, vertical[3], self, ui);
         } else {
+            ui.set_render_areas(vertical[0], Some(vertical[2]), vertical[3], None);
             render_transcript(frame, vertical[0], ui);
             render_slash_menu(
                 frame,

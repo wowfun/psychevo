@@ -86,6 +86,168 @@ async fn user_shell_abort_returns_aborted_result() {
     assert_eq!(result.result["error"], "aborted");
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn bash_abort_kills_background_child_process_group() {
+    let temp = tempdir().expect("temp");
+    let workdir = temp.path().join("work");
+    fs::create_dir_all(&workdir).expect("workdir");
+    let marker = workdir.join("bg.pid");
+    let command = format!("sleep 60 & echo $! > {}; wait", shell_quote_path(&marker));
+    let (handle, receivers) = psychevo_agent_core::ControlHandle::new();
+    let task = tokio::spawn(crate::tools::run_bash_command(
+        workdir,
+        command,
+        60,
+        receivers.abort_signal(),
+    ));
+
+    let pid = wait_for_pid_file(&marker).await;
+    assert!(process_exists(pid), "background child did not start");
+    handle.abort();
+
+    let (result, is_error) = tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .expect("abort should settle")
+        .expect("bash task should join")
+        .expect("bash result");
+    assert!(is_error);
+    assert_eq!(result["error"], "aborted");
+    assert!(
+        wait_for_process_exit(pid, Duration::from_secs(5)).await,
+        "background child pid {pid} survived abort"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn bash_timeout_kills_background_child_process_group() {
+    let temp = tempdir().expect("temp");
+    let workdir = temp.path().join("work");
+    fs::create_dir_all(&workdir).expect("workdir");
+    let marker = workdir.join("bg.pid");
+    let command = format!("sleep 60 & echo $! > {}; wait", shell_quote_path(&marker));
+    let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+
+    let (result, is_error) =
+        crate::tools::run_bash_command(workdir, command, 1, receivers.abort_signal())
+            .await
+            .expect("bash result");
+
+    assert!(is_error);
+    assert_eq!(result["error"], "command timed out after 1 seconds");
+    let pid = read_pid_file(&marker);
+    assert!(
+        wait_for_process_exit(pid, Duration::from_secs(5)).await,
+        "background child pid {pid} survived timeout"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn bash_output_collection_does_not_wait_for_open_descendant_pipes() {
+    let temp = tempdir().expect("temp");
+    let workdir = temp.path().join("work");
+    fs::create_dir_all(&workdir).expect("workdir");
+    let marker = workdir.join("detached.pid");
+    let command = format!(
+        "sh -c 'trap \"\" HUP; sleep 30' & echo $! > {}; echo done",
+        shell_quote_path(&marker)
+    );
+    let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+    let started = Instant::now();
+
+    let (result, is_error) = tokio::time::timeout(
+        Duration::from_secs(5),
+        crate::tools::run_bash_command(workdir, command, 60, receivers.abort_signal()),
+    )
+    .await
+    .expect("open descendant pipes should not hang")
+    .expect("bash result");
+
+    let pid = read_pid_file(&marker);
+    let _ = unsafe { libc::kill(pid, libc::SIGKILL) };
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "output drain should have a bounded deadline"
+    );
+    assert!(!is_error);
+    assert!(result["error"].is_null());
+    assert_eq!(result["output"], "done\n");
+}
+
+#[tokio::test]
+async fn bash_stdin_is_closed_for_prompt_style_commands() {
+    let temp = tempdir().expect("temp");
+    let workdir = temp.path().join("work");
+    fs::create_dir_all(&workdir).expect("workdir");
+    let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+
+    let (result, is_error) = crate::tools::run_bash_command(
+        workdir,
+        "if read line; then printf 'read:%s\\n' \"$line\"; else printf 'stdin closed\\n'; fi"
+            .to_string(),
+        5,
+        receivers.abort_signal(),
+    )
+    .await
+    .expect("bash result");
+
+    assert!(!is_error);
+    assert!(result["error"].is_null());
+    assert_eq!(result["output"], "stdin closed\n");
+}
+
+#[cfg(unix)]
+fn shell_quote_path(path: &std::path::Path) -> String {
+    format!("'{}'", path.to_string_lossy().replace('\'', "'\"'\"'"))
+}
+
+#[cfg(unix)]
+async fn wait_for_pid_file(path: &std::path::Path) -> i32 {
+    let started = Instant::now();
+    loop {
+        if path.exists() {
+            return read_pid_file(path);
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "timed out waiting for pid file {}",
+            path.display()
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+#[cfg(unix)]
+fn read_pid_file(path: &std::path::Path) -> i32 {
+    fs::read_to_string(path)
+        .expect("pid file")
+        .trim()
+        .parse()
+        .expect("pid")
+}
+
+#[cfg(unix)]
+fn process_exists(pid: i32) -> bool {
+    if unsafe { libc::kill(pid, 0) } == 0 {
+        return true;
+    }
+    std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+}
+
+#[cfg(unix)]
+async fn wait_for_process_exit(pid: i32, timeout: Duration) -> bool {
+    let started = Instant::now();
+    while started.elapsed() < timeout {
+        if !process_exists(pid) {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    false
+}
+
 #[test]
 fn plan_list_and_search_tools_are_read_only_and_bounded() {
     let temp = tempdir().expect("temp");

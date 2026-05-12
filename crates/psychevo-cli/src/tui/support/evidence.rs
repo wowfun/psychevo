@@ -12,7 +12,7 @@ fn is_write_like_tool(tool: &str) -> bool {
 }
 
 fn active_tool_row(row: &TranscriptRow) -> bool {
-    !row.failed && row.tool_started.is_some() && row.tool_elapsed.is_none()
+    !row.failed && !row.interrupted && row.tool_started.is_some() && row.tool_elapsed.is_none()
 }
 
 fn completed_live_tool_elapsed(row: &TranscriptRow, metadata: Option<&Value>) -> Option<Duration> {
@@ -151,6 +151,9 @@ fn path_from_args(args: &Value) -> Option<&str> {
 }
 
 fn tool_output_text(value: &Value) -> (String, Option<String>) {
+    if let Some(timeout) = bash_timeout_output_text(value) {
+        return collapse_ledger_body(&timeout);
+    }
     let result = value.get("result").unwrap_or(&Value::Null);
     let full = result
         .get("content")
@@ -161,6 +164,38 @@ fn tool_output_text(value: &Value) -> (String, Option<String>) {
         .map(str::to_string)
         .unwrap_or_else(|| format_tool_summary(value));
     collapse_ledger_body(&full)
+}
+
+fn bash_timeout_output_text(value: &Value) -> Option<String> {
+    if value.get("tool_name").and_then(Value::as_str) != Some("bash") {
+        return None;
+    }
+    let result = value.get("result").unwrap_or(&Value::Null);
+    let error = result.get("error").and_then(Value::as_str)?;
+    if !error.starts_with("command timed out after ") {
+        return None;
+    }
+    let prompt = format!("timeout: {error}");
+    let output = result
+        .get("output")
+        .and_then(Value::as_str)
+        .filter(|output| {
+            let trimmed = output.trim();
+            !trimmed.is_empty() && trimmed != "(no output)"
+        });
+    Some(match output {
+        Some(output) => format!("{prompt}; partial output follows\n{output}"),
+        None => prompt,
+    })
+}
+
+fn tool_event_interrupted(value: &Value) -> bool {
+    value.get("outcome").and_then(Value::as_str) == Some("aborted")
+        || value
+            .get("result")
+            .and_then(|result| result.get("error"))
+            .and_then(Value::as_str)
+            == Some("aborted")
 }
 
 fn model_label(provider: &str, model: &str) -> String {
@@ -190,6 +225,7 @@ struct TurnMetaProjection<'a> {
     metadata: Option<&'a Value>,
     accounting: Option<&'a Value>,
     failures: usize,
+    interrupted: bool,
     debug: bool,
 }
 
@@ -211,8 +247,8 @@ fn turn_meta_text(meta: TurnMetaProjection<'_>) -> String {
         };
         parts.push(format!("{} {suffix}", meta.failures));
     }
-    if let Some(cost) = compact_cost(meta.accounting) {
-        parts.push(cost);
+    if meta.interrupted {
+        parts.push("interrupted".to_string());
     }
     if meta.debug {
         if let Some(usage) = meta.usage {
@@ -266,13 +302,6 @@ fn turn_meta_text(meta: TurnMetaProjection<'_>) -> String {
 
 fn usage_context_tokens(usage: &Value) -> Option<u64> {
     usage.get("input_tokens").and_then(Value::as_u64)
-}
-
-fn compact_cost(accounting: Option<&Value>) -> Option<String> {
-    let value = accounting?
-        .get("estimated_cost_nanodollars")
-        .and_then(Value::as_i64)?;
-    Some(format!("cost {}", format_nanodollars(value)))
 }
 
 fn format_nanodollars(value: i64) -> String {

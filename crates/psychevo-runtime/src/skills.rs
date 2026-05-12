@@ -90,6 +90,14 @@ pub struct SelectedSkill {
     pub path: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillContextFragment {
+    pub name: String,
+    pub path: PathBuf,
+    pub base_dir: PathBuf,
+    pub content: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct SkillDiscoveryOptions {
     pub home: PathBuf,
@@ -467,7 +475,17 @@ pub fn skill_context_messages(
     skills: &[SelectedSkill],
     catalog: &SkillCatalog,
 ) -> Result<Vec<String>> {
-    let mut messages = Vec::new();
+    Ok(skill_context_fragments(skills, catalog)?
+        .into_iter()
+        .map(|fragment| fragment.content)
+        .collect())
+}
+
+pub fn skill_context_fragments(
+    skills: &[SelectedSkill],
+    catalog: &SkillCatalog,
+) -> Result<Vec<SkillContextFragment>> {
+    let mut fragments = Vec::new();
     for selected in skills {
         let Some(skill) = catalog
             .skills
@@ -478,15 +496,21 @@ pub fn skill_context_messages(
         };
         let raw = fs::read_to_string(&skill.file_path)?;
         let body = strip_frontmatter(&raw).trim();
-        messages.push(format!(
+        let content = format!(
             "<skill>\n<name>{}</name>\n<path>{}</path>\n<skill_dir>{}</skill_dir>\n{}\n</skill>",
             escape_xml(&skill.name),
             escape_xml(&skill.file_path.display().to_string()),
             escape_xml(&skill.base_dir.display().to_string()),
             body
-        ));
+        );
+        fragments.push(SkillContextFragment {
+            name: skill.name.clone(),
+            path: skill.file_path.clone(),
+            base_dir: skill.base_dir.clone(),
+            content,
+        });
     }
-    Ok(messages)
+    Ok(fragments)
 }
 
 pub fn create_skill(

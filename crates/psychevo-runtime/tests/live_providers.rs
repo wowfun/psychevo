@@ -36,6 +36,9 @@ async fn run_live_read_tool(provider: &str) {
         continue_latest: false,
         prompt: "Use the read tool to read fixture.txt, then answer with one short sentence."
             .to_string(),
+        image_inputs: Vec::new(),
+        extract_prompt_image_sources: true,
+        prompt_display: None,
         max_context_messages: None,
         config_path: None,
         model: None,

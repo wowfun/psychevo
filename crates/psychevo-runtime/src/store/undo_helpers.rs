@@ -29,13 +29,7 @@ fn user_prompt_from_message_json(value: &str) -> Option<String> {
     let Message::User { content, .. } = message else {
         return None;
     };
-    Some(
-        content
-            .iter()
-            .map(|block| block.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n"),
-    )
+    Some(user_content_text(&content))
 }
 
 fn session_tool_call_count(conn: &Connection, session_id: &str) -> rusqlite::Result<i64> {

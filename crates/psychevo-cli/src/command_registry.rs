@@ -50,6 +50,9 @@ pub(crate) enum SlashCommandAction {
     VariantSet,
     ModeSet,
     Thinking,
+    Raw,
+    Copy,
+    Image,
     Rename,
     Undo,
     Redo,
@@ -219,6 +222,45 @@ pub(crate) const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         output_kind: CommandOutputKind::ImmediateStateChange,
         status: CommandStatus::Active,
         action: SlashCommandAction::Thinking,
+        common: false,
+    },
+    SlashCommandSpec {
+        canonical: "/show-raw",
+        aliases: &[],
+        usage: "/show-raw [on|off]",
+        summary: "toggle raw Markdown display",
+        surface: TUI_SLASH,
+        group: COMMANDS,
+        argument_kind: CommandArgumentKind::OptionalValue,
+        output_kind: CommandOutputKind::ImmediateStateChange,
+        status: CommandStatus::Active,
+        action: SlashCommandAction::Raw,
+        common: false,
+    },
+    SlashCommandSpec {
+        canonical: "/copy",
+        aliases: &[],
+        usage: "/copy",
+        summary: "copy latest answer as Markdown",
+        surface: TUI_SLASH,
+        group: COMMANDS,
+        argument_kind: CommandArgumentKind::None,
+        output_kind: CommandOutputKind::BoundedFeedback,
+        status: CommandStatus::Active,
+        action: SlashCommandAction::Copy,
+        common: true,
+    },
+    SlashCommandSpec {
+        canonical: "/image",
+        aliases: &[],
+        usage: "/image <source> [prompt]",
+        summary: "attach image",
+        surface: TUI_SLASH,
+        group: COMMANDS,
+        argument_kind: CommandArgumentKind::FreeFormTrailingText,
+        output_kind: CommandOutputKind::BoundedFeedback,
+        status: CommandStatus::Active,
+        action: SlashCommandAction::Image,
         common: false,
     },
     SlashCommandSpec {
@@ -432,6 +474,7 @@ mod tests {
                 .iter()
                 .any(|spec| spec.canonical == "/thinking")
         );
+        assert!(!SLASH_COMMANDS.iter().any(|spec| spec.canonical == "/raw"));
     }
 
     #[test]

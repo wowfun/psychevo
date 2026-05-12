@@ -246,6 +246,13 @@ fn render_status(frame: &mut Frame<'_>, area: Rect, app: &TuiApp, ui: &Fullscree
         spans.push(Span::raw("  "));
         spans.push(Span::styled("shell", theme.accent_style()));
     }
+    if !ui.pending_images.is_empty() {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            format!("images {}", ui.pending_images.len()),
+            theme.accent_style(),
+        ));
+    }
     if ui.running.is_some() || ui.running_started.is_some() {
         let elapsed = ui.running_elapsed().unwrap_or_default();
         spans.push(Span::raw("  "));
@@ -274,8 +281,37 @@ fn render_status(frame: &mut Frame<'_>, area: Rect, app: &TuiApp, ui: &Fullscree
         spans.push(Span::raw("  "));
         spans.push(Span::styled(context, theme.dim_style()));
     }
+    if let Some(status) = &ui.ephemeral_status {
+        append_ephemeral_status(&mut spans, status, area.width);
+    }
     let line = Line::from(spans);
     frame.render_widget(Paragraph::new(line), area);
+}
+
+fn append_ephemeral_status(
+    spans: &mut Vec<Span<'static>>,
+    status: &UiEphemeralStatus,
+    width: u16,
+) {
+    let used = spans_width(spans);
+    let separator = "  ";
+    let available = usize::from(width)
+        .saturating_sub(used)
+        .saturating_sub(UnicodeWidthStr::width(separator));
+    if available == 0 {
+        return;
+    }
+    let text = truncate_display_width(&status.text, available);
+    if text.is_empty() {
+        return;
+    }
+    let style = if status.failed {
+        tui_theme().error_style()
+    } else {
+        tui_theme().success_style()
+    };
+    spans.push(Span::raw(separator.to_string()));
+    spans.push(Span::styled(text, style));
 }
 
 fn spans_width(spans: &[Span<'_>]) -> usize {

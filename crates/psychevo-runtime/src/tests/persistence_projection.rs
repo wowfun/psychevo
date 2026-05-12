@@ -23,6 +23,7 @@ async fn persistence_sink_streams_elapsed_metadata_for_assistant_message_end() {
         session_id: session_id.clone(),
         prompt_snapshot: None,
         prompt_snapshot_written: Arc::new(Mutex::new(false)),
+        prompt_context_evidence: Arc::new(Vec::new()),
         started,
         tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
         control: SmokeControl::None,
@@ -32,6 +33,7 @@ async fn persistence_sink_streams_elapsed_metadata_for_assistant_message_end() {
         include_reasoning: false,
         reasoning_effort: None,
         model_metadata: Default::default(),
+        prompt_display: None,
         context_recorder: None,
     };
 
@@ -100,6 +102,7 @@ async fn persistence_sink_persists_assistant_reasoning_effort_metadata() {
         session_id: session_id.clone(),
         prompt_snapshot: None,
         prompt_snapshot_written: Arc::new(Mutex::new(false)),
+        prompt_context_evidence: Arc::new(Vec::new()),
         started: Instant::now(),
         tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
         control: SmokeControl::None,
@@ -109,6 +112,7 @@ async fn persistence_sink_persists_assistant_reasoning_effort_metadata() {
         include_reasoning: false,
         reasoning_effort: Some("high".to_string()),
         model_metadata: Default::default(),
+        prompt_display: None,
         context_recorder: None,
     };
 
@@ -167,6 +171,7 @@ async fn persistence_sink_persists_tool_elapsed_metadata() {
         session_id: session_id.clone(),
         prompt_snapshot: None,
         prompt_snapshot_written: Arc::new(Mutex::new(false)),
+        prompt_context_evidence: Arc::new(Vec::new()),
         started: Instant::now(),
         tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
         control: SmokeControl::None,
@@ -176,6 +181,7 @@ async fn persistence_sink_persists_tool_elapsed_metadata() {
         include_reasoning: false,
         reasoning_effort: None,
         model_metadata: Default::default(),
+        prompt_display: None,
         context_recorder: None,
     };
 
@@ -235,6 +241,71 @@ async fn persistence_sink_persists_tool_elapsed_metadata() {
             .as_u64()
             .expect("stored elapsed"),
         321
+    );
+}
+
+#[tokio::test]
+async fn persistence_sink_persists_prompt_context_evidence_once() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let store = SqliteStore::open(&db).expect("store");
+    let session_id = store
+        .create_session_with_metadata(&workdir, "tui", "model", "provider", None)
+        .expect("session");
+    let sink = PersistenceSink {
+        store: store.clone(),
+        session_id: session_id.clone(),
+        prompt_snapshot: Some("snapshot".to_string()),
+        prompt_snapshot_written: Arc::new(Mutex::new(false)),
+        prompt_context_evidence: Arc::new(vec![ContextEvidenceInput {
+            role: "system".to_string(),
+            source_kind: "system_instruction".to_string(),
+            source_name: Some("mode".to_string()),
+            source_path: None,
+            content_text: "mode instruction".to_string(),
+            metadata: Some(json!({ "instruction_index": 0 })),
+        }]),
+        started: Instant::now(),
+        tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
+        control: SmokeControl::None,
+        control_handle: None,
+        events: None,
+        stream_events: None,
+        include_reasoning: false,
+        reasoning_effort: None,
+        model_metadata: Default::default(),
+        prompt_display: None,
+        context_recorder: None,
+    };
+
+    sink.emit(AgentEvent::MessageEnd {
+        message: user_message("first", 1),
+        usage: None,
+        metadata: None,
+    })
+    .await
+    .expect("first prompt");
+    sink.emit(AgentEvent::MessageEnd {
+        message: user_message("second", 2),
+        usage: None,
+        metadata: None,
+    })
+    .await
+    .expect("second prompt");
+
+    assert_eq!(store.load_messages(&session_id).expect("messages").len(), 2);
+    let first = store
+        .load_context_evidence(&session_id, 1)
+        .expect("first evidence");
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].source_name.as_deref(), Some("mode"));
+    assert_eq!(first[0].content_text, "mode instruction");
+    assert!(
+        store
+            .load_context_evidence(&session_id, 2)
+            .expect("second evidence")
+            .is_empty()
     );
 }
 

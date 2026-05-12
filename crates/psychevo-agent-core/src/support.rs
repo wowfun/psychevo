@@ -1,6 +1,6 @@
 pub fn user_text_message(text: impl Into<String>) -> Message {
     Message::User {
-        content: vec![TextBlock { text: text.into() }],
+        content: vec![UserContentBlock::text(text)],
         timestamp_ms: now_ms(),
     }
 }
@@ -23,4 +23,3 @@ impl EventSink for NoopEventSink {
         Box::pin(async { Ok(()) })
     }
 }
-

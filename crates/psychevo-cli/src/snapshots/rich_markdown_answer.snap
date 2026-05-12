@@ -1,5 +1,6 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 667
 expression: combined
 ---
 fixture=rich_markdown_answer
@@ -13,11 +14,11 @@ size=120x24
 • Keep ledger rhythm
 • Style inline code
 
-  fn render() {}
+╭─ code rust
+│ fn render() {}
+╰─
 
 See crates/psychevo-cli/src/tui/render/transcript.rs:42.
-
-
 
 
 
@@ -39,11 +40,11 @@ mock/model  high  ~/work · main
 [dim]• [default]Keep ledger rhythm
 [dim]• [default]Style [cyan]inline code[default]
 [default]
-[dim]  [cyan]fn render() {}[default]
+[dim]╭─ code rust[default]
+[dim]│ [cyan]fn[default] render[dim]()[default] [dim]{}[default]
+[dim]╰─[default]
 [default]
 [default]See [cyan]crates/psychevo-cli/src/tui/render/transcript.rs:42[default].
-[default]
-[default]
 [default]
 [default]
 [default]

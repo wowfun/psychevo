@@ -142,7 +142,7 @@ fn history_reload_scrolls_to_end_of_multiline_markdown_answer() {
     let buffer = draw_fullscreen_for_test(&app, &mut ui, 100, 10);
     let text = buffer_text(&buffer);
 
-    assert!(text.contains("| 12 | io_uring"), "{text}");
+    assert!(text.contains("└────"), "{text}");
     assert!(text.contains("Linux"), "{text}");
     assert!(!text.contains("Hacker News 日报完成"), "{text}");
 }
@@ -1360,7 +1360,7 @@ fn completed_live_tool_elapsed_keeps_visible_active_duration_for_all_tool_phases
 }
 
 #[test]
-fn interrupted_pending_tool_row_stops_timer_as_failed() {
+fn interrupted_pending_tool_row_stops_timer_as_interrupted() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -1390,7 +1390,8 @@ fn interrupted_pending_tool_row_stops_timer_as_failed() {
     let row = &ui.transcript[0];
     assert_eq!(row.title, "Changed src/lib.rs");
     assert_eq!(row.text, "interrupted");
-    assert!(row.failed);
+    assert!(row.interrupted);
+    assert!(!row.failed);
     assert!(row.tool_elapsed.is_some());
     assert!(row.tool_started.is_none());
 }
@@ -1739,7 +1740,8 @@ fn history_aborted_tool_calls_render_interrupted_without_live_timer() {
     assert!(row.title.starts_with("Ran cd /home/kevin/Projects/feedgarden"));
     assert!(!row.title.starts_with("Running "));
     assert_eq!(row.text, "interrupted");
-    assert!(row.failed);
+    assert!(row.interrupted);
+    assert!(!row.failed);
     assert_eq!(row.tool_elapsed, Some(Duration::from_millis(34_653)));
     assert!(row.tool_started.is_none());
     assert!(ui.tool_rows.is_empty());
@@ -1803,6 +1805,215 @@ fn history_text_plus_tool_call_message_shows_active_row_without_turn_meta() {
             .iter()
             .all(|row| row.kind != TranscriptKind::Meta)
     );
+}
+
+#[test]
+fn history_aborted_tool_result_renders_interrupted_without_failure_style() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    ui.push_history_message(
+        &serde_json::json!({
+            "role": "assistant",
+            "content": [{
+                "type": "tool_call",
+                "id": "call_find",
+                "name": "bash",
+                "arguments": {
+                    "command": "find /home/kevin -name tmp.txt -type f",
+                    "timeout": 10
+                },
+                "arguments_json": "{\"command\":\"find /home/kevin -name tmp.txt -type f\",\"timeout\":10}",
+                "arguments_error": null,
+                "content_index": 0,
+                "call_index": 0
+            }],
+            "timestamp_ms": 2,
+            "finish_reason": "tool_calls",
+            "outcome": "normal",
+            "model": "mock-model",
+            "provider": "mock"
+        }),
+        None,
+        None,
+    );
+    ui.push_history_message(
+        &serde_json::json!({
+            "role": "tool_result",
+            "tool_name": "bash",
+            "tool_call_id": "call_find",
+            "content": "{\"output\":\"(no output)\",\"exit_code\":null,\"error\":\"aborted\",\"truncated\":false}",
+            "is_error": true
+        }),
+        None,
+        Some(&serde_json::json!({ "elapsed_ms": 4_000 })),
+    );
+
+    let row = ui
+        .transcript
+        .iter()
+        .find(|row| row.kind == TranscriptKind::Ran)
+        .expect("interrupted history row");
+    assert_eq!(row.title, "Ran find /home/kevin -name tmp.txt -type f");
+    assert_eq!(row.text, "interrupted");
+    assert!(row.interrupted);
+    assert!(!row.failed);
+    assert_eq!(row.tool_elapsed, Some(Duration::from_secs(4)));
+    assert!(row.tool_started.is_none());
+}
+
+#[test]
+fn history_bash_timeout_renders_timeout_before_partial_output() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    ui.push_history_message(
+        &serde_json::json!({
+            "role": "assistant",
+            "content": [{
+                "type": "tool_call",
+                "id": "call_fetch",
+                "name": "bash",
+                "arguments": {
+                    "command": "python scripts/fetch.py",
+                    "timeout": 120
+                },
+                "arguments_json": "{\"command\":\"python scripts/fetch.py\",\"timeout\":120}",
+                "arguments_error": null,
+                "content_index": 0,
+                "call_index": 0
+            }],
+            "timestamp_ms": 2,
+            "finish_reason": "tool_calls",
+            "outcome": "normal",
+            "model": "mock-model",
+            "provider": "mock"
+        }),
+        None,
+        None,
+    );
+    ui.push_history_message(
+        &serde_json::json!({
+            "role": "tool_result",
+            "tool_name": "bash",
+            "tool_call_id": "call_fetch",
+            "content": "{\"output\":\"[fetch] 29 rows done\",\"exit_code\":null,\"error\":\"command timed out after 120 seconds\",\"truncated\":false}",
+            "is_error": true
+        }),
+        None,
+        Some(&serde_json::json!({ "elapsed_ms": 120_000 })),
+    );
+
+    let row = ui
+        .transcript
+        .iter()
+        .find(|row| row.kind == TranscriptKind::Ran)
+        .expect("timeout history row");
+    assert_eq!(row.title, "Ran python scripts/fetch.py");
+    assert!(row.failed);
+    assert!(row.text.starts_with(
+        "timeout: command timed out after 120 seconds; partial output follows\n"
+    ));
+    assert!(row.text.contains("[fetch] 29 rows done"));
+}
+
+#[test]
+fn history_answer_turn_meta_omits_accounting_cost() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    ui.push_history_message_with_accounting(
+        &serde_json::json!({
+            "role": "assistant",
+            "content": [{"type": "text", "text": "done"}],
+            "timestamp_ms": 2,
+            "finish_reason": "stop",
+            "outcome": "normal",
+            "model": "mock-model",
+            "provider": "mock"
+        }),
+        None,
+        Some(&serde_json::json!({ "elapsed_ms": 42 })),
+        Some(&serde_json::json!({ "estimated_cost_nanodollars": 99_000 })),
+    );
+
+    let meta = ui
+        .transcript
+        .iter()
+        .find(|row| row.kind == TranscriptKind::Meta)
+        .expect("history meta row");
+    assert_eq!(meta.text, "mock/mock-model  0s");
+    assert!(!meta.text.contains("cost"));
+}
+
+#[test]
+fn history_user_image_display_metadata_renders_prompt_and_attachment_meta() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    ui.push_history_message(
+        &serde_json::json!({
+            "role": "user",
+            "content": [
+                {"type": "local_image", "path": "/tmp/image.png"},
+                {"type": "text", "text": "describe it"}
+            ],
+            "timestamp_ms": 1
+        }),
+        None,
+        Some(&serde_json::json!({
+            "tui_display": {
+                "content_text": "[Image #1] describe it",
+                "attachments": [
+                    {
+                        "kind": "image",
+                        "placeholder": "[Image #1]",
+                        "source": "image.png"
+                    }
+                ]
+            }
+        })),
+    );
+
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Prompt && row.text == "[Image #1] describe it"
+    }));
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Meta
+            && row.text == "attachments\nimage 1: image.png"
+    }));
+}
+
+#[test]
+fn legacy_history_image_blocks_render_as_attachment_meta_not_prompt_text() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    ui.push_history_message(
+        &serde_json::json!({
+            "role": "user",
+            "content": [
+                {"type": "local_image", "path": "/tmp/image.png"},
+                {"type": "text", "text": "describe it"}
+            ],
+            "timestamp_ms": 1
+        }),
+        None,
+        None,
+    );
+
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Prompt && row.text == "describe it"
+    }));
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Meta
+            && row.text == "attachments\nimage 1: /tmp/image.png"
+    }));
 }
 
 #[test]

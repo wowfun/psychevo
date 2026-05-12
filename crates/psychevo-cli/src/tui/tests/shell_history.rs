@@ -319,9 +319,109 @@ fn tool_failure_without_answer_keeps_failure_meta() {
         false,
     );
 
+    let failed_row = ui
+        .transcript
+        .iter()
+        .find(|row| row.kind == TranscriptKind::Ran)
+        .expect("failed bash row");
+    assert!(failed_row.failed);
+    assert!(!failed_row.interrupted);
     assert!(
         ui.transcript
             .iter()
             .any(|row| { row.kind == TranscriptKind::Meta && row.text.contains("1 failure") })
     );
+}
+
+#[test]
+fn interrupted_bash_tool_renders_interrupted_without_failure_meta() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.start_assistant();
+    ui.interrupt_requested = true;
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "run_start",
+            "provider": "mock",
+            "model": "mock-model",
+            "mode": "default"
+        }),
+        false,
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_execution_end",
+            "tool_name": "bash",
+            "tool_call_id": "call_1",
+            "args": { "command": "find /home/kevin -name tmp.txt -type f" },
+            "outcome": "aborted",
+            "elapsed_ms": 4_000,
+            "result": {
+                "output": "(no output)",
+                "exit_code": null,
+                "error": "aborted",
+                "truncated": false
+            }
+        }),
+        false,
+    );
+
+    let row = ui
+        .transcript
+        .iter()
+        .find(|row| row.kind == TranscriptKind::Ran)
+        .expect("interrupted bash row");
+    assert_eq!(row.title, "Ran find /home/kevin -name tmp.txt -type f");
+    assert_eq!(row.text, "interrupted");
+    assert!(row.interrupted);
+    assert!(!row.failed);
+    assert_eq!(row.tool_elapsed, Some(Duration::from_secs(4)));
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| !(row.kind == TranscriptKind::Ran && row.text.contains("(no output)")))
+    );
+    let meta = ui
+        .transcript
+        .iter()
+        .find(|row| row.kind == TranscriptKind::Meta)
+        .expect("interrupted meta");
+    assert!(meta.text.contains("interrupted"), "{meta:?}");
+    assert!(!meta.text.contains("failure"), "{meta:?}");
+}
+
+#[test]
+fn interrupted_user_shell_renders_interrupted_marker() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.start_assistant();
+    ui.interrupt_requested = true;
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_execution_end",
+            "tool_name": "bash",
+            "tool_call_id": "shell_1",
+            "source": "user_shell",
+            "args": { "command": "find /home/kevin -name tmp.txt -type f" },
+            "outcome": "aborted",
+            "result": {
+                "output": "(no output)",
+                "exit_code": null,
+                "error": "aborted",
+                "truncated": false
+            }
+        }),
+        false,
+    );
+
+    let row = ui
+        .transcript
+        .iter()
+        .find(|row| row.kind == TranscriptKind::Ran)
+        .expect("interrupted shell row");
+    assert_eq!(row.text, "interrupted");
+    assert!(row.interrupted);
+    assert!(!row.failed);
 }

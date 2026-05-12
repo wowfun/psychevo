@@ -18,22 +18,20 @@ impl TuiApp {
     }
 
     async fn run_fullscreen_loop(&mut self, initial_prompt: String) -> Result<()> {
-        enable_raw_mode()?;
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableTuiMouseCapture)?;
+        let mut terminal_guard = FullscreenTerminalGuard::enter(&mut stdout)?;
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
+        terminal.clear()?;
         let result = self
             .run_fullscreen_loop_inner(&mut terminal, initial_prompt)
             .await;
-        disable_raw_mode()?;
-        execute!(
-            terminal.backend_mut(),
-            DisableMouseCapture,
-            LeaveAlternateScreen
-        )?;
-        terminal.show_cursor()?;
-        result
+        let restore_result = terminal_guard.restore();
+        match (result, restore_result) {
+            (Err(err), _) => Err(err),
+            (Ok(()), Err(err)) => Err(err),
+            (Ok(()), Ok(())) => Ok(()),
+        }
     }
 
     async fn run_fullscreen_loop_inner(
@@ -129,6 +127,29 @@ impl TuiApp {
                 needs_draw: mouse_event_needs_redraw(mouse.kind),
                 should_quit: self.handle_fullscreen_mouse(ui, mouse).await?,
             }),
+            CrosstermEvent::Paste(pasted) => {
+                let pasted = normalize_bracketed_paste_text(&pasted);
+                ui.clear_history_navigation_for_edit();
+                let source = pasted.trim();
+                if !source.is_empty()
+                    && !pasted.contains('\n')
+                    && let Ok(image) = resolve_image_source(source, &self.workdir)
+                {
+                    let placeholder = ui.add_pending_image(image);
+                    ui.textarea.insert_str(&placeholder);
+                    ui.textarea.insert_str(" ");
+                } else {
+                    ui.textarea.insert_str(&pasted);
+                }
+                ui.sync_pending_images_with_textarea();
+                ui.clear_slash_menu_dismissal();
+                ui.sync_file_popup(&self.workdir);
+                self.sync_skill_popup(ui);
+                Ok(FullscreenEventOutcome {
+                    needs_draw: true,
+                    should_quit: false,
+                })
+            }
             CrosstermEvent::Resize(_, _) => Ok(FullscreenEventOutcome {
                 needs_draw: true,
                 should_quit: false,
@@ -160,6 +181,10 @@ impl TuiApp {
             && key.modifiers.contains(KeyModifiers::CONTROL)
             && self.copy_selected_text(ui)?
         {
+            return Ok(false);
+        }
+        if key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.copy_latest_answer_markdown(ui);
             return Ok(false);
         }
         if key.code == KeyCode::Esc && ui.selection.anchor.is_some() {
@@ -324,8 +349,9 @@ impl TuiApp {
                 ui.textarea.insert_newline();
             }
             KeyCode::Enter => {
+                ui.sync_pending_images_with_textarea();
                 let line = textarea_text(&ui.textarea);
-                if line.trim().is_empty() {
+                if line.trim().is_empty() && ui.pending_images.is_empty() {
                     return Ok(false);
                 }
                 let submitted = if parse_shell_escape_input(&line).is_some()
@@ -351,6 +377,7 @@ impl TuiApp {
                 ui.textarea = new_textarea();
                 ui.slash_menu_selected = 0;
                 ui.clear_slash_menu_dismissal();
+                ui.close_file_popup();
                 ui.close_skill_popup();
                 if self.submit_fullscreen_text(ui, submitted, true).await? {
                     return Ok(true);
@@ -394,15 +421,13 @@ impl TuiApp {
             KeyCode::Down if ui.can_recall_history_next() => {
                 ui.recall_history(1);
             }
-            KeyCode::Down if textarea_text(&ui.textarea).is_empty() => {
-                ui.scroll_transcript(1);
-            }
             _ => {
                 ui.clear_history_navigation_for_edit();
                 ui.textarea.input(key);
                 ui.clear_slash_menu_dismissal();
             }
         }
+        ui.sync_pending_images_with_textarea();
         ui.sync_file_popup(&self.workdir);
         self.sync_skill_popup(ui);
         Ok(false)
@@ -415,30 +440,10 @@ impl TuiApp {
     ) -> Result<bool> {
         match mouse.kind {
             MouseEventKind::ScrollUp => {
-                if let Some(panel) = &mut ui.bottom_panel {
-                    match panel {
-                        BottomPanel::Help(panel) => panel.scroll_by(-3),
-                        BottomPanel::Models(panel) if panel.tab == ModelTab::Info => {
-                            panel.scroll_info_by(-3)
-                        }
-                        _ => panel.selection_mut().move_selection(-3),
-                    }
-                } else {
-                    ui.scroll_transcript(-3);
-                }
+                self.handle_fullscreen_mouse_wheel(ui, mouse.column, mouse.row, -3);
             }
             MouseEventKind::ScrollDown => {
-                if let Some(panel) = &mut ui.bottom_panel {
-                    match panel {
-                        BottomPanel::Help(panel) => panel.scroll_by(3),
-                        BottomPanel::Models(panel) if panel.tab == ModelTab::Info => {
-                            panel.scroll_info_by(3)
-                        }
-                        _ => panel.selection_mut().move_selection(3),
-                    }
-                } else {
-                    ui.scroll_transcript(3);
-                }
+                self.handle_fullscreen_mouse_wheel(ui, mouse.column, mouse.row, 3);
             }
             MouseEventKind::Down(MouseButton::Left) => {
                 if let Some(index) = ui.bottom_panel_hit(mouse.column, mouse.row) {
@@ -549,15 +554,41 @@ impl TuiApp {
         Ok(false)
     }
 
+    fn handle_fullscreen_mouse_wheel(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        column: u16,
+        row: u16,
+        amount: isize,
+    ) {
+        match ui.mouse_wheel_target(column, row) {
+            Some(MouseWheelTarget::BottomPanel) => {
+                if let Some(panel) = &mut ui.bottom_panel {
+                    scroll_bottom_panel(panel, amount);
+                }
+            }
+            Some(MouseWheelTarget::Transcript) => ui.scroll_transcript(amount),
+            None => {}
+        }
+    }
+
 }
 
 const FULLSCREEN_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(16);
 const MAX_READY_EVENTS_PER_FRAME: usize = 64;
-const TUI_MOUSE_CAPTURE_ANSI: &str = concat!(
+const TUI_MOUSE_CAPTURE_ENABLE_ANSI: &str = concat!(
     "\x1b[?1000h",
     "\x1b[?1002h",
     "\x1b[?1015h",
-    "\x1b[?1006h"
+    "\x1b[?1006h",
+    "\x1b[?1007h"
+);
+const TUI_MOUSE_CAPTURE_DISABLE_ANSI: &str = concat!(
+    "\x1b[?1007l",
+    "\x1b[?1006l",
+    "\x1b[?1015l",
+    "\x1b[?1002l",
+    "\x1b[?1000l"
 );
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -565,14 +596,114 @@ struct EnableTuiMouseCapture;
 
 impl crossterm::Command for EnableTuiMouseCapture {
     fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
-        f.write_str(TUI_MOUSE_CAPTURE_ANSI)
+        f.write_str(TUI_MOUSE_CAPTURE_ENABLE_ANSI)
     }
 
     #[cfg(windows)]
     fn execute_winapi(&self) -> io::Result<()> {
-        <crossterm::event::EnableMouseCapture as crossterm::Command>::execute_winapi(
-            &crossterm::event::EnableMouseCapture,
-        )
+        Err(io::Error::other(
+            "tried to execute EnableTuiMouseCapture using WinAPI; use ANSI instead",
+        ))
+    }
+
+    #[cfg(windows)]
+    fn is_ansi_code_supported(&self) -> bool {
+        true
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DisableTuiMouseCapture;
+
+impl crossterm::Command for DisableTuiMouseCapture {
+    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        f.write_str(TUI_MOUSE_CAPTURE_DISABLE_ANSI)
+    }
+
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> io::Result<()> {
+        Err(io::Error::other(
+            "tried to execute DisableTuiMouseCapture using WinAPI; use ANSI instead",
+        ))
+    }
+
+    #[cfg(windows)]
+    fn is_ansi_code_supported(&self) -> bool {
+        true
+    }
+}
+
+#[derive(Debug)]
+struct FullscreenTerminalGuard {
+    active: bool,
+}
+
+impl FullscreenTerminalGuard {
+    fn enter(stdout: &mut io::Stdout) -> Result<Self> {
+        enable_raw_mode()?;
+        if let Err(err) = write_fullscreen_enter_commands(stdout) {
+            let _ = restore_fullscreen_terminal_modes();
+            return Err(err.into());
+        }
+        Ok(Self { active: true })
+    }
+
+    fn restore(&mut self) -> Result<()> {
+        if self.active {
+            restore_fullscreen_terminal_modes()?;
+            self.active = false;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for FullscreenTerminalGuard {
+    fn drop(&mut self) {
+        if self.active {
+            let _ = restore_fullscreen_terminal_modes();
+            self.active = false;
+        }
+    }
+}
+
+fn write_fullscreen_enter_commands(out: &mut impl Write) -> io::Result<()> {
+    execute!(out, EnterAlternateScreen)?;
+    execute!(
+        out,
+        crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
+        crossterm::cursor::MoveTo(0, 0)
+    )?;
+    execute!(out, EnableBracketedPaste)?;
+    execute!(out, EnableTuiMouseCapture)?;
+    Ok(())
+}
+
+fn write_fullscreen_exit_commands(out: &mut impl Write) -> io::Result<()> {
+    let mut first_error = execute!(out, DisableBracketedPaste).err();
+    if let Err(err) = execute!(out, DisableTuiMouseCapture) {
+        first_error.get_or_insert(err);
+    }
+    if let Err(err) = execute!(out, LeaveAlternateScreen) {
+        first_error.get_or_insert(err);
+    }
+    if let Err(err) = execute!(out, crossterm::cursor::Show) {
+        first_error.get_or_insert(err);
+    }
+    match first_error {
+        Some(err) => Err(err),
+        None => Ok(()),
+    }
+}
+
+fn restore_fullscreen_terminal_modes() -> io::Result<()> {
+    let mut stdout = io::stdout();
+    let mut first_error = write_fullscreen_exit_commands(&mut stdout).err();
+    if let Err(err) = disable_raw_mode() {
+        first_error.get_or_insert(err);
+    }
+    match first_error {
+        Some(err) => Err(err),
+        None => Ok(()),
     }
 }
 
@@ -584,6 +715,21 @@ struct FullscreenEventOutcome {
 
 fn mouse_event_needs_redraw(kind: MouseEventKind) -> bool {
     !matches!(kind, MouseEventKind::Moved)
+}
+
+fn scroll_bottom_panel(panel: &mut BottomPanel, amount: isize) {
+    match panel {
+        BottomPanel::Help(panel) => panel.scroll_by(amount),
+        BottomPanel::Models(panel) if panel.tab == ModelTab::Info => {
+            panel.scroll_info_by(amount)
+        }
+        BottomPanel::ProviderWizard(_) => {}
+        _ => panel.selection_mut().move_selection(amount),
+    }
+}
+
+fn normalize_bracketed_paste_text(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 fn slash_skill_name(command: &str) -> Option<String> {

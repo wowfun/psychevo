@@ -73,6 +73,45 @@ async fn reasoning_only_progress_has_no_visible_message_update() {
     assert_eq!(updates, 1);
 }
 
+#[test]
+fn user_message_deserializes_text_blocks_and_serializes_local_images() {
+    let text_message = serde_json::from_value::<Message>(json!({
+        "role": "user",
+        "content": [{ "text": "hello" }],
+        "timestamp_ms": 1
+    }))
+    .expect("text user message");
+
+    assert_eq!(
+        text_message,
+        Message::User {
+            content: vec![UserContentBlock::text("hello")],
+            timestamp_ms: 1,
+        }
+    );
+
+    let image_message = Message::User {
+        content: vec![
+            UserContentBlock::local_image("/tmp/image.avif"),
+            UserContentBlock::image_url("https://example.com/image.png"),
+        ],
+        timestamp_ms: 2,
+    };
+    let value = serde_json::to_value(image_message).expect("image user message");
+
+    assert_eq!(
+        value,
+        json!({
+            "role": "user",
+            "content": [
+                { "type": "local_image", "path": "/tmp/image.avif" },
+                { "type": "image_url", "url": "https://example.com/image.png" }
+            ],
+            "timestamp_ms": 2
+        })
+    );
+}
+
 #[tokio::test]
 async fn usage_and_metadata_do_not_emit_empty_message_updates() {
     let provider = Arc::new(StaticProvider {

@@ -21,10 +21,12 @@ impl<'a> FullscreenUi<'a> {
             turn_metadata: None,
             turn_accounting: None,
             turn_failures: 0,
+            turn_interrupted: false,
             turn_outcome: None,
             turn_had_reasoning: false,
             history_prompt_started_ms: None,
             thinking_visible: app.thinking_visible,
+            raw_visible: app.raw_visible,
             running: None,
             auxiliary_agent_tasks: Vec::new(),
             running_started: None,
@@ -40,6 +42,10 @@ impl<'a> FullscreenUi<'a> {
             focus: FocusMode::Composer,
             selected_row: None,
             selected_target: None,
+            last_transcript_area: None,
+            last_composer_area: None,
+            last_status_area: None,
+            last_bottom_panel_area: None,
             last_entry_areas: Vec::new(),
             mouse_down_target: None,
             mouse_dragged: false,
@@ -56,6 +62,7 @@ impl<'a> FullscreenUi<'a> {
             history_index: None,
             history_draft: None,
             queued_inputs: VecDeque::new(),
+            pending_images: Vec::new(),
             history_search: false,
             history_query: String::new(),
             slash_menu_selected: 0,
@@ -67,6 +74,7 @@ impl<'a> FullscreenUi<'a> {
             last_skill_popup_areas: Vec::new(),
             last_bottom_panel_areas: Vec::new(),
             bottom_panel: None,
+            ephemeral_status: None,
             screen_lines: Vec::new(),
             selection: SelectionState::default(),
             terminal_clear_requested: false,
@@ -116,6 +124,8 @@ impl<'a> FullscreenUi<'a> {
         self.sidebar_cost_nanodollars = None;
         self.history_prompt_started_ms = None;
         self.turn_had_reasoning = false;
+        self.pending_images.clear();
+        self.ephemeral_status = None;
     }
 
     fn take_terminal_clear_request(&mut self) -> bool {
@@ -129,6 +139,11 @@ impl<'a> FullscreenUi<'a> {
             self.selected_target = None;
             self.ensure_selection();
         }
+        self.clamp_transcript_scroll();
+    }
+
+    fn set_raw_visible(&mut self, visible: bool) {
+        self.raw_visible = visible;
         self.clamp_transcript_scroll();
     }
 
@@ -279,6 +294,17 @@ impl<'a> FullscreenUi<'a> {
         selected_text_from_lines(&self.screen_lines, &self.selection)
     }
 
+    fn latest_visible_answer_markdown(&self) -> Option<String> {
+        self.transcript
+            .iter()
+            .rev()
+            .find(|row| row.kind == TranscriptKind::Answer && row_visible(row, self.thinking_visible))
+            .and_then(|row| {
+                let text = row.full_text.as_deref().unwrap_or(&row.text);
+                (!text.trim().is_empty()).then(|| text.to_string())
+            })
+    }
+
     #[cfg(test)]
     fn push_history_message(
         &mut self,
@@ -302,8 +328,8 @@ impl<'a> FullscreenUi<'a> {
             .unwrap_or_default()
         {
             "user" => {
-                if let Some(text) = user_text_from_message(message) {
-                    self.push_user(text);
+                if let Some(display) = user_display_from_message(message, metadata) {
+                    self.push_user_with_attachment_meta(display.text, display.attachment_meta);
                 }
                 self.history_prompt_started_ms = message_timestamp_ms(message);
             }
@@ -388,7 +414,7 @@ impl<'a> FullscreenUi<'a> {
         );
         row.tool_call_id = Some(call.id);
         row.tool_elapsed = metadata_elapsed_duration(metadata);
-        row.failed = true;
+        row.interrupted = true;
         self.transcript.push(row);
     }
 
@@ -411,11 +437,21 @@ impl<'a> FullscreenUi<'a> {
             .unwrap_or("");
         let result = serde_json::from_str::<Value>(content)
             .unwrap_or_else(|_| serde_json::json!({ "content": content }));
+        let outcome = if is_error
+            && result.get("error").and_then(Value::as_str) == Some("aborted")
+        {
+            "aborted"
+        } else if is_error {
+            "failed"
+        } else {
+            "normal"
+        };
         let value = serde_json::json!({
             "tool_name": tool,
             "result": result,
-            "outcome": if is_error { "failed" } else { "normal" }
+            "outcome": outcome
         });
+        let interrupted = tool_event_interrupted(&value);
         let title = self
             .history_tool_titles
             .get(tool_call_id)
@@ -427,17 +463,23 @@ impl<'a> FullscreenUi<'a> {
             .unwrap_or_else(|| TranscriptRow::with_title(evidence_kind(tool), title.clone(), ""));
         row.kind = evidence_kind(tool);
         row.title = title;
-        row.failed = is_error;
+        row.interrupted = interrupted;
+        row.failed = is_error && !interrupted;
         row.tool_elapsed =
             metadata_elapsed_duration(metadata).or_else(|| row.tool_started.map(|started| started.elapsed()));
         row.tool_started = None;
-        let (collapsed, full) = tool_output_text(&value);
-        row.text = if collapsed.is_empty() {
-            format_tool_summary(&value)
+        if interrupted {
+            row.text = "interrupted".to_string();
+            row.full_text = None;
         } else {
-            collapsed
-        };
-        row.full_text = full;
+            let (collapsed, full) = tool_output_text(&value);
+            row.text = if collapsed.is_empty() {
+                format_tool_summary(&value)
+            } else {
+                collapsed
+            };
+            row.full_text = full;
+        }
         if let Some(idx) = idx {
             self.transcript[idx] = row;
             self.tool_rows.retain(|_, row_index| *row_index != idx);
@@ -477,11 +519,13 @@ impl<'a> FullscreenUi<'a> {
         if self.queued_inputs.is_empty() {
             return;
         }
-        let mut parts = self
-            .queued_inputs
-            .drain(..)
-            .map(queued_input_text)
-            .collect::<Vec<_>>();
+        let mut parts = Vec::new();
+        for input in self.queued_inputs.drain(..) {
+            if let QueuedInput::Prompt { images, .. } = &input {
+                self.pending_images.extend(images.iter().cloned());
+            }
+            parts.push(queued_input_text(input));
+        }
         let draft = textarea_text(&self.textarea);
         if !draft.is_empty() {
             parts.push(draft);
@@ -491,6 +535,41 @@ impl<'a> FullscreenUi<'a> {
         self.clear_slash_menu_dismissal();
         self.close_file_popup();
         self.close_skill_popup();
+    }
+
+    fn add_pending_image(&mut self, image: ImageInput) -> String {
+        self.sync_pending_images_with_textarea();
+        let text = textarea_text(&self.textarea);
+        let placeholder = next_image_placeholder(&self.pending_images, &text);
+        self.pending_images.push(PendingImageAttachment {
+            placeholder: placeholder.clone(),
+            image,
+        });
+        placeholder
+    }
+
+    fn sync_pending_images_with_textarea(&mut self) {
+        let text = textarea_text(&self.textarea);
+        self.pending_images
+            .retain(|attachment| text.contains(&attachment.placeholder));
+    }
+
+    fn take_submitted_images(&mut self, prompt: &str) -> Vec<PendingImageAttachment> {
+        let mut indexed = self
+            .pending_images
+            .iter()
+            .filter_map(|attachment| {
+                prompt
+                    .find(&attachment.placeholder)
+                    .map(|index| (index, attachment.clone()))
+            })
+            .collect::<Vec<_>>();
+        indexed.sort_by_key(|(index, _)| *index);
+        self.pending_images.clear();
+        indexed
+            .into_iter()
+            .map(|(_, attachment)| attachment)
+            .collect()
     }
 
     fn complete_slash_command(&mut self) {
@@ -687,6 +766,44 @@ impl<'a> FullscreenUi<'a> {
             .map(|(index, _)| *index)
     }
 
+    fn set_render_areas(
+        &mut self,
+        transcript: Rect,
+        composer: Option<Rect>,
+        status: Rect,
+        bottom_panel: Option<Rect>,
+    ) {
+        self.last_transcript_area = Some(transcript);
+        self.last_composer_area = composer;
+        self.last_status_area = Some(status);
+        self.last_bottom_panel_area = bottom_panel;
+    }
+
+    fn mouse_wheel_target(&self, column: u16, row: u16) -> Option<MouseWheelTarget> {
+        if self
+            .last_bottom_panel_area
+            .is_some_and(|area| rect_contains(area, column, row))
+        {
+            return Some(MouseWheelTarget::BottomPanel);
+        }
+        if self
+            .last_transcript_area
+            .is_some_and(|area| rect_contains(area, column, row))
+        {
+            return Some(MouseWheelTarget::Transcript);
+        }
+        if self
+            .last_composer_area
+            .is_some_and(|area| rect_contains(area, column, row))
+            || self
+                .last_status_area
+                .is_some_and(|area| rect_contains(area, column, row))
+        {
+            return None;
+        }
+        None
+    }
+
     fn set_bottom_panel_notice(&mut self, text: impl Into<String>) {
         if let Some(panel) = &mut self.bottom_panel {
             match panel {
@@ -696,9 +813,26 @@ impl<'a> FullscreenUi<'a> {
         }
     }
 
+    #[cfg(test)]
     fn push_user(&mut self, text: String) {
+        self.push_user_with_images(text, &[]);
+    }
+
+    fn push_user_with_attachment_meta(
+        &mut self,
+        text: String,
+        attachment_meta: Option<String>,
+    ) {
         self.transcript
             .push(TranscriptRow::with_title(TranscriptKind::Prompt, "", text));
+        if let Some(meta) = attachment_meta {
+            self.transcript
+                .push(TranscriptRow::simple(TranscriptKind::Meta, meta));
+        }
+    }
+
+    fn push_user_with_images(&mut self, text: String, images: &[PendingImageAttachment]) {
+        self.push_user_with_attachment_meta(text, attachment_metadata_text(images, &self.workdir));
     }
 
     fn start_assistant(&mut self) {
@@ -718,6 +852,7 @@ impl<'a> FullscreenUi<'a> {
         self.turn_metadata = None;
         self.turn_accounting = None;
         self.turn_failures = 0;
+        self.turn_interrupted = false;
         self.turn_outcome = None;
         self.turn_had_reasoning = false;
     }
@@ -725,6 +860,20 @@ impl<'a> FullscreenUi<'a> {
     fn push_status(&mut self, text: impl Into<String>) {
         self.transcript
             .push(TranscriptRow::simple(TranscriptKind::Status, text));
+    }
+
+    fn set_ephemeral_status(&mut self, text: impl Into<String>) {
+        self.ephemeral_status = Some(UiEphemeralStatus {
+            text: text.into(),
+            failed: false,
+        });
+    }
+
+    fn set_ephemeral_error(&mut self, text: impl Into<String>) {
+        self.ephemeral_status = Some(UiEphemeralStatus {
+            text: text.into(),
+            failed: true,
+        });
     }
 
     fn push_command_result(
@@ -1008,6 +1157,8 @@ impl<'a> FullscreenUi<'a> {
                 row.kind = evidence_kind(tool);
                 row.title = active_tool_title(tool, value);
                 row.text = "running".to_string();
+                row.failed = false;
+                row.interrupted = false;
                 row.tool_call_id = (!tool_call_id.is_empty()).then_some(tool_call_id.clone());
                 if row.tool_started.is_none() {
                     row.tool_started = Some(tool_started_instant(value));
@@ -1031,9 +1182,14 @@ impl<'a> FullscreenUi<'a> {
                     .get("outcome")
                     .and_then(Value::as_str)
                     .unwrap_or("normal");
-                let failed = outcome != "normal";
-                if failed && !user_shell {
+                let interrupted = tool_event_interrupted(value);
+                let user_confirmed_interrupt = interrupted && self.interrupt_requested;
+                let failed = outcome != "normal" && !interrupted;
+                if outcome != "normal" && !user_shell && !interrupted {
                     self.turn_failures += 1;
+                }
+                if user_confirmed_interrupt {
+                    self.turn_interrupted = true;
                 }
                 let idx = self
                     .tool_rows
@@ -1050,15 +1206,21 @@ impl<'a> FullscreenUi<'a> {
                 row.kind = evidence_kind(tool);
                 row.title = tool_title_for_update(tool, value, &row.title);
                 row.failed = failed;
+                row.interrupted = interrupted;
                 row.tool_elapsed = completed_live_tool_elapsed(row, Some(value));
                 row.tool_started = None;
-                let (collapsed, full) = tool_output_text(value);
-                row.text = if collapsed.is_empty() {
-                    format_tool_summary(value)
+                if interrupted {
+                    row.text = "interrupted".to_string();
+                    row.full_text = None;
                 } else {
-                    collapsed
-                };
-                row.full_text = full;
+                    let (collapsed, full) = tool_output_text(value);
+                    row.text = if collapsed.is_empty() {
+                        format_tool_summary(value)
+                    } else {
+                        collapsed
+                    };
+                    row.full_text = full;
+                }
                 if is_write_like_tool(tool) {
                     self.remove_orphan_provisional_tool_intents(tool, Some(idx));
                 }
@@ -1203,6 +1365,7 @@ impl<'a> FullscreenUi<'a> {
         self.streaming_tool_message_open = false;
         self.deferred_stream_events.clear();
         self.turn_outcome = None;
+        self.turn_interrupted = false;
         self.turn_had_reasoning = false;
         self.running_started = None;
         self.interrupt_requested = false;
@@ -1222,7 +1385,8 @@ impl<'a> FullscreenUi<'a> {
             };
             row.tool_elapsed = Some(started.elapsed());
             row.title = completed_tool_title_from_active(row.kind, &row.title);
-            row.failed = true;
+            row.failed = false;
+            row.interrupted = true;
             row.text = "interrupted".to_string();
         }
     }
@@ -1321,7 +1485,7 @@ impl<'a> FullscreenUi<'a> {
         }
         if !(allow_visible_answer && self.assistant_row.is_some()
             || allow_reasoning_only && self.turn_had_reasoning
-            || allow_failure_summary && self.turn_failures > 0)
+            || allow_failure_summary && (self.turn_failures > 0 || self.turn_interrupted))
         {
             return;
         }
@@ -1334,6 +1498,7 @@ impl<'a> FullscreenUi<'a> {
             metadata: self.turn_metadata.as_ref(),
             accounting: self.turn_accounting.as_ref(),
             failures: self.turn_failures,
+            interrupted: self.turn_interrupted,
             debug,
         });
         if meta.is_empty() {

@@ -1,4 +1,5 @@
 use anyhow::{Result, anyhow};
+use psychevo_runtime::split_image_source_argument;
 
 use crate::command_registry::{
     CUSTOM_SKILL_COMMAND, CommandArgumentKind, CommandGroup, CommandStatus, CommandSurface,
@@ -12,6 +13,7 @@ const GENERAL_COMMANDS: &[&str] = &[
     "/model",
     "/sessions",
     "/new",
+    "/copy",
     "/undo",
     "/redo",
     "/quit",
@@ -31,6 +33,10 @@ pub(crate) enum SlashCommand {
     ModeSet(String),
     ThinkingToggle,
     ThinkingSet(bool),
+    RawToggle,
+    RawSet(bool),
+    Copy,
+    Image { source: String, prompt: String },
     Rename(String),
     Undo,
     Redo,
@@ -86,10 +92,11 @@ pub(crate) fn slash_help_sections(skill_count: Option<usize>) -> SlashHelpSectio
         "Tab - complete slash command".to_string(),
         "Esc - close active UI or interrupt running work".to_string(),
         "Ctrl+C/Ctrl+D - quit or copy active selection".to_string(),
+        "Ctrl+O - copy latest answer as Markdown".to_string(),
         "Ctrl+B - toggle sidebar".to_string(),
         "Ctrl+T - focus transcript".to_string(),
         "Ctrl+R - search prompt history".to_string(),
-        "Up/Down - recall history or navigate".to_string(),
+        "Up/Down - move cursor or recall history at prompt boundaries".to_string(),
         "PageUp/PageDown - scroll".to_string(),
         String::new(),
         "Common commands".to_string(),
@@ -309,6 +316,12 @@ fn parse_registered_slash_command(
         SlashCommandAction::VariantSet => parse_variant_command(spec, rest),
         SlashCommandAction::ModeSet => parse_mode_command(spec, rest),
         SlashCommandAction::Thinking => parse_thinking_command(spec, rest),
+        SlashCommandAction::Raw => parse_raw_command(spec, rest),
+        SlashCommandAction::Copy => {
+            parse_no_arguments(spec, command, rest)?;
+            Ok(SlashCommand::Copy)
+        }
+        SlashCommandAction::Image => parse_image_command(spec, rest),
         SlashCommandAction::Rename => parse_rename_command(spec, rest),
         SlashCommandAction::Undo => {
             parse_no_arguments(spec, command, rest)?;
@@ -366,6 +379,26 @@ fn parse_thinking_command(spec: &SlashCommandSpec, rest: &[&str]) -> Result<Slas
         ["off"] => Ok(SlashCommand::ThinkingSet(false)),
         _ => Err(anyhow!("usage: {}", spec.usage)),
     }
+}
+
+fn parse_raw_command(spec: &SlashCommandSpec, rest: &[&str]) -> Result<SlashCommand> {
+    match rest {
+        [] => Ok(SlashCommand::RawToggle),
+        ["on"] => Ok(SlashCommand::RawSet(true)),
+        ["off"] => Ok(SlashCommand::RawSet(false)),
+        _ => Err(anyhow!("usage: {}", spec.usage)),
+    }
+}
+
+fn parse_image_command(spec: &SlashCommandSpec, rest: &[&str]) -> Result<SlashCommand> {
+    let input = rest.join(" ");
+    let Some(argument) = split_image_source_argument(&input) else {
+        return Err(anyhow!("usage: {}", spec.usage));
+    };
+    Ok(SlashCommand::Image {
+        source: argument.source,
+        prompt: argument.remainder,
+    })
 }
 
 fn parse_rename_command(spec: &SlashCommandSpec, rest: &[&str]) -> Result<SlashCommand> {
@@ -537,6 +570,42 @@ mod tests {
     }
 
     #[test]
+    fn parses_raw_visibility_and_copy_commands() {
+        assert_eq!(
+            parse_slash_command("/show-raw").unwrap(),
+            Some(SlashCommand::RawToggle)
+        );
+        assert_eq!(
+            parse_slash_command("/show-raw on").unwrap(),
+            Some(SlashCommand::RawSet(true))
+        );
+        assert_eq!(
+            parse_slash_command("/show-raw off").unwrap(),
+            Some(SlashCommand::RawSet(false))
+        );
+        assert_eq!(
+            parse_slash_command("/copy").unwrap(),
+            Some(SlashCommand::Copy)
+        );
+        assert_eq!(
+            parse_slash_command("/image \"image one.png\" describe").unwrap(),
+            Some(SlashCommand::Image {
+                source: "image one.png".to_string(),
+                prompt: "describe".to_string(),
+            })
+        );
+        assert!(parse_slash_command("/show-raw maybe").is_err());
+        assert!(parse_slash_command("/copy now").is_err());
+        assert!(parse_slash_command("/image").is_err());
+        assert!(
+            parse_slash_command("/raw")
+                .unwrap_err()
+                .to_string()
+                .contains("unknown slash command: /raw")
+        );
+    }
+
+    #[test]
     fn parses_session_rename_command() {
         assert_eq!(
             parse_slash_command("/rename My session").unwrap(),
@@ -612,6 +681,9 @@ mod tests {
         );
         assert!(parse_slash_command("/undo now").is_err());
         assert!(parse_slash_command("/redo now").is_err());
+        assert_eq!(slash_menu_items("/copy")[0].command, "/copy");
+        assert_eq!(slash_menu_items("/image")[0].command, "/image");
+        assert_eq!(slash_menu_items("/show-raw")[0].command, "/show-raw");
     }
 
     #[test]
@@ -621,6 +693,8 @@ mod tests {
         assert!(help.contains("\nCommands\n"));
         assert!(help.contains("\nCustom commands\n"));
         assert!(help.contains("Ctrl+B - toggle sidebar"));
+        assert!(help.contains("Ctrl+O - copy latest answer as Markdown"));
+        assert!(help.contains("/copy - copy latest answer as Markdown"));
         assert!(help.contains("/usage - usage and cost summary (aliases: /stats)"));
         assert!(help.contains("/sessions - switch session (aliases: /resume, /continue)"));
         assert!(help.contains("/skill:<name> [args] - invoke a skill (2 available)"));

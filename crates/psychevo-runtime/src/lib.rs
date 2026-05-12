@@ -6,6 +6,7 @@ mod error;
 mod events;
 mod messages;
 mod paths;
+mod prompt_image;
 mod run;
 mod session_lookup;
 mod skills;
@@ -36,6 +37,10 @@ pub use context_usage::{
 };
 pub use error::{Error, Result};
 pub use paths::canonicalize_workdir;
+pub use prompt_image::{
+    extract_image_sources_from_prompt, model_metadata_explicitly_disallows_image_input,
+    prompt_starts_with_supported_image_path, resolve_image_source, split_image_source_argument,
+};
 pub use run::{run_live, run_live_streaming, run_live_streaming_controlled};
 pub use session_lookup::{latest_run_session_for_workdir, session_exists};
 pub use skills::{
@@ -48,15 +53,15 @@ pub use skills::{
 };
 pub use smoke::run_smoke;
 pub use stats::usage_stats;
-pub use store::SqliteStore;
+pub use store::{ContextEvidenceInput, ContextEvidenceRecord, SqliteStore};
 pub use tools::tool_names_for_mode;
 pub use types::{
-    ConfiguredModel, CustomProviderInput, CustomProviderResult, ModelCatalogEntry,
-    ModelCatalogProvider, ModelMetadataCacheTarget, RunControl, RunControlHandle, RunMode,
-    RunOptions, RunResult, RunStreamEvent, RunStreamSink, SanitizedMessageSummary,
-    SessionRedoResult, SessionSummary, SessionUndoOptions, SessionUndoResult, SmokeControl,
-    SmokeOptions, SmokeResult, StatsOptions, TuiMessageSummary, UserShellOptions, UserShellResult,
-    run_control,
+    ConfiguredModel, CustomProviderInput, CustomProviderResult, ImageInput, ModelCatalogEntry,
+    ModelCatalogProvider, ModelMetadataCacheTarget, PromptAttachmentDisplay, PromptDisplayMetadata,
+    RunControl, RunControlHandle, RunMode, RunOptions, RunResult, RunStreamEvent, RunStreamSink,
+    SanitizedMessageSummary, SessionRedoResult, SessionSummary, SessionUndoOptions,
+    SessionUndoResult, SmokeControl, SmokeOptions, SmokeResult, StatsOptions,
+    TUI_DISPLAY_METADATA_KEY, TuiMessageSummary, UserShellOptions, UserShellResult, run_control,
 };
 pub use undo::{redo_session, undo_session};
 pub use user_shell::run_user_shell_command_streaming_controlled;

@@ -111,6 +111,7 @@ impl TurnPrinter {
                     metadata: value.get("metadata"),
                     accounting: value.get("accounting"),
                     failures: 0,
+                    interrupted: false,
                     debug: self.debug,
                 });
                 if !meta.is_empty() {

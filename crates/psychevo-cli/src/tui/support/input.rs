@@ -51,6 +51,10 @@ fn should_submit_typed_slash(input: &str) -> bool {
         || crate::command_registry::slash_command_spec(trimmed).is_some()
 }
 
+fn should_parse_slash_command_input(input: &str) -> bool {
+    !prompt_starts_with_supported_image_path(input)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ShellEscapeInput {
     command: String,

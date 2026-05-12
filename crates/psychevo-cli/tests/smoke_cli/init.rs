@@ -53,7 +53,7 @@ fn cli_init_creates_home_tree_and_is_idempotent() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 5);
+    assert_eq!(user_version, 6);
 
     std::fs::write(home.join("config.jsonc"), "custom config").expect("custom config");
     std::fs::write(home.join(".env"), "CUSTOM=1\n").expect("custom env");
@@ -123,7 +123,7 @@ fn cli_init_reset_state_backs_up_existing_sqlite_files() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 5);
+    assert_eq!(user_version, 6);
 }
 
 #[test]

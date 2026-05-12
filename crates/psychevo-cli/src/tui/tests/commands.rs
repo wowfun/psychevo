@@ -40,6 +40,133 @@ async fn mode_slash_command_sets_mode_with_direct_value() {
 }
 
 #[tokio::test]
+async fn show_raw_toggles_persists_and_does_not_append_transcript_status() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::RawToggle)
+        .await
+        .expect("raw toggle");
+
+    assert!(app.raw_visible);
+    assert!(ui.raw_visible);
+    assert!(ui.transcript.is_empty());
+    let loaded = TuiState::load(&app.state_path).expect("load state");
+    assert!(loaded.raw_visible);
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::RawSet(false))
+        .await
+        .expect("raw off");
+
+    assert!(!app.raw_visible);
+    assert!(!ui.raw_visible);
+    assert!(ui.transcript.is_empty());
+    let loaded = TuiState::load(&app.state_path).expect("load state");
+    assert!(!loaded.raw_visible);
+}
+
+#[tokio::test]
+async fn show_raw_rejects_invalid_arguments_through_slash_entry() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.textarea = textarea_with_text("/show-raw maybe");
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .expect("enter");
+
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command
+            && row.title == "/show-raw maybe"
+            && row.failed
+            && row.text.contains("error: usage: /show-raw [on|off]")
+    }));
+}
+
+#[tokio::test]
+async fn copy_command_copies_latest_answer_raw_markdown_without_transcript_row() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let copied = Arc::new(Mutex::new(Vec::new()));
+    let copied_for_sink = Arc::clone(&copied);
+    app.clipboard = Arc::new(move |text| {
+        copied_for_sink
+            .lock()
+            .expect("clipboard lock")
+            .push(text.to_string());
+        Ok(())
+    });
+    app.raw_visible = true;
+    let mut ui = FullscreenUi::new(&app);
+    ui.transcript.push(TranscriptRow::with_title(
+        TranscriptKind::Answer,
+        "",
+        "# Raw title\n\n- `source` item".to_string(),
+    ));
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Copy)
+        .await
+        .expect("copy");
+
+    assert_eq!(
+        copied.lock().expect("clipboard lock").as_slice(),
+        ["# Raw title\n\n- `source` item"]
+    );
+    assert_eq!(
+        ui.ephemeral_status.as_ref().map(|status| status.text.as_str()),
+        Some("copied latest answer Markdown")
+    );
+    assert!(ui.transcript.iter().all(|row| {
+        row.kind != TranscriptKind::Command
+            && row.kind != TranscriptKind::Status
+            && row.kind != TranscriptKind::Error
+    }));
+}
+
+#[tokio::test]
+async fn ctrl_o_copies_latest_answer_raw_markdown() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let copied = Arc::new(Mutex::new(Vec::new()));
+    let copied_for_sink = Arc::clone(&copied);
+    app.clipboard = Arc::new(move |text| {
+        copied_for_sink
+            .lock()
+            .expect("clipboard lock")
+            .push(text.to_string());
+        Ok(())
+    });
+    let mut ui = FullscreenUi::new(&app);
+    ui.transcript.push(TranscriptRow::with_title(
+        TranscriptKind::Answer,
+        "",
+        "first answer".to_string(),
+    ));
+    ui.transcript.push(TranscriptRow::with_title(
+        TranscriptKind::Answer,
+        "",
+        "second **raw** answer".to_string(),
+    ));
+
+    let should_quit = app
+        .handle_fullscreen_key(
+            &mut ui,
+            KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL),
+        )
+        .await
+        .expect("ctrl-o");
+
+    assert!(!should_quit);
+    assert_eq!(
+        copied.lock().expect("clipboard lock").as_slice(),
+        ["second **raw** answer"]
+    );
+    assert!(ui.transcript.iter().all(|row| row.kind != TranscriptKind::Command));
+}
+
+#[tokio::test]
 async fn fullscreen_status_uses_single_multiline_command_row() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
@@ -610,23 +737,22 @@ async fn mouse_wheel_scrolls_transcript_inside_tui() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
-    ui.last_transcript_width = 80;
-    ui.last_transcript_height = 4;
     for index in 0..12 {
         ui.transcript.push(TranscriptRow::simple(
             TranscriptKind::Answer,
             format!("line {index}"),
         ));
     }
-    ui.scroll_to_bottom();
+    let _ = draw_fullscreen_for_test(&app, &mut ui, 80, 10);
     let bottom = ui.scroll;
+    let transcript_area = ui.last_transcript_area.expect("transcript area");
 
     app.handle_fullscreen_mouse(
         &mut ui,
         MouseEvent {
             kind: MouseEventKind::ScrollUp,
-            column: 0,
-            row: 0,
+            column: transcript_area.x,
+            row: transcript_area.y,
             modifiers: KeyModifiers::NONE,
         },
     )
@@ -638,7 +764,78 @@ async fn mouse_wheel_scrolls_transcript_inside_tui() {
 }
 
 #[tokio::test]
-async fn empty_composer_down_scrolls_transcript_toward_bottom() {
+async fn mouse_wheel_in_transcript_does_not_recall_composer_history() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.history = vec!["older prompt".to_string()];
+    for index in 0..18 {
+        ui.transcript.push(TranscriptRow::simple(
+            TranscriptKind::Answer,
+            format!("line {index}"),
+        ));
+    }
+    let _ = draw_fullscreen_for_test(&app, &mut ui, 80, 10);
+    let transcript_area = ui.last_transcript_area.expect("transcript area");
+    ui.scroll = 0;
+    ui.auto_follow_transcript = false;
+
+    app.handle_fullscreen_mouse(
+        &mut ui,
+        MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: transcript_area.x,
+            row: transcript_area.y,
+            modifiers: KeyModifiers::NONE,
+        },
+    )
+    .await
+    .expect("scroll");
+
+    assert!(ui.scroll > 0);
+    assert_eq!(ui.history_index, None);
+    assert_eq!(textarea_text(&ui.textarea), "");
+}
+
+#[tokio::test]
+async fn mouse_wheel_in_composer_or_status_is_ignored() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.history = vec!["older prompt".to_string()];
+    for index in 0..18 {
+        ui.transcript.push(TranscriptRow::simple(
+            TranscriptKind::Answer,
+            format!("line {index}"),
+        ));
+    }
+    let _ = draw_fullscreen_for_test(&app, &mut ui, 80, 10);
+    let composer_area = ui.last_composer_area.expect("composer area");
+    let status_area = ui.last_status_area.expect("status area");
+    ui.scroll = 0;
+    ui.auto_follow_transcript = false;
+
+    for area in [composer_area, status_area] {
+        app.handle_fullscreen_mouse(
+            &mut ui,
+            MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                column: area.x,
+                row: area.y,
+                modifiers: KeyModifiers::NONE,
+            },
+        )
+        .await
+        .expect("scroll");
+    }
+
+    assert_eq!(ui.scroll, 0);
+    assert_eq!(ui.history_index, None);
+    assert_eq!(textarea_text(&ui.textarea), "");
+}
+
+#[tokio::test]
+async fn mouse_wheel_routes_between_bottom_panel_and_transcript_by_hover() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -648,8 +845,66 @@ async fn empty_composer_down_scrolls_transcript_toward_bottom() {
             format!("line {index}"),
         ));
     }
-    let _ = draw_fullscreen_for_test(&app, &mut ui, 80, 10);
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Help)
+        .await
+        .expect("help");
+    let _ = draw_fullscreen_for_test(&app, &mut ui, 80, 24);
+    let transcript_area = ui.last_transcript_area.expect("transcript area");
+    let panel_area = ui.last_bottom_panel_area.expect("bottom panel area");
     ui.scroll = 0;
+    ui.auto_follow_transcript = false;
+
+    app.handle_fullscreen_mouse(
+        &mut ui,
+        MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: panel_area.x,
+            row: panel_area.y,
+            modifiers: KeyModifiers::NONE,
+        },
+    )
+    .await
+    .expect("panel scroll");
+
+    let Some(BottomPanel::Help(panel)) = &ui.bottom_panel else {
+        panic!("help panel");
+    };
+    assert_eq!(panel.scroll, 3);
+    assert_eq!(ui.scroll, 0);
+
+    app.handle_fullscreen_mouse(
+        &mut ui,
+        MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: transcript_area.x,
+            row: transcript_area.y,
+            modifiers: KeyModifiers::NONE,
+        },
+    )
+    .await
+    .expect("transcript scroll");
+
+    let Some(BottomPanel::Help(panel)) = &ui.bottom_panel else {
+        panic!("help panel");
+    };
+    assert_eq!(panel.scroll, 3);
+    assert!(ui.scroll > 0);
+}
+
+#[tokio::test]
+async fn empty_composer_down_without_active_history_does_not_scroll_or_recall() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.history = vec!["older prompt".to_string()];
+    for index in 0..18 {
+        ui.transcript.push(TranscriptRow::simple(
+            TranscriptKind::Answer,
+            format!("line {index}"),
+        ));
+    }
+    let _ = draw_fullscreen_for_test(&app, &mut ui, 80, 10);
+    let bottom = ui.scroll;
     ui.auto_follow_transcript = false;
     ui.textarea = new_textarea();
 
@@ -657,6 +912,59 @@ async fn empty_composer_down_scrolls_transcript_toward_bottom() {
         .await
         .expect("down");
 
-    assert_eq!(ui.scroll, 1);
+    assert_eq!(ui.scroll, bottom);
     assert!(!ui.auto_follow_transcript);
+    assert_eq!(ui.history_index, None);
+    assert_eq!(textarea_text(&ui.textarea), "");
+}
+
+#[tokio::test]
+async fn empty_composer_up_recalls_latest_prompt_without_scrolling_transcript() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.history = vec!["older prompt".to_string(), "latest prompt".to_string()];
+    for index in 0..18 {
+        ui.transcript.push(TranscriptRow::simple(
+            TranscriptKind::Answer,
+            format!("line {index}"),
+        ));
+    }
+    let _ = draw_fullscreen_for_test(&app, &mut ui, 80, 10);
+    let bottom = ui.scroll;
+    let auto_follow = ui.auto_follow_transcript;
+    assert!(bottom > 0);
+    ui.textarea = new_textarea();
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))
+        .await
+        .expect("up");
+
+    assert_eq!(ui.scroll, bottom);
+    assert_eq!(ui.auto_follow_transcript, auto_follow);
+    assert_eq!(ui.history_index, Some(1));
+    assert_eq!(textarea_text(&ui.textarea), "latest prompt");
+}
+
+#[tokio::test]
+async fn non_empty_composer_up_recalls_prompt_history_and_down_restores_draft() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.history = vec!["older prompt".to_string()];
+    ui.textarea = textarea_with_text("draft");
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))
+        .await
+        .expect("up");
+
+    assert_eq!(ui.history_index, Some(0));
+    assert_eq!(textarea_text(&ui.textarea), "older prompt");
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .await
+        .expect("down");
+
+    assert_eq!(ui.history_index, None);
+    assert_eq!(textarea_text(&ui.textarea), "draft");
 }

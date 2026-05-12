@@ -21,13 +21,7 @@ fn message_fields(message: &Message) -> Result<MessageFields> {
         } => Ok(MessageFields {
             role: "user".to_string(),
             timestamp_ms: *timestamp_ms,
-            content_text: Some(
-                content
-                    .iter()
-                    .map(|block| block.text.as_str())
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-            ),
+            content_text: Some(user_content_text(content)),
             tool_call_id: None,
             tool_name: None,
             tool_calls_json: None,
@@ -100,6 +94,22 @@ fn message_fields(message: &Message) -> Result<MessageFields> {
     }
 }
 
+fn user_content_text(content: &[psychevo_agent_core::UserContentBlock]) -> String {
+    let mut image_index = 0usize;
+    content
+        .iter()
+        .map(|block| match block {
+            psychevo_agent_core::UserContentBlock::Text(block) => block.text.clone(),
+            psychevo_agent_core::UserContentBlock::LocalImage(_)
+            | psychevo_agent_core::UserContentBlock::ImageUrl(_) => {
+                image_index += 1;
+                format!("[Image {image_index}]")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn optional_json_string(value: &Option<Value>) -> Result<Option<String>> {
     value
         .as_ref()
@@ -114,4 +124,3 @@ fn parse_optional_json(value: Option<String>) -> Result<Option<Value>> {
         .transpose()
         .map_err(Into::into)
 }
-
