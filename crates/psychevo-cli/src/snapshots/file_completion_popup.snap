@@ -1,5 +1,6 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 667
 expression: combined
 ---
 fixture=file_completion_popup
@@ -21,14 +22,14 @@ size=120x24
 
 
 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-│ files
-│  dir   src
-│> file  src/main.rs
-│  file  crates/psychevo-cli/src/tui/mod.rs
-│
-› review @src
 
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  src  dir
+› src/main.rs  file
+  crates/psychevo-cli/src/tui/mod.rs  file
+› review @src
 mock/model  high  ~/work · main
 
 --- styles ---
@@ -47,12 +48,12 @@ mock/model  high  ~/work · main
 [default]
 [default]
 [default]
-[default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-[default]│ files
-[default]│[cyan]  [magenta]dir [default]  src
-[default]│[cyan]> [magenta]file[cyan]  src/main.rs[default]
-[default]│[cyan]  [magenta]file[default]  crates/psychevo-cli/src/tui/mod.rs
-[default]│
-[dim]›[default] review @src
 [default]
+[default]
+[default]
+[default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[cyan]  src[default]  [dim]dir[default]
+[cyan]› src/main.rs[default]  [dim]file[default]
+[cyan]  crates/psychevo-cli/src/tui/mod.rs[default]  [dim]file[default]
+[dim]›[default] review @src
 [default]mock/model  [magenta]high[default]  [dim]~/work · main[default]

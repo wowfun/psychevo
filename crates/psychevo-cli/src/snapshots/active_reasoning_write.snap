@@ -1,5 +1,6 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 667
 expression: combined
 ---
 fixture=active_reasoning_write
@@ -11,7 +12,8 @@ size=120x24
 ◦ Thinking                                                                                                           0s
   └ Let me compose the full report now. I have all the data. Let me write it out.
 
-◦ Changing /tmp/hackernews-hot-05-39.md                                                                              0s
+◦ Updating /tmp/hackernews-hot-05-39.md                                                                              0s
+
 
 
 
@@ -28,8 +30,7 @@ size=120x24
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
-
-mock/model  high  ◦ 0s · Esc  ~/work · main
+mock/model  high  • 0s · Esc  ~/work · main
 
 --- styles ---
 [dim]› [default]Write the report after reasoning.
@@ -37,7 +38,8 @@ mock/model  high  ◦ 0s · Esc  ~/work · main
 [cyan]◦ [paper]Thinking[default]                                                                                                           [dim]0s[default]
 [dim]  └ Let me compose the full report now. I have all the data. Let me write it out.[default]
 [default]
-[cyan]◦ [default]Changing /tmp/hackernews-hot-05-39.md                                                                              [dim]0s[default]
+[cyan]◦ [default]Updating /tmp/hackernews-hot-05-39.md                                                                              [dim]0s[default]
+[default]
 [default]
 [default]
 [default]
@@ -54,5 +56,4 @@ mock/model  high  ◦ 0s · Esc  ~/work · main
 [default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
-[default]
-[default]mock/model  [magenta]high[default]  [cyan]◦[default] [dim]0s · [cyan]Esc[default]  [dim]~/work · main[default]
+[default]mock/model  [magenta]high[default]  [cyan]•[default] [dim]0s · [cyan]Esc[default]  [dim]~/work · main[default]

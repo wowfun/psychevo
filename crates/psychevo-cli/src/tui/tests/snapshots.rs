@@ -244,7 +244,7 @@ fn tui_snapshot_history_pending_write_call() {
         })),
     );
     for row in &mut ui.transcript {
-        if row.title.starts_with("Changing ") {
+        if row.title.starts_with("Updating ") {
             row.tool_started = Some(
                 Instant::now()
                     .checked_sub(Duration::from_secs(2))
@@ -292,7 +292,7 @@ fn tui_snapshot_active_write_suppresses_failure_meta() {
         false,
     );
     for row in &mut ui.transcript {
-        if row.title.starts_with("Changing ") {
+        if row.title.starts_with("Updating ") {
             row.tool_started = Some(
                 Instant::now()
                     .checked_sub(Duration::from_secs(2))

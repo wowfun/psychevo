@@ -1,11 +1,13 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 667
 expression: combined
 ---
 fixture=long_thinking_markdown_expanded_meta_bottom_scroll
 size=100x18
 
 --- text ---
+    | 1 | **热 门 话 题  1** - 混 合  Markdown/CJK 宽 度 校 验 行  | 181 |
     | 2 | **热 门 话 题  2** - 混 合  Markdown/CJK 宽 度 校 验 行  | 182 |
     | 3 | **热 门 话 题  3** - 混 合  Markdown/CJK 宽 度 校 验 行  | 183 |
     | 4 | **热 门 话 题  4** - 混 合  Markdown/CJK 宽 度 校 验 行  | 184 |
@@ -22,10 +24,10 @@ size=100x18
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
-
 mock/model  high  ~/work · main
 
 --- styles ---
+[dim]    | 1 | **热[default] [dim]门[default] [dim]话[default] [dim]题[default] [dim] 1** - 混[default] [dim]合[default] [dim] Markdown/CJK 宽[default] [dim]度[default] [dim]校[default] [dim]验[default] [dim]行[default] [dim] | 181 |[default]
 [dim]    | 2 | **热[default] [dim]门[default] [dim]话[default] [dim]题[default] [dim] 2** - 混[default] [dim]合[default] [dim] Markdown/CJK 宽[default] [dim]度[default] [dim]校[default] [dim]验[default] [dim]行[default] [dim] | 182 |[default]
 [dim]    | 3 | **热[default] [dim]门[default] [dim]话[default] [dim]题[default] [dim] 3** - 混[default] [dim]合[default] [dim] Markdown/CJK 宽[default] [dim]度[default] [dim]校[default] [dim]验[default] [dim]行[default] [dim] | 183 |[default]
 [dim]    | 4 | **热[default] [dim]门[default] [dim]话[default] [dim]题[default] [dim] 4** - 混[default] [dim]合[default] [dim] Markdown/CJK 宽[default] [dim]度[default] [dim]校[default] [dim]验[default] [dim]行[default] [dim] | 184 |[default]
@@ -42,5 +44,4 @@ mock/model  high  ~/work · main
 [default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
-[default]
 [default]mock/model  [magenta]high[default]  [dim]~/work · main[default]

@@ -1,5 +1,6 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 667
 expression: combined
 ---
 fixture=consecutive_tool_rows_flat
@@ -15,16 +16,16 @@ size=120x20
   └ read 240 lines
 • Ran cargo test -p psychevo-cli tui::tests
   └ ok
-• Changed crates/psychevo-cli/src/tui/render/transcript.rs
+• Updated crates/psychevo-cli/src/tui/render/transcript.rs
   └ write normal
 • Ran cargo fmt
   └ ok
 
 The tool evidence stays flat even when several tool rows arrive consecutively.
 
+
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
-
 mock/model  high  ~/work · main
 
 --- styles ---
@@ -37,14 +38,14 @@ mock/model  high  ~/work · main
 [dim]  └ [default]read 240 lines
 [green]• [default]Ran cargo test -p psychevo-cli tui::tests
 [dim]  └ [default]ok
-[green]• [default]Changed crates/psychevo-cli/src/tui/render/transcript.rs
+[green]• [default]Updated crates/psychevo-cli/src/tui/render/transcript.rs
 [dim]  └ [default]write normal
 [green]• [default]Ran cargo fmt
 [dim]  └ [default]ok
 [default]
 [default]The tool evidence stays flat even when several tool rows arrive consecutively.
 [default]
+[default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
-[default]
 [default]mock/model  [magenta]high[default]  [dim]~/work · main[default]

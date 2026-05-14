@@ -30,7 +30,8 @@ fn transcript_render_blocks_keep_consecutive_tools_flat() {
     let blocks = transcript_render_blocks(&ui);
     assert_eq!(blocks.len(), 4);
     for (index, block) in blocks.iter().enumerate() {
-        assert!(matches!(block, TranscriptRenderBlock::Row { index: row_index } if *row_index == index));
+        assert_eq!(block.index, index);
+        assert_eq!(block.target, TranscriptHitTarget::Row(ui.transcript[index].id));
     }
 }
 
@@ -47,8 +48,8 @@ fn transcript_render_blocks_keep_thinking_and_tools_flat() {
     ui.transcript
         .push(TranscriptRow::with_title(TranscriptKind::Ran, "Ran ls", "ok"));
     ui.transcript.push(TranscriptRow::with_title(
-        TranscriptKind::Changed,
-        "Changed report.md",
+        TranscriptKind::Updated,
+        "Updated report.md",
         "write normal",
     ));
     ui.transcript.push(TranscriptRow::simple(
@@ -58,10 +59,10 @@ fn transcript_render_blocks_keep_thinking_and_tools_flat() {
 
     let blocks = transcript_render_blocks(&ui);
     assert_eq!(blocks.len(), 4);
-    assert!(matches!(blocks[0], TranscriptRenderBlock::Row { index: 0 }));
-    assert!(matches!(blocks[1], TranscriptRenderBlock::Row { index: 1 }));
-    assert!(matches!(blocks[2], TranscriptRenderBlock::Row { index: 2 }));
-    assert!(matches!(blocks[3], TranscriptRenderBlock::Row { index: 3 }));
+    assert_eq!(blocks[0].index, 0);
+    assert_eq!(blocks[1].index, 1);
+    assert_eq!(blocks[2].index, 2);
+    assert_eq!(blocks[3].index, 3);
 }
 
 #[test]
@@ -429,39 +430,21 @@ fn long_running_command_row_expands_full_command() {
 }
 
 #[tokio::test]
-async fn keyboard_enter_toggles_selected_expandable_row() {
+async fn ctrl_t_is_reserved_and_does_not_enter_transcript_focus() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
     let mut row = TranscriptRow::with_title(TranscriptKind::Explored, "Explored log", "a");
     row.full_text = Some("a\nb\nc".to_string());
     ui.transcript.push(row);
-    ui.focus = FocusMode::Transcript;
-    ui.selected_target = Some(TranscriptHitTarget::Row(ui.transcript[0].id));
 
-    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL))
         .await
-        .expect("enter");
+        .expect("ctrl-t");
 
-    assert!(ui.transcript[0].expanded);
-}
-
-#[tokio::test]
-async fn keyboard_space_toggles_selected_expandable_row() {
-    let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let mut ui = FullscreenUi::new(&app);
-    let mut row = TranscriptRow::with_title(TranscriptKind::Explored, "Explored log", "a");
-    row.full_text = Some("a\nb\nc".to_string());
-    ui.transcript.push(row);
-    ui.focus = FocusMode::Transcript;
-    ui.selected_target = Some(TranscriptHitTarget::Row(ui.transcript[0].id));
-
-    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
-        .await
-        .expect("space");
-
-    assert!(ui.transcript[0].expanded);
+    assert_eq!(ui.focus, FocusMode::Composer);
+    assert!(ui.selected_target.is_none());
+    assert!(!ui.transcript[0].expanded);
 }
 
 #[tokio::test]

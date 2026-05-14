@@ -176,7 +176,7 @@ async fn fullscreen_drain_keeps_queued_events_after_task_completion() {
 }
 
 #[tokio::test]
-async fn fast_reasoning_only_write_renders_changing_before_completion() {
+async fn fast_reasoning_only_write_renders_updating_before_completion() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -260,14 +260,14 @@ async fn fast_reasoning_only_write_renders_changing_before_completion() {
         .iter()
         .position(|row| row.kind == TranscriptKind::Thinking)
         .expect("thinking row");
-    let changing = ui
+    let updating = ui
         .transcript
         .iter()
-        .position(|row| row.title == "Changing files")
-        .expect("provisional changing row");
-    assert!(thinking < changing);
-    assert!(ui.transcript[changing].tool_started.is_some());
-    assert!(ui.transcript[changing].tool_call_id.is_none());
+        .position(|row| row.title == "Updating files")
+        .expect("provisional updating row");
+    assert!(thinking < updating);
+    assert!(ui.transcript[updating].tool_started.is_some());
+    assert!(ui.transcript[updating].tool_call_id.is_none());
     assert!(ui
         .transcript
         .iter()
@@ -283,7 +283,7 @@ async fn fast_reasoning_only_write_renders_changing_before_completion() {
     assert!(ui
         .transcript
         .iter()
-        .any(|row| row.title == "Changing /tmp/hackernews-hot-05-39.md"));
+        .any(|row| row.title == "Updating /tmp/hackernews-hot-05-39.md"));
 
     app.drain_fullscreen_events(&mut ui)
         .await
@@ -292,7 +292,7 @@ async fn fast_reasoning_only_write_renders_changing_before_completion() {
     assert!(ui
         .transcript
         .iter()
-        .any(|row| row.title == "Changed feeds/2026-05-10/hackernews-hot-05-39.md"));
+        .any(|row| row.title == "Updated feeds/2026-05-10/hackernews-hot-05-39.md"));
 }
 
 #[tokio::test]
@@ -366,7 +366,7 @@ async fn pending_write_tool_input_defers_later_completion_events() {
     assert!(ui
         .transcript
         .iter()
-        .any(|row| row.title == "Changing files"));
+        .any(|row| row.title == "Updating files"));
     assert_eq!(ui.deferred_stream_events.len(), 3);
     assert!(ui.running.is_some());
 
@@ -376,7 +376,7 @@ async fn pending_write_tool_input_defers_later_completion_events() {
     assert!(ui
         .transcript
         .iter()
-        .any(|row| row.title == "Changing /tmp/hackernews-hot-05-39.md"));
+        .any(|row| row.title == "Updating /tmp/hackernews-hot-05-39.md"));
     assert_eq!(ui.deferred_stream_events.len(), 1);
 
     app.drain_fullscreen_events(&mut ui)
@@ -386,7 +386,7 @@ async fn pending_write_tool_input_defers_later_completion_events() {
     assert!(ui
         .transcript
         .iter()
-        .any(|row| row.title == "Changed feeds/2026-05-10/hackernews-hot-05-39.md"));
+        .any(|row| row.title == "Updated feeds/2026-05-10/hackernews-hot-05-39.md"));
 }
 
 #[test]
@@ -974,7 +974,7 @@ fn load_history_rehydrates_pending_write_tool_call() {
     let mut ui = FullscreenUi::new(&app);
     app.load_current_session_history(&mut ui).expect("history");
     assert!(ui.transcript.iter().any(|row| {
-        row.title == "Changing feeds/2026-05-10/hackernews-hot-06-42.md"
+        row.title == "Updating feeds/2026-05-10/hackernews-hot-06-42.md"
             && row.tool_started.is_some()
     }));
     assert!(
@@ -1003,12 +1003,12 @@ fn load_history_rehydrates_pending_write_tool_call() {
     let rows = ui
         .transcript
         .iter()
-        .filter(|row| row.kind == TranscriptKind::Changed)
+        .filter(|row| row.kind == TranscriptKind::Updated)
         .collect::<Vec<_>>();
     assert_eq!(rows.len(), 1);
     assert_eq!(
         rows[0].title,
-        "Changed feeds/2026-05-10/hackernews-hot-06-42.md"
+        "Updated feeds/2026-05-10/hackernews-hot-06-42.md"
     );
     assert!(rows[0].tool_started.is_none());
 }

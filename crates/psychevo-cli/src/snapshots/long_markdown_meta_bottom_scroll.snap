@@ -7,6 +7,7 @@ fixture=long_markdown_meta_bottom_scroll
 size=100x18
 
 --- text ---
+│ 23 │ Topic 23 - mixed Markdown/CJK width validation row │ 123   │
 │ 24 │ Topic 24 - mixed Markdown/CJK width validation row │ 124   │
 │ 25 │ Topic 25 - mixed Markdown/CJK width validation row │ 125   │
 │ 26 │ Topic 26 - mixed Markdown/CJK width validation row │ 126   │
@@ -23,10 +24,10 @@ LONG_MARKDOWN_BOTTOM_MARKER
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
-
 mock/model  high  ~/work · main
 
 --- styles ---
+[dim]│ [default]23[dim] │ [default]Topic 23 - mixed Markdown/CJK width validation row[dim] │ [default]123  [dim] │[default]
 [dim]│ [default]24[dim] │ [default]Topic 24 - mixed Markdown/CJK width validation row[dim] │ [default]124  [dim] │[default]
 [dim]│ [default]25[dim] │ [default]Topic 25 - mixed Markdown/CJK width validation row[dim] │ [default]125  [dim] │[default]
 [dim]│ [default]26[dim] │ [default]Topic 26 - mixed Markdown/CJK width validation row[dim] │ [default]126  [dim] │[default]
@@ -43,5 +44,4 @@ mock/model  high  ~/work · main
 [default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
-[default]
 [default]mock/model  [magenta]high[default]  [dim]~/work · main[default]

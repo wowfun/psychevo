@@ -1,11 +1,13 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 667
 expression: combined
 ---
 fixture=collapsed_long_json_tool_output
 size=120x18
 
 --- text ---
+
 • Ran sqlite3 feeds/.cache/hn.db                                                                          ▸ more output
   └ {"comments":[{"id":48070001,"by":"user1","text":"identity verification discussion identity verification discussion
 "},{"id":48070002,"by":"user2","text":"identity verification discussion identity verification discussion
@@ -22,10 +24,10 @@ size=120x18
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
-
 mock/model  high  ~/work · main
 
 --- styles ---
+[default]
 [green]• [default]Ran sqlite3 feeds/.cache/hn.db                                                                          [dim]▸ more output[default]
 [dim]  └ [default]{"comments":[{"id":48070001,"by":"user1","text":"identity verification discussion identity verification discussion
 [default]"},{"id":48070002,"by":"user2","text":"identity verification discussion identity verification discussion
@@ -42,5 +44,4 @@ mock/model  high  ~/work · main
 [default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
-[default]
 [default]mock/model  [magenta]high[default]  [dim]~/work · main[default]

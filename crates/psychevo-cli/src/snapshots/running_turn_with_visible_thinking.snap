@@ -1,5 +1,6 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 667
 expression: combined
 ---
 fixture=running_turn_with_visible_thinking
@@ -26,10 +27,10 @@ size=120x24
 
 
 
+
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
-
-mock/model  high  ◦ 12s · Esc  ~/work · main
+mock/model  high  • 12s · Esc  ~/work · main
 
 --- styles ---
 [dim]› [default]Inspect the CLI rendering path.
@@ -52,7 +53,7 @@ mock/model  high  ◦ 12s · Esc  ~/work · main
 [default]
 [default]
 [default]
+[default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
-[default]
-[default]mock/model  [magenta]high[default]  [cyan]◦[default] [dim]12s · [cyan]Esc[default]  [dim]~/work · main[default]
+[default]mock/model  [magenta]high[default]  [cyan]•[default] [dim]12s · [cyan]Esc[default]  [dim]~/work · main[default]

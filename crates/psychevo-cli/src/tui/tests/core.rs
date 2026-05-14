@@ -160,9 +160,9 @@ fn turn_printer_announces_streaming_tool_preparation_once() {
         .expect("end");
 
     let output = String::from_utf8(output).expect("utf8");
-    assert_eq!(output.matches("Changing files: preparing").count(), 1);
-    assert!(!output.contains("Changing report.md: running"));
-    assert!(output.contains("Changed report.md 1s:"));
+    assert_eq!(output.matches("Updating files: preparing").count(), 1);
+    assert!(!output.contains("Updating report.md: running"));
+    assert!(output.contains("Updated report.md 1s:"));
 }
 
 #[test]
@@ -214,5 +214,5 @@ fn turn_printer_scopes_reused_tool_positions_across_messages() {
 
     let output = String::from_utf8(output).expect("utf8");
     assert!(output.contains("Running echo one: preparing"));
-    assert!(output.contains("Changing report.md: preparing"));
+    assert!(output.contains("Updating report.md: preparing"));
 }

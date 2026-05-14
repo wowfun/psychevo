@@ -71,7 +71,7 @@ fn transcript_viewport_excludes_bottom_border_from_scroll_height() {
 
     let _buffer = draw_fullscreen_for_test(&app, &mut ui, 48, 10);
 
-    assert_eq!(ui.last_transcript_height, 6);
+    assert_eq!(ui.last_transcript_height, 7);
 }
 
 #[test]
@@ -391,9 +391,9 @@ fn active_tool_rows_render_present_tense_without_redundant_body() {
             "Running cargo test -p psychevo-cli",
         ),
         (
-            TranscriptKind::Changed,
-            "Changed src/lib.rs",
-            "Changing src/lib.rs",
+            TranscriptKind::Updated,
+            "Updated src/lib.rs",
+            "Updating src/lib.rs",
         ),
     ] {
         let mut row = TranscriptRow::with_title(kind, stored_title, "running");
@@ -482,7 +482,7 @@ fn completed_tool_title_formats_elapsed_minutes() {
 }
 
 #[test]
-fn streaming_tool_call_creates_pending_changing_row_before_execution() {
+fn streaming_tool_call_creates_pending_updating_row_before_execution() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -508,8 +508,8 @@ fn streaming_tool_call_creates_pending_changing_row_before_execution() {
     );
 
     assert_eq!(ui.transcript.len(), 1);
-    assert_eq!(ui.transcript[0].kind, TranscriptKind::Changed);
-    assert_eq!(ui.transcript[0].title, "Changing files");
+    assert_eq!(ui.transcript[0].kind, TranscriptKind::Updated);
+    assert_eq!(ui.transcript[0].title, "Updating files");
     assert_eq!(ui.transcript[0].text, "preparing");
     assert!(ui.transcript[0].tool_started.is_some());
     assert!(ui
@@ -558,15 +558,15 @@ fn streaming_tool_call_after_visible_text_stays_below_answer() {
     let tool = ui
         .transcript
         .iter()
-        .position(|row| row.kind == TranscriptKind::Changed)
+        .position(|row| row.kind == TranscriptKind::Updated)
         .expect("tool row");
     assert!(answer < tool);
-    assert_eq!(ui.transcript[tool].title, "Changing report.md");
+    assert_eq!(ui.transcript[tool].title, "Updating report.md");
 
     ui.scroll_to_bottom();
     let buffer = draw_fullscreen_for_test(&app, &mut ui, 80, 8);
     let text = buffer_text(&buffer);
-    assert!(text.contains("Changing report.md"), "{text}");
+    assert!(text.contains("Updating report.md"), "{text}");
     assert!(!text.contains("Tool calls"), "{text}");
 }
 
@@ -632,10 +632,10 @@ fn message_end_text_plus_write_tool_shows_active_row_without_intermediate_meta()
     let tool = ui
         .transcript
         .iter()
-        .position(|row| row.kind == TranscriptKind::Changed)
+        .position(|row| row.kind == TranscriptKind::Updated)
         .expect("tool row");
     assert!(answer < tool);
-    assert_eq!(ui.transcript[tool].title, "Changing /tmp/hackernews-hot-05-15.md");
+    assert_eq!(ui.transcript[tool].title, "Updating /tmp/hackernews-hot-05-15.md");
     assert!(
         ui.transcript
             .iter()
@@ -647,13 +647,13 @@ fn message_end_text_plus_write_tool_shows_active_row_without_intermediate_meta()
     ui.scroll_to_bottom();
     let buffer = draw_fullscreen_for_test(&app, &mut ui, 100, 8);
     let text = buffer_text(&buffer);
-    assert!(text.contains("Changing /tmp/hackernews-hot-05-15.md"), "{text}");
+    assert!(text.contains("Updating /tmp/hackernews-hot-05-15.md"), "{text}");
     assert!(!text.contains("Tool calls"), "{text}");
     assert!(!text.contains("xiaomi-token-plan/mimo-v2.5-pro"), "{text}");
 }
 
 #[test]
-fn pending_write_tool_input_shows_changing_before_complete_arguments() {
+fn pending_write_tool_input_shows_updating_before_complete_arguments() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -702,10 +702,10 @@ fn pending_write_tool_input_shows_changing_before_complete_arguments() {
     let tool = ui
         .transcript
         .iter()
-        .position(|row| row.kind == TranscriptKind::Changed)
+        .position(|row| row.kind == TranscriptKind::Updated)
         .expect("tool row");
     assert!(answer < tool);
-    assert_eq!(ui.transcript[tool].title, "Changing files");
+    assert_eq!(ui.transcript[tool].title, "Updating files");
     assert!(ui.transcript[tool].tool_started.is_some());
     assert!(
         ui.transcript
@@ -726,18 +726,18 @@ fn pending_write_tool_input_shows_changing_before_complete_arguments() {
         }),
         false,
     );
-    assert_eq!(ui.transcript[tool].title, "Changing feeds/report.md");
+    assert_eq!(ui.transcript[tool].title, "Updating feeds/report.md");
 
     ui.scroll_to_bottom();
     let buffer = draw_fullscreen_for_test(&app, &mut ui, 100, 8);
     let text = buffer_text(&buffer);
-    assert!(text.contains("Changing feeds/report.md"), "{text}");
+    assert!(text.contains("Updating feeds/report.md"), "{text}");
     assert!(!text.contains("Tool calls"), "{text}");
     assert!(!text.contains("xiaomi-token-plan/mimo-v2.5-pro"), "{text}");
 }
 
 #[test]
-fn visible_write_preamble_creates_and_reconciles_provisional_changing_row() {
+fn visible_write_preamble_creates_and_reconciles_provisional_updating_row() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -759,7 +759,7 @@ fn visible_write_preamble_creates_and_reconciles_provisional_changing_row() {
     let provisional = ui
         .transcript
         .iter()
-        .position(|row| row.title == "Changing files")
+        .position(|row| row.title == "Updating files")
         .expect("provisional row");
     assert!(ui.transcript[provisional].tool_call_id.is_none());
 
@@ -774,7 +774,7 @@ fn visible_write_preamble_creates_and_reconciles_provisional_changing_row() {
         }),
         false,
     );
-    assert_eq!(ui.transcript[provisional].title, "Changing feeds/report.md");
+    assert_eq!(ui.transcript[provisional].title, "Updating feeds/report.md");
     assert_eq!(
         ui.transcript[provisional].tool_call_id.as_deref(),
         Some("call_write_report")
@@ -782,7 +782,7 @@ fn visible_write_preamble_creates_and_reconciles_provisional_changing_row() {
     assert_eq!(
         ui.transcript
             .iter()
-            .filter(|row| row.kind == TranscriptKind::Changed)
+            .filter(|row| row.kind == TranscriptKind::Updated)
             .count(),
         1
     );
@@ -810,7 +810,7 @@ fn visible_write_preamble_does_not_leave_orphan_after_non_write_tool_message() {
     assert!(ui
         .transcript
         .iter()
-        .any(|row| row.title == "Changing files"));
+        .any(|row| row.title == "Updating files"));
 
     ui.apply_value_event(
         &serde_json::json!({
@@ -843,7 +843,7 @@ fn visible_write_preamble_does_not_leave_orphan_after_non_write_tool_message() {
     assert!(
         ui.transcript
             .iter()
-            .all(|row| row.title != "Changing files"),
+            .all(|row| row.title != "Updating files"),
         "{:?}",
         ui.transcript
     );
@@ -931,14 +931,14 @@ fn repeated_visible_write_preamble_does_not_duplicate_after_concrete_write_signa
     assert!(ui
         .transcript
         .iter()
-        .all(|row| row.title != "Changing files"));
-    let changed = ui
+        .all(|row| row.title != "Updating files"));
+    let updated = ui
         .transcript
         .iter()
-        .filter(|row| row.kind == TranscriptKind::Changed)
+        .filter(|row| row.kind == TranscriptKind::Updated)
         .collect::<Vec<_>>();
-    assert_eq!(changed.len(), 1);
-    assert_eq!(changed[0].title, "Changed feeds/report.md");
+    assert_eq!(updated.len(), 1);
+    assert_eq!(updated[0].title, "Updated feeds/report.md");
 }
 
 #[test]
@@ -986,7 +986,7 @@ fn active_write_removes_confusing_failure_meta_until_it_settles() {
     assert!(ui
         .transcript
         .iter()
-        .any(|row| row.title == "Changing files"));
+        .any(|row| row.title == "Updating files"));
     assert!(
         ui.transcript
             .iter()
@@ -1046,7 +1046,7 @@ fn reasoning_delta_removes_prior_failure_meta_while_turn_continues() {
     assert!(ui
         .transcript
         .iter()
-        .all(|row| row.title != "Changing files"));
+        .all(|row| row.title != "Updating files"));
 }
 
 #[test]
@@ -1134,7 +1134,7 @@ fn visible_write_preamble_provisional_row_is_removed_without_tool_call() {
     assert!(ui
         .transcript
         .iter()
-        .any(|row| row.title == "Changing files"));
+        .any(|row| row.title == "Updating files"));
 
     ui.apply_value_event(
         &serde_json::json!({
@@ -1156,7 +1156,7 @@ fn visible_write_preamble_provisional_row_is_removed_without_tool_call() {
     assert!(ui
         .transcript
         .iter()
-        .all(|row| row.title != "Changing files"));
+        .all(|row| row.title != "Updating files"));
 }
 
 #[test]
@@ -1216,10 +1216,10 @@ fn streaming_tool_call_migrates_position_key_to_tool_id_without_duplicate() {
     let rows = ui
         .transcript
         .iter()
-        .filter(|row| row.kind == TranscriptKind::Changed)
+        .filter(|row| row.kind == TranscriptKind::Updated)
         .collect::<Vec<_>>();
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].title, "Changing report.md");
+    assert_eq!(rows[0].title, "Updating report.md");
     assert_eq!(rows[0].text, "running");
     assert_eq!(rows[0].tool_call_id.as_deref(), Some("call_write"));
 }
@@ -1263,8 +1263,8 @@ fn streaming_tool_completion_reuses_pending_row_as_completed_evidence() {
 
     assert_eq!(ui.transcript.len(), 1);
     let row = &ui.transcript[0];
-    assert_eq!(row.kind, TranscriptKind::Changed);
-    assert_eq!(row.title, "Changed report.md");
+    assert_eq!(row.kind, TranscriptKind::Updated);
+    assert_eq!(row.title, "Updated report.md");
     assert!(row.text.contains("write normal"));
     assert_eq!(row.tool_elapsed, Some(Duration::from_millis(65_000)));
     assert!(row.tool_started.is_none());
@@ -1284,10 +1284,10 @@ fn completed_live_tool_elapsed_keeps_visible_active_duration_for_all_tool_phases
         ),
         (
             "search",
-            serde_json::json!({"query": "Changing"}),
-            serde_json::json!({"query": "Changing", "matches": []}),
+            serde_json::json!({"query": "Updating"}),
+            serde_json::json!({"query": "Updating", "matches": []}),
             TranscriptKind::Explored,
-            "Explored search Changing",
+            "Explored search Updating",
         ),
         (
             "bash",
@@ -1300,15 +1300,15 @@ fn completed_live_tool_elapsed_keeps_visible_active_duration_for_all_tool_phases
             "write",
             serde_json::json!({"path": "report.md", "content": "body"}),
             serde_json::json!({"path": "report.md", "bytes_written": 4}),
-            TranscriptKind::Changed,
-            "Changed report.md",
+            TranscriptKind::Updated,
+            "Updated report.md",
         ),
         (
             "edit",
             serde_json::json!({"path": "report.md", "old": "a", "new": "b"}),
             serde_json::json!({"path": "report.md", "replacements": 1}),
-            TranscriptKind::Changed,
-            "Changed report.md",
+            TranscriptKind::Updated,
+            "Updated report.md",
         ),
     ];
 
@@ -1388,7 +1388,7 @@ fn interrupted_pending_tool_row_stops_timer_as_interrupted() {
     ui.finish_turn();
 
     let row = &ui.transcript[0];
-    assert_eq!(row.title, "Changed src/lib.rs");
+    assert_eq!(row.title, "Updated src/lib.rs");
     assert_eq!(row.text, "interrupted");
     assert!(row.interrupted);
     assert!(!row.failed);
@@ -1516,12 +1516,12 @@ fn sequential_streaming_tool_calls_reuse_position_without_overwriting_rows() {
         .filter(|row| {
             matches!(
                 row.kind,
-                TranscriptKind::Explored | TranscriptKind::Ran | TranscriptKind::Changed
+                TranscriptKind::Explored | TranscriptKind::Ran | TranscriptKind::Updated
             )
         })
         .map(|row| row.title.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(titles, ["Ran echo one", "Changed report.md"]);
+    assert_eq!(titles, ["Ran echo one", "Updated report.md"]);
 }
 
 #[test]
@@ -1796,8 +1796,8 @@ fn history_text_plus_tool_call_message_shows_active_row_without_turn_meta() {
             .any(|row| row.kind == TranscriptKind::Answer)
     );
     assert!(ui.transcript.iter().any(|row| {
-        row.kind == TranscriptKind::Changed
-            && row.title == "Changing /tmp/hackernews-hot-05-15.md"
+        row.kind == TranscriptKind::Updated
+            && row.title == "Updating /tmp/hackernews-hot-05-15.md"
             && row.tool_started.is_some()
     }));
     assert!(
@@ -2057,7 +2057,7 @@ fn history_tool_result_updates_rehydrated_pending_write_row() {
     assert!(ui
         .transcript
         .iter()
-        .any(|row| row.title == "Changing feeds/2026-05-10/hackernews-hot-06-42.md"));
+        .any(|row| row.title == "Updating feeds/2026-05-10/hackernews-hot-06-42.md"));
 
     ui.push_history_message(
         &serde_json::json!({
@@ -2072,18 +2072,18 @@ fn history_tool_result_updates_rehydrated_pending_write_row() {
         Some(&serde_json::json!({"elapsed_ms": 0})),
     );
 
-    let changed = ui
+    let updated = ui
         .transcript
         .iter()
-        .filter(|row| row.kind == TranscriptKind::Changed)
+        .filter(|row| row.kind == TranscriptKind::Updated)
         .collect::<Vec<_>>();
-    assert_eq!(changed.len(), 1);
+    assert_eq!(updated.len(), 1);
     assert_eq!(
-        changed[0].title,
-        "Changed feeds/2026-05-10/hackernews-hot-06-42.md"
+        updated[0].title,
+        "Updated feeds/2026-05-10/hackernews-hot-06-42.md"
     );
-    assert_eq!(changed[0].tool_elapsed, Some(Duration::from_millis(0)));
-    assert!(changed[0].tool_started.is_none());
+    assert_eq!(updated[0].tool_elapsed, Some(Duration::from_millis(0)));
+    assert!(updated[0].tool_started.is_none());
     assert!(ui.tool_rows.is_empty());
 }
 
@@ -2193,7 +2193,7 @@ fn bottom_status_line_renders_minimal_workdir_branch_and_context() {
     let text = buffer_text(&buffer);
 
     assert!(
-        text.contains("mock/model  high  ~/work · main · ~50/100 (50.0%) estimated"),
+        text.contains("mock/model  high  ~50/100 (50.0%) estimated · ~/work · main"),
         "{text}"
     );
     assert!(!text.contains("workdir:"), "{text}");
@@ -2209,7 +2209,7 @@ fn bottom_status_context_hides_missing_branch_and_unknown_limit() {
     ui.last_context_snapshot = Some(test_context_snapshot());
 
     let text = bottom_status_context_for_width(&app, &ui, 80).expect("status context");
-    assert_eq!(text, "~/work · ~50/100 (50.0%) estimated");
+    assert_eq!(text, "~50/100 (50.0%) estimated · ~/work");
 
     let mut snapshot = test_context_snapshot();
     snapshot.context_limit = None;
@@ -2230,7 +2230,7 @@ fn bottom_status_context_uses_live_input_usage_before_snapshot() {
 
     let text = bottom_status_context_for_width(&app, &ui, 80).expect("status context");
 
-    assert_eq!(text, "~/work · main · 29.8k/1.0M (3.0%)");
+    assert_eq!(text, "29.8k/1.0M (3.0%) · ~/work · main");
 }
 
 #[test]
@@ -2243,7 +2243,7 @@ fn bottom_status_context_hides_branch_before_context_usage() {
 
     let text = bottom_status_context_for_width(&app, &ui, 36).expect("status context");
 
-    assert_eq!(text, "~/work · ~50/100 (50.0%) estimated");
+    assert_eq!(text, "~50/100 (50.0%) estimated · ~/work");
 }
 
 #[test]
@@ -2387,7 +2387,7 @@ fn live_tool_call_reasoning_message_does_not_get_turn_meta() {
 }
 
 #[test]
-fn reasoning_only_write_message_shows_active_changing_without_meta() {
+fn reasoning_only_write_message_shows_active_updating_without_meta() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -2413,14 +2413,14 @@ fn reasoning_only_write_message_shows_active_changing_without_meta() {
     let provisional = ui
         .transcript
         .iter()
-        .position(|row| row.title == "Changing files")
-        .expect("provisional changing row");
+        .position(|row| row.title == "Updating files")
+        .expect("provisional updating row");
     assert!(ui.transcript[provisional].tool_started.is_some());
     assert_eq!(ui.transcript[provisional].tool_call_id, None);
     assert!(
         ui.transcript
             .iter()
-            .all(|row| row.title != "Changing /tmp/hackernews-hot-05-39.md"),
+            .all(|row| row.title != "Updating /tmp/hackernews-hot-05-39.md"),
         "{:?}",
         ui.transcript
     );
@@ -2462,17 +2462,17 @@ fn reasoning_only_write_message_shows_active_changing_without_meta() {
         .iter()
         .position(|row| row.kind == TranscriptKind::Thinking)
         .expect("thinking row");
-    let changing = ui
+    let updating = ui
         .transcript
         .iter()
-        .position(|row| row.kind == TranscriptKind::Changed)
-        .expect("changing row");
-    assert!(thinking < changing);
+        .position(|row| row.kind == TranscriptKind::Updated)
+        .expect("updating row");
+    assert!(thinking < updating);
     assert_eq!(
-        ui.transcript[changing].title,
-        "Changing /tmp/hackernews-hot-05-39.md"
+        ui.transcript[updating].title,
+        "Updating /tmp/hackernews-hot-05-39.md"
     );
-    assert!(ui.transcript[changing].tool_started.is_some());
+    assert!(ui.transcript[updating].tool_started.is_some());
     assert!(
         ui.transcript
             .iter()
@@ -2486,7 +2486,7 @@ fn reasoning_only_write_message_shows_active_changing_without_meta() {
 }
 
 #[test]
-fn hidden_thinking_write_intent_does_not_create_provisional_changing() {
+fn hidden_thinking_write_intent_does_not_create_provisional_updating() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -2507,7 +2507,7 @@ fn hidden_thinking_write_intent_does_not_create_provisional_changing() {
     assert!(ui
         .transcript
         .iter()
-        .all(|row| row.title != "Changing files"));
+        .all(|row| row.title != "Updating files"));
 }
 
 #[test]
@@ -2596,7 +2596,7 @@ fn composer_and_prompt_share_full_width_surface() {
         .draw(|frame| app.render_fullscreen(frame, &mut ui))
         .expect("draw");
     let buffer = terminal.backend().buffer();
-    let composer_y = 7;
+    let composer_y = 8;
 
     assert_eq!(buffer.cell((0, 0)).expect("prompt marker").symbol(), "›");
     assert_eq!(
@@ -2628,20 +2628,6 @@ fn composer_and_prompt_share_full_width_surface() {
             .expect("composer rail")
             .symbol(),
         "│"
-    );
-    assert_eq!(
-        buffer
-            .cell((0, composer_y + 1))
-            .expect("composer row bg")
-            .bg,
-        TUI_SURFACE_BG
-    );
-    assert_eq!(
-        buffer
-            .cell((47, composer_y + 1))
-            .expect("composer row trailing bg")
-            .bg,
-        TUI_SURFACE_BG
     );
 }
 
@@ -2678,7 +2664,7 @@ fn wrapped_prompt_rows_keep_full_width_background_for_wide_text() {
 }
 
 #[test]
-fn empty_composer_uses_two_surface_rows() {
+fn empty_composer_uses_one_surface_row() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -2688,7 +2674,7 @@ fn empty_composer_uses_two_surface_rows() {
         .draw(|frame| app.render_fullscreen(frame, &mut ui))
         .expect("draw");
     let buffer = terminal.backend().buffer();
-    let composer_y = 7;
+    let composer_y = 8;
 
     assert_eq!(
         buffer
@@ -2697,16 +2683,14 @@ fn empty_composer_uses_two_surface_rows() {
             .symbol(),
         "›"
     );
-    for y in composer_y..=composer_y + 1 {
-        assert_eq!(
-            buffer.cell((0, y)).expect("composer row start").bg,
-            TUI_SURFACE_BG
-        );
-        assert_eq!(
-            buffer.cell((47, y)).expect("composer row end").bg,
-            TUI_SURFACE_BG
-        );
-    }
+    assert_eq!(
+        buffer.cell((0, composer_y)).expect("composer row start").bg,
+        TUI_SURFACE_BG
+    );
+    assert_eq!(
+        buffer.cell((47, composer_y)).expect("composer row end").bg,
+        TUI_SURFACE_BG
+    );
 }
 
 #[test]

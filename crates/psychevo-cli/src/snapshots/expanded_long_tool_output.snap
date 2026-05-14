@@ -1,5 +1,6 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 667
 expression: combined
 ---
 fixture=expanded_long_tool_output
@@ -26,9 +27,9 @@ size=120x24
     12: crates/psychevo-cli/src/tui.rs evidence row
     13: crates/psychevo-cli/src/tui.rs evidence row
     14: crates/psychevo-cli/src/tui.rs evidence row
+    15: crates/psychevo-cli/src/tui.rs evidence row
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
-
 mock/model  high  ~/work · main
 
 --- styles ---
@@ -52,7 +53,7 @@ mock/model  high  ~/work · main
 [dim]    [default]12: crates/psychevo-cli/src/tui.rs evidence row
 [dim]    [default]13: crates/psychevo-cli/src/tui.rs evidence row
 [dim]    [default]14: crates/psychevo-cli/src/tui.rs evidence row
+[dim]    [default]15: crates/psychevo-cli/src/tui.rs evidence row
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
-[default]
 [default]mock/model  [magenta]high[default]  [dim]~/work · main[default]

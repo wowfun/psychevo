@@ -1,5 +1,6 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 667
 expression: combined
 ---
 fixture=slash_menu_prefix_filtering
@@ -22,13 +23,13 @@ size=120x24
 
 
 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-│ commands
-│> /model  select/fetch model
-│  /mode  set <plan|default>
-│
-› /mo
 
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+› /model  select/fetch model
+  /mode  set <plan|default>
+› /mo
 mock/model  high  ~/work · main
 
 --- styles ---
@@ -48,11 +49,11 @@ mock/model  high  ~/work · main
 [default]
 [default]
 [default]
-[default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-[default]│ commands
-[default]│[cyan]> /model[dim]  select/fetch model[default]
-[default]│[cyan]  /mode[dim]  set <plan|default>[default]
-[default]│
-[dim]›[default] /mo
 [default]
+[default]
+[default]
+[default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[cyan]› /model[default]  [dim]select/fetch model[default]
+[cyan]  /mode[default]  [dim]set <plan|default>[default]
+[dim]›[default] /mo
 [default]mock/model  [magenta]high[default]  [dim]~/work · main[default]

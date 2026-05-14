@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-05-15
+
+### Added
+
+- Added the 080 Design System spec for `pevo tui`.
+
+### Changed
+
+- Reworked `pevo tui` around the V1 design-system direction, including
+  composer/status/popup surfaces, evidence wording, `Ctrl+T` reservation, and
+  updated snapshots.
+
 ## 2026-05-13
 
 ### Fixed

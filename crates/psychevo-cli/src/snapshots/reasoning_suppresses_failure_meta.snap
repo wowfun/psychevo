@@ -1,5 +1,6 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 667
 expression: combined
 ---
 fixture=reasoning_suppresses_failure_meta
@@ -20,10 +21,10 @@ comments.
 
 
 
+
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
-
-mock/model  high  ◦ 0s · Esc  ~/work
+mock/model  high  • 0s · Esc  ~/work
 
 --- styles ---
 [red]• Ran command[default]                                                                                                        [dim]0s[default]
@@ -40,7 +41,7 @@ mock/model  high  ◦ 0s · Esc  ~/work
 [default]
 [default]
 [default]
+[default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
-[default]
-[default]mock/model  [magenta]high[default]  [cyan]◦[default] [dim]0s · [cyan]Esc[default]  [dim]~/work[default]
+[default]mock/model  [magenta]high[default]  [cyan]•[default] [dim]0s · [cyan]Esc[default]  [dim]~/work[default]

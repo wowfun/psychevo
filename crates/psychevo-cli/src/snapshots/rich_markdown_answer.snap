@@ -27,9 +27,9 @@ See crates/psychevo-cli/src/tui/render/transcript.rs:42.
 
 
 
+
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
-
 mock/model  high  ~/work · main
 
 --- styles ---
@@ -53,7 +53,7 @@ mock/model  high  ~/work · main
 [default]
 [default]
 [default]
+[default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
-[default]
 [default]mock/model  [magenta]high[default]  [dim]~/work · main[default]

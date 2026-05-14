@@ -1,5 +1,6 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 667
 expression: combined
 ---
 fixture=long_thinking_markdown_meta_bottom_scroll
@@ -20,9 +21,9 @@ size=100x18
 
 ▌ xiaomi-token-plan/mimo-v2.5-pro low 7m05s 1 failure
 
+
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
-
 mock/model  high  ~/work · main
 
 --- styles ---
@@ -40,7 +41,7 @@ mock/model  high  ~/work · main
 [default]
 [dim]▌ xiaomi-token-plan/mimo-v2.5-pro low 7m05s 1 failure[default]
 [default]
+[default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
-[default]
 [default]mock/model  [magenta]high[default]  [dim]~/work · main[default]

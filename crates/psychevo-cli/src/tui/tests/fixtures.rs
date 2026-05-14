@@ -349,8 +349,8 @@ fn push_consecutive_tool_rows_turn(ui: &mut FullscreenUi<'_>) {
         "ok",
     ));
     ui.transcript.push(TranscriptRow::with_title(
-        TranscriptKind::Changed,
-        "Changed crates/psychevo-cli/src/tui/render/transcript.rs",
+        TranscriptKind::Updated,
+        "Updated crates/psychevo-cli/src/tui/render/transcript.rs",
         "write normal",
     ));
     ui.transcript.push(TranscriptRow::with_title(

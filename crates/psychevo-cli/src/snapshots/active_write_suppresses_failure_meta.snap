@@ -1,5 +1,6 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 667
 expression: combined
 ---
 fixture=active_write_suppresses_failure_meta
@@ -11,7 +12,8 @@ size=120x18
 
 Now let me write the full report:
 
-◦ Changing files                                                                                                     2s
+◦ Updating files                                                                                                     2s
+
 
 
 
@@ -22,8 +24,7 @@ Now let me write the full report:
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
-
-mock/model  high  ◦ 0s · Esc  ~/work
+mock/model  high  • 0s · Esc  ~/work
 
 --- styles ---
 [red]• Ran command[default]                                                                                                        [dim]0s[default]
@@ -31,7 +32,8 @@ mock/model  high  ◦ 0s · Esc  ~/work
 [default]
 [default]Now let me write the full report:
 [default]
-[cyan]◦ [default]Changing files                                                                                                     [dim]2s[default]
+[cyan]◦ [default]Updating files                                                                                                     [dim]2s[default]
+[default]
 [default]
 [default]
 [default]
@@ -42,5 +44,4 @@ mock/model  high  ◦ 0s · Esc  ~/work
 [default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
-[default]
-[default]mock/model  [magenta]high[default]  [cyan]◦[default] [dim]0s · [cyan]Esc[default]  [dim]~/work[default]
+[default]mock/model  [magenta]high[default]  [cyan]•[default] [dim]0s · [cyan]Esc[default]  [dim]~/work[default]
