@@ -71,29 +71,27 @@ fn render_slash_menu(
 ) {
     let theme = tui_theme();
     row_areas.clear();
-    let lines = items
+    frame.render_widget(Block::default().style(theme.menu_style()), area);
+    let rows = items
         .iter()
         .enumerate()
         .map(|(index, item)| {
-            let marker = if item.upcoming { " upcoming" } else { "" };
-            let selected = index == selected_index;
-            let prefix = if selected { "> " } else { "  " };
-            let row_style = if selected {
-                theme.selected_row_style()
-            } else {
-                Style::default()
-            };
-            Line::from(vec![
-                Span::styled(prefix, row_style.fg(theme.accent)),
-                Span::styled(item.command.clone(), row_style.fg(theme.accent)),
-                Span::styled(
-                    format!("  {}{marker}", item.description),
-                    row_style.fg(theme.dim),
-                ),
-            ])
+            let mut description = item.description.clone();
+            if item.upcoming {
+                description.push_str(" upcoming");
+            }
+            DisplayRow {
+                marker: "  ",
+                label: item.command.clone(),
+                description: Some(description),
+                selected: index == selected_index,
+                disabled: item.upcoming,
+                tone: DisplayRowTone::Accent,
+                ..DisplayRow::default()
+            }
         })
         .collect::<Vec<_>>();
-    for index in 0..items.len() {
+    for index in 0..rows.len().min(area.height as usize) {
         row_areas.push((
             index,
             Rect {
@@ -104,12 +102,7 @@ fn render_slash_menu(
             },
         ));
     }
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(Block::default().borders(Borders::LEFT).title(" commands "))
-            .style(theme.menu_style()),
-        area,
-    );
+    render_display_rows(area, frame.buffer_mut(), &rows);
 }
 
 fn render_file_popup(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_>) {
@@ -118,16 +111,19 @@ fn render_file_popup(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_
     let Some(popup) = &ui.file_search.popup else {
         return;
     };
-    let lines = if popup.matches.is_empty() {
-        let text = if popup.waiting {
-            "  searching files..."
+    frame.render_widget(Block::default().style(theme.menu_style()), area);
+    let rows = if popup.matches.is_empty() {
+        let label = if popup.waiting {
+            "searching files..."
         } else {
-            "  no matches"
+            "no matches"
         };
-        vec![Line::from(Span::styled(
-            text.to_string(),
-            theme.dim_style(),
-        ))]
+        vec![DisplayRow {
+            marker: "  ",
+            label: label.to_string(),
+            tone: DisplayRowTone::Dim,
+            ..DisplayRow::default()
+        }]
     } else {
         popup
             .matches
@@ -135,27 +131,22 @@ fn render_file_popup(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_
             .take(FILE_POPUP_MAX_ROWS)
             .enumerate()
             .map(|(index, item)| {
-                let selected = index == popup.selected;
-                let row_style = if selected {
-                    theme.selected_row_style()
-                } else {
-                    Style::default()
-                };
-                let prefix = if selected { "> " } else { "  " };
                 let kind = match item.kind {
-                    FileSearchMatchKind::Directory => "dir ",
+                    FileSearchMatchKind::Directory => "dir",
                     FileSearchMatchKind::File => "file",
                 };
-                Line::from(vec![
-                    Span::styled(prefix, row_style.fg(theme.accent)),
-                    Span::styled(kind.to_string(), row_style.fg(theme.identity)),
-                    Span::styled("  ".to_string(), row_style),
-                    Span::styled(item.path.clone(), row_style),
-                ])
+                DisplayRow {
+                    marker: "  ",
+                    label: item.path.clone(),
+                    meta: Some(kind.to_string()),
+                    selected: index == popup.selected,
+                    tone: DisplayRowTone::Accent,
+                    ..DisplayRow::default()
+                }
             })
             .collect()
     };
-    for index in 0..lines.len() {
+    for index in 0..rows.len().min(area.height as usize) {
         ui.last_file_popup_areas.push((
             index,
             Rect {
@@ -166,12 +157,7 @@ fn render_file_popup(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_
             },
         ));
     }
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(Block::default().borders(Borders::LEFT).title(" files "))
-            .style(theme.menu_style()),
-        area,
-    );
+    render_display_rows(area, frame.buffer_mut(), &rows);
 }
 
 fn render_skill_popup(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_>) {
@@ -180,11 +166,14 @@ fn render_skill_popup(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'
     let Some(popup) = &ui.skill_search.popup else {
         return;
     };
-    let lines = if popup.matches.is_empty() {
-        vec![Line::from(Span::styled(
-            "  no skill matches".to_string(),
-            theme.dim_style(),
-        ))]
+    frame.render_widget(Block::default().style(theme.menu_style()), area);
+    let rows = if popup.matches.is_empty() {
+        vec![DisplayRow {
+            marker: "  ",
+            label: "no skill matches".to_string(),
+            tone: DisplayRowTone::Dim,
+            ..DisplayRow::default()
+        }]
     } else {
         popup
             .matches
@@ -192,23 +181,18 @@ fn render_skill_popup(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'
             .take(FILE_POPUP_MAX_ROWS)
             .enumerate()
             .map(|(index, item)| {
-                let selected = index == popup.selected;
-                let row_style = if selected {
-                    theme.selected_row_style()
-                } else {
-                    Style::default()
-                };
-                let prefix = if selected { "> " } else { "  " };
-                Line::from(vec![
-                    Span::styled(prefix, row_style.fg(theme.accent)),
-                    Span::styled("$".to_string(), row_style.fg(theme.identity)),
-                    Span::styled(item.name.clone(), row_style.fg(theme.accent)),
-                    Span::styled(format!("  {}", item.description), row_style.fg(theme.dim)),
-                ])
+                DisplayRow {
+                    marker: "  ",
+                    label: format!("${}", item.name),
+                    description: Some(item.description.clone()),
+                    selected: index == popup.selected,
+                    tone: DisplayRowTone::Identity,
+                    ..DisplayRow::default()
+                }
             })
             .collect()
     };
-    for index in 0..lines.len() {
+    for index in 0..rows.len().min(area.height as usize) {
         ui.last_skill_popup_areas.push((
             index,
             Rect {
@@ -219,12 +203,7 @@ fn render_skill_popup(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'
             },
         ));
     }
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(Block::default().borders(Borders::LEFT).title(" skills "))
-            .style(theme.menu_style()),
-        area,
-    );
+    render_display_rows(area, frame.buffer_mut(), &rows);
 }
 
 fn render_status(frame: &mut Frame<'_>, area: Rect, app: &TuiApp, ui: &FullscreenUi<'_>) {
@@ -232,16 +211,16 @@ fn render_status(frame: &mut Frame<'_>, area: Rect, app: &TuiApp, ui: &Fullscree
     let model = app.model_display_value();
     let variant = app.variant_display_value();
     let mut spans = Vec::new();
-    spans.push(Span::raw(model));
-    spans.push(Span::raw("  "));
-    spans.push(Span::styled(variant, theme.identity_style()));
     if app.current_mode != RunMode::Build {
-        spans.push(Span::raw("  "));
         spans.push(Span::styled(
             app.current_mode.as_str().to_string(),
             theme.accent_style(),
         ));
+        spans.push(Span::raw("  "));
     }
+    spans.push(Span::raw(model));
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled(variant, theme.identity_style()));
     if parse_shell_escape_input(&textarea_text(&ui.textarea)).is_some() {
         spans.push(Span::raw("  "));
         spans.push(Span::styled("shell", theme.accent_style()));
@@ -256,11 +235,6 @@ fn render_status(frame: &mut Frame<'_>, area: Rect, app: &TuiApp, ui: &Fullscree
     if ui.running.is_some() || ui.running_started.is_some() {
         let elapsed = ui.running_elapsed().unwrap_or_default();
         spans.push(Span::raw("  "));
-        spans.push(Span::styled(
-            activity_spinner_frame(elapsed),
-            theme.accent_style(),
-        ));
-        spans.push(Span::raw(" "));
         if ui.interrupt_requested {
             spans.push(Span::styled("interrupting", theme.error_style()));
             spans.push(Span::raw(" "));
@@ -269,6 +243,8 @@ fn render_status(frame: &mut Frame<'_>, area: Rect, app: &TuiApp, ui: &Fullscree
                 theme.dim_style(),
             ));
         } else {
+            spans.push(Span::styled("•", theme.accent_style()));
+            spans.push(Span::raw(" "));
             spans.push(Span::styled(
                 format_duration_compact(elapsed),
                 theme.dim_style(),
@@ -277,15 +253,35 @@ fn render_status(frame: &mut Frame<'_>, area: Rect, app: &TuiApp, ui: &Fullscree
             spans.push(Span::styled("Esc", theme.accent_style()));
         }
     }
+    if let Some(status) = &ui.ephemeral_status {
+        append_ephemeral_status(&mut spans, status, area.width);
+    }
     if let Some(context) = bottom_status_context(app, ui, area.width, spans_width(&spans)) {
         spans.push(Span::raw("  "));
         spans.push(Span::styled(context, theme.dim_style()));
     }
-    if let Some(status) = &ui.ephemeral_status {
-        append_ephemeral_status(&mut spans, status, area.width);
+    let status_line = StatusLineView {
+        line: Line::from(spans),
+    };
+    let _ = status_line.desired_height(area.width);
+    status_line.render(area, frame.buffer_mut());
+}
+
+struct StatusLineView {
+    line: Line<'static>,
+}
+
+impl TuiRenderable for StatusLineView {
+    fn desired_height(&self, _width: u16) -> u16 {
+        1
     }
-    let line = Line::from(spans);
-    frame.render_widget(Paragraph::new(line), area);
+
+    fn render(&self, area: Rect, buf: &mut ratatui::buffer::Buffer) {
+        if area.is_empty() {
+            return;
+        }
+        Paragraph::new(self.line.clone()).render(area, buf);
+    }
 }
 
 fn append_ephemeral_status(
@@ -350,36 +346,42 @@ fn bottom_status_context_for_width(
     let branch = bottom_status_branch(&ui.sidebar.branch);
     let context = bottom_status_context_usage(ui);
 
+    if let Some(context) = context.as_deref() {
+        let mut segments = vec![context, full_workdir.as_str()];
+        if let Some(branch) = branch.as_deref() {
+            segments.push(branch);
+        }
+        if let Some(value) = joined_segments_if_fits(&segments, available_width) {
+            return Some(value);
+        }
+    }
+
+    if let Some(context) = context.as_deref() {
+        if let Some(value) = joined_segments_if_fits(&[context, full_workdir.as_str()], available_width) {
+            return Some(value);
+        }
+        let context_width = UnicodeWidthStr::width(context);
+        if available_width > context_width.saturating_add(SEP_WIDTH) {
+            let workdir_width = available_width
+                .saturating_sub(context_width)
+                .saturating_sub(SEP_WIDTH);
+            if workdir_width >= STATUS_WORKDIR_MIN_WIDTH {
+                let workdir =
+                    format_directory_display_with_home(&app.workdir, home.as_deref(), workdir_width);
+                return Some(format!("{context} · {workdir}"));
+            }
+        }
+        if context_width <= available_width {
+            return Some(context.to_string());
+        }
+    }
+
     let mut segments = vec![full_workdir.as_str()];
     if let Some(branch) = branch.as_deref() {
         segments.push(branch);
     }
-    if let Some(context) = context.as_deref() {
-        segments.push(context);
-    }
     if let Some(value) = joined_segments_if_fits(&segments, available_width) {
         return Some(value);
-    }
-
-    let mut segments = vec![full_workdir.as_str()];
-    if let Some(context) = context.as_deref() {
-        segments.push(context);
-    }
-    if let Some(value) = joined_segments_if_fits(&segments, available_width) {
-        return Some(value);
-    }
-
-    if let Some(context) = context.as_deref() {
-        let context_width = UnicodeWidthStr::width(context);
-        let required_without_workdir = context_width.saturating_add(SEP_WIDTH);
-        if available_width > required_without_workdir {
-            let workdir_width = available_width.saturating_sub(required_without_workdir);
-            if workdir_width >= STATUS_WORKDIR_MIN_WIDTH {
-                let workdir =
-                    format_directory_display_with_home(&app.workdir, home.as_deref(), workdir_width);
-                return Some(format!("{workdir} · {context}"));
-            }
-        }
     }
 
     if available_width < STATUS_WORKDIR_MIN_WIDTH {

@@ -13,7 +13,7 @@ enum TranscriptKind {
     Thinking,
     Explored,
     Ran,
-    Changed,
+    Updated,
     Meta,
     Command,
     Status,
@@ -30,9 +30,11 @@ enum TranscriptHitTarget {
     Row(TranscriptRowId),
 }
 
-#[derive(Debug, Clone)]
-enum TranscriptRenderBlock {
-    Row { index: usize },
+#[derive(Debug, Clone, Copy)]
+struct TranscriptRenderBlock {
+    index: usize,
+    target: TranscriptHitTarget,
+    kind: TranscriptKind,
 }
 
 #[derive(Debug, Clone)]
@@ -149,7 +151,7 @@ impl TranscriptRow {
             TranscriptKind::Thinking
                 | TranscriptKind::Explored
                 | TranscriptKind::Ran
-                | TranscriptKind::Changed
+                | TranscriptKind::Updated
         ) || self.expanded
         {
             return;

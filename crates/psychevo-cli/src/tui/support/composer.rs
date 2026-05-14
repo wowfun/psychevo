@@ -320,5 +320,5 @@ fn is_newline_key(key: KeyEvent) -> bool {
 
 fn composer_height(textarea: &TextArea<'_>) -> u16 {
     let lines = textarea.lines().len() as u16;
-    lines.clamp(2, 6)
+    lines.clamp(1, 6)
 }

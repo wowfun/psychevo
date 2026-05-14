@@ -291,7 +291,7 @@ impl TuiApp {
         let slash_height = if slash_items.is_empty() {
             0
         } else {
-            (slash_items.len() as u16 + 2).min(10)
+            (slash_items.len() as u16).min(FILE_POPUP_MAX_ROWS as u16)
         };
         let popup_height = file_popup_height.max(skill_popup_height).max(slash_height);
         let vertical = if popup_height == 0 {

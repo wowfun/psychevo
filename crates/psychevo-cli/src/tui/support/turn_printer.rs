@@ -153,7 +153,7 @@ impl TurnPrinter {
                     .map(String::as_str)
                     .unwrap_or("");
                 let title = match evidence_kind(tool) {
-                    TranscriptKind::Explored | TranscriptKind::Ran | TranscriptKind::Changed => {
+                    TranscriptKind::Explored | TranscriptKind::Ran | TranscriptKind::Updated => {
                         tool_title_for_update(tool, value, existing_title)
                     }
                     _ => "Tool".to_string(),

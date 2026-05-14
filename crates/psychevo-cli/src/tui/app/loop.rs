@@ -330,10 +330,14 @@ impl TuiApp {
                 ui.history_query.clear();
                 ui.push_status("history search");
             }
+            KeyCode::Char('?')
+                if key.modifiers.is_empty() && textarea_text(&ui.textarea).trim().is_empty() =>
+            {
+                ui.bottom_panel = Some(BottomPanel::Help(self.help_panel()));
+                ui.clear_slash_menu_dismissal();
+            }
             KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                ui.focus = FocusMode::Transcript;
-                ui.auto_follow_transcript = false;
-                ui.ensure_selection();
+                ui.push_status("transcript review reserved");
             }
             KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 let visible = !ui.sidebar_enabled();

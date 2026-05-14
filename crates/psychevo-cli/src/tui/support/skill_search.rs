@@ -65,7 +65,7 @@ impl SkillSearchState {
             return 0;
         };
         let rows = popup.matches.len().clamp(1, FILE_POPUP_MAX_ROWS);
-        (rows as u16 + 2).min(FILE_POPUP_MAX_ROWS as u16 + 2)
+        rows as u16
     }
 
     fn selected_name(&self) -> Option<String> {

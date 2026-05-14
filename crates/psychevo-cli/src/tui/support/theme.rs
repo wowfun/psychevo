@@ -146,7 +146,6 @@ impl TuiTheme {
         Style::default()
             .fg(self.accent)
             .bg(self.menu_selected_bg)
-            .add_modifier(Modifier::BOLD)
     }
 
     fn panel_field_style(self) -> Style {
@@ -292,4 +291,3 @@ const fn generate_xterm_256_colors() -> [(u8, u8, u8); 256] {
     }
     colors
 }
-

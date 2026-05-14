@@ -2,7 +2,7 @@ fn evidence_kind(tool: &str) -> TranscriptKind {
     match tool {
         "read" | "list" | "search" => TranscriptKind::Explored,
         "bash" => TranscriptKind::Ran,
-        "write" | "edit" => TranscriptKind::Changed,
+        "write" | "edit" => TranscriptKind::Updated,
         _ => TranscriptKind::Status,
     }
 }
@@ -52,7 +52,7 @@ fn tool_title_prefixes_for_kind(
     match kind {
         TranscriptKind::Explored => Some(("Exploring", "Explored", "Explored")),
         TranscriptKind::Ran => Some(("Running", "Ran", "Ran command")),
-        TranscriptKind::Changed => Some(("Changing", "Changed", "Changed files")),
+        TranscriptKind::Updated => Some(("Updating", "Updated", "Updated files")),
         _ => None,
     }
 }
@@ -78,7 +78,7 @@ fn tool_title(tool: &str, value: &Value) -> String {
                 .unwrap_or("command");
             format!("Ran {command}")
         }
-        "write" | "edit" => format!("Changed {}", path_from(args, result).unwrap_or("files")),
+        "write" | "edit" => format!("Updated {}", path_from(args, result).unwrap_or("files")),
         other => format!("Tool {other}"),
     }
 }
@@ -101,8 +101,8 @@ fn active_tool_title(tool: &str, value: &Value) -> String {
             .map(|command| format!("Running {command}"))
             .unwrap_or_else(|| "Running command".to_string()),
         "write" | "edit" => path_from_args(args)
-            .map(|path| format!("Changing {path}"))
-            .unwrap_or_else(|| "Changing files".to_string()),
+            .map(|path| format!("Updating {path}"))
+            .unwrap_or_else(|| "Updating files".to_string()),
         other => format!("Using {other}"),
     }
 }
@@ -117,11 +117,11 @@ fn tool_title_for_update(tool: &str, value: &Value, existing_title: &str) -> Str
             return format!("Ran {command}");
         }
     }
-    if matches!(tool, "write" | "edit") && title == "Changed files"
-        && let Some(path) = existing_title.strip_prefix("Changing ")
+    if matches!(tool, "write" | "edit") && title == "Updated files"
+        && let Some(path) = existing_title.strip_prefix("Updating ")
         && path != "files"
     {
-        return format!("Changed {path}");
+        return format!("Updated {path}");
     }
     title
 }

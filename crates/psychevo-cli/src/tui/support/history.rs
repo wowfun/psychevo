@@ -5,7 +5,7 @@ fn default_title(kind: TranscriptKind) -> &'static str {
         TranscriptKind::Thinking => "Thinking",
         TranscriptKind::Explored => "Explored",
         TranscriptKind::Ran => "Ran",
-        TranscriptKind::Changed => "Changed",
+        TranscriptKind::Updated => "Updated",
         TranscriptKind::Meta => "",
         TranscriptKind::Command => "",
         TranscriptKind::Status => "Status",

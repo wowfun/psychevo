@@ -98,16 +98,13 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_
         ));
         let first_slice_start = *slice_start.get_or_insert(block_start);
         let block_lines = render_block_lines(ui, &render_blocks, block_index, area.width);
-        let prompt_surface_rows = match block {
-            TranscriptRenderBlock::Row { index }
-                if ui.transcript[*index].kind == TranscriptKind::Prompt =>
-            {
-                let compact_trailing = compact_trailing_for_render_block(&render_blocks, block_index, ui);
-                block_lines
-                    .len()
-                    .saturating_sub(usize::from(!compact_trailing))
-            }
-            _ => 0,
+        let prompt_surface_rows = if block.kind == TranscriptKind::Prompt {
+            let compact_trailing = compact_trailing_for_render_block(&render_blocks, block_index, ui);
+            block_lines
+                .len()
+                .saturating_sub(usize::from(!compact_trailing))
+        } else {
+            0
         };
         for (line_index, line) in block_lines.iter().enumerate() {
             let has_surface_bg = line_index < prompt_surface_rows;
@@ -166,7 +163,7 @@ fn refresh_transcript_layout(ui: &mut FullscreenUi<'_>, width: u16) {
     let mut recomputed_rows = 0usize;
     for (block_index, block) in render_blocks.iter().enumerate() {
         let key = transcript_layout_block_key(ui, &render_blocks, block_index);
-        let target = render_block_target(block, ui);
+        let target = block.target;
         let height = old_blocks
                 .and_then(|blocks| blocks.get(block_index))
                 .filter(|cached| cached.key == key)
@@ -235,15 +232,13 @@ fn transcript_render_blocks(ui: &FullscreenUi<'_>) -> Vec<TranscriptRenderBlock>
         .iter()
         .enumerate()
         .filter_map(|(index, row)| {
-            row_visible(row, ui.thinking_visible).then_some(TranscriptRenderBlock::Row { index })
+            row_visible(row, ui.thinking_visible).then_some(TranscriptRenderBlock {
+                index,
+                target: TranscriptHitTarget::Row(row.id),
+                kind: row.kind,
+            })
         })
         .collect()
-}
-
-fn render_block_target(block: &TranscriptRenderBlock, ui: &FullscreenUi<'_>) -> TranscriptHitTarget {
-    match block {
-        TranscriptRenderBlock::Row { index } => TranscriptHitTarget::Row(ui.transcript[*index].id),
-    }
 }
 
 fn target_selected(ui: &FullscreenUi<'_>, target: TranscriptHitTarget) -> bool {
@@ -264,19 +259,17 @@ fn compact_trailing_for_render_block(
     let Some(block) = blocks.get(index) else {
         return false;
     };
-    let TranscriptRenderBlock::Row { index: row_index } = block;
-    let row = &ui.transcript[*row_index];
+    let row = &ui.transcript[block.index];
     blocks.get(index + 1).is_some_and(|next| {
-        let TranscriptRenderBlock::Row { index: next_index } = next;
-        let next_kind = ui.transcript[*next_index].kind;
+        let next_kind = next.kind;
         (matches!(row.kind, TranscriptKind::Prompt | TranscriptKind::Answer)
             && next_kind == TranscriptKind::Meta)
             || (matches!(
                 row.kind,
-                TranscriptKind::Explored | TranscriptKind::Ran | TranscriptKind::Changed
+                TranscriptKind::Explored | TranscriptKind::Ran | TranscriptKind::Updated
             ) && matches!(
                 next_kind,
-                TranscriptKind::Explored | TranscriptKind::Ran | TranscriptKind::Changed
+                TranscriptKind::Explored | TranscriptKind::Ran | TranscriptKind::Updated
             ))
     })
 }
@@ -290,9 +283,8 @@ fn render_block_lines(
     let Some(block) = blocks.get(index) else {
         return Vec::new();
     };
-    let TranscriptRenderBlock::Row { index: row_index } = block;
-    let row = &ui.transcript[*row_index];
-    let target = TranscriptHitTarget::Row(row.id);
+    let row = &ui.transcript[block.index];
+    let target = block.target;
     let selected = target_selected(ui, target);
     let compact_trailing = compact_trailing_for_render_block(blocks, index, ui);
     transcript_lines(
@@ -311,11 +303,10 @@ fn transcript_layout_block_key(
     index: usize,
 ) -> TranscriptLayoutBlockKey {
     let block = &blocks[index];
-    let target = render_block_target(block, ui);
+    let target = block.target;
     let selected = target_selected(ui, target);
     let compact_trailing = compact_trailing_for_render_block(blocks, index, ui);
-    let TranscriptRenderBlock::Row { index } = block;
-    let row = &ui.transcript[*index];
+    let row = &ui.transcript[block.index];
     TranscriptLayoutBlockKey {
         target,
         compact_trailing,
@@ -377,7 +368,7 @@ fn transcript_lines(
     }
     if matches!(
         row.kind,
-        TranscriptKind::Explored | TranscriptKind::Ran | TranscriptKind::Changed
+        TranscriptKind::Explored | TranscriptKind::Ran | TranscriptKind::Updated
     ) {
         return tool_lines(row, selected, compact_trailing, width);
     }
@@ -1010,7 +1001,7 @@ fn tool_title_prefixes(kind: TranscriptKind) -> Option<(&'static str, &'static s
     match kind {
         TranscriptKind::Explored => Some(("Exploring", "Explored", "Exploring")),
         TranscriptKind::Ran => Some(("Running", "Ran", "Running command")),
-        TranscriptKind::Changed => Some(("Changing", "Changed", "Changing files")),
+        TranscriptKind::Updated => Some(("Updating", "Updated", "Updating files")),
         _ => None,
     }
 }
@@ -1021,7 +1012,7 @@ fn foldable_evidence_body(row: &TranscriptRow) -> bool {
         TranscriptKind::Thinking
             | TranscriptKind::Explored
             | TranscriptKind::Ran
-            | TranscriptKind::Changed
+            | TranscriptKind::Updated
             | TranscriptKind::Command
     ) && !row.text.trim().is_empty()
         && !row.interrupted
@@ -1357,7 +1348,7 @@ fn label_style(kind: TranscriptKind, failed: bool) -> Style {
         TranscriptKind::Prompt
         | TranscriptKind::Explored
         | TranscriptKind::Ran
-        | TranscriptKind::Changed => theme.accent_style(),
+        | TranscriptKind::Updated => theme.accent_style(),
         TranscriptKind::Answer => theme.identity_style(),
         TranscriptKind::Thinking => theme.thinking_style(),
         TranscriptKind::Meta => theme.dim_style(),

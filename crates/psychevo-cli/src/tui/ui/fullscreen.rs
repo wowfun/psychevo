@@ -1647,7 +1647,7 @@ impl<'a> FullscreenUi<'a> {
     fn visible_transcript_targets(&self) -> Vec<TranscriptHitTarget> {
         transcript_render_blocks(self)
             .iter()
-            .map(|block| render_block_target(block, self))
+            .map(|block| block.target)
             .collect()
     }
 
