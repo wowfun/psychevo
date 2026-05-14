@@ -5,11 +5,15 @@ psychevo_self_edit: deny
 
 # 210. pevo TUI Input and Commands
 
-Define fullscreen input handling, keymaps, slash commands, file completion, shell escapes, and local selection behavior.
+Define fullscreen input handling, keymaps, slash commands, file completion,
+shell escapes, and local selection behavior. Shared interaction principles and
+visual treatment come from [080 Design System](../080-design-system/spec.md).
 
 ## Keymap
 
-The first fullscreen keymap is fixed:
+The first fullscreen keymap is fixed and composer-first. V1 keeps the key
+handling organized for future user keymap configuration, but it does not expose
+custom keymaps.
 
 - `Enter` submits the composer. When slash completion suggestions are visible,
   the first suggestion is selected by default and `Enter` executes that
@@ -40,16 +44,15 @@ The first fullscreen keymap is fixed:
 - `Shift+Tab` cycles `default -> plan -> default`.
 - `Esc` clears active UI state before it can interrupt work: text selection,
   file and skill popups, slash menu, bottom selection panes, history search,
-  transcript focus, and an empty shell-mode composer all take priority. If none
-  of those states is active and foreground work is running, `Esc` requests
+  and an empty shell-mode composer all take priority. If none of those states
+  is active and foreground work is running, `Esc` requests
   interruption through runtime control. Runtime-controlled provider generation
   and foreground shell waits must wake on that signal instead of waiting for the
   next provider chunk, shell polling interval, or title-generation follow-up.
   When idle, it performs no destructive action.
-- `Ctrl+T` enters transcript selection while leaving composer as the default
-  focus.
-- `Enter` or `Space` expands or collapses the selected expandable transcript
-  block when transcript selection is active.
+- `Ctrl+T` is reserved for a future transcript review overlay and has no V1
+  behavior.
+- `?` opens contextual shortcut help when the current surface supports it.
 - When a TUI text selection is active, `Ctrl+C` copies and clears it. Otherwise
   `Ctrl+C` requests quit. `Ctrl+D` quits.
 - `Ctrl+O` copies the latest visible assistant answer as raw Markdown source,
@@ -67,6 +70,13 @@ The first fullscreen keymap is fixed:
   prompt only while a history entry is already active and the cursor is on the
   last logical line, restoring the saved draft after the newest history entry.
   Otherwise `Up`/`Down` remain textarea navigation or no-op behavior.
+
+Transcript rows are not a persistent keyboard focus target in V1. Bounded
+Thinking, command, and tool evidence details may still expand inline by mouse
+clicking the folded row or `▸`/`▾` marker. Keyboard users can scroll the
+transcript, copy the latest visible answer, and use `/show-raw` or
+`/show-thinking` display toggles, but V1 does not provide a keyboard path to
+expand one specific evidence row.
 
 Fullscreen TUI enables terminal mouse capture while the alternate screen is
 active and enables xterm alternate-scroll mode so terminal wheel input stays
@@ -137,18 +147,18 @@ The first TUI supports:
 - `/skill:<name> [args]`
 - future disabled entries in the slash menu: `/compact` and `/export`
 
-Slash command discovery is registry-backed. The slash menu shows canonical
-command labels only, stays a flat list with at most 8 rows, and does not show
-hidden aliases or group headers. Fullscreen TUI projects slash-command feedback
+Slash command discovery is registry-backed and remains a lightweight menu above
+the composer. The slash menu shows canonical command labels only, stays a flat
+list with at most 8 rows, and does not show hidden aliases or group headers.
+Fullscreen TUI projects slash-command feedback
 that is written to the transcript as one command transcript row: the first line
 echoes the submitted command as `> <command>`, and the result begins on the
 next line with `└`. This command row is display-only and must not count as a
 user prompt, visible message, durable session message, or provider-context
 input. Slash commands that open bottom panes, including `/help`, do not append a
 command transcript row. Non-terminal scripted TUI keeps deterministic plain text
-output without command-row wrapping. Command transcript rows are foldable
-through the same transcript row keyboard and mouse interactions as Thinking and
-tool evidence rows; they default open, collapse to the echoed command line, and
+output without command-row wrapping. Command transcript rows are foldable by
+mouse in fullscreen; they default open, collapse to the echoed command line, and
 expand back to the full local result. `/help` does not accept arguments.
 
 `/help` output uses the three groups defined by [026 Commands](../026-commands/spec.md).
@@ -426,7 +436,7 @@ are restored as `!<command>` lines. If the composer already contains a draft,
 the restored queue text is inserted before that draft, separated by newlines.
 The settled transcript renders the aborted foreground work with an explicit
 `interrupted` marker rather than ordinary failure styling. While the interrupt
-is still in progress, the bottom state line continues to show `interrupting`.
+is still in progress, the bottom status line continues to show `interrupting`.
 Normal turn completion and ordinary failures retain the existing FIFO
 auto-start behavior.
 

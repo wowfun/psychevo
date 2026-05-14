@@ -54,12 +54,12 @@ Required coverage:
   and pressing `Enter` executes it
 - evidence-ledger projection for unlabeled prompt blocks without left rails,
   expandable flat `Thinking` rows without left rails, flat
-  `Explored`/`Ran`/`Changed` tool rows without `Tool calls` section headers,
+  `Explored`/`Ran`/`Updated` tool rows without `Tool calls` section headers,
   failures inside their original group, unlabeled answer body text without left
   rails, tool blocks without left rails, `Ran <actual first command line>`
   titles that skip leading blank/comment-only shell lines and survive
   start-to-end tool updates even when end events omit tool arguments, transient
-  active `Exploring`/`Running`/`Changing` rows created from streaming assistant
+  active `Exploring`/`Running`/`Updating` rows created from streaming assistant
   tool-call blocks before tool execution starts, temporary message-scoped
   `content_index:call_index` key migration to `tool_call_id`, no duplicate row
   when `tool_execution_start` follows a pending row, no overwrite when later
@@ -85,48 +85,48 @@ Required coverage:
   `XmYYs` at one minute or more, zero-padded minute seconds, and floor rounding
   from persisted millisecond precision; active fullscreen tool-evidence cache
   keys must track the current elapsed label and spinner frame so `Running` /
-  `Exploring` / `Changing` rows refresh while live
+  `Exploring` / `Updating` rows refresh while live
 - plain non-terminal renderer output for `Prompt`, `Thinking`, active
-  `Exploring`/`Running`/`Changing` preparation notices, completed `Explored`,
-  `Ran`, `Changed`, `Answer`, and `Meta` blocks, including `--debug`, without
+  `Exploring`/`Running`/`Updating` preparation notices, completed `Explored`,
+  `Ran`, `Updated`, `Answer`, and `Meta` blocks, including `--debug`, without
   printing repeated preparation lines for every argument delta
 - narrow and wide layout rendering, sidebar hidden by default for fresh state,
   persisted optional sidebar visible state, thinking visible/hidden,
-  expanded/collapsed tool output, minimal bottom state line with no-key
-  `workdir · branch · context_usage` local context items, and composer
+  expanded/collapsed tool output, fixed single-line status/hint row with
+  mode/model/context priority and no-key local context items, and composer
   surface without a left accent rail; user prompt blocks and the composer must
   share the same adaptive full-width surface with a leading `›` prompt marker,
   falling back to `RGB(38,38,38)` when no terminal background is known; the
-  empty composer must occupy two input rows with surface background on both
-  rows, wrapped historical prompt rows including CJK/wide-character content
+  empty composer must occupy one input row with surface background, wrapped
+  historical prompt rows including CJK/wide-character content
   must keep full-width prompt background on each physical row, and sidebar
   headings must be bold without colored left rails; running-state snapshots must
-  show spinner/elapsed/`Esc` appended to the stable bottom state line and must
-  not contain `Working` or active phase words that belong in ledger rows
+  show elapsed/`Esc` appended to the stable bottom status line and must not
+  contain `Working` or active phase words that belong in ledger rows
 - active tool evidence snapshots and unit tests must preserve ledger-only
-  `Exploring`/`Running`/`Changing` state while a tool timer is live, suppress
+  `Exploring`/`Running`/`Updating` state while a tool timer is live, suppress
   redundant `running`/`preparing` body-only rows, keep completed
-  `Explored`/`Ran`/`Changed` rows stable, and retain the first actual bash
+  `Explored`/`Ran`/`Updated` rows stable, and retain the first actual bash
   command line in active and completed titles after skipping leading blank and
   comment-only shell lines. A targeted snapshot must cover the provider shape
   where an intermediate `finish_reason=tool_calls` assistant message contains
-  visible text followed by a `write` tool call, keeping the active `Changing`
+  visible text followed by a `write` tool call, keeping the active `Updating`
   row visible below that text without premature turn metadata
 - completed live tool evidence tests must cover `Exploring`/`Running`/
-  `Changing` rows settling into `Explored`/`Ran`/`Changed` while preserving the
+  `Updating` rows settling into `Explored`/`Ran`/`Updated` while preserving the
   visible active duration when runtime `elapsed_ms` is shorter, including 0ms
   instant completions
 - fullscreen active tool visibility tests must cover reasoning-only assistant
   `finish_reason=tool_calls` messages with a `write` tool call, proving
-  `Changing <path>` appears below `Thinking` with no premature metadata; they
+  `Updating <path>` appears below `Thinking` with no premature metadata; they
   must also prove visible Thinking text with an explicit write/run intent can
-  create a generic provisional `Changing files`/`Running command` row, hidden
+  create a generic provisional `Updating files`/`Running command` row, hidden
   Thinking text cannot, runtime pending tool-call input events for `write`
-  create a visible `Changing files` row before complete arguments or local
+  create a visible `Updating files` row before complete arguments or local
   execution arrive, and later concrete tool-call signals adopt the provisional
   row instead of duplicating it. Same-tick `message_end(write)` /
   `tool_execution_start(write)` / `tool_execution_end(write)` batches are
-  deferred so `Changing` renders before completion
+  deferred so `Updating` renders before completion
 - runtime stream projection must expose named pending tool-call input events to
   fullscreen TUI without leaking folded reasoning into sanitized message events;
   provider streams that emit tool names before complete JSON arguments must
@@ -134,23 +134,23 @@ Required coverage:
   local tool execution
 - fullscreen history reload coverage must include a persisted assistant
   `finish_reason=tool_calls` message with a `write` tool call and no matching
-  tool result yet; it must render an active `Changing <path>` row without turn
-  metadata and must update that same row to `Changed <path>` when the matching
+  tool result yet; it must render an active `Updating <path>` row without turn
+  metadata and must update that same row to `Updated <path>` when the matching
   persisted or streamed `tool_result` arrives. It must also include a persisted
   aborted assistant message whose tool calls have no matching tool results;
   those rows must render as static muted `interrupted` evidence, use completed
   tool titles such as `Ran <command>`, and must not keep live
-  `Exploring`/`Running`/`Changing` timers after TUI restart. A targeted visual
-  snapshot must lock the pending history `Changing <path>` row shape.
+  `Exploring`/`Running`/`Updating` timers after TUI restart. A targeted visual
+  snapshot must lock the pending history `Updating <path>` row shape.
 - visible assistant preamble fallback coverage must prove that text such as
-  `Let me write the complete report` can create a provisional `Changing files`
+  `Let me write the complete report` can create a provisional `Updating files`
   row during a still-open assistant message, that visible Thinking text follows
   the same explicit-intent provisional/adoption/removal rules while hidden
   Thinking does not, and that the provisional row is removed if the assistant
   message finishes without a matching tool call. Repeated visible preamble
   updates after a concrete write signal must not leave duplicate
-  `Changing files` rows after `Changed` appears. A targeted visual snapshot
-  must prove an active `Changing` row suppresses a prior failure
+  `Updating files` rows after `Updated` appears. A targeted visual snapshot
+  must prove an active `Updating` row suppresses a prior failure
   turn-metadata block such as `0s 1 failure`
 - streaming reasoning regression coverage must prove that a prior failure
   turn-metadata block is removed once `Thinking` continues, and that an aborted
@@ -162,10 +162,10 @@ Required coverage:
   for long Thinking and long tool output, active Thinking elapsed, short
   Thinking detail collapse, completed and active tool row detail collapse, long
   `Ran`/`Running` command-title expansion, long JSON/HTML-like single-line tool
-  output collapse, keyboard `Enter`/`Space` row toggles, mouse row toggles, and
-  drag text selection not toggling anything. Snapshot coverage must prove
-  transcript focus uses a single-line `›` marker instead of repeating `>` on
-  every wrapped Markdown/table line
+  output collapse, mouse row toggles, no V1 keyboard row toggle path, and drag
+  text selection not toggling anything. Snapshot coverage must prove selection
+  and focus markers use the design-system `›` marker instead of repeating `>`
+  on every wrapped Markdown/table line
 - terminal-adaptive TUI theme derivation for dark, light, and unknown terminal
   backgrounds; prompt/composer shared surfaces, popup/menu surfaces, selected
   row contrast, accent styles, and static motion fallback are covered by
@@ -356,9 +356,10 @@ Required coverage:
   `select/fetch model`, prefix-only Tab completion that does not complete
   fuzzy-only matches, disabled `/compact` and `/export` entries, and bounded
   `upcoming` feedback
-- transcript focus and expansion behavior: `Ctrl+T`, selected row movement,
-  `Enter`/`Space` row expand-collapse, `Esc` returning to composer, and
-  keyboard transcript scrolling
+- V1 transcript passive behavior: `Ctrl+T` remains reserved and inert,
+  PageUp/PageDown scroll the transcript from composer focus, folded evidence
+  toggles by mouse only, and `Up`/`Down` remain composer navigation/history
+  boundary keys
 - slash menu row selection with Up/Down/Home/End and mouse click, including
   Up/Down wraparound and `/mo` navigation to `/mode` before `Enter`
 - transcript auto-follow behavior: new prompts reset to bottom-following,

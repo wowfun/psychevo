@@ -5,16 +5,17 @@ psychevo_self_edit: deny
 
 Define the first interactive terminal surface for `pevo`.
 
-This topic builds on [200 pevo CLI](../200-pevo-cli/spec.md) and
-[026 Commands](../026-commands/spec.md), and routes live coding-agent turns
-through `psychevo-runtime`. For interactive terminals, `pevo tui` is a
-fullscreen terminal UI. For non-terminal stdin/stdout, it keeps the
-deterministic line-by-line scripted behavior.
+This topic implements the terminal-specific surface defined by
+[080 Design System](../080-design-system/spec.md). It also builds on
+[200 pevo CLI](../200-pevo-cli/spec.md) and [026 Commands](../026-commands/spec.md),
+and routes live coding-agent turns through `psychevo-runtime`. For interactive
+terminals, `pevo tui` is a fullscreen terminal UI. For non-terminal
+stdin/stdout, it keeps the deterministic line-by-line scripted behavior.
 
 ## Scope
 
 - `pevo tui` command spelling and startup behavior
-- fullscreen transcript, composer, and minimal bottom state line
+- fullscreen transcript, composer, and fixed single-line status/hint line
 - persisted TUI-local model, variant, mode, thinking visibility, raw transcript
   visibility, and sidebar visibility
 - session selection, session archiving/deletion, session renaming, model,
@@ -22,10 +23,10 @@ deterministic line-by-line scripted behavior.
   `/status` kept to runtime/session state rather than thinking visibility
 - context usage slash command for the latest provider request or current
   session estimate
-- evidence-ledger rendering for prompts, folded reasoning, tool evidence, final
+- design-system rendering for prompts, folded reasoning, tool evidence, final
   answers, timeout-visible tool failures, and turn metadata
-- bottom state line workdir, branch, and compact context-window usage derived
-  from the latest context snapshot
+- fixed bottom status line with mode, model, and compact context-window usage
+  derived from the latest context snapshot
 - local stats reporting from persisted accounting columns
 - responsive foreground interruption and preservation of every visible
   assistant answer emitted during a multi-tool turn
@@ -34,8 +35,9 @@ deterministic line-by-line scripted behavior.
   directory
 - image attachments from standalone readable image-source paste and `/image`,
   with numbered composer placeholders and local attachment metadata
-- transcript row focus plus keyboard and mouse expansion for bounded Thinking
-  and tool evidence rows rendered through a shared ledger row component
+- mouse expansion for bounded Thinking and tool evidence rows rendered through
+  the shared evidence component; V1 does not provide transcript review mode or a
+  keyboard path to expand one specific evidence row
 - ledger-only active tool status, including pending provider-side tool input
   and persisted assistant tool calls whose tool results have not arrived yet,
   with at least one visible active frame, no stale provisional rows after
@@ -49,7 +51,7 @@ deterministic line-by-line scripted behavior.
 - debug projection for usage and provider metadata summaries
 - deterministic visual-regression projections and local diagnostic screenshots
 - terminal-adaptive semantic rendering for prompt, composer, popup, bottom
-  panel, selection, and evidence-ledger surfaces
+  panel, fixed status line, selection, and evidence surfaces
 - lightweight terminal Markdown projection for assistant answers, plus raw
   transcript display and raw Markdown answer copy
 - hard `plan` / `default` runtime mode selection
@@ -57,13 +59,14 @@ deterministic line-by-line scripted behavior.
 
 Out of scope:
 
-- panes, plugins, custom keymaps, or full rich document rendering beyond
-  bounded Markdown projection
-- approvals, auth, provider login, provider catalogs, or model probing
+- plugins, user-configurable keymaps, user-configurable statusline fields, TUI
+  theme configuration, or full rich document rendering beyond bounded Markdown
+  projection
+- approvals, auth, provider login, or model probing
 - structured `@file` references, automatic file-content attachment, custom
   slash commands, or command-template files
-- compaction, rollback, share/fork UI, external editor integration, or TUI
-  theme configuration
+- transcript review overlay, compaction, rollback, share/fork UI, or external
+  editor integration
 
 ## Command
 
@@ -98,6 +101,8 @@ initialization requirement.
 
 ## Topic Attachments
 
+- [080 Design System](../080-design-system/spec.md) is the source of truth for
+  visual language, shared TUI component contracts, and interaction principles.
 - [Sessions](sessions.md) defines session resume, switching, stable activity ordering, history, titles, archive/delete, and undo/redo-adjacent session behavior.
 - [State and Models](state-and-models.md) defines TUI-local state, model selection, catalog fetching, variants, and runtime modes.
 - [Input and Commands](input-and-commands.md) defines key handling, slash commands, file completion, user shell escapes, and local text selection.
