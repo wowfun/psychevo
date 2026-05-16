@@ -1,0 +1,72 @@
+use std::collections::BTreeMap;
+use std::io::{self, Read};
+use std::path::{Path, PathBuf};
+
+use anyhow::{Result, anyhow};
+use psychevo_runtime::{RunMode, RunOptions, canonicalize_workdir};
+use serde_json::json;
+
+use crate::env::{env_path, resolve_state_db};
+
+pub(crate) fn print_json_error(err: &anyhow::Error) -> Result<()> {
+    println!(
+        "{}",
+        serde_json::to_string(&json!({
+            "type": "error",
+            "message": format!("{err:#}"),
+        }))?
+    );
+    Ok(())
+}
+
+pub(crate) fn base_run_options(
+    env_map: &BTreeMap<String, String>,
+    home: &Path,
+    cwd: &Path,
+) -> Result<RunOptions> {
+    Ok(RunOptions {
+        db_path: resolve_state_db(env_map, home, cwd)?,
+        workdir: cwd.to_path_buf(),
+        snapshot_root: None,
+        session: None,
+        continue_latest: false,
+        prompt: String::new(),
+        image_inputs: Vec::new(),
+        extract_prompt_image_sources: false,
+        prompt_display: None,
+        max_context_messages: None,
+        config_path: env_path("PSYCHEVO_CONFIG", env_map, cwd)?,
+        model: None,
+        reasoning_effort: None,
+        include_reasoning: false,
+        mode: RunMode::Build,
+        inherited_env: Some(env_map.clone()),
+        no_skills: false,
+        skill_inputs: Vec::new(),
+    })
+}
+
+pub(crate) fn config_scope_dir(home: &Path, cwd: &Path, local: bool) -> Result<PathBuf> {
+    if local {
+        Ok(canonicalize_workdir(cwd)?.join(".psychevo"))
+    } else {
+        Ok(home.to_path_buf())
+    }
+}
+
+pub(crate) fn scope_label(local: bool) -> &'static str {
+    if local { "local" } else { "global" }
+}
+
+pub(crate) fn read_secret_from_stdin(required: bool) -> Result<Option<String>> {
+    if !required {
+        return Ok(None);
+    }
+    let mut secret = String::new();
+    io::stdin().read_to_string(&mut secret)?;
+    let secret = secret.trim().to_string();
+    if secret.is_empty() {
+        return Err(anyhow!("--api-key-stdin requires a non-empty stdin value"));
+    }
+    Ok(Some(secret))
+}

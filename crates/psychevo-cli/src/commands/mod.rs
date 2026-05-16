@@ -1,6 +1,11 @@
+pub(crate) mod auth;
+pub(crate) mod common;
+pub(crate) mod config;
 pub(crate) mod context;
 pub(crate) mod init;
+pub(crate) mod model;
 pub(crate) mod run;
+pub(crate) mod session;
 pub(crate) mod skills;
 pub(crate) mod smoke;
 pub(crate) mod stats;

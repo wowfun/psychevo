@@ -79,7 +79,22 @@ async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
             println!("{}", serde_json::to_string(event)?);
         }
     } else {
+        for warning in &result.warnings {
+            eprintln!("warning: {}", warning.message);
+            if let Some(suggestion) = &warning.suggestion {
+                eprintln!("suggestion: {suggestion}");
+            }
+        }
         println!("{}", result.final_answer);
+        if result.outcome != Outcome::Normal
+            && let Some(reason) = result.terminal_reason
+        {
+            eprintln!(
+                "turn ended: {} - {}",
+                result.outcome.as_str(),
+                reason.message()
+            );
+        }
     }
 
     let success = result.outcome == Outcome::Normal && result.tool_failures == 0;

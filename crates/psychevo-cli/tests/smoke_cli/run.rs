@@ -91,8 +91,8 @@ fn cli_run_dir_controls_tool_workdir() {
 }
 
 #[test]
-fn cli_run_allows_more_than_eight_tool_turns_before_final_answer() {
-    let mut responses = (0..9)
+fn cli_run_allows_more_than_thirty_two_tool_turns_before_final_answer() {
+    let mut responses = (0..33)
         .map(|index| sse_tool_read_call(&format!("call_read_{index}")))
         .collect::<Vec<_>>();
     responses.push(sse_text("long workflow complete"));
@@ -136,12 +136,98 @@ fn cli_run_allows_more_than_eight_tool_turns_before_final_answer() {
             |row| row.get(0),
         )
         .expect("read results");
-    assert_eq!(read_results, 9);
+    assert_eq!(read_results, 33);
     let end_reason: String = conn
         .query_row("SELECT end_reason FROM sessions", [], |row| row.get(0))
         .expect("end reason");
     assert_eq!(end_reason, "normal");
-    assert_eq!(server.requests.lock().expect("requests").len(), 10);
+    assert_eq!(server.requests.lock().expect("requests").len(), 34);
+}
+
+#[test]
+fn cli_run_budget_exhaustion_reports_model_turn_limit() {
+    let responses = (0..128)
+        .map(|index| sse_tool_read_call(&format!("call_read_{index}")))
+        .collect::<Vec<_>>();
+    let server = MockSseServer::start(responses);
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = temp.path().join("work");
+    std::fs::create_dir_all(&workdir).expect("workdir");
+    std::fs::write(workdir.join("fixture.txt"), "fixture content\n").expect("fixture");
+    let config = write_run_config(&temp.path().join("config"), &server.base_url);
+
+    let output = isolated_run_cmd(temp.path(), &config, &db)
+        .args([
+            "run",
+            "--dir",
+            workdir.to_str().expect("workdir"),
+            "keep",
+            "reading",
+        ])
+        .output()
+        .expect("pevo run");
+
+    assert!(!output.status.success());
+    assert_eq!(String::from_utf8(output.stdout).expect("stdout"), "\n");
+    let stderr = String::from_utf8(output.stderr).expect("stderr");
+    assert!(stderr.contains("turn ended: failed - reached model-turn limit (128)"));
+
+    let conn = Connection::open(db).expect("db");
+    let end_reason: String = conn
+        .query_row("SELECT end_reason FROM sessions", [], |row| row.get(0))
+        .expect("end reason");
+    assert_eq!(end_reason, "failed");
+    assert_eq!(server.requests.lock().expect("requests").len(), 128);
+}
+
+#[test]
+fn cli_run_json_budget_exhaustion_includes_terminal_reason() {
+    let responses = (0..128)
+        .map(|index| sse_tool_read_call(&format!("call_read_{index}")))
+        .collect::<Vec<_>>();
+    let server = MockSseServer::start(responses);
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = temp.path().join("work");
+    std::fs::create_dir_all(&workdir).expect("workdir");
+    std::fs::write(workdir.join("fixture.txt"), "fixture content\n").expect("fixture");
+    let config = write_run_config(&temp.path().join("config"), &server.base_url);
+
+    let output = isolated_run_cmd(temp.path(), &config, &db)
+        .args([
+            "run",
+            "--dir",
+            workdir.to_str().expect("workdir"),
+            "--format",
+            "json",
+            "keep",
+            "reading",
+        ])
+        .output()
+        .expect("pevo run");
+
+    assert!(!output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+    let events = stdout
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("json line"))
+        .collect::<Vec<_>>();
+    assert!(events.iter().all(|event| event["type"] != "error"));
+    let agent_end = events
+        .iter()
+        .find(|event| event["type"] == "agent_end")
+        .expect("agent_end");
+    assert_eq!(agent_end["outcome"], "failed");
+    assert_eq!(agent_end["terminal_reason"]["type"], "max_turns_exceeded");
+    assert_eq!(agent_end["terminal_reason"]["max_turns"], 128);
+    assert!(
+        agent_end["terminal_message"]
+            .as_str()
+            .expect("terminal message")
+            .contains("model-turn limit (128)")
+    );
+    assert_eq!(server.requests.lock().expect("requests").len(), 128);
 }
 
 #[test]
@@ -309,10 +395,10 @@ fn cli_run_skill_marker_injects_context_and_preserves_prompt() {
 
     let request = server.request_json(0);
     let contents = user_contents(&request);
-    assert_eq!(contents.len(), 1);
+    assert_eq!(contents.len(), 2);
     assert!(contents[0].contains("<skill>"));
     assert!(contents[0].contains("Follow the reviewer workflow."));
-    assert!(contents[0].contains("$reviewer do it"));
+    assert_eq!(contents[1], "$reviewer do it");
 
     let conn = Connection::open(db).expect("db");
     let user_messages = conn
@@ -361,9 +447,9 @@ fn cli_run_skill_flag_injects_without_stdout_pollution() {
     );
 
     let contents = user_contents(&server.request_json(0));
-    assert_eq!(contents.len(), 1);
+    assert_eq!(contents.len(), 2);
     assert!(contents[0].contains("Follow the reviewer workflow."));
-    assert!(contents[0].contains("do it"));
+    assert_eq!(contents[1], "do it");
 }
 
 #[test]
@@ -397,6 +483,218 @@ fn cli_run_unknown_skill_marker_remains_plain_text() {
         .expect("run start json");
     assert_eq!(first["selected_skills"], serde_json::json!([]));
     assert_eq!(user_contents(&server.request_json(0)), vec!["$missing do it"]);
+}
+
+#[test]
+fn cli_run_injects_agents_project_instructions_without_persisting_as_messages() {
+    let server = MockSseServer::start(vec![sse_text("agents final")]);
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = temp.path().join("work");
+    std::fs::create_dir_all(workdir.join(".git")).expect("git");
+    std::fs::create_dir_all(workdir.join(".psychevo")).expect("psychevo");
+    std::fs::write(workdir.join("AGENTS.md"), "Use root workflow.").expect("agents");
+    std::fs::write(workdir.join(".psychevo/AGENTS.md"), "Use pevo workflow.")
+        .expect("psychevo agents");
+    std::fs::write(workdir.join("AGENTS.local.md"), "Use local workflow.").expect("local");
+    let config = write_run_config(&temp.path().join("config"), &server.base_url);
+    let output = isolated_run_cmd(temp.path(), &config, &db)
+        .args([
+            "run",
+            "--dir",
+            workdir.to_str().expect("workdir"),
+            "--format",
+            "json",
+            "do it",
+        ])
+        .output()
+        .expect("pevo run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let contents = user_contents(&server.request_json(0));
+    assert_eq!(contents.len(), 2);
+    assert!(contents[0].contains("# AGENTS.md instructions for"));
+    assert!(contents[0].contains("Use root workflow."));
+    assert!(contents[0].contains("Use pevo workflow."));
+    assert!(contents[0].contains("Use local workflow."));
+    assert_eq!(contents[1], "do it");
+
+    let conn = Connection::open(db).expect("db");
+    let user_messages = conn
+        .prepare("SELECT content_text FROM messages WHERE role = 'user' ORDER BY session_seq")
+        .expect("prepare")
+        .query_map([], |row| row.get::<_, String>(0))
+        .expect("query")
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .expect("rows");
+    assert_eq!(user_messages, vec!["do it"]);
+    let evidence_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM context_evidence WHERE source_kind = 'project_instruction'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("context evidence");
+    assert_eq!(evidence_count, 3);
+    let grouped_blocks: Vec<i64> = conn
+        .prepare(
+            "SELECT provider_block_index FROM context_evidence WHERE source_kind = 'project_instruction' AND provider_group = 'project_instructions' ORDER BY context_seq",
+        )
+        .expect("prepare")
+        .query_map([], |row| row.get::<_, i64>(0))
+        .expect("query")
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .expect("rows");
+    assert_eq!(grouped_blocks, vec![0, 1, 2]);
+}
+
+#[test]
+fn cli_run_keeps_agents_skill_and_prompt_as_separate_provider_messages() {
+    let server = MockSseServer::start(vec![sse_text("combined final")]);
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = temp.path().join("work");
+    std::fs::create_dir_all(workdir.join(".git")).expect("git");
+    std::fs::write(workdir.join("AGENTS.md"), "Use project workflow.").expect("agents");
+    write_home_skill(
+        temp.path(),
+        "reviewer",
+        "review code",
+        "Follow the reviewer workflow.",
+    );
+    let config = write_run_config(&temp.path().join("config"), &server.base_url);
+    let output = isolated_run_cmd(temp.path(), &config, &db)
+        .args([
+            "run",
+            "--dir",
+            workdir.to_str().expect("workdir"),
+            "--format",
+            "json",
+            "$reviewer do it",
+        ])
+        .output()
+        .expect("pevo run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let contents = user_contents(&server.request_json(0));
+    assert_eq!(contents.len(), 3);
+    assert!(contents[0].contains("# AGENTS.md instructions for"));
+    assert!(contents[0].contains("Use project workflow."));
+    assert!(contents[1].contains("<skill>"));
+    assert!(contents[1].contains("Follow the reviewer workflow."));
+    assert_eq!(contents[2], "$reviewer do it");
+
+    let conn = Connection::open(db).expect("db");
+    let user_evidence: Vec<(String, String)> = conn
+        .prepare(
+            "SELECT source_kind, provider_group FROM context_evidence WHERE role = 'user' ORDER BY context_seq",
+        )
+        .expect("prepare")
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .expect("query")
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .expect("rows");
+    assert_eq!(
+        user_evidence,
+        vec![
+            (
+                "project_instruction".to_string(),
+                "project_instructions".to_string()
+            ),
+            (
+                "selected_skill".to_string(),
+                "selected_skill:0:reviewer".to_string()
+            ),
+        ]
+    );
+}
+
+#[test]
+fn cli_run_warns_for_claude_memory_without_loading_it() {
+    let server = MockSseServer::start(vec![sse_text("claude final")]);
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = temp.path().join("work");
+    std::fs::create_dir_all(workdir.join(".git")).expect("git");
+    std::fs::write(workdir.join("CLAUDE.md"), "Do not load this Claude memory.")
+        .expect("claude");
+    let config = write_run_config(&temp.path().join("config"), &server.base_url);
+    let output = isolated_run_cmd(temp.path(), &config, &db)
+        .args([
+            "run",
+            "--dir",
+            workdir.to_str().expect("workdir"),
+            "--format",
+            "json",
+            "hello",
+        ])
+        .output()
+        .expect("pevo run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+    let events = stdout
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("json line"))
+        .collect::<Vec<_>>();
+    let warning = events
+        .iter()
+        .find(|event| event["type"] == "warning")
+        .expect("warning event");
+    assert_eq!(warning["kind"], "project_instruction");
+    assert!(
+        warning["message"]
+            .as_str()
+            .expect("message")
+            .contains("Psychevo only loads AGENTS-named")
+    );
+    assert_eq!(warning["suggestion"], "ln -s CLAUDE.md AGENTS.md");
+    assert!(!user_contents(&server.request_json(0))[0].contains("Do not load this Claude memory."));
+}
+
+#[test]
+fn cli_run_default_writes_claude_warning_to_stderr_only() {
+    let server = MockSseServer::start(vec![sse_text("default final")]);
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = temp.path().join("work");
+    std::fs::create_dir_all(workdir.join(".git")).expect("git");
+    std::fs::write(workdir.join("CLAUDE.local.md"), "local claude").expect("claude local");
+    let config = write_run_config(&temp.path().join("config"), &server.base_url);
+    let output = isolated_run_cmd(temp.path(), &config, &db)
+        .args([
+            "run",
+            "--dir",
+            workdir.to_str().expect("workdir"),
+            "hello",
+        ])
+        .output()
+        .expect("pevo run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("stdout"),
+        "default final\n"
+    );
+    let stderr = String::from_utf8(output.stderr).expect("stderr");
+    assert!(stderr.contains("warning: Detected"));
+    assert!(stderr.contains("suggestion: ln -s CLAUDE.local.md AGENTS.local.md"));
 }
 
 #[test]

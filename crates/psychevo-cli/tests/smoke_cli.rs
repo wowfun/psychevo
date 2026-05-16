@@ -249,3 +249,4 @@ include!("smoke_cli/run.rs");
 include!("smoke_cli/tui.rs");
 include!("smoke_cli/skills.rs");
 include!("smoke_cli/install.rs");
+include!("smoke_cli/admin.rs");

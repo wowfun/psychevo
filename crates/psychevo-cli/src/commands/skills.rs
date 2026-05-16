@@ -169,7 +169,7 @@ fn catalog(
 }
 
 fn target_from_create(args: &SkillsCreateArgs) -> SkillTarget {
-    if args.project {
+    if args.local {
         SkillTarget::Project
     } else {
         SkillTarget::Global
@@ -177,7 +177,7 @@ fn target_from_create(args: &SkillsCreateArgs) -> SkillTarget {
 }
 
 fn target_from_scope(args: &SkillsNameScopeArgs) -> SkillTarget {
-    if args.project {
+    if args.local {
         SkillTarget::Project
     } else {
         SkillTarget::Global
@@ -185,7 +185,7 @@ fn target_from_scope(args: &SkillsNameScopeArgs) -> SkillTarget {
 }
 
 fn target_from_install(args: &SkillsInstallArgs) -> SkillTarget {
-    if args.project {
+    if args.local {
         SkillTarget::Project
     } else {
         SkillTarget::Global

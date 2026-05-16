@@ -13,10 +13,106 @@ fn cli_help_lists_aligned_command_descriptions() {
     );
     let stdout = String::from_utf8(output.stdout).expect("stdout");
     assert!(stdout.contains("init"));
-    assert!(stdout.contains("Initialize Psychevo home"));
+    assert!(stdout.contains("Create or repair the global Psychevo home"));
     assert!(stdout.contains("Run one coding-agent turn"));
-    assert!(stdout.contains("Open the interactive terminal UI"));
-    assert!(stdout.contains("Inspect context-window usage for a session"));
+    assert!(stdout.contains("Open the fullscreen terminal UI"));
+    assert!(stdout.contains("Inspect local context-window usage for a session"));
+}
+
+#[test]
+fn cli_help_describes_representative_commands_and_flags() {
+    let temp = tempdir().expect("temp");
+    assert_help_contains(
+        temp.path(),
+        &["run", "--help"],
+        &[
+            "Run one coding-agent turn through the configured provider",
+            "--dir <DIR>",
+            "--skill <NAME_OR_PATH>",
+            "Disable default and configured skill discovery",
+            "NDJSON machine output",
+        ],
+    );
+    assert_help_contains(
+        temp.path(),
+        &["tui", "--help"],
+        &[
+            "Open the fullscreen terminal UI",
+            "--new",
+            "leading ! runs a local shell escape",
+        ],
+    );
+    assert_help_contains(
+        temp.path(),
+        &["session", "--help"],
+        &[
+            "List, inspect, rename, archive, restore, export, or share local sessions",
+            "export",
+            "share",
+        ],
+    );
+    assert_help_contains(
+        temp.path(),
+        &["session", "export", "--help"],
+        &[
+            "without contacting providers",
+            "last-provider-request",
+            "hidden prompts",
+            "--include <LIST>",
+        ],
+    );
+    assert_help_contains(
+        temp.path(),
+        &["skill", "--help"],
+        &[
+            "List discoverable skills",
+            "Install one or more skills from a source path",
+        ],
+    );
+    assert_help_contains(
+        temp.path(),
+        &["model", "fetch", "--help"],
+        &[
+            "provider /models endpoints",
+            "contacts providers",
+            "[PROVIDER]",
+        ],
+    );
+    assert_help_contains(
+        temp.path(),
+        &["config", "provider", "add", "--help"],
+        &[
+            "OpenAI-compatible provider",
+            "--base-url <URL>",
+            "API key from stdin",
+            "selected .env",
+        ],
+    );
+    assert_help_contains(
+        temp.path(),
+        &["auth", "set", "--help"],
+        &[
+            "Read a provider API key from stdin",
+            "Raw API keys are never accepted",
+            "--api-key-stdin",
+        ],
+    );
+}
+
+fn assert_help_contains(test_home: &Path, args: &[&str], expected: &[&str]) {
+    let output = pevo_cmd(test_home).args(args).output().expect("pevo help");
+    assert!(
+        output.status.success(),
+        "args: {args:?}\nstderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+    for needle in expected {
+        assert!(
+            stdout.contains(needle),
+            "args: {args:?}\nmissing: {needle}\nstdout:\n{stdout}"
+        );
+    }
 }
 
 #[test]
@@ -53,7 +149,7 @@ fn cli_init_creates_home_tree_and_is_idempotent() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 6);
+    assert_eq!(user_version, 7);
 
     std::fs::write(home.join("config.jsonc"), "custom config").expect("custom config");
     std::fs::write(home.join(".env"), "CUSTOM=1\n").expect("custom env");
@@ -123,7 +219,7 @@ fn cli_init_reset_state_backs_up_existing_sqlite_files() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 6);
+    assert_eq!(user_version, 7);
 }
 
 #[test]

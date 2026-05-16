@@ -1,0 +1,102 @@
+use std::env;
+use std::process::ExitCode;
+
+use anyhow::{Result, anyhow};
+use psychevo_runtime::{auth_status_value, set_provider_api_key};
+use serde_json::Value;
+
+use crate::args::{AuthArgs, AuthCommand, AuthSetArgs, AuthStatusArgs};
+use crate::commands::common::{
+    base_run_options, config_scope_dir, print_json_error, read_secret_from_stdin,
+};
+use crate::env::{ensure_home_initialized, inherited_env, resolve_psychevo_home};
+
+pub(crate) fn run_auth_command(args: AuthArgs) -> Result<ExitCode> {
+    match run_auth_command_inner(&args) {
+        Ok(code) => Ok(code),
+        Err(err) if auth_json(&args) => {
+            print_json_error(&err)?;
+            Ok(ExitCode::from(1))
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn run_auth_command_inner(args: &AuthArgs) -> Result<ExitCode> {
+    let env_map = inherited_env();
+    let cwd = env::current_dir()?;
+    let home = resolve_psychevo_home(&env_map, &cwd)?;
+    ensure_home_initialized(&home)?;
+    let options = base_run_options(&env_map, &home, &cwd)?;
+    match &args.command {
+        AuthCommand::Status(args) => auth_status(args, &options),
+        AuthCommand::Set(args) => auth_set(args, &options, &home, &cwd),
+    }
+}
+
+fn auth_status(args: &AuthStatusArgs, options: &psychevo_runtime::RunOptions) -> Result<ExitCode> {
+    let value = auth_status_value(options, args.provider.as_deref())?;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&value)?);
+    } else {
+        print_auth_status(&value);
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn auth_set(
+    args: &AuthSetArgs,
+    options: &psychevo_runtime::RunOptions,
+    home: &std::path::Path,
+    cwd: &std::path::Path,
+) -> Result<ExitCode> {
+    if !args.api_key_stdin {
+        return Err(anyhow!("pevo auth set requires --api-key-stdin"));
+    }
+    let api_key = read_secret_from_stdin(true)?.expect("required stdin secret");
+    let value = set_provider_api_key(
+        options,
+        config_scope_dir(home, cwd, args.local)?,
+        &args.provider,
+        &api_key,
+    )?;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&value)?);
+    } else {
+        println!("provider: {}", value["provider"].as_str().unwrap_or("-"));
+        println!(
+            "api_key_env: {}",
+            value["api_key_env"].as_str().unwrap_or("-")
+        );
+        println!("env_path: {}", value["env_path"].as_str().unwrap_or("-"));
+        println!(
+            "replaced_existing: {}",
+            value["replaced_existing"].as_bool().unwrap_or(false)
+        );
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn print_auth_status(value: &Value) {
+    let rows = value["providers"].as_array().cloned().unwrap_or_default();
+    if rows.is_empty() {
+        println!("No providers found.");
+        return;
+    }
+    println!("Provider\tStatus\tAPI key env");
+    for row in rows {
+        println!(
+            "{}\t{}\t{}",
+            row["provider"].as_str().unwrap_or("-"),
+            row["status"].as_str().unwrap_or("-"),
+            row["api_key_env"].as_str().unwrap_or("-")
+        );
+    }
+}
+
+fn auth_json(args: &AuthArgs) -> bool {
+    match &args.command {
+        AuthCommand::Status(args) => args.json,
+        AuthCommand::Set(args) => args.json,
+    }
+}
