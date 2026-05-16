@@ -17,8 +17,27 @@ async fn stream_assistant(
         .filter(|instruction| !instruction.trim().is_empty())
         .map(|instruction| json!({ "role": "system", "content": instruction }))
         .collect::<Vec<_>>();
+    let contextual_insert_index = request
+        .previous_messages
+        .len()
+        .saturating_add(request.context_messages.len())
+        .min(context.len());
     messages.extend(
-        context
+        context[..contextual_insert_index]
+            .iter()
+            .map(serde_json::to_value)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|err| Error::Agent(err.to_string()))?,
+    );
+    messages.extend(
+        request
+            .contextual_user_messages
+            .iter()
+            .filter(|message| !message.blocks.is_empty())
+            .map(ContextualUserMessage::to_provider_value),
+    );
+    messages.extend(
+        context[contextual_insert_index..]
             .iter()
             .map(serde_json::to_value)
             .collect::<std::result::Result<Vec<_>, _>>()

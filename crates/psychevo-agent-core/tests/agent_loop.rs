@@ -1,12 +1,17 @@
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::future::BoxFuture;
+use futures::stream;
 use psychevo_agent_core::{
-    AgentEvent, AgentLoopRequest, ControlHandle, EventSink, Message, Result, ToolBinding,
-    ToolExecutionMode, ToolOutput, run_agent_loop, user_text_message,
+    AgentEvent, AgentLoopRequest, ControlHandle, EventSink, Message, Result, TerminalReason,
+    ToolBinding, ToolExecutionMode, ToolOutput, run_agent_loop, user_text_message,
 };
-use psychevo_ai::{AbortSignal, FakeProvider, Outcome, RawStreamEvent};
+use psychevo_ai::{
+    AbortSignal, FakeProvider, GenerationProvider, GenerationRequest, GenerationStream, Outcome,
+    RawStreamEvent, StreamEvent,
+};
 use serde_json::{Value, json};
 
 #[derive(Clone, Default)]
@@ -91,6 +96,94 @@ impl ToolBinding for SequentialDelayTool {
     }
 }
 
+#[derive(Clone)]
+struct RequestRecordingProvider {
+    scripts: Arc<Mutex<VecDeque<Vec<RawStreamEvent>>>>,
+    requests: Arc<Mutex<Vec<GenerationRequest>>>,
+}
+
+impl RequestRecordingProvider {
+    fn new(scripts: Vec<Vec<RawStreamEvent>>) -> Self {
+        Self {
+            scripts: Arc::new(Mutex::new(scripts.into())),
+            requests: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+}
+
+impl GenerationProvider for RequestRecordingProvider {
+    fn stream(
+        &self,
+        request: GenerationRequest,
+        abort: AbortSignal,
+    ) -> BoxFuture<'static, psychevo_ai::Result<GenerationStream>> {
+        let scripts = Arc::clone(&self.scripts);
+        let requests = Arc::clone(&self.requests);
+        Box::pin(async move {
+            requests.lock().expect("requests").push(request);
+            if abort.aborted() {
+                return Ok(Box::pin(stream::iter(vec![Ok(StreamEvent::Done {
+                    outcome: Outcome::Aborted,
+                    finish_reason: Some("aborted".to_string()),
+                })])) as GenerationStream);
+            }
+            let script = scripts
+                .lock()
+                .expect("scripts")
+                .pop_front()
+                .ok_or(psychevo_ai::Error::ScriptExhausted)?;
+            let events = script
+                .into_iter()
+                .map(raw_stream_event_to_stream_event)
+                .map(Ok);
+            Ok(Box::pin(stream::iter(events)) as GenerationStream)
+        })
+    }
+}
+
+fn raw_stream_event_to_stream_event(event: RawStreamEvent) -> StreamEvent {
+    match event {
+        RawStreamEvent::Text(text) => StreamEvent::TextDelta { text },
+        RawStreamEvent::Reasoning(text) => StreamEvent::ReasoningDelta {
+            text,
+            reasoning_content: None,
+        },
+        RawStreamEvent::ToolStart {
+            content_index,
+            call_index,
+            id,
+            name,
+        } => StreamEvent::ToolCallStart {
+            content_index,
+            call_index,
+            id,
+            name,
+        },
+        RawStreamEvent::ToolArgs {
+            content_index,
+            call_index,
+            delta,
+        } => StreamEvent::ToolCallDelta {
+            content_index,
+            call_index,
+            id: None,
+            name: None,
+            arguments_delta: delta,
+        },
+        RawStreamEvent::ToolEnd {
+            content_index,
+            call_index,
+        } => StreamEvent::ToolCallEnd {
+            content_index,
+            call_index,
+        },
+        RawStreamEvent::Done(outcome) => StreamEvent::Done {
+            outcome,
+            finish_reason: None,
+        },
+    }
+}
+
 fn tool_script() -> Vec<Vec<RawStreamEvent>> {
     vec![
         vec![
@@ -134,6 +227,75 @@ fn tool_script() -> Vec<Vec<RawStreamEvent>> {
 }
 
 #[tokio::test]
+async fn injected_user_shell_context_reaches_next_provider_request() {
+    let provider = RequestRecordingProvider::new(vec![
+        vec![
+            RawStreamEvent::ToolStart {
+                content_index: 0,
+                call_index: 0,
+                id: "slow".to_string(),
+                name: "read".to_string(),
+            },
+            RawStreamEvent::ToolArgs {
+                content_index: 0,
+                call_index: 0,
+                delta: "{\"delay\":50}".to_string(),
+            },
+            RawStreamEvent::ToolEnd {
+                content_index: 0,
+                call_index: 0,
+            },
+            RawStreamEvent::Done(Outcome::Normal),
+        ],
+        vec![
+            RawStreamEvent::Text("done".to_string()),
+            RawStreamEvent::Done(Outcome::Normal),
+        ],
+    ]);
+    let requests = Arc::clone(&provider.requests);
+    let (control, receivers) = ControlHandle::new();
+    let sink = RecordingSink::default();
+    let task = tokio::spawn(run_agent_loop(
+        Arc::new(provider),
+        AgentLoopRequest {
+            model_provider: "fake".to_string(),
+            model: "fake".to_string(),
+            generation_metadata: json!({}),
+            system_instructions: Vec::new(),
+            previous_messages: vec![],
+            context_messages: Vec::new(),
+            contextual_user_messages: Vec::new(),
+            prompt_messages: vec![user_text_message("run")],
+            tools: vec![Arc::new(DelayTool)],
+            max_turns: 4,
+        },
+        Arc::new(sink),
+        receivers,
+    ));
+
+    wait_for_request_count(&requests, 1).await;
+    assert!(control.inject_user_message(user_text_message(
+        "<user_shell_command><command>pwd</command><result>Exit code: 0\nDuration: 0.001 seconds\nTruncated: false\nOutput:\n/tmp</result></user_shell_command>"
+    )));
+    let completion = task.await.expect("join").expect("loop");
+    assert_eq!(completion.outcome, Outcome::Normal);
+    assert!(
+        completion.messages.iter().all(|message| {
+            !serde_json::to_string(message)
+                .expect("message json")
+                .contains("<user_shell_command>")
+        }),
+        "injected context should not duplicate completion messages"
+    );
+
+    let requests = requests.lock().expect("requests");
+    assert_eq!(requests.len(), 2);
+    let second = serde_json::to_string(&requests[1].messages).expect("request json");
+    assert!(second.contains("<user_shell_command>"));
+    assert!(second.contains("<command>pwd</command>"));
+}
+
+#[tokio::test]
 async fn tool_execution_events_include_timing_fields() {
     let provider = Arc::new(FakeProvider::new(vec![
         vec![
@@ -171,6 +333,7 @@ async fn tool_execution_events_include_timing_fields() {
             system_instructions: Vec::new(),
             previous_messages: vec![],
             context_messages: Vec::new(),
+            contextual_user_messages: Vec::new(),
             prompt_messages: vec![user_text_message("run")],
             tools: vec![Arc::new(DelayTool)],
             max_turns: 4,
@@ -208,6 +371,16 @@ async fn tool_execution_events_include_timing_fields() {
     assert!(elapsed_ms > 0);
 }
 
+async fn wait_for_request_count(requests: &Arc<Mutex<Vec<GenerationRequest>>>, expected: usize) {
+    for _ in 0..200 {
+        if requests.lock().expect("requests").len() >= expected {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+    panic!("timed out waiting for {expected} provider requests");
+}
+
 #[tokio::test]
 async fn sequential_tool_elapsed_excludes_queue_time() {
     let provider = Arc::new(FakeProvider::new(tool_script()));
@@ -223,6 +396,7 @@ async fn sequential_tool_elapsed_excludes_queue_time() {
             system_instructions: Vec::new(),
             previous_messages: vec![],
             context_messages: Vec::new(),
+            contextual_user_messages: Vec::new(),
             prompt_messages: vec![user_text_message("run")],
             tools: vec![Arc::new(SequentialDelayTool)],
             max_turns: 4,
@@ -267,6 +441,7 @@ async fn parallel_tool_end_can_finish_before_source_ordered_tool_results() {
             system_instructions: Vec::new(),
             previous_messages: vec![],
             context_messages: Vec::new(),
+            contextual_user_messages: Vec::new(),
             prompt_messages: vec![user_text_message("run")],
             tools: vec![Arc::new(DelayTool)],
             max_turns: 4,
@@ -335,6 +510,7 @@ async fn invalid_tool_json_becomes_error_tool_result() {
             system_instructions: Vec::new(),
             previous_messages: vec![],
             context_messages: Vec::new(),
+            contextual_user_messages: Vec::new(),
             prompt_messages: vec![user_text_message("run")],
             tools: vec![Arc::new(DelayTool)],
             max_turns: 4,
@@ -358,6 +534,69 @@ async fn invalid_tool_json_becomes_error_tool_result() {
 }
 
 #[tokio::test]
+async fn max_turn_budget_exhaustion_reports_terminal_reason() {
+    let provider = Arc::new(FakeProvider::new(vec![vec![
+        RawStreamEvent::ToolStart {
+            content_index: 0,
+            call_index: 0,
+            id: "one-more".to_string(),
+            name: "read".to_string(),
+        },
+        RawStreamEvent::ToolArgs {
+            content_index: 0,
+            call_index: 0,
+            delta: "{\"delay\":1}".to_string(),
+        },
+        RawStreamEvent::ToolEnd {
+            content_index: 0,
+            call_index: 0,
+        },
+        RawStreamEvent::Done(Outcome::Normal),
+    ]]));
+    let sink = RecordingSink::default();
+    let events = Arc::clone(&sink.events);
+    let (_control, receivers) = ControlHandle::new();
+    let completion = run_agent_loop(
+        provider,
+        AgentLoopRequest {
+            model_provider: "fake".to_string(),
+            model: "fake".to_string(),
+            generation_metadata: json!({}),
+            system_instructions: Vec::new(),
+            previous_messages: vec![],
+            context_messages: Vec::new(),
+            contextual_user_messages: Vec::new(),
+            prompt_messages: vec![user_text_message("run")],
+            tools: vec![Arc::new(DelayTool)],
+            max_turns: 1,
+        },
+        Arc::new(sink),
+        receivers,
+    )
+    .await
+    .expect("loop");
+
+    assert_eq!(completion.outcome, Outcome::Failed);
+    assert_eq!(
+        completion.terminal_reason,
+        Some(TerminalReason::MaxTurnsExceeded { max_turns: 1 })
+    );
+    let guard = events.lock().expect("events");
+    let terminal_reason = guard.iter().find_map(|event| match event {
+        AgentEvent::AgentEnd {
+            outcome,
+            terminal_reason,
+            ..
+        } if *outcome == Outcome::Failed => *terminal_reason,
+        _ => None,
+    });
+    assert_eq!(
+        terminal_reason,
+        Some(TerminalReason::MaxTurnsExceeded { max_turns: 1 })
+    );
+}
+
+#[tokio::test]
 async fn graceful_stop_finishes_current_turn() {
     let provider = Arc::new(FakeProvider::new(vec![vec![
         RawStreamEvent::Text("one turn".to_string()),
@@ -374,6 +613,7 @@ async fn graceful_stop_finishes_current_turn() {
             system_instructions: Vec::new(),
             previous_messages: vec![],
             context_messages: Vec::new(),
+            contextual_user_messages: Vec::new(),
             prompt_messages: vec![user_text_message("run")],
             tools: vec![],
             max_turns: 4,
@@ -403,6 +643,7 @@ async fn abort_before_generation_returns_aborted() {
             system_instructions: Vec::new(),
             previous_messages: vec![],
             context_messages: Vec::new(),
+            contextual_user_messages: Vec::new(),
             prompt_messages: vec![user_text_message("run")],
             tools: vec![],
             max_turns: 4,
@@ -432,6 +673,7 @@ async fn event_sink_failure_fails_invocation() {
             system_instructions: Vec::new(),
             previous_messages: vec![],
             context_messages: Vec::new(),
+            contextual_user_messages: Vec::new(),
             prompt_messages: vec![user_text_message("run")],
             tools: vec![],
             max_turns: 4,

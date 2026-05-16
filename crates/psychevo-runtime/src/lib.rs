@@ -6,8 +6,10 @@ mod error;
 mod events;
 mod messages;
 mod paths;
+mod project_instructions;
 mod prompt_image;
 mod run;
+mod session_export;
 mod session_lookup;
 mod skills;
 mod smoke;
@@ -23,9 +25,10 @@ mod user_shell;
 mod tests;
 
 pub use config::{
-    configured_models, create_global_custom_provider, custom_provider_api_key_env,
+    auth_status_value, config_provider_list_value, config_show_value, configured_models,
+    create_global_custom_provider, create_scoped_custom_provider, custom_provider_api_key_env,
     fetch_model_catalog, model_catalog_endpoint, model_catalog_providers,
-    refresh_model_metadata_cache, selected_configured_model,
+    refresh_model_metadata_cache, selected_configured_model, set_provider_api_key,
 };
 pub use context::prune_context;
 pub use context_usage::{
@@ -41,7 +44,13 @@ pub use prompt_image::{
     extract_image_sources_from_prompt, model_metadata_explicitly_disallows_image_input,
     prompt_starts_with_supported_image_path, resolve_image_source, split_image_source_argument,
 };
+pub use psychevo_agent_core::TerminalReason;
 pub use run::{run_live, run_live_streaming, run_live_streaming_controlled};
+pub use session_export::{
+    SessionArtifactKind, SessionExportArtifact, SessionExportFormat, SessionExportInclude,
+    SessionExportIncludeSet, SessionExportOptions, SessionExportWriteResult,
+    default_session_export_filename, render_session_export, write_session_export,
+};
 pub use session_lookup::{latest_run_session_for_workdir, session_exists};
 pub use skills::{
     InstallOptions, ScanResult, ScanVerdict, SelectedSkill, SkillCatalog, SkillDiagnostic,
@@ -56,12 +65,14 @@ pub use stats::usage_stats;
 pub use store::{ContextEvidenceInput, ContextEvidenceRecord, SqliteStore};
 pub use tools::tool_names_for_mode;
 pub use types::{
-    ConfiguredModel, CustomProviderInput, CustomProviderResult, ImageInput, ModelCatalogEntry,
-    ModelCatalogProvider, ModelMetadataCacheTarget, PromptAttachmentDisplay, PromptDisplayMetadata,
-    RunControl, RunControlHandle, RunMode, RunOptions, RunResult, RunStreamEvent, RunStreamSink,
-    SanitizedMessageSummary, SessionRedoResult, SessionSummary, SessionUndoOptions,
+    ConfigScope, ConfiguredModel, CustomProviderInput, CustomProviderResult, ImageInput,
+    ModelCatalogEntry, ModelCatalogProvider, ModelMetadataCacheTarget, PromptAttachmentDisplay,
+    PromptDisplayMetadata, RunControl, RunControlHandle, RunMode, RunOptions, RunResult,
+    RunStreamEvent, RunStreamSink, RunWarning, SanitizedMessageSummary, ScopedCustomProviderInput,
+    SessionExportMessageSummary, SessionRedoResult, SessionSummary, SessionUndoOptions,
     SessionUndoResult, SmokeControl, SmokeOptions, SmokeResult, StatsOptions,
-    TUI_DISPLAY_METADATA_KEY, TuiMessageSummary, UserShellOptions, UserShellResult, run_control,
+    TUI_DISPLAY_METADATA_KEY, TuiMessageSummary, USER_SHELL_METADATA_KEY, UserShellContextOptions,
+    UserShellOptions, UserShellResult, run_control,
 };
 pub use undo::{redo_session, undo_session};
 pub use user_shell::run_user_shell_command_streaming_controlled;

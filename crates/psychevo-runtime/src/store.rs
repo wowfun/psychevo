@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use psychevo_agent_core::{AssistantBlock, Message, now_ms};
+use psychevo_agent_core::{AssistantBlock, Message, TerminalReason, now_ms};
 use psychevo_ai::Outcome;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Map, Value, json};
@@ -13,9 +13,12 @@ use uuid::Uuid;
 use crate::error::{Error, Result};
 use crate::messages::{sanitize_message_for_output, sanitize_message_for_tui_history};
 use crate::run::normalize_session_title;
-use crate::types::{MessageAccounting, SanitizedMessageSummary, SessionSummary, TuiMessageSummary};
+use crate::types::{
+    MessageAccounting, SanitizedMessageSummary, SessionExportMessageSummary, SessionSummary,
+    TuiMessageSummary,
+};
 
-const SQLITE_SCHEMA_VERSION: i64 = 6;
+const SQLITE_SCHEMA_VERSION: i64 = 7;
 const SESSION_REVERT_METADATA_KEY: &str = "revert";
 const MESSAGE_UNDO_METADATA_KEY: &str = "undo";
 const MESSAGE_PRE_SNAPSHOT_KEY: &str = "pre_snapshot";
@@ -39,6 +42,9 @@ pub struct ContextEvidenceInput {
     pub source_kind: String,
     pub source_name: Option<String>,
     pub source_path: Option<String>,
+    pub provider_group: Option<String>,
+    pub provider_block_index: Option<i64>,
+    pub context_kind: Option<String>,
     pub content_text: String,
     pub metadata: Option<Value>,
 }
@@ -53,6 +59,9 @@ pub struct ContextEvidenceRecord {
     pub source_kind: String,
     pub source_name: Option<String>,
     pub source_path: Option<String>,
+    pub provider_group: Option<String>,
+    pub provider_block_index: Option<i64>,
+    pub context_kind: Option<String>,
     pub timestamp_ms: i64,
     pub content_text: String,
     pub metadata: Option<Value>,

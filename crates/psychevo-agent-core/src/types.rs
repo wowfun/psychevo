@@ -8,6 +8,22 @@ pub enum Error {
     Agent(String),
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TerminalReason {
+    MaxTurnsExceeded { max_turns: usize },
+}
+
+impl TerminalReason {
+    pub fn message(self) -> String {
+        match self {
+            Self::MaxTurnsExceeded { max_turns } => format!(
+                "reached model-turn limit ({max_turns}) before final answer; resume this session to continue."
+            ),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "role", rename_all = "snake_case")]
 pub enum Message {
@@ -39,6 +55,73 @@ impl Message {
             Self::Assistant { .. } => "assistant",
             Self::ToolResult { .. } => "tool_result",
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ContextualUserBlock {
+    pub kind: String,
+    pub source_name: Option<String>,
+    pub source_path: Option<String>,
+    pub text: String,
+    pub hidden: bool,
+}
+
+impl ContextualUserBlock {
+    pub fn new(
+        kind: impl Into<String>,
+        source_name: Option<String>,
+        source_path: Option<String>,
+        text: impl Into<String>,
+    ) -> Self {
+        Self {
+            kind: kind.into(),
+            source_name,
+            source_path,
+            text: text.into(),
+            hidden: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ContextualUserMessage {
+    pub provider_group: String,
+    pub blocks: Vec<ContextualUserBlock>,
+    pub hidden: bool,
+    pub timestamp_ms: i64,
+}
+
+impl ContextualUserMessage {
+    pub fn new(provider_group: impl Into<String>, blocks: Vec<ContextualUserBlock>) -> Self {
+        Self {
+            provider_group: provider_group.into(),
+            blocks,
+            hidden: true,
+            timestamp_ms: now_ms(),
+        }
+    }
+
+    pub fn to_provider_value(&self) -> Value {
+        json!({
+            "role": "user",
+            "content": self.blocks.iter().map(|block| {
+                json!({
+                    "type": "contextual_text",
+                    "text": block.text,
+                    "context_kind": block.kind,
+                    "source_name": block.source_name,
+                    "source_path": block.source_path,
+                    "hidden": block.hidden,
+                })
+            }).collect::<Vec<_>>(),
+            "timestamp_ms": self.timestamp_ms,
+            "metadata": {
+                "contextual_user": true,
+                "provider_group": self.provider_group,
+                "hidden": self.hidden,
+            },
+        })
     }
 }
 

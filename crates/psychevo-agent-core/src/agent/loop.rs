@@ -2,7 +2,7 @@ pub async fn run_agent_loop(
     provider: Arc<dyn GenerationProvider>,
     request: AgentLoopRequest,
     sink: Arc<dyn EventSink>,
-    control: ControlReceivers,
+    mut control: ControlReceivers,
 ) -> Result<AgentCompletion> {
     emit(&sink, AgentEvent::AgentStart).await?;
 
@@ -10,12 +10,14 @@ pub async fn run_agent_loop(
         let completion = AgentCompletion {
             outcome: Outcome::Aborted,
             messages: Vec::new(),
+            terminal_reason: None,
         };
         emit(
             &sink,
             AgentEvent::AgentEnd {
                 outcome: completion.outcome,
                 messages: completion.messages.clone(),
+                terminal_reason: completion.terminal_reason,
             },
         )
         .await?;
@@ -48,10 +50,14 @@ pub async fn run_agent_loop(
         )
         .await?;
     }
+    drain_external_user_messages(&mut control, &mut context);
 
     loop {
         if turn_index >= request.max_turns {
             let outcome = Outcome::Failed;
+            let terminal_reason = Some(TerminalReason::MaxTurnsExceeded {
+                max_turns: request.max_turns,
+            });
             emit(
                 &sink,
                 AgentEvent::TurnEnd {
@@ -65,12 +71,14 @@ pub async fn run_agent_loop(
                 AgentEvent::AgentEnd {
                     outcome,
                     messages: new_messages.clone(),
+                    terminal_reason,
                 },
             )
             .await?;
             return Ok(AgentCompletion {
                 outcome,
                 messages: new_messages,
+                terminal_reason,
             });
         }
 
@@ -89,14 +97,18 @@ pub async fn run_agent_loop(
                 AgentEvent::AgentEnd {
                     outcome,
                     messages: new_messages.clone(),
+                    terminal_reason: None,
                 },
             )
             .await?;
             return Ok(AgentCompletion {
                 outcome,
                 messages: new_messages,
+                terminal_reason: None,
             });
         }
+
+        drain_external_user_messages(&mut control, &mut context);
 
         let assistant = stream_assistant(
             Arc::clone(&provider),
@@ -110,6 +122,7 @@ pub async fn run_agent_loop(
         let assistant_outcome = assistant_outcome(&assistant);
         context.push(assistant.clone());
         new_messages.push(assistant.clone());
+        let injected_after_generation = drain_external_user_messages(&mut control, &mut context);
 
         if assistant_outcome != Outcome::Normal {
             emit(
@@ -125,12 +138,14 @@ pub async fn run_agent_loop(
                 AgentEvent::AgentEnd {
                     outcome: assistant_outcome,
                     messages: new_messages.clone(),
+                    terminal_reason: None,
                 },
             )
             .await?;
             return Ok(AgentCompletion {
                 outcome: assistant_outcome,
                 messages: new_messages,
+                terminal_reason: None,
             });
         }
 
@@ -164,12 +179,14 @@ pub async fn run_agent_loop(
                 .await?;
             }
         }
+        let injected_after_tools =
+            injected_after_generation || drain_external_user_messages(&mut control, &mut context);
 
         let terminal = if control.abort_requested() {
             Some(Outcome::Aborted)
         } else if control.stop_requested() {
             Some(Outcome::Stopped)
-        } else if tool_calls.is_empty() {
+        } else if tool_calls.is_empty() && !injected_after_tools {
             Some(Outcome::Normal)
         } else {
             None
@@ -189,12 +206,14 @@ pub async fn run_agent_loop(
                 AgentEvent::AgentEnd {
                     outcome,
                     messages: new_messages.clone(),
+                    terminal_reason: None,
                 },
             )
             .await?;
             return Ok(AgentCompletion {
                 outcome,
                 messages: new_messages,
+                terminal_reason: None,
             });
         }
 
@@ -209,4 +228,14 @@ pub async fn run_agent_loop(
         turn_index += 1;
         emit(&sink, AgentEvent::TurnStart { turn_index }).await?;
     }
+}
+
+fn drain_external_user_messages(
+    control: &mut ControlReceivers,
+    context: &mut Vec<Message>,
+) -> bool {
+    let messages = control.drain_injected_messages();
+    let had_messages = !messages.is_empty();
+    context.extend(messages);
+    had_messages
 }

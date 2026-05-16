@@ -6,6 +6,7 @@ pub struct AgentLoopRequest {
     pub system_instructions: Vec<String>,
     pub previous_messages: Vec<Message>,
     pub context_messages: Vec<Message>,
+    pub contextual_user_messages: Vec<ContextualUserMessage>,
     pub prompt_messages: Vec<Message>,
     pub tools: Vec<Arc<dyn ToolBinding>>,
     pub max_turns: usize,
@@ -15,4 +16,5 @@ pub struct AgentLoopRequest {
 pub struct AgentCompletion {
     pub outcome: Outcome,
     pub messages: Vec<Message>,
+    pub terminal_reason: Option<TerminalReason>,
 }

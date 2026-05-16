@@ -43,8 +43,8 @@ impl GenerationProvider for OpenAiChatProvider {
                 return Ok(aborted_generation_stream());
             }
 
-            let endpoint = chat_completions_endpoint(&base_url);
-            let body = build_chat_request(&request, &base_url);
+            let endpoint = openai_chat_completions_endpoint(&base_url);
+            let body = openai_chat_request_body(&request, &base_url);
             let send = client
                 .post(endpoint)
                 .bearer_auth(api_key)

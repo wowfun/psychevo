@@ -83,6 +83,7 @@ pub async fn run_smoke(options: SmokeOptions) -> Result<SmokeResult> {
         system_instructions: Vec::new(),
         previous_messages,
         context_messages: Vec::new(),
+        contextual_user_messages: Vec::new(),
         prompt_messages: vec![user_text_message(prompt)],
         tools,
         max_turns: 8,

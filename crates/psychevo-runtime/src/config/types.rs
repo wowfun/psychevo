@@ -53,6 +53,13 @@ pub(crate) struct LoadedRunConfig {
     pub(crate) env: BTreeMap<String, String>,
 }
 
+#[derive(Debug, Clone)]
+struct LoadedConfigValue {
+    value: Value,
+    env: BTreeMap<String, String>,
+    sources: Vec<PathBuf>,
+}
+
 const AUTO_PROVIDER_ORDER: &[&str] = &[
     "openrouter",
     "openai",
@@ -145,16 +152,26 @@ const BUILT_IN_PROVIDERS: &[BuiltInProvider] = &[
 ];
 
 pub(crate) fn load_run_config(options: &RunOptions, workdir: &Path) -> Result<LoadedRunConfig> {
+    let loaded = load_config_value(options, workdir)?;
+    Ok(LoadedRunConfig {
+        config: parse_run_config(loaded.value)?,
+        env: loaded.env,
+    })
+}
+
+fn load_config_value(options: &RunOptions, workdir: &Path) -> Result<LoadedConfigValue> {
     let mut env_map = options
         .inherited_env
         .clone()
         .unwrap_or_else(|| env::vars().collect());
     let project_dir = workdir.join(".psychevo");
     let mut value = json!({});
+    let mut sources = Vec::new();
 
     if let Some(config_path) = resolve_config_path(options, &env_map)? {
         let loaded = load_jsonc_config_file(&config_path, true)?;
         deep_merge(&mut value, loaded);
+        sources.push(config_path.clone());
         if let Some(parent) = config_path.parent() {
             load_dotenv_file(&parent.join(".env"), &mut env_map)?;
         }
@@ -169,14 +186,20 @@ pub(crate) fn load_run_config(options: &RunOptions, workdir: &Path) -> Result<Lo
         }
         let loaded = load_jsonc_config_file(&home_config, true)?;
         deep_merge(&mut value, loaded);
+        sources.push(home_config);
         load_dotenv_file(&home.join(".env"), &mut env_map)?;
-        let loaded = load_jsonc_config_file(&project_dir.join("config.jsonc"), false)?;
+        let project_config = project_dir.join("config.jsonc");
+        let loaded = load_jsonc_config_file(&project_config, false)?;
+        if project_config.exists() {
+            sources.push(project_config);
+        }
         deep_merge(&mut value, loaded);
     }
 
     load_dotenv_file(&project_dir.join(".env"), &mut env_map)?;
-    Ok(LoadedRunConfig {
-        config: parse_run_config(value)?,
+    Ok(LoadedConfigValue {
+        value,
         env: env_map,
+        sources,
     })
 }

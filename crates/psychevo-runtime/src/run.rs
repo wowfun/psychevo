@@ -3,7 +3,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use psychevo_agent_core::{
-    AgentLoopRequest, ControlHandle, Message, NoopEventSink, run_agent_loop, user_text_message,
+    AgentLoopRequest, ContextualUserBlock, ContextualUserMessage, ControlHandle, Message,
+    NoopEventSink, run_agent_loop, user_text_message,
 };
 use psychevo_ai::{GenerationProvider, OpenAiChatProvider, Outcome};
 use serde_json::json;
@@ -18,6 +19,7 @@ use crate::error::{Error, Result};
 use crate::events::PersistenceSink;
 use crate::messages::assistant_text;
 use crate::paths::canonical_workdir;
+use crate::project_instructions::{ProjectInstructionFragment, load_project_instructions};
 use crate::prompt_image::prompt_message_from_inputs_with_options;
 use crate::skills::{
     SelectedSkill, SkillCatalog, SkillContextFragment, SkillDiscoveryOptions, discover_skills,
@@ -28,11 +30,11 @@ use crate::snapshot::SnapshotStore;
 use crate::store::{ContextEvidenceInput, SqliteStore};
 use crate::tools::{coding_core_tools_for_mode, mode_instruction, skill_tools_for_mode};
 use crate::types::{
-    RunControl, RunOptions, RunResult, RunStreamEvent, RunStreamSink, SmokeControl,
+    RunControl, RunOptions, RunResult, RunStreamEvent, RunStreamSink, RunWarning, SmokeControl,
 };
 
 const TITLE_GENERATION_TIMEOUT_SECS: u64 = 15;
-const DEFAULT_AGENT_MAX_TURNS: usize = 32;
+const DEFAULT_AGENT_MAX_TURNS: usize = 128;
 pub(crate) const SESSION_TITLE_MAX_CHARS: usize = 100;
 
 pub async fn run_live(options: RunOptions) -> Result<RunResult> {
@@ -76,6 +78,7 @@ async fn run_live_internal(
     if options.prompt.trim().is_empty() && options.image_inputs.is_empty() {
         return Err(Error::Message("prompt is empty".to_string()));
     }
+    let project_instructions = load_project_instructions(&workdir)?;
 
     let loaded = load_run_config(&options, &workdir)?;
     let resolved = resolve_run_provider(&options, &loaded)?;
@@ -97,10 +100,11 @@ async fn run_live_internal(
         &loaded.env,
     );
     let skill_context_fragments = skill_context_fragments(&selected_skills, &skill_catalog)?;
-    let skill_context_messages = skill_context_fragments
-        .iter()
-        .map(|fragment| user_text_message(fragment.content.clone()))
-        .collect::<Vec<_>>();
+    let contextual_user_messages =
+        contextual_user_messages_for_run(&project_instructions.fragments, &skill_context_fragments);
+    let project_instruction_context_message_count =
+        usize::from(!project_instructions.fragments.is_empty());
+    let selected_skill_context_message_count = skill_context_fragments.len();
     let store = SqliteStore::open(&options.db_path)?;
     let (session_id, created_session) = if let Some(session_id) = options.session.clone() {
         store.resume_session(&session_id)?;
@@ -180,6 +184,11 @@ async fn run_live_internal(
         stream(RunStreamEvent::Event(run_start.clone()));
     }
     let events = Arc::new(Mutex::new(vec![run_start]));
+    emit_warning_events(
+        &project_instructions.warnings,
+        &events,
+        stream_events.as_ref(),
+    );
 
     let previous_messages = prune_context(
         store.load_messages(&session_id)?,
@@ -223,8 +232,11 @@ async fn run_live_internal(
     if !skills_prompt.trim().is_empty() {
         system_instructions.push(skills_prompt);
     }
-    let prompt_context_evidence =
-        context_evidence_for_request(&system_instructions, &skill_context_fragments);
+    let prompt_context_evidence = context_evidence_for_request(
+        &system_instructions,
+        &project_instructions.fragments,
+        &skill_context_fragments,
+    );
     let sink = Arc::new(PersistenceSink {
         store: store.clone(),
         session_id: session_id.clone(),
@@ -254,7 +266,8 @@ async fn run_live_internal(
                 1,
                 system_instructions.len().saturating_sub(1),
                 previous_messages.len(),
-                skill_context_messages.len(),
+                project_instruction_context_message_count,
+                selected_skill_context_message_count,
                 skill_catalog
                     .skills
                     .iter()
@@ -269,7 +282,8 @@ async fn run_live_internal(
         generation_metadata,
         system_instructions,
         previous_messages,
-        context_messages: skill_context_messages,
+        context_messages: Vec::new(),
+        contextual_user_messages,
         prompt_messages: vec![
             prompt_message_from_inputs_with_options(
                 &options.prompt,
@@ -322,6 +336,7 @@ async fn run_live_internal(
     Ok(RunResult {
         session_id,
         outcome: completion.outcome,
+        terminal_reason: completion.terminal_reason,
         final_answer,
         db_path: options.db_path,
         workdir,
@@ -335,6 +350,7 @@ async fn run_live_internal(
         selected_skills,
         context_snapshot,
         events,
+        warnings: project_instructions.warnings,
     })
 }
 
@@ -354,8 +370,88 @@ fn selected_skills_for_run(
         .collect()
 }
 
+fn contextual_user_messages_for_run(
+    project_instruction_fragments: &[ProjectInstructionFragment],
+    skill_fragments: &[SkillContextFragment],
+) -> Vec<ContextualUserMessage> {
+    let mut messages = Vec::new();
+    if !project_instruction_fragments.is_empty() {
+        messages.push(ContextualUserMessage::new(
+            "project_instructions",
+            project_instruction_fragments
+                .iter()
+                .map(|fragment| {
+                    ContextualUserBlock::new(
+                        "project_instruction",
+                        Some(fragment.source_name.clone()),
+                        Some(fragment.source_path.display().to_string()),
+                        fragment.content.clone(),
+                    )
+                })
+                .collect(),
+        ));
+    }
+    messages.extend(skill_fragments.iter().enumerate().map(|(index, fragment)| {
+        ContextualUserMessage::new(
+            selected_skill_provider_group(index, &fragment.name),
+            vec![ContextualUserBlock::new(
+                "selected_skill",
+                Some(fragment.name.clone()),
+                Some(fragment.path.display().to_string()),
+                fragment.content.clone(),
+            )],
+        )
+    }));
+    messages
+}
+
+fn selected_skill_provider_group(index: usize, name: &str) -> String {
+    format!("selected_skill:{index}:{name}")
+}
+
+fn emit_warning_events(
+    warnings: &[RunWarning],
+    events: &Arc<Mutex<Vec<serde_json::Value>>>,
+    stream_events: Option<&RunStreamSink>,
+) {
+    for warning in warnings {
+        let value = warning_event(warning);
+        events
+            .lock()
+            .expect("event lock poisoned")
+            .push(value.clone());
+        if let Some(stream) = stream_events {
+            stream(RunStreamEvent::Event(value));
+        }
+    }
+}
+
+fn warning_event(warning: &RunWarning) -> serde_json::Value {
+    let mut value = json!({
+        "type": "warning",
+        "kind": warning.kind.clone(),
+        "message": warning.message.clone(),
+    });
+    if let Some(object) = value.as_object_mut() {
+        if let Some(path) = &warning.source_path {
+            object.insert(
+                "source_path".to_string(),
+                serde_json::Value::String(path.display().to_string()),
+            );
+        }
+        if let Some(suggestion) = &warning.suggestion {
+            object.insert(
+                "suggestion".to_string(),
+                serde_json::Value::String(suggestion.clone()),
+            );
+        }
+    }
+    value
+}
+
 fn context_evidence_for_request(
     system_instructions: &[String],
+    project_instruction_fragments: &[ProjectInstructionFragment],
     skill_fragments: &[SkillContextFragment],
 ) -> Vec<ContextEvidenceInput> {
     let mut evidence = Vec::new();
@@ -365,16 +461,40 @@ fn context_evidence_for_request(
             source_kind: "system_instruction".to_string(),
             source_name: Some(system_instruction_source_name(index)),
             source_path: None,
+            provider_group: Some("system_instructions".to_string()),
+            provider_block_index: Some(index as i64),
+            context_kind: Some("system_instruction".to_string()),
             content_text: instruction.clone(),
             metadata: Some(json!({ "instruction_index": index })),
         });
     }
-    for fragment in skill_fragments {
+    for (index, fragment) in project_instruction_fragments.iter().enumerate() {
+        evidence.push(ContextEvidenceInput {
+            role: "user".to_string(),
+            source_kind: "project_instruction".to_string(),
+            source_name: Some(fragment.source_name.clone()),
+            source_path: Some(fragment.source_path.display().to_string()),
+            provider_group: Some("project_instructions".to_string()),
+            provider_block_index: Some(index as i64),
+            context_kind: Some("project_instruction".to_string()),
+            content_text: fragment.content.clone(),
+            metadata: Some(json!({
+                "directory": fragment.directory.display().to_string(),
+                "truncated": fragment.truncated,
+                "original_bytes": fragment.original_bytes,
+                "included_bytes": fragment.included_bytes,
+            })),
+        });
+    }
+    for (index, fragment) in skill_fragments.iter().enumerate() {
         evidence.push(ContextEvidenceInput {
             role: "user".to_string(),
             source_kind: "selected_skill".to_string(),
             source_name: Some(fragment.name.clone()),
             source_path: Some(fragment.path.display().to_string()),
+            provider_group: Some(selected_skill_provider_group(index, &fragment.name)),
+            provider_block_index: Some(0),
+            context_kind: Some("selected_skill".to_string()),
             content_text: fragment.content.clone(),
             metadata: Some(json!({
                 "base_dir": fragment.base_dir.display().to_string(),
@@ -440,6 +560,7 @@ async fn generate_session_title(
         ],
         previous_messages: Vec::new(),
         context_messages: Vec::new(),
+        contextual_user_messages: Vec::new(),
         prompt_messages: vec![user_text_message(session_title_request(
             prompt,
             selected_skills,

@@ -5,6 +5,8 @@ pub enum AgentEvent {
     AgentEnd {
         outcome: Outcome,
         messages: Vec<Message>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        terminal_reason: Option<TerminalReason>,
     },
     TurnStart {
         turn_index: usize,

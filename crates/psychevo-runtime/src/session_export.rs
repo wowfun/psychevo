@@ -1,0 +1,1115 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+
+use psychevo_agent_core::{
+    AssistantBlock, ContextualUserBlock, ContextualUserMessage, Message, UserContentBlock,
+};
+use psychevo_ai::{
+    GenerationRequest, ModelTarget, ToolDeclaration, openai_chat_completions_endpoint,
+    openai_chat_request_body,
+};
+use serde::Serialize;
+use serde_json::{Map, Value};
+
+use crate::error::{Error, Result};
+use crate::skills::SkillDiscoveryOptions;
+use crate::store::{ContextEvidenceRecord, SqliteStore};
+use crate::tools::{coding_core_tools_for_mode, mode_instruction, skill_tools_for_mode};
+use crate::types::{RunMode, SessionSummary};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionExportFormat {
+    Markdown,
+    Json,
+}
+
+impl SessionExportFormat {
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::Markdown => "md",
+            Self::Json => "json",
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Markdown => "markdown",
+            Self::Json => "json",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionArtifactKind {
+    Export,
+    Share,
+}
+
+impl SessionArtifactKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Export => "export",
+            Self::Share => "share",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SessionExportInclude {
+    Header,
+    Messages,
+    Reasoning,
+    ProviderInputEvidence,
+    LastProviderRequest,
+}
+
+impl SessionExportInclude {
+    pub fn parse_token(value: &str) -> Option<Self> {
+        match value {
+            "header" | "h" => Some(Self::Header),
+            "messages" | "m" => Some(Self::Messages),
+            "reasoning" | "r" => Some(Self::Reasoning),
+            "provider-input-evidence" | "pie" => Some(Self::ProviderInputEvidence),
+            "last-provider-request" | "lpr" => Some(Self::LastProviderRequest),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Header => "header",
+            Self::Messages => "messages",
+            Self::Reasoning => "reasoning",
+            Self::ProviderInputEvidence => "provider-input-evidence",
+            Self::LastProviderRequest => "last-provider-request",
+        }
+    }
+}
+
+impl Serialize for SessionExportInclude {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionExportIncludeSet {
+    values: BTreeSet<SessionExportInclude>,
+}
+
+impl SessionExportIncludeSet {
+    pub fn default_for(_artifact_kind: SessionArtifactKind) -> Self {
+        Self::from_values([SessionExportInclude::Messages])
+    }
+
+    pub fn parse(value: &str, artifact_kind: SessionArtifactKind) -> Result<Self> {
+        let mut values = Vec::new();
+        for token in value
+            .split(',')
+            .map(str::trim)
+            .filter(|token| !token.is_empty())
+        {
+            let include = SessionExportInclude::parse_token(token).ok_or_else(|| {
+                Error::Message(format!(
+                    "unknown export include `{token}`; expected comma-separated values from {}",
+                    include_usage_for_artifact(artifact_kind)
+                ))
+            })?;
+            values.push(include);
+        }
+        if values.is_empty() {
+            return Err(Error::Message(format!(
+                "empty export include list; expected comma-separated values from {}",
+                include_usage_for_artifact(artifact_kind)
+            )));
+        }
+        Self::new(values, artifact_kind)
+    }
+
+    pub fn new(
+        values: impl IntoIterator<Item = SessionExportInclude>,
+        artifact_kind: SessionArtifactKind,
+    ) -> Result<Self> {
+        let mut set = Self::from_values(values);
+        set.expand_dependencies();
+        set.validate_for_artifact(artifact_kind)?;
+        Ok(set)
+    }
+
+    pub fn contains(&self, include: SessionExportInclude) -> bool {
+        self.values.contains(&include)
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = SessionExportInclude> + '_ {
+        self.values.iter().copied()
+    }
+
+    pub fn tokens(&self) -> Vec<&'static str> {
+        self.values().map(SessionExportInclude::as_str).collect()
+    }
+
+    fn from_values(values: impl IntoIterator<Item = SessionExportInclude>) -> Self {
+        Self {
+            values: values.into_iter().collect(),
+        }
+    }
+
+    fn expand_dependencies(&mut self) {
+        if self.contains(SessionExportInclude::Reasoning) {
+            self.values.insert(SessionExportInclude::Messages);
+        }
+    }
+
+    fn validate_for_artifact(&self, artifact_kind: SessionArtifactKind) -> Result<()> {
+        if artifact_kind == SessionArtifactKind::Share
+            && self.contains(SessionExportInclude::LastProviderRequest)
+        {
+            return Err(Error::Message(
+                "share artifacts do not support include value `last-provider-request`".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn include_usage_for_artifact(artifact_kind: SessionArtifactKind) -> &'static str {
+    match artifact_kind {
+        SessionArtifactKind::Export => {
+            "header,messages,reasoning,provider-input-evidence,last-provider-request"
+        }
+        SessionArtifactKind::Share => "header,messages,reasoning,provider-input-evidence",
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionExportOptions {
+    pub format: SessionExportFormat,
+    pub include: SessionExportIncludeSet,
+    pub artifact_kind: SessionArtifactKind,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionExportArtifact {
+    pub content: String,
+    pub format: SessionExportFormat,
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionExportWriteResult {
+    pub path: PathBuf,
+    pub bytes: usize,
+    pub format: SessionExportFormat,
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone)]
+struct ExportMessageRecord {
+    session_seq: i64,
+    message: Message,
+}
+
+#[derive(Serialize)]
+struct ExportDocument<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    header: Option<ExportHeaderValue<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    messages: Option<Vec<ExportMessageValue>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider_input_evidence: Option<Vec<ExportPromptEvidence>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_provider_request: Option<ProviderRequestExport>,
+}
+
+#[derive(Serialize)]
+struct ExportHeaderValue<'a> {
+    session: ExportSessionValue<'a>,
+    options: ExportOptionsValue,
+}
+
+#[derive(Serialize)]
+struct ExportSessionValue<'a> {
+    id: &'a str,
+    source: &'a str,
+    workdir: &'a str,
+    model: &'a str,
+    provider: &'a str,
+    started_at_ms: i64,
+    updated_at_ms: i64,
+    ended_at_ms: Option<i64>,
+    end_reason: Option<&'a str>,
+    archived_at_ms: Option<i64>,
+    message_count: i64,
+    tool_call_count: i64,
+    title: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct ExportOptionsValue {
+    format: SessionExportFormat,
+    artifact_kind: SessionArtifactKind,
+    include: Vec<SessionExportInclude>,
+}
+
+#[derive(Serialize)]
+struct ExportMessageValue {
+    session_seq: i64,
+    message: Message,
+}
+
+#[derive(Serialize)]
+struct ExportPromptEvidence {
+    prompt_session_seq: i64,
+    items: Vec<ExportEvidenceItem>,
+}
+
+#[derive(Serialize)]
+struct ExportEvidenceItem {
+    context_seq: i64,
+    role: String,
+    source_kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider_group: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider_block_index: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    context_kind: Option<String>,
+    content_text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProviderRequestExport {
+    prompt_session_seq: i64,
+    assistant_session_seq: i64,
+    provider: String,
+    model: String,
+    base_url: String,
+    endpoint: String,
+    reconstructed: bool,
+    warnings: Vec<String>,
+    body: Value,
+}
+
+pub fn default_session_export_filename(
+    session_id: &str,
+    format: SessionExportFormat,
+    artifact_kind: SessionArtifactKind,
+) -> String {
+    let short = short_session_id(session_id);
+    match artifact_kind {
+        SessionArtifactKind::Export => format!("psychevo-session-{short}.{}", format.extension()),
+        SessionArtifactKind::Share => format!("psychevo-share-{short}.md"),
+    }
+}
+
+pub fn render_session_export(
+    store: &SqliteStore,
+    session_id: &str,
+    options: SessionExportOptions,
+) -> Result<SessionExportArtifact> {
+    let summary = store
+        .session_summary(session_id)?
+        .ok_or_else(|| Error::Message(format!("session not found: {session_id}")))?;
+    let include_messages = options.include.contains(SessionExportInclude::Messages);
+    let include_reasoning = options.include.contains(SessionExportInclude::Reasoning);
+    let messages = if include_messages {
+        Some(load_export_messages(store, session_id, include_reasoning)?)
+    } else {
+        None
+    };
+    let last_request = if options
+        .include
+        .contains(SessionExportInclude::LastProviderRequest)
+    {
+        let unfiltered_messages = load_unfiltered_export_messages(store, session_id)?;
+        reconstruct_last_provider_request(store, session_id, &summary, &unfiltered_messages)?
+    } else {
+        None
+    };
+    let evidence = if options
+        .include
+        .contains(SessionExportInclude::ProviderInputEvidence)
+    {
+        Some(load_provider_input_evidence(store, session_id)?)
+    } else {
+        None
+    };
+    let format = options.format;
+    let content = match format {
+        SessionExportFormat::Markdown => render_markdown(
+            &summary,
+            messages.as_deref(),
+            evidence.as_ref(),
+            last_request.as_ref(),
+            &options,
+        ),
+        SessionExportFormat::Json => {
+            let document = export_document(&summary, &messages, evidence, last_request, options);
+            serde_json::to_string_pretty(&document)?
+        }
+    };
+    Ok(SessionExportArtifact {
+        content,
+        format,
+        session_id: summary.id,
+    })
+}
+
+pub fn write_session_export(
+    store: &SqliteStore,
+    session_id: &str,
+    output_path: &Path,
+    options: SessionExportOptions,
+) -> Result<SessionExportWriteResult> {
+    let artifact = render_session_export(store, session_id, options)?;
+    if let Some(parent) = output_path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(output_path, artifact.content.as_bytes())?;
+    Ok(SessionExportWriteResult {
+        path: output_path.to_path_buf(),
+        bytes: artifact.content.len(),
+        format: artifact.format,
+        session_id: artifact.session_id,
+    })
+}
+
+fn load_export_messages(
+    store: &SqliteStore,
+    session_id: &str,
+    include_reasoning: bool,
+) -> Result<Vec<ExportMessageRecord>> {
+    store
+        .load_export_message_summaries(session_id)?
+        .into_iter()
+        .map(|record| {
+            let message = if include_reasoning {
+                sanitize_reasoning_for_export(&record.message)
+            } else {
+                sanitize_message_without_reasoning(&record.message)
+            };
+            Ok(ExportMessageRecord {
+                session_seq: record.session_seq,
+                message,
+            })
+        })
+        .collect()
+}
+
+fn load_unfiltered_export_messages(
+    store: &SqliteStore,
+    session_id: &str,
+) -> Result<Vec<ExportMessageRecord>> {
+    store
+        .load_export_message_summaries(session_id)?
+        .into_iter()
+        .map(|record| {
+            Ok(ExportMessageRecord {
+                session_seq: record.session_seq,
+                message: record.message,
+            })
+        })
+        .collect()
+}
+
+fn load_provider_input_evidence(
+    store: &SqliteStore,
+    session_id: &str,
+) -> Result<Vec<ExportPromptEvidence>> {
+    let mut prompts = Vec::new();
+    for record in store.load_export_message_summaries(session_id)? {
+        if !matches!(record.message, Message::User { .. }) {
+            continue;
+        }
+        let items = store.load_context_evidence(session_id, record.session_seq)?;
+        if items.is_empty() {
+            continue;
+        }
+        prompts.push(ExportPromptEvidence {
+            prompt_session_seq: record.session_seq,
+            items: items.into_iter().map(export_evidence_item).collect(),
+        });
+    }
+    Ok(prompts)
+}
+
+fn export_evidence_item(record: ContextEvidenceRecord) -> ExportEvidenceItem {
+    ExportEvidenceItem {
+        context_seq: record.context_seq,
+        role: record.role,
+        source_kind: record.source_kind,
+        source_name: record.source_name,
+        source_path: record.source_path,
+        provider_group: record.provider_group,
+        provider_block_index: record.provider_block_index,
+        context_kind: record.context_kind,
+        content_text: record.content_text,
+        metadata: record.metadata,
+    }
+}
+
+fn reconstruct_last_provider_request(
+    store: &SqliteStore,
+    session_id: &str,
+    summary: &SessionSummary,
+    messages: &[ExportMessageRecord],
+) -> Result<Option<ProviderRequestExport>> {
+    let metadata = store.session_metadata(session_id)?.unwrap_or(Value::Null);
+    let base_url = metadata
+        .get("base_url")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let endpoint = openai_chat_completions_endpoint(&base_url);
+    let mut warnings = base_reconstruction_warnings(&metadata);
+    let mode = session_mode_from_metadata(&metadata, &mut warnings);
+    let generation_metadata = generation_metadata_from_session_metadata(&metadata, &mut warnings);
+    let workdir = PathBuf::from(&summary.workdir);
+    let tools = reconstructed_tool_declarations(&workdir, mode);
+    let mut current_prompt_seq = None;
+    let mut last_request = None;
+
+    for (index, record) in messages.iter().enumerate() {
+        if matches!(record.message, Message::User { .. }) {
+            current_prompt_seq = Some(record.session_seq);
+        }
+        if !matches!(record.message, Message::Assistant { .. }) {
+            continue;
+        }
+        let Some(prompt_session_seq) = current_prompt_seq else {
+            continue;
+        };
+        let mut request_warnings = warnings.clone();
+        let provider_messages = reconstructed_provider_messages(
+            store,
+            session_id,
+            messages,
+            index,
+            prompt_session_seq,
+            mode,
+            &mut request_warnings,
+        )?;
+        let request = GenerationRequest {
+            model: ModelTarget {
+                provider: summary.provider.clone(),
+                model: summary.model.clone(),
+            },
+            messages: provider_messages,
+            tools: tools.clone(),
+            metadata: generation_metadata.clone(),
+        };
+        let body = openai_chat_request_body(&request, &base_url);
+        last_request = Some(ProviderRequestExport {
+            prompt_session_seq,
+            assistant_session_seq: record.session_seq,
+            provider: summary.provider.clone(),
+            model: summary.model.clone(),
+            base_url: base_url.clone(),
+            endpoint: endpoint.clone(),
+            reconstructed: true,
+            warnings: request_warnings,
+            body,
+        });
+    }
+
+    Ok(last_request)
+}
+
+fn reconstructed_provider_messages(
+    store: &SqliteStore,
+    session_id: &str,
+    messages: &[ExportMessageRecord],
+    assistant_index: usize,
+    prompt_session_seq: i64,
+    mode: RunMode,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<Value>> {
+    let evidence = store.load_context_evidence(session_id, prompt_session_seq)?;
+    let mut provider_messages = Vec::new();
+    let mut system_count = 0usize;
+    for item in evidence
+        .iter()
+        .filter(|item| item.source_kind == "system_instruction")
+    {
+        if item.content_text.trim().is_empty() {
+            continue;
+        }
+        provider_messages.push(serde_json::json!({
+            "role": "system",
+            "content": item.content_text.clone(),
+        }));
+        system_count += 1;
+    }
+    if system_count == 0 {
+        provider_messages.push(serde_json::json!({
+            "role": "system",
+            "content": mode_instruction(mode),
+        }));
+        warnings.push(
+            "prompt-scoped system instruction evidence was unavailable; default mode instruction was reconstructed"
+                .to_string(),
+        );
+    }
+
+    for record in messages
+        .iter()
+        .take_while(|record| record.session_seq < prompt_session_seq)
+    {
+        provider_messages.push(message_to_value(&record.message)?);
+    }
+
+    if evidence.is_empty() {
+        warnings.push(
+            "prompt-scoped context evidence was unavailable; hidden project or selected-skill inputs may be missing"
+                .to_string(),
+        );
+    } else {
+        for message in contextual_user_messages_from_evidence(&evidence) {
+            provider_messages.push(message.to_provider_value());
+        }
+    }
+
+    for record in messages
+        .iter()
+        .take(assistant_index)
+        .filter(|record| record.session_seq >= prompt_session_seq)
+    {
+        provider_messages.push(message_to_value(&record.message)?);
+    }
+
+    Ok(provider_messages)
+}
+
+fn contextual_user_messages_from_evidence(
+    evidence: &[ContextEvidenceRecord],
+) -> Vec<ContextualUserMessage> {
+    #[derive(Debug)]
+    struct Group {
+        name: String,
+        first_context_seq: i64,
+        timestamp_ms: i64,
+        blocks: Vec<(Option<i64>, i64, ContextualUserBlock)>,
+    }
+
+    let mut groups = Vec::<Group>::new();
+    for item in evidence.iter().filter(|item| {
+        item.role == "user"
+            && matches!(
+                item.source_kind.as_str(),
+                "project_instruction" | "selected_skill"
+            )
+            && !item.content_text.trim().is_empty()
+    }) {
+        let group_name = item
+            .provider_group
+            .clone()
+            .unwrap_or_else(|| format!("legacy_context:{}", item.context_seq));
+        let block = ContextualUserBlock::new(
+            item.context_kind
+                .clone()
+                .unwrap_or_else(|| item.source_kind.clone()),
+            item.source_name.clone(),
+            item.source_path.clone(),
+            item.content_text.clone(),
+        );
+        if let Some(group) = groups.iter_mut().find(|group| group.name == group_name) {
+            group
+                .blocks
+                .push((item.provider_block_index, item.context_seq, block));
+        } else {
+            groups.push(Group {
+                name: group_name,
+                first_context_seq: item.context_seq,
+                timestamp_ms: item.timestamp_ms,
+                blocks: vec![(item.provider_block_index, item.context_seq, block)],
+            });
+        }
+    }
+
+    groups.sort_by_key(|group| group.first_context_seq);
+    groups
+        .into_iter()
+        .map(|mut group| {
+            group.blocks.sort_by_key(|(block_index, context_seq, _)| {
+                (block_index.unwrap_or(i64::MAX), *context_seq)
+            });
+            ContextualUserMessage {
+                provider_group: group.name,
+                blocks: group
+                    .blocks
+                    .into_iter()
+                    .map(|(_, _, block)| block)
+                    .collect(),
+                hidden: true,
+                timestamp_ms: group.timestamp_ms,
+            }
+        })
+        .collect()
+}
+
+fn message_to_value(message: &Message) -> Result<Value> {
+    Ok(serde_json::to_value(message)?)
+}
+
+fn base_reconstruction_warnings(metadata: &Value) -> Vec<String> {
+    let mut warnings = vec![
+        "request body is reconstructed from persisted session data, not captured from the original HTTP request".to_string(),
+        "reconstruction uses the current provider adapter and current tool schemas; old sessions may differ".to_string(),
+        "local image references are re-read during reconstruction and may differ if files changed".to_string(),
+        "context pruning may differ for sessions that used unstored pruning options".to_string(),
+        "HTTP headers and API keys are never included".to_string(),
+        "skill/no-skill runtime options are not persisted; default skill tool declarations were reconstructed".to_string(),
+    ];
+    if metadata
+        .get("base_url")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .is_none()
+    {
+        warnings.push("session metadata does not include base_url; endpoint was reconstructed from an empty base URL".to_string());
+    }
+    if metadata.get("model_metadata").is_none() {
+        warnings.push(
+            "session metadata does not include model_metadata; capability-specific request shaping may differ"
+                .to_string(),
+        );
+    }
+    warnings
+}
+
+fn session_mode_from_metadata(metadata: &Value, warnings: &mut Vec<String>) -> RunMode {
+    match metadata
+        .get("mode")
+        .and_then(Value::as_str)
+        .and_then(RunMode::parse)
+    {
+        Some(mode) => mode,
+        None => {
+            warnings.push(
+                "session metadata does not include a valid mode; default mode tool declarations were reconstructed"
+                    .to_string(),
+            );
+            RunMode::default()
+        }
+    }
+}
+
+fn generation_metadata_from_session_metadata(
+    metadata: &Value,
+    warnings: &mut Vec<String>,
+) -> Value {
+    let mut object = Map::new();
+    if let Some(model_metadata) = metadata.get("model_metadata") {
+        object.insert("model_metadata".to_string(), model_metadata.clone());
+    }
+    if let Some(reasoning_effort) = metadata
+        .get("reasoning_effort")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+    {
+        object.insert(
+            "reasoning_effort".to_string(),
+            Value::String(reasoning_effort.to_string()),
+        );
+    } else {
+        warnings.push(
+            "session metadata does not include reasoning_effort; no explicit reasoning_effort field was reconstructed"
+                .to_string(),
+        );
+    }
+    Value::Object(object)
+}
+
+fn reconstructed_tool_declarations(workdir: &Path, mode: RunMode) -> Vec<ToolDeclaration> {
+    let mut tools = coding_core_tools_for_mode(workdir, mode);
+    tools.extend(skill_tools_for_mode(
+        SkillDiscoveryOptions {
+            home: workdir.join(".psychevo"),
+            workdir: workdir.to_path_buf(),
+            config_path: None,
+            env: BTreeMap::new(),
+            explicit_inputs: Vec::new(),
+            no_skills: false,
+        },
+        mode,
+    ));
+    tools
+        .iter()
+        .map(|tool| ToolDeclaration {
+            name: tool.name().to_string(),
+            description: tool.description().to_string(),
+            parameters: tool.parameters(),
+        })
+        .collect()
+}
+
+fn export_document<'a>(
+    summary: &'a SessionSummary,
+    messages: &Option<Vec<ExportMessageRecord>>,
+    evidence: Option<Vec<ExportPromptEvidence>>,
+    last_request: Option<ProviderRequestExport>,
+    options: SessionExportOptions,
+) -> ExportDocument<'a> {
+    let header = options
+        .include
+        .contains(SessionExportInclude::Header)
+        .then(|| ExportHeaderValue {
+            session: ExportSessionValue {
+                id: &summary.id,
+                source: &summary.source,
+                workdir: &summary.workdir,
+                model: &summary.model,
+                provider: &summary.provider,
+                started_at_ms: summary.started_at_ms,
+                updated_at_ms: summary.updated_at_ms,
+                ended_at_ms: summary.ended_at_ms,
+                end_reason: summary.end_reason.as_deref(),
+                archived_at_ms: summary.archived_at_ms,
+                message_count: summary.message_count,
+                tool_call_count: summary.tool_call_count,
+                title: summary.title.as_deref(),
+            },
+            options: ExportOptionsValue {
+                format: options.format,
+                artifact_kind: options.artifact_kind,
+                include: options.include.values().collect(),
+            },
+        });
+    ExportDocument {
+        header,
+        messages: messages.as_ref().map(|messages| {
+            messages
+                .iter()
+                .map(|record| ExportMessageValue {
+                    session_seq: record.session_seq,
+                    message: record.message.clone(),
+                })
+                .collect()
+        }),
+        provider_input_evidence: evidence.filter(|items| !items.is_empty()),
+        last_provider_request: last_request,
+    }
+}
+
+fn render_markdown(
+    summary: &SessionSummary,
+    messages: Option<&[ExportMessageRecord]>,
+    evidence: Option<&Vec<ExportPromptEvidence>>,
+    last_request: Option<&ProviderRequestExport>,
+    options: &SessionExportOptions,
+) -> String {
+    let mut out = String::new();
+    if options.include.contains(SessionExportInclude::Header) {
+        let title = match options.artifact_kind {
+            SessionArtifactKind::Export => "# Psychevo Session Export",
+            SessionArtifactKind::Share => "# Psychevo Session Share",
+        };
+        push_line(&mut out, title);
+        push_line(&mut out, "");
+        if let Some(title) = summary.title.as_deref().filter(|value| !value.is_empty()) {
+            push_line(&mut out, &format!("Title: {}", markdown_inline(title)));
+        }
+        push_line(&mut out, &format!("Session: `{}`", summary.id));
+        push_line(&mut out, &format!("Source: `{}`", summary.source));
+        push_line(&mut out, &format!("Workdir: `{}`", summary.workdir));
+        push_line(
+            &mut out,
+            &format!("Model: `{}/{}`", summary.provider, summary.model),
+        );
+        push_line(&mut out, &format!("Started: `{}`", summary.started_at_ms));
+        push_line(&mut out, &format!("Updated: `{}`", summary.updated_at_ms));
+        push_line(&mut out, "");
+        push_line(&mut out, "Options:");
+        push_line(
+            &mut out,
+            &format!("- artifact: `{}`", options.artifact_kind.as_str()),
+        );
+        push_line(
+            &mut out,
+            &format!("- include: `{}`", options.include.tokens().join(",")),
+        );
+    }
+    if let Some(messages) = messages {
+        if !out.is_empty() {
+            push_line(&mut out, "");
+        }
+        push_line(&mut out, "## Transcript");
+        for record in messages {
+            push_line(&mut out, "");
+            render_markdown_message(&mut out, record);
+        }
+    }
+    if let Some(evidence) = evidence.filter(|items| !items.is_empty()) {
+        if !out.is_empty() {
+            push_line(&mut out, "");
+        }
+        push_line(&mut out, "## Provider Input Evidence");
+        for prompt in evidence {
+            push_line(&mut out, "");
+            push_line(
+                &mut out,
+                &format!("### Prompt message #{}", prompt.prompt_session_seq),
+            );
+            for item in &prompt.items {
+                push_line(&mut out, "");
+                push_line(
+                    &mut out,
+                    &format!(
+                        "#### {} / {}",
+                        markdown_inline(&item.role),
+                        markdown_inline(&item.source_kind)
+                    ),
+                );
+                if let Some(name) = &item.source_name {
+                    push_line(&mut out, &format!("- source: `{}`", markdown_inline(name)));
+                }
+                if let Some(path) = &item.source_path {
+                    push_line(&mut out, &format!("- path: `{}`", markdown_inline(path)));
+                }
+                if let Some(group) = &item.provider_group {
+                    push_line(
+                        &mut out,
+                        &format!("- provider_group: `{}`", markdown_inline(group)),
+                    );
+                }
+                if let Some(index) = item.provider_block_index {
+                    push_line(&mut out, &format!("- provider_block_index: `{index}`"));
+                }
+                if let Some(kind) = &item.context_kind {
+                    push_line(
+                        &mut out,
+                        &format!("- context_kind: `{}`", markdown_inline(kind)),
+                    );
+                }
+                if let Some(metadata) = &item.metadata {
+                    push_line(&mut out, "- metadata:");
+                    push_fenced_json(&mut out, metadata);
+                }
+                push_fenced_text(&mut out, &item.content_text);
+            }
+        }
+    }
+    if options
+        .include
+        .contains(SessionExportInclude::LastProviderRequest)
+    {
+        if !out.is_empty() {
+            push_line(&mut out, "");
+        }
+        push_line(&mut out, "## Reconstructed Last Provider Request");
+        if let Some(request) = last_request {
+            push_line(&mut out, "");
+            push_line(
+                &mut out,
+                &format!(
+                    "### Prompt #{} -> assistant #{}",
+                    request.prompt_session_seq, request.assistant_session_seq
+                ),
+            );
+            push_line(
+                &mut out,
+                &format!("- provider: `{}`", markdown_inline(&request.provider)),
+            );
+            push_line(
+                &mut out,
+                &format!("- model: `{}`", markdown_inline(&request.model)),
+            );
+            push_line(
+                &mut out,
+                &format!("- base_url: `{}`", markdown_inline(&request.base_url)),
+            );
+            push_line(
+                &mut out,
+                &format!("- endpoint: `{}`", markdown_inline(&request.endpoint)),
+            );
+            push_line(&mut out, "- reconstructed: `true`");
+            if !request.warnings.is_empty() {
+                push_line(&mut out, "- warnings:");
+                for warning in &request.warnings {
+                    push_line(&mut out, &format!("  - {}", markdown_inline(warning)));
+                }
+            }
+            push_fenced_json(&mut out, &request.body);
+        } else {
+            push_line(&mut out, "");
+            push_line(&mut out, "_No reconstructed provider request available._");
+        }
+    }
+    out
+}
+
+fn render_markdown_message(out: &mut String, record: &ExportMessageRecord) {
+    match &record.message {
+        Message::User { content, .. } => {
+            push_line(out, &format!("### {}. User", record.session_seq));
+            let text = user_content_markdown(content);
+            if text.trim().is_empty() {
+                push_line(out, "_No text content._");
+            } else {
+                push_line(out, "");
+                push_line(out, &text);
+            }
+        }
+        Message::Assistant { content, .. } => {
+            push_line(out, &format!("### {}. Assistant", record.session_seq));
+            for block in content {
+                match block {
+                    AssistantBlock::Text { text } => {
+                        if !text.trim().is_empty() {
+                            push_line(out, "");
+                            push_line(out, text);
+                        }
+                    }
+                    AssistantBlock::Reasoning { text, .. } => {
+                        if !text.trim().is_empty() {
+                            push_line(out, "");
+                            push_line(out, "#### Reasoning");
+                            push_fenced_text(out, text);
+                        }
+                    }
+                    AssistantBlock::ToolCall(call) => {
+                        push_line(out, "");
+                        push_line(
+                            out,
+                            &format!("#### Tool call: `{}` (`{}`)", call.name, call.id),
+                        );
+                        push_fenced_json(out, &call.arguments);
+                    }
+                }
+            }
+        }
+        Message::ToolResult {
+            tool_call_id,
+            tool_name,
+            content,
+            is_error,
+            ..
+        } => {
+            push_line(
+                out,
+                &format!(
+                    "### {}. Tool result: `{}` (`{}`)",
+                    record.session_seq, tool_name, tool_call_id
+                ),
+            );
+            push_line(out, &format!("- error: `{is_error}`"));
+            push_fenced_text(out, content);
+        }
+    }
+}
+
+fn sanitize_message_without_reasoning(message: &Message) -> Message {
+    match message {
+        Message::Assistant {
+            content,
+            timestamp_ms,
+            finish_reason,
+            outcome,
+            model,
+            provider,
+        } => Message::Assistant {
+            content: content
+                .iter()
+                .filter(|block| !matches!(block, AssistantBlock::Reasoning { .. }))
+                .cloned()
+                .collect(),
+            timestamp_ms: *timestamp_ms,
+            finish_reason: finish_reason.clone(),
+            outcome: *outcome,
+            model: model.clone(),
+            provider: provider.clone(),
+        },
+        other => other.clone(),
+    }
+}
+
+fn sanitize_reasoning_for_export(message: &Message) -> Message {
+    match message {
+        Message::Assistant {
+            content,
+            timestamp_ms,
+            finish_reason,
+            outcome,
+            model,
+            provider,
+        } => Message::Assistant {
+            content: content
+                .iter()
+                .filter_map(|block| match block {
+                    AssistantBlock::Reasoning { text, .. } if !text.trim().is_empty() => {
+                        Some(AssistantBlock::Reasoning {
+                            text: text.clone(),
+                            provider_evidence: None,
+                        })
+                    }
+                    AssistantBlock::Reasoning { .. } => None,
+                    other => Some(other.clone()),
+                })
+                .collect(),
+            timestamp_ms: *timestamp_ms,
+            finish_reason: finish_reason.clone(),
+            outcome: *outcome,
+            model: model.clone(),
+            provider: provider.clone(),
+        },
+        other => other.clone(),
+    }
+}
+
+fn user_content_markdown(content: &[UserContentBlock]) -> String {
+    let mut image_index = 0usize;
+    content
+        .iter()
+        .map(|block| match block {
+            UserContentBlock::Text(block) => block.text.clone(),
+            UserContentBlock::LocalImage(block) => {
+                image_index += 1;
+                format!("[Image {image_index}: {}]", block.path.display())
+            }
+            UserContentBlock::ImageUrl(block) => {
+                image_index += 1;
+                format!("[Image {image_index}: {}]", block.url)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn push_fenced_json(out: &mut String, value: &Value) {
+    let text = serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
+    push_line(out, "```json");
+    push_line(out, &text);
+    push_line(out, "```");
+}
+
+fn push_fenced_text(out: &mut String, text: &str) {
+    push_line(out, "```text");
+    push_line(out, text);
+    push_line(out, "```");
+}
+
+fn push_line(out: &mut String, line: &str) {
+    out.push_str(line);
+    out.push('\n');
+}
+
+fn markdown_inline(value: &str) -> String {
+    value.replace('`', "\\`")
+}
+
+fn short_session_id(session_id: &str) -> &str {
+    session_id.get(..8).unwrap_or(session_id)
+}

@@ -81,6 +81,87 @@ async fn persistence_sink_streams_elapsed_metadata_for_assistant_message_end() {
 }
 
 #[tokio::test]
+async fn persistence_sink_projects_and_persists_terminal_reason() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let store = SqliteStore::open(&db).expect("store");
+    let session_id = store
+        .create_session_with_metadata(
+            &workdir,
+            "tui",
+            "model",
+            "provider",
+            Some(json!({"provider_label": "Mock"})),
+        )
+        .expect("session");
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let captured_for_stream = Arc::clone(&captured);
+    let stream: RunStreamSink = Arc::new(move |event| {
+        captured_for_stream
+            .lock()
+            .expect("captured stream lock")
+            .push(event);
+    });
+    let sink = PersistenceSink {
+        store: store.clone(),
+        session_id: session_id.clone(),
+        prompt_snapshot: None,
+        prompt_snapshot_written: Arc::new(Mutex::new(false)),
+        prompt_context_evidence: Arc::new(Vec::new()),
+        started: Instant::now(),
+        tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
+        control: SmokeControl::None,
+        control_handle: None,
+        events: None,
+        stream_events: Some(stream),
+        include_reasoning: false,
+        reasoning_effort: None,
+        model_metadata: Default::default(),
+        prompt_display: None,
+        context_recorder: None,
+    };
+
+    sink.emit(AgentEvent::AgentEnd {
+        outcome: Outcome::Failed,
+        messages: Vec::new(),
+        terminal_reason: Some(psychevo_agent_core::TerminalReason::MaxTurnsExceeded {
+            max_turns: 128,
+        }),
+    })
+    .await
+    .expect("agent end");
+
+    let event = match captured.lock().expect("captured stream lock").as_slice() {
+        [RunStreamEvent::Event(value)] => value.clone(),
+        other => panic!("unexpected stream events: {other:?}"),
+    };
+    assert_eq!(event["type"], "agent_end");
+    assert_eq!(event["outcome"], "failed");
+    assert_eq!(event["terminal_reason"]["type"], "max_turns_exceeded");
+    assert_eq!(event["terminal_reason"]["max_turns"], 128);
+    assert!(
+        event["terminal_message"]
+            .as_str()
+            .expect("terminal message")
+            .contains("model-turn limit (128)")
+    );
+
+    let metadata = store
+        .session_metadata(&session_id)
+        .expect("metadata")
+        .expect("metadata");
+    assert_eq!(metadata["provider_label"], "Mock");
+    assert_eq!(metadata["terminal_reason"]["type"], "max_turns_exceeded");
+    assert_eq!(metadata["terminal_reason"]["max_turns"], 128);
+    let summary = store
+        .session_summary(&session_id)
+        .expect("summary")
+        .expect("summary");
+    assert_eq!(summary.end_reason.as_deref(), Some("failed"));
+}
+
+#[tokio::test]
 async fn persistence_sink_persists_assistant_reasoning_effort_metadata() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
@@ -263,6 +344,9 @@ async fn persistence_sink_persists_prompt_context_evidence_once() {
             source_kind: "system_instruction".to_string(),
             source_name: Some("mode".to_string()),
             source_path: None,
+            provider_group: Some("system_instructions".to_string()),
+            provider_block_index: Some(0),
+            context_kind: Some("system_instruction".to_string()),
             content_text: "mode instruction".to_string(),
             metadata: Some(json!({ "instruction_index": 0 })),
         }]),
@@ -300,6 +384,12 @@ async fn persistence_sink_persists_prompt_context_evidence_once() {
         .expect("first evidence");
     assert_eq!(first.len(), 1);
     assert_eq!(first[0].source_name.as_deref(), Some("mode"));
+    assert_eq!(
+        first[0].provider_group.as_deref(),
+        Some("system_instructions")
+    );
+    assert_eq!(first[0].provider_block_index, Some(0));
+    assert_eq!(first[0].context_kind.as_deref(), Some("system_instruction"));
     assert_eq!(first[0].content_text, "mode instruction");
     assert!(
         store

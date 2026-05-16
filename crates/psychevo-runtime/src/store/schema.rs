@@ -18,6 +18,7 @@ impl SqliteStore {
             && user_version != 3
             && user_version != 4
             && user_version != 5
+            && user_version != 6
         {
             return Err(Error::Config(format!(
                 "state database schema version {user_version} is not supported; run `pevo init --reset-state` or set PSYCHEVO_DB to a new state database"
@@ -87,6 +88,9 @@ impl SqliteStore {
                 source_kind TEXT NOT NULL,
                 source_name TEXT,
                 source_path TEXT,
+                provider_group TEXT,
+                provider_block_index INTEGER,
+                context_kind TEXT,
                 timestamp_ms INTEGER NOT NULL,
                 content_text TEXT NOT NULL,
                 metadata_json TEXT,
@@ -122,6 +126,17 @@ impl SqliteStore {
                 ALTER TABLE messages ADD COLUMN pricing_tier TEXT;
                 "#,
             )?;
+        }
+        if !sqlite_column_exists(&conn, "context_evidence", "provider_group")? {
+            conn.execute_batch("ALTER TABLE context_evidence ADD COLUMN provider_group TEXT;")?;
+        }
+        if !sqlite_column_exists(&conn, "context_evidence", "provider_block_index")? {
+            conn.execute_batch(
+                "ALTER TABLE context_evidence ADD COLUMN provider_block_index INTEGER;",
+            )?;
+        }
+        if !sqlite_column_exists(&conn, "context_evidence", "context_kind")? {
+            conn.execute_batch("ALTER TABLE context_evidence ADD COLUMN context_kind TEXT;")?;
         }
         conn.pragma_update(None, "user_version", SQLITE_SCHEMA_VERSION)?;
         Ok(Self {

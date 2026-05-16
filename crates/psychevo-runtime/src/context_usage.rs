@@ -14,6 +14,7 @@ use serde_json::{Value, json};
 use crate::config::selected_configured_model;
 use crate::error::{Error, Result};
 use crate::paths::canonical_workdir;
+use crate::project_instructions::load_project_instructions;
 use crate::skills::{
     SkillDiscoveryOptions, discover_skills, format_skills_for_prompt, resolve_skills_home,
 };
@@ -307,6 +308,13 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
     for message in &messages {
         request_messages.push(serde_json::to_value(&message.message)?);
     }
+    let project_instructions = load_project_instructions(&workdir)?;
+    for fragment in &project_instructions.fragments {
+        request_messages.push(json!({
+            "role": "user",
+            "content": [{ "text": fragment.content.clone() }],
+        }));
+    }
     let mut tools = coding_core_tools_for_mode(&workdir, mode);
     tools.extend(skill_tools_for_mode(skill_options, mode));
     let request = GenerationRequest {
@@ -321,6 +329,7 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
                 "system_prompt_message_count": 1,
                 "skill_index_message_count": if catalog.skills.is_empty() { 0 } else { 1 },
                 "previous_message_count": messages.len(),
+                "project_instruction_context_message_count": project_instructions.fragments.len(),
                 "selected_skill_context_message_count": 0,
                 "skill_names": catalog.skills.iter().map(|skill| skill.name.clone()).collect::<Vec<_>>(),
             }
@@ -346,6 +355,7 @@ pub(crate) fn context_counting_metadata(
     system_prompt_message_count: usize,
     skill_index_message_count: usize,
     previous_message_count: usize,
+    project_instruction_context_message_count: usize,
     selected_skill_context_message_count: usize,
     skill_names: Vec<String>,
 ) -> Value {
@@ -353,6 +363,7 @@ pub(crate) fn context_counting_metadata(
         "system_prompt_message_count": system_prompt_message_count,
         "skill_index_message_count": skill_index_message_count,
         "previous_message_count": previous_message_count,
+        "project_instruction_context_message_count": project_instruction_context_message_count,
         "selected_skill_context_message_count": selected_skill_context_message_count,
         "skill_names": skill_names,
     })
@@ -447,6 +458,17 @@ pub fn format_context_snapshot_text_with_options(
                 if count > 0 || tokens > 0 {
                     lines.push(format!(
                         "  selected_skill_context: {count} {}, {}",
+                        input_message_unit(count),
+                        format_token_count(tokens, true)
+                    ));
+                }
+            }
+            if let Some(project) = category.details.get("project_instruction_context") {
+                let count = project.get("count").and_then(Value::as_u64).unwrap_or(0);
+                let tokens = project.get("tokens").and_then(Value::as_u64).unwrap_or(0);
+                if count > 0 || tokens > 0 {
+                    lines.push(format!(
+                        "  project_instruction_context: {count} {}, {}",
                         input_message_unit(count),
                         format_token_count(tokens, true)
                     ));
@@ -656,6 +678,10 @@ fn snapshot_from_count(
             "selected_skill_context": {
                 "count": count.selected_skill_context_count,
                 "tokens": count.selected_skill_context_tokens,
+            },
+            "project_instruction_context": {
+                "count": count.project_instruction_context_count,
+                "tokens": count.project_instruction_context_tokens,
             }
         }),
     );
@@ -909,6 +935,8 @@ mod tests {
             total_estimated_tokens: system + tools + skills + messages,
             tool_count: 4,
             role_counts,
+            project_instruction_context_tokens: 0,
+            project_instruction_context_count: 0,
             selected_skill_context_tokens: 0,
             selected_skill_context_count: 0,
             skill_names: vec!["alpha".to_string(), "beta".to_string()],
@@ -951,6 +979,28 @@ mod tests {
             snapshot.categories["messages"].details["roles"]["user"]["count"],
             2
         );
+    }
+
+    #[test]
+    fn snapshot_text_reports_project_instruction_context_under_messages() {
+        let mut count = count(10, 20, 5, 45);
+        count.project_instruction_context_count = 2;
+        count.project_instruction_context_tokens = 17;
+        let snapshot = snapshot_from_count(
+            ContextScope::LastProviderRequest,
+            Some("session".to_string()),
+            "openai".to_string(),
+            "gpt-4o".to_string(),
+            Some("default".to_string()),
+            Some(200),
+            count,
+        );
+
+        let text = format_context_snapshot_text(&snapshot, false);
+
+        assert!(text.contains("input_messages:"));
+        assert!(text.contains("project_instruction_context: 2 input msgs, ~17 tokens"));
+        assert!(!text.contains("\nmessages:"));
     }
 
     #[test]

@@ -32,6 +32,8 @@ async fn user_shell_streams_bash_events_without_provider_config() {
         UserShellOptions {
             workdir: workdir.clone(),
             command: "printf 'shell ok\\n'".to_string(),
+            context: None,
+            inject_into: None,
         },
         stream,
         control,
@@ -74,6 +76,8 @@ async fn user_shell_abort_returns_aborted_result() {
         UserShellOptions {
             workdir,
             command: "sleep 5".to_string(),
+            context: None,
+            inject_into: None,
         },
         stream,
         control,
@@ -84,6 +88,158 @@ async fn user_shell_abort_returns_aborted_result() {
     assert_eq!(result.outcome, Outcome::Aborted);
     assert_eq!(result.tool_failures, 0);
     assert_eq!(result.result["error"], "aborted");
+}
+
+#[tokio::test]
+async fn user_shell_context_persists_user_xml_record() {
+    let temp = tempdir().expect("temp");
+    let workdir = temp.path().join("work");
+    fs::create_dir_all(&workdir).expect("workdir");
+    let context = configured_user_shell_context(&temp, &workdir);
+    let stream: RunStreamSink = Arc::new(|_| {});
+    let (_handle, control) = run_control();
+
+    let result = run_user_shell_command_streaming_controlled(
+        UserShellOptions {
+            workdir: workdir.clone(),
+            command: "printf 'context-ok\\n'".to_string(),
+            context: Some(context),
+            inject_into: None,
+        },
+        stream,
+        control,
+    )
+    .await
+    .expect("user shell");
+
+    assert_eq!(result.outcome, Outcome::Normal);
+    let session_id = result.session_id.as_deref().expect("session");
+    let context_text = result.context_text.as_deref().expect("context text");
+    assert!(context_text.contains("<user_shell_command><command>printf 'context-ok\\n'</command>"));
+    assert!(context_text.contains("Exit code: 0"));
+    assert!(context_text.contains("Truncated: false"));
+    assert!(context_text.contains("Output:\ncontext-ok\n"));
+
+    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let messages = store.load_messages(session_id).expect("messages");
+    assert_eq!(messages.len(), 1);
+    match &messages[0] {
+        Message::User { content, .. } => {
+            assert_eq!(content.len(), 1);
+            assert_eq!(content[0].text_value(), Some(context_text));
+        }
+        other => panic!("expected user shell message, got {other:?}"),
+    }
+    let summary = store
+        .session_summary(session_id)
+        .expect("summary")
+        .expect("session summary");
+    assert_eq!(
+        summary.title.as_deref(),
+        Some("Shell: printf 'context-ok\\n'")
+    );
+    let tui = store
+        .load_tui_message_summaries(session_id)
+        .expect("summaries");
+    assert_eq!(
+        tui[0]
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.get(USER_SHELL_METADATA_KEY))
+            .and_then(|metadata| metadata.get("command"))
+            .and_then(Value::as_str),
+        Some("printf 'context-ok\\n'")
+    );
+
+    let mut resume_context = configured_user_shell_context(&temp, &workdir);
+    resume_context.session = Some(session_id.to_string());
+    let (_handle, control) = run_control();
+    let resumed = run_user_shell_command_streaming_controlled(
+        UserShellOptions {
+            workdir,
+            command: "printf 'again\\n'".to_string(),
+            context: Some(resume_context),
+            inject_into: None,
+        },
+        Arc::new(|_| {}),
+        control,
+    )
+    .await
+    .expect("resumed user shell");
+    assert_eq!(resumed.session_id.as_deref(), Some(session_id));
+    assert_eq!(store.load_messages(session_id).expect("messages").len(), 2);
+}
+
+#[tokio::test]
+async fn user_shell_context_missing_config_rejects_before_execution() {
+    let temp = tempdir().expect("temp");
+    let workdir = temp.path().join("work");
+    fs::create_dir_all(&workdir).expect("workdir");
+    let marker = workdir.join("marker");
+    let context = UserShellContextOptions {
+        db_path: temp.path().join("state.db"),
+        session: None,
+        continue_latest: true,
+        source: "tui".to_string(),
+        continue_sources: vec!["run".to_string(), "tui".to_string()],
+        config_path: None,
+        model: None,
+        reasoning_effort: None,
+        mode: RunMode::Build,
+        inherited_env: Some(BTreeMap::from([(
+            "HOME".to_string(),
+            temp.path().to_string_lossy().to_string(),
+        )])),
+    };
+    let stream: RunStreamSink = Arc::new(|_| {});
+    let (_handle, control) = run_control();
+    let err = run_user_shell_command_streaming_controlled(
+        UserShellOptions {
+            workdir,
+            command: "touch marker".to_string(),
+            context: Some(context),
+            inject_into: None,
+        },
+        stream,
+        control,
+    )
+    .await
+    .expect_err("missing config");
+
+    assert!(
+        err.to_string().contains("config") || err.to_string().contains("PSYCHEVO_HOME"),
+        "{err:#}"
+    );
+    assert!(!marker.exists());
+}
+
+#[tokio::test]
+async fn user_shell_context_records_bounded_truncated_output() {
+    let temp = tempdir().expect("temp");
+    let workdir = temp.path().join("work");
+    fs::create_dir_all(&workdir).expect("workdir");
+    let context = configured_user_shell_context(&temp, &workdir);
+    let stream: RunStreamSink = Arc::new(|_| {});
+    let (_handle, control) = run_control();
+
+    let result = run_user_shell_command_streaming_controlled(
+        UserShellOptions {
+            workdir,
+            command: "yes x | head -c 60000".to_string(),
+            context: Some(context),
+            inject_into: None,
+        },
+        stream,
+        control,
+    )
+    .await
+    .expect("user shell");
+
+    assert_eq!(result.outcome, Outcome::Normal);
+    assert_eq!(result.result["truncated"], true);
+    let context_text = result.context_text.expect("context text");
+    assert!(context_text.contains("Truncated: true"));
+    assert!(context_text.len() < 60_000);
 }
 
 #[cfg(unix)]
@@ -196,6 +352,49 @@ async fn bash_stdin_is_closed_for_prompt_style_commands() {
     assert!(!is_error);
     assert!(result["error"].is_null());
     assert_eq!(result["output"], "stdin closed\n");
+}
+
+fn configured_user_shell_context(
+    temp: &tempfile::TempDir,
+    _workdir: &std::path::Path,
+) -> UserShellContextOptions {
+    let home = home_dir(temp);
+    fs::create_dir_all(&home).expect("home");
+    fs::write(
+        home.join("config.jsonc"),
+        r#"
+        {
+          "model": "lmstudio/test-model",
+          "provider": {
+            "lmstudio": {
+              "models": { "test-model": {} }
+            }
+          }
+        }
+        "#,
+    )
+    .expect("config");
+    UserShellContextOptions {
+        db_path: temp.path().join("state.db"),
+        session: None,
+        continue_latest: true,
+        source: "tui".to_string(),
+        continue_sources: vec!["run".to_string(), "tui".to_string()],
+        config_path: None,
+        model: None,
+        reasoning_effort: None,
+        mode: RunMode::Build,
+        inherited_env: Some(BTreeMap::from([
+            (
+                "HOME".to_string(),
+                temp.path().to_string_lossy().to_string(),
+            ),
+            (
+                "PSYCHEVO_HOME".to_string(),
+                home.to_string_lossy().to_string(),
+            ),
+        ])),
+    }
 }
 
 #[cfg(unix)]

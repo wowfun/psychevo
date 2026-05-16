@@ -3,7 +3,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use psychevo_agent_core::{ControlHandle, ControlReceivers, Message};
+use psychevo_agent_core::{ControlHandle, ControlReceivers, Message, TerminalReason};
 use psychevo_ai::Outcome;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -63,6 +63,7 @@ pub struct RunOptions {
 }
 
 pub const TUI_DISPLAY_METADATA_KEY: &str = "tui_display";
+pub const USER_SHELL_METADATA_KEY: &str = "user_shell";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromptDisplayMetadata {
@@ -102,6 +103,17 @@ pub struct CustomProviderInput {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopedCustomProviderInput {
+    pub config_dir: PathBuf,
+    pub provider_id: String,
+    pub label: String,
+    pub base_url: String,
+    pub api_key_env: Option<String>,
+    pub api_key: Option<String>,
+    pub require_api_key: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CustomProviderResult {
     pub provider_id: String,
     pub label: String,
@@ -109,6 +121,13 @@ pub struct CustomProviderResult {
     pub api_key_env: String,
     pub wrote_api_key: bool,
     pub reused_existing_api_key: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigScope {
+    Global,
+    Local,
+    Effective,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -139,6 +158,7 @@ impl RunMode {
 pub struct RunResult {
     pub session_id: String,
     pub outcome: Outcome,
+    pub terminal_reason: Option<TerminalReason>,
     pub final_answer: String,
     pub db_path: PathBuf,
     pub workdir: PathBuf,
@@ -152,12 +172,39 @@ pub struct RunResult {
     pub selected_skills: Vec<SelectedSkill>,
     pub context_snapshot: Option<crate::context_usage::ContextSnapshot>,
     pub events: Vec<Value>,
+    pub warnings: Vec<RunWarning>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunWarning {
+    pub kind: String,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggestion: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct UserShellOptions {
     pub workdir: PathBuf,
     pub command: String,
+    pub context: Option<UserShellContextOptions>,
+    pub inject_into: Option<RunControlHandle>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UserShellContextOptions {
+    pub db_path: PathBuf,
+    pub session: Option<String>,
+    pub continue_latest: bool,
+    pub source: String,
+    pub continue_sources: Vec<String>,
+    pub config_path: Option<PathBuf>,
+    pub model: Option<String>,
+    pub reasoning_effort: Option<String>,
+    pub mode: RunMode,
+    pub inherited_env: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -173,6 +220,8 @@ pub struct StatsOptions {
 pub struct UserShellResult {
     pub command: String,
     pub workdir: PathBuf,
+    pub session_id: Option<String>,
+    pub context_text: Option<String>,
     pub outcome: Outcome,
     pub tool_failures: usize,
     pub result: Value,
@@ -519,6 +568,14 @@ pub struct SanitizedMessageSummary {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct SessionExportMessageSummary {
+    pub session_seq: i64,
+    pub message: Message,
+    pub usage: Option<Value>,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct TuiMessageSummary {
     pub message: Message,
     pub usage: Option<Value>,
@@ -547,6 +604,18 @@ impl RunControlHandle {
 
     pub fn abort(&self) {
         self.inner.abort();
+    }
+
+    pub fn inject_user_message(&self, message: Message) -> bool {
+        self.inner.inject_user_message(message)
+    }
+}
+
+impl fmt::Debug for RunControlHandle {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RunControlHandle")
+            .finish_non_exhaustive()
     }
 }
 

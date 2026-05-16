@@ -13,7 +13,7 @@ const MAX_IMAGE_BASE64_BYTES: usize = 4_718_592;
 const MAX_IMAGE_DIMENSION: u32 = 2000;
 const JPEG_QUALITIES: [u8; 5] = [80, 85, 70, 55, 40];
 
-fn chat_completions_endpoint(base_url: &str) -> String {
+pub fn openai_chat_completions_endpoint(base_url: &str) -> String {
     let trimmed = base_url.trim_end_matches('/');
     if trimmed.ends_with("/chat/completions") {
         trimmed.to_string()
@@ -22,7 +22,7 @@ fn chat_completions_endpoint(base_url: &str) -> String {
     }
 }
 
-fn build_chat_request(request: &GenerationRequest, base_url: &str) -> Value {
+pub fn openai_chat_request_body(request: &GenerationRequest, base_url: &str) -> Value {
     let mut body = json!({
         "model": request.model.model,
         "messages": translate_messages(&request.messages, &request.model, &request.metadata, base_url),
@@ -71,6 +71,8 @@ pub struct OpenAiChatTokenCount {
     pub total_estimated_tokens: u64,
     pub tool_count: usize,
     pub role_counts: BTreeMap<String, OpenAiChatRoleTokenCount>,
+    pub project_instruction_context_tokens: u64,
+    pub project_instruction_context_count: usize,
     pub selected_skill_context_tokens: u64,
     pub selected_skill_context_count: usize,
     pub skill_names: Vec<String>,
@@ -103,7 +105,7 @@ pub fn count_openai_chat_request(
         };
     };
     let counting = request_context_counting_metadata(request);
-    let body = build_chat_request(request, base_url);
+    let body = openai_chat_request_body(request, base_url);
     let (system_tools_tokens, tool_count) = body
         .get("tools")
         .map(|tools| (count_value(enc, tools), tools.as_array().map_or(0, Vec::len)))
@@ -152,6 +154,12 @@ pub fn count_openai_chat_request(
         .iter()
         .map(|message| count_value(enc, message))
         .sum::<u64>();
+    let project_instruction_context_messages =
+        project_instruction_context_provider_messages(request, base_url, &counting);
+    let project_instruction_context_tokens = project_instruction_context_messages
+        .iter()
+        .map(|message| count_value(enc, message))
+        .sum::<u64>();
 
     let total_estimated_tokens = system_prompt_tokens
         .saturating_add(system_tools_tokens)
@@ -168,8 +176,10 @@ pub fn count_openai_chat_request(
         total_estimated_tokens,
         tool_count,
         role_counts,
+        project_instruction_context_tokens,
+        project_instruction_context_count: counting.project_instruction_context_message_count,
         selected_skill_context_tokens,
-        selected_skill_context_count: selected_skill_context_messages.len(),
+        selected_skill_context_count: counting.selected_skill_context_message_count,
         skill_names: counting.skill_names,
         skill_entries,
     }
@@ -236,6 +246,7 @@ struct RequestContextCountingMetadata {
     system_prompt_message_count: usize,
     skill_index_message_count: usize,
     previous_message_count: usize,
+    project_instruction_context_message_count: usize,
     selected_skill_context_message_count: usize,
     skill_names: Vec<String>,
 }
@@ -264,6 +275,10 @@ fn request_context_counting_metadata(
             .unwrap_or_default() as usize,
         previous_message_count: value
             .get("previous_message_count")
+            .and_then(Value::as_u64)
+            .unwrap_or_default() as usize,
+        project_instruction_context_message_count: value
+            .get("project_instruction_context_message_count")
             .and_then(Value::as_u64)
             .unwrap_or_default() as usize,
         selected_skill_context_message_count: value
@@ -332,8 +347,32 @@ fn selected_skill_context_provider_messages(
     if counting.selected_skill_context_message_count == 0 {
         return Vec::new();
     }
-    let start = counting.previous_message_count;
+    let start = counting
+        .previous_message_count
+        .saturating_add(counting.project_instruction_context_message_count);
     let end = start.saturating_add(counting.selected_skill_context_message_count);
+    non_system_provider_messages_in_range(request, base_url, start, end)
+}
+
+fn project_instruction_context_provider_messages(
+    request: &GenerationRequest,
+    base_url: &str,
+    counting: &RequestContextCountingMetadata,
+) -> Vec<Value> {
+    if counting.project_instruction_context_message_count == 0 {
+        return Vec::new();
+    }
+    let start = counting.previous_message_count;
+    let end = start.saturating_add(counting.project_instruction_context_message_count);
+    non_system_provider_messages_in_range(request, base_url, start, end)
+}
+
+fn non_system_provider_messages_in_range(
+    request: &GenerationRequest,
+    base_url: &str,
+    start: usize,
+    end: usize,
+) -> Vec<Value> {
     let mut seen_non_system_messages = 0usize;
     let mut messages = Vec::new();
     for message in &request.messages {
@@ -341,7 +380,7 @@ fn selected_skill_context_provider_messages(
             continue;
         }
         if seen_non_system_messages >= start && seen_non_system_messages < end {
-            messages.extend(translate_message(
+            messages.extend(translate_message_for_request(
                 message,
                 &request.model,
                 &request.metadata,
@@ -350,7 +389,7 @@ fn selected_skill_context_provider_messages(
         }
         seen_non_system_messages = seen_non_system_messages.saturating_add(1);
     }
-    merge_adjacent_user_messages(messages)
+    messages
 }
 
 fn normalized_message_role(message: &Value) -> String {
@@ -386,11 +425,19 @@ fn translate_messages(
     metadata: &Value,
     base_url: &str,
 ) -> Vec<Value> {
-    let projected = messages
+    messages
         .iter()
-        .flat_map(|message| translate_message(message, target, metadata, base_url))
-        .collect::<Vec<_>>();
-    merge_adjacent_user_messages(projected)
+        .flat_map(|message| translate_message_for_request(message, target, metadata, base_url))
+        .collect::<Vec<_>>()
+}
+
+fn translate_message_for_request(
+    message: &Value,
+    target: &ModelTarget,
+    metadata: &Value,
+    base_url: &str,
+) -> Vec<Value> {
+    merge_adjacent_user_messages(translate_message(message, target, metadata, base_url))
 }
 
 fn translate_message(

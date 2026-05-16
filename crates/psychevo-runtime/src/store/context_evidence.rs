@@ -8,8 +8,9 @@ impl SqliteStore {
         let mut stmt = conn.prepare(
             r#"
             SELECT id, session_id, prompt_session_seq, context_seq, role,
-                   source_kind, source_name, source_path, timestamp_ms,
-                   content_text, metadata_json
+                   source_kind, source_name, source_path, provider_group,
+                   provider_block_index, context_kind, timestamp_ms, content_text,
+                   metadata_json
             FROM context_evidence
             WHERE session_id = ?1 AND prompt_session_seq = ?2
             ORDER BY context_seq ASC
@@ -25,9 +26,12 @@ impl SqliteStore {
                 row.get::<_, String>(5)?,
                 row.get::<_, Option<String>>(6)?,
                 row.get::<_, Option<String>>(7)?,
-                row.get::<_, i64>(8)?,
-                row.get::<_, String>(9)?,
+                row.get::<_, Option<String>>(8)?,
+                row.get::<_, Option<i64>>(9)?,
                 row.get::<_, Option<String>>(10)?,
+                row.get::<_, i64>(11)?,
+                row.get::<_, String>(12)?,
+                row.get::<_, Option<String>>(13)?,
             ))
         })?;
         let mut evidence = Vec::new();
@@ -41,6 +45,9 @@ impl SqliteStore {
                 source_kind,
                 source_name,
                 source_path,
+                provider_group,
+                provider_block_index,
+                context_kind,
                 timestamp_ms,
                 content_text,
                 metadata_json,
@@ -54,6 +61,9 @@ impl SqliteStore {
                 source_kind,
                 source_name,
                 source_path,
+                provider_group,
+                provider_block_index,
+                context_kind,
                 timestamp_ms,
                 content_text,
                 metadata: parse_optional_json(metadata_json)?,
@@ -69,6 +79,9 @@ struct PreparedContextEvidence {
     source_kind: String,
     source_name: Option<String>,
     source_path: Option<String>,
+    provider_group: Option<String>,
+    provider_block_index: Option<i64>,
+    context_kind: Option<String>,
     content_text: String,
     metadata_json: Option<String>,
 }
@@ -84,6 +97,9 @@ fn prepare_context_evidence(
                 source_kind: item.source_kind.clone(),
                 source_name: item.source_name.clone(),
                 source_path: item.source_path.clone(),
+                provider_group: item.provider_group.clone(),
+                provider_block_index: item.provider_block_index,
+                context_kind: item.context_kind.clone(),
                 content_text: item.content_text.clone(),
                 metadata_json: optional_json_string(&item.metadata)?,
             })
@@ -103,8 +119,9 @@ fn insert_context_evidence_rows(
             r#"
             INSERT INTO context_evidence (
                 session_id, prompt_session_seq, context_seq, role, source_kind,
-                source_name, source_path, timestamp_ms, content_text, metadata_json
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                source_name, source_path, provider_group, provider_block_index,
+                context_kind, timestamp_ms, content_text, metadata_json
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
             "#,
             params![
                 session_id,
@@ -114,6 +131,9 @@ fn insert_context_evidence_rows(
                 &item.source_kind,
                 &item.source_name,
                 &item.source_path,
+                &item.provider_group,
+                &item.provider_block_index,
+                &item.context_kind,
                 timestamp_ms,
                 &item.content_text,
                 &item.metadata_json,

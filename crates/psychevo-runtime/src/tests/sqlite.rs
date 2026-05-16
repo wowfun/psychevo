@@ -1,5 +1,5 @@
 #[test]
-fn sqlite_schema_v6_migrates_v3_state_databases() {
+fn sqlite_schema_v7_migrates_v3_state_databases() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("v3.db");
     let workdir = temp.path().join("work").to_string_lossy().to_string();
@@ -70,7 +70,7 @@ fn sqlite_schema_v6_migrates_v3_state_databases() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 6);
+    assert_eq!(user_version, 7);
     let archived_at: Option<i64> = conn
         .query_row(
             "SELECT archived_at_ms FROM sessions WHERE id = 'session-v3'",
@@ -89,6 +89,11 @@ fn sqlite_schema_v6_migrates_v3_state_databases() {
             .iter()
             .any(|name| name == "source_kind")
     );
+    assert!(
+        sqlite_columns(&conn, "context_evidence")
+            .iter()
+            .any(|name| name == "provider_group")
+    );
     assert_eq!(
         store
             .latest_run_session_for_workdir(&temp.path().join("work"))
@@ -98,7 +103,7 @@ fn sqlite_schema_v6_migrates_v3_state_databases() {
 }
 
 #[test]
-fn sqlite_schema_v6_migrates_v5_state_databases() {
+fn sqlite_schema_v7_migrates_v5_state_databases() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("v5.db");
     let workdir = temp.path().join("work").to_string_lossy().to_string();
@@ -180,11 +185,16 @@ fn sqlite_schema_v6_migrates_v5_state_databases() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 6);
+    assert_eq!(user_version, 7);
     assert!(
         sqlite_columns(&conn, "context_evidence")
             .iter()
             .any(|name| name == "content_text")
+    );
+    assert!(
+        sqlite_columns(&conn, "context_evidence")
+            .iter()
+            .any(|name| name == "provider_block_index")
     );
     assert_eq!(
         store
@@ -195,7 +205,123 @@ fn sqlite_schema_v6_migrates_v5_state_databases() {
 }
 
 #[test]
-fn sqlite_schema_v6_rejects_old_state_databases() {
+fn sqlite_schema_v7_migrates_v6_state_databases() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("v6.db");
+    let workdir = temp.path().join("work").to_string_lossy().to_string();
+    {
+        let conn = Connection::open(&db).expect("db");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                source TEXT NOT NULL,
+                parent_session_id TEXT,
+                workdir TEXT NOT NULL,
+                model TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                started_at_ms INTEGER NOT NULL,
+                updated_at_ms INTEGER NOT NULL,
+                ended_at_ms INTEGER,
+                end_reason TEXT,
+                archived_at_ms INTEGER,
+                message_count INTEGER NOT NULL DEFAULT 0,
+                tool_call_count INTEGER NOT NULL DEFAULT 0,
+                title TEXT,
+                metadata_json TEXT
+            );
+
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL REFERENCES sessions(id),
+                session_seq INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                timestamp_ms INTEGER NOT NULL,
+                message_json TEXT NOT NULL,
+                content_text TEXT,
+                tool_call_id TEXT,
+                tool_name TEXT,
+                tool_calls_json TEXT,
+                finish_reason TEXT,
+                outcome TEXT,
+                model TEXT,
+                provider TEXT,
+                usage_json TEXT,
+                metadata_json TEXT,
+                context_input_tokens INTEGER,
+                billable_input_tokens INTEGER,
+                billable_output_tokens INTEGER,
+                reasoning_tokens INTEGER,
+                cache_read_tokens INTEGER,
+                cache_write_tokens INTEGER,
+                reported_total_tokens INTEGER,
+                estimated_cost_nanodollars INTEGER,
+                pricing_source TEXT,
+                pricing_tier TEXT,
+                UNIQUE(session_id, session_seq)
+            );
+
+            CREATE TABLE context_evidence (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                prompt_session_seq INTEGER NOT NULL,
+                context_seq INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                source_kind TEXT NOT NULL,
+                source_name TEXT,
+                source_path TEXT,
+                timestamp_ms INTEGER NOT NULL,
+                content_text TEXT NOT NULL,
+                metadata_json TEXT,
+                UNIQUE(session_id, prompt_session_seq, context_seq),
+                FOREIGN KEY (session_id, prompt_session_seq)
+                    REFERENCES messages(session_id, session_seq)
+                    ON DELETE CASCADE
+            );
+
+            CREATE INDEX idx_messages_session_seq
+                ON messages(session_id, session_seq);
+            CREATE INDEX idx_context_evidence_prompt
+                ON context_evidence(session_id, prompt_session_seq, context_seq);
+            "#,
+        )
+        .expect("schema");
+        conn.execute(
+            r#"
+            INSERT INTO sessions (
+                id, source, parent_session_id, workdir, model, provider,
+                started_at_ms, updated_at_ms, ended_at_ms, end_reason,
+                archived_at_ms, message_count, tool_call_count, title, metadata_json
+            ) VALUES ('session-v6', 'run', NULL, ?1, 'model', 'provider',
+                1, 2, NULL, NULL, NULL, 0, 0, NULL, NULL)
+            "#,
+            rusqlite::params![workdir],
+        )
+        .expect("session");
+        conn.pragma_update(None, "user_version", 6)
+            .expect("version");
+    }
+
+    let store = SqliteStore::open(&db).expect("migrate");
+    let conn = Connection::open(&db).expect("db");
+    let user_version: i64 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .expect("user_version");
+    assert_eq!(user_version, 7);
+    let columns = sqlite_columns(&conn, "context_evidence");
+    assert!(columns.iter().any(|name| name == "provider_group"));
+    assert!(columns.iter().any(|name| name == "provider_block_index"));
+    assert!(columns.iter().any(|name| name == "context_kind"));
+    assert_eq!(
+        store
+            .latest_run_session_for_workdir(&temp.path().join("work"))
+            .expect("latest"),
+        Some("session-v6".to_string())
+    );
+}
+
+#[test]
+fn sqlite_schema_v7_rejects_old_state_databases() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("old.db");
     {
@@ -378,7 +504,9 @@ fn sqlite_append_to_archived_session_reopens_and_updates_recency() {
     let conn = Connection::open(&db).expect("db");
     set_session_times(&conn, &first, 1_000, 1_000);
     set_session_times(&conn, &second, 2_000, 2_000);
-    store.finish_session(&first, Outcome::Normal).expect("finish");
+    store
+        .finish_session(&first, Outcome::Normal, None)
+        .expect("finish");
     set_session_times(&conn, &first, 1_000, 1_000);
     store.archive_session(&first).expect("archive");
 
@@ -444,6 +572,9 @@ fn sqlite_context_evidence_is_prompt_scoped_and_hidden_from_messages() {
                     source_kind: "system_instruction".to_string(),
                     source_name: Some("mode".to_string()),
                     source_path: None,
+                    provider_group: Some("system_instructions".to_string()),
+                    provider_block_index: Some(0),
+                    context_kind: Some("system_instruction".to_string()),
                     content_text: "mode instruction".to_string(),
                     metadata: Some(json!({ "instruction_index": 0 })),
                 },
@@ -452,6 +583,9 @@ fn sqlite_context_evidence_is_prompt_scoped_and_hidden_from_messages() {
                     source_kind: "selected_skill".to_string(),
                     source_name: Some("reviewer".to_string()),
                     source_path: Some("/tmp/reviewer/SKILL.md".to_string()),
+                    provider_group: Some("selected_skill:0:reviewer".to_string()),
+                    provider_block_index: Some(0),
+                    context_kind: Some("selected_skill".to_string()),
                     content_text: "<skill>body</skill>".to_string(),
                     metadata: Some(json!({ "base_dir": "/tmp/reviewer" })),
                 },
@@ -468,8 +602,23 @@ fn sqlite_context_evidence_is_prompt_scoped_and_hidden_from_messages() {
         .expect("evidence");
     assert_eq!(evidence.len(), 2);
     assert_eq!(evidence[0].source_name.as_deref(), Some("mode"));
+    assert_eq!(
+        evidence[0].provider_group.as_deref(),
+        Some("system_instructions")
+    );
+    assert_eq!(evidence[0].provider_block_index, Some(0));
+    assert_eq!(
+        evidence[0].context_kind.as_deref(),
+        Some("system_instruction")
+    );
     assert_eq!(evidence[1].source_kind, "selected_skill");
     assert_eq!(evidence[1].source_path.as_deref(), Some("/tmp/reviewer/SKILL.md"));
+    assert_eq!(
+        evidence[1].provider_group.as_deref(),
+        Some("selected_skill:0:reviewer")
+    );
+    assert_eq!(evidence[1].provider_block_index, Some(0));
+    assert_eq!(evidence[1].context_kind.as_deref(), Some("selected_skill"));
     assert_eq!(evidence[1].content_text, "<skill>body</skill>");
 }
 
@@ -542,6 +691,9 @@ fn sqlite_context_evidence_cascades_with_prompt_messages() {
                 source_kind: "system_instruction".to_string(),
                 source_name: Some("mode".to_string()),
                 source_path: None,
+                provider_group: Some("system_instructions".to_string()),
+                provider_block_index: Some(0),
+                context_kind: Some("system_instruction".to_string()),
                 content_text: "mode instruction".to_string(),
                 metadata: None,
             }],
@@ -588,6 +740,9 @@ fn sqlite_context_evidence_cascades_with_prompt_messages() {
                 source_kind: "system_instruction".to_string(),
                 source_name: Some("mode".to_string()),
                 source_path: None,
+                provider_group: Some("system_instructions".to_string()),
+                provider_block_index: Some(0),
+                context_kind: Some("system_instruction".to_string()),
                 content_text: "mode instruction".to_string(),
                 metadata: None,
             }],
@@ -603,7 +758,7 @@ fn sqlite_context_evidence_cascades_with_prompt_messages() {
 }
 
 #[test]
-fn sqlite_schema_v6_stores_reasoning_only_in_message_json_and_metrics_separately() {
+fn sqlite_schema_v7_stores_reasoning_only_in_message_json_and_metrics_separately() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");

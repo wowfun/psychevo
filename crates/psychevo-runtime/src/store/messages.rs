@@ -80,6 +80,44 @@ impl SqliteStore {
         Ok(messages)
     }
 
+    pub fn load_export_message_summaries(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<SessionExportMessageSummary>> {
+        let boundary = self
+            .session_revert_state(session_id)?
+            .map(|revert| revert.start_seq)
+            .unwrap_or(i64::MAX);
+        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT session_seq, message_json, usage_json, metadata_json
+            FROM messages
+            WHERE session_id = ?1 AND session_seq < ?2
+            ORDER BY session_seq ASC
+            "#,
+        )?;
+        let rows = stmt.query_map(params![session_id, boundary], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        })?;
+        let mut messages = Vec::new();
+        for row in rows {
+            let (session_seq, message_json, usage_json, metadata_json) = row?;
+            messages.push(SessionExportMessageSummary {
+                session_seq,
+                message: serde_json::from_str(&message_json)?,
+                usage: parse_optional_json(usage_json)?,
+                metadata: parse_optional_json(metadata_json)?,
+            });
+        }
+        Ok(messages)
+    }
+
     pub fn load_tui_message_summaries(&self, session_id: &str) -> Result<Vec<TuiMessageSummary>> {
         let boundary = self
             .session_revert_state(session_id)?

@@ -159,8 +159,12 @@ impl EventSink for PersistenceSink {
                             })?;
                     }
                 }
-                AgentEvent::AgentEnd { outcome, .. } => store
-                    .finish_session(&session_id, outcome)
+                AgentEvent::AgentEnd {
+                    outcome,
+                    terminal_reason,
+                    ..
+                } => store
+                    .finish_session(&session_id, outcome, terminal_reason)
                     .map_err(|err| psychevo_agent_core::Error::EventSink(err.to_string()))?,
                 _ => {}
             }
@@ -263,10 +267,33 @@ fn project_agent_event_with_accounting(
             return include_reasoning.then(|| json!({ "type": "reasoning_end", "text": text }));
         }
         AgentEvent::ToolCallPending { .. } => return None,
-        AgentEvent::AgentEnd { outcome, messages } => AgentEvent::AgentEnd {
-            outcome: *outcome,
-            messages: messages.iter().map(sanitize_message_for_output).collect(),
-        },
+        AgentEvent::AgentEnd {
+            outcome,
+            messages,
+            terminal_reason,
+        } => {
+            let mut value = json!({
+                "type": "agent_end",
+                "outcome": outcome.as_str(),
+                "messages": messages
+                    .iter()
+                    .map(sanitize_message_for_output)
+                    .collect::<Vec<_>>(),
+            });
+            if let Some(reason) = terminal_reason
+                && let Some(object) = value.as_object_mut()
+            {
+                object.insert(
+                    "terminal_reason".to_string(),
+                    serde_json::to_value(reason).ok()?,
+                );
+                object.insert(
+                    "terminal_message".to_string(),
+                    Value::String(reason.message()),
+                );
+            }
+            return Some(value);
+        }
         AgentEvent::MessageStart { message } => AgentEvent::MessageStart {
             message: sanitize_message_for_output(message),
         },

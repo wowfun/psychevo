@@ -79,6 +79,74 @@ fn read_http_headers(stream: &mut std::net::TcpStream) {
     }
 }
 
+fn read_http_request(stream: &mut std::net::TcpStream) -> String {
+    let mut request = Vec::new();
+    let mut buf = [0; 1024];
+    let header_end = loop {
+        let n = stream.read(&mut buf).expect("read request");
+        if n == 0 {
+            break request.len();
+        }
+        request.extend_from_slice(&buf[..n]);
+        if let Some(index) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+            break index + 4;
+        }
+    };
+    let headers = String::from_utf8_lossy(&request[..header_end]).to_string();
+    let content_length = headers
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse::<usize>().ok())
+                .flatten()
+        })
+        .unwrap_or(0);
+    while request.len().saturating_sub(header_end) < content_length {
+        let n = stream.read(&mut buf).expect("read body");
+        if n == 0 {
+            break;
+        }
+        request.extend_from_slice(&buf[..n]);
+    }
+    String::from_utf8_lossy(&request).to_string()
+}
+
+#[tokio::test]
+async fn openai_provider_posts_public_request_body() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let base_url = format!("http://{addr}/v1");
+    let expected = openai_chat_request_body(&basic_generation_request(), &base_url);
+    let (request_tx, request_rx) = std::sync::mpsc::channel();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        let request = read_http_request(&mut stream);
+        request_tx.send(request).expect("request");
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: 14\r\nconnection: close\r\n\r\ndata: [DONE]\n\n",
+            )
+            .expect("response");
+    });
+
+    let provider = OpenAiChatProvider::new(base_url, "test-key", "mock");
+    let (_abort_tx, abort_rx) = watch::channel(false);
+    let _stream = provider
+        .stream(basic_generation_request(), AbortSignal::new(abort_rx))
+        .await
+        .expect("stream");
+    let request = request_rx.recv().expect("captured request");
+    assert!(request.starts_with("POST /v1/chat/completions HTTP/1.1"));
+    let body = request
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body)
+        .expect("http body");
+    let body: Value = serde_json::from_str(body).expect("request json");
+    assert_eq!(body, expected);
+    server.join().expect("server");
+}
+
 #[tokio::test]
 async fn openai_provider_abort_wakes_pending_http_response() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
@@ -221,7 +289,7 @@ fn chat_request_maps_messages_and_tools() {
         metadata: json!({ "reasoning_effort": "medium" }),
     };
 
-    let body = build_chat_request(&request, "https://api.openai.com/v1");
+    let body = openai_chat_request_body(&request, "https://api.openai.com/v1");
     assert_eq!(body["model"], "gpt-test");
     assert_eq!(body["stream"], true);
     assert_eq!(
@@ -260,7 +328,7 @@ fn chat_request_maps_local_image_blocks_to_content_parts() {
         metadata: json!({}),
     };
 
-    let body = build_chat_request(&request, "https://api.openai.com/v1");
+    let body = openai_chat_request_body(&request, "https://api.openai.com/v1");
 
     let content = body["messages"][0]["content"]
         .as_array()
@@ -303,7 +371,7 @@ fn chat_request_transcodes_bmp_local_image_to_png_part() {
         metadata: json!({}),
     };
 
-    let body = build_chat_request(&request, "https://api.openai.com/v1");
+    let body = openai_chat_request_body(&request, "https://api.openai.com/v1");
     let data_url = body["messages"][0]["content"][0]["image_url"]["url"]
         .as_str()
         .expect("data url");
@@ -331,7 +399,7 @@ fn chat_request_resizes_large_local_image_part() {
         metadata: json!({}),
     };
 
-    let body = build_chat_request(&request, "https://api.openai.com/v1");
+    let body = openai_chat_request_body(&request, "https://api.openai.com/v1");
     let data_url = body["messages"][0]["content"][0]["image_url"]["url"]
         .as_str()
         .expect("data url");
@@ -364,6 +432,7 @@ fn openai_chat_token_count_splits_context_categories() {
             json!({"role":"system","content":"mode"}),
             json!({"role":"system","content":"<available_skills>\n  <skill>\n    <name>alpha</name>\n    <description>longer helper</description>\n  </skill>\n  <skill>\n    <name>beta</name>\n    <description>short</description>\n  </skill>\n</available_skills>"}),
             json!({"role":"user","content":[{"text":"previous"}]}),
+            json!({"role":"user","content":[{"text":"project instructions"}]}),
             json!({"role":"user","content":[{"text":"selected skill body"}]}),
             json!({"role":"assistant","content":[{"type":"text","text":"ok"}]}),
         ],
@@ -377,6 +446,7 @@ fn openai_chat_token_count_splits_context_categories() {
                 "system_prompt_message_count": 1,
                 "skill_index_message_count": 1,
                 "previous_message_count": 1,
+                "project_instruction_context_message_count": 1,
                 "selected_skill_context_message_count": 1,
                 "skill_names": ["alpha", "beta"]
             }
@@ -389,16 +459,63 @@ fn openai_chat_token_count_splits_context_categories() {
     assert!(count.system_tools_tokens > 0);
     assert!(count.skills_tokens > 0);
     assert!(count.messages_tokens > 0);
+    assert!(count.project_instruction_context_tokens > 0);
     assert!(count.selected_skill_context_tokens > 0);
     assert_eq!(count.tool_count, 1);
-    assert_eq!(count.role_counts["user"].count, 1);
+    assert_eq!(count.role_counts["user"].count, 3);
     assert_eq!(count.role_counts["assistant"].count, 1);
     assert_eq!(count.selected_skill_context_count, 1);
+    assert_eq!(count.project_instruction_context_count, 1);
     assert_eq!(count.skill_names, vec!["alpha", "beta"]);
     assert_eq!(count.skill_entries.len(), 2);
     assert_eq!(count.skill_entries[0].name, "alpha");
     assert!(count.skill_entries[0].tokens > count.skill_entries[1].tokens);
     assert_eq!(count.encoding, "deepseek_v3");
+}
+
+#[test]
+fn chat_request_preserves_user_context_message_boundaries() {
+    let request = GenerationRequest {
+        model: ModelTarget {
+            provider: "openai".to_string(),
+            model: "gpt-test".to_string(),
+        },
+        messages: vec![
+            json!({"role":"system","content":"mode"}),
+            json!({"role":"user","content":[
+                {"type":"contextual_text","text":"# AGENTS.md instructions for /repo\n\n<INSTRUCTIONS>\nUse repo rules.\n</INSTRUCTIONS>"},
+                {"type":"contextual_text","text":"# AGENTS.md instructions for /repo/app\n\n<INSTRUCTIONS>\nUse app rules.\n</INSTRUCTIONS>"}
+            ]}),
+            json!({"role":"user","content":[{"text":"<skill>\n<name>reviewer</name>\nbody\n</skill>"}]}),
+            json!({
+                "role":"assistant",
+                "content":[{"type":"reasoning","text":"private"}],
+                "timestamp_ms":2,
+                "finish_reason":"stop",
+                "outcome":"normal",
+                "model":"gpt-test",
+                "provider":"openai"
+            }),
+            json!({"role":"user","content":[{"text":"$reviewer check this"}]}),
+        ],
+        tools: Vec::new(),
+        metadata: json!({}),
+    };
+
+    let body = openai_chat_request_body(&request, "https://api.openai.com/v1");
+    let messages = body["messages"].as_array().expect("messages");
+
+    assert_eq!(messages.len(), 4);
+    assert_eq!(messages[1]["role"], "user");
+    assert_eq!(
+        messages[1]["content"],
+        "# AGENTS.md instructions for /repo\n\n<INSTRUCTIONS>\nUse repo rules.\n</INSTRUCTIONS>\n\n# AGENTS.md instructions for /repo/app\n\n<INSTRUCTIONS>\nUse app rules.\n</INSTRUCTIONS>"
+    );
+    assert_eq!(
+        messages[2]["content"],
+        "<skill>\n<name>reviewer</name>\nbody\n</skill>"
+    );
+    assert_eq!(messages[3]["content"], "$reviewer check this");
 }
 
 #[test]
@@ -416,7 +533,7 @@ fn chat_request_preserves_ephemeral_system_messages() {
         metadata: json!({}),
     };
 
-    let body = build_chat_request(&request, "https://api.openai.com/v1");
+    let body = openai_chat_request_body(&request, "https://api.openai.com/v1");
     assert_eq!(
         body["messages"],
         json!([
@@ -450,7 +567,7 @@ fn chat_request_hides_reasoning_unless_target_derives_protocol_echo() {
         metadata: json!({}),
     };
 
-    let body = build_chat_request(&request, "https://api.openai.com/v1");
+    let body = openai_chat_request_body(&request, "https://api.openai.com/v1");
     assert_eq!(
         body["messages"][0],
         json!({"role":"assistant","content":"visible"})
@@ -458,7 +575,7 @@ fn chat_request_hides_reasoning_unless_target_derives_protocol_echo() {
 
     request.model.provider = "deepseek".to_string();
     request.model.model = "deepseek-v4-pro".to_string();
-    let body = build_chat_request(&request, "https://api.deepseek.com/v1");
+    let body = openai_chat_request_body(&request, "https://api.deepseek.com/v1");
     assert_eq!(body["messages"][0]["content"], "visible");
     assert_eq!(body["messages"][0]["reasoning_content"], "private thought");
 }
@@ -495,7 +612,7 @@ fn chat_request_projects_fallback_target_reasoning_across_provider_family() {
         metadata: json!({}),
     };
 
-    let body = build_chat_request(&request, "https://api.deepseek.com/v1");
+    let body = openai_chat_request_body(&request, "https://api.deepseek.com/v1");
     assert_eq!(
         body["messages"][0]["reasoning_content"],
         "other provider thought"
@@ -534,7 +651,7 @@ fn chat_request_projects_metadata_interleaved_reasoning_for_tool_calls() {
         metadata: interleaved_reasoning_metadata(),
     };
 
-    let body = build_chat_request(&request, "https://example.test/v1");
+    let body = openai_chat_request_body(&request, "https://example.test/v1");
     assert_eq!(
         body["messages"][0]["reasoning_content"],
         "metadata-driven thought"
@@ -553,7 +670,7 @@ fn chat_request_defaults_reasoning_content_when_reasoning_true_without_interleav
         metadata: reasoning_capability_metadata(),
     };
 
-    let body = build_chat_request(&request, "https://example.test/v1");
+    let body = openai_chat_request_body(&request, "https://example.test/v1");
     assert_eq!(
         body["messages"][0]["reasoning_content"],
         "defaulted thought"
@@ -574,7 +691,7 @@ fn chat_request_defaults_reasoning_content_when_interleaved_true() {
         metadata: reasoning_capability_with_interleaved(json!(true)),
     };
 
-    let body = build_chat_request(&request, "https://example.test/v1");
+    let body = openai_chat_request_body(&request, "https://example.test/v1");
     assert_eq!(
         body["messages"][0]["reasoning_content"],
         "boolean interleaved thought"
@@ -593,7 +710,7 @@ fn chat_request_respects_interleaved_false_even_when_reasoning_true() {
         metadata: reasoning_capability_with_interleaved(json!(false)),
     };
 
-    let body = build_chat_request(&request, "https://api.deepseek.com/v1");
+    let body = openai_chat_request_body(&request, "https://api.deepseek.com/v1");
     assert_eq!(
         body["messages"][0],
         json!({"role":"assistant","content":"visible"})
@@ -614,7 +731,7 @@ fn chat_request_does_not_rewrite_reasoning_details_to_reasoning_content() {
         })),
     };
 
-    let body = build_chat_request(&request, "https://example.test/v1");
+    let body = openai_chat_request_body(&request, "https://example.test/v1");
     assert_eq!(
         body["messages"][0],
         json!({"role":"assistant","content":"visible"})
@@ -641,7 +758,7 @@ fn chat_request_does_not_default_reasoning_content_when_reasoning_false() {
         }),
     };
 
-    let body = build_chat_request(&request, "https://example.test/v1");
+    let body = openai_chat_request_body(&request, "https://example.test/v1");
     assert_eq!(
         body["messages"][0],
         json!({"role":"assistant","content":"visible"})
@@ -687,7 +804,7 @@ fn chat_request_replays_xiaomi_thinking_reasoning_for_tool_calls() {
         }),
     };
 
-    let body = build_chat_request(&request, "https://api.xiaomimimo.com/v1");
+    let body = openai_chat_request_body(&request, "https://api.xiaomimimo.com/v1");
     assert_eq!(
         body["messages"][0]["reasoning_content"],
         "need to inspect files"
@@ -724,7 +841,7 @@ fn chat_request_projects_cross_provider_reasoning_for_interleaved_target() {
         }),
     };
 
-    let body = build_chat_request(&request, "https://api.xiaomimimo.com/v1");
+    let body = openai_chat_request_body(&request, "https://api.xiaomimimo.com/v1");
     assert_eq!(
         body["messages"][0]["reasoning_content"],
         "deepseek scratchpad"
@@ -762,7 +879,7 @@ fn chat_request_pads_interleaved_reasoning_when_retained_reasoning_empty() {
         metadata: interleaved_reasoning_metadata(),
     };
 
-    let body = build_chat_request(&request, "https://example.test/v1");
+    let body = openai_chat_request_body(&request, "https://example.test/v1");
     assert_eq!(body["messages"][0]["reasoning_content"], " ");
 }
 
@@ -789,7 +906,7 @@ fn chat_request_does_not_project_reasoning_without_interleaved_or_fallback() {
         metadata: json!({}),
     };
 
-    let body = build_chat_request(&request, "https://example.test/v1");
+    let body = openai_chat_request_body(&request, "https://example.test/v1");
     assert_eq!(
         body["messages"][0],
         json!({"role":"assistant","content":"visible"})
@@ -797,7 +914,7 @@ fn chat_request_does_not_project_reasoning_without_interleaved_or_fallback() {
 }
 
 #[test]
-fn translate_messages_drops_thinking_only_and_merges_users() {
+fn translate_messages_drops_thinking_only_without_merging_source_users() {
     let request = GenerationRequest {
         model: ModelTarget {
             provider: "openai".to_string(),
@@ -820,7 +937,33 @@ fn translate_messages_drops_thinking_only_and_merges_users() {
         metadata: json!({}),
     };
 
-    let body = build_chat_request(&request, "https://api.openai.com/v1");
+    let body = openai_chat_request_body(&request, "https://api.openai.com/v1");
+    assert_eq!(
+        body["messages"],
+        json!([
+            {"role":"user","content":"first"},
+            {"role":"user","content":"second"}
+        ])
+    );
+}
+
+#[test]
+fn translate_messages_merges_text_blocks_within_one_source_user_message() {
+    let request = GenerationRequest {
+        model: ModelTarget {
+            provider: "openai".to_string(),
+            model: "gpt-test".to_string(),
+        },
+        messages: vec![json!({
+            "role":"user",
+            "content":[{"text":"first"},{"text":"second"}],
+            "timestamp_ms":1
+        })],
+        tools: Vec::new(),
+        metadata: json!({}),
+    };
+
+    let body = openai_chat_request_body(&request, "https://api.openai.com/v1");
     assert_eq!(
         body["messages"],
         json!([{"role":"user","content":"first\n\nsecond"}])

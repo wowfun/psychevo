@@ -9,9 +9,9 @@ use serde_json::{Value, json};
 use crate::error::{Error, Result};
 use crate::paths::canonical_workdir;
 use crate::types::{
-    ConfiguredModel, CustomProviderInput, CustomProviderResult, ModelCapabilities,
+    ConfigScope, ConfiguredModel, CustomProviderInput, CustomProviderResult, ModelCapabilities,
     ModelCatalogEntry, ModelCatalogProvider, ModelCost, ModelCostTier, ModelLimits, ModelMetadata,
-    ModelMetadataCacheTarget, RunOptions,
+    ModelMetadataCacheTarget, RunOptions, ScopedCustomProviderInput,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -29,3 +29,4 @@ include!("config/resolution.rs");
 include!("config/catalog_helpers.rs");
 include!("config/models.rs");
 include!("config/custom_provider.rs");
+include!("config/cli_views.rs");

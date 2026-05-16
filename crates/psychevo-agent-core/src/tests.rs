@@ -34,6 +34,29 @@ impl GenerationProvider for StaticProvider {
     }
 }
 
+#[derive(Clone, Default)]
+struct RequestCaptureProvider {
+    requests: Arc<Mutex<Vec<GenerationRequest>>>,
+}
+
+impl GenerationProvider for RequestCaptureProvider {
+    fn stream(
+        &self,
+        request: GenerationRequest,
+        _abort: AbortSignal,
+    ) -> BoxFuture<'static, psychevo_ai::Result<psychevo_ai::GenerationStream>> {
+        self.requests.lock().expect("requests").push(request);
+        Box::pin(async {
+            let output: psychevo_ai::GenerationStream =
+                Box::pin(stream::iter([Ok(StreamEvent::Done {
+                    outcome: Outcome::Normal,
+                    finish_reason: Some("stop".to_string()),
+                })]));
+            Ok(output)
+        })
+    }
+}
+
 fn request() -> AgentLoopRequest {
     AgentLoopRequest {
         model_provider: "fake".to_string(),
@@ -42,10 +65,68 @@ fn request() -> AgentLoopRequest {
         system_instructions: Vec::new(),
         previous_messages: Vec::new(),
         context_messages: Vec::new(),
+        contextual_user_messages: Vec::new(),
         prompt_messages: vec![user_text_message("hello")],
         tools: Vec::new(),
         max_turns: 1,
     }
+}
+
+#[tokio::test]
+async fn contextual_user_messages_are_inserted_between_history_and_prompt() {
+    let provider = RequestCaptureProvider::default();
+    let requests = Arc::clone(&provider.requests);
+    let (_, control) = ControlHandle::new();
+    let completion = run_agent_loop(
+        Arc::new(provider),
+        AgentLoopRequest {
+            model_provider: "fake".to_string(),
+            model: "model".to_string(),
+            generation_metadata: json!({}),
+            system_instructions: Vec::new(),
+            previous_messages: vec![user_text_message("previous")],
+            context_messages: Vec::new(),
+            contextual_user_messages: vec![ContextualUserMessage::new(
+                "project_instructions",
+                vec![
+                    ContextualUserBlock::new(
+                        "project_instruction",
+                        Some("AGENTS.md".to_string()),
+                        Some("/repo/AGENTS.md".to_string()),
+                        "root rules",
+                    ),
+                    ContextualUserBlock::new(
+                        "project_instruction",
+                        Some("AGENTS.local.md".to_string()),
+                        Some("/repo/AGENTS.local.md".to_string()),
+                        "local rules",
+                    ),
+                ],
+            )],
+            prompt_messages: vec![user_text_message("accepted prompt")],
+            tools: Vec::new(),
+            max_turns: 1,
+        },
+        Arc::new(NoopEventSink),
+        control,
+    )
+    .await
+    .expect("loop");
+    assert_eq!(completion.outcome, Outcome::Normal);
+    assert_eq!(completion.messages[0], user_text_message("accepted prompt"));
+
+    let requests = requests.lock().expect("requests");
+    let messages = &requests[0].messages;
+    assert_eq!(messages.len(), 3);
+    assert_eq!(messages[0]["content"][0]["text"], "previous");
+    assert_eq!(
+        messages[1]["metadata"]["provider_group"],
+        "project_instructions"
+    );
+    assert_eq!(messages[1]["content"].as_array().expect("blocks").len(), 2);
+    assert_eq!(messages[1]["content"][0]["text"], "root rules");
+    assert_eq!(messages[1]["content"][1]["text"], "local rules");
+    assert_eq!(messages[2]["content"][0]["text"], "accepted prompt");
 }
 
 #[tokio::test]
