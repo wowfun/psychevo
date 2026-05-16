@@ -332,6 +332,7 @@ fn transcript_layout_row_key(
         kind: row.kind,
         failed: row.failed,
         interrupted: row.interrupted,
+        user_shell: row.user_shell,
         expanded: row.expanded,
         details_collapsed: row.details_collapsed,
         expandable: row.is_expandable(),
@@ -365,6 +366,9 @@ fn transcript_lines(
     }
     if row.kind == TranscriptKind::Thinking {
         return thinking_lines(row, selected, compact_trailing, width);
+    }
+    if row.user_shell {
+        return user_shell_lines(row, selected, compact_trailing, width);
     }
     if matches!(
         row.kind,
@@ -703,6 +707,93 @@ fn wrap_prompt_text(text: &str, prefix: &str, width: u16) -> Vec<String> {
     lines
 }
 
+fn user_shell_lines(
+    row: &TranscriptRow,
+    selected: bool,
+    compact_trailing: bool,
+    width: u16,
+) -> Vec<Line<'static>> {
+    let theme = tui_theme();
+    let command_style = style_for_body(TranscriptKind::Prompt, row.failed).bg(theme.surface_bg);
+    let marker_style = theme.accent_style();
+    let mut command = user_shell_command_text(row);
+    if let Some(hint) = row_expand_hint(row, selected, None) {
+        command.push(' ');
+        command.push_str(&hint);
+    }
+    let mut out = Vec::new();
+    for (index, wrapped) in wrap_prompt_text(&command, "! ", width)
+        .into_iter()
+        .enumerate()
+    {
+        let (prefix, prefix_style) = if index == 0 {
+            ("! ", marker_style)
+        } else {
+            ("  ", theme.dim_style())
+        };
+        out.push(prompt_line(
+            prefix,
+            &wrapped,
+            width,
+            command_style,
+            prefix_style,
+        ));
+    }
+
+    if !row.details_collapsed {
+        let body_style = if row.interrupted {
+            interruption_style()
+        } else {
+            style_for_body(row.kind, row.failed)
+        };
+        let mut body_lines = row
+            .expandable_text()
+            .lines()
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        if row.is_expandable()
+            && !row.expanded
+            && body_lines
+                .last()
+                .is_some_and(|line| collapsed_more_line_count(line).is_some())
+        {
+            body_lines.pop();
+        }
+        for (line_index, line) in body_lines.into_iter().enumerate() {
+            let first_prefix = if line_index == 0 { "  └ " } else { "    " };
+            for (wrapped_index, wrapped) in wrap_command_text(&line, first_prefix, width)
+                .into_iter()
+                .enumerate()
+            {
+                let prefix = if wrapped_index == 0 {
+                    first_prefix
+                } else {
+                    "    "
+                };
+                out.push(Line::from(vec![
+                    Span::styled(prefix.to_string(), theme.dim_style()),
+                    Span::styled(wrapped, body_style),
+                ]));
+            }
+        }
+    }
+
+    if !compact_trailing {
+        out.push(Line::from(""));
+    }
+    out
+}
+
+fn user_shell_command_text(row: &TranscriptRow) -> String {
+    let title = row.title.trim();
+    for prefix in ["Running ! ", "Ran ! ", "! ", "Running ", "Ran "] {
+        if let Some(command) = title.strip_prefix(prefix) {
+            return command.trim().to_string();
+        }
+    }
+    title.to_string()
+}
+
 fn wrap_detail_text(text: &str, prefix: &str, width: u16) -> Vec<String> {
     let max_width = usize::from(width)
         .saturating_sub(UnicodeWidthStr::width(prefix))
@@ -849,7 +940,7 @@ fn thinking_ledger_view(
     } else if selected || active_elapsed.is_some() {
         tui_theme().accent_style()
     } else {
-        tui_theme().thinking_style()
+        tui_theme().success_style()
     };
     let marker = if selected {
         "› ".to_string()
@@ -861,7 +952,7 @@ fn thinking_ledger_view(
     let title_style = if row.failed {
         tui_theme().error_style().add_modifier(Modifier::BOLD)
     } else {
-        tui_theme().thinking_style().add_modifier(Modifier::BOLD)
+        Style::default().add_modifier(Modifier::BOLD)
     };
     let hint = row_expand_hint(row, selected, None);
     let body_style = style_for_body(row.kind, row.failed);
@@ -1020,7 +1111,9 @@ fn foldable_evidence_body(row: &TranscriptRow) -> bool {
 }
 
 fn foldable_tool_title(row: &TranscriptRow) -> bool {
-    matches!(row.kind, TranscriptKind::Ran) && tool_title_detail(row, &row.title).is_some()
+    !row.user_shell
+        && matches!(row.kind, TranscriptKind::Ran)
+        && tool_title_detail(row, &row.title).is_some()
 }
 
 fn toggle_transcript_row_details(row: &mut TranscriptRow) {
@@ -1040,7 +1133,7 @@ fn toggle_transcript_row_details(row: &mut TranscriptRow) {
 const TOOL_TITLE_DETAIL_WIDTH: usize = 80;
 
 fn tool_title_detail(row: &TranscriptRow, title: &str) -> Option<String> {
-    if row.kind != TranscriptKind::Ran {
+    if row.kind != TranscriptKind::Ran || row.user_shell {
         return None;
     }
     let command = title
@@ -1117,16 +1210,16 @@ fn row_expand_hint(
 }
 
 fn omitted_line_count(row: &TranscriptRow) -> Option<usize> {
-    row.text
-        .lines()
-        .last()
-        .and_then(collapsed_more_line_count)
-        .or_else(|| {
-            let full = row.full_text.as_deref()?;
-            let full_count = full.lines().count();
-            let visible_count = row.text.lines().count();
-            (full_count > visible_count).then_some(full_count - visible_count)
-        })
+    if let Some(count) = row.text.lines().last().and_then(collapsed_more_line_count) {
+        return Some(count);
+    }
+    if row.text.trim_end().ends_with('…') {
+        return None;
+    }
+    let full = row.full_text.as_deref()?;
+    let full_count = full.lines().count();
+    let visible_count = row.text.lines().count();
+    (full_count > visible_count).then_some(full_count - visible_count)
 }
 
 fn collapsed_more_line_count(line: &str) -> Option<usize> {
@@ -1145,6 +1238,7 @@ fn row_has_collapsed_body(row: &TranscriptRow) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct LedgerBodyCollapsePolicy {
     max_lines: usize,
+    max_tokens: usize,
     max_width: usize,
 }
 
@@ -1155,18 +1249,24 @@ struct LedgerBodyCollapse {
 }
 
 const LEDGER_BODY_COLLAPSE_LINES: usize = 8;
+const LEDGER_BODY_COLLAPSE_TOKENS: usize = 200;
 const LEDGER_BODY_COLLAPSE_WIDTH: usize = 1200;
+const DISPLAY_TOKEN_LONG_RUN_FREE_CELLS: usize = 16;
+const DISPLAY_TOKEN_CHUNK_CELLS: usize = 4;
 
 fn ledger_body_collapse_policy() -> LedgerBodyCollapsePolicy {
     LedgerBodyCollapsePolicy {
         max_lines: LEDGER_BODY_COLLAPSE_LINES,
+        max_tokens: LEDGER_BODY_COLLAPSE_TOKENS,
         max_width: LEDGER_BODY_COLLAPSE_WIDTH,
     }
 }
 
 impl LedgerBodyCollapsePolicy {
     fn should_collapse(self, text: &str) -> bool {
-        text.lines().count() > self.max_lines || UnicodeWidthStr::width(text) > self.max_width
+        text.lines().count() > self.max_lines
+            || display_token_count(text) > self.max_tokens
+            || UnicodeWidthStr::width(text) > self.max_width
     }
 
     fn collapse(self, text: &str) -> LedgerBodyCollapse {
@@ -1178,22 +1278,125 @@ impl LedgerBodyCollapsePolicy {
                 .copied()
                 .collect::<Vec<_>>()
                 .join("\n");
+            if display_token_count(&collapsed) > self.max_tokens
+                || UnicodeWidthStr::width(collapsed.as_str()) > self.max_width
+            {
+                return self.collapse_by_token_or_width(text);
+            }
             return LedgerBodyCollapse {
                 preview: format!("{collapsed}\n... {} more lines", lines.len() - self.max_lines),
                 full_text: Some(text.to_string()),
             };
         }
-        if UnicodeWidthStr::width(text) > self.max_width {
-            return LedgerBodyCollapse {
-                preview: truncate_display_width(text, self.max_width),
-                full_text: Some(text.to_string()),
-            };
+        if display_token_count(text) > self.max_tokens
+            || UnicodeWidthStr::width(text) > self.max_width
+        {
+            return self.collapse_by_token_or_width(text);
         }
         LedgerBodyCollapse {
             preview: text.to_string(),
             full_text: None,
         }
     }
+
+    fn collapse_by_token_or_width(self, text: &str) -> LedgerBodyCollapse {
+        let mut preview = if display_token_count(text) > self.max_tokens {
+            truncate_display_tokens(text, self.max_tokens)
+        } else {
+            text.to_string()
+        };
+        if UnicodeWidthStr::width(preview.as_str()) > self.max_width {
+            preview = truncate_display_width(&preview, self.max_width);
+        }
+        LedgerBodyCollapse {
+            preview,
+            full_text: Some(text.to_string()),
+        }
+    }
+}
+
+fn display_token_count(text: &str) -> usize {
+    text.split_whitespace()
+        .map(display_token_count_segment)
+        .sum()
+}
+
+fn display_token_count_segment(segment: &str) -> usize {
+    if segment.is_empty() {
+        return 0;
+    }
+    let width = UnicodeWidthStr::width(segment);
+    if width <= DISPLAY_TOKEN_LONG_RUN_FREE_CELLS {
+        1
+    } else {
+        1 + width
+            .saturating_sub(DISPLAY_TOKEN_LONG_RUN_FREE_CELLS)
+            .div_ceil(DISPLAY_TOKEN_CHUNK_CELLS)
+    }
+}
+
+fn truncate_display_tokens(text: &str, max_tokens: usize) -> String {
+    if display_token_count(text) <= max_tokens {
+        return text.to_string();
+    }
+    if max_tokens == 0 {
+        return "…".to_string();
+    }
+    let mut out = String::new();
+    let mut token_count = 0usize;
+    let mut index = 0usize;
+    while index < text.len() {
+        let Some(ch) = text[index..].chars().next() else {
+            break;
+        };
+        let start = index;
+        let whitespace = ch.is_whitespace();
+        index += ch.len_utf8();
+        while index < text.len() {
+            let Some(next) = text[index..].chars().next() else {
+                break;
+            };
+            if next.is_whitespace() != whitespace {
+                break;
+            }
+            index += next.len_utf8();
+        }
+        let segment = &text[start..index];
+        if whitespace {
+            if !out.is_empty() && token_count < max_tokens {
+                out.push_str(segment);
+            }
+            continue;
+        }
+        let segment_tokens = display_token_count_segment(segment);
+        if token_count.saturating_add(segment_tokens) <= max_tokens {
+            out.push_str(segment);
+            token_count = token_count.saturating_add(segment_tokens);
+        } else {
+            let remaining = max_tokens.saturating_sub(token_count);
+            if remaining > 0 {
+                let width = DISPLAY_TOKEN_LONG_RUN_FREE_CELLS
+                    + remaining.saturating_sub(1) * DISPLAY_TOKEN_CHUNK_CELLS;
+                out.push_str(&prefix_display_width(segment, width));
+            }
+            break;
+        }
+    }
+    format!("{}…", out.trim_end())
+}
+
+fn prefix_display_width(value: &str, max_width: usize) -> String {
+    let mut out = String::new();
+    let mut width = 0usize;
+    for ch in value.chars() {
+        let ch_width = ch.width().unwrap_or(0);
+        if width.saturating_add(ch_width) > max_width {
+            break;
+        }
+        out.push(ch);
+        width = width.saturating_add(ch_width);
+    }
+    out
 }
 
 fn collapse_ledger_body(text: &str) -> (String, Option<String>) {

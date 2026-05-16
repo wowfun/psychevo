@@ -472,6 +472,76 @@ async fn file_popup_keyboard_navigation_wraps_and_inserts_selection() {
 }
 
 #[tokio::test]
+async fn shell_mode_reuses_at_file_popup_for_path_completion() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.enter_shell_mode();
+    ui.textarea = textarea_with_text("cat @sr");
+    ui.file_search.popup = Some(FileSearchPopupState {
+        query: "sr".to_string(),
+        matches: vec![FileSearchMatch {
+            path: "src/main.rs".to_string(),
+            kind: FileSearchMatchKind::File,
+        }],
+        selected: 0,
+        waiting: false,
+    });
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+        .await
+        .expect("tab");
+
+    assert!(ui.shell_mode);
+    assert_eq!(textarea_text(&ui.textarea), "cat src/main.rs ");
+    assert!(ui.file_search.popup.is_none());
+}
+
+#[tokio::test]
+async fn shell_mode_does_not_perform_naked_shell_completion() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.enter_shell_mode();
+    ui.textarea = textarea_with_text("cat xx");
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+        .await
+        .expect("tab");
+
+    assert!(ui.shell_mode);
+    assert_eq!(textarea_text(&ui.textarea), "cat xx");
+}
+
+#[tokio::test]
+async fn shell_mode_file_completion_preserves_space_path_quoting() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.enter_shell_mode();
+    ui.textarea = textarea_with_text("cat @doc");
+    ui.file_search.popup = Some(FileSearchPopupState {
+        query: "doc".to_string(),
+        matches: vec![FileSearchMatch {
+            path: "docs/reference notes.md".to_string(),
+            kind: FileSearchMatchKind::File,
+        }],
+        selected: 0,
+        waiting: false,
+    });
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .expect("enter");
+
+    assert!(ui.shell_mode);
+    assert_eq!(
+        textarea_text(&ui.textarea),
+        "cat \"docs/reference notes.md\" "
+    );
+}
+
+#[tokio::test]
 async fn file_popup_esc_dismisses_until_token_changes() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);

@@ -142,7 +142,10 @@ impl TuiApp {
             && !sessions.is_empty()
         {
             for (index, session) in sessions.iter().enumerate() {
-                let session_id = session.get("session").and_then(Value::as_str).unwrap_or("-");
+                let session_id = session
+                    .get("session")
+                    .and_then(Value::as_str)
+                    .unwrap_or("-");
                 let title = session
                     .get("title")
                     .and_then(Value::as_str)
@@ -370,7 +373,7 @@ impl TuiApp {
             "No variants",
             rows,
         );
-        panel.footer = "Enter select  Esc back  Type search".to_string();
+        panel.footer = "Enter apply  Esc back  Type search".to_string();
         if is_current_model
             && let Some(current_variant) = self.current_variant.as_deref()
             && let Some(index) = panel
@@ -545,7 +548,7 @@ impl TuiApp {
             is_current: model_spec == current,
             is_default: self.current_model.is_none() && model_spec == current,
             style: BottomRowStyle::Normal,
-            footer: None,
+            footer: Some("Enter choose model  Esc close  Type search".to_string()),
             value: BottomSelectionValue::Model {
                 model: Box::new(model),
                 source,
@@ -596,7 +599,6 @@ impl TuiApp {
             })
             .unwrap_or_else(|| "default".to_string())
     }
-
 }
 
 fn model_capability_tags(model: &ConfiguredModel) -> Vec<String> {
@@ -612,8 +614,7 @@ fn model_capability_tags(model: &ConfiguredModel) -> Vec<String> {
         Some(false) => tags.push("no tools".to_string()),
         None => {}
     }
-    if caps.attachment == Some(true) || caps.input_modalities.iter().any(|value| value != "text")
-    {
+    if caps.attachment == Some(true) || caps.input_modalities.iter().any(|value| value != "text") {
         tags.push("multi-modal".to_string());
     }
     if caps.structured_output == Some(true) {

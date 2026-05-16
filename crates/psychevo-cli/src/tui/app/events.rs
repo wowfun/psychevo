@@ -2,6 +2,12 @@ impl TuiApp {
     async fn drain_fullscreen_events(&mut self, ui: &mut FullscreenUi<'_>) -> Result<bool> {
         let mut changed = false;
         changed |= self.drain_finished_auxiliary_agent_tasks(ui).await?;
+        let (shell_changed, active_tool_frame_requested) =
+            self.drain_auxiliary_shell_tasks(ui).await?;
+        changed |= shell_changed;
+        if active_tool_frame_requested {
+            return Ok(true);
+        }
         changed |= self.drain_finished_clipboard_copies(ui);
         changed |= self.drain_model_metadata_refresh(ui).await?;
         changed |= self.drain_model_catalog_fetches(ui).await?;
@@ -70,7 +76,10 @@ impl TuiApp {
                         self.force_new_once = false;
                         if result.outcome != Outcome::Normal && !interrupted {
                             self.had_error = true;
-                            ui.push_error(format!("turn ended: {}", result.outcome.as_str()));
+                            ui.push_error(turn_ended_error_message(
+                                result.outcome,
+                                result.terminal_reason,
+                            ));
                         }
                     }
                     Ok(Err(err)) => {
@@ -87,6 +96,11 @@ impl TuiApp {
                         let interrupted =
                             ui.interrupt_requested && result.outcome == Outcome::Aborted;
                         restore_queued_after_interrupt |= interrupted;
+                        if let Some(session_id) = result.session_id {
+                            self.current_session = Some(session_id);
+                            self.refresh_current_session_title()?;
+                            self.force_new_once = false;
+                        }
                         if (result.outcome != Outcome::Normal || result.tool_failures > 0)
                             && !interrupted
                         {
@@ -159,27 +173,38 @@ impl TuiApp {
                 self.last_context_snapshot = Some(snapshot.clone());
                 ui.last_context_snapshot = Some(snapshot);
             }
-            self.observe_fullscreen_value_event(value);
+            let run_started = self.observe_fullscreen_value_event(value);
+            let active_tool_frame_requested =
+                ui.apply_stream_event(event, self.thinking_visible, self.debug);
+            if run_started
+                && let Err(err) = self.start_pending_auxiliary_shells(ui)
+            {
+                self.had_error = true;
+                ui.push_error(format!("error: {err:#}"));
+            }
+            return active_tool_frame_requested;
         }
         ui.apply_stream_event(event, self.thinking_visible, self.debug)
     }
 
-    fn observe_fullscreen_value_event(&mut self, value: &Value) {
+    fn observe_fullscreen_value_event(&mut self, value: &Value) -> bool {
         if value.get("type").and_then(Value::as_str) != Some("run_start") {
-            return;
+            return false;
         }
         let Some(session_id) = value.get("session_id").and_then(Value::as_str) else {
-            return;
+            return false;
         };
         if self.current_session.as_deref() != Some(session_id) {
             self.current_session = Some(session_id.to_string());
             self.current_session_title = None;
         }
         self.force_new_once = false;
+        true
     }
 
     fn finish_streamed_agent_turn(&mut self, ui: &mut FullscreenUi<'_>) {
         let outcome = ui.turn_outcome.unwrap_or(Outcome::Normal);
+        let terminal_message = ui.turn_terminal_message.take();
         if let Some(running) = ui.running.take()
             && let RunningTask::Agent(task) = running.task
         {
@@ -188,7 +213,10 @@ impl TuiApp {
         let interrupted = ui.interrupt_requested && outcome == Outcome::Aborted;
         if outcome != Outcome::Normal && !interrupted {
             self.had_error = true;
-            ui.push_error(format!("turn ended: {}", outcome.as_str()));
+            ui.push_error(turn_ended_error_text(
+                outcome,
+                terminal_message.as_deref(),
+            ));
         }
         ui.finish_turn();
         ui.refresh_sidebar(self);
@@ -221,6 +249,83 @@ impl TuiApp {
         }
         ui.auxiliary_agent_tasks = pending;
         Ok(changed)
+    }
+
+    async fn drain_auxiliary_shell_tasks(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+    ) -> Result<(bool, bool)> {
+        let mut changed = false;
+        let mut pending_tasks = Vec::new();
+        let mut tasks = std::mem::take(&mut ui.auxiliary_shell_tasks).into_iter();
+        while let Some(mut shell) = tasks.next() {
+            let mut pending = VecDeque::new();
+            while let Ok(event) = shell.rx.try_recv() {
+                pending.push_back(event);
+            }
+            let (had_pending, active_tool_frame_requested) =
+                self.apply_pending_fullscreen_stream_events(ui, pending);
+            changed |= had_pending;
+            if had_pending {
+                ui.follow_transcript_if_needed();
+                ui.refresh_sidebar(self);
+            }
+            if active_tool_frame_requested {
+                pending_tasks.push(shell);
+                pending_tasks.extend(tasks);
+                ui.auxiliary_shell_tasks = pending_tasks;
+                return Ok((true, true));
+            }
+
+            if shell.task.is_finished() {
+                let mut pending = VecDeque::new();
+                while let Ok(event) = shell.rx.try_recv() {
+                    pending.push_back(event);
+                }
+                let (had_pending, active_tool_frame_requested) =
+                    self.apply_pending_fullscreen_stream_events(ui, pending);
+                if had_pending {
+                    ui.follow_transcript_if_needed();
+                }
+                if active_tool_frame_requested {
+                    pending_tasks.push(shell);
+                    pending_tasks.extend(tasks);
+                    ui.auxiliary_shell_tasks = pending_tasks;
+                    return Ok((true, true));
+                }
+
+                match shell.task.await {
+                    Ok(Ok(result)) => {
+                        let interrupted =
+                            ui.interrupt_requested && result.outcome == Outcome::Aborted;
+                        if let Some(session_id) = result.session_id {
+                            self.current_session = Some(session_id);
+                            self.refresh_current_session_title()?;
+                            self.force_new_once = false;
+                        }
+                        if (result.outcome != Outcome::Normal || result.tool_failures > 0)
+                            && !interrupted
+                        {
+                            self.had_error = true;
+                        }
+                    }
+                    Ok(Err(err)) => {
+                        self.had_error = true;
+                        ui.push_error(format!("error: {err:#}"));
+                    }
+                    Err(err) => {
+                        self.had_error = true;
+                        ui.push_error(format!("task failed: {err}"));
+                    }
+                }
+                ui.refresh_sidebar(self);
+                changed = true;
+            } else {
+                pending_tasks.push(shell);
+            }
+        }
+        ui.auxiliary_shell_tasks = pending_tasks;
+        Ok((changed, false))
     }
 
     fn render_fullscreen(&self, frame: &mut Frame<'_>, ui: &mut FullscreenUi<'_>) {
@@ -350,4 +455,15 @@ impl TuiApp {
         render_active_selection(frame, ui);
     }
 
+}
+
+fn turn_ended_error_message(outcome: Outcome, terminal_reason: Option<TerminalReason>) -> String {
+    turn_ended_error_text(outcome, terminal_reason.map(TerminalReason::message).as_deref())
+}
+
+fn turn_ended_error_text(outcome: Outcome, terminal_message: Option<&str>) -> String {
+    match terminal_message.filter(|message| !message.trim().is_empty()) {
+        Some(message) => format!("turn ended: {} - {message}", outcome.as_str()),
+        None => format!("turn ended: {}", outcome.as_str()),
+    }
 }

@@ -12,6 +12,7 @@ impl<'a> FullscreenUi<'a> {
             streaming_tool_message_open: false,
             deferred_stream_events: VecDeque::new(),
             history_tool_titles: BTreeMap::new(),
+            shell_mode: false,
             turn_started: None,
             turn_provider: String::new(),
             turn_model: String::new(),
@@ -23,12 +24,15 @@ impl<'a> FullscreenUi<'a> {
             turn_failures: 0,
             turn_interrupted: false,
             turn_outcome: None,
+            turn_terminal_message: None,
             turn_had_reasoning: false,
             history_prompt_started_ms: None,
             thinking_visible: app.thinking_visible,
             raw_visible: app.raw_visible,
             running: None,
             auxiliary_agent_tasks: Vec::new(),
+            auxiliary_shell_tasks: Vec::new(),
+            pending_auxiliary_shell_commands: VecDeque::new(),
             running_started: None,
             #[cfg(test)]
             running_elapsed_override: None,
@@ -328,10 +332,12 @@ impl<'a> FullscreenUi<'a> {
             .unwrap_or_default()
         {
             "user" => {
-                if let Some(display) = user_display_from_message(message, metadata) {
+                if let Some(display) = user_shell_display_from_message(message, metadata) {
+                    self.push_history_user_shell(display);
+                } else if let Some(display) = user_display_from_message(message, metadata) {
                     self.push_user_with_attachment_meta(display.text, display.attachment_meta);
+                    self.history_prompt_started_ms = message_timestamp_ms(message);
                 }
-                self.history_prompt_started_ms = message_timestamp_ms(message);
             }
             "assistant" => {
                 let tool_calls = history_tool_calls_from_message(message);
@@ -386,6 +392,33 @@ impl<'a> FullscreenUi<'a> {
             "tool_result" => self.push_history_tool_result(message, metadata),
             _ => {}
         }
+    }
+
+    fn push_history_user_shell(&mut self, display: UserShellDisplay) {
+        let value = serde_json::json!({
+            "type": "tool_execution_end",
+            "tool_name": "bash",
+            "args": {"command": display.command},
+            "result": display.result,
+            "outcome": display.outcome,
+            "source": "user_shell",
+        });
+        let (collapsed, full) = tool_output_text(&value);
+        let mut row = TranscriptRow::with_title(
+            TranscriptKind::Ran,
+            tool_title("bash", &value),
+            if collapsed.is_empty() {
+                format_tool_summary(&value)
+            } else {
+                collapsed
+            },
+        );
+        row.full_text = full;
+        row.interrupted = tool_event_interrupted(&value);
+        row.failed = value.get("outcome").and_then(Value::as_str) != Some("normal")
+            && !row.interrupted;
+        row.user_shell = true;
+        self.transcript.push(row);
     }
 
     fn push_history_active_tool_call(&mut self, message: &Value, call: HistoryToolCall) {
@@ -508,10 +541,76 @@ impl<'a> FullscreenUi<'a> {
         let Some(running) = &self.running else {
             return false;
         };
-        if !self.interrupt_requested {
-            running.control.abort();
-            self.interrupt_requested = true;
+        running.control.abort();
+        for shell in &self.auxiliary_shell_tasks {
+            shell.control.abort();
         }
+        self.pending_auxiliary_shell_commands.clear();
+        self.interrupt_requested = true;
+        true
+    }
+
+    fn enter_shell_mode(&mut self) {
+        self.shell_mode = true;
+        self.clear_slash_menu_dismissal();
+    }
+
+    fn exit_shell_mode(&mut self) {
+        self.shell_mode = false;
+        self.clear_slash_menu_dismissal();
+    }
+
+    fn clear_composer(&mut self) {
+        self.textarea = new_textarea();
+        self.shell_mode = false;
+    }
+
+    fn set_composer_text(&mut self, text: &str) {
+        if let Some(shell) = parse_shell_escape_input(text) {
+            self.shell_mode = true;
+            self.textarea = if shell.command.is_empty() {
+                new_textarea()
+            } else {
+                textarea_with_text(&shell.command)
+            };
+        } else {
+            self.shell_mode = false;
+            self.textarea = if text.is_empty() {
+                new_textarea()
+            } else {
+                textarea_with_text(text)
+            };
+        }
+        self.slash_menu_selected = 0;
+        self.clear_slash_menu_dismissal();
+    }
+
+    fn composer_submission_text(&self) -> String {
+        let text = textarea_text(&self.textarea);
+        if self.shell_mode {
+            format!("!{text}")
+        } else {
+            text
+        }
+    }
+
+    fn absorb_shell_escape_prefix(&mut self) -> bool {
+        if self.shell_mode {
+            return false;
+        }
+        let text = textarea_text(&self.textarea);
+        let Some(shell) = parse_shell_escape_input(&text) else {
+            return false;
+        };
+        self.shell_mode = true;
+        self.textarea = if shell.command.is_empty() {
+            new_textarea()
+        } else {
+            textarea_with_text(&shell.command)
+        };
+        self.slash_menu_selected = 0;
+        self.clear_slash_menu_dismissal();
+        self.close_skill_popup();
         true
     }
 
@@ -526,11 +625,11 @@ impl<'a> FullscreenUi<'a> {
             }
             parts.push(queued_input_text(input));
         }
-        let draft = textarea_text(&self.textarea);
-        if !draft.is_empty() {
+        let draft = self.composer_submission_text();
+        if !draft.is_empty() && draft != "!" {
             parts.push(draft);
         }
-        self.textarea = textarea_with_text(&parts.join("\n"));
+        self.set_composer_text(&parts.join("\n"));
         self.reset_history_navigation();
         self.clear_slash_menu_dismissal();
         self.close_file_popup();
@@ -697,7 +796,7 @@ impl<'a> FullscreenUi<'a> {
             self.last_skill_popup_areas.clear();
             self.clear_slash_menu_dismissal();
         } else {
-            self.textarea = textarea_with_text(&format!("${name} "));
+            self.set_composer_text(&format!("${name} "));
             self.close_skill_popup();
             self.slash_menu_selected = 0;
             self.clear_slash_menu_dismissal();
@@ -854,6 +953,7 @@ impl<'a> FullscreenUi<'a> {
         self.turn_failures = 0;
         self.turn_interrupted = false;
         self.turn_outcome = None;
+        self.turn_terminal_message = None;
         self.turn_had_reasoning = false;
     }
 
@@ -1067,6 +1167,15 @@ impl<'a> FullscreenUi<'a> {
                 }
                 false
             }
+            "warning" => {
+                if let Some(message) = value.get("message").and_then(Value::as_str) {
+                    self.push_status(format!("warning: {message}"));
+                }
+                if let Some(suggestion) = value.get("suggestion").and_then(Value::as_str) {
+                    self.push_status(format!("suggestion: {suggestion}"));
+                }
+                false
+            }
             "message_update" | "message_end" => {
                 let event_type = value.get("type").and_then(Value::as_str);
                 let mut active_tool_frame_requested = false;
@@ -1127,6 +1236,7 @@ impl<'a> FullscreenUi<'a> {
             }
             "tool_call_pending" => self.apply_streaming_tool_calls(value),
             "tool_execution_start" => {
+                let user_shell = value.get("source").and_then(Value::as_str) == Some("user_shell");
                 let tool = value
                     .get("tool_name")
                     .and_then(Value::as_str)
@@ -1159,6 +1269,7 @@ impl<'a> FullscreenUi<'a> {
                 row.text = "running".to_string();
                 row.failed = false;
                 row.interrupted = false;
+                row.user_shell = user_shell;
                 row.tool_call_id = (!tool_call_id.is_empty()).then_some(tool_call_id.clone());
                 if row.tool_started.is_none() {
                     row.tool_started = Some(tool_started_instant(value));
@@ -1207,6 +1318,7 @@ impl<'a> FullscreenUi<'a> {
                 row.title = tool_title_for_update(tool, value, &row.title);
                 row.failed = failed;
                 row.interrupted = interrupted;
+                row.user_shell = user_shell;
                 row.tool_elapsed = completed_live_tool_elapsed(row, Some(value));
                 row.tool_started = None;
                 if interrupted {
@@ -1231,6 +1343,10 @@ impl<'a> FullscreenUi<'a> {
             }
             "agent_end" => {
                 self.turn_outcome = outcome_from_value(value);
+                self.turn_terminal_message = value
+                    .get("terminal_message")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
                 false
             }
             _ => false,
@@ -1365,6 +1481,7 @@ impl<'a> FullscreenUi<'a> {
         self.streaming_tool_message_open = false;
         self.deferred_stream_events.clear();
         self.turn_outcome = None;
+        self.turn_terminal_message = None;
         self.turn_interrupted = false;
         self.turn_had_reasoning = false;
         self.running_started = None;
@@ -1450,7 +1567,7 @@ impl<'a> FullscreenUi<'a> {
             return;
         }
         if self.history_index.is_none() && direction < 0 {
-            self.history_draft = Some(textarea_text(&self.textarea));
+            self.history_draft = Some(self.composer_submission_text());
         }
         let next = match self.history_index {
             None if direction < 0 => self.history.len().saturating_sub(1),
@@ -1459,17 +1576,16 @@ impl<'a> FullscreenUi<'a> {
             Some(index) => {
                 if index + 1 >= self.history.len() {
                     self.history_index = None;
-                    self.textarea = match self.history_draft.take() {
-                        Some(draft) if !draft.is_empty() => textarea_with_text(&draft),
-                        _ => new_textarea(),
-                    };
+                    let draft = self.history_draft.take().unwrap_or_default();
+                    self.set_composer_text(&draft);
                     return;
                 }
                 index + 1
             }
         };
         self.history_index = Some(next);
-        self.textarea = textarea_with_text(&self.history[next]);
+        let entry = self.history[next].clone();
+        self.set_composer_text(&entry);
     }
 
     fn update_turn_meta(

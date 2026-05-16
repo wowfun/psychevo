@@ -93,7 +93,7 @@ impl TuiApp {
     }
 
     fn sync_skill_popup(&self, ui: &mut FullscreenUi<'_>) {
-        if ui.current_file_token().is_some() {
+        if ui.shell_mode || ui.current_file_token().is_some() {
             ui.close_skill_popup();
             return;
         }

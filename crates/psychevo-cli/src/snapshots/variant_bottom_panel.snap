@@ -25,7 +25,7 @@ size=120x24
   xhigh  extra high reasoning
   max  maximum configured reasoning
 
-  Enter select  Esc back  Type search
+  Enter apply  Esc back  Type search
 
 
 
@@ -51,7 +51,7 @@ mock/mock-model  default  ~/work · main
 [default]  xhigh  extra high reasoning
 [default]  max  maximum configured reasoning
 [default]
-[default]  [dim]Enter select  Esc back  Type search[default]
+[default]  [dim]Enter apply  Esc back  Type search[default]
 [default]
 [default]
 [default]

@@ -36,7 +36,7 @@ async fn esc_clears_empty_shell_mode_composer() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
-    ui.textarea = textarea_with_text("!");
+    ui.enter_shell_mode();
 
     let should_quit = app
         .handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
@@ -45,6 +45,7 @@ async fn esc_clears_empty_shell_mode_composer() {
 
     assert!(!should_quit);
     assert_eq!(textarea_text(&ui.textarea), "");
+    assert!(!ui.shell_mode);
     assert!(ui.running.is_none());
 }
 
@@ -53,7 +54,8 @@ fn status_line_marks_shell_mode_for_bang_input() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
-    ui.textarea = textarea_with_text("!printf shell");
+    ui.enter_shell_mode();
+    ui.textarea = textarea_with_text("printf shell");
 
     let buffer = draw_fullscreen_for_test(&app, &mut ui, 80, 12);
     let text = buffer_text(&buffer);
@@ -168,16 +170,152 @@ async fn shifted_one_key_enters_shell_mode() {
     .await
     .expect("bang key");
 
-    assert_eq!(textarea_text(&ui.textarea), "!");
+    assert!(ui.shell_mode);
+    assert_eq!(textarea_text(&ui.textarea), "");
     let buffer = draw_fullscreen_for_test(&app, &mut ui, 80, 12);
     let text = buffer_text(&buffer);
     assert!(text.contains("mock/model  high  shell"), "{text}");
 }
 
 #[tokio::test]
-async fn fullscreen_user_shell_runs_locally_and_drains_queued_shell_escape() {
+async fn empty_shell_mode_uses_bang_prompt_and_backspace_exits() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.enter_shell_mode();
+
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 48, 10);
+    let composer_y = 8;
+    assert_eq!(
+        buffer
+            .cell((0, composer_y))
+            .expect("shell composer marker")
+            .symbol(),
+        "!"
+    );
+    assert_eq!(
+        buffer
+            .cell((1, composer_y))
+            .expect("shell composer spacer")
+            .symbol(),
+        " "
+    );
+    assert!(!buffer_text(&buffer).contains("Ask pevo"));
+
+    app.handle_fullscreen_key(
+        &mut ui,
+        KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+    )
+    .await
+    .expect("backspace");
+
+    assert!(!ui.shell_mode);
+    assert_eq!(textarea_text(&ui.textarea), "");
+}
+
+#[tokio::test]
+async fn pasted_bang_input_imports_shell_mode_without_literal_bang() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    app.handle_fullscreen_event(
+        &mut ui,
+        CrosstermEvent::Paste("  !printf pasted".to_string()),
+    )
+    .await
+    .expect("paste");
+
+    assert!(ui.shell_mode);
+    assert_eq!(textarea_text(&ui.textarea), "printf pasted");
+}
+
+#[tokio::test]
+async fn shell_mode_submit_records_bang_history_and_executes_command_text() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app_with_models(&temp);
+    app.current_session = None;
+    let mut ui = FullscreenUi::new(&app);
+    ui.enter_shell_mode();
+    ui.textarea = textarea_with_text("printf shell-mode");
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .expect("enter");
+
+    assert!(!ui.shell_mode);
+    assert_eq!(
+        ui.history.last().map(String::as_str),
+        Some("!printf shell-mode")
+    );
+
+    drain_fullscreen_until_idle(&mut app, &mut ui).await;
+
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.kind == TranscriptKind::Ran
+                && row.title == "Ran ! printf shell-mode"
+                && row.text == "shell-mode")
+    );
+}
+
+#[test]
+fn user_shell_transcript_row_uses_prompt_surface_command_line() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    let mut row = TranscriptRow::with_title(TranscriptKind::Ran, "Ran ! ls", "feeds\ntmp1.txt");
+    row.user_shell = true;
+    ui.transcript.push(row);
+
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 60, 12);
+    let text = buffer_text(&buffer);
+    let lines = text.lines().collect::<Vec<_>>();
+    let command_y = lines
+        .iter()
+        .position(|line| line.contains("! ls"))
+        .expect("user shell command row") as u16;
+
+    assert!(lines[command_y as usize].contains("! ls"), "{text}");
+    assert!(!lines[command_y as usize].contains("Ran"), "{text}");
+    assert!(!lines[command_y as usize].contains("•"), "{text}");
+    assert_eq!(
+        buffer
+            .cell((0, command_y))
+            .expect("user shell marker")
+            .symbol(),
+        "!"
+    );
+    assert_eq!(
+        buffer
+            .cell((0, command_y))
+            .expect("user shell marker")
+            .fg,
+        TUI_CYAN
+    );
+    assert_eq!(
+        buffer
+            .cell((0, command_y))
+            .expect("user shell marker")
+            .bg,
+        TUI_SURFACE_BG
+    );
+    assert_eq!(
+        buffer
+            .cell((30, command_y))
+            .expect("user shell row padding")
+            .bg,
+        TUI_SURFACE_BG
+    );
+    assert!(text.contains("└ feeds"), "{text}");
+}
+
+#[tokio::test]
+async fn fullscreen_user_shell_runs_locally_and_drains_queued_shell_escape() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app_with_models(&temp);
+    app.current_session = None;
     let mut ui = FullscreenUi::new(&app);
 
     app.start_fullscreen_shell(&mut ui, "printf shell-one".to_string())
@@ -203,14 +341,176 @@ async fn fullscreen_user_shell_runs_locally_and_drains_queued_shell_escape() {
     assert!(
         ran_rows
             .iter()
-            .any(|row| { row.title == "Ran printf shell-one" && row.text == "shell-one" })
+            .any(|row| { row.title == "Ran ! printf shell-one" && row.text == "shell-one" })
     );
     assert!(
         ran_rows
             .iter()
-            .any(|row| { row.title == "Ran printf shell-two" && row.text == "shell-two" })
+            .any(|row| { row.title == "Ran ! printf shell-two" && row.text == "shell-two" })
     );
     assert!(!app.had_error);
+}
+
+#[tokio::test]
+async fn fullscreen_user_shell_during_agent_turn_waits_for_run_start_then_starts_auxiliary_task() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app_with_models(&temp);
+    app.current_session = None;
+    let session_id = SqliteStore::open(&app.db_path)
+        .expect("store")
+        .create_session_with_metadata(&app.workdir, "tui", "mock/model", "mock", None)
+        .expect("session");
+    let mut ui = FullscreenUi::new(&app);
+    let (_tx, rx) = mpsc::unbounded_channel();
+    let task = tokio::spawn(async {
+        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::RunResult>>().await
+    });
+    let (control, _) = run_control();
+    ui.running = Some(RunningTurn {
+        control,
+        rx,
+        task: RunningTask::Agent(task),
+    });
+    ui.start_assistant();
+
+    app.submit_fullscreen_text(&mut ui, "!printf aux-shell".to_string(), true)
+        .await
+        .expect("submit shell");
+
+    assert!(ui.queued_inputs.is_empty());
+    assert_eq!(ui.pending_auxiliary_shell_commands.len(), 1);
+    assert_eq!(ui.auxiliary_shell_tasks.len(), 0);
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 80, 12);
+    let text = buffer_text(&buffer);
+    assert!(text.contains("shell 1"), "{text}");
+
+    app.apply_fullscreen_stream_event(
+        &mut ui,
+        RunStreamEvent::Event(serde_json::json!({
+            "type": "run_start",
+            "session_id": session_id,
+            "provider": "mock",
+            "model": "mock/model",
+            "mode": "default"
+        })),
+    );
+    assert!(ui.pending_auxiliary_shell_commands.is_empty());
+    assert_eq!(ui.auxiliary_shell_tasks.len(), 1);
+    for _ in 0..200 {
+        app.drain_fullscreen_events(&mut ui)
+            .await
+            .expect("drain events");
+        if ui.auxiliary_shell_tasks.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(ui.auxiliary_shell_tasks.is_empty());
+    assert!(ui.running.is_some());
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.kind == TranscriptKind::Ran
+                && row.title == "Ran ! printf aux-shell"
+                && row.text == "aux-shell")
+    );
+
+    if let Some(running) = ui.running.take() {
+        running.task.abort();
+    }
+}
+
+#[tokio::test]
+async fn auxiliary_user_shell_missing_config_does_not_execute_marker_command() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let session_id = SqliteStore::open(&app.db_path)
+        .expect("store")
+        .create_session_with_metadata(&app.workdir, "tui", "mock/model", "mock", None)
+        .expect("session");
+    app.current_session = Some(session_id.clone());
+    let marker = app.workdir.join("should-not-exist");
+    let mut ui = FullscreenUi::new(&app);
+    let (_tx, rx) = mpsc::unbounded_channel();
+    let task = tokio::spawn(async {
+        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::RunResult>>().await
+    });
+    let (control, _) = run_control();
+    ui.running = Some(RunningTurn {
+        control,
+        rx,
+        task: RunningTask::Agent(task),
+    });
+    ui.start_assistant();
+    app.apply_fullscreen_stream_event(
+        &mut ui,
+        RunStreamEvent::Event(serde_json::json!({
+            "type": "run_start",
+            "session_id": session_id,
+            "provider": "mock",
+            "model": "mock/model",
+            "mode": "default"
+        })),
+    );
+
+    app.submit_fullscreen_text(
+        &mut ui,
+        format!("!printf nope > {}", marker.display()),
+        true,
+    )
+    .await
+    .expect("submit shell");
+
+    assert_eq!(ui.auxiliary_shell_tasks.len(), 1);
+    for _ in 0..200 {
+        app.drain_fullscreen_events(&mut ui)
+            .await
+            .expect("drain events");
+        if ui.auxiliary_shell_tasks.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    assert!(ui.auxiliary_shell_tasks.is_empty());
+    assert!(!marker.exists());
+    assert!(app.had_error);
+
+    if let Some(running) = ui.running.take() {
+        running.task.abort();
+    }
+}
+
+#[tokio::test]
+async fn persisted_user_shell_history_reloads_as_ran_evidence() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app_with_models(&temp);
+    app.current_session = None;
+    let mut ui = FullscreenUi::new(&app);
+
+    app.start_fullscreen_shell(&mut ui, "printf reload-shell".to_string())
+        .expect("start shell");
+    drain_fullscreen_until_idle(&mut app, &mut ui).await;
+    assert!(app.current_session.is_some());
+
+    let mut reloaded = FullscreenUi::new(&app);
+    app.load_current_session_history(&mut reloaded)
+        .expect("load history");
+    assert_eq!(reloaded.history.as_slice(), ["!printf reload-shell"]);
+    assert!(
+        reloaded
+            .transcript
+            .iter()
+            .any(|row| row.kind == TranscriptKind::Ran
+                && row.title == "Ran ! printf reload-shell"
+                && row.text == "reload-shell")
+    );
+    assert!(
+        reloaded
+            .transcript
+            .iter()
+            .all(|row| row.kind != TranscriptKind::Prompt)
+    );
 }
 
 #[test]
@@ -235,6 +535,23 @@ fn composer_history_recall_preserves_draft() {
     ui.recall_history(1);
     assert_eq!(textarea_text(&ui.textarea), "draft");
     assert_eq!(ui.history_index, None);
+}
+
+#[test]
+fn shell_history_recall_restores_shell_mode_and_strips_bang() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.push_submitted_history("!echo hi".to_string());
+    ui.textarea = textarea_with_text("draft");
+
+    ui.recall_history(-1);
+    assert!(ui.shell_mode);
+    assert_eq!(textarea_text(&ui.textarea), "echo hi");
+
+    ui.recall_history(1);
+    assert!(!ui.shell_mode);
+    assert_eq!(textarea_text(&ui.textarea), "draft");
 }
 
 #[test]

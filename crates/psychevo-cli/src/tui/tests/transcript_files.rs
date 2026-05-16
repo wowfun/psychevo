@@ -260,6 +260,27 @@ fn completed_thinking_row_does_not_show_elapsed() {
 }
 
 #[test]
+fn completed_thinking_row_uses_shared_evidence_title_styles() {
+    let thinking = TranscriptRow::with_title(TranscriptKind::Thinking, "Thinking", "");
+    let tool = TranscriptRow::with_title(TranscriptKind::Ran, "Ran ls", "");
+    let thinking = thinking_lines(&thinking, false, true, 80)
+        .into_iter()
+        .next()
+        .expect("thinking row");
+    let tool = tool_lines(&tool, false, true, 80)
+        .into_iter()
+        .next()
+        .expect("tool row");
+
+    assert_eq!(thinking.spans[0].style, tool.spans[0].style);
+    assert_eq!(thinking.spans[1].style, tool.spans[1].style);
+    assert_eq!(
+        thinking.spans[1].style,
+        Style::default().add_modifier(Modifier::BOLD)
+    );
+}
+
+#[test]
 fn short_thinking_row_can_collapse_details() {
     let mut row = TranscriptRow::with_title(
         TranscriptKind::Thinking,
@@ -352,6 +373,87 @@ fn long_single_line_tool_output_collapses_by_display_width() {
         .join("\n");
     assert!(rendered.contains("▸ more output"), "{rendered}");
     assert!(rendered.len() < output.len(), "rendered output was not bounded");
+}
+
+#[test]
+fn long_tool_output_collapses_by_display_tokens() {
+    let output = (0..LEDGER_BODY_COLLAPSE_TOKENS + 12)
+        .map(|_| "x")
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(
+        UnicodeWidthStr::width(output.as_str()) < LEDGER_BODY_COLLAPSE_WIDTH,
+        "test fixture should exercise token collapse before width collapse"
+    );
+    let row = TranscriptRow::with_title(TranscriptKind::Ran, "Ran tokens", output.clone());
+
+    assert!(row.is_expandable());
+    assert!(!row.expanded);
+    assert_eq!(row.full_text.as_deref(), Some(output.as_str()));
+    assert_eq!(display_token_count(&row.text), LEDGER_BODY_COLLAPSE_TOKENS);
+    assert!(row.text.ends_with('…'), "{}", row.text);
+
+    let rendered = tool_lines(&row, false, true, 120)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("▸ more output"), "{rendered}");
+}
+
+#[test]
+fn line_count_collapse_preview_is_bounded_by_display_tokens() {
+    let line = (0..40).map(|_| "field").collect::<Vec<_>>().join(" ");
+    let output = (1..=12)
+        .map(|index| format!("{index}|{line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let row = TranscriptRow::with_title(TranscriptKind::Ran, "Ran sqlite3 -separator '|'", output);
+
+    assert!(row.is_expandable());
+    assert!(!row.expanded);
+    assert!(!row.text.contains("... 4 more lines"), "{}", row.text);
+    assert!(row.text.ends_with('…'), "{}", row.text);
+    assert!(
+        display_token_count(&row.text) <= LEDGER_BODY_COLLAPSE_TOKENS,
+        "{}",
+        row.text
+    );
+
+    let rendered = tool_lines(&row, false, true, 120)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("▸ more output"), "{rendered}");
+    assert!(!rendered.contains("▸ 4 more lines"), "{rendered}");
+}
+
+#[test]
+fn unbroken_table_output_collapses_by_display_tokens() {
+    let output = "-".repeat(900);
+    assert!(
+        output.lines().count() <= LEDGER_BODY_COLLAPSE_LINES,
+        "test fixture should exercise token collapse before line collapse"
+    );
+    assert!(
+        UnicodeWidthStr::width(output.as_str()) < LEDGER_BODY_COLLAPSE_WIDTH,
+        "test fixture should exercise token collapse before width collapse"
+    );
+    let row = TranscriptRow::with_title(TranscriptKind::Ran, "Ran sqlite3 -column", output.clone());
+
+    assert!(row.is_expandable());
+    assert!(!row.expanded);
+    assert_eq!(row.full_text.as_deref(), Some(output.as_str()));
+    assert!(row.text.ends_with('…'), "{}", row.text);
+    assert!(row.text.len() < output.len(), "{}", row.text);
+
+    let rendered = tool_lines(&row, false, true, 120)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("▸ more output"), "{rendered}");
 }
 
 #[test]

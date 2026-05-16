@@ -48,6 +48,7 @@ struct TranscriptRow {
     details_collapsed: bool,
     failed: bool,
     interrupted: bool,
+    user_shell: bool,
     tool_call_id: Option<String>,
     tool_started: Option<Instant>,
     tool_elapsed: Option<Duration>,
@@ -95,6 +96,7 @@ struct TranscriptLayoutRowKey {
     kind: TranscriptKind,
     failed: bool,
     interrupted: bool,
+    user_shell: bool,
     expanded: bool,
     details_collapsed: bool,
     expandable: bool,
@@ -121,6 +123,7 @@ impl TranscriptRow {
             details_collapsed: false,
             failed: false,
             interrupted: false,
+            user_shell: false,
             tool_call_id: None,
             tool_started: None,
             tool_elapsed: None,
@@ -194,6 +197,7 @@ struct FullscreenUi<'a> {
     streaming_tool_message_open: bool,
     deferred_stream_events: VecDeque<RunStreamEvent>,
     history_tool_titles: BTreeMap<String, String>,
+    shell_mode: bool,
     turn_started: Option<Instant>,
     turn_provider: String,
     turn_model: String,
@@ -205,12 +209,15 @@ struct FullscreenUi<'a> {
     turn_failures: usize,
     turn_interrupted: bool,
     turn_outcome: Option<Outcome>,
+    turn_terminal_message: Option<String>,
     turn_had_reasoning: bool,
     history_prompt_started_ms: Option<i64>,
     thinking_visible: bool,
     raw_visible: bool,
     running: Option<RunningTurn>,
     auxiliary_agent_tasks: Vec<JoinHandle<psychevo_runtime::Result<psychevo_runtime::RunResult>>>,
+    auxiliary_shell_tasks: Vec<AuxiliaryShellTask>,
+    pending_auxiliary_shell_commands: VecDeque<String>,
     running_started: Option<Instant>,
     #[cfg(test)]
     running_elapsed_override: Option<Duration>,
@@ -458,12 +465,12 @@ impl BottomSelectionPanel {
             SessionListView::Active => (
                 "Active Sessions",
                 "No active sessions",
-                "Enter select  Tab archived  Ctrl+K actions  Esc close  Type search",
+                "Enter switch  Tab archived  Ctrl+K manage  Esc close  Type search",
             ),
             SessionListView::Archived => (
                 "Archived Sessions",
                 "No archived sessions",
-                "Enter restore  Tab active  Ctrl+K actions  Esc close  Type search",
+                "Enter restore  Tab active  Ctrl+K manage  Esc close  Type search",
             ),
         };
         let mut panel = Self::new(title, "", empty_label, rows);
@@ -889,7 +896,8 @@ impl ProviderWizardPanel {
             .iter()
             .position(|field| *field == self.active_field)
             .unwrap_or(0) as isize;
-        self.active_field = fields[(current + direction).rem_euclid(fields.len() as isize) as usize];
+        self.active_field =
+            fields[(current + direction).rem_euclid(fields.len() as isize) as usize];
         self.notice = None;
     }
 
@@ -965,7 +973,9 @@ fn provider_id_slug(label: &str) -> String {
         if ch.is_ascii_alphanumeric() {
             slug.push(ch.to_ascii_lowercase());
             previous_sep = false;
-        } else if matches!(ch, '-' | '_' | ' ' | '.' | '/' | ':') && !previous_sep && !slug.is_empty()
+        } else if matches!(ch, '-' | '_' | ' ' | '.' | '/' | ':')
+            && !previous_sep
+            && !slug.is_empty()
         {
             slug.push('-');
             previous_sep = true;

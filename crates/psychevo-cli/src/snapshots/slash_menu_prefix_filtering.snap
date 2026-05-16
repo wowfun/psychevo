@@ -27,8 +27,8 @@ size=120x24
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-› /model  select/fetch model
-  /mode  set <plan|default>
+› /model  choose or fetch model
+  /mode  set plan/default mode
 › /mo
 mock/model  high  ~/work · main
 
@@ -53,7 +53,7 @@ mock/model  high  ~/work · main
 [default]
 [default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-[cyan]› /model[default]  [dim]select/fetch model[default]
-[cyan]  /mode[default]  [dim]set <plan|default>[default]
+[cyan]› /model[default]  [dim]choose or fetch model[default]
+[cyan]  /mode[default]  [dim]set plan/default mode[default]
 [dim]›[default] /mo
 [default]mock/model  [magenta]high[default]  [dim]~/work · main[default]

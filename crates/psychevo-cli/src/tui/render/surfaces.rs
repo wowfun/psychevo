@@ -7,21 +7,35 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_>)
     }
 
     let textarea_empty = ui.textarea.is_empty();
-    let marker_width = if textarea_empty {
+    let marker_width = if ui.shell_mode {
+        area.width.min(2)
+    } else if textarea_empty {
         area.width.min(1)
     } else {
         area.width.min(2)
     };
-    frame.render_widget(
-        Paragraph::new(Line::from(if textarea_empty {
-            vec![Span::styled("›".to_string(), surface_style.fg(theme.dim))]
+    let marker_spans = if ui.shell_mode {
+        if marker_width <= 1 {
+            vec![Span::styled(
+                "!".to_string(),
+                surface_style.fg(theme.accent),
+            )]
         } else {
             vec![
-                Span::styled("›".to_string(), surface_style.fg(theme.dim)),
+                Span::styled("!".to_string(), surface_style.fg(theme.accent)),
                 Span::styled(" ".to_string(), surface_style),
             ]
-        }))
-        .style(surface_style),
+        }
+    } else if textarea_empty {
+        vec![Span::styled("›".to_string(), surface_style.fg(theme.dim))]
+    } else {
+        vec![
+            Span::styled("›".to_string(), surface_style.fg(theme.dim)),
+            Span::styled(" ".to_string(), surface_style),
+        ]
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(marker_spans)).style(surface_style),
         Rect {
             x: area.x,
             y: area.y,
@@ -45,7 +59,7 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_>)
     ui.textarea.set_placeholder_text("");
     frame.render_widget(&ui.textarea, input_area);
 
-    if textarea_empty && input_area.width > 1 {
+    if textarea_empty && !ui.shell_mode && input_area.width > 1 {
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "Ask pevo...".to_string(),
@@ -180,15 +194,13 @@ fn render_skill_popup(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'
             .iter()
             .take(FILE_POPUP_MAX_ROWS)
             .enumerate()
-            .map(|(index, item)| {
-                DisplayRow {
-                    marker: "  ",
-                    label: format!("${}", item.name),
-                    description: Some(item.description.clone()),
-                    selected: index == popup.selected,
-                    tone: DisplayRowTone::Identity,
-                    ..DisplayRow::default()
-                }
+            .map(|(index, item)| DisplayRow {
+                marker: "  ",
+                label: format!("${}", item.name),
+                description: Some(item.description.clone()),
+                selected: index == popup.selected,
+                tone: DisplayRowTone::Identity,
+                ..DisplayRow::default()
             })
             .collect()
     };
@@ -221,9 +233,18 @@ fn render_status(frame: &mut Frame<'_>, area: Rect, app: &TuiApp, ui: &Fullscree
     spans.push(Span::raw(model));
     spans.push(Span::raw("  "));
     spans.push(Span::styled(variant, theme.identity_style()));
-    if parse_shell_escape_input(&textarea_text(&ui.textarea)).is_some() {
+    if ui.shell_mode || parse_shell_escape_input(&textarea_text(&ui.textarea)).is_some() {
         spans.push(Span::raw("  "));
         spans.push(Span::styled("shell", theme.accent_style()));
+    }
+    let auxiliary_shell_count =
+        ui.auxiliary_shell_tasks.len() + ui.pending_auxiliary_shell_commands.len();
+    if auxiliary_shell_count > 0 {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            format!("shell {auxiliary_shell_count}"),
+            theme.accent_style(),
+        ));
     }
     if !ui.pending_images.is_empty() {
         spans.push(Span::raw("  "));
@@ -284,11 +305,7 @@ impl TuiRenderable for StatusLineView {
     }
 }
 
-fn append_ephemeral_status(
-    spans: &mut Vec<Span<'static>>,
-    status: &UiEphemeralStatus,
-    width: u16,
-) {
+fn append_ephemeral_status(spans: &mut Vec<Span<'static>>, status: &UiEphemeralStatus, width: u16) {
     let used = spans_width(spans);
     let separator = "  ";
     let available = usize::from(width)
@@ -357,7 +374,9 @@ fn bottom_status_context_for_width(
     }
 
     if let Some(context) = context.as_deref() {
-        if let Some(value) = joined_segments_if_fits(&[context, full_workdir.as_str()], available_width) {
+        if let Some(value) =
+            joined_segments_if_fits(&[context, full_workdir.as_str()], available_width)
+        {
             return Some(value);
         }
         let context_width = UnicodeWidthStr::width(context);
@@ -366,8 +385,11 @@ fn bottom_status_context_for_width(
                 .saturating_sub(context_width)
                 .saturating_sub(SEP_WIDTH);
             if workdir_width >= STATUS_WORKDIR_MIN_WIDTH {
-                let workdir =
-                    format_directory_display_with_home(&app.workdir, home.as_deref(), workdir_width);
+                let workdir = format_directory_display_with_home(
+                    &app.workdir,
+                    home.as_deref(),
+                    workdir_width,
+                );
                 return Some(format!("{context} · {workdir}"));
             }
         }
@@ -387,7 +409,8 @@ fn bottom_status_context_for_width(
     if available_width < STATUS_WORKDIR_MIN_WIDTH {
         return None;
     }
-    let workdir = format_directory_display_with_home(&app.workdir, home.as_deref(), available_width);
+    let workdir =
+        format_directory_display_with_home(&app.workdir, home.as_deref(), available_width);
     (!workdir.is_empty()).then_some(workdir)
 }
 
@@ -444,10 +467,7 @@ fn render_sidebar(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_>) 
         sidebar_heading("Modified Files"),
     ];
     if ui.sidebar.changed_files.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "(clean)",
-            theme.dim_style(),
-        )));
+        lines.push(Line::from(Span::styled("(clean)", theme.dim_style())));
     } else {
         for file in &ui.sidebar.changed_files {
             lines.push(Line::from(file.clone()));
@@ -477,10 +497,7 @@ fn render_bottom_panel(
         render_model_panel(frame, area, panel, row_areas);
         return;
     }
-    frame.render_widget(
-        Block::default().style(theme.menu_style()),
-        area,
-    );
+    frame.render_widget(Block::default().style(theme.menu_style()), area);
     let inner = Rect {
         x: area.x.saturating_add(2),
         y: area.y.saturating_add(1),
@@ -559,10 +576,7 @@ fn render_bottom_panel(
     }
     lines.push(Line::from(""));
     if let Some(notice) = &selection.notice {
-        lines.push(Line::from(Span::styled(
-            notice.clone(),
-            theme.dim_style(),
-        )));
+        lines.push(Line::from(Span::styled(notice.clone(), theme.dim_style())));
     }
     lines.push(Line::from(Span::styled(
         selection.footer_text(),
@@ -659,10 +673,7 @@ fn render_model_list_tab(
     }
     lines.push(Line::from(""));
     if let Some(notice) = &selection.notice {
-        lines.push(Line::from(Span::styled(
-            notice.clone(),
-            theme.dim_style(),
-        )));
+        lines.push(Line::from(Span::styled(notice.clone(), theme.dim_style())));
     }
     lines.push(Line::from(Span::styled(
         model_list_footer_text(selection),
@@ -755,7 +766,8 @@ fn model_info_lines(
     lines.push(Line::from(format!(
         "model: {}  provider: {} ({})",
         format_model_spec(model),
-        model.provider_label, model.provider
+        model.provider_label,
+        model.provider
     )));
     let mut state = Vec::new();
     if row.is_current {
@@ -820,12 +832,7 @@ fn model_detail_capabilities(model: &ConfiguredModel) -> Vec<String> {
         "temperature",
         "no temperature",
     );
-    push_bool_capability(
-        &mut parts,
-        caps.attachment,
-        "attachments",
-        "no attachments",
-    );
+    push_bool_capability(&mut parts, caps.attachment, "attachments", "no attachments");
     push_bool_capability(
         &mut parts,
         caps.structured_output,
@@ -875,7 +882,10 @@ fn model_detail_pricing(model: &ConfiguredModel) -> Vec<String> {
             parts.push("standard: free".to_string());
         }
         (Some(input), Some(output)) => {
-            parts.push(format!("standard: in/out {}", format_model_rate_pair(input, output)));
+            parts.push(format!(
+                "standard: in/out {}",
+                format_model_rate_pair(input, output)
+            ));
         }
         (Some(value), None) => parts.push(format!("standard: input {}", format_model_rate(value))),
         (None, Some(value)) => {
@@ -911,8 +921,12 @@ fn model_detail_pricing(model: &ConfiguredModel) -> Vec<String> {
                 "cache read/write {}",
                 format_model_rate_pair(read, write)
             )),
-            (Some(value), None) => tier_parts.push(format!("cache read {}", format_model_rate(value))),
-            (None, Some(value)) => tier_parts.push(format!("cache write {}", format_model_rate(value))),
+            (Some(value), None) => {
+                tier_parts.push(format!("cache read {}", format_model_rate(value)))
+            }
+            (None, Some(value)) => {
+                tier_parts.push(format!("cache write {}", format_model_rate(value)))
+            }
             (None, None) => {}
         }
         if !tier_parts.is_empty() {
@@ -1019,22 +1033,18 @@ fn help_panel_body_line(line: &str) -> Line<'static> {
             Style::default().add_modifier(Modifier::BOLD),
         ));
     }
+    if line.starts_with("  ") {
+        return Line::from(Span::styled(line.to_string(), theme.dim_style()));
+    }
     if line == "No custom commands available" {
         return Line::from(Span::styled(line.to_string(), theme.dim_style()));
     }
     Line::from(line.to_string())
 }
 
-fn render_provider_wizard_panel(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    panel: &ProviderWizardPanel,
-) {
+fn render_provider_wizard_panel(frame: &mut Frame<'_>, area: Rect, panel: &ProviderWizardPanel) {
     let theme = tui_theme();
-    frame.render_widget(
-        Block::default().style(theme.menu_style()),
-        area,
-    );
+    frame.render_widget(Block::default().style(theme.menu_style()), area);
     let inner = Rect {
         x: area.x.saturating_add(2),
         y: area.y.saturating_add(1),
@@ -1047,10 +1057,7 @@ fn render_provider_wizard_panel(
                 "Add Provider",
                 theme.dim_style().add_modifier(Modifier::BOLD),
             ),
-            Span::styled(
-                "  OpenAI-compatible global provider",
-                theme.dim_style(),
-            ),
+            Span::styled("  OpenAI-compatible global provider", theme.dim_style()),
         ]),
         provider_wizard_field_line(panel, ProviderWizardField::Label, "Label", &panel.label),
         provider_wizard_field_line(
@@ -1059,7 +1066,12 @@ fn render_provider_wizard_panel(
             "Provider ID",
             &panel.provider_id,
         ),
-        provider_wizard_field_line(panel, ProviderWizardField::BaseUrl, "Base URL", &panel.base_url),
+        provider_wizard_field_line(
+            panel,
+            ProviderWizardField::BaseUrl,
+            "Base URL",
+            &panel.base_url,
+        ),
     ];
     let env_var = panel
         .env_var()
@@ -1084,10 +1096,7 @@ fn render_provider_wizard_panel(
     }
     lines.push(Line::from(""));
     if let Some(notice) = &panel.notice {
-        lines.push(Line::from(Span::styled(
-            notice.clone(),
-            theme.dim_style(),
-        )));
+        lines.push(Line::from(Span::styled(notice.clone(), theme.dim_style())));
     }
     lines.push(Line::from(Span::styled(
         "Enter next/save  Up/Down field  Esc back",
@@ -1164,10 +1173,7 @@ fn bottom_panel_row(row: &BottomSelectionRow, selected: bool, width: u16) -> Lin
         .collect::<String>();
     let rest = truncate_display_width(&rest, (width as usize).saturating_sub(prefix_width));
     Line::from(vec![
-        Span::styled(
-            prefix,
-            theme.accent_style().add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(prefix, theme.accent_style().add_modifier(Modifier::BOLD)),
         Span::styled(rest, theme.dim_style()),
     ])
 }

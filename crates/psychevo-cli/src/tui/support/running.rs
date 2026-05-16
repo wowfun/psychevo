@@ -4,6 +4,12 @@ struct RunningTurn {
     task: RunningTask,
 }
 
+struct AuxiliaryShellTask {
+    control: RunControlHandle,
+    rx: mpsc::UnboundedReceiver<RunStreamEvent>,
+    task: JoinHandle<psychevo_runtime::Result<psychevo_runtime::UserShellResult>>,
+}
+
 enum RunningTask {
     Agent(JoinHandle<psychevo_runtime::Result<psychevo_runtime::RunResult>>),
     UserShell(JoinHandle<psychevo_runtime::Result<psychevo_runtime::UserShellResult>>),

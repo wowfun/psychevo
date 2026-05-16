@@ -26,6 +26,24 @@ impl TuiApp {
         }
     }
 
+    fn user_shell_context_options(&self) -> UserShellContextOptions {
+        UserShellContextOptions {
+            db_path: self.db_path.clone(),
+            session: self.current_session.clone(),
+            continue_latest: self.current_session.is_none() && !self.force_new_once,
+            source: "tui".to_string(),
+            continue_sources: TUI_SESSION_SOURCES
+                .iter()
+                .map(|source| (*source).to_string())
+                .collect(),
+            config_path: self.config_path.clone(),
+            model: self.current_model.clone(),
+            reasoning_effort: self.current_variant.clone(),
+            mode: self.current_mode,
+            inherited_env: Some(self.env_map.clone()),
+        }
+    }
+
     fn show_status(&self) -> Result<()> {
         println!("{}", self.status_text());
         Ok(())

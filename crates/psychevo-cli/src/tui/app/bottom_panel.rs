@@ -1023,7 +1023,7 @@ impl TuiApp {
                     .find(|entry| entry.contains(&ui.history_query))
                     .cloned()
                 {
-                    ui.textarea = textarea_with_text(&entry);
+                    ui.set_composer_text(&entry);
                     ui.push_status("history entry selected");
                 } else {
                     ui.push_error("no history match");

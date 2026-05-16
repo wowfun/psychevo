@@ -76,7 +76,11 @@ fn tool_title(tool: &str, value: &Value) -> String {
                 .and_then(Value::as_str)
                 .and_then(first_shell_command_line)
                 .unwrap_or("command");
-            format!("Ran {command}")
+            if is_user_shell_value(value) {
+                format!("Ran ! {command}")
+            } else {
+                format!("Ran {command}")
+            }
         }
         "write" | "edit" => format!("Updated {}", path_from(args, result).unwrap_or("files")),
         other => format!("Tool {other}"),
@@ -98,8 +102,20 @@ fn active_tool_title(tool: &str, value: &Value) -> String {
             .get("command")
             .and_then(Value::as_str)
             .and_then(first_shell_command_line)
-            .map(|command| format!("Running {command}"))
-            .unwrap_or_else(|| "Running command".to_string()),
+            .map(|command| {
+                if is_user_shell_value(value) {
+                    format!("Running ! {command}")
+                } else {
+                    format!("Running {command}")
+                }
+            })
+            .unwrap_or_else(|| {
+                if is_user_shell_value(value) {
+                    "Running ! command".to_string()
+                } else {
+                    "Running command".to_string()
+                }
+            }),
         "write" | "edit" => path_from_args(args)
             .map(|path| format!("Updating {path}"))
             .unwrap_or_else(|| "Updating files".to_string()),
@@ -109,7 +125,7 @@ fn active_tool_title(tool: &str, value: &Value) -> String {
 
 fn tool_title_for_update(tool: &str, value: &Value, existing_title: &str) -> String {
     let title = tool_title(tool, value);
-    if tool == "bash" && title == "Ran command" {
+    if tool == "bash" && matches!(title.as_str(), "Ran command" | "Ran ! command") {
         if existing_title.starts_with("Ran ") {
             return existing_title.to_string();
         }
@@ -124,6 +140,10 @@ fn tool_title_for_update(tool: &str, value: &Value, existing_title: &str) -> Str
         return format!("Updated {path}");
     }
     title
+}
+
+fn is_user_shell_value(value: &Value) -> bool {
+    value.get("source").and_then(Value::as_str) == Some("user_shell")
 }
 
 fn first_shell_command_line(text: &str) -> Option<&str> {

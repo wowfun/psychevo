@@ -60,12 +60,7 @@ impl TuiApp {
                         ui.refresh_sidebar(self);
                     }
                     Err(err) => {
-                        ui.push_command_result(
-                            command_echo,
-                            None,
-                            format!("error: {err:#}"),
-                            true,
-                        );
+                        ui.push_command_result(command_echo, None, format!("error: {err:#}"), true);
                     }
                 }
             }
@@ -74,27 +69,20 @@ impl TuiApp {
                     self.model_selection_panel()?,
                 )));
             }
-            SlashCommand::VariantSet(variant) => {
-                match self.set_variant_no_print(variant.clone()) {
-                    Ok(()) => {
-                        ui.push_command_result(
-                            command_echo,
-                            None,
-                            format!("variant: {variant}"),
-                            false,
-                        );
-                        ui.refresh_sidebar(self);
-                    }
-                    Err(err) => {
-                        ui.push_command_result(
-                            command_echo,
-                            None,
-                            format!("error: {err:#}"),
-                            true,
-                        );
-                    }
+            SlashCommand::VariantSet(variant) => match self.set_variant_no_print(variant.clone()) {
+                Ok(()) => {
+                    ui.push_command_result(
+                        command_echo,
+                        None,
+                        format!("variant: {variant}"),
+                        false,
+                    );
+                    ui.refresh_sidebar(self);
                 }
-            }
+                Err(err) => {
+                    ui.push_command_result(command_echo, None, format!("error: {err:#}"), true);
+                }
+            },
             SlashCommand::ModeSet(mode) => {
                 self.set_mode_no_print(&mode)?;
                 ui.refresh_sidebar(self);
@@ -124,6 +112,28 @@ impl TuiApp {
             SlashCommand::Copy => {
                 self.copy_latest_answer_markdown(ui);
             }
+            SlashCommand::Export(options) => match self.write_tui_export(&options) {
+                Ok(result) => ui.push_command_result(
+                    command_echo,
+                    None,
+                    format!("exported: {}", result.path.display()),
+                    false,
+                ),
+                Err(err) => {
+                    ui.push_command_result(command_echo, None, format!("error: {err:#}"), true)
+                }
+            },
+            SlashCommand::Share(options) => match self.write_tui_share(&options) {
+                Ok(result) => ui.push_command_result(
+                    command_echo,
+                    None,
+                    format!("share: {}", result.path.display()),
+                    false,
+                ),
+                Err(err) => {
+                    ui.push_command_result(command_echo, None, format!("error: {err:#}"), true)
+                }
+            },
             SlashCommand::Image { source, prompt } => {
                 match resolve_image_source(&source, &self.workdir) {
                     Ok(image) => {
@@ -134,18 +144,13 @@ impl TuiApp {
                         } else {
                             format!("{placeholder} {prompt}")
                         };
-                        ui.textarea = textarea_with_text(&text);
+                        ui.set_composer_text(&text);
                         ui.clear_slash_menu_dismissal();
                         ui.close_file_popup();
                         ui.close_skill_popup();
                     }
                     Err(err) => {
-                        ui.push_command_result(
-                            command_echo,
-                            None,
-                            format!("error: {err:#}"),
-                            true,
-                        );
+                        ui.push_command_result(command_echo, None, format!("error: {err:#}"), true);
                     }
                 }
             }
@@ -208,14 +213,14 @@ impl TuiApp {
             }
             SlashCommand::SkillInvoke { name, args } => {
                 let text = skill_prompt_marker(&name, &args);
-                ui.textarea = textarea_with_text(&text);
+                ui.set_composer_text(&text);
                 self.sync_skill_popup(ui);
             }
             SlashCommand::Upcoming(command) => {
                 ui.push_command_result(
                     command_echo,
                     None,
-                    format!("/{command} upcoming"),
+                    format!("/{command} is upcoming; no session changes made"),
                     false,
                 );
             }
@@ -298,6 +303,28 @@ impl TuiApp {
         ui: &mut FullscreenUi<'_>,
         command: String,
     ) -> Result<()> {
+        if ui
+            .running
+            .as_ref()
+            .is_some_and(|running| matches!(running.task, RunningTask::Agent(_)))
+        {
+            let (had_pending, _active_tool_frame_requested) =
+                self.drain_available_fullscreen_stream_events(ui);
+            if had_pending {
+                ui.follow_transcript_if_needed();
+                ui.refresh_sidebar(self);
+            }
+            if self.current_session.is_none() || ui.turn_started.is_none() {
+                if command.trim().is_empty() {
+                    ui.push_status(USER_SHELL_HELP);
+                } else {
+                    ui.pending_auxiliary_shell_commands.push_back(command);
+                    ui.refresh_sidebar(self);
+                }
+                return Ok(());
+            }
+            return self.start_auxiliary_fullscreen_shell(ui, command);
+        }
         if ui.running.is_some() {
             ui.queued_inputs.push_back(QueuedInput::Shell(command));
             return Ok(());
@@ -395,7 +422,15 @@ impl TuiApp {
             SlashCommand::RawToggle => self.toggle_raw(),
             SlashCommand::RawSet(enabled) => self.set_raw(enabled),
             SlashCommand::Copy => self.copy_latest_answer_markdown_scripted(),
-            SlashCommand::Image { .. } => Err(anyhow!("/image is only available in fullscreen TUI")),
+            SlashCommand::Export(options) => self
+                .write_tui_export(&options)
+                .map(|result| println!("exported: {}", result.path.display())),
+            SlashCommand::Share(options) => self
+                .write_tui_share(&options)
+                .map(|result| println!("share: {}", result.path.display())),
+            SlashCommand::Image { .. } => {
+                Err(anyhow!("/image is only available in fullscreen TUI"))
+            }
             SlashCommand::Rename(title) => self.rename_session(title),
             SlashCommand::Undo => self.undo_session_print(),
             SlashCommand::Redo => self.redo_session_print(),
@@ -408,7 +443,11 @@ impl TuiApp {
                 return self.submit_prompt(prompt).await.map(|_| false);
             }
             SlashCommand::Upcoming(command) => {
-                println!("{}", self.renderer.status(&format!("/{command} upcoming")));
+                println!(
+                    "{}",
+                    self.renderer
+                        .status(&format!("/{command} is upcoming; no session changes made"))
+                );
                 Ok(())
             }
         };
@@ -423,10 +462,9 @@ impl TuiApp {
         let has_image = !images.is_empty();
         let _ = prompt;
         has_image
-            && self
-                .selected_model
-                .as_ref()
-                .is_some_and(|model| model_metadata_explicitly_disallows_image_input(&model.metadata))
+            && self.selected_model.as_ref().is_some_and(|model| {
+                model_metadata_explicitly_disallows_image_input(&model.metadata)
+            })
     }
 
     fn skills_status_text(&self) -> String {
@@ -473,6 +511,81 @@ impl TuiApp {
             json_i64(totals, "reported_total_tokens"),
             format_nanodollars(json_i64(totals, "estimated_cost_nanodollars"))
         ))
+    }
+
+    fn write_tui_export(
+        &self,
+        options: &crate::tui::slash::TuiExportOptions,
+    ) -> Result<SessionExportWriteResult> {
+        let session_id = self
+            .current_session
+            .as_deref()
+            .ok_or_else(|| anyhow!("no session context yet"))?;
+        let output = self.resolve_tui_export_path(
+            options.path.as_deref(),
+            options.format,
+            SessionArtifactKind::Export,
+            session_id,
+        );
+        let store = SqliteStore::open(&self.db_path)?;
+        Ok(write_session_export(
+            &store,
+            session_id,
+            &output,
+            SessionExportOptions {
+                format: options.format,
+                include: options.include.clone(),
+                artifact_kind: SessionArtifactKind::Export,
+            },
+        )?)
+    }
+
+    fn write_tui_share(
+        &self,
+        options: &crate::tui::slash::TuiShareOptions,
+    ) -> Result<SessionExportWriteResult> {
+        let session_id = self
+            .current_session
+            .as_deref()
+            .ok_or_else(|| anyhow!("no session context yet"))?;
+        let output = self.resolve_tui_export_path(
+            options.path.as_deref(),
+            SessionExportFormat::Markdown,
+            SessionArtifactKind::Share,
+            session_id,
+        );
+        let store = SqliteStore::open(&self.db_path)?;
+        Ok(write_session_export(
+            &store,
+            session_id,
+            &output,
+            SessionExportOptions {
+                format: SessionExportFormat::Markdown,
+                include: options.include.clone(),
+                artifact_kind: SessionArtifactKind::Share,
+            },
+        )?)
+    }
+
+    fn resolve_tui_export_path(
+        &self,
+        path: Option<&str>,
+        format: SessionExportFormat,
+        artifact_kind: SessionArtifactKind,
+        session_id: &str,
+    ) -> PathBuf {
+        let path = path.map(PathBuf::from).unwrap_or_else(|| {
+            self.workdir.join(default_session_export_filename(
+                session_id,
+                format,
+                artifact_kind,
+            ))
+        });
+        if path.is_absolute() {
+            path
+        } else {
+            self.workdir.join(path)
+        }
     }
 
     fn context_status_snapshot(&self, live: Option<&ContextSnapshot>) -> Result<ContextSnapshot> {
@@ -554,6 +667,8 @@ impl TuiApp {
             UserShellOptions {
                 workdir: self.workdir.clone(),
                 command,
+                context: Some(self.user_shell_context_options()),
+                inject_into: None,
             },
             sink,
             control,
@@ -563,6 +678,11 @@ impl TuiApp {
             let mut turn = turn.lock().expect("turn lock poisoned");
             let mut stdout = stdout.lock().expect("stdout lock poisoned");
             turn.finish(&mut *stdout)?;
+        }
+        if let Some(session_id) = result.session_id {
+            self.current_session = Some(session_id);
+            self.refresh_current_session_title()?;
+            self.force_new_once = false;
         }
         if result.outcome != Outcome::Normal || result.tool_failures > 0 {
             self.had_error = true;
@@ -590,7 +710,9 @@ impl TuiApp {
             .map(|attachment| attachment.image.clone())
             .collect::<Vec<_>>();
         if self.image_submission_degrades_to_text(&prompt, &image_inputs) {
-            ui.set_ephemeral_error("selected model does not support image input; sent image source as text");
+            ui.set_ephemeral_error(
+                "selected model does not support image input; sent image source as text",
+            );
         }
         ui.push_user_with_images(display_prompt.clone(), &images);
         let (tx, rx) = mpsc::unbounded_channel();
@@ -631,6 +753,8 @@ impl TuiApp {
         let options = UserShellOptions {
             workdir: self.workdir.clone(),
             command,
+            context: Some(self.user_shell_context_options()),
+            inject_into: None,
         };
         let task = tokio::spawn(async move {
             run_user_shell_command_streaming_controlled(options, sink, control).await
@@ -646,6 +770,57 @@ impl TuiApp {
         Ok(())
     }
 
+    fn start_auxiliary_fullscreen_shell(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        command: String,
+    ) -> Result<()> {
+        if command.trim().is_empty() {
+            ui.push_status(USER_SHELL_HELP);
+            return Ok(());
+        }
+        let Some(inject_into) = ui.running.as_ref().map(|running| running.control.clone()) else {
+            return self.start_fullscreen_shell(ui, command);
+        };
+        let (tx, rx) = mpsc::unbounded_channel();
+        let sink: RunStreamSink = Arc::new(move |event| {
+            let _ = tx.send(event);
+        });
+        let (control_handle, control) = run_control();
+        let options = UserShellOptions {
+            workdir: self.workdir.clone(),
+            command,
+            context: Some(self.user_shell_context_options()),
+            inject_into: Some(inject_into),
+        };
+        let task = tokio::spawn(async move {
+            run_user_shell_command_streaming_controlled(options, sink, control).await
+        });
+        ui.scroll_to_bottom();
+        ui.auxiliary_shell_tasks.push(AuxiliaryShellTask {
+            control: control_handle,
+            rx,
+            task,
+        });
+        ui.refresh_sidebar(self);
+        Ok(())
+    }
+
+    fn start_pending_auxiliary_shells(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
+        if self.current_session.is_none()
+            || ui.turn_started.is_none()
+            || !ui
+                .running
+                .as_ref()
+                .is_some_and(|running| matches!(running.task, RunningTask::Agent(_)))
+        {
+            return Ok(());
+        }
+        while let Some(command) = ui.pending_auxiliary_shell_commands.pop_front() {
+            self.start_auxiliary_fullscreen_shell(ui, command)?;
+        }
+        Ok(())
+    }
 }
 
 fn fullscreen_context_bar_width(ui: &FullscreenUi<'_>) -> usize {
@@ -680,6 +855,37 @@ fn slash_command_echo(command: &SlashCommand) -> String {
             format!("/show-raw {}", if *enabled { "on" } else { "off" })
         }
         SlashCommand::Copy => "/copy".to_string(),
+        SlashCommand::Export(options) => {
+            let mut parts = vec!["/export".to_string()];
+            if let Some(path) = &options.path {
+                parts.push(path.clone());
+            }
+            if options.format == SessionExportFormat::Json {
+                parts.push("--format json".to_string());
+            }
+            if options.include
+                != psychevo_runtime::SessionExportIncludeSet::default_for(
+                    SessionArtifactKind::Export,
+                )
+            {
+                parts.push(format!("--include {}", options.include.tokens().join(",")));
+            }
+            parts.join(" ")
+        }
+        SlashCommand::Share(options) => {
+            let mut parts = vec!["/share".to_string()];
+            if let Some(path) = &options.path {
+                parts.push(path.clone());
+            }
+            if options.include
+                != psychevo_runtime::SessionExportIncludeSet::default_for(
+                    SessionArtifactKind::Share,
+                )
+            {
+                parts.push(format!("--include {}", options.include.tokens().join(",")));
+            }
+            parts.join(" ")
+        }
         SlashCommand::Image { source, prompt } => {
             if prompt.trim().is_empty() {
                 format!("/image {source}")
@@ -688,7 +894,10 @@ fn slash_command_echo(command: &SlashCommand) -> String {
             }
         }
         SlashCommand::Rename(title) => {
-            format!("/rename {}", title.split_whitespace().collect::<Vec<_>>().join(" "))
+            format!(
+                "/rename {}",
+                title.split_whitespace().collect::<Vec<_>>().join(" ")
+            )
         }
         SlashCommand::Undo => "/undo".to_string(),
         SlashCommand::Redo => "/redo".to_string(),

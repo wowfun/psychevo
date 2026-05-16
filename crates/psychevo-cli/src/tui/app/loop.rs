@@ -141,6 +141,7 @@ impl TuiApp {
                 } else {
                     ui.textarea.insert_str(&pasted);
                 }
+                ui.absorb_shell_escape_prefix();
                 ui.sync_pending_images_with_textarea();
                 ui.clear_slash_menu_dismissal();
                 ui.sync_file_popup(&self.workdir);
@@ -279,7 +280,8 @@ impl TuiApp {
             }
         }
         let slash_input = textarea_text(&ui.textarea);
-        let slash_count = if ui.current_file_token().is_some()
+        let slash_count = if ui.shell_mode
+            || ui.current_file_token().is_some()
             || ui.current_skill_token().is_some()
             || ui.slash_menu_dismissed(&slash_input)
         {
@@ -331,7 +333,9 @@ impl TuiApp {
                 ui.push_status("history search");
             }
             KeyCode::Char('?')
-                if key.modifiers.is_empty() && textarea_text(&ui.textarea).trim().is_empty() =>
+                if key.modifiers.is_empty()
+                    && !ui.shell_mode
+                    && textarea_text(&ui.textarea).trim().is_empty() =>
             {
                 ui.bottom_panel = Some(BottomPanel::Help(self.help_panel()));
                 ui.clear_slash_menu_dismissal();
@@ -355,10 +359,12 @@ impl TuiApp {
             KeyCode::Enter => {
                 ui.sync_pending_images_with_textarea();
                 let line = textarea_text(&ui.textarea);
-                if line.trim().is_empty() && ui.pending_images.is_empty() {
+                if !ui.shell_mode && line.trim().is_empty() && ui.pending_images.is_empty() {
                     return Ok(false);
                 }
-                let submitted = if parse_shell_escape_input(&line).is_some()
+                let submitted = if ui.shell_mode {
+                    ui.composer_submission_text()
+                } else if parse_shell_escape_input(&line).is_some()
                     || should_submit_typed_slash(&line)
                 {
                     line.clone()
@@ -378,7 +384,7 @@ impl TuiApp {
                         line.clone()
                     }
                 };
-                ui.textarea = new_textarea();
+                ui.clear_composer();
                 ui.slash_menu_selected = 0;
                 ui.clear_slash_menu_dismissal();
                 ui.close_file_popup();
@@ -394,7 +400,9 @@ impl TuiApp {
                 self.cycle_mode(ui)?;
             }
             KeyCode::Tab => {
-                ui.complete_slash_command();
+                if !ui.shell_mode {
+                    ui.complete_slash_command();
+                }
             }
             KeyCode::Char('1')
                 if key.modifiers.contains(KeyModifiers::SHIFT)
@@ -402,12 +410,26 @@ impl TuiApp {
                     && !key.modifiers.contains(KeyModifiers::ALT) =>
             {
                 ui.clear_history_navigation_for_edit();
-                ui.textarea.insert_char('!');
+                if textarea_text(&ui.textarea).trim().is_empty() {
+                    ui.textarea = new_textarea();
+                    ui.enter_shell_mode();
+                } else {
+                    ui.textarea.insert_char('!');
+                    ui.absorb_shell_escape_prefix();
+                }
                 ui.clear_slash_menu_dismissal();
             }
             KeyCode::Esc => {
-                if is_empty_shell_escape_input(&textarea_text(&ui.textarea)) {
+                if ui.shell_mode && textarea_text(&ui.textarea).trim().is_empty() {
+                    ui.exit_shell_mode();
                     ui.textarea = new_textarea();
+                    ui.clear_slash_menu_dismissal();
+                    ui.close_file_popup();
+                    ui.close_skill_popup();
+                    return Ok(false);
+                }
+                if is_empty_shell_escape_input(&textarea_text(&ui.textarea)) {
+                    ui.clear_composer();
                     ui.clear_slash_menu_dismissal();
                     ui.close_file_popup();
                     ui.close_skill_popup();
@@ -416,6 +438,13 @@ impl TuiApp {
                 if ui.request_interrupt() {
                     return Ok(false);
                 }
+            }
+            KeyCode::Backspace if ui.shell_mode && textarea_text(&ui.textarea).is_empty() => {
+                ui.exit_shell_mode();
+                ui.clear_slash_menu_dismissal();
+                ui.close_file_popup();
+                ui.close_skill_popup();
+                return Ok(false);
             }
             KeyCode::PageUp => ui.scroll_transcript(-6),
             KeyCode::PageDown => ui.scroll_transcript(6),
@@ -428,6 +457,7 @@ impl TuiApp {
             _ => {
                 ui.clear_history_navigation_for_edit();
                 ui.textarea.input(key);
+                ui.absorb_shell_escape_prefix();
                 ui.clear_slash_menu_dismissal();
             }
         }
@@ -487,7 +517,7 @@ impl TuiApp {
                             return Ok(false);
                         }
                         let submitted = command;
-                        ui.textarea = new_textarea();
+                        ui.clear_composer();
                         ui.slash_menu_selected = 0;
                         ui.clear_slash_menu_dismissal();
                         ui.close_skill_popup();

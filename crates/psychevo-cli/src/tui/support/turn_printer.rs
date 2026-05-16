@@ -85,6 +85,14 @@ impl TurnPrinter {
                 self.streaming_tool_message_seq = 0;
                 self.streaming_tool_message_open = false;
             }
+            "warning" => {
+                if let Some(message) = value.get("message").and_then(Value::as_str) {
+                    writeln!(out, "{}", self.renderer.status(&format!("warning: {message}")))?;
+                }
+                if let Some(suggestion) = value.get("suggestion").and_then(Value::as_str) {
+                    writeln!(out, "{}", self.renderer.dim(&format!("suggestion: {suggestion}")))?;
+                }
+            }
             "message_update" => {
                 self.render_streaming_tool_calls(value, out)?;
                 if let Some(text) = assistant_text_from_event(value) {

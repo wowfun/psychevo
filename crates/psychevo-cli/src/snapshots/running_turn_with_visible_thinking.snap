@@ -1,6 +1,5 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
-assertion_line: 667
 expression: combined
 ---
 fixture=running_turn_with_visible_thinking
@@ -35,7 +34,7 @@ mock/model  high  • 12s · Esc  ~/work · main
 --- styles ---
 [dim]› [default]Inspect the CLI rendering path.
 [default]
-[cyan]◦ [paper]Thinking[default]                                                                                                           [dim]0s[default]
+[cyan]◦ [default]Thinking                                                                                                           [dim]0s[default]
 [dim]  └ Read the TUI renderer and identify stable evidence blocks.[default]
 [default]
 [cyan]◦ [default]Exploring crates/psychevo-cli/src/tui.rs                                                                          [dim]12s[default]

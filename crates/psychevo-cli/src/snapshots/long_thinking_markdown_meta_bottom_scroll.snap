@@ -1,6 +1,5 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
-assertion_line: 667
 expression: combined
 ---
 fixture=long_thinking_markdown_meta_bottom_scroll
@@ -29,7 +28,7 @@ mock/model  high  ~/work · main
 --- styles ---
 [dim]› [default]Restore a reasoning-only daily report.
 [default]
-[paper]• Thinking[default]                                                                          [dim]▸ 12 more lines[default]
+[green]• [default]Thinking                                                                          [dim]▸ 12 more lines[default]
 [dim]  └ Hacker News 日[default] [dim]报[default] [dim]已[default] [dim]生[default] [dim]成[default] [dim]完[default] [dim]成[default] [dim]！[default] [dim]✅[default]
 [dim]    [default]
 [dim]    **文[default] [dim]件[default] [dim]：[default] [dim]** `feeds/2026-05-10/hackernews-hot-04-03.md`（[default] [dim]25KB）[default]

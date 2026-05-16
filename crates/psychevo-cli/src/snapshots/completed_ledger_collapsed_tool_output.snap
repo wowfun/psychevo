@@ -1,6 +1,5 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
-assertion_line: 667
 expression: combined
 ---
 fixture=completed_ledger_collapsed_tool_output
@@ -35,7 +34,7 @@ mock/model  high  ~/work · main
 --- styles ---
 [dim]› [default]Summarize the TUI snapshot harness.
 [default]
-[paper]• Thinking[default]
+[green]• [default]Thinking
 [dim]  └ Check layout boundaries, style roles, and expandable evidence.[default]
 [default]
 [green]• [default]Explored crates/psychevo-cli/src/tui.rs                                                               [dim]▸ 16 more lines[default]

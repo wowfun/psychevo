@@ -1,6 +1,5 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
-assertion_line: 667
 expression: combined
 ---
 fixture=reasoning_suppresses_failure_meta
@@ -30,7 +29,7 @@ mock/model  high  • 0s · Esc  ~/work
 [red]• Ran command[default]                                                                                                        [dim]0s[default]
 [dim]  └ [red]failed[default]
 [default]
-[cyan]◦ [paper]Thinking[default]                                                                                                           [dim]0s[default]
+[cyan]◦ [default]Thinking                                                                                                           [dim]0s[default]
 [dim]  └ The current time is approximately 15:20 UTC. Let me compose the full report now. I have all 10 stories and their[default]
 [dim]comments.[default]
 [dim]    [default]

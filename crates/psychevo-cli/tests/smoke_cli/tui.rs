@@ -26,13 +26,41 @@ fn cli_tui_initial_prompt_shows_thinking_by_default() {
 }
 
 #[test]
-fn cli_tui_bang_shell_runs_without_provider_or_session() {
+fn cli_tui_bang_shell_rejects_missing_provider_config_before_execution() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
     let workdir = temp.path().join("work");
     std::fs::create_dir_all(&workdir).expect("workdir");
+    let marker = workdir.join("marker");
     let config = temp.path().join("missing-config.jsonc");
+
+    let output = isolated_tui_cmd(temp.path(), &home, &config, &db)
+        .args([
+            "tui",
+            "--dir",
+            workdir.to_str().expect("workdir"),
+            "!touch marker",
+        ])
+        .output()
+        .expect("pevo tui shell");
+
+    assert!(!output.status.success());
+    assert!(!marker.exists());
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+    assert!(!stdout.contains("Ran touch marker"), "{stdout}");
+    assert!(!stdout.contains("Prompt:"), "{stdout}");
+    assert!(!stdout.contains("Answer:"), "{stdout}");
+}
+
+#[test]
+fn cli_tui_bang_shell_persists_context_with_config() {
+    let temp = tempdir().expect("temp");
+    let home = init_tui_home(temp.path());
+    let db = temp.path().join("state.db");
+    let workdir = temp.path().join("work");
+    std::fs::create_dir_all(&workdir).expect("workdir");
+    let config = write_run_config(&temp.path().join("config"), "http://127.0.0.1:9");
 
     let output = isolated_tui_cmd(temp.path(), &home, &config, &db)
         .args([
@@ -50,7 +78,7 @@ fn cli_tui_bang_shell_runs_without_provider_or_session() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8(output.stdout).expect("stdout");
-    assert!(stdout.contains("Ran printf shell-cli-ok"), "{stdout}");
+    assert!(stdout.contains("Ran ! printf shell-cli-ok"), "{stdout}");
     assert!(!stdout.contains("Prompt:"), "{stdout}");
     assert!(!stdout.contains("Answer:"), "{stdout}");
 
@@ -58,7 +86,22 @@ fn cli_tui_bang_shell_runs_without_provider_or_session() {
     let session_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
         .expect("session count");
-    assert_eq!(session_count, 0);
+    assert_eq!(session_count, 1);
+    let (content_text, message_json, metadata_json): (String, String, String) = conn
+        .query_row(
+            "SELECT content_text, message_json, metadata_json FROM messages",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("message");
+    assert_eq!(content_text, "!printf shell-cli-ok");
+    assert!(message_json.contains("<user_shell_command>"));
+    assert!(message_json.contains("<command>printf shell-cli-ok</command>"));
+    let metadata: Value = serde_json::from_str(&metadata_json).expect("metadata");
+    assert_eq!(
+        metadata["user_shell"]["command"].as_str(),
+        Some("printf shell-cli-ok")
+    );
 }
 
 #[test]
@@ -214,7 +257,8 @@ fn cli_tui_help_prints_commands_from_registry() {
     assert!(stdout.contains("General\n"));
     assert!(stdout.contains("\nCommands\n"));
     assert!(stdout.contains("\nCustom commands\n"));
-    assert!(stdout.contains("/usage - usage and cost summary (aliases: /stats)"));
+    assert!(stdout.contains("/usage - local usage and cost (aliases: /stats)"));
+    assert!(stdout.contains("Reads persisted SQLite accounting and cost estimates"));
     assert!(stdout.contains("No custom commands available"));
     assert!(!stdout.contains("pevo run"));
 }

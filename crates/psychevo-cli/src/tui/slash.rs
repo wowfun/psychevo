@@ -1,5 +1,7 @@
 use anyhow::{Result, anyhow};
-use psychevo_runtime::split_image_source_argument;
+use psychevo_runtime::{
+    SessionArtifactKind, SessionExportFormat, SessionExportIncludeSet, split_image_source_argument,
+};
 
 use crate::command_registry::{
     CUSTOM_SKILL_COMMAND, CommandArgumentKind, CommandGroup, CommandStatus, CommandSurface,
@@ -36,6 +38,8 @@ pub(crate) enum SlashCommand {
     RawToggle,
     RawSet(bool),
     Copy,
+    Export(TuiExportOptions),
+    Share(TuiShareOptions),
     Image { source: String, prompt: String },
     Rename(String),
     Undo,
@@ -43,6 +47,19 @@ pub(crate) enum SlashCommand {
     Skills,
     SkillInvoke { name: String, args: String },
     Upcoming(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TuiExportOptions {
+    pub(crate) path: Option<String>,
+    pub(crate) format: SessionExportFormat,
+    pub(crate) include: SessionExportIncludeSet,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TuiShareOptions {
+    pub(crate) path: Option<String>,
+    pub(crate) include: SessionExportIncludeSet,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,14 +135,20 @@ pub(crate) fn slash_help_sections(skill_count: Option<usize>) -> SlashHelpSectio
         .filter(|spec| spec.group == CommandGroup::Commands)
     {
         debug_assert_eq!(spec.surface, CommandSurface::TuiSlash);
-        commands.push(help_command_row(spec));
+        commands.extend(help_command_rows(spec));
     }
 
     let custom_commands = match skill_count {
-        Some(count) if count > 0 => vec![format!(
-            "{} - {} ({count} available)",
-            CUSTOM_SKILL_COMMAND.usage, CUSTOM_SKILL_COMMAND.summary
-        )],
+        Some(count) if count > 0 => {
+            let mut rows = vec![format!(
+                "{} - {} ({count} available)",
+                CUSTOM_SKILL_COMMAND.usage, CUSTOM_SKILL_COMMAND.summary
+            )];
+            if let Some(detail) = CUSTOM_SKILL_COMMAND.help_detail {
+                rows.push(format!("  {detail}"));
+            }
+            rows
+        }
         _ => vec!["No custom commands available".to_string()],
     };
 
@@ -143,6 +166,14 @@ fn help_command_row(spec: &SlashCommandSpec) -> String {
         format!(" (aliases: {})", spec.aliases.join(", "))
     };
     format!("{} - {}{}", spec.usage, spec.summary, aliases)
+}
+
+fn help_command_rows(spec: &SlashCommandSpec) -> Vec<String> {
+    let mut rows = vec![help_command_row(spec)];
+    if let Some(detail) = spec.help_detail {
+        rows.push(format!("  {detail}"));
+    }
+    rows
 }
 
 #[cfg(test)]
@@ -323,6 +354,8 @@ fn parse_registered_slash_command(
             parse_no_arguments(spec, command, rest)?;
             Ok(SlashCommand::Copy)
         }
+        SlashCommandAction::Export => parse_export_command(spec, rest),
+        SlashCommandAction::Share => parse_share_command(spec, rest),
         SlashCommandAction::Image => parse_image_command(spec, rest),
         SlashCommandAction::Rename => parse_rename_command(spec, rest),
         SlashCommandAction::Undo => {
@@ -390,6 +423,132 @@ fn parse_raw_command(spec: &SlashCommandSpec, rest: &[&str]) -> Result<SlashComm
         ["off"] => Ok(SlashCommand::RawSet(false)),
         _ => Err(anyhow!("usage: {}", spec.usage)),
     }
+}
+
+fn parse_export_command(spec: &SlashCommandSpec, rest: &[&str]) -> Result<SlashCommand> {
+    let parsed = parse_export_like_options(spec, rest, true, SessionArtifactKind::Export)?;
+    Ok(SlashCommand::Export(TuiExportOptions {
+        path: parsed.path,
+        format: parsed.format,
+        include: parsed.include,
+    }))
+}
+
+fn parse_share_command(spec: &SlashCommandSpec, rest: &[&str]) -> Result<SlashCommand> {
+    let parsed = parse_export_like_options(spec, rest, false, SessionArtifactKind::Share)?;
+    Ok(SlashCommand::Share(TuiShareOptions {
+        path: parsed.path,
+        include: parsed.include,
+    }))
+}
+
+struct ParsedExportLikeOptions {
+    path: Option<String>,
+    format: SessionExportFormat,
+    include: SessionExportIncludeSet,
+}
+
+fn parse_export_like_options(
+    spec: &SlashCommandSpec,
+    rest: &[&str],
+    allow_format: bool,
+    artifact_kind: SessionArtifactKind,
+) -> Result<ParsedExportLikeOptions> {
+    let tokens = split_slash_argument_tokens(&rest.join(" "))?;
+    let mut path = None;
+    let mut format = SessionExportFormat::Markdown;
+    let mut include = None;
+    let mut index = 0usize;
+    while index < tokens.len() {
+        let token = &tokens[index];
+        match token.as_str() {
+            "--include" | "-i" => {
+                index += 1;
+                let Some(value) = tokens.get(index) else {
+                    return Err(anyhow!("usage: {}", spec.usage));
+                };
+                include = Some(parse_include(value, artifact_kind, spec)?);
+            }
+            "--format" if allow_format => {
+                index += 1;
+                let Some(value) = tokens.get(index) else {
+                    return Err(anyhow!("usage: {}", spec.usage));
+                };
+                format =
+                    parse_export_format(value).ok_or_else(|| anyhow!("usage: {}", spec.usage))?;
+            }
+            value if allow_format && value.starts_with("--format=") => {
+                let value = value.trim_start_matches("--format=");
+                format =
+                    parse_export_format(value).ok_or_else(|| anyhow!("usage: {}", spec.usage))?;
+            }
+            value if value.starts_with("--include=") => {
+                let value = value.trim_start_matches("--include=");
+                include = Some(parse_include(value, artifact_kind, spec)?);
+            }
+            value if value.starts_with('-') => return Err(anyhow!("usage: {}", spec.usage)),
+            value => {
+                if path.is_some() {
+                    return Err(anyhow!("usage: {}", spec.usage));
+                }
+                path = Some(value.to_string());
+            }
+        }
+        index += 1;
+    }
+    Ok(ParsedExportLikeOptions {
+        path,
+        format,
+        include: include.unwrap_or_else(|| SessionExportIncludeSet::default_for(artifact_kind)),
+    })
+}
+
+fn parse_include(
+    value: &str,
+    artifact_kind: SessionArtifactKind,
+    spec: &SlashCommandSpec,
+) -> Result<SessionExportIncludeSet> {
+    SessionExportIncludeSet::parse(value, artifact_kind)
+        .map_err(|_| anyhow!("usage: {}", spec.usage))
+}
+
+fn parse_export_format(value: &str) -> Option<SessionExportFormat> {
+    match value {
+        "markdown" | "md" => Some(SessionExportFormat::Markdown),
+        "json" => Some(SessionExportFormat::Json),
+        _ => None,
+    }
+}
+
+fn split_slash_argument_tokens(input: &str) -> Result<Vec<String>> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match (quote, ch) {
+            (Some(active), value) if value == active => quote = None,
+            (None, '"' | '\'') => quote = Some(ch),
+            (None, value) if value.is_whitespace() => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            (_, '\\') => {
+                if let Some(next) = chars.next() {
+                    current.push(next);
+                }
+            }
+            (_, value) => current.push(value),
+        }
+    }
+    if quote.is_some() {
+        return Err(anyhow!("unterminated quoted argument"));
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    Ok(tokens)
 }
 
 fn parse_image_command(spec: &SlashCommandSpec, rest: &[&str]) -> Result<SlashCommand> {
@@ -617,6 +776,84 @@ mod tests {
     }
 
     #[test]
+    fn parses_export_share_commands() {
+        assert_eq!(
+            parse_slash_command("/export").unwrap(),
+            Some(SlashCommand::Export(TuiExportOptions {
+                path: None,
+                format: SessionExportFormat::Markdown,
+                include: SessionExportIncludeSet::default_for(SessionArtifactKind::Export),
+            }))
+        );
+        assert_eq!(
+            parse_slash_command(
+                "/export out.json --format json --include messages,reasoning,provider-input-evidence,last-provider-request"
+            )
+            .unwrap(),
+            Some(SlashCommand::Export(TuiExportOptions {
+                path: Some("out.json".to_string()),
+                format: SessionExportFormat::Json,
+                include: SessionExportIncludeSet::parse(
+                    "messages,reasoning,provider-input-evidence,last-provider-request",
+                    SessionArtifactKind::Export,
+                )
+                .unwrap(),
+            }))
+        );
+        assert_eq!(
+            parse_slash_command("/export out.json --format json -i h,lpr").unwrap(),
+            Some(SlashCommand::Export(TuiExportOptions {
+                path: Some("out.json".to_string()),
+                format: SessionExportFormat::Json,
+                include: SessionExportIncludeSet::parse("h,lpr", SessionArtifactKind::Export)
+                    .unwrap(),
+            }))
+        );
+        assert_eq!(
+            parse_slash_command(r#"/export "session export.md" --format=markdown"#).unwrap(),
+            Some(SlashCommand::Export(TuiExportOptions {
+                path: Some("session export.md".to_string()),
+                format: SessionExportFormat::Markdown,
+                include: SessionExportIncludeSet::default_for(SessionArtifactKind::Export),
+            }))
+        );
+        assert_eq!(
+            parse_slash_command(
+                "/share share.md --include messages,reasoning,provider-input-evidence"
+            )
+            .unwrap(),
+            Some(SlashCommand::Share(TuiShareOptions {
+                path: Some("share.md".to_string()),
+                include: SessionExportIncludeSet::parse(
+                    "messages,reasoning,provider-input-evidence",
+                    SessionArtifactKind::Share,
+                )
+                .unwrap(),
+            }))
+        );
+        assert_eq!(
+            parse_slash_command("/share share.md -i m,r,pie").unwrap(),
+            Some(SlashCommand::Share(TuiShareOptions {
+                path: Some("share.md".to_string()),
+                include: SessionExportIncludeSet::parse("m,r,pie", SessionArtifactKind::Share)
+                    .unwrap(),
+            }))
+        );
+        assert!(parse_slash_command("/share --format json").is_err());
+        assert!(parse_slash_command("/export --with-reasoning").is_err());
+        assert!(parse_slash_command("/export --full-inputs").is_err());
+        assert!(parse_slash_command("/export --last-request").is_err());
+        assert!(parse_slash_command("/export --raw-requests").is_err());
+        assert!(parse_slash_command("/share --with-reasoning").is_err());
+        assert!(parse_slash_command("/share --full-inputs").is_err());
+        assert!(parse_slash_command("/share --last-request").is_err());
+        assert!(parse_slash_command("/share --raw-requests").is_err());
+        assert!(parse_slash_command("/share --include last-provider-request").is_err());
+        assert!(parse_slash_command("/export --format yaml").is_err());
+        assert!(parse_slash_command("/export a b").is_err());
+    }
+
+    #[test]
     fn parses_skills_commands() {
         assert_eq!(
             parse_slash_command("/skills").unwrap(),
@@ -652,14 +889,14 @@ mod tests {
         assert_eq!(slash_menu_items("/model")[0].command, "/model");
         assert_eq!(
             slash_menu_items("/model")[0].description,
-            "select/fetch model"
+            "choose or fetch model"
         );
         let mode = slash_menu_items("/mode");
         assert_eq!(mode[0].command, "/mode");
-        assert_eq!(mode[0].description, "set <plan|default>");
+        assert_eq!(mode[0].description, "set plan/default mode");
         let variant = slash_menu_items("/var");
         assert_eq!(variant[0].command, "/variant");
-        assert_eq!(variant[0].description, "set <value>");
+        assert_eq!(variant[0].description, "set reasoning effort");
         let undo = slash_menu_items("/un");
         assert_eq!(undo.len(), 1);
         assert_eq!(undo[0].command, "/undo");
@@ -667,7 +904,7 @@ mod tests {
         let rename = slash_menu_items("/ren");
         assert_eq!(rename.len(), 1);
         assert_eq!(rename[0].command, "/rename");
-        assert_eq!(rename[0].description, "<title> rename current session");
+        assert_eq!(rename[0].description, "rename current session");
         let fuzzy_rename = slash_menu_items("/rn");
         assert_eq!(fuzzy_rename[0].command, "/rename");
         let fuzzy_model = slash_menu_items("/mdl");
@@ -697,9 +934,18 @@ mod tests {
         assert!(help.contains("Ctrl+B - toggle sidebar"));
         assert!(help.contains("Ctrl+O - copy latest answer as Markdown"));
         assert!(help.contains("/copy - copy latest answer as Markdown"));
-        assert!(help.contains("/usage - usage and cost summary (aliases: /stats)"));
-        assert!(help.contains("/sessions - switch session (aliases: /resume, /continue)"));
+        assert!(help.contains("/usage - local usage and cost (aliases: /stats)"));
+        assert!(help.contains("Reads persisted SQLite accounting and cost estimates"));
+        assert!(
+            help.contains("/sessions - switch or manage sessions (aliases: /resume, /continue)")
+        );
+        assert!(help.contains("archive, restore, and delete actions affect local state only"));
+        assert!(help.contains(
+            "/export [path] [--format markdown|json] [-i|--include list] - write session export"
+        ));
+        assert!(help.contains("last-provider-request can expose hidden prompts"));
         assert!(help.contains("/skill:<name> [args] - invoke a skill (2 available)"));
+        assert!(help.contains("Inserts an explicit skill invocation"));
         assert!(!help.contains("pevo run"));
 
         let empty = format_slash_help(Some(0));

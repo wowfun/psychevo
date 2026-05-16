@@ -118,7 +118,7 @@ impl TuiApp {
         let result = undo_session(self.undo_options()?)?;
         ui.clear_transcript();
         self.load_current_session_history(ui)?;
-        ui.textarea = textarea_with_text(&result.prompt);
+        ui.set_composer_text(&result.prompt);
         ui.refresh_sidebar(self);
         Ok(format!(
             "undone {} messages; prompt restored",
@@ -130,7 +130,7 @@ impl TuiApp {
         let result = redo_session(self.undo_options()?)?;
         ui.clear_transcript();
         self.load_current_session_history(ui)?;
-        ui.textarea = new_textarea();
+        ui.clear_composer();
         ui.refresh_sidebar(self);
         let suffix = if result.complete {
             "complete"
@@ -203,6 +203,9 @@ impl TuiApp {
             return Ok(());
         };
         let store = SqliteStore::open(&self.db_path)?;
+        ui.sidebar_context_limit = store
+            .session_metadata(session_id)?
+            .and_then(|metadata| metadata.get("context_limit").and_then(Value::as_u64));
         let mut history_prompts = Vec::new();
         for summary in store.load_tui_message_summaries(session_id)? {
             let value = serde_json::to_value(summary.message)?;

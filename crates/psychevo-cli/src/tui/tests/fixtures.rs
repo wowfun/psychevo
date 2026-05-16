@@ -15,7 +15,8 @@ fn draw_fullscreen_for_test(
 async fn drain_fullscreen_until_idle(app: &mut TuiApp, ui: &mut FullscreenUi<'_>) {
     for _ in 0..200 {
         app.drain_fullscreen_events(ui).await.expect("drain events");
-        if ui.running.is_none() && ui.queued_inputs.is_empty() {
+        if ui.running.is_none() && ui.queued_inputs.is_empty() && ui.auxiliary_shell_tasks.is_empty()
+        {
             return;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;

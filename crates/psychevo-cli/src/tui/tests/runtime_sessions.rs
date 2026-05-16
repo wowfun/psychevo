@@ -76,6 +76,7 @@ fn finished_run_result(app: &TuiApp) -> psychevo_runtime::RunResult {
     psychevo_runtime::RunResult {
         session_id: "finished-session".to_string(),
         outcome: Outcome::Normal,
+        terminal_reason: None,
         final_answer: "done".to_string(),
         db_path: app.db_path.clone(),
         workdir: app.workdir.clone(),
@@ -89,6 +90,7 @@ fn finished_run_result(app: &TuiApp) -> psychevo_runtime::RunResult {
         selected_skills: Vec::new(),
         context_snapshot: None,
         events: Vec::new(),
+        warnings: Vec::new(),
     }
 }
 
@@ -533,6 +535,7 @@ async fn fullscreen_agent_end_releases_turn_before_auxiliary_task_finishes() {
     let result = psychevo_runtime::RunResult {
         session_id: "streamed-session".to_string(),
         outcome: Outcome::Normal,
+        terminal_reason: None,
         final_answer: "hi".to_string(),
         db_path: app.db_path.clone(),
         workdir: app.workdir.clone(),
@@ -546,6 +549,7 @@ async fn fullscreen_agent_end_releases_turn_before_auxiliary_task_finishes() {
         selected_skills: Vec::new(),
         context_snapshot: None,
         events: Vec::new(),
+        warnings: Vec::new(),
     };
     let (done_tx, done_rx) = tokio::sync::oneshot::channel();
     let task = tokio::spawn(async move {
@@ -611,6 +615,7 @@ async fn fullscreen_refreshes_title_after_detached_agent_task_finishes() {
         Ok(psychevo_runtime::RunResult {
             session_id: task_session_id,
             outcome: Outcome::Normal,
+            terminal_reason: None,
             final_answer: "done".to_string(),
             db_path,
             workdir,
@@ -624,6 +629,7 @@ async fn fullscreen_refreshes_title_after_detached_agent_task_finishes() {
             selected_skills: Vec::new(),
             context_snapshot: None,
             events: Vec::new(),
+            warnings: Vec::new(),
         })
     });
     let (control, _) = run_control();
@@ -660,6 +666,7 @@ async fn interrupted_turn_restores_queued_inputs_to_composer_without_autostart()
     let result = psychevo_runtime::RunResult {
         session_id: "aborted-session".to_string(),
         outcome: Outcome::Aborted,
+        terminal_reason: None,
         final_answer: String::new(),
         db_path: app.db_path.clone(),
         workdir: app.workdir.clone(),
@@ -673,6 +680,7 @@ async fn interrupted_turn_restores_queued_inputs_to_composer_without_autostart()
         selected_skills: Vec::new(),
         context_snapshot: None,
         events: Vec::new(),
+        warnings: Vec::new(),
     };
     let task = tokio::spawn(async move { Ok(result) });
     let (control, _) = run_control();
@@ -769,6 +777,42 @@ fn normal_turn_with_tool_failure_does_not_add_contradictory_error_row() {
     );
 }
 
+#[test]
+fn streamed_budget_exhaustion_renders_specific_error_row() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "agent_end",
+            "outcome": "failed",
+            "messages": [],
+            "terminal_reason": {
+                "type": "max_turns_exceeded",
+                "max_turns": 128
+            },
+            "terminal_message": "reached model-turn limit (128) before final answer; resume this session to continue."
+        }),
+        false,
+    );
+
+    app.finish_streamed_agent_turn(&mut ui);
+
+    assert!(app.had_error);
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.kind == TranscriptKind::Error
+                && row.text.contains("model-turn limit (128)"))
+    );
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.text != "turn ended: failed")
+    );
+}
+
 #[tokio::test]
 async fn completed_normal_task_with_tool_failures_does_not_mark_tui_error() {
     let temp = tempdir().expect("temp");
@@ -778,6 +822,7 @@ async fn completed_normal_task_with_tool_failures_does_not_mark_tui_error() {
     let result = psychevo_runtime::RunResult {
         session_id: "normal-with-tool-failure".to_string(),
         outcome: Outcome::Normal,
+        terminal_reason: None,
         final_answer: "handled failure".to_string(),
         db_path: app.db_path.clone(),
         workdir: app.workdir.clone(),
@@ -791,6 +836,7 @@ async fn completed_normal_task_with_tool_failures_does_not_mark_tui_error() {
         selected_skills: Vec::new(),
         context_snapshot: None,
         events: Vec::new(),
+        warnings: Vec::new(),
     };
     let task = tokio::spawn(async move { Ok(result) });
     let (control, _) = run_control();
@@ -811,13 +857,79 @@ async fn completed_normal_task_with_tool_failures_does_not_mark_tui_error() {
     );
 }
 
+#[tokio::test]
+async fn completed_budget_exhaustion_renders_specific_error_row() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    let (_tx, rx) = mpsc::unbounded_channel();
+    let result = psychevo_runtime::RunResult {
+        session_id: "budget-exhausted".to_string(),
+        outcome: Outcome::Failed,
+        terminal_reason: Some(psychevo_runtime::TerminalReason::MaxTurnsExceeded {
+            max_turns: 128,
+        }),
+        final_answer: String::new(),
+        db_path: app.db_path.clone(),
+        workdir: app.workdir.clone(),
+        provider: "mock".to_string(),
+        model: "mock-model".to_string(),
+        base_url: "http://127.0.0.1".to_string(),
+        api_key_env: Some("TEST_PROVIDER_KEY".to_string()),
+        reasoning_effort: None,
+        context_limit: None,
+        tool_failures: 0,
+        selected_skills: Vec::new(),
+        context_snapshot: None,
+        events: Vec::new(),
+        warnings: Vec::new(),
+    };
+    let task = tokio::spawn(async move { Ok(result) });
+    let (control, _) = run_control();
+    ui.running = Some(RunningTurn {
+        control,
+        rx,
+        task: RunningTask::Agent(task),
+    });
+    while !ui
+        .running
+        .as_ref()
+        .expect("running")
+        .task
+        .is_finished()
+    {
+        tokio::task::yield_now().await;
+    }
+
+    app.drain_fullscreen_events(&mut ui).await.expect("drain");
+
+    assert!(app.had_error);
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.kind == TranscriptKind::Error
+                && row.text.contains("model-turn limit (128)"))
+    );
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.text != "turn ended: failed")
+    );
+}
+
 #[test]
 fn fullscreen_loads_current_session_history() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session_id = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(
+            &app.workdir,
+            "tui",
+            "mock-model",
+            "mock",
+            Some(serde_json::json!({"context_limit": 64_000})),
+        )
         .expect("session");
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
@@ -911,12 +1023,78 @@ fn fullscreen_loads_current_session_history() {
             .all(|row| !row.text.contains("tokens="))
     );
     assert_eq!(ui.sidebar_tokens, Some(9));
+    assert_eq!(ui.sidebar_context_limit, Some(64_000));
+    let status = bottom_status_context_for_width(&app, &ui, 80).expect("status context");
+    assert_eq!(status, "9/64.0k (0.0%) · ~/work");
     assert_eq!(ui.history, ["hello", "follow-up"]);
     ui.textarea = textarea_with_text("draft");
     ui.recall_history(-1);
     assert_eq!(textarea_text(&ui.textarea), "follow-up");
     ui.recall_history(1);
     assert_eq!(textarea_text(&ui.textarea), "draft");
+}
+
+#[test]
+fn load_history_omits_bottom_context_usage_without_context_limit() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let session_id = store
+        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .expect("session");
+    app.current_session = Some(session_id.clone());
+    let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
+    conn.execute(
+        r#"
+            INSERT INTO messages (
+                session_id, session_seq, role, timestamp_ms, message_json,
+                content_text, usage_json
+            ) VALUES (?1, 1, 'assistant', 1000, ?2, 'hi', ?3)
+            "#,
+        rusqlite::params![
+            &session_id,
+            serde_json::json!({
+                "role": "assistant",
+                "content": [{"type": "text", "text": "hi"}],
+                "timestamp_ms": 1000,
+                "finish_reason": "stop",
+                "outcome": "normal",
+                "model": "mock-model",
+                "provider": "mock"
+            })
+            .to_string(),
+            serde_json::json!({"input_tokens": 9}).to_string()
+        ],
+    )
+    .expect("insert assistant");
+
+    let mut ui = FullscreenUi::new(&app);
+    app.load_current_session_history(&mut ui).expect("history");
+
+    assert_eq!(ui.sidebar_tokens, Some(9));
+    assert_eq!(ui.sidebar_context_limit, None);
+    let status = bottom_status_context_for_width(&app, &ui, 80).expect("status context");
+    assert_eq!(status, "~/work");
+}
+
+#[tokio::test]
+async fn fullscreen_new_command_clears_context_usage_state() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.sidebar_tokens = Some(9);
+    ui.sidebar_context_limit = Some(64_000);
+    ui.last_context_snapshot = Some(test_context_snapshot());
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::New)
+        .await
+        .expect("new");
+
+    assert_eq!(ui.sidebar_tokens, None);
+    assert_eq!(ui.sidebar_context_limit, None);
+    assert_eq!(ui.last_context_snapshot, None);
+    let status = bottom_status_context_for_width(&app, &ui, 80).expect("status context");
+    assert_eq!(status, "~/work");
 }
 
 #[test]

@@ -115,7 +115,9 @@ async fn copy_command_copies_latest_answer_raw_markdown_without_transcript_row()
         ["# Raw title\n\n- `source` item"]
     );
     assert_eq!(
-        ui.ephemeral_status.as_ref().map(|status| status.text.as_str()),
+        ui.ephemeral_status
+            .as_ref()
+            .map(|status| status.text.as_str()),
         Some("copied latest answer Markdown")
     );
     assert!(ui.transcript.iter().all(|row| {
@@ -163,7 +165,11 @@ async fn ctrl_o_copies_latest_answer_raw_markdown() {
         copied.lock().expect("clipboard lock").as_slice(),
         ["second **raw** answer"]
     );
-    assert!(ui.transcript.iter().all(|row| row.kind != TranscriptKind::Command));
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.kind != TranscriptKind::Command)
+    );
 }
 
 #[tokio::test]
@@ -212,7 +218,12 @@ async fn fullscreen_help_command_opens_bottom_help_panel() {
     assert!(text.contains("\nCommands\n"));
     assert!(text.contains("\nCustom commands\n"));
     assert!(text.contains("Ctrl+B - toggle sidebar"));
-    assert!(text.contains("/usage - usage and cost summary (aliases: /stats)"));
+    assert!(text.contains("/usage - local usage and cost (aliases: /stats)"));
+    assert!(text.contains("Reads persisted SQLite accounting and cost estimates"));
+    assert!(text.contains(
+        "/export [path] [--format markdown|json] [-i|--include list] - write session export"
+    ));
+    assert!(text.contains("last-provider-request can expose hidden prompts"));
     assert!(text.contains("No custom commands available"));
     assert!(!text.contains("pevo run"));
 }
@@ -296,7 +307,12 @@ async fn fullscreen_usage_command_opens_bottom_panel() {
     };
     assert_eq!(panel.title, "Usage");
     assert!(panel.rows.iter().any(|row| row.label == "Totals"));
-    assert!(panel.rows.iter().any(|row| row.label == "Cache and reasoning"));
+    assert!(
+        panel
+            .rows
+            .iter()
+            .any(|row| row.label == "Cache and reasoning")
+    );
     assert!(
         ui.transcript
             .iter()
@@ -396,9 +412,10 @@ async fn fullscreen_context_command_appends_compact_command_row() {
     assert_eq!(cell_count, 70);
     assert_eq!(cell_count % 5, 0);
     assert!((50..=100).contains(&cell_count));
-    assert!(row
-        .text
-        .contains("\nS system  T tools  K skills  M input_messages  . free\n\n"));
+    assert!(
+        row.text
+            .contains("\nS system  T tools  K skills  M input_messages  . free\n\n")
+    );
     assert!(row.text.contains("\ninput_messages:"));
     assert!(!row.text.contains("\nmessages:"));
     assert!(!row.text.contains("unavailable"));
@@ -445,7 +462,138 @@ async fn fullscreen_variant_and_upcoming_feedback_use_command_rows() {
     assert!(ui.transcript.iter().any(|row| {
         row.kind == TranscriptKind::Command
             && row.title == "/compact"
-            && row.text == "/compact upcoming"
+            && row.text == "/compact is upcoming; no session changes made"
+    }));
+}
+
+#[tokio::test]
+async fn fullscreen_export_and_share_write_artifacts() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let session_id = store
+        .create_session_with_metadata(
+            &app.workdir,
+            "tui",
+            "mock-model",
+            "mock",
+            Some(serde_json::json!({
+                "base_url": "https://example.test/v1",
+                "mode": "default",
+                "model_metadata": {
+                    "capabilities": {
+                        "tool_call": true
+                    }
+                }
+            })),
+        )
+        .expect("session");
+    app.current_session = Some(session_id.clone());
+    let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
+    insert_tui_message(
+        &conn,
+        &session_id,
+        1,
+        "user",
+        1,
+        serde_json::json!({
+            "role": "user",
+            "content": [{"text": "export this prompt"}],
+            "timestamp_ms": 1
+        }),
+    );
+    insert_tui_message(
+        &conn,
+        &session_id,
+        2,
+        "assistant",
+        2,
+        serde_json::json!({
+            "role": "assistant",
+            "content": [{"type": "text", "text": "exported answer"}],
+            "timestamp_ms": 2,
+            "finish_reason": "stop",
+            "outcome": "normal",
+            "model": "mock-model",
+            "provider": "mock"
+        }),
+    );
+    let mut ui = FullscreenUi::new(&app);
+
+    app.handle_fullscreen_command(
+        &mut ui,
+        SlashCommand::Export(crate::tui::slash::TuiExportOptions {
+            path: Some("exports/session.md".to_string()),
+            format: SessionExportFormat::Markdown,
+            include: psychevo_runtime::SessionExportIncludeSet::default_for(
+                SessionArtifactKind::Export,
+            ),
+        }),
+    )
+    .await
+    .expect("export");
+
+    let export_path = app.workdir.join("exports/session.md");
+    let content = fs::read_to_string(&export_path).expect("export content");
+    assert!(content.contains("export this prompt"));
+    assert!(content.contains("exported answer"));
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command
+            && row.title == "/export exports/session.md"
+            && row.text.contains("exported:")
+            && row.text.contains("exports/session.md")
+    }));
+
+    app.handle_fullscreen_command(
+        &mut ui,
+        SlashCommand::Export(crate::tui::slash::TuiExportOptions {
+            path: Some("exports/session.json".to_string()),
+            format: SessionExportFormat::Json,
+            include: psychevo_runtime::SessionExportIncludeSet::parse(
+                "last-provider-request",
+                SessionArtifactKind::Export,
+            )
+            .unwrap(),
+        }),
+    )
+    .await
+    .expect("export last request json");
+
+    let last_export_path = app.workdir.join("exports/session.json");
+    let content = fs::read_to_string(&last_export_path).expect("last request export content");
+    let value: Value = serde_json::from_str(&content).expect("last request export json");
+    assert_eq!(
+        value["last_provider_request"]["body"]["messages"][1]["content"],
+        "export this prompt"
+    );
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command
+            && row.title
+                == "/export exports/session.json --format json --include last-provider-request"
+            && row.text.contains("exported:")
+            && row.text.contains("exports/session.json")
+    }));
+
+    app.handle_fullscreen_command(
+        &mut ui,
+        SlashCommand::Share(crate::tui::slash::TuiShareOptions {
+            path: Some("share.md".to_string()),
+            include: psychevo_runtime::SessionExportIncludeSet::default_for(
+                SessionArtifactKind::Share,
+            ),
+        }),
+    )
+    .await
+    .expect("share");
+
+    let share_path = app.workdir.join("share.md");
+    let content = fs::read_to_string(&share_path).expect("share content");
+    assert!(content.contains("exported answer"));
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command
+            && row.title == "/share share.md"
+            && row.text.contains("share:")
+            && row.text.contains("share.md")
     }));
 }
 
@@ -485,7 +633,10 @@ async fn fullscreen_skills_command_lists_dynamic_entries_and_inserts_skill_marke
     )
     .await
     .expect("skill invoke");
-    assert_eq!(textarea_text(&ui.textarea), "$helper apply it to src/lib.rs");
+    assert_eq!(
+        textarea_text(&ui.textarea),
+        "$helper apply it to src/lib.rs"
+    );
 }
 
 fn test_context_snapshot() -> ContextSnapshot {

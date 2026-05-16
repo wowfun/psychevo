@@ -1,6 +1,5 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
-assertion_line: 667
 expression: combined
 ---
 fixture=consecutive_tool_rows_flat
@@ -31,7 +30,7 @@ mock/model  high  ~/work · main
 --- styles ---
 [dim]› [default]Summarize several tool calls.
 [default]
-[paper]• Thinking[default]
+[green]• [default]Thinking
 [dim]  └ I need to inspect files and run checks before answering.[default]
 [default]
 [green]• [default]Explored crates/psychevo-cli/src/tui/render/transcript.rs

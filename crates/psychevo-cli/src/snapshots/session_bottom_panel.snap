@@ -21,7 +21,7 @@ size=120x24
   2026-05-05
   Review session pane  mock/other-model  messages=3                                                          09:44
 
-  Enter select  Tab archived  Ctrl+K actions  Esc close  Type search
+  Enter switch  Tab archived  Ctrl+K manage  Esc close  Type search
 
 
 
@@ -47,7 +47,7 @@ mock/model  high  ~/work · main
 [default]  [cyan]2026-05-05[default]
 [default]  Review session pane  mock/other-model  messages=3                                                          09:44
 [default]
-[default]  [dim]Enter select  Tab archived  Ctrl+K actions  Esc close  Type search[default]
+[default]  [dim]Enter switch  Tab archived  Ctrl+K manage  Esc close  Type search[default]
 [default]
 [default]
 [default]

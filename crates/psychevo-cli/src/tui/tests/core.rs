@@ -55,6 +55,27 @@ fn turn_printer_shows_reasoning_when_enabled() {
 }
 
 #[test]
+fn turn_printer_renders_project_instruction_warning() {
+    let mut printer = TurnPrinter::new(TuiRenderer::new(false), false, false);
+    let mut output = Vec::new();
+    printer
+        .render_event(
+            &RunStreamEvent::Event(serde_json::json!({
+                "type": "warning",
+                "kind": "project_instruction",
+                "message": "Detected CLAUDE.md",
+                "suggestion": "ln -s CLAUDE.md AGENTS.md"
+            })),
+            &mut output,
+        )
+        .expect("warning");
+
+    let output = String::from_utf8(output).expect("utf8");
+    assert!(output.contains("warning: Detected CLAUDE.md"));
+    assert!(output.contains("suggestion: ln -s CLAUDE.md AGENTS.md"));
+}
+
+#[test]
 fn turn_printer_preserves_bash_command_title_until_tool_end() {
     let mut printer = TurnPrinter::new(TuiRenderer::new(false), false, false);
     let mut output = Vec::new();

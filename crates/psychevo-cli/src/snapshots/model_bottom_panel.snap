@@ -23,7 +23,7 @@ size=120x24
   › ● mock/mock-model  mock  context 128,000  output 16,000  reasoning  tools  multi-modal  structured  $1.500/$2.500…
   mock/other-model  mock  default high
 
-  Enter select  Ctrl+R refresh metadata  Tab/Right info  Esc close  Type search
+  Enter choose model  Ctrl+R refresh metadata  Tab/Right info  Esc close  Type search
 
 
 
@@ -49,7 +49,7 @@ mock/mock-model  default  ~/work · main
 [default]  [cyan]› ● mock/mock-model  mock  context 128,000  output 16,000  reasoning  tools  multi-modal  structured  $1.500/$2.500…[default]
 [default]  mock/other-model  mock  default high
 [default]
-[default]  [dim]Enter select  Ctrl+R refresh metadata  Tab/Right info  Esc close  Type search[default]
+[default]  [dim]Enter choose model  Ctrl+R refresh metadata  Tab/Right info  Esc close  Type search[default]
 [default]
 [default]
 [default]
