@@ -50,6 +50,12 @@ An outcome describes how an agent invocation, turn, message, or tool execution e
 
 Outcomes are represented by end-event semantics. They do not require separate failed, stopped, or aborted event families.
 
+A terminal reason may refine a terminal outcome when the core loop can identify
+the specific bounded condition that ended execution. Terminal reasons do not
+replace outcomes and do not create additional outcome values. The first
+implementation slice defines `max_turns_exceeded` for failed invocations that
+reach the finite model-turn budget before a terminal assistant answer.
+
 Abort is an active cancellation signal, not only a flag checked between
 operations. Provider generation and runtime-supplied foreground tool waits must
 be able to wake promptly when abort is requested, including while waiting on
@@ -63,7 +69,7 @@ Agent execution defines these canonical event families:
 - `message_start`, `message_update`, `message_end`
 - `tool_execution_start`, `tool_execution_update`, `tool_execution_end`
 
-`agent_start` and `agent_end` bound one accepted agent invocation. `agent_end` supports a semantic projection of the invocation terminal outcome and final messages or final material needed by observers. That projection may be derived from loop messages, provider results, runtime completion facts, or interface settlement facts; this spec does not require a low-level core event payload to natively carry every projected field. `agent_end` does not indicate that the session has ended.
+`agent_start` and `agent_end` bound one accepted agent invocation. `agent_end` supports a semantic projection of the invocation terminal outcome, optional terminal reason, and final messages or final material needed by observers. That projection may be derived from loop messages, provider results, runtime completion facts, or interface settlement facts; this spec does not require a low-level core event payload to natively carry every projected field. `agent_end` does not indicate that the session has ended.
 
 `turn_start` and `turn_end` bound one turn within an agent invocation.
 

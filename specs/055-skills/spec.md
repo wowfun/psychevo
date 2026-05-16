@@ -16,7 +16,7 @@ actions.
 - runtime discovery paths, precedence, disabled state, and collisions
 - model-visible skill index and explicit skill expansion
 - verb-first skill tool semantics
-- `pevo skills` command family behavior
+- `pevo skill` command family behavior
 - local and Git install boundaries
 - scanner verdicts and provenance sidecar semantics
 
@@ -95,12 +95,16 @@ of submitting the prompt. Runtime parses `$skill-name` markers in every user
 entry surface, and also treats `--skill <name-or-path>` as an explicit selected
 skill.
 
-Explicitly selected skills are injected as separate user-context fragments
-containing the full skill body. The injected fragment is persisted as durable
-context evidence anchored to the accepted user prompt, while the persisted user
-message and TUI transcript keep the original user text, such as `$reviewer
-check this diff`. Unknown `$name` markers remain ordinary text. Relative
-references in injected skill content are resolved against the skill directory.
+Explicitly selected skills are injected as separate hidden contextual-user
+messages containing the full skill body. Each selected skill remains separate
+from grouped project instructions and from the accepted user prompt. The
+injected fragment is persisted as durable context evidence anchored to the
+accepted user prompt, while the persisted user message and TUI transcript keep
+the original user text, such as `$reviewer check this diff`. Unknown `$name`
+markers remain ordinary text. Relative references in injected skill content are
+resolved against the skill directory. Provider projection preserves the
+selected-skill fragment as a distinct message from the accepted user prompt, so
+the model can distinguish loaded skill context from the user's actual request.
 
 ## Tools
 
@@ -125,19 +129,20 @@ create, modify, remove, install, enable, or disable skills.
 
 ## CLI
 
-`pevo skills` is the product command family for local skill management:
+`pevo skill` is the product command family for local skill management. The
+obsolete plural `pevo skills` form is not accepted.
 
 - `list [--json] [--all]`
 - `view <name> [file_path]`
-- `create <name> --description <text> [--global|--project]`
+- `create <name> --description <text> [--global|--local]`
 - `patch <name> --old <text> --new <text>`
 - `remove <name>`
-- `enable|disable <name> [--global|--project]`
-- `install <local-path-or-git-url> [--name <name>|--all] [--global|--project] [--force]`
+- `enable|disable <name> [--global|--local]`
+- `install <local-path-or-git-url> [--name <name>|--all] [--global|--local] [--force]`
 - `scan <path>`
 
 The default create and install target is global `$PSYCHEVO_HOME/skills`.
-`--project` targets `<workdir>/.psychevo/skills`.
+`--local` targets `<workdir>/.psychevo/skills`.
 
 `pevo run` and `pevo tui` accept repeatable `--skill <name-or-path>`. These
 flags explicitly select and inject skills for the next prompt, while `$skill`

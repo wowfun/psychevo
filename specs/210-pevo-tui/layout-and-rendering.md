@@ -41,7 +41,9 @@ ledger block:
 - folded thinking renders as a flat expandable row, not as a vertical left-rail
   block or derived section. Active Thinking uses the same shared activity
   marker as active tool evidence; completed Thinking uses a stable bullet
-  marker. Thinking body lines use compact tool-style indentation (`└` then
+  marker with the same evidence marker role as completed tool rows. Thinking
+  titles use the ordinary evidence title style rather than a dedicated thinking
+  color. Thinking body lines use compact tool-style indentation (`└` then
   continuation spaces), and explicit new paragraphs in reasoning content do not
   receive label-width indentation.
 - consecutive tool evidence rows remain flat ledger rows. Individual tool
@@ -118,7 +120,10 @@ latest provider input usage exists and its context limit is known; when shown,
 it uses the same formatter as the value after `tokens: ` in `/context`, for
 example `39.2k/1.0M (3.7%)`. Running turns may refresh this value from streamed
 context snapshots, provider input usage metadata, or an explicit `/context`
-session estimate.
+session estimate. Session startup, resume, and session switching must restore
+the latest persisted provider input usage together with the session context
+limit before the first draw so the bottom status line does not temporarily omit
+context usage for resumed sessions.
 
 On narrow terminals, mode/model/running state takes priority, then context
 usage, then path and branch. Lower-priority status text is truncated or hidden
@@ -223,6 +228,10 @@ When the overall turn outcome is `normal`, tool failures are summarized by the
 failed tool row and turn metadata, not by an additional red `Error` transcript
 row. A red turn-ended error row is reserved for non-normal turn outcomes, so
 the TUI must not render contradictory messages such as `turn ended: normal`.
+When a non-normal turn includes a terminal reason, the red turn-ended row must
+include the reason-specific human message; for model-turn budget exhaustion it
+must say the model-turn limit was reached before a final answer and suggest
+resuming the session to continue.
 User-confirmed interrupted turns show `interrupted` in turn metadata instead of
 counting the interrupted tool as `1 failure`.
 
@@ -271,9 +280,16 @@ detail text. Short rows default open; selecting an open foldable row shows
 command titles stay single-line with ellipsis in the title row so elapsed time
 remains visible, but rows with long command titles can expand to show the
 complete wrapped command below the title. Long Thinking bodies and long tool
-outputs use the same default collapse threshold: eight logical lines or roughly
-1200 display characters. Line-count collapses show `▸ N more lines`; width-only
-collapses whose omitted line count is not meaningful show `▸ more output`.
+outputs use the same default collapse threshold: eight logical lines, 200
+display tokens, or roughly 1200 display cells. Display-token counting is a
+local UI heuristic: ordinary whitespace-delimited spans count as one token, and
+long unbroken spans such as table separators, URLs, minified JSON, or CJK runs
+are charged in display-cell chunks so they cannot bypass the token threshold.
+Line-count previews are still subject to the display-token and display-cell
+budgets; if the first visible logical lines would exceed either budget, the row
+uses a bounded token/width preview instead of showing all of those lines.
+Line-count collapses show `▸ N more lines`; token- or width-only collapses
+whose omitted line count is not meaningful show `▸ more output`.
 
 Mouse clicks on expandable rows toggle that row's details. Dragging to select
 transcript text must not toggle rows. Transcript-focus `Enter` and `Space`
@@ -481,8 +497,13 @@ are summarized rather than dumped unless the block is expanded.
 
 User shell escapes render through the same compact `Ran <first command line>`
 evidence used for shell tool evidence, with failures remaining in that evidence
-group. User shell result evidence is local TUI material and must not become
-provider replay context or a persisted user prompt.
+group. The provider-visible persisted record is a user-role text fragment:
+`<user_shell_command><command>...</command><result>Exit code: ... Duration: ...
+seconds Truncated: ... Output: ...</result></user_shell_command>`. TUI display
+metadata and message content text must keep session reloads and history recall
+human-facing: reload renders the persisted shell record as `Ran <first command
+line>` evidence rather than a raw XML user prompt, and composer history recalls
+it as `!<command>`.
 
 When the fullscreen composer contains a user shell escape, the bottom state
 line includes a local shell-mode marker while preserving the normal model,
@@ -493,10 +514,16 @@ events before rendering the turn as complete. Final ledger projection must not
 lose late tool or message evidence merely because the task finished between
 input polling ticks.
 
-Fullscreen input submitted while an agent turn or user shell command is active
-is queued in submission order. Queued prompts start after active work settles.
-Queued user shell escapes run after earlier queued work; bare queued `!` shows
-the bounded help text and then drains the next queued item.
+Fullscreen prompts submitted while an agent turn or user shell command is active
+are queued in submission order. User shell escapes submitted while a foreground
+agent turn is active start immediately as auxiliary shell tasks; their bounded
+results are injected as external user shell context at provider request
+boundaries, after tool batches, and before terminal checks. If the foreground
+turn has already ended by the time the auxiliary shell completes, the shell
+context still persists on the same session for the next turn. User shell escapes
+submitted while another standalone shell command is active keep the existing
+shell abort/queue behavior. Bare queued `!` shows the bounded help text and then
+drains the next queued item.
 
 Session picker and scripted session-list output must not expose folded
 reasoning blocks or provider reasoning wire fields. Folded reasoning blocks

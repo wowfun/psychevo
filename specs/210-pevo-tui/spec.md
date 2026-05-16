@@ -30,14 +30,17 @@ stdin/stdout, it keeps the deterministic line-by-line scripted behavior.
 - local stats reporting from persisted accounting columns
 - responsive foreground interruption and preservation of every visible
   assistant answer emitted during a multi-tool turn
-- direct user shell escape from the composer and scripted input
+- direct user shell escape from the composer and scripted input, persisted by
+  default as user-provided shell context for subsequent provider requests while
+  never exposing `bash` as a plan-mode model tool
 - fullscreen composer `@` file path completion for the selected working
   directory
 - image attachments from standalone readable image-source paste and `/image`,
   with numbered composer placeholders and local attachment metadata
 - mouse expansion for bounded Thinking and tool evidence rows rendered through
-  the shared evidence component; V1 does not provide transcript review mode or a
-  keyboard path to expand one specific evidence row
+  the shared evidence component, including shared evidence title/marker styling;
+  V1 does not provide transcript review mode or a keyboard path to expand one
+  specific evidence row
 - ledger-only active tool status, including pending provider-side tool input
   and persisted assistant tool calls whose tool results have not arrived yet,
   with at least one visible active frame, no stale provisional rows after
@@ -46,14 +49,16 @@ stdin/stdout, it keeps the deterministic line-by-line scripted behavior.
   transcript scrolling, fullscreen alternate-screen scrollback isolation, and
   hover-routed mouse-wheel scrolling
 - local-only row-level expansion for long Thinking bodies and long tool output
-  using the same collapse thresholds, without derived transcript section
-  headers
+  using the same line, display-token, and width collapse thresholds, without
+  derived transcript section headers
 - debug projection for usage and provider metadata summaries
 - deterministic visual-regression projections and local diagnostic screenshots
 - terminal-adaptive semantic rendering for prompt, composer, popup, bottom
   panel, fixed status line, selection, and evidence surfaces
 - lightweight terminal Markdown projection for assistant answers, plus raw
   transcript display and raw Markdown answer copy
+- local session export/share slash commands backed by the same transcript
+  artifact boundary as `pevo session export` and `pevo session share`
 - hard `plan` / `default` runtime mode selection
 - interactive skill listing and explicit skill invocation slash commands
 
@@ -65,8 +70,8 @@ Out of scope:
 - approvals, auth, provider login, or model probing
 - structured `@file` references, automatic file-content attachment, custom
   slash commands, or command-template files
-- transcript review overlay, compaction, rollback, share/fork UI, or external
-  editor integration
+- transcript review overlay, compaction, rollback, fork UI, remote session
+  publishing, or external editor integration
 
 ## Command
 

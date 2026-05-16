@@ -19,17 +19,34 @@ custom keymaps.
   the first suggestion is selected by default and `Enter` executes that
   suggestion directly.
 - `Shift+Enter`, `Ctrl+Enter`, `Alt+Enter`, and `Ctrl+J` insert a newline.
-- Composer input that begins with `!` after leading whitespace is a user shell
-  escape. `!<command>` runs the command locally in the selected workdir through
-  the bounded runtime shell executor and is not sent to the provider. Bare `!`
-  shows bounded shell-help text and does not execute.
+- Shell mode is an explicit composer state, not literal `!` text in the
+  textarea. Pressing `Shift+1` from an empty composer enters shell mode and
+  leaves the textarea empty. While shell mode is active, the composer prompt
+  marker is `! ` instead of the normal prompt marker. Empty shell mode exits on
+  either `Esc` or `Backspace`. Pasted text, history recall, scripted input, or
+  raw submit text that begins with `!` after leading whitespace imports as
+  shell mode with the leading `!` stripped. Submitting shell mode records
+  `!<command>` in composer history, but the shell execution layer receives only
+  `<command>`. Bare shell mode submission shows bounded shell-help text and
+  does not execute.
+- `!<command>` runs the command locally in the selected workdir through the
+  bounded runtime shell executor. The command is not a provider-callable `bash`
+  tool, but its bounded result is persisted as model-visible user shell context
+  according to the runtime shell-context contract. Live and reloaded user shell
+  transcript rows render like user prompt rows: the command line uses the same
+  full-width prompt background, starts with `! ` followed by the user's command,
+  uses the same marker color as the shell-mode composer `!`, and omits the
+  normal tool-evidence bullet and `Ran` label. The command output
+  remains below that prompt-styled command line as bounded evidence detail. This
+  distinguishes user-submitted shell commands from model-requested bash tool
+  calls.
 - `Up` and `Down` recall submitted composer history when the current composer
   position is at the first or last logical line respectively. History recall
   preserves the in-progress draft and restores it when the user moves past the
   newest history entry. Within multi-line input away from those boundaries,
   `Up` and `Down` keep their normal textarea cursor movement.
 - `Tab` completes slash commands in the composer when the current input starts
-  with `/`.
+  with `/` and shell mode is not active.
 - Typing an `@` token in the fullscreen composer opens a file path completion
   popup for the selected workdir. Valid tokens start at the beginning of the
   current line or after whitespace, so `@`, `@src`, and `hello @src` trigger
@@ -41,6 +58,11 @@ custom keymaps.
   Inserting a path replaces only the active `@` token, appends one trailing
   space, and quotes paths containing whitespace when they do not already
   contain a double quote.
+- Shell mode reuses the same `@` file path completion popup, so
+  `cat @src<Tab>` inserts a workdir-relative path such as `src/main.rs ` using
+  the existing whitespace quoting rules. Image paths selected this way remain
+  plain text paths and do not create attachments. Naked shell words such as
+  `cat src<Tab>` do not trigger shell-native completion.
 - `Shift+Tab` cycles `default -> plan -> default`.
 - `Esc` clears active UI state before it can interrupt work: text selection,
   file and skill popups, slash menu, bottom selection panes, history search,
@@ -139,17 +161,24 @@ The first TUI supports:
 - `/show-raw on`
 - `/show-raw off`
 - `/copy`
+- `/export [path] [--format markdown|json] [-i|--include list]`
+- `/share [path] [-i|--include list]`
 - `/image <source> [prompt]`
 - `/rename <title>`
 - `/undo`
 - `/redo`
 - `/skills`
 - `/skill:<name> [args]`
-- future disabled entries in the slash menu: `/compact` and `/export`
+- future disabled entries in the slash menu: `/compact`
 
 Slash command discovery is registry-backed and remains a lightweight menu above
 the composer. The slash menu shows canonical command labels only, stays a flat
 list with at most 8 rows, and does not show hidden aliases or group headers.
+Slash menu summaries stay compact enough for one-line discovery. Expanded
+`/help` may add short detail lines for commands whose consequences are easy to
+miss, such as local artifact writes, provider calls, session mutation, display
+state, clipboard behavior, shell/image submission, or sensitive export
+includes.
 Fullscreen TUI projects slash-command feedback
 that is written to the transcript as one command transcript row: the first line
 echoes the submitted command as `> <command>`, and the result begins on the
@@ -169,7 +198,9 @@ order. `Custom commands` summarizes dynamic skill invocation as
 `/skill:<name> [args]` with the discovered skill count, or reports
 `No custom commands available` when skills are disabled or none are discovered.
 Help rows use `<usage> - <summary>` and may append compact alias text on the
-canonical command row. Fullscreen `/help` opens a bottom help pane with
+canonical command row. Rows with expanded detail render the detail immediately
+after the command row as a short indented continuation line. Fullscreen `/help`
+opens a bottom help pane with
 `Help`, `General`, `Commands`, and `Custom commands` header tabs; `Esc` closes
 the pane, and tab/arrow navigation may switch help sections. Scripted `/help`
 prints the same deterministic help text without opening a pane.
@@ -226,6 +257,30 @@ rendered rich text. It is unaffected by `/show-raw`, so rich and raw transcript
 display modes copy the same source text. Fullscreen TUI reports copy success or
 failure through short status feedback and must not append a command transcript
 row. If no assistant answer is visible, it reports a bounded failure status.
+
+`/export [path] [--format markdown|json] [-i|--include list]` writes selected
+sections from the current persisted session as a local artifact. When `path` is
+omitted, Markdown writes
+`psychevo-session-<short-session-id>.md` and JSON writes
+`psychevo-session-<short-session-id>.json` in the selected workdir. When `path`
+is relative, it resolves against the selected workdir. The command uses the
+same include semantics and section projection as `pevo session export`. The
+export include vocabulary is `header` (`h`), `messages` (`m`), `reasoning`
+(`r`), `provider-input-evidence` (`pie`), and `last-provider-request` (`lpr`).
+If `--include` is omitted, the effective include set is `messages`. The include
+set is exact, and `reasoning` expands to include `messages`. The command does
+not contact a provider, open an editor, or upload content. Fullscreen TUI
+reports success or failure in one command transcript row, and non-terminal
+scripted TUI prints the same bounded text.
+
+`/share [path] [-i|--include list]` writes selected local shareable Markdown
+sections for the current persisted session and reports its path. When `path` is
+omitted, it writes `psychevo-share-<short-session-id>.md` in the selected
+workdir. It is intentionally a local packaging step only: it does not create a
+public link, call a remote share API, create a gist, or persist durable sharing
+state. The share include vocabulary is restricted to `header` (`h`), `messages`
+(`m`), `reasoning` (`r`), and `provider-input-evidence` (`pie`);
+`last-provider-request` and legacy raw provider request flags are unsupported.
 
 `/show-raw` toggles raw transcript visibility. `/show-raw on` and
 `/show-raw off` set it explicitly. It is a display-only mode and does not

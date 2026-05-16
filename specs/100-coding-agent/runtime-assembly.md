@@ -18,11 +18,13 @@ independently numbered spec and does not define a stable public Rust API.
 - FakeProvider smoke scenario selection
 - Chat-compatible live provider assembly
 - control signal wiring
+- project instruction discovery for AGENTS-named files
 
 Out of scope:
 - interactive terminal UI
 - non-Chat provider transports, OAuth, or provider login flows
-- project discovery, instruction discovery, memory, skills, and approvals
+- memory, approvals, third-party assistant instruction globs, legacy
+  assistant rules/imports, and implicit legacy memory-file loading
 
 ## Assembly Contract
 
@@ -63,6 +65,52 @@ When `max_context_messages` is supplied, runtime keeps the most recent N
 loop-visible messages. If this would cut a tool-call/tool-result pair, runtime
 expands the retained prefix backward until the visible transcript has complete
 tool-call/tool-result relationships.
+
+## Project Instructions
+
+Runtime discovers project instructions from the canonical workdir before each
+live coding-agent invocation. The first slice uses `.git` as the project-root
+marker. When no `.git` ancestor exists, only the canonical workdir is searched.
+When a root exists, runtime searches directories from root to workdir.
+
+For each searched directory, runtime appends non-empty regular files in this
+order:
+
+- `AGENTS.md`
+- `.psychevo/AGENTS.md`
+- `AGENTS.local.md`
+
+Project instructions are injected as typed hidden contextual-user input after
+retained history and before selected skill context and the current prompt. They
+are not persisted as ordinary transcript messages. Runtime groups all
+project-instruction fragments for the prompt into one contextual-user message
+with one text block per source fragment. Each block uses the AGENTS context
+marker:
+
+```text
+# AGENTS.md instructions for <directory>
+
+<INSTRUCTIONS>
+...
+</INSTRUCTIONS>
+```
+
+Provider projection must preserve source message boundaries between the grouped
+project-instruction context, selected skill context, and the accepted user
+prompt. It may coalesce text blocks within one contextual-user message when a
+provider shape requires string-only content, but it must not merge hidden
+context with the user's prompt. Runtime persists model-visible project
+instruction injections as context evidence with source paths, truncation
+metadata, and provider reconstruction group/block ordering.
+
+Runtime does not load legacy assistant memory files, sidecar rule/import
+directories, third-party instruction globs, or remote instruction URLs. When a
+legacy assistant memory file is present and the corresponding AGENTS file for
+that directory is absent, runtime emits a non-fatal warning that suggests
+creating an AGENTS-named symlink.
+
+Project instruction content is bounded by a total runtime budget. Content that
+exceeds the budget is truncated and marked in the model-visible context.
 
 ## Smoke Scenario
 

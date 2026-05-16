@@ -43,6 +43,8 @@ A command metadata record should identify:
 - argument kind
 - output kind
 - status
+- optional expanded help detail for surfaces that have room to explain
+  consequences, persistence, or provider/network behavior
 
 Argument kinds are:
 
@@ -93,6 +95,12 @@ duplicates. Help rows use:
 ```text
 <usage> - <summary>
 ```
+
+Expanded help surfaces may add one short continuation line after a row when the
+command has important consequences, persistence behavior, provider/network
+behavior, or sensitive-data handling to disclose. Compact discovery surfaces
+such as slash menus should continue to use only canonical names and short
+summaries.
 
 When aliases are useful to disclose, the same row may append:
 

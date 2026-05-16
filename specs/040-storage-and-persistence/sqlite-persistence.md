@@ -167,15 +167,20 @@ The first implementation slice stores these context evidence columns:
 - `source_kind` text
 - `source_name` text nullable
 - `source_path` text nullable
+- `provider_group` text nullable
+- `provider_block_index` integer nullable
+- `context_kind` text nullable
 - `timestamp_ms` integer
 - `content_text` text
 - `metadata_json` text nullable
 
 Context evidence is anchored to `messages(session_id, session_seq)` for the
 accepted prompt and enforces `UNIQUE(session_id, prompt_session_seq,
-context_seq)`. Deleting the prompt message deletes its context evidence.
-Context evidence does not increment `sessions.message_count`, is not returned by
-message transcript retrieval, and is not used by default session resume.
+context_seq)`. `provider_group` and `provider_block_index` preserve hidden
+contextual-user grouping for reconstructed provider requests. Deleting the
+prompt message deletes its context evidence. Context evidence does not increment
+`sessions.message_count`, is not returned by message transcript retrieval, and
+is not used by default session resume.
 
 ## SQLite Behavior
 
@@ -193,14 +198,16 @@ SQLite persistence should perform periodic WAL checkpoint work when supported by
 
 Storage failures that affect session or message persistence must be observable to runtime or caller-facing layers that depend on persistence.
 
-The current implementation uses `PRAGMA user_version = 6`, WAL, foreign keys,
+The current implementation uses `PRAGMA user_version = 7`, WAL, foreign keys,
 short busy timeouts, `BEGIN IMMEDIATE`, bounded jitter retry, and best-effort
 periodic `wal_checkpoint(PASSIVE)`.
 
-The version 6 slice creates `context_evidence` for new databases and supported
-migrations. It still migrates version 4 databases by adding message accounting
-columns, and still migrates version 3 state databases by adding
-`sessions.archived_at_ms` before applying version 5 additions. It does not
+The version 7 slice creates contextual-user grouping columns in
+`context_evidence` for new databases and supported migrations. It still migrates
+version 6 databases by adding those columns, still migrates version 4 databases
+by adding message accounting columns, and still migrates version 3 state
+databases by adding `sessions.archived_at_ms` before applying version 5
+additions. It does not
 automatically migrate version 1 or version 2 state databases. Opening an older
 state database must fail with an explicit cutover/reset instruction instead of
 silently mutating retained state.

@@ -20,27 +20,48 @@ Required coverage:
   precedence, per-workdir mode persistence, global thinking persistence, global
   raw transcript visibility persistence, global sidebar visibility persistence,
   and recent-model bounding
-- registry-backed slash command parsing and menu rows, fullscreen `/help`
-  bottom help pane and scripted `/help` text output, aliases,
+- registry-backed slash command parsing and compact menu rows, fullscreen
+  `/help` bottom help pane and scripted `/help` text output with expanded
+  consequence/detail lines, aliases,
   model/variant/mode validation, `/copy`, `Ctrl+O`, `/show-raw`,
   `/show-raw on`, `/show-raw off`, invalid `/show-raw` arguments, `/rename`,
   `/sessions`/`/resume`/`/continue`, and ambiguous session prefix handling
 - composer behavior for submit, newline, current-session persisted user-prompt
   history seeding, history recall with draft restoration, and history search
 - user shell escape behavior for fullscreen and scripted TUI: `!` detection
-  after leading whitespace, empty `!` bounded help, local shell execution
-  without provider credentials, `Ran <first command line>` evidence, failure
-  projection, `Esc` clearing empty shell-mode input, aborting active shell work,
-  FIFO queueing with prompts and shell escapes while active work is running,
-  and process-local history that survives session switches without seeding
-  future provider context
+  after leading whitespace, explicit shell-mode state with `Shift+1` leaving the
+  textarea free of literal `!`, shell-mode composer prompt marker `! `, empty
+  shell mode `Esc` and `Backspace` exiting shell mode, pasted/raw/history
+  `!<command>` importing as shell mode plus stripped command text, empty shell
+  submission showing bounded help, shell-mode submission recording
+  `!<command>` history while execution receives only `<command>`,
+  provider/model resolution before command execution, marker-file commands not
+  running when configuration is missing, context persistence as
+  `<user_shell_command>` user-role records with bounded output and truncation
+  metadata, user shell transcript rows rendering the command line as a
+  full-width prompt-surface `! <first command line>` row whose `!` marker uses
+  the shell-mode composer marker color, with no bullet and no `Ran` label, model
+  bash tool evidence titles staying unchanged, failure
+  projection, aborting active shell work, auxiliary shell execution rather than
+  FIFO queueing while a foreground agent turn is active, pending auxiliary
+  shell commands waiting for `run_start`/session id before starting, shell
+  result injection before the next provider request when possible, next-turn
+  persistence when the foreground turn already ended, bounded auxiliary shell
+  errors clearing running state, bottom status activity such as `shell 1` while
+  auxiliary shell work is active, session reload rendering persisted shell
+  history as prompt-surface `! <command>` shell rows, scripted
+  `pevo tui !...` requiring resolvable configuration, and composer history
+  recalling shell records as `!<command>`
 - fullscreen composer `@` file completion: token detection for empty, path-like,
   Unicode, second-`@`, whitespace-boundary, and multi-line current-line tokens;
   rejection of mid-word `foo@bar`; workdir-relative search; directory marking;
   gitignore handling; stale-result rejection; keyboard and mouse insertion;
   `Esc` dismissal until the token changes; and interop with slash menus and
-  bottom selection panes. Selecting an image path through `@` must insert path
-  text plus a trailing space rather than create an attachment
+  bottom selection panes. Shell mode must reuse the same `@` popup for inputs
+  such as `cat @sr<Tab>`, preserve existing quoting for paths with spaces, and
+  leave naked shell words such as `cat sr<Tab>` unchanged. Selecting an image
+  path through `@` must insert path text plus a trailing space rather than
+  create an attachment
 - fullscreen image attachment UX: ordinary prompt text such as
   `描述这张图片的内容：img1.avif` remains text on paste and submit; standalone
   readable image-source paste creates a `[Image #N]` placeholder and one
@@ -77,6 +98,8 @@ Required coverage:
   metadata, active tool rows suppressing turn metadata until they settle, and
   no extra red `turn ended: normal` row when the final turn outcome is normal
   but one or more tool calls failed, and debug meta; only the
+  budget-exhausted `agent_end` and completed `RunResult` paths render an
+  explicit model-turn-limit error instead of a bare `turn ended: failed`, and
   active Thinking uses shared activity motion, completed Thinking uses a stable
   bullet marker, reasoning content uses the normal thinking body role, and
   explicit reasoning paragraphs do not receive label-width indentation
@@ -100,7 +123,9 @@ Required coverage:
   empty composer must occupy one input row with surface background, wrapped
   historical prompt rows including CJK/wide-character content
   must keep full-width prompt background on each physical row, and sidebar
-  headings must be bold without colored left rails; running-state snapshots must
+  headings must be bold without colored left rails; resumed session history
+  reloads must restore bottom status context usage when persisted provider input
+  usage and a session context limit are available; running-state snapshots must
   show elapsed/`Esc` appended to the stable bottom status line and must not
   contain `Working` or active phase words that belong in ledger rows
 - active tool evidence snapshots and unit tests must preserve ledger-only
@@ -158,11 +183,13 @@ Required coverage:
 - expandable tool output snapshots must show right-side text hints such as
   `▸ N more lines`, `▸ more output`, and `▾ collapse`, with no bare `[+]` or
   `[-]` tokens
-- expandable transcript row coverage must include shared collapse thresholds
-  for long Thinking and long tool output, active Thinking elapsed, short
-  Thinking detail collapse, completed and active tool row detail collapse, long
-  `Ran`/`Running` command-title expansion, long JSON/HTML-like single-line tool
-  output collapse, mouse row toggles, no V1 keyboard row toggle path, and drag
+- expandable transcript row coverage must include shared line, display-token,
+  and width collapse thresholds for long Thinking and long tool output, active
+  Thinking elapsed, short Thinking detail collapse, completed and active tool
+  row detail collapse, long `Ran`/`Running` command-title expansion, long
+  JSON/HTML-like single-line tool output collapse, unbroken table separator
+  token collapse, and line-count collapse previews that are still bounded by
+  display tokens, mouse row toggles, no V1 keyboard row toggle path, and drag
   text selection not toggling anything. Snapshot coverage must prove selection
   and focus markers use the design-system `›` marker instead of repeating `>`
   on every wrapped Markdown/table line

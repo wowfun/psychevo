@@ -127,6 +127,12 @@ Reasoning/thinking content is folded out of JSON output by default. Supplying
 events remain visible-transcript projections and must not carry reasoning
 blocks or provider reasoning wire fields.
 
+When a started run ends because the agent loop reached its model-turn budget,
+the `agent_end` JSON event includes `terminal_reason:
+{"type":"max_turns_exceeded","max_turns":N}` and a human-readable
+`terminal_message`. This is a terminal outcome projection, not a runtime error
+event.
+
 When `--format json` is selected and a runtime/configuration error happens
 after argument parsing, stdout contains one JSON object:
 
@@ -141,7 +147,9 @@ No `run_start` is emitted for errors before a session exists.
 `pevo run` exits with code 0 only for normal completion. Provider failures,
 tool failures that produce a failed terminal outcome, invalid configuration,
 session-start rejection, before-agent-start rejection, and usage errors exit
-non-zero.
+non-zero. In default output mode, terminal outcomes with a diagnostic terminal
+reason write the diagnostic message to stderr while stdout remains reserved for
+final assistant text.
 
 Live-provider calls are opt-in by command usage. The default validation path
 must not require credentials, live network access, or user configuration.

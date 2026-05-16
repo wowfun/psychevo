@@ -93,14 +93,16 @@ observable, but no new turn is started after abort is observed.
 ## Turn Budget
 
 The first implementation keeps a finite model-turn budget to prevent runaway
-tool loops. The runtime default for the built-in coding agent is 32 model turns,
+tool loops. The runtime default for the built-in coding agent is 128 model turns,
 so multi-tool workflows can complete after several tool-result feedback cycles
 while still failing closed when the model never reaches a terminal assistant
 answer.
 
 Budget exhaustion ends the agent invocation with outcome `failed` after all
 already-started tool executions and tool-result messages for the previous turn
-have been emitted.
+have been emitted. The terminal `agent_end` material carries the terminal
+reason `max_turns_exceeded` with the configured turn budget so interfaces can
+explain the failure without requiring users to infer it from the transcript.
 
 ## Related Topics
 

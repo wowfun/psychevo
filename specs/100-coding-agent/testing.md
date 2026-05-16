@@ -40,7 +40,12 @@ Manual real-provider smoke validation is allowed only as live opt-in validation.
 - Live observation shows `agent_start`, `turn_start`, `message_start`, tool execution events, message completion, turn completion, and `agent_end`.
 - Final material resolves to evidence-backed agent-invocation facts without requiring tests to inspect storage schemas.
 - Tool-result facts are linked to assistant tool requests, tool execution outcomes, and loop-visible tool-result messages.
-- Tests for the first implementation slice must not require skills, memory, instruction-file discovery, or context-file discovery unless a later spec makes those features part of the default capability.
+- Tests for the first implementation slice cover AGENTS-named project
+  instruction discovery, injection, warnings for legacy assistant memory files,
+  and evidence projection. They must not require skills, memory, legacy
+  assistant imports/rules, third-party instruction globs, remote instruction
+  URLs, or other context-file discovery unless a later spec makes those
+  features part of the default capability.
 
 ## Validation Boundaries
 

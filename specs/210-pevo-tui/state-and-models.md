@@ -87,9 +87,12 @@ per-workdir mode. Default mode exposes the current full coding-core tools.
 Plan mode must not expose `bash`, `write`, or `edit`. Its read-only semantics
 must not depend only on provider instructions.
 
-User shell escape is a local user action, not a model-visible tool. It is
-available in both `plan` and `default` modes and must not add `bash` to the
-agent-visible tool surface for `plan` mode.
+User shell escape is a user-supplied shell context action, not a model-visible
+tool. It is available in both `plan` and `default` modes and must not add
+`bash` to the agent-visible tool surface for `plan` mode. Successful, failed,
+non-zero, timed-out, truncated, and interrupted user shell results are persisted
+as user-role context records for subsequent provider requests when the current
+provider/model configuration can be resolved.
 
 The runtime sends an ephemeral mode instruction to the provider for the current
 turn. The instruction is not persisted as a transcript message.

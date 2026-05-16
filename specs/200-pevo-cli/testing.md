@@ -43,6 +43,9 @@ scripts/validate.sh broad
 - `--include-reasoning` without JSON format rejects.
 - `--format json` runtime/config errors emit one stdout error JSON object.
 - default-format errors remain human stderr failures.
+- budget exhaustion emits a structured `agent_end.terminal_reason`, writes a
+  default-format diagnostic to stderr, and exits non-zero.
+- long tool workflows can exceed 32 tool turns before a final assistant answer.
 - removed old `run` flags are rejected by argument parsing.
 - `-m provider/model` works, while unqualified `-m model` rejects.
 - `--variant` accepts the supported set, passes enabled values, and suppresses
@@ -73,6 +76,44 @@ scripts/validate.sh broad
 
 - `pevo --help` exposes subcommand descriptions aligned with the shared command
   contract vocabulary while argv parsing remains clap-owned.
+- Representative command help, including `pevo run --help`, `pevo tui --help`,
+  `pevo session --help`, `pevo session export --help`, `pevo skill --help`,
+  `pevo model fetch --help`, `pevo config provider add --help`, and
+  `pevo auth set --help`, describes arguments, flags, local writes, provider
+  calls, stdin secrets, JSON output, skill selection, and sensitive export
+  includes where applicable.
+- `pevo skill` is the only skill command family; obsolete `pevo skills` is
+  rejected by argument parsing.
+- `pevo session`, `pevo model`, `pevo config`, and `pevo auth` expose singular
+  top-level command names.
+
+## Session Coverage
+
+- `pevo session list`, `show`, `rename`, `archive`, and `restore` operate on
+  isolated SQLite state.
+- `latest` resolves the latest active `run` or `tui` session for the current
+  canonical workdir.
+- Exact ids are not fuzzy matched.
+- `--json` emits structured output; JSON errors use the common
+  `{"type":"error","message":"..."}` shape.
+
+## Model Coverage
+
+- `pevo model list` and `pevo model current` read only local config/cache.
+- `pevo model fetch <provider>` is the only model command that contacts
+  provider `/models`, and tests use fake local providers only.
+- `--json` emits structured output; JSON errors use the common error shape.
+
+## Config And Auth Coverage
+
+- Config/auth writes default to global `$PSYCHEVO_HOME`; `--local` writes the
+  current workdir `.psychevo` scope.
+- `--global` and `--local` are mutually exclusive.
+- `pevo config provider add` writes provider JSONC without raw keys.
+- `--api-key-env` records an env var name only; `--api-key-stdin` writes the
+  secret to the selected `.env`.
+- `pevo auth status` and `pevo auth set --api-key-stdin` never print raw
+  secrets in human or JSON output.
 
 ## Install Script Coverage
 

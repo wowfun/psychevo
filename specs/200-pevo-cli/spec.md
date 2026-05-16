@@ -19,14 +19,16 @@ product-level environment variables.
 - `pevo run`
 - `pevo smoke` product positioning
 - `pevo tui` product positioning
-- `pevo skills` product positioning
-- reserved future command family boundaries
+- `pevo skill` product positioning
+- local session, model, config, and auth inspection/maintenance commands
+- local session export/share artifacts
 
 Out of scope:
 
-- approvals, file attachments, fork/share/server attach,
+- approvals, file attachments, fork/server attach, remote session publishing,
   provider login, or auth stores
-- provider transport semantics, provider catalogs, OAuth, or credential pools
+- provider transport semantics beyond explicit `/models` fetches, OAuth, or
+  credential pools
 - SQLite schema details beyond product path selection
 - SDK, HTTP, or MCP transports
 
@@ -65,18 +67,24 @@ Implemented first-slice commands:
 - `pevo run`
 - `pevo smoke`
 - `pevo tui`
-- `pevo skills`
+- `pevo skill`
 - `pevo stats`
 - `pevo context`
-
-Reserved command families:
-
-- `pevo models`
 - `pevo session`
+- `pevo model`
+- `pevo config`
 - `pevo auth`
 
-Reserved command families do not define accepted arguments or behavior in this
-slice.
+Process help is part of the product surface. Top-level commands, subcommands,
+arguments, and flags should carry human-readable descriptions in `--help`
+output, including stable value names for positional arguments and option
+values. High-consequence commands should also use long help to make their
+effects clear: whether they write local files or config, read secrets from
+stdin, contact providers, emit machine output, include selected skills, or
+expose sensitive reconstructed prompt material.
+
+`pevo skill` is the only skill command family name. The obsolete plural
+`pevo skills` is not accepted.
 
 `pevo smoke` is a deterministic development and validation harness. It keeps
 its explicit fake-provider flags and is not redesigned as a live-provider
@@ -88,7 +96,7 @@ metadata summaries. Debug projection does not change `pevo run --format json`,
 does not expose folded reasoning in sanitized transcript messages, and does not
 turn provider metadata into transcript content.
 
-`pevo skills` owns local skill lifecycle operations: list, view, create, patch,
+`pevo skill` owns local skill lifecycle operations: list, view, create, patch,
 remove, enable, disable, install, and scan. Skill package, discovery, scanner,
 and provenance semantics belong to [055 Skills](../055-skills/spec.md).
 
@@ -99,6 +107,90 @@ provider invoices.
 `pevo context` owns local context-window usage inspection for one existing
 session. It does not contact providers, refresh catalogs, or persist prompt
 snapshots.
+
+`pevo session` owns scriptable local session maintenance for the current
+workdir: `list`, `show`, `rename`, `archive`, `restore`, `export`, and
+`share`. `latest` resolves the latest active `run` or `tui` session for the
+current canonical workdir. Exact session ids are matched exactly. The first CLI
+batch intentionally does not expose session `delete`, `undo`, or `redo`.
+
+`pevo session export <session|latest>` emits a local artifact from the SQLite
+state database without contacting providers or external services. Markdown is
+the default artifact format; JSON is available through `--format json` for
+structured automation. When no output path is supplied, the artifact is written
+to stdout. When an output path is supplied through `-o, --output <path>`,
+parent directories may be created, existing files may be overwritten, and the
+command reports the written path.
+
+Export content is selected with `-i, --include <comma-separated-list>`. The
+export include vocabulary is `header` (`h`), `messages` (`m`), `reasoning`
+(`r`), `provider-input-evidence` (`pie`), and `last-provider-request` (`lpr`).
+If `--include` is
+omitted, the effective include set is `messages`. The include set is exact:
+`--include header` emits only header metadata, and
+`--include last-provider-request` emits only the reconstructed provider request.
+`reasoning` expands to include `messages` and retains assistant reasoning
+blocks without provider evidence metadata inside exported messages. The old
+`--with-reasoning`, `--full-inputs`, and `--last-request` flags are not
+accepted.
+
+JSON export uses top-level fields that correspond to selected sections.
+`header`, when included, contains `{ "session": ..., "options": ... }`.
+`messages` contains the sanitized caller-facing transcript projection.
+`provider_input_evidence` contains prompt-scoped provider-input evidence
+retained in `context_evidence`, including mode/system instructions, project
+instructions, selected skill context, source metadata, and content text. This
+evidence bundle does not claim exact provider request replay.
+`last_provider_request` contains the best-effort reconstructed provider request
+body sent immediately before the latest persisted assistant generation in the
+session. This body is regenerated from persisted transcript messages,
+prompt-scoped context evidence, session metadata, and the current
+OpenAI-compatible request adapter; it is labeled as reconstructed, excludes
+HTTP headers and API keys, and may differ from the original network payload if
+provider translation code, tool schemas, local image files, or unstored
+pruning/runtime options changed. Last-request reconstruction is unredacted and
+may expose hidden/system prompts, project instructions, skill context, tool
+schemas, tool outputs, reasoning adapter fields, and image data URLs when those
+inputs are reconstructable.
+
+`pevo session share <session|latest>` creates a local shareable Markdown
+artifact for the session and reports its filesystem path. This command is an
+explicit local packaging step, not remote publication: it must not upload to a
+service, create gists, call provider APIs, or mark durable sharing state. When
+no output path is supplied, the artifact is written as
+`psychevo-share-<short-session-id>.md` in the current workdir. `--json` changes
+the command result reporting to JSON; it does not change the Markdown artifact
+format. Share content is selected with `-i, --include`; the share include
+vocabulary is restricted to `header` (`h`), `messages` (`m`), `reasoning`
+(`r`), and `provider-input-evidence` (`pie`). If `--include` is omitted, the
+effective include set is `messages`. `reasoning` expands to include `messages`.
+Future remote
+publishing may build on this artifact boundary with an opt-in command. `share`
+does not support `last-provider-request` or legacy raw provider request flags;
+provider request bodies are intentionally excluded from share artifacts.
+
+`pevo model` owns local model inspection and explicit provider catalog fetches:
+`list`, `current`, and `fetch`. `list` and `current` read only local
+configuration/cache. `fetch` is the only model command that contacts provider
+`/models` endpoints.
+
+`pevo config` owns path/config/provider inspection plus scoped provider
+creation. Config writes default to the global `$PSYCHEVO_HOME` scope; `--local`
+writes the current workdir's `.psychevo` scope; `--global` explicitly selects
+the default scope. `--global` and `--local` are mutually exclusive.
+
+`pevo auth` owns credential status and API-key writes for configured or
+built-in providers. It supports `status` and `set`; destructive
+unset/logout/remove behavior is not part of this batch. Raw API keys are never
+accepted as argv values. `auth set` reads the key from stdin and writes only to
+the selected scope's `.env`.
+
+New `session`, `model`, `config`, and `auth` commands emit human output by
+default and support `--json`. JSON errors use:
+
+```json
+{"type":"error","message":"..."}
+```
 
 `scripts/install.sh` owns source-based installation of the `pevo` binary. It
 supports installing from a local checkout or a cloned Git repository, verifies
@@ -119,7 +211,7 @@ the installed binary, and optionally initializes the global Psychevo home.
 - [210 pevo TUI](../210-pevo-tui/spec.md) defines the fullscreen interactive
   terminal command.
 - [055 Skills](../055-skills/spec.md) defines the skill package and lifecycle
-  semantics exposed by `pevo skills`.
+  semantics exposed by `pevo skill`.
 - [200 Testing](testing.md) defines acceptance coverage.
 - [120 Provider Registry](../120-provider-registry/spec.md) defines
   provider/model configuration and resolution.
