@@ -1,5 +1,39 @@
 # Changelog
 
+## 2026-05-16
+
+### Added
+
+- Added singular `pevo session`, `pevo model`, `pevo config`, and `pevo auth`
+  command families with JSON output, scoped config/auth writes, and provider
+  `/models` fetching.
+- Added AGENTS project instruction loading for live runs, including
+  `.psychevo/AGENTS.md`, `AGENTS.local.md`, context evidence, context-usage
+  details, and non-fatal legacy memory migration warnings.
+- Added local session export/share artifacts across `pevo session
+  export/share` and TUI `/export` `/share`, including Markdown/JSON export,
+  opt-in reasoning, provider-input evidence bundles, and sensitive include
+  flags such as `last-provider-request`.
+
+### Changed
+
+- Expanded CLI and TUI discovery copy across `pevo --help`, subcommand help,
+  slash `/help`, slash menu summaries, and picker footers so local writes,
+  provider calls, skill selection, JSON output, stdin secrets, and sensitive
+  export includes are easier to understand.
+- Changed hidden project instructions, selected-skill context, and
+  export/share content selection to preserve provider boundaries and use exact
+  include sets.
+- Renamed the CLI skill command family to canonical `pevo skill`, removed the
+  obsolete `pevo skills` form, and migrated skill scope flags from `--project`
+  to `--local`.
+
+### Fixed
+
+- Fixed `pevo tui` session resume so the bottom status line restores compact
+  context-window usage from persisted provider input usage and session context
+  limits before the first redraw.
+
 ## 2026-05-15
 
 ### Added
@@ -11,6 +45,21 @@
 - Reworked `pevo tui` around the V1 design-system direction, including
   composer/status/popup surfaces, evidence wording, `Ctrl+T` reservation, and
   updated snapshots.
+- Matched the `pevo tui` user-shell transcript `!` marker color to the
+  shell-mode composer marker, and rendered shell transcript rows as prompt
+  rows.
+- Increased the built-in coding-agent model-turn budget to 128 and surfaced a
+  specific diagnostic when that budget is exhausted before a final answer.
+- Aligned `pevo tui` Thinking evidence title/marker colors with tool evidence
+  rows and added display-token collapse for long evidence bodies, including
+  dense table, unbroken output, and oversized line-count previews.
+- Changed `pevo tui` shell escapes to require resolvable model/provider config,
+  persist bounded `<user_shell_command>` user context, and inject auxiliary
+  shell results into active agent turns without exposing `bash` in plan mode.
+- Changed `pevo tui` shell mode so `!` is composer state instead of textarea
+  text, reuses `@file` completion for shell commands, defers auxiliary shell
+  work until the foreground agent session is known, and lets empty shell mode
+  exit with `Backspace`.
 
 ## 2026-05-13
 

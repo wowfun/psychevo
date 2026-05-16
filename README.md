@@ -101,8 +101,13 @@ pevo run -m deepseek/deepseek-chat "inspect the CLI entrypoints"
 | `pevo init` | Create the global Psychevo home, starter config, `.env` template, and SQLite state. |
 | `pevo run [message..]` | Run a live coding-agent task from the shell. |
 | `pevo tui [message..]` | Start the fullscreen terminal UI, or process scripted stdin line by line. |
-| `pevo skills ...` | List, view, create, patch, remove, enable, disable, install, or scan local skills. |
+| `pevo skill ...` | List, view, create, patch, remove, enable, disable, install, or scan local skills. |
+| `pevo session ...` | List, inspect, rename, archive, restore, export, or locally share sessions. |
+| `pevo model ...` | Inspect configured models and explicitly fetch provider model catalogs. |
+| `pevo config ...` | Inspect config paths and add OpenAI-compatible providers. |
+| `pevo auth ...` | Inspect credential status and store provider API keys from stdin. |
 | `pevo stats` | Show local token and estimated-cost statistics from SQLite state. |
+| `pevo context --session <id\|latest>` | Inspect local context-window usage for a session. |
 | `pevo smoke --db <path> --workdir <path>` | Run the deterministic fake-provider validation harness. |
 
 Run `pevo <command> --help` for flags.
