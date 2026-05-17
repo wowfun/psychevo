@@ -141,11 +141,14 @@ batch intentionally does not expose session `delete`, `undo`, or `redo`.
 
 `pevo session export <session|latest>` emits a local artifact from the SQLite
 state database without contacting providers or external services. Markdown is
-the default artifact format; JSON is available through `--format json` for
-structured automation. When no output path is supplied, the artifact is written
-to stdout. When an output path is supplied through `-o, --output <path>`,
-parent directories may be created, existing files may be overwritten, and the
-command reports the written path.
+the default artifact format; JSON is available through `-f, --format json` for
+structured automation. All CLI commands that expose a `--format` option also
+support `-f`. When no output path is supplied, the artifact is written to
+stdout. Default artifact filenames use a session-id prefix long enough to
+distinguish sibling parent and child sessions created in the same time window.
+When an output path is supplied through `-o, --output <path>`, parent
+directories may be created, existing files may be overwritten, and the command
+reports the written path.
 
 Export content is selected with `-i, --include <comma-separated-list>`. The
 export include vocabulary is `header` (`h`), `messages` (`m`), `reasoning`
@@ -154,13 +157,23 @@ If `--include` is
 omitted, the effective include set is `messages`. The include set is exact:
 `--include header` emits only header metadata, and
 `--include last-provider-request` emits only the reconstructed provider request.
+That request expands the persisted prompt prefix snapshot when the
+corresponding user prompt's recorded prefix hash matches the latest stored
+snapshot, so hidden prefix slots such as agent catalog, skill index, selected
+main agent, base mode, and project context appear in the reconstructed request
+body. Assistant-turn prefix metadata may be used only as a fallback for older
+records. If the full snapshot is missing or stale, the request is marked
+approximate with warnings instead of silently applying the latest prefix.
 `reasoning` expands to include `messages` and retains assistant reasoning
 blocks without provider evidence metadata inside exported messages. The old
 `--with-reasoning`, `--full-inputs`, and `--last-request` flags are not
 accepted.
 
 JSON export uses top-level fields that correspond to selected sections.
-`header`, when included, contains `{ "session": ..., "options": ... }`.
+`header`, when included, contains `{ "session": ..., "options": ...,
+"prompt_prefix": ... }`. `prompt_prefix` is header-owned metadata: it exposes
+slot names, roles, hashes, sources, provider/model, version, and invalidation
+state, but not hidden full slot text. There is no top-level `prompt_prefix`.
 `messages` contains the sanitized caller-facing transcript projection.
 `provider_input_evidence` contains prompt-scoped provider-input evidence
 retained in `context_evidence`, including mode/system instructions, project
@@ -183,8 +196,9 @@ artifact for the session and reports its filesystem path. This command is an
 explicit local packaging step, not remote publication: it must not upload to a
 service, create gists, call provider APIs, or mark durable sharing state. When
 no output path is supplied, the artifact is written as
-`psychevo-share-<short-session-id>.md` in the current workdir. `--json` changes
-the command result reporting to JSON; it does not change the Markdown artifact
+`psychevo-share-<short-session-id>.md` in the current workdir, using the same
+collision-resistant short session id as export filenames. `--json` changes the
+command result reporting to JSON; it does not change the Markdown artifact
 format. Share content is selected with `-i, --include`; the share include
 vocabulary is restricted to `header` (`h`), `messages` (`m`), `reasoning`
 (`r`), and `provider-input-evidence` (`pie`). If `--include` is omitted, the

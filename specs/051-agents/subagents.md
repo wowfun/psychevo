@@ -158,4 +158,5 @@ not enter `psychevo-agent-core`.
 - [008 Session Continuity](../008-session-continuity/spec.md) defines session
   lineage and continuity inputs.
 - [200 pevo CLI](../200-pevo-cli/spec.md) owns command spelling.
-- [210 pevo TUI](../210-pevo-tui/spec.md) owns interactive projection.
+- [212 pevo TUI Interaction](../212-pevo-tui-interaction/spec.md) owns
+  interactive projection.

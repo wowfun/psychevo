@@ -148,5 +148,5 @@ Concrete surfaces may wrap these messages in their normal error presentation.
   defaults.
 - [200 pevo CLI](../200-pevo-cli/spec.md) defines the concrete `pevo` product
   command line.
-- [210 pevo TUI](../210-pevo-tui/spec.md) defines the fullscreen interactive
-  slash command surface.
+- [212 pevo TUI Interaction](../212-pevo-tui-interaction/spec.md) defines the
+  fullscreen interactive slash command surface.

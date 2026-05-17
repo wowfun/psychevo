@@ -37,6 +37,12 @@ The live adapter posts to a Chat Completions-compatible endpoint:
 
 The adapter translates loop-visible messages to mainstream Chat roles:
 
+- runtime instruction slots with provider role `system` become `role: "system"`
+- runtime instruction slots with provider role `developer` become
+  `role: "developer"` only when model metadata declares
+  `capabilities.developer_role = true`; otherwise runtime or the adapter falls
+  back to `role: "system"` as defined by
+  [006 Prompt Assembly](../006-context-assembly/prompt-assembly.md)
 - user text becomes `role: "user"`
 - assistant text and tool calls become `role: "assistant"` with optional
   `tool_calls`
@@ -99,5 +105,7 @@ normal agent-loop error path.
 - [003 AI Protocol](spec.md) defines provider-neutral generation semantics.
 - [003 Normalized Stream](normalized-stream.md) defines the first normalized
   stream categories consumed by the agent loop.
+- [006 Prompt Assembly](../006-context-assembly/prompt-assembly.md) defines
+  semantic instruction slots and provider-role fallback.
 - [120 Provider Registry](../120-provider-registry/spec.md) defines provider
   selection and configuration for the live entrypoint.

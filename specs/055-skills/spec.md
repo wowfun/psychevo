@@ -186,4 +186,5 @@ metadata, not part of `SKILL.md`.
 - [110 Coding Core Tools](../110-coding-core-tools/spec.md) defines the required
   coding-core toolset, which skill tools do not join.
 - [200 pevo CLI](../200-pevo-cli/spec.md) owns concrete command spelling.
-- [210 pevo TUI](../210-pevo-tui/spec.md) owns interactive slash projection.
+- [212 pevo TUI Interaction](../212-pevo-tui-interaction/spec.md) owns
+  interactive slash projection.

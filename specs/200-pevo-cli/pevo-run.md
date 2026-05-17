@@ -34,7 +34,7 @@ Out of scope:
 - optional `--variant <none|minimal|low|medium|high|xhigh|max>`
 - optional `-s, --session <id>`
 - optional `-c, --continue`
-- optional `--format <default|json>`
+- optional `-f, --format <default|json>`
 - optional `--include-reasoning`
 - optional `--no-skills`
 - repeatable optional `--skill <name-or-path>`

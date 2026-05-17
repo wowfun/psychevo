@@ -6,8 +6,10 @@ psychevo_self_edit: deny
 # 080. Design System
 
 Define Psychevo's shared visual and interaction system. This topic is the
-source of truth for TUI surface language; implementation-specific TUI behavior
-lives in [210 pevo TUI](../210-pevo-tui/spec.md).
+source of truth for TUI surface language; implementation-specific TUI rendering
+lives in [211 pevo TUI Rendering](../211-pevo-tui-rendering/spec.md), and
+interaction behavior lives in
+[212 pevo TUI Interaction](../212-pevo-tui-interaction/spec.md).
 
 ## Direction
 

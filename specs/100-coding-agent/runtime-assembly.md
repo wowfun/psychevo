@@ -81,8 +81,10 @@ order:
 - `AGENTS.local.md`
 
 Project instructions are injected as typed hidden contextual-user input after
-retained history and before selected skill context and the current prompt. They
-are not persisted as ordinary transcript messages. Runtime groups all
+instruction prefix slots and before retained history, selected skill context,
+and the current prompt, matching
+[006 Prompt Assembly](../006-context-assembly/prompt-assembly.md). They are not
+persisted as ordinary transcript messages. Runtime groups all
 project-instruction fragments for the prompt into one contextual-user message
 with one text block per source fragment. Each block uses the AGENTS context
 marker:
@@ -152,6 +154,8 @@ requests abort after `agent_start`; the invocation must end with outcome
 ## Related Topics
 
 - [100 Coding Agent](spec.md) defines the built-in capability semantics.
+- [006 Prompt Assembly](../006-context-assembly/prompt-assembly.md) defines
+  typed prompt slot ordering and stable prefix-cache behavior.
 - [120 Provider Registry](../120-provider-registry/spec.md) defines the live
   provider/model resolution contract.
 - [200 pevo run](../200-pevo-cli/pevo-run.md) defines the concrete live CLI

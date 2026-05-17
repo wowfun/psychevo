@@ -13,11 +13,13 @@ Define the model context assembly contract owned by `psychevo-runtime`.
 - capability-supplied context candidates
 - runtime-owned context projection
 - context transformation boundaries
+- prompt slot assembly and provider role fallback as specified by the
+  [Prompt Assembly Attachment](prompt-assembly.md)
 - durable evidence relationship for context assembly facts
 - boundaries between context assembly, agent messages, AI generation requests, and tool inputs
 
 Out of scope:
-- prompt wording, prompt templates, prompt section ordering, or provider role mapping
+- exact prompt wording or byte-for-byte prompt templates
 - exact provider request fields, response fields, stream fields, or wire formats
 - exact source discovery rules, concrete file names, attachment syntax, or lookup syntax
 - context-window reserve budgets, truncation limits, or compaction policy
@@ -32,7 +34,11 @@ Out of scope:
 
 Model context is the semantic model-facing input assembled for one generation request. It excludes the model target, generation controls, tool declarations, provider configuration, and transport details.
 
-Instruction context is non-transcript instruction or runtime guidance intended for the model. This spec does not define provider roles, prompt text, or prompt section order.
+Instruction context is non-transcript instruction or runtime guidance intended
+for the model. Provider role fallback, typed prompt slot ordering, cache tiers,
+evidence, and accounting are defined by the
+[Prompt Assembly Attachment](prompt-assembly.md). Exact prompt wording remains
+outside this spec.
 
 Loop-visible context is model-visible message material that uses the message semantics defined by [002 Agent Execution](../002-agent-execution/spec.md). Loop-visible context is the part of model context that belongs to the agent loop transcript.
 
@@ -83,17 +89,21 @@ generation request or for a persisted session estimate. This projection is an
 inspection aid; it must not redefine context assembly semantics, mutate session
 state, or persist full prompt/request text.
 
-The first projection includes only source categories Psychevo can compute:
+The projection includes only source categories Psychevo can compute:
 
-- system prompt
+- base policy
+- developer prompt
+- project context
+- history
+- turn context
+- current prompt
 - system tools
-- skills
-- messages
 - free space when a context limit is known
 
-Human-readable context usage output may label the model-facing `messages`
-category as `input_messages` to distinguish it from interface-visible message
-counts. Structured snapshots retain the `messages` category key.
+Human-readable context usage output may label model-facing transcript
+categories as input categories to distinguish them from interface-visible
+message counts. Structured snapshots retain the category keys defined by the
+[Prompt Assembly Attachment](prompt-assembly.md).
 
 Provider-reported input/context token usage, when available, is authoritative
 for the headline total. Category totals are tokenizer estimates. If provider
@@ -103,7 +113,8 @@ and must be marked estimated.
 Runtime-owned context usage data must retain counts, labels, category names,
 tool counts, role counts, selected skill names, and per-skill index-entry
 token counts only. Per-skill index-entry counts describe the compact skills
-index entry, not loaded skill body text. It must not retain message bodies,
+index entry, not loaded skill body text. Selected-agent text is developer
+prompt material, not skill material. Runtime must not retain message bodies,
 skill bodies, tool argument bodies, or provider request text after counting
 completes.
 
@@ -142,3 +153,6 @@ Transformation policy may depend on caller inputs, runtime configuration, provid
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines how context facts relate to other state families.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability contribution boundaries for context candidates.
 - [055 Skills](../055-skills/spec.md) defines skill package discovery and model-visible skill index semantics.
+- [Prompt Assembly Attachment](prompt-assembly.md) defines typed prompt slot
+  ordering, prefix snapshots, provider-role fallback, and context usage
+  categories.

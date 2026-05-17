@@ -89,9 +89,23 @@ slice.
 ## Selected-Agent Behavior
 
 When a caller selects an agent definition for the main session, runtime starts
-the invocation with that definition's instruction body, model preference, tool
-policy, selected skills, hooks, MCP scope, and diagnostics. Session metadata
-records the selected definition and source.
+the invocation with that definition's selected-agent instruction block, model
+preference, tool policy, selected skills, hooks, MCP scope, and diagnostics.
+The selected-agent instruction block includes the selected identity, the
+definition description as model-visible purpose guidance, and the instruction
+body when present. This block is ordered after the runtime-mode instruction and
+before agent catalogs, skill catalogs, and contextual-user context, as defined
+by [006 Prompt Assembly](../006-context-assembly/prompt-assembly.md). It is a
+developer-policy specialization layer. Its description and body take precedence
+over generic coding-agent behavior unless runtime mode, tool policy, safety
+constraints, resource gates, or direct user constraints are stricter. Session
+metadata records the selected definition and source.
+
+Child and fork invocations use the same selected-agent identity, description,
+and instruction-body construction, with additional child-run control guidance
+owned by the subagent runtime. Their persisted child sessions record a
+child-invocation prefix snapshot and prompt-scoped evidence for export and
+last-provider-request reconstruction.
 
 Interactive clients may treat the selected agent as a session-scoped setting:
 changing it affects only future invocations in that session, not previous
@@ -157,6 +171,9 @@ diagnostics and do not fail closed in the first implementation slice.
   dependency direction.
 - [004 Runtime Contract](../004-runtime-contract/spec.md) defines runtime-owned
   agent-invocation assembly.
+- [006 Prompt Assembly](../006-context-assembly/prompt-assembly.md) defines
+  selected main-agent prompt slot ordering, cache behavior, and provider-role
+  fallback.
 - [007 Tool Surface](../007-tool-surface/spec.md) defines tool declaration and
   execution binding semantics.
 - [051 Subagents](subagents.md) defines child and forked agent run semantics.
@@ -165,4 +182,5 @@ diagnostics and do not fail closed in the first implementation slice.
 - [100 Coding Agent](../100-coding-agent/spec.md) defines the built-in coding
   capability that may be specialized by a selected agent.
 - [200 pevo CLI](../200-pevo-cli/spec.md) owns command spelling.
-- [210 pevo TUI](../210-pevo-tui/spec.md) owns interactive projection.
+- [212 pevo TUI Interaction](../212-pevo-tui-interaction/spec.md) owns
+  interactive projection.
