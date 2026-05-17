@@ -41,6 +41,12 @@ Runtime must expose a tool declaration in a generation-request snapshot only whe
 
 Runtime selects the agent-invocation scoped tool surface from available inputs. Capability extensions may contribute tool candidates or toolset candidates, but [050 Capability Extensions](../050-capability-extensions/spec.md) owns source, contribution, activation, availability, and conflict boundaries. This spec does not define source discovery, selection precedence, or plugin mechanics.
 
+When an agent definition is selected, runtime applies that definition's tool
+policy as an additional invocation-scoped constraint. Agent policy may narrow
+tools, but it must not expose a tool declaration without a matching execution
+binding or exceed the current runtime-mode hard ceiling. [051 Agents](../051-agents/spec.md)
+defines agent tool-policy normalization.
+
 Tool implementations may come from built-in or external sources, but source mechanics do not define the tool surface contract.
 
 The AI generation request may include a refreshable tool snapshot from the agent-invocation scoped tool surface. Tool refresh does not define a dynamic tool API, hook API, plugin API, or model-visible toolset concept. [003 AI Protocol](../003-ai-protocol/spec.md) owns provider-neutral generation request semantics and provider-facing normalization.
@@ -85,3 +91,5 @@ A tool result artifact is loop-visible result material produced after a tool exe
 - [009 Resource Surface](../009-resource-surface/spec.md) defines resource gates that may affect tool execution.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines how tool facts relate to other state families.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines how capability contributions may provide tool candidates before agent-invocation scoped selection.
+- [051 Agents](../051-agents/spec.md) defines selected-agent tool policy.
+- [051 Subagents](../051-agents/subagents.md) defines subagent control tools.

@@ -29,6 +29,7 @@ The default first-slice SQLite shape contains:
 - `sessions`
 - `messages`
 - `context_evidence`
+- `agent_edges`
 
 The default first-slice SQLite shape does not create:
 - a separate per-invocation execution-root table
@@ -74,6 +75,29 @@ The first implementation slice stores these session columns:
 - `message_count` integer
 - `tool_call_count` integer
 - `title` text nullable
+- `metadata_json` text nullable
+
+## Agent Edges
+
+The `agent_edges` storage shape persists parent-to-child agent coordination
+edges. It complements `sessions.parent_session_id`; it does not replace session
+lineage and is not a separate agent-run truth source.
+
+Required semantics include:
+- one incoming edge per child agent session
+- stable relationship from parent session to child session
+- lifecycle coordination status independent of the child session's completed,
+  failed, or interrupted execution status
+- metadata space for runtime projection fields such as durable agent id,
+  task name, agent definition name, role, and depth
+
+The first implementation slice stores these columns:
+
+- `parent_session_id` text
+- `child_session_id` text primary key
+- `status` text, `open` or `closed`
+- `created_at_ms` integer
+- `updated_at_ms` integer
 - `metadata_json` text nullable
 
 ## Messages
@@ -198,9 +222,13 @@ SQLite persistence should perform periodic WAL checkpoint work when supported by
 
 Storage failures that affect session or message persistence must be observable to runtime or caller-facing layers that depend on persistence.
 
-The current implementation uses `PRAGMA user_version = 7`, WAL, foreign keys,
+The current implementation uses `PRAGMA user_version = 8`, WAL, foreign keys,
 short busy timeouts, `BEGIN IMMEDIATE`, bounded jitter retry, and best-effort
 periodic `wal_checkpoint(PASSIVE)`.
+
+The version 8 slice creates `agent_edges` for durable parent-to-child agent
+coordination. The edge tracks `open`/`closed` coordination state separately
+from child session completion.
 
 The version 7 slice creates contextual-user grouping columns in
 `context_evidence` for new databases and supported migrations. It still migrates

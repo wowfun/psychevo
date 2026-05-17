@@ -72,8 +72,10 @@ custom keymaps.
   and foreground shell waits must wake on that signal instead of waiting for the
   next provider chunk, shell polling interval, or title-generation follow-up.
   When idle, it performs no destructive action.
-- `Ctrl+T` is reserved for a future transcript review overlay and has no V1
-  behavior.
+- `Ctrl+T` focuses the transcript. In transcript focus, `Up`/`Down` move the
+  focused transcript row, `PageUp`/`PageDown` scroll, `Enter`/`Space` toggles
+  folded evidence rows or opens clickable `Agent` rows, and `Esc` returns to
+  composer focus.
 - `?` opens contextual shortcut help when the current surface supports it.
 - When a TUI text selection is active, `Ctrl+C` copies and clears it. Otherwise
   `Ctrl+C` requests quit. `Ctrl+D` quits.
@@ -93,12 +95,12 @@ custom keymaps.
   last logical line, restoring the saved draft after the newest history entry.
   Otherwise `Up`/`Down` remain textarea navigation or no-op behavior.
 
-Transcript rows are not a persistent keyboard focus target in V1. Bounded
-Thinking, command, and tool evidence details may still expand inline by mouse
-clicking the folded row or `▸`/`▾` marker. Keyboard users can scroll the
-transcript, copy the latest visible answer, and use `/show-raw` or
-`/show-thinking` display toggles, but V1 does not provide a keyboard path to
-expand one specific evidence row.
+Transcript rows are a lightweight keyboard focus target, not a modal editor.
+Bounded Thinking, command, and tool evidence details expand inline by mouse
+clicking the folded row or by focusing the transcript with `Ctrl+T` and pressing
+`Enter`/`Space` on the selected row. Clickable `Agent` rows use the same row
+focus path to enter the child session. Composer focus remains the default after
+turn completion and after `Esc`.
 
 Fullscreen TUI enables terminal mouse capture while the alternate screen is
 active and enables xterm alternate-scroll mode so terminal wheel input stays

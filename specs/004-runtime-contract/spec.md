@@ -62,6 +62,7 @@ After a session boundary exists, runtime assembles an agent invocation from call
 - agent-invocation scoped tool surface
 - generation-request tool declaration snapshots
 - capability extension selections
+- optional selected agent definition and child-agent control scope
 - stop, abort, and cancellation signals
 - evidence sink
 
@@ -76,6 +77,14 @@ Runtime wires the resource surface for non-model resources used by context assem
 Runtime assembles the agent-invocation scoped tool surface and supplies tool declaration snapshots for generation requests. Runtime may refresh those snapshots between generation requests when registry, availability, or toolset expansion facts change. [007 Tool Surface](../007-tool-surface/spec.md) defines the declaration snapshot, binding, and selection contract. This spec does not define concrete tool names, tool schemas, tool result formats, or tool permission rules.
 
 Runtime resolves optional capability targets and toolset hints from built-in, runtime-provided, or external contributions. If required capability material, working context, toolset, model, resource boundary, or evidence wiring cannot be assembled, runtime rejects the request before `agent_start`. A before-agent-start rejection is an invocation rejection, not a failed agent invocation. [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability source, contribution, activation, availability, and conflict boundaries. This spec does not define plugin manifests, extension APIs, package formats, discovery paths, hot reload, startup protocols, shutdown protocols, or healthcheck protocols.
+
+Runtime may resolve a selected agent definition for an invocation. Agent
+definitions contribute instructions, model preferences, tool policy, hooks,
+skills, and MCP scope through runtime assembly. Child subagent runs remain
+runtime-owned agent invocations with parent session relationships and control
+signals; they do not redefine core execution semantics. [051 Agents](../051-agents/spec.md)
+defines selected-agent semantics, and [051 Subagents](../051-agents/subagents.md)
+defines child control semantics.
 
 Runtime wires stop, abort, and cancellation signals into agent execution, AI generation, tool execution bindings, and the evidence sink. Outcome semantics remain owned by [002 Agent Execution](../002-agent-execution/spec.md) and [003 AI Protocol](../003-ai-protocol/spec.md).
 
@@ -109,4 +118,6 @@ that projection must not redefine message content or provider replay semantics.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines runtime assembly state relationships.
 - [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines persistence substrate boundaries for runtime-wired durable facts.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability contributions resolved by runtime into agent-invocation scoped selections.
+- [051 Agents](../051-agents/spec.md) defines selected agent definitions.
+- [051 Subagents](../051-agents/subagents.md) defines child-agent control behavior.
 - [100 Coding Agent](../100-coding-agent/spec.md) defines a built-in capability target assembled by runtime.

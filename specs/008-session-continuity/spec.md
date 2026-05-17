@@ -77,6 +77,12 @@ Lineage is semantic. It must not imply a storage cursor, file entry, database ro
 
 Lineage may help runtime choose continuity inputs, but it does not define replay behavior, deterministic reconstruction, branch UI, fork behavior, merge behavior, tree navigation, retry, or undo.
 
+Subagent runs may use session lineage to relate a child session to its parent.
+The lineage relationship records coordination and continuity provenance; it
+does not make the child session a branch UI, storage cursor, or replay
+algorithm. [051 Subagents](../051-agents/subagents.md) owns child-run control
+semantics.
+
 ## Related Topics
 
 - [000 Foundation](../000-foundation/spec.md) defines the upstream project foundation and implementation-neutral principles.
@@ -88,3 +94,4 @@ Lineage may help runtime choose continuity inputs, but it does not define replay
 - [010 Memory System](../010-memory-system/spec.md) defines optional cross-session memory, separate from session continuity.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines how session continuity facts relate to other state families.
 - [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines optional persistence boundaries for session continuity facts.
+- [051 Subagents](../051-agents/subagents.md) defines subagent lineage and control semantics.

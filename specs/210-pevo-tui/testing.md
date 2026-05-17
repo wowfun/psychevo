@@ -157,6 +157,45 @@ Required coverage:
   provider streams that emit tool names before complete JSON arguments must
   produce active ledger rows during argument generation instead of waiting for
   local tool execution
+- foreground Agent observability tests must cover scoped child stream routing:
+  entering a running child session renders its live Thinking, tool, and message
+  events through the regular transcript view; staying in the parent updates only
+  the Agent row's live tail and status; opening a child after scoped events have
+  already reached the parent replays the buffered live child work; and completed
+  parent Agent rows show the child session's latest assistant token usage when
+  available without duplicating hidden completion notifications. Parent-row
+  child Thinking previews must coalesce contiguous reasoning deltas so provider
+  chunking cannot render one `Thinking:` line per streamed fragment
+- Agent runtime identity tests must cover `@agent-name` delegations resolving to
+  that definition name rather than `general`, `name` alias compatibility,
+  `name`/`agent_type` conflict errors, explicit unknown agent errors, and
+  omitted agent names defaulting to `general`
+- nested-agent tests must cover effective `max_spawn_depth`: unset, `null`, and
+  `0` make a direct child a leaf; `1` allows one grandchild level and decrements
+  the remaining depth to `0`; pause-new-spawns rejects new `Agent` calls without
+  interrupting already running children
+- foreground Agent status-line tests must cover child-session context usage,
+  including fallback to parent context-limit metadata, with compact parent
+  navigation appended after the workdir/branch segment instead of hiding the
+  context usage segment
+- `/agents Running` coverage must include cap-state rendering, Pause/Resume
+  spawning, and Stop subtree semantics. `/agents Available` coverage must
+  include disabled/error rows for supported definition files that fail to parse,
+  `Use as main` for active definitions, `Default main agent` clearing, and
+  rejection of main-agent switching while a turn is running. Successful
+  main-agent changes should close the panel.
+- main-agent switching coverage must assert that the selection is scoped to the
+  current session, restored when switching sessions, reflected in `/status` and
+  the transcript/composer separator rather than the bottom status line, used
+  for subsequent `RunOptions.agent`, and does not alter `@agent-name`
+  delegation semantics. Child-session coverage must assert that a child
+  session's persisted `agent.name` appears as the default separator identity
+  and that selecting `Default main agent` inside that child restores the child
+  identity.
+- evidence row tests must cover the shared Thinking/tool/Agent body behavior:
+  `Space`/row-click expand-collapse semantics, active elapsed labels, and live
+  `2+4` head/tail previews should be exercised through the common helper rather
+  than separate per-row bespoke assertions when possible
 - fullscreen history reload coverage must include a persisted assistant
   `finish_reason=tool_calls` message with a `write` tool call and no matching
   tool result yet; it must render an active `Updating <path>` row without turn
@@ -189,10 +228,14 @@ Required coverage:
   row detail collapse, long `Ran`/`Running` command-title expansion, long
   JSON/HTML-like single-line tool output collapse, unbroken table separator
   token collapse, and line-count collapse previews that are still bounded by
-  display tokens, mouse row toggles, no V1 keyboard row toggle path, and drag
-  text selection not toggling anything. Snapshot coverage must prove selection
-  and focus markers use the design-system `›` marker instead of repeating `>`
-  on every wrapped Markdown/table line
+  display tokens. Long Thinking, tool output, and Agent previews must keep a
+  live first-2 plus last-4 middle-folded preview, including streamed appends
+  that update the trailing window. Mouse row toggles must not open Agent
+  sessions; Agent entry uses the explicit `Open` target or transcript-focus
+  `Enter`/`O`, while `Space` keeps toggling details. Drag text selection must
+  not toggle anything. Snapshot coverage must prove selection and focus markers
+  use the design-system `›` marker instead of repeating `>` on every wrapped
+  Markdown/table line
 - terminal-adaptive TUI theme derivation for dark, light, and unknown terminal
   backgrounds; prompt/composer shared surfaces, popup/menu surfaces, selected
   row contrast, accent styles, and static motion fallback are covered by
@@ -383,10 +426,11 @@ Required coverage:
   `select/fetch model`, prefix-only Tab completion that does not complete
   fuzzy-only matches, disabled `/compact` and `/export` entries, and bounded
   `upcoming` feedback
-- V1 transcript passive behavior: `Ctrl+T` remains reserved and inert,
-  PageUp/PageDown scroll the transcript from composer focus, folded evidence
-  toggles by mouse only, and `Up`/`Down` remain composer navigation/history
-  boundary keys
+- transcript focus behavior: `Ctrl+T` enters transcript focus, `Esc` returns
+  to composer focus, `Up`/`Down` move focused rows, `Enter`/`Space` toggles
+  folded evidence or opens clickable `Agent` rows, PageUp/PageDown scroll from
+  both composer and transcript focus, and composer-focus `Up`/`Down` remain
+  input/history boundary keys
 - slash menu row selection with Up/Down/Home/End and mouse click, including
   Up/Down wraparound and `/mo` navigation to `/mode` before `Enter`
 - transcript auto-follow behavior: new prompts reset to bottom-following,
@@ -483,12 +527,18 @@ turn metadata, scroll the transcript away from the bottom and then back down,
 capture the default collapsed Thinking/table state, then expand the Thinking
 row and capture a screenshot proving the bottom marker and metadata row are
 visible. It must also capture an interrupted foreground bash row so the settled
-`interrupted` marker can be visually inspected.
+`interrupted` marker can be visually inspected. Agent-observability changes must
+also capture a foreground clickable `Agent` tool row plus `/agents` Running,
+Available, definition action, and run-prompt panels using deterministic local
+agent definitions.
 
 VHS capture remains outside default broad validation and is not a pixel golden.
 Screenshots stay untracked. A person or visually capable agent must inspect the
 generated PNGs and report the screenshot directory and visual judgment in the
-handoff for a fullscreen TUI visual change.
+handoff for a fullscreen TUI visual change. Agent-observability VHS coverage
+must include the parent running Agent row with `Open`, live tail, and tokens; a
+running child session showing live Thinking/tool activity; and the child
+navigation hint while preserving the regular session layout.
 
 The VHS path is `scripts/pevo-tui-capture.sh demo`. Its required tools are
 `vhs`, `ttyd`, `ffmpeg`, and `python3`. If dependencies are missing, the

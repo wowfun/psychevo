@@ -143,6 +143,11 @@ Allowed direct interaction rules:
 - `psychevo-runtime` may own SQLite persistence for the first implementation slice without adding a new crate.
 - `psychevo-agent-core` may directly interact with `psychevo-ai` and tool abstractions supplied by runtime.
 
+Agent definitions and subagent orchestration are first-class orchestration
+concepts, not core loop concepts. `psychevo-runtime` owns their resolution in
+the first implementation slice; a future agent-orchestration crate may own that
+layer as long as dependency direction and transport separation remain intact.
+
 Prohibited dependency rules:
 - lower layers must not depend on higher layers
 - `psychevo-agent-core` must not depend on `psychevo-runtime` or `psychevo-cli`
@@ -165,4 +170,5 @@ Prohibited dependency rules:
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines cross-cutting semantic state relationships.
 - [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines storage and persistence boundaries.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability contribution boundaries resolved by runtime.
+- [051 Agents](../051-agents/spec.md) defines reusable agent definitions and selected-agent orchestration semantics.
 - [100 Coding Agent](../100-coding-agent/spec.md) defines a runtime-owned built-in capability target.

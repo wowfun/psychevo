@@ -47,6 +47,14 @@ Runtime resolves the `coding-agent` capability target during agent-invocation as
 
 Instruction-file discovery, context-file discovery, skills, and memory are not part of the minimum coding-agent contract. Optional skill support may feed skill indexes, explicit skill content, and skill adjunct tools through context, tool, or capability contribution boundaries owned by [006 Context Assembly](../006-context-assembly/spec.md), [050 Capability Extensions](../050-capability-extensions/spec.md), and [055 Skills](../055-skills/spec.md). Memory remains owned by [010 Memory System](../010-memory-system/spec.md).
 
+Optional agent definitions may specialize the coding-agent invocation. A
+selected agent can add instructions, model preference, hooks, skills, MCP scope,
+and tool policy, but it cannot remove the runtime's responsibility to enforce
+working context, resource boundaries, and runtime-mode hard ceilings. Child
+subagents are separate runtime-owned invocations related to their parent
+session. [051 Agents](../051-agents/spec.md) and
+[051 Subagents](../051-agents/subagents.md) own these semantics.
+
 `coding-agent` uses the agent-invocation scoped tool surface assembled by runtime. Toolset expansion, refreshable tool declaration snapshots, and tool declaration visibility stay owned by [007 Tool Surface](../007-tool-surface/spec.md). Source identity, activation, availability, degraded state, and conflicts for contributed capability material stay owned by [050 Capability Extensions](../050-capability-extensions/spec.md).
 
 Coding tools operate through the runtime-bound resource surface. [009 Resource Surface](../009-resource-surface/spec.md) owns resource decisions and their observability boundaries.
@@ -72,3 +80,5 @@ Self-evolution is a later capability domain. Any future evaluate-modify-retain-o
 - [100 Testing](testing.md) defines acceptance scenarios and validation expectations.
 - [110 Coding Core Tools](../110-coding-core-tools/spec.md) defines the required `coding-core` toolset.
 - [055 Skills](../055-skills/spec.md) defines optional skill discovery, view, and management behavior.
+- [051 Agents](../051-agents/spec.md) defines optional selected-agent behavior.
+- [051 Subagents](../051-agents/subagents.md) defines optional subagent behavior.

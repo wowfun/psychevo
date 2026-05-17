@@ -86,6 +86,31 @@ expose sensitive reconstructed prompt material.
 `pevo skill` is the only skill command family name. The obsolete plural
 `pevo skills` is not accepted.
 
+`pevo agent` owns local agent definition inspection and first-class child-agent
+control.
+`pevo run` may accept `--agent <name-or-path>` to select the main-session
+agent definition and `--no-agents` to disable agent discovery and agent
+tools for that invocation. Agent definition behavior is defined by
+[051 Agents](../051-agents/spec.md), and subagent behavior is defined by
+[051 Subagents](../051-agents/subagents.md).
+
+`pevo agent list` lists discoverable agent definitions. Runtime instances are
+listed through `pevo agent status`, which defaults to the current/root session
+tree and accepts `--all` for every durable or live child-agent session.
+`pevo agent inspect`, `wait`, `send`, `close`, `resume`, `attach`, and `logs`
+operate on agent ids or task names returned by `Agent` spawn and status output.
+`inspect` is a local, read-only peek into a child-agent session: it resolves the
+durable parent/child edge, reports the agent record plus parent and child
+session summaries, and includes a bounded recent transcript projection. It must
+not contact providers, refresh model catalogs, mutate session recency, or resume
+stopped work. `send` may resume a closed or completed child agent in the
+background as a continuation turn. `attach` enters the original child session
+using its existing definition, mode, and tool policy; it does not promote the
+child to a main session.
+CLI output keeps the same split as the TUI: `inspect` and `logs` are
+observational, while `attach`, `send`, `resume`, and `close` are explicit
+control operations.
+
 `pevo smoke` is a deterministic development and validation harness. It keeps
 its explicit fake-provider flags and is not redesigned as a live-provider
 product entrypoint in this topic.
@@ -212,6 +237,8 @@ the installed binary, and optionally initializes the global Psychevo home.
   terminal command.
 - [055 Skills](../055-skills/spec.md) defines the skill package and lifecycle
   semantics exposed by `pevo skill`.
+- [051 Agents](../051-agents/spec.md) defines agent definition semantics.
+- [051 Subagents](../051-agents/subagents.md) defines subagent command semantics.
 - [200 Testing](testing.md) defines acceptance coverage.
 - [120 Provider Registry](../120-provider-registry/spec.md) defines
   provider/model configuration and resolution.
