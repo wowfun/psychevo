@@ -64,6 +64,12 @@ pub struct OpenAiChatTokenCount {
     pub encoding: String,
     pub encoding_source: String,
     pub encoding_fallback: bool,
+    pub base_policy_tokens: u64,
+    pub developer_prompt_tokens: u64,
+    pub project_context_tokens: u64,
+    pub history_tokens: u64,
+    pub turn_context_tokens: u64,
+    pub current_prompt_tokens: u64,
     pub system_prompt_tokens: u64,
     pub system_tools_tokens: u64,
     pub skills_tokens: u64,
@@ -110,65 +116,84 @@ pub fn count_openai_chat_request(
         .get("tools")
         .map(|tools| (count_value(enc, tools), tools.as_array().map_or(0, Vec::len)))
         .unwrap_or((0, 0));
-    let provider_messages = body
-        .get("messages")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
 
-    let mut system_prompt_tokens = 0u64;
-    let mut skills_tokens = 0u64;
-    let mut messages_tokens = 0u64;
+    let mut base_policy_tokens = 0u64;
+    let mut developer_prompt_tokens = 0u64;
+    let skills_tokens = 0u64;
+    let mut project_context_tokens = 0u64;
+    let mut history_tokens = 0u64;
+    let mut turn_context_tokens = 0u64;
+    let mut current_prompt_tokens = 0u64;
     let mut role_counts = BTreeMap::<String, OpenAiChatRoleTokenCount>::new();
-    let mut seen_provider_system_messages = 0usize;
     let mut skill_entries = Vec::new();
+    let mut transcript_message_count = 0usize;
 
-    for message in &provider_messages {
-        let tokens = count_value(enc, message);
-        if message.get("role").and_then(Value::as_str) == Some("system") {
-            if seen_provider_system_messages < counting.system_prompt_message_count {
-                system_prompt_tokens = system_prompt_tokens.saturating_add(tokens);
-            } else if seen_provider_system_messages
-                < counting
-                    .system_prompt_message_count
-                    .saturating_add(counting.skill_index_message_count)
-            {
-                skills_tokens = skills_tokens.saturating_add(tokens);
-                skill_entries.extend(skill_entry_token_counts(enc, message));
-            } else {
-                system_prompt_tokens = system_prompt_tokens.saturating_add(tokens);
+    for message in &request.messages {
+        let provider_messages = translate_message_for_request(message, &request.model, &request.metadata, base_url);
+        let tokens = provider_messages
+            .iter()
+            .map(|message| count_value(enc, message))
+            .sum::<u64>();
+        let role = message.get("role").and_then(Value::as_str).unwrap_or("unknown");
+        if role == "system" || role == "developer" {
+            match prompt_semantic_role(message).unwrap_or("developer_prompt") {
+                "base_policy" => base_policy_tokens = base_policy_tokens.saturating_add(tokens),
+                "developer_prompt" => {
+                    developer_prompt_tokens = developer_prompt_tokens.saturating_add(tokens);
+                    if prompt_slot(message) == Some("skill_index") {
+                        for provider_message in &provider_messages {
+                            skill_entries.extend(skill_entry_token_counts(enc, provider_message));
+                        }
+                    }
+                }
+                _ => developer_prompt_tokens = developer_prompt_tokens.saturating_add(tokens),
             }
-            seen_provider_system_messages = seen_provider_system_messages.saturating_add(1);
             continue;
         }
 
-        messages_tokens = messages_tokens.saturating_add(tokens);
-        let role = normalized_message_role(message);
-        let entry = role_counts.entry(role).or_default();
-        entry.count = entry.count.saturating_add(1);
-        entry.tokens = entry.tokens.saturating_add(tokens);
+        if context_category(message) == Some("project_context") {
+            project_context_tokens = project_context_tokens.saturating_add(tokens);
+        } else if context_category(message) == Some("turn_context") {
+            turn_context_tokens = turn_context_tokens.saturating_add(tokens);
+        } else if transcript_message_count < counting.previous_message_count {
+            history_tokens = history_tokens.saturating_add(tokens);
+            transcript_message_count = transcript_message_count.saturating_add(1);
+        } else {
+            current_prompt_tokens = current_prompt_tokens.saturating_add(tokens);
+            transcript_message_count = transcript_message_count.saturating_add(1);
+        }
+        for provider_message in provider_messages {
+            let role = normalized_message_role(&provider_message);
+            let entry = role_counts.entry(role).or_default();
+            entry.count = entry.count.saturating_add(1);
+            entry.tokens = entry.tokens.saturating_add(count_value(enc, &provider_message));
+        }
     }
-    let selected_skill_context_messages =
-        selected_skill_context_provider_messages(request, base_url, &counting);
-    let selected_skill_context_tokens = selected_skill_context_messages
-        .iter()
-        .map(|message| count_value(enc, message))
-        .sum::<u64>();
-    let project_instruction_context_messages =
-        project_instruction_context_provider_messages(request, base_url, &counting);
-    let project_instruction_context_tokens = project_instruction_context_messages
-        .iter()
-        .map(|message| count_value(enc, message))
-        .sum::<u64>();
+    let system_prompt_tokens = base_policy_tokens.saturating_add(developer_prompt_tokens);
+    let messages_tokens = project_context_tokens
+        .saturating_add(history_tokens)
+        .saturating_add(turn_context_tokens)
+        .saturating_add(current_prompt_tokens);
+    let selected_skill_context_tokens = turn_context_tokens;
+    let project_instruction_context_tokens = project_context_tokens;
 
-    let total_estimated_tokens = system_prompt_tokens
+    let total_estimated_tokens = base_policy_tokens
+        .saturating_add(developer_prompt_tokens)
         .saturating_add(system_tools_tokens)
-        .saturating_add(skills_tokens)
-        .saturating_add(messages_tokens);
+        .saturating_add(project_context_tokens)
+        .saturating_add(history_tokens)
+        .saturating_add(turn_context_tokens)
+        .saturating_add(current_prompt_tokens);
     OpenAiChatTokenCount {
         encoding: encoding.name,
         encoding_source: encoding.source,
         encoding_fallback: encoding.fallback,
+        base_policy_tokens,
+        developer_prompt_tokens,
+        project_context_tokens,
+        history_tokens,
+        turn_context_tokens,
+        current_prompt_tokens,
         system_prompt_tokens,
         system_tools_tokens,
         skills_tokens,
@@ -243,8 +268,6 @@ fn resolve_count_encoding(provider: &str, model: &str) -> CountEncoding {
 
 #[derive(Debug, Clone, Default)]
 struct RequestContextCountingMetadata {
-    system_prompt_message_count: usize,
-    skill_index_message_count: usize,
     previous_message_count: usize,
     project_instruction_context_message_count: usize,
     selected_skill_context_message_count: usize,
@@ -256,23 +279,10 @@ fn request_context_counting_metadata(
 ) -> RequestContextCountingMetadata {
     let Some(value) = request.metadata.get("context_counting") else {
         return RequestContextCountingMetadata {
-            system_prompt_message_count: request
-                .messages
-                .iter()
-                .filter(|message| message.get("role").and_then(Value::as_str) == Some("system"))
-                .count(),
             ..RequestContextCountingMetadata::default()
         };
     };
     RequestContextCountingMetadata {
-        system_prompt_message_count: value
-            .get("system_prompt_message_count")
-            .and_then(Value::as_u64)
-            .unwrap_or_default() as usize,
-        skill_index_message_count: value
-            .get("skill_index_message_count")
-            .and_then(Value::as_u64)
-            .unwrap_or_default() as usize,
         previous_message_count: value
             .get("previous_message_count")
             .and_then(Value::as_u64)
@@ -339,64 +349,32 @@ fn skill_entry_name(entry: &str) -> Option<&str> {
     (!name.is_empty()).then_some(name)
 }
 
-fn selected_skill_context_provider_messages(
-    request: &GenerationRequest,
-    base_url: &str,
-    counting: &RequestContextCountingMetadata,
-) -> Vec<Value> {
-    if counting.selected_skill_context_message_count == 0 {
-        return Vec::new();
-    }
-    let start = counting
-        .previous_message_count
-        .saturating_add(counting.project_instruction_context_message_count);
-    let end = start.saturating_add(counting.selected_skill_context_message_count);
-    non_system_provider_messages_in_range(request, base_url, start, end)
-}
-
-fn project_instruction_context_provider_messages(
-    request: &GenerationRequest,
-    base_url: &str,
-    counting: &RequestContextCountingMetadata,
-) -> Vec<Value> {
-    if counting.project_instruction_context_message_count == 0 {
-        return Vec::new();
-    }
-    let start = counting.previous_message_count;
-    let end = start.saturating_add(counting.project_instruction_context_message_count);
-    non_system_provider_messages_in_range(request, base_url, start, end)
-}
-
-fn non_system_provider_messages_in_range(
-    request: &GenerationRequest,
-    base_url: &str,
-    start: usize,
-    end: usize,
-) -> Vec<Value> {
-    let mut seen_non_system_messages = 0usize;
-    let mut messages = Vec::new();
-    for message in &request.messages {
-        if message.get("role").and_then(Value::as_str) == Some("system") {
-            continue;
-        }
-        if seen_non_system_messages >= start && seen_non_system_messages < end {
-            messages.extend(translate_message_for_request(
-                message,
-                &request.model,
-                &request.metadata,
-                base_url,
-            ));
-        }
-        seen_non_system_messages = seen_non_system_messages.saturating_add(1);
-    }
-    messages
-}
-
 fn normalized_message_role(message: &Value) -> String {
     match message.get("role").and_then(Value::as_str).unwrap_or("unknown") {
         "tool_result" => "tool".to_string(),
         other => other.to_string(),
     }
+}
+
+fn prompt_slot(message: &Value) -> Option<&str> {
+    message
+        .get("metadata")
+        .and_then(|metadata| metadata.get("prompt_slot"))
+        .and_then(Value::as_str)
+}
+
+fn prompt_semantic_role(message: &Value) -> Option<&str> {
+    message
+        .get("metadata")
+        .and_then(|metadata| metadata.get("prompt_semantic_role"))
+        .and_then(Value::as_str)
+}
+
+fn context_category(message: &Value) -> Option<&str> {
+    message
+        .get("metadata")
+        .and_then(|metadata| metadata.get("context_category"))
+        .and_then(Value::as_str)
 }
 
 fn capability_is_false(metadata: &Value, key: &str) -> bool {
@@ -448,11 +426,27 @@ fn translate_message(
 ) -> Vec<Value> {
     match message.get("role").and_then(Value::as_str) {
         Some("system") => system_messages(message),
+        Some("developer") => developer_messages(message, metadata),
         Some("user") => user_messages(message),
         Some("assistant") => assistant_messages(message, target, metadata, base_url),
         Some("tool_result") => tool_result_messages(message),
         _ => Vec::new(),
     }
+}
+
+fn developer_messages(message: &Value, metadata: &Value) -> Vec<Value> {
+    let role = if capability_is_true(metadata, "developer_role") {
+        "developer"
+    } else {
+        "system"
+    };
+    message
+        .get("content")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(|text| vec![json!({ "role": role, "content": text })])
+        .unwrap_or_default()
 }
 
 fn system_messages(message: &Value) -> Vec<Value> {

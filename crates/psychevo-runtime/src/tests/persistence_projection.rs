@@ -36,6 +36,7 @@ async fn persistence_sink_streams_elapsed_metadata_for_assistant_message_end() {
         prompt_display: None,
         context_recorder: None,
         selected_agent: None,
+        prompt_prefix_metadata: None,
     };
 
     sink.emit(AgentEvent::MessageEnd {
@@ -112,6 +113,7 @@ async fn persistence_sink_persists_selected_agent_on_assistant_message_end() {
             source: "project".to_string(),
             path: Some(workdir.join(".psychevo/agents/translate.md")),
         }),
+        prompt_prefix_metadata: None,
     };
 
     sink.emit(AgentEvent::MessageEnd {
@@ -180,6 +182,7 @@ async fn persistence_sink_projects_and_persists_terminal_reason() {
         prompt_display: None,
         context_recorder: None,
         selected_agent: None,
+        prompt_prefix_metadata: None,
     };
 
     sink.emit(AgentEvent::AgentEnd {
@@ -256,6 +259,7 @@ async fn persistence_sink_persists_assistant_reasoning_effort_metadata() {
         prompt_display: None,
         context_recorder: None,
         selected_agent: None,
+        prompt_prefix_metadata: None,
     };
 
     sink.emit(AgentEvent::MessageEnd {
@@ -326,6 +330,7 @@ async fn persistence_sink_persists_tool_elapsed_metadata() {
         prompt_display: None,
         context_recorder: None,
         selected_agent: None,
+        prompt_prefix_metadata: None,
     };
 
     sink.emit(AgentEvent::ToolExecutionEnd {
@@ -424,6 +429,7 @@ async fn persistence_sink_persists_prompt_context_evidence_once() {
         prompt_display: None,
         context_recorder: None,
         selected_agent: None,
+        prompt_prefix_metadata: None,
     };
 
     sink.emit(AgentEvent::MessageEnd {

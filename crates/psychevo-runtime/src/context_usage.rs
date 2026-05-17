@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use futures::future::BoxFuture;
-use psychevo_agent_core::{Message, ToolBinding};
+use psychevo_agent_core::{Message, PromptInstruction, ToolBinding};
 use psychevo_ai::{
     AbortSignal, GenerationProvider, GenerationRequest, GenerationStream, ModelTarget,
     OpenAiChatTokenCount, ToolDeclaration, count_openai_chat_request,
@@ -298,22 +298,36 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
     let mut request_messages = vec![json!({
         "role": "system",
         "content": mode_instruction(mode),
+        "metadata": {
+            "prompt_slot": "base/mode",
+            "prompt_semantic_role": "base_policy",
+        },
     })];
     if !skills_prompt.trim().is_empty() {
         request_messages.push(json!({
             "role": "system",
             "content": skills_prompt,
+            "metadata": {
+                "prompt_slot": "skill_index",
+                "prompt_semantic_role": "developer_prompt",
+            },
         }));
-    }
-    for message in &messages {
-        request_messages.push(serde_json::to_value(&message.message)?);
     }
     let project_instructions = load_project_instructions(&workdir)?;
     for fragment in &project_instructions.fragments {
         request_messages.push(json!({
             "role": "user",
             "content": [{ "text": fragment.content.clone() }],
+            "metadata": {
+                "contextual_user": true,
+                "provider_group": "project_instructions",
+                "context_category": "project_context",
+                "hidden": true,
+            },
         }));
+    }
+    for message in &messages {
+        request_messages.push(serde_json::to_value(&message.message)?);
     }
     let mut tools = coding_core_tools_for_mode(&workdir, mode);
     tools.extend(skill_tools_for_mode(skill_options, mode));
@@ -352,15 +366,30 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
 }
 
 pub(crate) fn context_counting_metadata(
-    system_prompt_message_count: usize,
-    skill_index_message_count: usize,
+    prompt_instructions: &[PromptInstruction],
+    turn_prompt_message_count: usize,
     previous_message_count: usize,
     project_instruction_context_message_count: usize,
     selected_skill_context_message_count: usize,
     skill_names: Vec<String>,
 ) -> Value {
+    let base_policy_message_count = prompt_instructions
+        .iter()
+        .filter(|instruction| instruction.semantic_role == "base_policy")
+        .count();
+    let developer_prompt_message_count = prompt_instructions
+        .iter()
+        .filter(|instruction| instruction.semantic_role == "developer_prompt")
+        .count();
+    let skill_index_message_count = prompt_instructions
+        .iter()
+        .filter(|instruction| instruction.slot == "skill_index")
+        .count();
     json!({
-        "system_prompt_message_count": system_prompt_message_count,
+        "system_prompt_message_count": prompt_instructions.len(),
+        "base_policy_message_count": base_policy_message_count,
+        "developer_prompt_message_count": developer_prompt_message_count,
+        "turn_prompt_message_count": turn_prompt_message_count,
         "skill_index_message_count": skill_index_message_count,
         "previous_message_count": previous_message_count,
         "project_instruction_context_message_count": project_instruction_context_message_count,
@@ -402,15 +431,21 @@ pub fn format_context_snapshot_text_with_options(
         && let Some(bar) = context_bar(snapshot, width)
     {
         lines.push(bar);
-        lines.push("S system  T tools  K skills  M input_messages  . free".to_string());
+        lines.push(
+            "B base  D developer  P project  H history  C turn  U prompt  T tools  . free"
+                .to_string(),
+        );
         lines.push(String::new());
     }
     lines.push(format_total_line(snapshot));
     for key in [
-        "system_prompt",
+        "base_policy",
+        "developer_prompt",
+        "project_context",
+        "history",
+        "turn_context",
+        "current_prompt",
         "system_tools",
-        "skills",
-        "messages",
         "free_space",
     ] {
         let Some(category) = snapshot.categories.get(key) else {
@@ -432,7 +467,7 @@ pub fn format_context_snapshot_text_with_options(
             {
                 lines.push(format!("  tools: {count}"));
             }
-        } else if key == "skills" {
+        } else if key == "developer_prompt" {
             for entry in sorted_skill_entries(category) {
                 lines.push(format!(
                     "  {}: {}",
@@ -440,7 +475,7 @@ pub fn format_context_snapshot_text_with_options(
                     format_token_count(entry.tokens, true)
                 ));
             }
-        } else if key == "messages" {
+        } else if key == "history" {
             if let Some(roles) = category.details.get("roles").and_then(Value::as_object) {
                 for (role, value) in roles {
                     let count = value.get("count").and_then(Value::as_u64).unwrap_or(0);
@@ -452,27 +487,35 @@ pub fn format_context_snapshot_text_with_options(
                     ));
                 }
             }
-            if let Some(selected) = category.details.get("selected_skill_context") {
-                let count = selected.get("count").and_then(Value::as_u64).unwrap_or(0);
-                let tokens = selected.get("tokens").and_then(Value::as_u64).unwrap_or(0);
-                if count > 0 || tokens > 0 {
-                    lines.push(format!(
-                        "  selected_skill_context: {count} {}, {}",
-                        input_message_unit(count),
-                        format_token_count(tokens, true)
-                    ));
-                }
+        } else if key == "project_context" {
+            let count = category
+                .details
+                .get("count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            if count > 0 {
+                lines.push(format!(
+                    "  project_context: {count} {}",
+                    input_message_unit(count)
+                ));
             }
-            if let Some(project) = category.details.get("project_instruction_context") {
-                let count = project.get("count").and_then(Value::as_u64).unwrap_or(0);
-                let tokens = project.get("tokens").and_then(Value::as_u64).unwrap_or(0);
-                if count > 0 || tokens > 0 {
-                    lines.push(format!(
-                        "  project_instruction_context: {count} {}, {}",
-                        input_message_unit(count),
-                        format_token_count(tokens, true)
-                    ));
-                }
+        } else if key == "turn_context" {
+            let count = category
+                .details
+                .get("selected_skill_context_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let tokens = category
+                .details
+                .get("selected_skill_context_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            if count > 0 || tokens > 0 {
+                lines.push(format!(
+                    "  selected_skill_context: {count} {}, {}",
+                    input_message_unit(count),
+                    format_token_count(tokens, true)
+                ));
             }
         }
     }
@@ -489,10 +532,10 @@ pub fn format_context_snapshot_text_with_options(
 }
 
 fn context_category_text_key(key: &str) -> &str {
-    if key == "messages" {
-        "input_messages"
-    } else {
-        key
+    match key {
+        "history" => "input_history",
+        "current_prompt" => "input_prompt",
+        other => other,
     }
 }
 
@@ -627,25 +670,17 @@ fn snapshot_from_count(
     let mut categories = BTreeMap::new();
     insert_category(
         &mut categories,
-        "system_prompt",
-        "System prompt",
-        count.system_prompt_tokens,
+        "base_policy",
+        "Base policy",
+        count.base_policy_tokens,
         context_limit,
         json!({}),
     );
     insert_category(
         &mut categories,
-        "system_tools",
-        "System tools",
-        count.system_tools_tokens,
-        context_limit,
-        json!({ "tool_count": count.tool_count }),
-    );
-    insert_category(
-        &mut categories,
-        "skills",
-        "Skills",
-        count.skills_tokens,
+        "developer_prompt",
+        "Developer prompt",
+        count.developer_prompt_tokens,
         context_limit,
         json!({
             "skill_count": count.skill_names.len(),
@@ -655,6 +690,14 @@ fn snapshot_from_count(
                 .map(|entry| json!({ "name": entry.name, "tokens": entry.tokens }))
                 .collect::<Vec<_>>(),
         }),
+    );
+    insert_category(
+        &mut categories,
+        "project_context",
+        "Project context",
+        count.project_context_tokens,
+        context_limit,
+        json!({ "count": count.project_instruction_context_count }),
     );
     let roles = count
         .role_counts
@@ -671,21 +714,38 @@ fn snapshot_from_count(
         .collect::<serde_json::Map<_, _>>();
     insert_category(
         &mut categories,
-        "messages",
-        "Messages",
-        count.messages_tokens,
+        "history",
+        "History",
+        count.history_tokens,
+        context_limit,
+        json!({ "roles": roles }),
+    );
+    insert_category(
+        &mut categories,
+        "turn_context",
+        "Turn context",
+        count.turn_context_tokens,
         context_limit,
         json!({
-            "roles": roles,
-            "selected_skill_context": {
-                "count": count.selected_skill_context_count,
-                "tokens": count.selected_skill_context_tokens,
-            },
-            "project_instruction_context": {
-                "count": count.project_instruction_context_count,
-                "tokens": count.project_instruction_context_tokens,
-            }
+            "selected_skill_context_count": count.selected_skill_context_count,
+            "selected_skill_context_tokens": count.selected_skill_context_tokens,
         }),
+    );
+    insert_category(
+        &mut categories,
+        "current_prompt",
+        "Current prompt",
+        count.current_prompt_tokens,
+        context_limit,
+        json!({}),
+    );
+    insert_category(
+        &mut categories,
+        "system_tools",
+        "System tools",
+        count.system_tools_tokens,
+        context_limit,
+        json!({ "tool_count": count.tool_count }),
     );
     let mut snapshot = ContextSnapshot {
         event_type: CONTEXT_SNAPSHOT_TYPE.to_string(),
@@ -788,12 +848,20 @@ fn context_advice(snapshot: &ContextSnapshot) -> Vec<ContextAdvice> {
             "System tools are a large share; switch to plan mode or reduce the tool surface when possible.",
         ),
         (
-            "skills",
-            "Skill index is a large share; prune enabled skills or narrow configured skill paths.",
+            "developer_prompt",
+            "Developer prompt is a large share; prune enabled skills or narrow configured agent and skill paths.",
         ),
         (
-            "messages",
-            "Messages dominate context; shorten the conversation or start a fresh session when practical.",
+            "history",
+            "History dominates context; shorten the conversation or start a fresh session when practical.",
+        ),
+        (
+            "turn_context",
+            "Turn context is a large share; reduce selected skill bodies or prompt-scoped attachments.",
+        ),
+        (
+            "current_prompt",
+            "Current prompt is a large share; shorten prompt-scoped input where practical.",
         ),
     ] {
         if advice.len() >= ADVICE_LIMIT {
@@ -849,10 +917,13 @@ fn context_bar(snapshot: &ContextSnapshot, requested_width: usize) -> Option<Str
     let limit = snapshot.context_limit?;
     let bar_cells = normalize_context_bar_width(requested_width);
     let order = [
-        ("system_prompt", 'S'),
+        ("base_policy", 'B'),
+        ("developer_prompt", 'D'),
+        ("project_context", 'P'),
+        ("history", 'H'),
+        ("turn_context", 'C'),
+        ("current_prompt", 'U'),
         ("system_tools", 'T'),
-        ("skills", 'K'),
-        ("messages", 'M'),
         ("free_space", '.'),
     ];
     let total = order
@@ -930,9 +1001,15 @@ mod tests {
             encoding: "o200k_base".to_string(),
             encoding_source: "fallback".to_string(),
             encoding_fallback: true,
-            system_prompt_tokens: system,
+            base_policy_tokens: system,
+            developer_prompt_tokens: skills,
+            project_context_tokens: 0,
+            history_tokens: messages,
+            turn_context_tokens: 0,
+            current_prompt_tokens: 0,
+            system_prompt_tokens: system + skills,
             system_tools_tokens: tools,
-            skills_tokens: skills,
+            skills_tokens: 0,
             messages_tokens: messages,
             total_estimated_tokens: system + tools + skills + messages,
             tool_count: 4,
@@ -978,16 +1055,17 @@ mod tests {
         assert_eq!(snapshot.total.source, "provider_usage");
         assert_eq!(snapshot.categories["free_space"].tokens, 110);
         assert_eq!(
-            snapshot.categories["messages"].details["roles"]["user"]["count"],
+            snapshot.categories["history"].details["roles"]["user"]["count"],
             2
         );
     }
 
     #[test]
-    fn snapshot_text_reports_project_instruction_context_under_messages() {
+    fn snapshot_text_reports_project_context_bucket() {
         let mut count = count(10, 20, 5, 45);
         count.project_instruction_context_count = 2;
         count.project_instruction_context_tokens = 17;
+        count.project_context_tokens = 17;
         let snapshot = snapshot_from_count(
             ContextScope::LastProviderRequest,
             Some("session".to_string()),
@@ -1000,8 +1078,8 @@ mod tests {
 
         let text = format_context_snapshot_text(&snapshot, false);
 
-        assert!(text.contains("input_messages:"));
-        assert!(text.contains("project_instruction_context: 2 input msgs, ~17 tokens"));
+        assert!(text.contains("project_context: ~17 tokens"));
+        assert!(text.contains("project_context: 2 input msgs"));
         assert!(!text.contains("\nmessages:"));
     }
 
@@ -1027,7 +1105,9 @@ mod tests {
         );
 
         assert!(text.starts_with("["));
-        assert!(text.contains("\nS system  T tools  K skills  M input_messages  . free\n\n"));
+        assert!(text.contains(
+            "\nB base  D developer  P project  H history  C turn  U prompt  T tools  . free\n\n"
+        ));
         assert!(text.contains("tokens: 34.0k/1.0M (3.4%)\n"));
         let token_line = text
             .lines()
@@ -1043,13 +1123,13 @@ mod tests {
         );
         assert!(!token_line.contains("provider"));
         assert!(text.contains("\n  alpha: ~13 tokens\n  beta: ~8 tokens\n"));
-        assert!(text.contains("input_messages: ~31.0k tokens"));
+        assert!(text.contains("input_history: ~31.0k tokens"));
         assert!(!text.contains("\nmessages:"));
         assert!(text.contains("user: 2 input msgs, ~31.0k tokens"));
         assert!(text.contains("free_space: 966.0k tokens (96.6%)\n\nscope: last provider request\nmodel: openai/gpt-4o"));
 
         let value = serde_json::to_value(&snapshot).expect("snapshot json");
-        assert!(value["categories"].get("messages").is_some());
+        assert!(value["categories"].get("history").is_some());
         assert!(value["categories"].get("input_messages").is_none());
     }
 
@@ -1126,7 +1206,7 @@ mod tests {
             snapshot
                 .advice
                 .iter()
-                .any(|advice| advice.category == "skills")
+                .any(|advice| advice.category == "developer_prompt")
         );
     }
 

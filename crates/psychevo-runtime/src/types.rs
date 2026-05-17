@@ -201,6 +201,30 @@ pub struct RunResult {
     pub warnings: Vec<RunWarning>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ReloadContextOptions {
+    pub db_path: PathBuf,
+    pub session: String,
+    pub config_path: Option<PathBuf>,
+    pub mode: Option<RunMode>,
+    pub inherited_env: Option<BTreeMap<String, String>>,
+    pub agent: Option<String>,
+    pub no_agents: bool,
+    pub no_skills: bool,
+    pub invalidation_reason: String,
+    pub notice: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReloadContextResult {
+    pub session_id: String,
+    pub prefix_hash: String,
+    pub version: i64,
+    pub provider: String,
+    pub model: String,
+    pub invalidation_reason: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SelectedAgent {
     pub name: String,
@@ -484,6 +508,7 @@ impl ModelCostTier {
 pub struct ModelCapabilities {
     pub reasoning: Option<bool>,
     pub tool_call: Option<bool>,
+    pub developer_role: Option<bool>,
     pub temperature: Option<bool>,
     pub attachment: Option<bool>,
     pub structured_output: Option<bool>,
@@ -500,6 +525,9 @@ impl ModelCapabilities {
         }
         if let Some(value) = self.tool_call {
             object.insert("tool_call".to_string(), Value::Bool(value));
+        }
+        if let Some(value) = self.developer_role {
+            object.insert("developer_role".to_string(), Value::Bool(value));
         }
         if let Some(value) = self.temperature {
             object.insert("temperature".to_string(), Value::Bool(value));

@@ -52,6 +52,9 @@ fn merge_capabilities(base: &mut ModelCapabilities, overlay: ModelCapabilities) 
     if overlay.tool_call.is_some() {
         base.tool_call = overlay.tool_call;
     }
+    if overlay.developer_role.is_some() {
+        base.developer_role = overlay.developer_role;
+    }
     if overlay.temperature.is_some() {
         base.temperature = overlay.temperature;
     }
@@ -340,6 +343,7 @@ fn parse_metadata_capabilities(value: &Value) -> ModelCapabilities {
     let mut capabilities = ModelCapabilities {
         reasoning: bool_from_keys(value, &["reasoning"]),
         tool_call: bool_from_keys(value, &["tool_call", "toolcall", "tools"]),
+        developer_role: bool_from_keys(value, &["developer_role", "developer"]),
         temperature: bool_from_keys(value, &["temperature"]),
         attachment: bool_from_keys(value, &["attachment", "attachments"]),
         structured_output: bool_from_keys(value, &["structured_output"]),

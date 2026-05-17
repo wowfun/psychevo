@@ -12,11 +12,18 @@ async fn stream_assistant(
     abort: AbortSignal,
 ) -> Result<Message> {
     let mut messages = request
-        .system_instructions
+        .prompt_instructions
         .iter()
-        .filter(|instruction| !instruction.trim().is_empty())
-        .map(|instruction| json!({ "role": "system", "content": instruction }))
+        .filter(|instruction| !instruction.content.trim().is_empty())
+        .map(PromptInstruction::to_provider_value)
         .collect::<Vec<_>>();
+    messages.extend(
+        request
+            .prefix_contextual_user_messages
+            .iter()
+            .filter(|message| !message.blocks.is_empty())
+            .map(ContextualUserMessage::to_provider_value),
+    );
     let contextual_insert_index = request
         .previous_messages
         .len()
@@ -31,7 +38,14 @@ async fn stream_assistant(
     );
     messages.extend(
         request
-            .contextual_user_messages
+            .turn_prompt_instructions
+            .iter()
+            .filter(|instruction| !instruction.content.trim().is_empty())
+            .map(PromptInstruction::to_provider_value),
+    );
+    messages.extend(
+        request
+            .turn_contextual_user_messages
             .iter()
             .filter(|message| !message.blocks.is_empty())
             .map(ContextualUserMessage::to_provider_value),

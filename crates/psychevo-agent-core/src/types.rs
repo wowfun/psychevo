@@ -87,6 +87,7 @@ impl ContextualUserBlock {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ContextualUserMessage {
     pub provider_group: String,
+    pub context_category: String,
     pub blocks: Vec<ContextualUserBlock>,
     pub hidden: bool,
     pub timestamp_ms: i64,
@@ -94,8 +95,17 @@ pub struct ContextualUserMessage {
 
 impl ContextualUserMessage {
     pub fn new(provider_group: impl Into<String>, blocks: Vec<ContextualUserBlock>) -> Self {
+        Self::new_with_category(provider_group, "turn_context", blocks)
+    }
+
+    pub fn new_with_category(
+        provider_group: impl Into<String>,
+        context_category: impl Into<String>,
+        blocks: Vec<ContextualUserBlock>,
+    ) -> Self {
         Self {
             provider_group: provider_group.into(),
+            context_category: context_category.into(),
             blocks,
             hidden: true,
             timestamp_ms: now_ms(),
@@ -119,6 +129,7 @@ impl ContextualUserMessage {
             "metadata": {
                 "contextual_user": true,
                 "provider_group": self.provider_group,
+                "context_category": self.context_category,
                 "hidden": self.hidden,
             },
         })

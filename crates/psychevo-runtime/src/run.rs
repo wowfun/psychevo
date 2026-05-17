@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use psychevo_agent_core::{
-    AgentLoopRequest, AssistantBlock, ContextualUserBlock, ContextualUserMessage, ControlHandle,
-    Message, NoopEventSink, run_agent_loop, user_text_message,
+    AgentLoopRequest, AssistantBlock, ControlHandle, Message, NoopEventSink, PromptInstruction,
+    run_agent_loop, user_text_message,
 };
 use psychevo_ai::{GenerationProvider, OpenAiChatProvider, Outcome};
 use serde_json::json;
@@ -12,8 +12,8 @@ use tokio::time;
 
 use crate::agents::{
     AgentDefinition, AgentDiscoveryOptions, AgentToolContext, agent_tools, apply_agent_hooks,
-    apply_agent_tool_policy, discover_agents, format_agents_for_prompt, resolve_agent_definition,
-    resolve_agents_home, run_agent_hook_event, spawn_child_agent_background,
+    apply_agent_tool_policy, discover_agents, resolve_agent_definition, resolve_agents_home,
+    run_agent_hook_event, spawn_child_agent_background,
 };
 use crate::config::{ResolvedRunProvider, load_run_config, resolve_run_provider};
 use crate::context::prune_context;
@@ -24,19 +24,25 @@ use crate::error::{Error, Result};
 use crate::events::PersistenceSink;
 use crate::messages::assistant_text;
 use crate::paths::canonical_workdir;
-use crate::project_instructions::{ProjectInstructionFragment, load_project_instructions};
+use crate::project_instructions::load_project_instructions;
+use crate::prompt_assembly::{
+    PROMPT_PREFIX_NOTICE_METADATA_KEY, PromptPrefixRecordInput, assemble_main_prompt_prefix,
+    assembly_from_prefix_record, context_evidence_for_request, prompt_prefix_record,
+    skill_contextual_user_messages, tool_declarations_hash, turn_prefix_notice_instruction,
+    turn_required_agent_instruction,
+};
 use crate::prompt_image::prompt_message_from_inputs_with_options;
 use crate::skills::{
-    SelectedSkill, SkillCatalog, SkillContextFragment, SkillDiscoveryOptions, discover_skills,
-    format_skills_for_prompt, resolve_skills_home, select_explicit_skills,
-    select_skills_for_prompt, skill_context_fragments,
+    SelectedSkill, SkillCatalog, SkillDiscoveryOptions, discover_skills, resolve_skills_home,
+    select_explicit_skills, select_skills_for_prompt, skill_context_fragments,
 };
 use crate::snapshot::SnapshotStore;
-use crate::store::{ContextEvidenceInput, SqliteStore};
-use crate::tools::{coding_core_tools_for_mode, mode_instruction, skill_tools_for_mode};
+use crate::store::{PromptPrefixRecord, SqliteStore};
+use crate::tools::{coding_core_tools_for_mode, skill_tools_for_mode};
 use crate::types::{
-    AgentSpawnOptions, AgentSpawnResult, RunControl, RunOptions, RunResult, RunStreamEvent,
-    RunStreamSink, RunWarning, SelectedAgent, SmokeControl,
+    AgentSpawnOptions, AgentSpawnResult, ModelMetadata, ReloadContextOptions, ReloadContextResult,
+    RunControl, RunOptions, RunResult, RunStreamEvent, RunStreamSink, RunWarning, SelectedAgent,
+    SmokeControl,
 };
 
 const TITLE_GENERATION_TIMEOUT_SECS: u64 = 15;
@@ -71,6 +77,170 @@ pub async fn run_live_streaming_controlled(
         Some(control),
     )
     .await
+}
+
+pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadContextResult> {
+    let store = SqliteStore::open(&options.db_path)?;
+    let summary = store
+        .session_summary(&options.session)?
+        .ok_or_else(|| Error::Message(format!("session not found: {}", options.session)))?;
+    let metadata = store.session_metadata(&summary.id)?.unwrap_or(json!({}));
+    let workdir = canonical_workdir(std::path::Path::new(&summary.workdir))?;
+    let mode = options
+        .mode
+        .or_else(|| {
+            metadata
+                .get("mode")
+                .and_then(serde_json::Value::as_str)
+                .and_then(crate::types::RunMode::parse)
+        })
+        .unwrap_or_default();
+    let env = options
+        .inherited_env
+        .clone()
+        .unwrap_or_else(|| std::env::vars().collect());
+    let agents_home = resolve_agents_home(&env, &workdir)?;
+    let agent_input = options
+        .agent
+        .clone()
+        .or_else(|| session_agent_input_from_metadata(&metadata));
+    let agent_catalog = discover_agents(&AgentDiscoveryOptions {
+        home: agents_home,
+        workdir: workdir.clone(),
+        env: env.clone(),
+        explicit_inputs: agent_input.iter().cloned().collect(),
+        no_agents: options.no_agents,
+    })?;
+    let selected_agent = match &agent_input {
+        Some(input) if !options.no_agents => Some(resolve_agent_definition(
+            &agent_catalog,
+            input,
+            &workdir,
+            &env,
+        )?),
+        _ => None,
+    };
+    let skills_home = resolve_skills_home(&env, &workdir)?;
+    let mut explicit_skill_inputs = Vec::new();
+    if let Some(agent) = &selected_agent {
+        explicit_skill_inputs.extend(agent.skills.clone());
+    }
+    let skill_options = SkillDiscoveryOptions {
+        home: skills_home,
+        workdir: workdir.clone(),
+        config_path: options.config_path.clone(),
+        env: env.clone(),
+        explicit_inputs: explicit_skill_inputs,
+        no_skills: options.no_skills,
+    };
+    let skill_catalog = discover_skills(&skill_options)?;
+    let project_instructions = load_project_instructions(&workdir)?;
+    let model_metadata = session_model_metadata(&metadata);
+    let mut tools = coding_core_tools_for_mode(&workdir, mode);
+    if !options.no_skills {
+        tools.extend(skill_tools_for_mode(skill_options, mode));
+    }
+    if !options.no_agents {
+        let provider: Arc<dyn GenerationProvider> = Arc::new(OpenAiChatProvider::new(
+            String::new(),
+            String::new(),
+            summary.provider.clone(),
+        ));
+        tools.extend(agent_tools(AgentToolContext {
+            provider,
+            model_provider: summary.provider.clone(),
+            model: summary.model.clone(),
+            provider_label: metadata
+                .get("provider_label")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(summary.provider.as_str())
+                .to_string(),
+            base_url: metadata
+                .get("base_url")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            api_key_env: metadata
+                .get("api_key_env")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+            reasoning_effort: metadata
+                .get("reasoning_effort")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+            context_limit: metadata
+                .get("context_limit")
+                .and_then(serde_json::Value::as_u64),
+            generation_metadata: json!({
+                "model_metadata": model_metadata.public_json(),
+            }),
+            workdir: workdir.clone(),
+            mode,
+            store: store.clone(),
+            parent_session_id: summary.id.clone(),
+            parent_context_snapshot: Vec::new(),
+            catalog: agent_catalog.clone(),
+            control_handle: None,
+            stream_events: None,
+            model_metadata: model_metadata.clone(),
+            env: env.clone(),
+            allowed_agent_names: selected_agent
+                .as_ref()
+                .and_then(|agent| agent.tool_policy.allowed_agents.clone()),
+            denied_agent_names: selected_agent
+                .as_ref()
+                .map(|agent| agent.tool_policy.denied_agents.clone())
+                .unwrap_or_default(),
+            required_agent_names: Vec::new(),
+            spawn_depth_remaining: None,
+        }));
+    }
+    tools = apply_agent_tool_policy(tools, selected_agent.as_ref(), mode);
+    tools = apply_agent_hooks(tools, selected_agent.as_ref(), &workdir);
+    let tool_declarations_hash = tool_declarations_hash(&tools);
+    let selected_agent_summary = selected_agent_for_result(selected_agent.as_ref());
+    let assembly = assemble_main_prompt_prefix(
+        mode,
+        selected_agent.as_ref(),
+        if options.no_agents {
+            &[]
+        } else {
+            &agent_catalog.agents
+        },
+        &skill_catalog.skills,
+        &project_instructions.fragments,
+        &model_metadata.capabilities,
+    );
+    let record = prompt_prefix_record(PromptPrefixRecordInput {
+        session_id: &summary.id,
+        provider: &summary.provider,
+        model: &summary.model,
+        prefix_hash: assembly.prefix_hash,
+        tool_declarations_hash,
+        invalidation_reason: Some(options.invalidation_reason),
+        slots: assembly.prefix_slots,
+        metadata: Some(json!({
+            "mode": mode.as_str(),
+            "selected_agent": selected_agent_summary,
+            "agents_enabled": !options.no_agents,
+        })),
+    });
+    let record = store.upsert_session_prompt_prefix(record)?;
+    if let Some(notice) = options.notice {
+        store.set_session_metadata_field(
+            &summary.id,
+            PROMPT_PREFIX_NOTICE_METADATA_KEY,
+            Some(serde_json::Value::String(notice)),
+        )?;
+    }
+    Ok(ReloadContextResult {
+        session_id: summary.id,
+        prefix_hash: record.prefix_hash,
+        version: record.version,
+        provider: record.provider,
+        model: record.model,
+        invalidation_reason: record.invalidation_reason,
+    })
 }
 
 pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentSpawnResult> {
@@ -185,10 +355,16 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
     ));
     let context = AgentToolContext {
         provider,
-        model_provider: resolved.provider,
-        model: resolved.model,
+        model_provider: resolved.provider.clone(),
+        model: resolved.model.clone(),
+        provider_label: resolved.display_label.clone(),
+        base_url: resolved.base_url.clone(),
+        api_key_env: resolved.api_key_env.clone(),
+        reasoning_effort: resolved.reasoning_effort.clone(),
+        context_limit: resolved.context_limit,
         generation_metadata: json!({
             "model_metadata": resolved.metadata.public_json(),
+            "reasoning_effort": resolved.reasoning_effort.clone(),
         }),
         workdir,
         mode: options.mode,
@@ -297,8 +473,6 @@ async fn run_live_internal(
         required_agent_mentions(&options.prompt, &agent_catalog.agents)
     };
     let skill_context_fragments = skill_context_fragments(&selected_skills, &skill_catalog)?;
-    let contextual_user_messages =
-        contextual_user_messages_for_run(&project_instructions.fragments, &skill_context_fragments);
     let project_instruction_context_message_count =
         usize::from(!project_instructions.fragments.is_empty());
     let selected_skill_context_message_count = skill_context_fragments.len();
@@ -429,55 +603,6 @@ async fn run_live_internal(
             serde_json::Value::String(effort.clone()),
         );
     }
-    let mut system_instructions = vec![mode_instruction(options.mode).to_string()];
-    if let Some(agent) = &selected_agent
-        && !agent.instructions.trim().is_empty()
-    {
-        system_instructions.push(format!(
-            "Main session agent: {}\n\n{}",
-            agent.name, agent.instructions
-        ));
-    }
-    if !options.no_agents {
-        let agents_prompt = format_agents_for_prompt(&agent_catalog.agents);
-        if !agents_prompt.trim().is_empty() {
-            system_instructions.push(agents_prompt);
-        }
-        if !required_agent_mentions.is_empty() {
-            system_instructions.push(format!(
-                "The user explicitly mentioned these agents: {}. You must call the Agent tool for each named agent before giving a final answer. The full user message remains the source of intent; write the child-agent task prompt yourself.",
-                required_agent_mentions.join(", ")
-            ));
-        }
-    }
-    let skills_prompt = format_skills_for_prompt(&skill_catalog.skills);
-    if !skills_prompt.trim().is_empty() {
-        system_instructions.push(skills_prompt);
-    }
-    let prompt_context_evidence = context_evidence_for_request(
-        &system_instructions,
-        &project_instructions.fragments,
-        &skill_context_fragments,
-    );
-    let sink = Arc::new(PersistenceSink {
-        store: store.clone(),
-        session_id: session_id.clone(),
-        prompt_snapshot,
-        prompt_snapshot_written: Arc::new(Mutex::new(false)),
-        prompt_context_evidence: Arc::new(prompt_context_evidence),
-        started: Instant::now(),
-        tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
-        control: SmokeControl::None,
-        control_handle: Some(control_handle.clone()),
-        events: Some(Arc::clone(&events)),
-        stream_events: stream_events.clone(),
-        include_reasoning: options.include_reasoning,
-        reasoning_effort: resolved.reasoning_effort.clone(),
-        model_metadata: resolved.metadata.clone(),
-        context_recorder: Some(context_recorder.clone()),
-        prompt_display: options.prompt_display.clone(),
-        selected_agent: selected_agent_summary.clone(),
-    });
     let mut tools = coding_core_tools_for_mode(&workdir, options.mode);
     if !options.no_skills || !explicit_skill_inputs.is_empty() {
         tools.extend(skill_tools_for_mode(skill_options, options.mode));
@@ -487,6 +612,11 @@ async fn run_live_internal(
             provider: Arc::clone(&provider),
             model_provider: resolved.provider.clone(),
             model: resolved.model.clone(),
+            provider_label: resolved.display_label.clone(),
+            base_url: resolved.base_url.clone(),
+            api_key_env: resolved.api_key_env.clone(),
+            reasoning_effort: resolved.reasoning_effort.clone(),
+            context_limit: resolved.context_limit,
             generation_metadata: generation_metadata.clone(),
             workdir: workdir.clone(),
             mode: options.mode,
@@ -511,12 +641,117 @@ async fn run_live_internal(
     }
     tools = apply_agent_tool_policy(tools, selected_agent.as_ref(), options.mode);
     tools = apply_agent_hooks(tools, selected_agent.as_ref(), &workdir);
+    let tool_declarations_hash = tool_declarations_hash(&tools);
+    let prefix_metadata = json!({
+        "mode": options.mode.as_str(),
+        "selected_agent": selected_agent_summary.clone(),
+        "agents_enabled": !options.no_agents,
+    });
+    let stored_prefix = store.load_session_prompt_prefix(&session_id)?;
+    let invalidation_reason = stored_prefix.as_ref().and_then(|record| {
+        prompt_prefix_invalidation_reason(
+            record,
+            &resolved.provider,
+            &resolved.model,
+            options.mode,
+            selected_agent_summary.as_ref(),
+            &tool_declarations_hash,
+        )
+    });
+    let needs_prefix_rebuild =
+        created_session || stored_prefix.is_none() || invalidation_reason.is_some();
+    let (prompt_assembly, prompt_prefix_record) = if needs_prefix_rebuild {
+        let assembly = assemble_main_prompt_prefix(
+            options.mode,
+            selected_agent.as_ref(),
+            if options.no_agents {
+                &[]
+            } else {
+                &agent_catalog.agents
+            },
+            &skill_catalog.skills,
+            &project_instructions.fragments,
+            &resolved.metadata.capabilities,
+        );
+        let reason = if created_session {
+            "new_session".to_string()
+        } else {
+            invalidation_reason.unwrap_or_else(|| "lazy_create".to_string())
+        };
+        let record = prompt_prefix_record(PromptPrefixRecordInput {
+            session_id: &session_id,
+            provider: &resolved.provider,
+            model: &resolved.model,
+            prefix_hash: assembly.prefix_hash.clone(),
+            tool_declarations_hash: tool_declarations_hash.clone(),
+            invalidation_reason: Some(reason),
+            slots: assembly.prefix_slots.clone(),
+            metadata: Some(prefix_metadata),
+        });
+        let record = store.upsert_session_prompt_prefix(record)?;
+        (assembly, record)
+    } else {
+        let record = stored_prefix.expect("checked above");
+        (assembly_from_prefix_record(&record), record)
+    };
+    let prefix_notice = take_prompt_prefix_notice(&store, &session_id)?;
+    let mut turn_prompt_instructions = Vec::new();
+    if let Some(notice) = prefix_notice.as_deref()
+        && let Some(instruction) =
+            turn_prefix_notice_instruction(notice, &resolved.metadata.capabilities, 0)
+    {
+        turn_prompt_instructions.push(instruction);
+    }
+    if let Some(instruction) = turn_required_agent_instruction(
+        &required_agent_mentions,
+        &resolved.metadata.capabilities,
+        turn_prompt_instructions.len(),
+    ) {
+        turn_prompt_instructions.push(instruction);
+    }
+    let turn_contextual_user_messages = skill_contextual_user_messages(&skill_context_fragments);
+    let prompt_context_evidence = context_evidence_for_request(
+        &prompt_assembly.prompt_instructions,
+        &turn_prompt_instructions,
+        &prompt_assembly.prefix_contextual_user_messages,
+        &skill_context_fragments,
+    );
+    let prompt_prefix_metadata = json!({
+        "hash": prompt_prefix_record.prefix_hash,
+        "version": prompt_prefix_record.version,
+        "created_at_ms": prompt_prefix_record.created_at_ms,
+        "provider": prompt_prefix_record.provider,
+        "model": prompt_prefix_record.model,
+        "tool_declarations_hash": prompt_prefix_record.tool_declarations_hash,
+        "invalidation_reason": prompt_prefix_record.invalidation_reason,
+    });
+    let sink = Arc::new(PersistenceSink {
+        store: store.clone(),
+        session_id: session_id.clone(),
+        prompt_snapshot,
+        prompt_snapshot_written: Arc::new(Mutex::new(false)),
+        prompt_context_evidence: Arc::new(prompt_context_evidence),
+        started: Instant::now(),
+        tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
+        control: SmokeControl::None,
+        control_handle: Some(control_handle.clone()),
+        events: Some(Arc::clone(&events)),
+        stream_events: stream_events.clone(),
+        include_reasoning: options.include_reasoning,
+        reasoning_effort: resolved.reasoning_effort.clone(),
+        model_metadata: resolved.metadata.clone(),
+        context_recorder: Some(context_recorder.clone()),
+        prompt_display: options.prompt_display.clone(),
+        selected_agent: selected_agent_summary.clone(),
+        prompt_prefix_metadata: Some(prompt_prefix_metadata.clone()),
+    });
     if let Some(object) = generation_metadata.as_object_mut() {
+        object.insert("prompt_prefix".to_string(), prompt_prefix_metadata);
         object.insert(
             "context_counting".to_string(),
             context_counting_metadata(
-                1,
-                system_instructions.len().saturating_sub(1),
+                &prompt_assembly.prompt_instructions,
+                turn_prompt_instructions.len(),
                 previous_messages.len(),
                 project_instruction_context_message_count,
                 selected_skill_context_message_count,
@@ -532,10 +767,12 @@ async fn run_live_internal(
         model_provider: resolved.provider.clone(),
         model: resolved.model.clone(),
         generation_metadata,
-        system_instructions,
+        prompt_instructions: prompt_assembly.prompt_instructions,
+        turn_prompt_instructions,
         previous_messages,
         context_messages: Vec::new(),
-        contextual_user_messages,
+        prefix_contextual_user_messages: prompt_assembly.prefix_contextual_user_messages,
+        turn_contextual_user_messages,
         prompt_messages: vec![
             prompt_message_from_inputs_with_options(
                 &options.prompt,
@@ -643,6 +880,91 @@ fn selected_agent_for_result(agent: Option<&AgentDefinition>) -> Option<Selected
     })
 }
 
+fn session_model_metadata(metadata: &serde_json::Value) -> ModelMetadata {
+    metadata
+        .get("model_metadata")
+        .cloned()
+        .and_then(|value| serde_json::from_value(value).ok())
+        .unwrap_or_default()
+}
+
+fn session_agent_input_from_metadata(metadata: &serde_json::Value) -> Option<String> {
+    if let Some(main_agent) = metadata.get("main_agent") {
+        if main_agent
+            .get("mode")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|mode| mode == "default")
+            || main_agent.is_null()
+        {
+            return None;
+        }
+        if let Some(input) = main_agent
+            .get("input")
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| main_agent.get("name").and_then(serde_json::Value::as_str))
+            .or_else(|| main_agent.get("path").and_then(serde_json::Value::as_str))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return Some(input.to_string());
+        }
+    }
+    metadata
+        .get("selected_agent")
+        .and_then(|value| {
+            value
+                .get("input")
+                .or_else(|| value.get("name"))
+                .or_else(|| value.get("path"))
+        })
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn prompt_prefix_invalidation_reason(
+    record: &PromptPrefixRecord,
+    provider: &str,
+    model: &str,
+    mode: crate::types::RunMode,
+    selected_agent: Option<&SelectedAgent>,
+    tool_declarations_hash: &str,
+) -> Option<String> {
+    if record.provider != provider
+        || record.model != model
+        || record.tool_declarations_hash != tool_declarations_hash
+    {
+        return Some("runtime_context_changed".to_string());
+    }
+    let Some(metadata) = record.metadata.as_ref() else {
+        return Some("prefix_metadata_missing".to_string());
+    };
+    if metadata.get("mode").and_then(serde_json::Value::as_str) != Some(mode.as_str()) {
+        return Some("runtime_context_changed".to_string());
+    }
+    let expected_agent = serde_json::to_value(selected_agent).unwrap_or(serde_json::Value::Null);
+    if metadata
+        .get("selected_agent")
+        .unwrap_or(&serde_json::Value::Null)
+        != &expected_agent
+    {
+        return Some("main_agent_changed".to_string());
+    }
+    None
+}
+
+fn take_prompt_prefix_notice(store: &SqliteStore, session_id: &str) -> Result<Option<String>> {
+    let notice = store
+        .session_metadata(session_id)?
+        .and_then(|metadata| metadata.get(PROMPT_PREFIX_NOTICE_METADATA_KEY).cloned())
+        .and_then(|value| value.as_str().map(str::to_string));
+    if notice.is_some() {
+        store.set_session_metadata_field(session_id, PROMPT_PREFIX_NOTICE_METADATA_KEY, None)?;
+    }
+    Ok(notice)
+}
+
 fn required_agent_mentions(prompt: &str, agents: &[AgentDefinition]) -> Vec<String> {
     let known = agents
         .iter()
@@ -722,7 +1044,7 @@ fn called_agent_names(
                 .and_then(serde_json::Value::as_str)
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .or_else(|| match required {
+                .or(match required {
                     [single] => Some(single.as_str()),
                     _ => Some("general"),
                 })
@@ -731,45 +1053,6 @@ fn called_agent_names(
         }
     }
     called
-}
-
-fn contextual_user_messages_for_run(
-    project_instruction_fragments: &[ProjectInstructionFragment],
-    skill_fragments: &[SkillContextFragment],
-) -> Vec<ContextualUserMessage> {
-    let mut messages = Vec::new();
-    if !project_instruction_fragments.is_empty() {
-        messages.push(ContextualUserMessage::new(
-            "project_instructions",
-            project_instruction_fragments
-                .iter()
-                .map(|fragment| {
-                    ContextualUserBlock::new(
-                        "project_instruction",
-                        Some(fragment.source_name.clone()),
-                        Some(fragment.source_path.display().to_string()),
-                        fragment.content.clone(),
-                    )
-                })
-                .collect(),
-        ));
-    }
-    messages.extend(skill_fragments.iter().enumerate().map(|(index, fragment)| {
-        ContextualUserMessage::new(
-            selected_skill_provider_group(index, &fragment.name),
-            vec![ContextualUserBlock::new(
-                "selected_skill",
-                Some(fragment.name.clone()),
-                Some(fragment.path.display().to_string()),
-                fragment.content.clone(),
-            )],
-        )
-    }));
-    messages
-}
-
-fn selected_skill_provider_group(index: usize, name: &str) -> String {
-    format!("selected_skill:{index}:{name}")
 }
 
 fn emit_warning_events(
@@ -810,69 +1093,6 @@ fn warning_event(warning: &RunWarning) -> serde_json::Value {
         }
     }
     value
-}
-
-fn context_evidence_for_request(
-    system_instructions: &[String],
-    project_instruction_fragments: &[ProjectInstructionFragment],
-    skill_fragments: &[SkillContextFragment],
-) -> Vec<ContextEvidenceInput> {
-    let mut evidence = Vec::new();
-    for (index, instruction) in system_instructions.iter().enumerate() {
-        evidence.push(ContextEvidenceInput {
-            role: "system".to_string(),
-            source_kind: "system_instruction".to_string(),
-            source_name: Some(system_instruction_source_name(index)),
-            source_path: None,
-            provider_group: Some("system_instructions".to_string()),
-            provider_block_index: Some(index as i64),
-            context_kind: Some("system_instruction".to_string()),
-            content_text: instruction.clone(),
-            metadata: Some(json!({ "instruction_index": index })),
-        });
-    }
-    for (index, fragment) in project_instruction_fragments.iter().enumerate() {
-        evidence.push(ContextEvidenceInput {
-            role: "user".to_string(),
-            source_kind: "project_instruction".to_string(),
-            source_name: Some(fragment.source_name.clone()),
-            source_path: Some(fragment.source_path.display().to_string()),
-            provider_group: Some("project_instructions".to_string()),
-            provider_block_index: Some(index as i64),
-            context_kind: Some("project_instruction".to_string()),
-            content_text: fragment.content.clone(),
-            metadata: Some(json!({
-                "directory": fragment.directory.display().to_string(),
-                "truncated": fragment.truncated,
-                "original_bytes": fragment.original_bytes,
-                "included_bytes": fragment.included_bytes,
-            })),
-        });
-    }
-    for (index, fragment) in skill_fragments.iter().enumerate() {
-        evidence.push(ContextEvidenceInput {
-            role: "user".to_string(),
-            source_kind: "selected_skill".to_string(),
-            source_name: Some(fragment.name.clone()),
-            source_path: Some(fragment.path.display().to_string()),
-            provider_group: Some(selected_skill_provider_group(index, &fragment.name)),
-            provider_block_index: Some(0),
-            context_kind: Some("selected_skill".to_string()),
-            content_text: fragment.content.clone(),
-            metadata: Some(json!({
-                "base_dir": fragment.base_dir.display().to_string(),
-            })),
-        });
-    }
-    evidence
-}
-
-fn system_instruction_source_name(index: usize) -> String {
-    match index {
-        0 => "mode".to_string(),
-        1 => "skills_index".to_string(),
-        _ => format!("system_instruction_{index}"),
-    }
 }
 
 pub(crate) async fn ensure_new_tui_session_title(
@@ -918,12 +1138,16 @@ async fn generate_session_title(
         model_provider: resolved.provider.clone(),
         model: resolved.model.clone(),
         generation_metadata: json!({}),
-        system_instructions: vec![
-            "Generate a concise title for this coding-agent session. Return only the title, no punctuation wrapper, no explanation. Keep it under 8 words.".to_string(),
-        ],
+        prompt_instructions: vec![PromptInstruction::inline_system(
+            "session_title_instruction",
+            0,
+            "Generate a concise title for this coding-agent session. Return only the title, no punctuation wrapper, no explanation. Keep it under 8 words.",
+        )],
+        turn_prompt_instructions: Vec::new(),
         previous_messages: Vec::new(),
         context_messages: Vec::new(),
-        contextual_user_messages: Vec::new(),
+        prefix_contextual_user_messages: Vec::new(),
+        turn_contextual_user_messages: Vec::new(),
         prompt_messages: vec![user_text_message(session_title_request(
             prompt,
             selected_skills,

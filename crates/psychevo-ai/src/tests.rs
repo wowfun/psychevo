@@ -429,11 +429,11 @@ fn openai_chat_token_count_splits_context_categories() {
             model: "deepseek-chat".to_string(),
         },
         messages: vec![
-            json!({"role":"system","content":"mode"}),
-            json!({"role":"system","content":"<available_skills>\n  <skill>\n    <name>alpha</name>\n    <description>longer helper</description>\n  </skill>\n  <skill>\n    <name>beta</name>\n    <description>short</description>\n  </skill>\n</available_skills>"}),
+            json!({"role":"system","content":"mode","metadata":{"prompt_slot":"base/mode","prompt_semantic_role":"base_policy"}}),
+            json!({"role":"system","content":"<available_skills>\n  <skill>\n    <name>alpha</name>\n    <description>longer helper</description>\n  </skill>\n  <skill>\n    <name>beta</name>\n    <description>short</description>\n  </skill>\n</available_skills>","metadata":{"prompt_slot":"skill_index","prompt_semantic_role":"developer_prompt"}}),
+            json!({"role":"user","content":[{"text":"project instructions"}],"metadata":{"context_category":"project_context"}}),
             json!({"role":"user","content":[{"text":"previous"}]}),
-            json!({"role":"user","content":[{"text":"project instructions"}]}),
-            json!({"role":"user","content":[{"text":"selected skill body"}]}),
+            json!({"role":"user","content":[{"text":"selected skill body"}],"metadata":{"context_category":"turn_context"}}),
             json!({"role":"assistant","content":[{"type":"text","text":"ok"}]}),
         ],
         tools: vec![ToolDeclaration {
@@ -455,9 +455,13 @@ fn openai_chat_token_count_splits_context_categories() {
 
     let count = count_openai_chat_request(&request, "https://api.deepseek.com/v1");
 
-    assert!(count.system_prompt_tokens > 0);
+    assert!(count.base_policy_tokens > 0);
+    assert!(count.developer_prompt_tokens > 0);
     assert!(count.system_tools_tokens > 0);
-    assert!(count.skills_tokens > 0);
+    assert_eq!(count.skills_tokens, 0);
+    assert!(count.history_tokens > 0);
+    assert!(count.turn_context_tokens > 0);
+    assert!(count.current_prompt_tokens > 0);
     assert!(count.messages_tokens > 0);
     assert!(count.project_instruction_context_tokens > 0);
     assert!(count.selected_skill_context_tokens > 0);
@@ -471,6 +475,42 @@ fn openai_chat_token_count_splits_context_categories() {
     assert_eq!(count.skill_entries[0].name, "alpha");
     assert!(count.skill_entries[0].tokens > count.skill_entries[1].tokens);
     assert_eq!(count.encoding, "deepseek_v3");
+}
+
+#[test]
+fn chat_request_maps_developer_role_only_when_capability_enabled() {
+    let mut request = GenerationRequest {
+        model: ModelTarget {
+            provider: "openai".to_string(),
+            model: "gpt-test".to_string(),
+        },
+        messages: vec![json!({"role":"developer","content":"developer policy"})],
+        tools: Vec::new(),
+        metadata: json!({}),
+    };
+
+    let body = openai_chat_request_body(&request, "https://api.openai.com/v1");
+    assert_eq!(body["messages"][0]["role"], "system");
+
+    request.metadata = json!({
+        "model_metadata": {
+            "capabilities": {
+                "developer_role": false
+            }
+        }
+    });
+    let body = openai_chat_request_body(&request, "https://api.openai.com/v1");
+    assert_eq!(body["messages"][0]["role"], "system");
+
+    request.metadata = json!({
+        "model_metadata": {
+            "capabilities": {
+                "developer_role": true
+            }
+        }
+    });
+    let body = openai_chat_request_body(&request, "https://api.openai.com/v1");
+    assert_eq!(body["messages"][0]["role"], "developer");
 }
 
 #[test]

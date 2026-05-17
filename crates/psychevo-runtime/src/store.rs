@@ -20,7 +20,7 @@ use crate::types::{
     TuiMessageSummary,
 };
 
-const SQLITE_SCHEMA_VERSION: i64 = 8;
+const SQLITE_SCHEMA_VERSION: i64 = 9;
 const SESSION_REVERT_METADATA_KEY: &str = "revert";
 const MESSAGE_UNDO_METADATA_KEY: &str = "undo";
 const MESSAGE_PRE_SNAPSHOT_KEY: &str = "pre_snapshot";
@@ -69,6 +69,34 @@ pub struct ContextEvidenceRecord {
     pub metadata: Option<Value>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptPrefixSlotRecord {
+    pub slot: String,
+    pub tier: String,
+    pub semantic_role: String,
+    pub provider_role: String,
+    pub order: usize,
+    pub content: String,
+    pub content_hash: String,
+    pub source_kind: Option<String>,
+    pub source_name: Option<String>,
+    pub source_path: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptPrefixRecord {
+    pub session_id: String,
+    pub version: i64,
+    pub created_at_ms: i64,
+    pub provider: String,
+    pub model: String,
+    pub prefix_hash: String,
+    pub tool_declarations_hash: String,
+    pub invalidation_reason: Option<String>,
+    pub slots: Vec<PromptPrefixSlotRecord>,
+    pub metadata: Option<Value>,
+}
+
 #[derive(Clone)]
 pub struct SqliteStore {
     conn: Arc<Mutex<Connection>>,
@@ -80,6 +108,7 @@ include!("store/sessions.rs");
 include!("store/undo_state.rs");
 include!("store/messages.rs");
 include!("store/context_evidence.rs");
+include!("store/prompt_prefix.rs");
 include!("store/agents.rs");
 include!("store/lifecycle.rs");
 include!("store/retry.rs");

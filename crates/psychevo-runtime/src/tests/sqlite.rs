@@ -1,5 +1,5 @@
 #[test]
-fn sqlite_schema_v8_migrates_v3_state_databases() {
+fn sqlite_schema_v9_migrates_v3_state_databases() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("v3.db");
     let workdir = temp.path().join("work").to_string_lossy().to_string();
@@ -70,7 +70,7 @@ fn sqlite_schema_v8_migrates_v3_state_databases() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 8);
+    assert_eq!(user_version, 9);
     let archived_at: Option<i64> = conn
         .query_row(
             "SELECT archived_at_ms FROM sessions WHERE id = 'session-v3'",
@@ -108,7 +108,7 @@ fn sqlite_schema_v8_migrates_v3_state_databases() {
 }
 
 #[test]
-fn sqlite_schema_v8_migrates_v5_state_databases() {
+fn sqlite_schema_v9_migrates_v5_state_databases() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("v5.db");
     let workdir = temp.path().join("work").to_string_lossy().to_string();
@@ -190,7 +190,7 @@ fn sqlite_schema_v8_migrates_v5_state_databases() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 8);
+    assert_eq!(user_version, 9);
     assert!(
         sqlite_columns(&conn, "context_evidence")
             .iter()
@@ -210,7 +210,7 @@ fn sqlite_schema_v8_migrates_v5_state_databases() {
 }
 
 #[test]
-fn sqlite_schema_v8_migrates_v6_state_databases() {
+fn sqlite_schema_v9_migrates_v6_state_databases() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("v6.db");
     let workdir = temp.path().join("work").to_string_lossy().to_string();
@@ -312,7 +312,7 @@ fn sqlite_schema_v8_migrates_v6_state_databases() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 8);
+    assert_eq!(user_version, 9);
     let columns = sqlite_columns(&conn, "context_evidence");
     assert!(columns.iter().any(|name| name == "provider_group"));
     assert!(columns.iter().any(|name| name == "provider_block_index"));
@@ -326,7 +326,7 @@ fn sqlite_schema_v8_migrates_v6_state_databases() {
 }
 
 #[test]
-fn sqlite_schema_v8_rejects_old_state_databases() {
+fn sqlite_schema_v9_rejects_old_state_databases() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("old.db");
     {
@@ -807,7 +807,7 @@ fn sqlite_context_evidence_cascades_with_prompt_messages() {
 }
 
 #[test]
-fn sqlite_schema_v8_stores_reasoning_only_in_message_json_and_metrics_separately() {
+fn sqlite_schema_v9_stores_reasoning_only_in_message_json_and_metrics_separately() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");

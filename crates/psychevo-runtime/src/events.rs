@@ -35,6 +35,7 @@ pub(crate) struct PersistenceSink {
     pub(crate) context_recorder: Option<ContextRecorder>,
     pub(crate) prompt_display: Option<PromptDisplayMetadata>,
     pub(crate) selected_agent: Option<SelectedAgent>,
+    pub(crate) prompt_prefix_metadata: Option<Value>,
 }
 
 impl EventSink for PersistenceSink {
@@ -54,6 +55,7 @@ impl EventSink for PersistenceSink {
         let context_recorder = self.context_recorder.clone();
         let prompt_display = self.prompt_display.clone();
         let selected_agent = self.selected_agent.clone();
+        let prompt_prefix_metadata = self.prompt_prefix_metadata.clone();
         let started = self.started;
         let tool_elapsed_ms = Arc::clone(&self.tool_elapsed_ms);
         Box::pin(async move {
@@ -134,8 +136,11 @@ impl EventSink for PersistenceSink {
                         false
                     };
                     if should_attach_snapshot {
-                        let (metadata, content_text_override) =
-                            prompt_user_metadata(prompt_snapshot.clone(), prompt_display.as_ref());
+                        let (metadata, content_text_override) = prompt_user_metadata(
+                            prompt_snapshot.clone(),
+                            prompt_display.as_ref(),
+                            prompt_prefix_metadata.clone(),
+                        );
                         store
                             .append_message_with_undo_snapshot_metadata_and_context_evidence(
                                 &session_id,
@@ -253,8 +258,12 @@ fn add_selected_agent_metadata(
 fn prompt_user_metadata(
     snapshot: Option<String>,
     prompt_display: Option<&PromptDisplayMetadata>,
+    prompt_prefix_metadata: Option<Value>,
 ) -> (Option<Value>, Option<String>) {
     let mut metadata = serde_json::Map::new();
+    if let Some(prefix) = prompt_prefix_metadata {
+        metadata.insert("prompt_prefix".to_string(), prefix);
+    }
     if let Some(snapshot) = snapshot {
         metadata.insert(
             "undo".to_string(),

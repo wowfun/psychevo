@@ -23,9 +23,13 @@ use crate::context_usage::ContextRecorder;
 use crate::error::{Error, Result};
 use crate::events::PersistenceSink;
 use crate::messages::assistant_text;
+use crate::prompt_assembly::{
+    PromptPrefixRecordInput, assemble_child_prompt_prefix, context_evidence_for_request,
+    prompt_prefix_record, tool_declarations_hash,
+};
 use crate::skills::resolve_skills_home;
-use crate::store::{AgentEdgeRecord, AgentEdgeStatus, ContextEvidenceInput, SqliteStore};
-use crate::tools::{coding_core_tools_for_mode, mode_instruction};
+use crate::store::{AgentEdgeRecord, AgentEdgeStatus, SqliteStore};
+use crate::tools::coding_core_tools_for_mode;
 use crate::types::{
     ModelMetadata, RunMode, RunStreamEvent, RunStreamSink, SelectedAgent, SessionSummary,
     SmokeControl,
@@ -255,6 +259,11 @@ pub(crate) struct AgentToolContext {
     pub(crate) provider: Arc<dyn GenerationProvider>,
     pub(crate) model_provider: String,
     pub(crate) model: String,
+    pub(crate) provider_label: String,
+    pub(crate) base_url: String,
+    pub(crate) api_key_env: Option<String>,
+    pub(crate) reasoning_effort: Option<String>,
+    pub(crate) context_limit: Option<u64>,
     pub(crate) generation_metadata: Value,
     pub(crate) workdir: PathBuf,
     pub(crate) mode: RunMode,
@@ -340,8 +349,8 @@ pub fn discover_agents(options: &AgentDiscoveryOptions) -> Result<AgentCatalog> 
     Ok(catalog)
 }
 
-pub fn resolve_agent_definition<'a>(
-    catalog: &'a AgentCatalog,
+pub fn resolve_agent_definition(
+    catalog: &AgentCatalog,
     input: &str,
     workdir: &Path,
     env: &BTreeMap<String, String>,
@@ -439,6 +448,26 @@ pub fn format_agents_for_prompt(catalog: &[AgentDefinition]) -> String {
         text.push_str("</agent>");
     }
     text.push_str("\n</agents>");
+    text
+}
+
+pub(crate) fn format_selected_agent_instruction(
+    agent: &AgentDefinition,
+    role: AgentInvocationRole,
+) -> String {
+    let label = match role {
+        AgentInvocationRole::Main => "Main session agent",
+        AgentInvocationRole::Subagent | AgentInvocationRole::Fork => "Child agent",
+        AgentInvocationRole::System => "System agent",
+    };
+    let mut text = format!(
+        "{label}: {}\n\nThe selected-agent purpose and instructions below define how you should handle this invocation. They take precedence over generic coding-agent behavior unless runtime mode, tool policy, safety constraints, resource gates, or direct user constraints are stricter.\n\nPurpose:\n{}",
+        agent.name, agent.description
+    );
+    if !agent.instructions.trim().is_empty() {
+        text.push_str("\n\nInstructions:\n");
+        text.push_str(agent.instructions.trim());
+    }
     text
 }
 
@@ -585,9 +614,8 @@ pub async fn wait_agent_targets(
             .collect::<BTreeMap<_, _>>();
         let timed_out = statuses
             .iter()
-            .filter_map(|(target, record)| {
-                (!agent_status_is_final(record.status)).then(|| target.clone())
-            })
+            .filter(|(_, record)| !agent_status_is_final(record.status))
+            .map(|(target, _)| target.clone())
             .collect::<Vec<_>>();
         if timed_out.is_empty() || started.elapsed() >= timeout {
             return Ok(json!({
@@ -845,15 +873,15 @@ async fn send_agent_message_with_context(
     }
     {
         let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-        if let Some((live_id, record)) = find_live_key_and_record_locked(&runs, target) {
-            if !agent_status_is_final(record.status) {
-                if let Some(state) = runs.get(&live_id)
-                    && let Some(control) = &state.control
-                {
-                    let _ = control.inject_user_message(user_text_message(message.to_string()));
-                }
-                return Ok(Some(record));
+        if let Some((live_id, record)) = find_live_key_and_record_locked(&runs, target)
+            && !agent_status_is_final(record.status)
+        {
+            if let Some(state) = runs.get(&live_id)
+                && let Some(control) = &state.control
+            {
+                let _ = control.inject_user_message(user_text_message(message.to_string()));
             }
+            return Ok(Some(record));
         }
     }
 
@@ -2129,18 +2157,18 @@ pub(crate) fn spawn_child_agent_background(
     let background = true;
     let spawn_depth_remaining = child_spawn_depth_remaining(&context, &agent, None);
     let child_model = child_model_from(&context, &agent, None);
-    let metadata = child_agent_metadata(
-        &id,
-        &task_name,
-        &agent,
-        &context.parent_session_id,
+    let metadata = child_agent_metadata(ChildAgentMetadataInput {
+        id: &id,
+        task_name: &task_name,
+        agent: &agent,
+        parent_session_id: &context.parent_session_id,
         role,
-        &prompt,
+        task: &prompt,
         background,
-        false,
+        fork_context: false,
         spawn_depth_remaining,
-        Some(&context),
-    );
+        context: Some(&context),
+    });
     let child_session = context.store.create_child_session_with_metadata(
         &context.parent_session_id,
         &context.workdir,
@@ -2251,18 +2279,18 @@ async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
             "agent",
             &child_model,
             &child.context.model_provider,
-            Some(child_agent_metadata(
-                &child.id,
-                &child.task_name,
-                &child.agent,
-                &child.context.parent_session_id,
-                child.role,
-                &child.prompt,
-                child.background,
-                child.fork_context,
-                child.spawn_depth_remaining,
-                Some(&child.context),
-            )),
+            Some(child_agent_metadata(ChildAgentMetadataInput {
+                id: &child.id,
+                task_name: &child.task_name,
+                agent: &child.agent,
+                parent_session_id: &child.context.parent_session_id,
+                role: child.role,
+                task: &child.prompt,
+                background: child.background,
+                fork_context: child.fork_context,
+                spawn_depth_remaining: child.spawn_depth_remaining,
+                context: Some(&child.context),
+            })),
         )?
     };
     update_run_child_session(&child.id, &child_session);
@@ -2272,18 +2300,18 @@ async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
             &child.context.parent_session_id,
             &child_session,
             AgentEdgeStatus::Open,
-            Some(child_agent_metadata(
-                &child.id,
-                &child.task_name,
-                &child.agent,
-                &child.context.parent_session_id,
-                child.role,
-                &child.prompt,
-                child.background,
-                child.fork_context,
-                child.spawn_depth_remaining,
-                Some(&child.context),
-            )),
+            Some(child_agent_metadata(ChildAgentMetadataInput {
+                id: &child.id,
+                task_name: &child.task_name,
+                agent: &child.agent,
+                parent_session_id: &child.context.parent_session_id,
+                role: child.role,
+                task: &child.prompt,
+                background: child.background,
+                fork_context: child.fork_context,
+                spawn_depth_remaining: child.spawn_depth_remaining,
+                context: Some(&child.context),
+            })),
         )?;
     }
     run_agent_hook_event(
@@ -2313,19 +2341,70 @@ async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     tools.extend(agent_tools(child_agent_tool_context));
     tools = apply_agent_tool_policy(tools, Some(&child.agent), child.context.mode);
     tools = apply_agent_hooks(tools, Some(&child.agent), &child.context.workdir);
+    let tool_declarations_hash = tool_declarations_hash(&tools);
+    let prompt_assembly = assemble_child_prompt_prefix(
+        child.context.mode,
+        &child.agent,
+        &child.context.model_metadata.capabilities,
+    );
+    let selected_agent = SelectedAgent {
+        name: child.agent.name.clone(),
+        source: child.agent.source.as_str().to_string(),
+        path: child.agent.file_path.clone(),
+    };
+    let prefix_metadata = json!({
+        "mode": child.context.mode.as_str(),
+        "selected_agent": selected_agent.clone(),
+        "agent_role": invocation_role_str(child.role),
+        "parent_session_id": child.context.parent_session_id.clone(),
+    });
+    let prefix_record = prompt_prefix_record(PromptPrefixRecordInput {
+        session_id: &child_session,
+        provider: &child.context.model_provider,
+        model: &child_model,
+        prefix_hash: prompt_assembly.prefix_hash.clone(),
+        tool_declarations_hash,
+        invalidation_reason: Some(if child.existing_child_session.is_some() {
+            "child_session_resumed".to_string()
+        } else {
+            "new_child_session".to_string()
+        }),
+        slots: prompt_assembly.prefix_slots.clone(),
+        metadata: Some(prefix_metadata),
+    });
+    let prefix_record = child
+        .context
+        .store
+        .upsert_session_prompt_prefix(prefix_record)?;
+    let prompt_prefix_metadata = json!({
+        "hash": prefix_record.prefix_hash,
+        "version": prefix_record.version,
+        "created_at_ms": prefix_record.created_at_ms,
+        "provider": prefix_record.provider,
+        "model": prefix_record.model,
+        "tool_declarations_hash": prefix_record.tool_declarations_hash,
+        "invalidation_reason": prefix_record.invalidation_reason,
+    });
+    let prompt_context_evidence = context_evidence_for_request(
+        &prompt_assembly.prompt_instructions,
+        &[],
+        &prompt_assembly.prefix_contextual_user_messages,
+        &[],
+    );
+    let mut generation_metadata = child.context.generation_metadata.clone();
+    if let Some(object) = generation_metadata.as_object_mut() {
+        object.insert("prompt_prefix".to_string(), prompt_prefix_metadata.clone());
+    }
     let request = AgentLoopRequest {
         model_provider: child.context.model_provider.clone(),
         model: child_model,
-        generation_metadata: child.context.generation_metadata.clone(),
-        system_instructions: vec![
-            mode_instruction(child.context.mode).to_string(),
-            child.agent.instructions.clone(),
-            "You are running as a child agent. Return a concise final answer to the parent agent."
-                .to_string(),
-        ],
+        generation_metadata,
+        prompt_instructions: prompt_assembly.prompt_instructions,
+        turn_prompt_instructions: Vec::new(),
         previous_messages,
         context_messages: Vec::new(),
-        contextual_user_messages: Vec::new(),
+        prefix_contextual_user_messages: prompt_assembly.prefix_contextual_user_messages,
+        turn_contextual_user_messages: Vec::new(),
         prompt_messages: vec![user_text_message(child.prompt.clone())],
         tools,
         max_turns: child
@@ -2346,7 +2425,7 @@ async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         session_id: child_session,
         prompt_snapshot: None,
         prompt_snapshot_written: Arc::new(Mutex::new(false)),
-        prompt_context_evidence: Arc::new(Vec::<ContextEvidenceInput>::new()),
+        prompt_context_evidence: Arc::new(prompt_context_evidence),
         started: Instant::now(),
         tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
         control: SmokeControl::None,
@@ -2358,11 +2437,8 @@ async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         model_metadata: child.context.model_metadata.clone(),
         context_recorder: Option::<ContextRecorder>::None,
         prompt_display: None,
-        selected_agent: Some(SelectedAgent {
-            name: child.agent.name.clone(),
-            source: child.agent.source.as_str().to_string(),
-            path: child.agent.file_path.clone(),
-        }),
+        selected_agent: Some(selected_agent),
+        prompt_prefix_metadata: Some(prompt_prefix_metadata),
     });
     let notification_agent_name = child.agent.name.clone();
     let parent_control_handle = child.context.control_handle.clone();
@@ -2513,23 +2589,57 @@ fn default_task_name(agent_name: &str, id: &str) -> String {
 
 const AGENT_NOTIFICATION_METADATA_KEY: &str = "agent_notification";
 
-fn child_agent_metadata(
-    id: &str,
-    task_name: &str,
-    agent: &AgentDefinition,
-    parent_session_id: &str,
+struct ChildAgentMetadataInput<'a> {
+    id: &'a str,
+    task_name: &'a str,
+    agent: &'a AgentDefinition,
+    parent_session_id: &'a str,
     role: AgentInvocationRole,
-    task: &str,
+    task: &'a str,
     background: bool,
     fork_context: bool,
     spawn_depth_remaining: u8,
-    context: Option<&AgentToolContext>,
-) -> Value {
-    let mut object = context
+    context: Option<&'a AgentToolContext>,
+}
+
+fn child_agent_metadata(input: ChildAgentMetadataInput<'_>) -> Value {
+    let mut object = input
+        .context
         .and_then(|context| context.generation_metadata.as_object().cloned())
         .unwrap_or_default();
-    if let Some(context) = context {
-        if let Some(limit) = context.model_metadata.context_limit() {
+    if let Some(context) = input.context {
+        object.insert(
+            "provider_label".to_string(),
+            Value::String(context.provider_label.clone()),
+        );
+        object.insert(
+            "base_url".to_string(),
+            Value::String(context.base_url.clone()),
+        );
+        object.insert(
+            "api_key_env".to_string(),
+            context
+                .api_key_env
+                .clone()
+                .map(Value::String)
+                .unwrap_or(Value::Null),
+        );
+        object.insert(
+            "reasoning_effort".to_string(),
+            context
+                .reasoning_effort
+                .clone()
+                .map(Value::String)
+                .unwrap_or(Value::Null),
+        );
+        object.insert(
+            "mode".to_string(),
+            Value::String(context.mode.as_str().to_string()),
+        );
+        let context_limit = context
+            .context_limit
+            .or_else(|| context.model_metadata.context_limit());
+        if let Some(limit) = context_limit {
             object.insert("context_limit".to_string(), Value::from(limit));
         }
         object
@@ -2539,18 +2649,18 @@ fn child_agent_metadata(
     object.insert(
         "agent".to_string(),
         json!({
-            "id": id,
-            "task_name": task_name,
-            "name": agent.name.clone(),
-            "source": agent.source.as_str(),
-            "path": agent.file_path.clone(),
-            "parent_session_id": parent_session_id,
-            "role": invocation_role_str(role),
-            "task": task,
-            "background": background,
-            "fork_context": fork_context,
-            "effective_max_spawn_depth": spawn_depth_remaining,
-            "max_spawn_depth": spawn_depth_remaining,
+            "id": input.id,
+            "task_name": input.task_name,
+            "name": input.agent.name.clone(),
+            "source": input.agent.source.as_str(),
+            "path": input.agent.file_path.clone(),
+            "parent_session_id": input.parent_session_id,
+            "role": invocation_role_str(input.role),
+            "task": input.task,
+            "background": input.background,
+            "fork_context": input.fork_context,
+            "effective_max_spawn_depth": input.spawn_depth_remaining,
+            "max_spawn_depth": input.spawn_depth_remaining,
         }),
     );
     Value::Object(object)
@@ -3205,6 +3315,25 @@ Plan the work.
             .find(|agent| agent.name == "general")
             .expect("general");
         assert_eq!(general.source, AgentSource::Project);
+    }
+
+    #[test]
+    fn selected_agent_instruction_includes_description_and_body() {
+        let agent = built_in_agent(
+            "translate",
+            "Detect the source language automatically.",
+            "Preserve punctuation and return only the translation.",
+            None,
+        );
+
+        let main = format_selected_agent_instruction(&agent, AgentInvocationRole::Main);
+        assert!(main.contains("Main session agent: translate"));
+        assert!(main.contains("Purpose:\nDetect the source language automatically."));
+        assert!(main.contains("Instructions:\nPreserve punctuation"));
+
+        let child = format_selected_agent_instruction(&agent, AgentInvocationRole::Subagent);
+        assert!(child.contains("Child agent: translate"));
+        assert!(child.contains("Purpose:\nDetect the source language automatically."));
     }
 
     #[test]

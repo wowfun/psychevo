@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use psychevo_agent_core::{
-    AssistantBlock, ContextualUserBlock, ContextualUserMessage, Message, UserContentBlock,
+    AssistantBlock, ContextualUserBlock, ContextualUserMessage, Message, PromptInstruction,
+    UserContentBlock,
 };
 use psychevo_ai::{
     GenerationRequest, ModelTarget, ToolDeclaration, openai_chat_completions_endpoint,
@@ -13,7 +14,7 @@ use serde_json::{Map, Value};
 
 use crate::error::{Error, Result};
 use crate::skills::SkillDiscoveryOptions;
-use crate::store::{ContextEvidenceRecord, SqliteStore};
+use crate::store::{ContextEvidenceRecord, PromptPrefixRecord, SqliteStore};
 use crate::tools::{coding_core_tools_for_mode, mode_instruction, skill_tools_for_mode};
 use crate::types::{RunMode, SessionSummary};
 
@@ -212,6 +213,7 @@ pub struct SessionExportWriteResult {
 struct ExportMessageRecord {
     session_seq: i64,
     message: Message,
+    metadata: Option<Value>,
 }
 
 #[derive(Serialize)]
@@ -230,6 +232,8 @@ struct ExportDocument<'a> {
 struct ExportHeaderValue<'a> {
     session: ExportSessionValue<'a>,
     options: ExportOptionsValue,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prompt_prefix: Option<ExportPromptPrefixValue>,
 }
 
 #[derive(Serialize)]
@@ -260,6 +264,35 @@ struct ExportOptionsValue {
 struct ExportMessageValue {
     session_seq: i64,
     message: Message,
+}
+
+#[derive(Serialize)]
+struct ExportPromptPrefixValue {
+    version: i64,
+    created_at_ms: i64,
+    provider: String,
+    model: String,
+    prefix_hash: String,
+    tool_declarations_hash: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    invalidation_reason: Option<String>,
+    slots: Vec<ExportPromptPrefixSlotValue>,
+}
+
+#[derive(Serialize)]
+struct ExportPromptPrefixSlotValue {
+    slot: String,
+    tier: String,
+    semantic_role: String,
+    provider_role: String,
+    order: usize,
+    content_hash: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_path: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -328,12 +361,19 @@ pub fn render_session_export(
     } else {
         None
     };
+    let prompt_prefix_record = store.load_session_prompt_prefix(session_id)?;
     let last_request = if options
         .include
         .contains(SessionExportInclude::LastProviderRequest)
     {
         let unfiltered_messages = load_unfiltered_export_messages(store, session_id)?;
-        reconstruct_last_provider_request(store, session_id, &summary, &unfiltered_messages)?
+        reconstruct_last_provider_request(
+            store,
+            session_id,
+            &summary,
+            &unfiltered_messages,
+            prompt_prefix_record.as_ref(),
+        )?
     } else {
         None
     };
@@ -345,17 +385,26 @@ pub fn render_session_export(
     } else {
         None
     };
+    let prompt_prefix = prompt_prefix_record.map(export_prompt_prefix_value);
     let format = options.format;
     let content = match format {
         SessionExportFormat::Markdown => render_markdown(
             &summary,
+            prompt_prefix.as_ref(),
             messages.as_deref(),
             evidence.as_ref(),
             last_request.as_ref(),
             &options,
         ),
         SessionExportFormat::Json => {
-            let document = export_document(&summary, &messages, evidence, last_request, options);
+            let document = export_document(
+                &summary,
+                prompt_prefix,
+                &messages,
+                evidence,
+                last_request,
+                options,
+            );
             serde_json::to_string_pretty(&document)?
         }
     };
@@ -404,6 +453,7 @@ fn load_export_messages(
             Ok(ExportMessageRecord {
                 session_seq: record.session_seq,
                 message,
+                metadata: record.metadata,
             })
         })
         .collect()
@@ -420,9 +470,37 @@ fn load_unfiltered_export_messages(
             Ok(ExportMessageRecord {
                 session_seq: record.session_seq,
                 message: record.message,
+                metadata: record.metadata,
             })
         })
         .collect()
+}
+
+fn export_prompt_prefix_value(record: PromptPrefixRecord) -> ExportPromptPrefixValue {
+    ExportPromptPrefixValue {
+        version: record.version,
+        created_at_ms: record.created_at_ms,
+        provider: record.provider,
+        model: record.model,
+        prefix_hash: record.prefix_hash,
+        tool_declarations_hash: record.tool_declarations_hash,
+        invalidation_reason: record.invalidation_reason,
+        slots: record
+            .slots
+            .into_iter()
+            .map(|slot| ExportPromptPrefixSlotValue {
+                slot: slot.slot,
+                tier: slot.tier,
+                semantic_role: slot.semantic_role,
+                provider_role: slot.provider_role,
+                order: slot.order,
+                content_hash: slot.content_hash,
+                source_kind: slot.source_kind,
+                source_name: slot.source_name,
+                source_path: slot.source_path,
+            })
+            .collect(),
+    }
 }
 
 fn load_provider_input_evidence(
@@ -466,6 +544,7 @@ fn reconstruct_last_provider_request(
     session_id: &str,
     summary: &SessionSummary,
     messages: &[ExportMessageRecord],
+    prompt_prefix: Option<&PromptPrefixRecord>,
 ) -> Result<Option<ProviderRequestExport>> {
     let metadata = store.session_metadata(session_id)?.unwrap_or(Value::Null);
     let base_url = metadata
@@ -479,27 +558,33 @@ fn reconstruct_last_provider_request(
     let generation_metadata = generation_metadata_from_session_metadata(&metadata, &mut warnings);
     let workdir = PathBuf::from(&summary.workdir);
     let tools = reconstructed_tool_declarations(&workdir, mode);
-    let mut current_prompt_seq = None;
+    let mut current_prompt = None;
     let mut last_request = None;
 
     for (index, record) in messages.iter().enumerate() {
         if matches!(record.message, Message::User { .. }) {
-            current_prompt_seq = Some(record.session_seq);
+            current_prompt = Some((record.session_seq, record.metadata.clone()));
         }
         if !matches!(record.message, Message::Assistant { .. }) {
             continue;
         }
-        let Some(prompt_session_seq) = current_prompt_seq else {
+        let Some((prompt_session_seq, ref prompt_metadata)) = current_prompt else {
             continue;
         };
         let mut request_warnings = warnings.clone();
-        let provider_messages = reconstructed_provider_messages(
+        let context = ProviderMessageReconstruction {
             store,
             session_id,
             messages,
+            mode,
+            prompt_prefix,
+        };
+        let provider_messages = reconstructed_provider_messages(
+            &context,
             index,
             prompt_session_seq,
-            mode,
+            prompt_metadata,
+            &record.metadata,
             &mut request_warnings,
         )?;
         let request = GenerationRequest {
@@ -528,16 +613,40 @@ fn reconstruct_last_provider_request(
     Ok(last_request)
 }
 
+struct ProviderMessageReconstruction<'a> {
+    store: &'a SqliteStore,
+    session_id: &'a str,
+    messages: &'a [ExportMessageRecord],
+    mode: RunMode,
+    prompt_prefix: Option<&'a PromptPrefixRecord>,
+}
+
 fn reconstructed_provider_messages(
-    store: &SqliteStore,
-    session_id: &str,
-    messages: &[ExportMessageRecord],
+    context: &ProviderMessageReconstruction<'_>,
     assistant_index: usize,
     prompt_session_seq: i64,
-    mode: RunMode,
+    prompt_metadata: &Option<Value>,
+    assistant_metadata: &Option<Value>,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<Value>> {
-    let evidence = store.load_context_evidence(session_id, prompt_session_seq)?;
+    let evidence = context
+        .store
+        .load_context_evidence(context.session_id, prompt_session_seq)?;
+    if let Some(prefix) = matching_prompt_prefix(
+        context.prompt_prefix,
+        prompt_metadata,
+        assistant_metadata,
+        warnings,
+    ) {
+        return reconstructed_provider_messages_from_prefix(
+            &evidence,
+            prefix,
+            context.messages,
+            assistant_index,
+            prompt_session_seq,
+        );
+    }
+
     let mut provider_messages = Vec::new();
     let mut system_count = 0usize;
     for item in evidence
@@ -556,7 +665,7 @@ fn reconstructed_provider_messages(
     if system_count == 0 {
         provider_messages.push(serde_json::json!({
             "role": "system",
-            "content": mode_instruction(mode),
+            "content": mode_instruction(context.mode),
         }));
         warnings.push(
             "prompt-scoped system instruction evidence was unavailable; default mode instruction was reconstructed"
@@ -564,7 +673,8 @@ fn reconstructed_provider_messages(
         );
     }
 
-    for record in messages
+    for record in context
+        .messages
         .iter()
         .take_while(|record| record.session_seq < prompt_session_seq)
     {
@@ -582,6 +692,43 @@ fn reconstructed_provider_messages(
         }
     }
 
+    for record in context
+        .messages
+        .iter()
+        .take(assistant_index)
+        .filter(|record| record.session_seq >= prompt_session_seq)
+    {
+        provider_messages.push(message_to_value(&record.message)?);
+    }
+
+    Ok(provider_messages)
+}
+
+fn reconstructed_provider_messages_from_prefix(
+    evidence: &[ContextEvidenceRecord],
+    prefix: &PromptPrefixRecord,
+    messages: &[ExportMessageRecord],
+    assistant_index: usize,
+    prompt_session_seq: i64,
+) -> Result<Vec<Value>> {
+    let mut provider_messages = Vec::new();
+    provider_messages.extend(prefix_prompt_instruction_values(prefix));
+    for message in prefix_contextual_user_messages(prefix) {
+        provider_messages.push(message.to_provider_value());
+    }
+
+    for record in messages
+        .iter()
+        .take_while(|record| record.session_seq < prompt_session_seq)
+    {
+        provider_messages.push(message_to_value(&record.message)?);
+    }
+
+    provider_messages.extend(turn_prompt_instruction_values_from_evidence(evidence));
+    for message in turn_contextual_user_messages_from_evidence(evidence) {
+        provider_messages.push(message.to_provider_value());
+    }
+
     for record in messages
         .iter()
         .take(assistant_index)
@@ -593,8 +740,166 @@ fn reconstructed_provider_messages(
     Ok(provider_messages)
 }
 
+fn matching_prompt_prefix<'a>(
+    prompt_prefix: Option<&'a PromptPrefixRecord>,
+    prompt_metadata: &Option<Value>,
+    assistant_metadata: &Option<Value>,
+    warnings: &mut Vec<String>,
+) -> Option<&'a PromptPrefixRecord> {
+    let prompt_hash = prompt_prefix_hash(prompt_metadata);
+    let assistant_hash = prompt_prefix_hash(assistant_metadata);
+    if let (Some(prompt_hash), Some(assistant_hash)) = (prompt_hash, assistant_hash)
+        && prompt_hash != assistant_hash
+    {
+        warnings.push(format!(
+            "user prompt prefix hash `{prompt_hash}` differs from assistant prompt prefix hash `{assistant_hash}`; using the user prompt hash for reconstruction"
+        ));
+    }
+    let (recorded_hash, source) = if let Some(prompt_hash) = prompt_hash {
+        (prompt_hash, "user prompt")
+    } else if let Some(assistant_hash) = assistant_hash {
+        (assistant_hash, "assistant message")
+    } else {
+        warnings.push(
+            "neither the user prompt nor assistant message includes a prompt prefix hash; hidden prefix snapshot cannot be verified and the reconstructed request is approximate"
+                .to_string(),
+        );
+        return None;
+    };
+    let Some(prefix) = prompt_prefix else {
+        warnings.push(format!(
+            "prompt prefix snapshot `{recorded_hash}` from {source} is unavailable; hidden prefix text cannot be reconstructed and the request is approximate"
+        ));
+        return None;
+    };
+    if prefix.prefix_hash != recorded_hash {
+        warnings.push(format!(
+            "latest prompt prefix snapshot `{}` does not match {source} prompt prefix `{recorded_hash}`; hidden prefix text is stale or unavailable and the request is approximate",
+            prefix.prefix_hash
+        ));
+        return None;
+    }
+    Some(prefix)
+}
+
+fn prompt_prefix_hash(metadata: &Option<Value>) -> Option<&str> {
+    metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("prompt_prefix"))
+        .and_then(|prefix| prefix.get("hash"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn prefix_prompt_instruction_values(prefix: &PromptPrefixRecord) -> Vec<Value> {
+    let mut slots = prefix
+        .slots
+        .iter()
+        .filter(|slot| slot.provider_role != "user" && !slot.content.trim().is_empty())
+        .collect::<Vec<_>>();
+    slots.sort_by_key(|slot| slot.order);
+    slots
+        .into_iter()
+        .map(|slot| {
+            PromptInstruction {
+                slot: slot.slot.clone(),
+                tier: slot.tier.clone(),
+                semantic_role: slot.semantic_role.clone(),
+                provider_role: slot.provider_role.clone(),
+                order: slot.order,
+                content: slot.content.clone(),
+                content_hash: slot.content_hash.clone(),
+                source_kind: slot.source_kind.clone(),
+                source_name: slot.source_name.clone(),
+                source_path: slot.source_path.clone(),
+            }
+            .to_provider_value()
+        })
+        .collect()
+}
+
+fn prefix_contextual_user_messages(prefix: &PromptPrefixRecord) -> Vec<ContextualUserMessage> {
+    let mut slots = prefix
+        .slots
+        .iter()
+        .filter(|slot| slot.semantic_role == "project_context" && !slot.content.trim().is_empty())
+        .collect::<Vec<_>>();
+    slots.sort_by_key(|slot| slot.order);
+    let blocks = slots
+        .into_iter()
+        .map(|slot| {
+            ContextualUserBlock::new(
+                slot.source_kind
+                    .clone()
+                    .unwrap_or_else(|| "project_instruction".to_string()),
+                slot.source_name.clone(),
+                slot.source_path.clone(),
+                slot.content.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    if blocks.is_empty() {
+        Vec::new()
+    } else {
+        vec![ContextualUserMessage::new_with_category(
+            "project_instructions",
+            "project_context",
+            blocks,
+        )]
+    }
+}
+
+fn turn_prompt_instruction_values_from_evidence(evidence: &[ContextEvidenceRecord]) -> Vec<Value> {
+    let mut items = evidence
+        .iter()
+        .filter(|item| {
+            item.provider_group.as_deref() == Some("turn_prompt_instructions")
+                && !item.content_text.trim().is_empty()
+        })
+        .collect::<Vec<_>>();
+    items.sort_by_key(|item| {
+        (
+            item.provider_block_index.unwrap_or(i64::MAX),
+            item.context_seq,
+        )
+    });
+    items
+        .into_iter()
+        .map(|item| {
+            serde_json::json!({
+                "role": item.role,
+                "content": item.content_text,
+                "metadata": {
+                    "prompt_slot": item.source_name,
+                    "prompt_slot_tier": "turn",
+                    "prompt_semantic_role": item.context_kind,
+                    "source_kind": item.source_kind,
+                    "source_name": item.source_name,
+                    "source_path": item.source_path,
+                }
+            })
+        })
+        .collect()
+}
+
+fn turn_contextual_user_messages_from_evidence(
+    evidence: &[ContextEvidenceRecord],
+) -> Vec<ContextualUserMessage> {
+    contextual_user_messages_from_evidence_for_kinds(evidence, &["selected_skill"])
+}
+
 fn contextual_user_messages_from_evidence(
     evidence: &[ContextEvidenceRecord],
+) -> Vec<ContextualUserMessage> {
+    contextual_user_messages_from_evidence_for_kinds(
+        evidence,
+        &["project_instruction", "selected_skill"],
+    )
+}
+
+fn contextual_user_messages_from_evidence_for_kinds(
+    evidence: &[ContextEvidenceRecord],
+    source_kinds: &[&str],
 ) -> Vec<ContextualUserMessage> {
     #[derive(Debug)]
     struct Group {
@@ -607,10 +912,7 @@ fn contextual_user_messages_from_evidence(
     let mut groups = Vec::<Group>::new();
     for item in evidence.iter().filter(|item| {
         item.role == "user"
-            && matches!(
-                item.source_kind.as_str(),
-                "project_instruction" | "selected_skill"
-            )
+            && source_kinds.contains(&item.source_kind.as_str())
             && !item.content_text.trim().is_empty()
     }) {
         let group_name = item
@@ -648,6 +950,7 @@ fn contextual_user_messages_from_evidence(
             });
             ContextualUserMessage {
                 provider_group: group.name,
+                context_category: "turn_context".to_string(),
                 blocks: group
                     .blocks
                     .into_iter()
@@ -758,6 +1061,7 @@ fn reconstructed_tool_declarations(workdir: &Path, mode: RunMode) -> Vec<ToolDec
 
 fn export_document<'a>(
     summary: &'a SessionSummary,
+    prompt_prefix: Option<ExportPromptPrefixValue>,
     messages: &Option<Vec<ExportMessageRecord>>,
     evidence: Option<Vec<ExportPromptEvidence>>,
     last_request: Option<ProviderRequestExport>,
@@ -787,6 +1091,7 @@ fn export_document<'a>(
                 artifact_kind: options.artifact_kind,
                 include: options.include.values().collect(),
             },
+            prompt_prefix,
         });
     ExportDocument {
         header,
@@ -806,6 +1111,7 @@ fn export_document<'a>(
 
 fn render_markdown(
     summary: &SessionSummary,
+    prompt_prefix: Option<&ExportPromptPrefixValue>,
     messages: Option<&[ExportMessageRecord]>,
     evidence: Option<&Vec<ExportPromptEvidence>>,
     last_request: Option<&ProviderRequestExport>,
@@ -841,6 +1147,10 @@ fn render_markdown(
             &mut out,
             &format!("- include: `{}`", options.include.tokens().join(",")),
         );
+        if let Some(prefix) = prompt_prefix {
+            push_line(&mut out, "");
+            render_markdown_prompt_prefix(&mut out, prefix);
+        }
     }
     if let Some(messages) = messages {
         if !out.is_empty() {
@@ -949,6 +1259,60 @@ fn render_markdown(
         }
     }
     out
+}
+
+fn render_markdown_prompt_prefix(out: &mut String, prefix: &ExportPromptPrefixValue) {
+    push_line(out, "### Prompt Prefix");
+    push_line(out, "");
+    push_line(
+        out,
+        &format!("- hash: `{}`", markdown_inline(&prefix.prefix_hash)),
+    );
+    push_line(out, &format!("- version: `{}`", prefix.version));
+    push_line(
+        out,
+        &format!(
+            "- model: `{}/{}`",
+            markdown_inline(&prefix.provider),
+            markdown_inline(&prefix.model)
+        ),
+    );
+    push_line(
+        out,
+        &format!(
+            "- tool_declarations_hash: `{}`",
+            markdown_inline(&prefix.tool_declarations_hash)
+        ),
+    );
+    if let Some(reason) = &prefix.invalidation_reason {
+        push_line(
+            out,
+            &format!("- invalidation_reason: `{}`", markdown_inline(reason)),
+        );
+    }
+    push_line(out, "");
+    push_line(out, "| slot | role | tier | hash | source |");
+    push_line(out, "| --- | --- | --- | --- | --- |");
+    for slot in &prefix.slots {
+        let source = slot
+            .source_path
+            .as_deref()
+            .or(slot.source_name.as_deref())
+            .or(slot.source_kind.as_deref())
+            .unwrap_or("");
+        push_line(
+            out,
+            &format!(
+                "| `{}` | `{}/{}` | `{}` | `{}` | `{}` |",
+                markdown_inline(&slot.slot),
+                markdown_inline(&slot.semantic_role),
+                markdown_inline(&slot.provider_role),
+                markdown_inline(&slot.tier),
+                markdown_inline(&slot.content_hash),
+                markdown_inline(source),
+            ),
+        );
+    }
 }
 
 fn render_markdown_message(out: &mut String, record: &ExportMessageRecord) {
@@ -1111,5 +1475,27 @@ fn markdown_inline(value: &str) -> String {
 }
 
 fn short_session_id(session_id: &str) -> &str {
-    session_id.get(..8).unwrap_or(session_id)
+    session_id.get(..13).unwrap_or(session_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_export_filename_distinguishes_sibling_uuidv7_sessions() {
+        let parent = default_session_export_filename(
+            "019e3716-eeb0-7102-9e7b-7a66ac5dc0a1",
+            SessionExportFormat::Json,
+            SessionArtifactKind::Export,
+        );
+        let child = default_session_export_filename(
+            "019e3716-fa89-7240-9397-1c4a74d8cebf",
+            SessionExportFormat::Json,
+            SessionArtifactKind::Export,
+        );
+        assert_ne!(parent, child);
+        assert_eq!(parent, "psychevo-session-019e3716-eeb0.json");
+        assert_eq!(child, "psychevo-session-019e3716-fa89.json");
+    }
 }

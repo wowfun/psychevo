@@ -62,10 +62,12 @@ fn request() -> AgentLoopRequest {
         model_provider: "fake".to_string(),
         model: "model".to_string(),
         generation_metadata: json!({}),
-        system_instructions: Vec::new(),
+        prompt_instructions: Vec::new(),
+        turn_prompt_instructions: Vec::new(),
         previous_messages: Vec::new(),
         context_messages: Vec::new(),
-        contextual_user_messages: Vec::new(),
+        prefix_contextual_user_messages: Vec::new(),
+        turn_contextual_user_messages: Vec::new(),
         prompt_messages: vec![user_text_message("hello")],
         tools: Vec::new(),
         max_turns: 1,
@@ -73,7 +75,7 @@ fn request() -> AgentLoopRequest {
 }
 
 #[tokio::test]
-async fn contextual_user_messages_are_inserted_between_history_and_prompt() {
+async fn prefix_contextual_user_messages_are_inserted_before_history() {
     let provider = RequestCaptureProvider::default();
     let requests = Arc::clone(&provider.requests);
     let (_, control) = ControlHandle::new();
@@ -83,11 +85,13 @@ async fn contextual_user_messages_are_inserted_between_history_and_prompt() {
             model_provider: "fake".to_string(),
             model: "model".to_string(),
             generation_metadata: json!({}),
-            system_instructions: Vec::new(),
+            prompt_instructions: Vec::new(),
+            turn_prompt_instructions: Vec::new(),
             previous_messages: vec![user_text_message("previous")],
             context_messages: Vec::new(),
-            contextual_user_messages: vec![ContextualUserMessage::new(
+            prefix_contextual_user_messages: vec![ContextualUserMessage::new_with_category(
                 "project_instructions",
+                "project_context",
                 vec![
                     ContextualUserBlock::new(
                         "project_instruction",
@@ -103,6 +107,7 @@ async fn contextual_user_messages_are_inserted_between_history_and_prompt() {
                     ),
                 ],
             )],
+            turn_contextual_user_messages: Vec::new(),
             prompt_messages: vec![user_text_message("accepted prompt")],
             tools: Vec::new(),
             max_turns: 1,
@@ -113,19 +118,26 @@ async fn contextual_user_messages_are_inserted_between_history_and_prompt() {
     .await
     .expect("loop");
     assert_eq!(completion.outcome, Outcome::Normal);
-    assert_eq!(completion.messages[0], user_text_message("accepted prompt"));
+    let Message::User { content, .. } = &completion.messages[0] else {
+        panic!("completion user message");
+    };
+    assert_eq!(content, &[UserContentBlock::text("accepted prompt")]);
 
     let requests = requests.lock().expect("requests");
     let messages = &requests[0].messages;
     assert_eq!(messages.len(), 3);
-    assert_eq!(messages[0]["content"][0]["text"], "previous");
     assert_eq!(
-        messages[1]["metadata"]["provider_group"],
+        messages[0]["metadata"]["provider_group"],
         "project_instructions"
     );
-    assert_eq!(messages[1]["content"].as_array().expect("blocks").len(), 2);
-    assert_eq!(messages[1]["content"][0]["text"], "root rules");
-    assert_eq!(messages[1]["content"][1]["text"], "local rules");
+    assert_eq!(
+        messages[0]["metadata"]["context_category"],
+        "project_context"
+    );
+    assert_eq!(messages[0]["content"].as_array().expect("blocks").len(), 2);
+    assert_eq!(messages[0]["content"][0]["text"], "root rules");
+    assert_eq!(messages[0]["content"][1]["text"], "local rules");
+    assert_eq!(messages[1]["content"][0]["text"], "previous");
     assert_eq!(messages[2]["content"][0]["text"], "accepted prompt");
 }
 

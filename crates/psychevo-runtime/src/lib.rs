@@ -8,6 +8,7 @@ mod events;
 mod messages;
 mod paths;
 mod project_instructions;
+mod prompt_assembly;
 mod prompt_image;
 mod run;
 mod session_export;
@@ -55,7 +56,8 @@ pub use prompt_image::{
 };
 pub use psychevo_agent_core::TerminalReason;
 pub use run::{
-    run_live, run_live_streaming, run_live_streaming_controlled, spawn_agent_background,
+    reload_session_context, run_live, run_live_streaming, run_live_streaming_controlled,
+    spawn_agent_background,
 };
 pub use session_export::{
     SessionArtifactKind, SessionExportArtifact, SessionExportFormat, SessionExportInclude,
@@ -79,13 +81,13 @@ pub use tools::tool_names_for_mode;
 pub use types::{
     AgentSpawnOptions, AgentSpawnResult, ConfigScope, ConfiguredModel, CustomProviderInput,
     CustomProviderResult, ImageInput, ModelCatalogEntry, ModelCatalogProvider,
-    ModelMetadataCacheTarget, PromptAttachmentDisplay, PromptDisplayMetadata, RunControl,
-    RunControlHandle, RunMode, RunOptions, RunResult, RunStreamEvent, RunStreamSink, RunWarning,
-    SanitizedMessageSummary, ScopedCustomProviderInput, SelectedAgent, SessionExportMessageSummary,
-    SessionRedoResult, SessionSummary, SessionUndoOptions, SessionUndoResult, SmokeControl,
-    SmokeOptions, SmokeResult, StatsOptions, TUI_DISPLAY_METADATA_KEY, TuiMessageSummary,
-    USER_SHELL_METADATA_KEY, UserShellContextOptions, UserShellOptions, UserShellResult,
-    run_control,
+    ModelMetadataCacheTarget, PromptAttachmentDisplay, PromptDisplayMetadata, ReloadContextOptions,
+    ReloadContextResult, RunControl, RunControlHandle, RunMode, RunOptions, RunResult,
+    RunStreamEvent, RunStreamSink, RunWarning, SanitizedMessageSummary, ScopedCustomProviderInput,
+    SelectedAgent, SessionExportMessageSummary, SessionRedoResult, SessionSummary,
+    SessionUndoOptions, SessionUndoResult, SmokeControl, SmokeOptions, SmokeResult, StatsOptions,
+    TUI_DISPLAY_METADATA_KEY, TuiMessageSummary, USER_SHELL_METADATA_KEY, UserShellContextOptions,
+    UserShellOptions, UserShellResult, run_control,
 };
 pub use undo::{redo_session, undo_session};
 pub use user_shell::run_user_shell_command_streaming_controlled;

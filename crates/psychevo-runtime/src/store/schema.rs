@@ -20,6 +20,7 @@ impl SqliteStore {
             && user_version != 5
             && user_version != 6
             && user_version != 7
+            && user_version != 8
         {
             return Err(Error::Config(format!(
                 "state database schema version {user_version} is not supported; run `pevo init --reset-state` or set PSYCHEVO_DB to a new state database"
@@ -107,6 +108,19 @@ impl SqliteStore {
                 status TEXT NOT NULL,
                 created_at_ms INTEGER NOT NULL,
                 updated_at_ms INTEGER NOT NULL,
+                metadata_json TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS session_prompt_prefixes (
+                session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+                version INTEGER NOT NULL,
+                created_at_ms INTEGER NOT NULL,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                prefix_hash TEXT NOT NULL,
+                tool_declarations_hash TEXT NOT NULL,
+                invalidation_reason TEXT,
+                slots_json TEXT NOT NULL,
                 metadata_json TEXT
             );
 
