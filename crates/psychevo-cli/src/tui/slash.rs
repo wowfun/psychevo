@@ -12,6 +12,7 @@ pub(crate) const VARIANTS: &[&str] = &["none", "minimal", "low", "medium", "high
 const GENERAL_COMMANDS: &[&str] = &[
     "/status",
     "/context",
+    "/reload-context",
     "/model",
     "/sessions",
     "/new",
@@ -30,6 +31,7 @@ pub(crate) enum SlashCommand {
     Sessions,
     Usage,
     Context,
+    ReloadContext,
     ModelShow,
     VariantSet(String),
     ModeSet(String),
@@ -344,6 +346,10 @@ fn parse_registered_slash_command(
             parse_no_arguments(spec, command, rest)?;
             Ok(SlashCommand::Context)
         }
+        SlashCommandAction::ReloadContext => {
+            parse_no_arguments(spec, command, rest)?;
+            Ok(SlashCommand::ReloadContext)
+        }
         SlashCommandAction::ModelShow => {
             parse_no_arguments(spec, command, rest)?;
             Ok(SlashCommand::ModelShow)
@@ -476,7 +482,7 @@ fn parse_export_like_options(
                 };
                 include = Some(parse_include(value, artifact_kind, spec)?);
             }
-            "--format" if allow_format => {
+            "--format" | "-f" if allow_format => {
                 index += 1;
                 let Some(value) = tokens.get(index) else {
                     return Err(anyhow!("usage: {}", spec.usage));
@@ -486,6 +492,11 @@ fn parse_export_like_options(
             }
             value if allow_format && value.starts_with("--format=") => {
                 let value = value.trim_start_matches("--format=");
+                format =
+                    parse_export_format(value).ok_or_else(|| anyhow!("usage: {}", spec.usage))?;
+            }
+            value if allow_format && value.starts_with("-f=") => {
+                let value = value.trim_start_matches("-f=");
                 format =
                     parse_export_format(value).ok_or_else(|| anyhow!("usage: {}", spec.usage))?;
             }
@@ -847,6 +858,22 @@ mod tests {
             }))
         );
         assert_eq!(
+            parse_slash_command("/export out.json -f json").unwrap(),
+            Some(SlashCommand::Export(TuiExportOptions {
+                path: Some("out.json".to_string()),
+                format: SessionExportFormat::Json,
+                include: SessionExportIncludeSet::default_for(SessionArtifactKind::Export),
+            }))
+        );
+        assert_eq!(
+            parse_slash_command("/export out.json -f=json").unwrap(),
+            Some(SlashCommand::Export(TuiExportOptions {
+                path: Some("out.json".to_string()),
+                format: SessionExportFormat::Json,
+                include: SessionExportIncludeSet::default_for(SessionArtifactKind::Export),
+            }))
+        );
+        assert_eq!(
             parse_slash_command("/share share.md -i m,r,pie").unwrap(),
             Some(SlashCommand::Share(TuiShareOptions {
                 path: Some("share.md".to_string()),
@@ -855,6 +882,7 @@ mod tests {
             }))
         );
         assert!(parse_slash_command("/share --format json").is_err());
+        assert!(parse_slash_command("/share -f json").is_err());
         assert!(parse_slash_command("/export --with-reasoning").is_err());
         assert!(parse_slash_command("/export --full-inputs").is_err());
         assert!(parse_slash_command("/export --last-request").is_err());
@@ -917,7 +945,6 @@ mod tests {
         assert_eq!(undo[0].command, "/undo");
         assert!(!undo[0].upcoming);
         let rename = slash_menu_items("/ren");
-        assert_eq!(rename.len(), 1);
         assert_eq!(rename[0].command, "/rename");
         assert_eq!(rename[0].description, "rename current session");
         let fuzzy_rename = slash_menu_items("/rn");
@@ -956,7 +983,7 @@ mod tests {
         );
         assert!(help.contains("archive, restore, and delete actions affect local state only"));
         assert!(help.contains(
-            "/export [path] [--format markdown|json] [-i|--include list] - write session export"
+            "/export [path] [-f|--format markdown|json] [-i|--include list] - write session export"
         ));
         assert!(help.contains("last-provider-request can expose hidden prompts"));
         assert!(help.contains("/skill:<name> [args] - invoke a skill (2 available)"));

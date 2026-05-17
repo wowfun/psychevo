@@ -1,6 +1,6 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
-assertion_line: 667
+assertion_line: 678
 expression: combined
 ---
 fixture=active_visible_write_preamble
@@ -11,7 +11,7 @@ size=120x24
 
 Now I have all the data needed. Let me write the complete report.
 
-◦ Updating files                                                                                                     0s
+⠋ Updating files                                                                                                     0s
 
 
 
@@ -30,14 +30,14 @@ Now I have all the data needed. Let me write the complete report.
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
-mock/model  high  • 0s · Esc  ~/work · main
+mock/model  high  ⠋ 0s · Esc  ~/work · main
 
 --- styles ---
 [dim]› [default]Write the complete report.
 [default]
 [default]Now I have all the data needed. Let me write the complete report.
 [default]
-[cyan]◦ [default]Updating files                                                                                                     [dim]0s[default]
+[cyan]⠋ [default]Updating files                                                                                                     [dim]0s[default]
 [default]
 [default]
 [default]
@@ -56,4 +56,4 @@ mock/model  high  • 0s · Esc  ~/work · main
 [default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
-[default]mock/model  [magenta]high[default]  [cyan]•[default] [dim]0s · [cyan]Esc[default]  [dim]~/work · main[default]
+[default]mock/model  [magenta]high[default]  [cyan]⠋[default] [dim]0s · [cyan]Esc[default]  [dim]~/work · main[default]

@@ -94,21 +94,10 @@ fn render_transcript(
         let hit_height =
             (visible_end.saturating_sub(visible_start)).min(usize::from(u16::MAX)) as u16;
         if visible_start == block_start
-            && let TranscriptHitTarget::Row(row_id) = layout_block.target
-            && ui.transcript[render_blocks[block_index].index]
-                .agent_target
-                .is_some()
+            && let Some(open_rect) =
+                agent_open_hit_rect(ui, area, y, &render_blocks, block_index)
         {
-            let open_width = area.width.min(20);
-            areas.push((
-                TranscriptHitTarget::AgentOpen(row_id),
-                Rect {
-                    x: area.x.saturating_add(area.width.saturating_sub(open_width)),
-                    y,
-                    width: open_width,
-                    height: 1,
-                },
-            ));
+            areas.push((open_rect.0, open_rect.1));
         }
         areas.push((
             layout_block.target,
@@ -169,6 +158,61 @@ fn render_transcript(
         transcript_selectable_area(area),
         SelectableRegion::Transcript,
     );
+}
+
+fn agent_open_hit_rect(
+    ui: &FullscreenUi<'_>,
+    area: Rect,
+    y: u16,
+    render_blocks: &[TranscriptRenderBlock],
+    block_index: usize,
+) -> Option<(TranscriptHitTarget, Rect)> {
+    let layout_block = ui.transcript_layout.blocks.get(block_index)?;
+    let TranscriptHitTarget::Row(row_id) = layout_block.target else {
+        return None;
+    };
+    let row = &ui.transcript[render_blocks.get(block_index)?.index];
+    row.agent_target.as_ref()?;
+    let selected = target_selected(ui, layout_block.target);
+    let phase = ToolRowPhase::from_row(row);
+    let active_elapsed = (phase == ToolRowPhase::Active)
+        .then(|| active_tool_elapsed(row))
+        .flatten();
+    let marker = if selected {
+        "› ".to_string()
+    } else if let Some(elapsed) = active_elapsed {
+        format!("{} ", activity_spinner_frame(elapsed))
+    } else {
+        "• ".to_string()
+    };
+    let title = tool_display_title(row, phase);
+    let title_detail = tool_title_detail(row, title.as_str());
+    let hint = row_expand_hint(row, selected, title_detail.as_deref())?;
+    let elapsed = tool_elapsed_label(row);
+    let line_width = area.width.saturating_sub(1);
+    let right_text = ledger_title_right_text(
+        Some(hint.as_str()),
+        elapsed.as_deref(),
+        line_width,
+        &marker,
+    );
+    if !right_text.starts_with("Open") {
+        return None;
+    }
+    let right_width = UnicodeWidthStr::width(right_text.as_str()).min(usize::from(u16::MAX)) as u16;
+    let open_width = UnicodeWidthStr::width("Open").min(usize::from(u16::MAX)) as u16;
+    if right_width == 0 || open_width == 0 {
+        return None;
+    }
+    Some((
+        TranscriptHitTarget::AgentOpen(row_id),
+        Rect {
+            x: area.x.saturating_add(line_width.saturating_sub(right_width)),
+            y,
+            width: open_width,
+            height: 1,
+        },
+    ))
 }
 
 fn render_session_identity_separator(
@@ -641,7 +685,7 @@ fn context_status_bar_line(line: &str, body_style: Style) -> Option<Line<'static
     }
     if !cells
         .chars()
-        .all(|cell| matches!(cell, 'S' | 'T' | 'K' | 'M' | '.'))
+        .all(|cell| matches!(cell, 'B' | 'D' | 'P' | 'H' | 'C' | 'U' | 'T' | '.'))
     {
         return None;
     }
@@ -657,15 +701,18 @@ fn context_status_bar_line(line: &str, body_style: Style) -> Option<Line<'static
 }
 
 fn context_status_legend_line(line: &str, body_style: Style) -> Option<Line<'static>> {
-    if line != "S system  T tools  K skills  M input_messages  . free" {
+    if line != "B base  D developer  P project  H history  C turn  U prompt  T tools  . free" {
         return None;
     }
     let mut spans = Vec::new();
     for (marker, label) in [
-        ('S', " system"),
+        ('B', " base"),
+        ('D', " developer"),
+        ('P', " project"),
+        ('H', " history"),
+        ('C', " turn"),
+        ('U', " prompt"),
         ('T', " tools"),
-        ('K', " skills"),
-        ('M', " input_messages"),
         ('.', " free"),
     ] {
         if !spans.is_empty() {
@@ -683,10 +730,13 @@ fn context_status_legend_line(line: &str, body_style: Style) -> Option<Line<'sta
 fn context_status_marker_style(marker: char) -> Option<Style> {
     let theme = tui_theme();
     match marker {
-        'S' => Some(theme.identity_style()),
+        'B' => Some(theme.identity_style()),
+        'D' => Some(theme.thinking_style()),
+        'P' => Some(theme.code_style()),
+        'H' => Some(theme.success_style()),
+        'C' => Some(theme.accent_style()),
+        'U' => Some(theme.identity_style()),
         'T' => Some(theme.accent_style()),
-        'K' => Some(theme.thinking_style()),
-        'M' => Some(theme.success_style()),
         '.' => Some(theme.dim_style()),
         _ => None,
     }
@@ -1187,6 +1237,11 @@ fn toggle_transcript_row_details(row: &mut TranscriptRow) {
         return;
     }
     if row.full_text.as_ref().is_some_and(|full| full != &row.text) || foldable_tool_title(row) {
+        if row.expanded && row.kind == TranscriptKind::Thinking && foldable_evidence_body(row) {
+            row.expanded = false;
+            row.details_collapsed = true;
+            return;
+        }
         row.expanded = !row.expanded;
         return;
     }

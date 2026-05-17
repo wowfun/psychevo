@@ -1,5 +1,6 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 678
 expression: combined
 ---
 fixture=reasoning_suppresses_failure_meta
@@ -9,7 +10,7 @@ size=120x18
 • Ran command                                                                                                        0s
   └ failed
 
-◦ Thinking                                                                                                           0s
+⠋ Thinking                                                                                                           0s
   └ The current time is approximately 15:20 UTC. Let me compose the full report now. I have all 10 stories and their
 comments.
 
@@ -23,13 +24,13 @@ comments.
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
-mock/model  high  • 0s · Esc  ~/work
+mock/model  high  ⠋ 0s · Esc  ~/work
 
 --- styles ---
 [red]• Ran command[default]                                                                                                        [dim]0s[default]
 [dim]  └ [red]failed[default]
 [default]
-[cyan]◦ [default]Thinking                                                                                                           [dim]0s[default]
+[cyan]⠋ [default]Thinking                                                                                                           [dim]0s[default]
 [dim]  └ The current time is approximately 15:20 UTC. Let me compose the full report now. I have all 10 stories and their[default]
 [dim]comments.[default]
 [dim]    [default]
@@ -43,4 +44,4 @@ mock/model  high  • 0s · Esc  ~/work
 [default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
-[default]mock/model  [magenta]high[default]  [cyan]•[default] [dim]0s · [cyan]Esc[default]  [dim]~/work[default]
+[default]mock/model  [magenta]high[default]  [cyan]⠋[default] [dim]0s · [cyan]Esc[default]  [dim]~/work[default]

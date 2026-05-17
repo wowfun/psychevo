@@ -1,5 +1,6 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 678
 expression: combined
 ---
 fixture=active_reasoning_write
@@ -8,10 +9,10 @@ size=120x24
 --- text ---
 › Write the report after reasoning.
 
-◦ Thinking                                                                                                           0s
+⠋ Thinking                                                                                                           0s
   └ Let me compose the full report now. I have all the data. Let me write it out.
 
-◦ Updating /tmp/hackernews-hot-05-39.md                                                                              0s
+⠋ Updating /tmp/hackernews-hot-05-39.md                                                                              0s
 
 
 
@@ -29,15 +30,15 @@ size=120x24
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
-mock/model  high  • 0s · Esc  ~/work · main
+mock/model  high  ⠋ 0s · Esc  ~/work · main
 
 --- styles ---
 [dim]› [default]Write the report after reasoning.
 [default]
-[cyan]◦ [default]Thinking                                                                                                           [dim]0s[default]
+[cyan]⠋ [default]Thinking                                                                                                           [dim]0s[default]
 [dim]  └ Let me compose the full report now. I have all the data. Let me write it out.[default]
 [default]
-[cyan]◦ [default]Updating /tmp/hackernews-hot-05-39.md                                                                              [dim]0s[default]
+[cyan]⠋ [default]Updating /tmp/hackernews-hot-05-39.md                                                                              [dim]0s[default]
 [default]
 [default]
 [default]
@@ -55,4 +56,4 @@ mock/model  high  • 0s · Esc  ~/work · main
 [default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
-[default]mock/model  [magenta]high[default]  [cyan]•[default] [dim]0s · [cyan]Esc[default]  [dim]~/work · main[default]
+[default]mock/model  [magenta]high[default]  [cyan]⠋[default] [dim]0s · [cyan]Esc[default]  [dim]~/work · main[default]

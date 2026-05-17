@@ -135,6 +135,10 @@ impl TuiApp {
             ui.push_status("finish the current shell command before opening an agent session");
             return Ok(());
         }
+        let store = SqliteStore::open(&self.db_path)?;
+        let edge = store
+            .find_agent_edge(target)?
+            .ok_or_else(|| anyhow!("agent not found: {target}"))?;
         if let Some(running) = ui.running.take() {
             let owner_session = self.current_session.clone();
             let RunningTurn { control, rx, task } = running;
@@ -142,6 +146,8 @@ impl TuiApp {
                 RunningTask::Agent(task) => {
                     ui.auxiliary_agent_tasks.push(AuxiliaryAgentTask {
                         session_id: owner_session,
+                        child_session_id: Some(edge.child_session_id.clone()),
+                        control,
                         rx,
                         task,
                     });
@@ -156,10 +162,6 @@ impl TuiApp {
                 }
             }
         }
-        let store = SqliteStore::open(&self.db_path)?;
-        let edge = store
-            .find_agent_edge(target)?
-            .ok_or_else(|| anyhow!("agent not found: {target}"))?;
         store.resume_session(&edge.child_session_id)?;
         self.current_session = Some(edge.child_session_id.clone());
         self.force_new_once = false;
@@ -194,6 +196,48 @@ impl TuiApp {
         ui.clear_transcript();
         self.load_current_session_history(ui)?;
         Ok(true)
+    }
+
+    fn request_current_session_interrupt(&mut self, ui: &mut FullscreenUi<'_>) -> bool {
+        let current_session = self.current_session.clone();
+        let mut interrupted = ui.request_interrupt(current_session.as_deref());
+        if let Some(session_id) = current_session.as_deref()
+            && let Ok(store) = SqliteStore::open(&self.db_path)
+        {
+            let value = agent_status_value(Some(&store), Some(session_id), false);
+            let targets = value
+                .get("agents")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|agent| {
+                    matches!(
+                        agent.get("status").and_then(Value::as_str),
+                        Some("pending_init" | "running")
+                    )
+                })
+                .filter_map(|agent| {
+                    agent
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .or_else(|| agent.get("child_session_id").and_then(Value::as_str))
+                        .map(ToOwned::to_owned)
+                })
+                .collect::<Vec<_>>();
+            for target in targets {
+                if stop_agent_id_with_grace(&target, Some(&store), Duration::ZERO)
+                    .ok()
+                    .flatten()
+                    .is_some()
+                {
+                    interrupted = true;
+                }
+            }
+        }
+        if interrupted {
+            ui.interrupt_requested = true;
+        }
+        interrupted
     }
 
     fn open_agent_parent_session(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
@@ -439,6 +483,7 @@ impl TuiApp {
     fn load_current_session_history(&self, ui: &mut FullscreenUi<'_>) -> Result<()> {
         let Some(session_id) = self.current_session.as_deref() else {
             ui.loaded_session_message_count = 0;
+            ui.visible_turn_started = None;
             ui.replace_session_history_prompts(Vec::new());
             ui.refresh_sidebar(self);
             return Ok(());
@@ -464,6 +509,12 @@ impl TuiApp {
                 summary.accounting.as_ref(),
             );
         }
+        let agent_catalog = self.current_agent_catalog();
+        let agent_edges = store.list_agent_edges_for_parent(session_id)?;
+        ui.reconcile_history_agent_rows(&agent_edges, agent_catalog.as_ref());
+        ui.visible_turn_started = ui
+            .history_prompt_started_ms
+            .and_then(instant_from_wall_timestamp_ms);
         ui.replace_session_history_prompts(history_prompts);
         ui.scroll_to_bottom();
         ui.refresh_sidebar(self);

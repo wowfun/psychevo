@@ -1,5 +1,6 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 678
 expression: combined
 ---
 fixture=running_turn_with_visible_thinking
@@ -8,10 +9,10 @@ size=120x24
 --- text ---
 › Inspect the CLI rendering path.
 
-◦ Thinking                                                                                                           0s
+⠋ Thinking                                                                                                           0s
   └ Read the TUI renderer and identify stable evidence blocks.
 
-◦ Exploring crates/psychevo-cli/src/tui.rs                                                                          12s
+⠋ Exploring crates/psychevo-cli/src/tui.rs                                                                          12s
 
 
 
@@ -29,15 +30,15 @@ size=120x24
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
-mock/model  high  • 12s · Esc  ~/work · main
+mock/model  high  ⠼ 12s · Esc  ~/work · main
 
 --- styles ---
 [dim]› [default]Inspect the CLI rendering path.
 [default]
-[cyan]◦ [default]Thinking                                                                                                           [dim]0s[default]
+[cyan]⠋ [default]Thinking                                                                                                           [dim]0s[default]
 [dim]  └ Read the TUI renderer and identify stable evidence blocks.[default]
 [default]
-[cyan]◦ [default]Exploring crates/psychevo-cli/src/tui.rs                                                                          [dim]12s[default]
+[cyan]⠋ [default]Exploring crates/psychevo-cli/src/tui.rs                                                                          [dim]12s[default]
 [default]
 [default]
 [default]
@@ -55,4 +56,4 @@ mock/model  high  • 12s · Esc  ~/work · main
 [default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
-[default]mock/model  [magenta]high[default]  [cyan]•[default] [dim]12s · [cyan]Esc[default]  [dim]~/work · main[default]
+[default]mock/model  [magenta]high[default]  [cyan]⠼[default] [dim]12s · [cyan]Esc[default]  [dim]~/work · main[default]

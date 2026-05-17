@@ -134,7 +134,7 @@ fn fixture_ui<'a>(app: &TuiApp, kind: FixtureKind) -> FullscreenUi<'a> {
             );
             row.tool_started = Some(
                 Instant::now()
-                    .checked_sub(Duration::from_secs(12))
+                    .checked_sub(Duration::from_millis(12_500))
                     .expect("instant"),
             );
             ui.transcript.push(row);
@@ -712,6 +712,19 @@ fn buffer_text(buffer: &ratatui::buffer::Buffer) -> String {
         text.push('\n');
     }
     text
+}
+
+fn attach_pending_agent_running(ui: &mut FullscreenUi<'_>) {
+    let (_tx, rx) = mpsc::unbounded_channel();
+    let task = tokio::spawn(async {
+        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::RunResult>>().await
+    });
+    let (control, _) = run_control();
+    ui.running = Some(RunningTurn {
+        control,
+        rx,
+        task: RunningTask::Agent(task),
+    });
 }
 
 fn buffer_style_text(buffer: &ratatui::buffer::Buffer) -> String {

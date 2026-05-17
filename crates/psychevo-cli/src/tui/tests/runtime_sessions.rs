@@ -566,10 +566,10 @@ async fn fullscreen_agent_end_releases_turn_before_auxiliary_task_finishes() {
     });
 
     app.drain_fullscreen_events(&mut ui).await.expect("drain");
-    let _ = done_tx.send(());
 
     assert!(ui.running.is_none());
     assert_eq!(app.current_session.as_deref(), Some("streamed-session"));
+    assert_eq!(ui.auxiliary_agent_tasks.len(), 1);
     assert!(
         ui.transcript
             .iter()
@@ -580,6 +580,12 @@ async fn fullscreen_agent_end_releases_turn_before_auxiliary_task_finishes() {
             .iter()
             .all(|row| row.text != "a turn is already running")
     );
+    ui.running_elapsed_override = Some(Duration::from_secs(15));
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 100, 12);
+    let text = buffer_text(&buffer);
+    assert!(!text.contains("15s · Esc"), "{text}");
+    assert!(!text.contains("Esc"), "{text}");
+    let _ = done_tx.send(());
 }
 
 #[tokio::test]

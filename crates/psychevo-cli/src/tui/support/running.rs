@@ -12,6 +12,8 @@ struct AuxiliaryShellTask {
 
 struct AuxiliaryAgentTask {
     session_id: Option<String>,
+    child_session_id: Option<String>,
+    control: RunControlHandle,
     rx: mpsc::UnboundedReceiver<RunStreamEvent>,
     task: JoinHandle<psychevo_runtime::Result<psychevo_runtime::RunResult>>,
 }
@@ -22,12 +24,14 @@ enum RunningTask {
 }
 
 enum RunningCompletion {
-    Agent(Box<
-        std::result::Result<
-            psychevo_runtime::Result<psychevo_runtime::RunResult>,
-            tokio::task::JoinError,
+    Agent(
+        Box<
+            std::result::Result<
+                psychevo_runtime::Result<psychevo_runtime::RunResult>,
+                tokio::task::JoinError,
+            >,
         >,
-    >),
+    ),
     UserShell(
         std::result::Result<
             psychevo_runtime::Result<psychevo_runtime::UserShellResult>,
@@ -114,7 +118,10 @@ fn normalize_prompt_text(text: &str) -> String {
         .join("\n")
 }
 
-fn attachment_metadata_text(attachments: &[PendingImageAttachment], workdir: &Path) -> Option<String> {
+fn attachment_metadata_text(
+    attachments: &[PendingImageAttachment],
+    workdir: &Path,
+) -> Option<String> {
     if attachments.is_empty() {
         return None;
     }

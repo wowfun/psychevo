@@ -226,6 +226,27 @@ fn agent_session_start_title(value: &Value) -> Option<String> {
     Some(agent_title(agent, detail))
 }
 
+fn agent_session_start_name(value: &Value) -> Option<&str> {
+    value
+        .get("agent_name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn agent_title_name(title: &str) -> &str {
+    title
+        .split_once('(')
+        .map(|(name, _)| name)
+        .unwrap_or(title)
+        .trim()
+}
+
+fn agent_placeholder_title_matches(row: &TranscriptRow, agent_name: &str) -> bool {
+    let title_name = agent_title_name(&row.title);
+    title_name == agent_name || matches!(title_name, "agent" | "Agent")
+}
+
 fn agent_name_from<'a>(args: &'a Value, result: &'a Value) -> &'a str {
     result
         .get("agent_name")
@@ -254,6 +275,74 @@ fn agent_title(agent: &str, detail: Option<&str>) -> String {
         Some(detail) => format!("{agent}({})", single_line_preview(detail, 96)),
         None => agent.to_string(),
     }
+}
+
+fn matching_agent_edge<'a>(
+    row: &TranscriptRow,
+    edges: &'a [AgentEdgeRecord],
+    used_edges: &std::collections::BTreeSet<usize>,
+) -> Option<(usize, &'a AgentEdgeRecord)> {
+    let row_tool_call_id = row.tool_call_id.as_deref();
+    if let Some(match_by_id) = edges.iter().enumerate().find(|(index, edge)| {
+        !used_edges.contains(index)
+            && row_tool_call_id.is_some_and(|id| agent_edge_metadata_matches(edge, id))
+    }) {
+        return Some(match_by_id);
+    }
+
+    let row_name = agent_title_name(&row.title);
+    if let Some(match_by_name) = edges.iter().enumerate().find(|(index, edge)| {
+        !used_edges.contains(index)
+            && agent_edge_agent_name(edge).is_some_and(|name| name == row_name)
+    }) {
+        return Some(match_by_name);
+    }
+
+    if matches!(row_name, "agent" | "Agent") {
+        return edges
+            .iter()
+            .enumerate()
+            .find(|(index, _)| !used_edges.contains(index));
+    }
+
+    None
+}
+
+fn agent_edge_title(edge: &AgentEdgeRecord, catalog: Option<&AgentCatalog>) -> Option<String> {
+    let name = agent_edge_agent_name(edge)?;
+    let detail = catalog
+        .and_then(|catalog| {
+            catalog
+                .agents
+                .iter()
+                .find(|agent| agent.name == name)
+                .map(|agent| agent.description.as_str())
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| agent_edge_agent_string(edge, "description"))
+        .or_else(|| agent_edge_agent_string(edge, "task_name"))
+        .or_else(|| agent_edge_agent_string(edge, "task"));
+    Some(agent_title(name, detail))
+}
+
+fn agent_edge_metadata_matches(edge: &AgentEdgeRecord, target: &str) -> bool {
+    agent_edge_agent_string(edge, "id").is_some_and(|value| value == target)
+        || agent_edge_agent_string(edge, "task_name").is_some_and(|value| value == target)
+}
+
+fn agent_edge_agent_name(edge: &AgentEdgeRecord) -> Option<&str> {
+    agent_edge_agent_string(edge, "name")
+}
+
+fn agent_edge_agent_string<'a>(edge: &'a AgentEdgeRecord, key: &str) -> Option<&'a str> {
+    edge.metadata
+        .as_ref()?
+        .get("agent")?
+        .get(key)?
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
 }
 
 fn single_line_preview(value: &str, max_chars: usize) -> String {
@@ -286,18 +375,20 @@ fn agent_tool_output_text(value: &Value) -> Option<(String, Option<String>)> {
     {
         "Started in background".to_string()
     } else if status == "completed" || outcome == "normal" {
+        let tool_use_label = pluralize(tool_calls, "tool use");
         format!(
-            "Done ({}{}{})",
+            "Done ({} {}{})",
             tool_calls,
-            format!(" {}", pluralize(tool_calls, "tool use")),
+            tool_use_label,
             token_suffix.unwrap_or_default()
         )
     } else {
+        let tool_use_label = pluralize(tool_calls, "tool use");
         format!(
-            "{} ({}{}{})",
+            "{} ({} {}{})",
             status_label(status, outcome),
             tool_calls,
-            format!(" {}", pluralize(tool_calls, "tool use")),
+            tool_use_label,
             token_suffix.unwrap_or_default()
         )
     };

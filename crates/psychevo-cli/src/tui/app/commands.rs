@@ -66,6 +66,20 @@ impl TuiApp {
                     }
                 }
             }
+            SlashCommand::ReloadContext => match self.reload_context_for_current_session(ui) {
+                Ok(result) => {
+                    ui.push_command_result(
+                        command_echo,
+                        None,
+                        format!("reloaded context: {} v{}", result.prefix_hash, result.version),
+                        false,
+                    );
+                    ui.refresh_sidebar(self);
+                }
+                Err(err) => {
+                    ui.push_command_result(command_echo, None, format!("error: {err:#}"), true);
+                }
+            },
             SlashCommand::ModelShow => {
                 ui.bottom_panel = Some(BottomPanel::Models(ModelPanel::new(
                     self.model_selection_panel()?,
@@ -172,7 +186,7 @@ impl TuiApp {
                 }
             },
             SlashCommand::Undo => {
-                if ui.request_interrupt() {
+                if self.request_current_session_interrupt(ui) {
                     ui.push_command_result(
                         command_echo,
                         None,
@@ -192,7 +206,7 @@ impl TuiApp {
                 }
             }
             SlashCommand::Redo => {
-                if ui.request_interrupt() {
+                if self.request_current_session_interrupt(ui) {
                     ui.push_command_result(
                         command_echo,
                         None,
@@ -422,6 +436,26 @@ impl TuiApp {
                         },
                     )
                 );
+                Ok(())
+            }
+            SlashCommand::ReloadContext => {
+                let session = self
+                    .current_session
+                    .clone()
+                    .ok_or_else(|| anyhow!("no session context yet"))?;
+                let result = reload_session_context(ReloadContextOptions {
+                    db_path: self.db_path.clone(),
+                    session,
+                    config_path: self.config_path.clone(),
+                    mode: Some(self.current_mode),
+                    inherited_env: Some(self.env_map.clone()),
+                    agent: self.current_agent.clone(),
+                    no_agents: self.no_agents,
+                    no_skills: self.no_skills,
+                    invalidation_reason: "manual_reload".to_string(),
+                    notice: None,
+                })?;
+                println!("reloaded context: {} v{}", result.prefix_hash, result.version);
                 Ok(())
             }
             SlashCommand::ModelShow => self.show_model(),
@@ -680,6 +714,31 @@ impl TuiApp {
         })?)
     }
 
+    fn reload_context_for_current_session(
+        &self,
+        ui: &FullscreenUi<'_>,
+    ) -> Result<psychevo_runtime::ReloadContextResult> {
+        if ui.running.is_some() {
+            return Err(anyhow!("finish the current turn before reloading context"));
+        }
+        let session = self
+            .current_session
+            .clone()
+            .ok_or_else(|| anyhow!("no session context yet"))?;
+        Ok(reload_session_context(ReloadContextOptions {
+            db_path: self.db_path.clone(),
+            session,
+            config_path: self.config_path.clone(),
+            mode: Some(self.current_mode),
+            inherited_env: Some(self.env_map.clone()),
+            agent: self.current_agent.clone(),
+            no_agents: self.no_agents,
+            no_skills: self.no_skills,
+            invalidation_reason: "manual_reload".to_string(),
+            notice: None,
+        })?)
+    }
+
     async fn submit_prompt(&mut self, prompt: String) -> Result<()> {
         let stdout = Arc::new(Mutex::new(io::stdout()));
         let turn = Arc::new(Mutex::new(TurnPrinter::new(
@@ -915,6 +974,7 @@ fn slash_command_echo(command: &SlashCommand) -> String {
         SlashCommand::Sessions => "/sessions".to_string(),
         SlashCommand::Usage => "/usage".to_string(),
         SlashCommand::Context => "/context".to_string(),
+        SlashCommand::ReloadContext => "/reload-context".to_string(),
         SlashCommand::ModelShow => "/model".to_string(),
         SlashCommand::VariantSet(variant) => format!("/variant {variant}"),
         SlashCommand::ModeSet(mode) => format!("/mode {mode}"),

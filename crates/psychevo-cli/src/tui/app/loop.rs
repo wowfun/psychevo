@@ -229,7 +229,9 @@ impl TuiApp {
         if ui.focus == FocusMode::Transcript {
             match key.code {
                 KeyCode::Esc => {
-                    ui.focus = FocusMode::Composer;
+                    if !self.request_current_session_interrupt(ui) {
+                        ui.focus = FocusMode::Composer;
+                    }
                 }
                 KeyCode::Up => ui.move_selection(-1),
                 KeyCode::Down => ui.move_selection(1),
@@ -525,7 +527,7 @@ impl TuiApp {
                     ui.close_skill_popup();
                     return Ok(false);
                 }
-                if ui.request_interrupt() {
+                if self.request_current_session_interrupt(ui) {
                     return Ok(false);
                 }
             }
@@ -609,8 +611,7 @@ impl TuiApp {
                         &line,
                         ui.slash_menu_selected,
                         &self.slash_items(),
-                    )
-                    {
+                    ) {
                         if let Some(name) = slash_skill_name(&command) {
                             ui.insert_skill_marker(&name);
                             self.sync_skill_popup(ui);
@@ -710,7 +711,6 @@ impl TuiApp {
             None => {}
         }
     }
-
 }
 
 const FULLSCREEN_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(16);
@@ -859,9 +859,7 @@ fn mouse_event_needs_redraw(kind: MouseEventKind) -> bool {
 fn scroll_bottom_panel(panel: &mut BottomPanel, amount: isize) {
     match panel {
         BottomPanel::Help(panel) => panel.scroll_by(amount),
-        BottomPanel::Models(panel) if panel.tab == ModelTab::Info => {
-            panel.scroll_info_by(amount)
-        }
+        BottomPanel::Models(panel) if panel.tab == ModelTab::Info => panel.scroll_info_by(amount),
         BottomPanel::ProviderWizard(_) => {}
         _ => panel.selection_mut().move_selection(amount),
     }

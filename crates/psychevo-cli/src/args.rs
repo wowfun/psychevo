@@ -135,7 +135,7 @@ pub(crate) struct RunArgs {
         help = "Continue the latest run session for the selected workdir"
     )]
     pub(crate) continue_latest: bool,
-    #[arg(long, value_enum, value_name = "FORMAT", default_value_t = RunFormatArg::Default, help = "Select human output or NDJSON machine output")]
+    #[arg(short = 'f', long, value_enum, value_name = "FORMAT", default_value_t = RunFormatArg::Default, help = "Select human output or NDJSON machine output")]
     pub(crate) format: RunFormatArg,
     #[arg(
         long,
@@ -494,7 +494,7 @@ pub(crate) struct AgentRunArgs {
         help = "Override reasoning effort for this run"
     )]
     pub(crate) variant: Option<VariantArg>,
-    #[arg(long, value_enum, value_name = "FORMAT", default_value_t = RunFormatArg::Default, help = "Select human output or NDJSON machine output")]
+    #[arg(short = 'f', long, value_enum, value_name = "FORMAT", default_value_t = RunFormatArg::Default, help = "Select human output or NDJSON machine output")]
     pub(crate) format: RunFormatArg,
     #[arg(
         value_name = "MESSAGE",
@@ -595,6 +595,8 @@ pub(crate) enum SessionCommand {
     Archive(SessionIdArgs),
     #[command(about = "Restore one archived session")]
     Restore(SessionIdArgs),
+    #[command(about = "Rebuild one session prompt prefix from current local context")]
+    ReloadContext(SessionIdArgs),
     #[command(
         about = "Export selected local session sections",
         long_about = "Export selected local session sections from SQLite without contacting providers. The last-provider-request include is unredacted and may expose hidden prompts, project instructions, skill context, tool schemas, tool outputs, and image data URLs."
@@ -653,7 +655,7 @@ pub(crate) struct SessionExportArgs {
         help = "Exact session id or latest for this workdir"
     )]
     pub(crate) session: String,
-    #[arg(long, value_enum, value_name = "FORMAT", default_value_t = SessionExportFormatArg::Markdown, help = "Artifact format to write")]
+    #[arg(short = 'f', long, value_enum, value_name = "FORMAT", default_value_t = SessionExportFormatArg::Markdown, help = "Artifact format to write")]
     pub(crate) format: SessionExportFormatArg,
     #[arg(
         short = 'o',
@@ -1027,6 +1029,12 @@ mod tests {
             Cli::try_parse_from(["pevo", "session", "export", "latest", "-i", "h,m,r,pie,lpr",])
                 .is_ok()
         );
+        assert!(Cli::try_parse_from(["pevo", "run", "-f", "json", "hello"]).is_ok());
+        assert!(
+            Cli::try_parse_from(["pevo", "agent", "run", "reviewer", "-f", "json", "hello"])
+                .is_ok()
+        );
+        assert!(Cli::try_parse_from(["pevo", "session", "export", "latest", "-f", "json"]).is_ok());
         assert!(
             Cli::try_parse_from(["pevo", "session", "export", "latest", "--with-reasoning"])
                 .is_err()

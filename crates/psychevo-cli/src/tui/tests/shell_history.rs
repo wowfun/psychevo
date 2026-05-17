@@ -63,11 +63,21 @@ fn status_line_marks_shell_mode_for_bang_input() {
     assert!(text.contains("mock/model  high  shell"), "{text}");
 }
 
-#[test]
-fn running_status_line_shows_spinner_elapsed_and_esc_hint() {
+#[tokio::test]
+async fn running_status_line_shows_spinner_elapsed_and_esc_hint() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
+    let (_tx, rx) = mpsc::unbounded_channel();
+    let task = tokio::spawn(async {
+        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::RunResult>>().await
+    });
+    let (control, _) = run_control();
+    ui.running = Some(RunningTurn {
+        control,
+        rx,
+        task: RunningTask::Agent(task),
+    });
     ui.start_assistant();
     ui.running_elapsed_override = Some(Duration::from_secs(12));
 
@@ -75,14 +85,100 @@ fn running_status_line_shows_spinner_elapsed_and_esc_hint() {
     let text = buffer_text(&buffer);
 
     assert!(text.contains("mock/model  high"), "{text}");
-    assert!(text.contains("12s · Esc"), "{text}");
+    assert!(text.contains("⠼ 12s · Esc"), "{text}");
     assert!(!text.contains("Working"), "{text}");
 
     ui.running_elapsed_override = Some(Duration::from_secs(140));
     let buffer = draw_fullscreen_for_test(&app, &mut ui, 80, 12);
     let text = buffer_text(&buffer);
 
-    assert!(text.contains("2m20s · Esc"), "{text}");
+    assert!(text.contains("⠦ 2m20s · Esc"), "{text}");
+    if let Some(running) = ui.running.take() {
+        running.task.abort();
+    }
+}
+
+#[tokio::test]
+async fn status_line_elapsed_survives_run_and_tool_phase_changes() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    let (_tx, rx) = mpsc::unbounded_channel();
+    let task = tokio::spawn(async {
+        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::RunResult>>().await
+    });
+    let (control, _) = run_control();
+    ui.running = Some(RunningTurn {
+        control,
+        rx,
+        task: RunningTask::Agent(task),
+    });
+    ui.start_assistant();
+    ui.visible_turn_started = Some(
+        Instant::now()
+            .checked_sub(Duration::from_millis(12_500))
+            .expect("instant"),
+    );
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "run_start",
+            "provider": "mock",
+            "model": "mock-model",
+            "mode": "default"
+        }),
+        false,
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_execution_start",
+            "tool_call_id": "call_read",
+            "tool_name": "read",
+            "args": {"path": "README.md"}
+        }),
+        false,
+    );
+
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 80, 12);
+    let text = buffer_text(&buffer);
+    assert!(text.contains("12s · Esc"), "{text}");
+    assert!(!text.contains("0s · Esc"), "{text}");
+
+    if let Some(running) = ui.running.take() {
+        running.task.abort();
+    }
+}
+
+#[test]
+fn historical_unfinished_prompt_without_live_work_does_not_show_running_elapsed() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let session = store
+        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .expect("session");
+    let prompt_ms = wall_now_ms() - 12_500;
+    let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
+    insert_tui_message(
+        &conn,
+        &session,
+        1,
+        "user",
+        prompt_ms,
+        serde_json::json!({
+            "role": "user",
+            "content": [{"type": "text", "text": "old prompt"}],
+            "timestamp_ms": prompt_ms
+        }),
+    );
+    app.current_session = Some(session);
+    let mut ui = FullscreenUi::new(&app);
+    app.load_current_session_history(&mut ui).expect("history");
+
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 80, 12);
+    let text = buffer_text(&buffer);
+    assert!(!text.contains("12s · Esc"), "{text}");
+    assert!(!text.contains("Esc"), "{text}");
 }
 
 #[tokio::test]

@@ -293,8 +293,7 @@ fn render_status(frame: &mut Frame<'_>, area: Rect, app: &TuiApp, ui: &Fullscree
             theme.accent_style(),
         ));
     }
-    if ui.running.is_some() || ui.running_started.is_some() {
-        let elapsed = ui.running_elapsed().unwrap_or_default();
+    if let Some(elapsed) = ui.status_running_elapsed(app.current_session.as_deref()) {
         spans.push(Span::raw("  "));
         if ui.interrupt_requested {
             spans.push(Span::styled("interrupting", theme.error_style()));
@@ -304,7 +303,10 @@ fn render_status(frame: &mut Frame<'_>, area: Rect, app: &TuiApp, ui: &Fullscree
                 theme.dim_style(),
             ));
         } else {
-            spans.push(Span::styled("•", theme.accent_style()));
+            spans.push(Span::styled(
+                activity_spinner_frame(elapsed),
+                theme.accent_style(),
+            ));
             spans.push(Span::raw(" "));
             spans.push(Span::styled(
                 format_duration_compact(elapsed),
@@ -1144,6 +1146,7 @@ fn model_detail_capabilities(model: &ConfiguredModel) -> Vec<String> {
     let mut parts = Vec::new();
     push_bool_capability(&mut parts, caps.reasoning, "reasoning", "no reasoning");
     push_bool_capability(&mut parts, caps.tool_call, "tools", "no tools");
+    push_bool_capability(&mut parts, caps.developer_role, "developer role", "no developer role");
     push_bool_capability(
         &mut parts,
         caps.temperature,

@@ -285,6 +285,8 @@ impl TuiApp {
                 RunningTask::Agent(task) => {
                     ui.auxiliary_agent_tasks.push(AuxiliaryAgentTask {
                         session_id: owner_session,
+                        child_session_id: None,
+                        control,
                         rx,
                         task,
                     });
@@ -319,8 +321,7 @@ impl TuiApp {
     ) -> Result<(bool, bool)> {
         let mut changed = false;
         let mut pending = Vec::new();
-        let mut tasks = std::mem::take(&mut ui.auxiliary_agent_tasks).into_iter();
-        while let Some(mut agent) = tasks.next() {
+        for mut agent in std::mem::take(&mut ui.auxiliary_agent_tasks) {
             let mut events = VecDeque::new();
             while let Ok(event) = agent.rx.try_recv() {
                 events.push_back(event);

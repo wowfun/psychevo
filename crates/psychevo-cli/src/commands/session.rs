@@ -4,9 +4,10 @@ use std::process::ExitCode;
 
 use anyhow::{Result, anyhow};
 use psychevo_runtime::{
-    SessionArtifactKind, SessionExportFormat, SessionExportIncludeSet, SessionExportOptions,
-    SessionExportWriteResult, SessionSummary, SqliteStore, canonicalize_workdir,
-    default_session_export_filename, render_session_export, write_session_export,
+    ReloadContextOptions, SessionArtifactKind, SessionExportFormat, SessionExportIncludeSet,
+    SessionExportOptions, SessionExportWriteResult, SessionSummary, SqliteStore,
+    canonicalize_workdir, default_session_export_filename, reload_session_context,
+    render_session_export, write_session_export,
 };
 use serde_json::{Value, json};
 
@@ -49,6 +50,9 @@ fn run_session_command_inner(args: &SessionArgs) -> Result<ExitCode> {
             print_session_result("session", &summary, args.json)?;
         }
         SessionCommand::Rename(args) => rename_session(args, &store, &workdir)?,
+        SessionCommand::ReloadContext(args) => {
+            reload_context(args, &store, &workdir, &db_path, env_map)?
+        }
         SessionCommand::Export(args) => export_session(args, &store, &workdir)?,
         SessionCommand::Share(args) => share_session(args, &store, &workdir)?,
         SessionCommand::Archive(args) => {
@@ -119,6 +123,46 @@ fn rename_session(
         .session_summary(&session_id)?
         .ok_or_else(|| anyhow!("session not found: {session_id}"))?;
     print_session_result("renamed", &summary, args.json)
+}
+
+fn reload_context(
+    args: &SessionIdArgs,
+    store: &SqliteStore,
+    workdir: &Path,
+    db_path: &Path,
+    env_map: std::collections::BTreeMap<String, String>,
+) -> Result<()> {
+    let session_id = resolve_session_id(store, workdir, &args.session)?;
+    let result = reload_session_context(ReloadContextOptions {
+        db_path: db_path.to_path_buf(),
+        session: session_id,
+        config_path: None,
+        mode: None,
+        inherited_env: Some(env_map),
+        agent: None,
+        no_agents: false,
+        no_skills: false,
+        invalidation_reason: "manual_reload".to_string(),
+        notice: None,
+    })?;
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "action": "reload-context",
+                "session": result.session_id,
+                "prefix_hash": result.prefix_hash,
+                "version": result.version,
+                "provider": result.provider,
+                "model": result.model,
+                "invalidation_reason": result.invalidation_reason,
+            }))?
+        );
+    } else {
+        println!("reloaded context: {}", result.session_id);
+        println!("prefix: {} v{}", result.prefix_hash, result.version);
+    }
+    Ok(())
 }
 
 fn export_session(args: &SessionExportArgs, store: &SqliteStore, workdir: &Path) -> Result<()> {
@@ -256,7 +300,8 @@ fn session_json(args: &SessionArgs) -> bool {
         SessionCommand::List(args) => args.json,
         SessionCommand::Show(args)
         | SessionCommand::Archive(args)
-        | SessionCommand::Restore(args) => args.json,
+        | SessionCommand::Restore(args)
+        | SessionCommand::ReloadContext(args) => args.json,
         SessionCommand::Rename(args) => args.json,
         SessionCommand::Export(_) => false,
         SessionCommand::Share(args) => args.json,

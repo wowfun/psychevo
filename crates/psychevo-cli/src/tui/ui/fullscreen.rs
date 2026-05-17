@@ -35,7 +35,7 @@ impl<'a> FullscreenUi<'a> {
             agent_child_event_backlog: BTreeMap::new(),
             auxiliary_shell_tasks: Vec::new(),
             pending_auxiliary_shell_commands: VecDeque::new(),
-            running_started: None,
+            visible_turn_started: None,
             #[cfg(test)]
             running_elapsed_override: None,
             interrupt_requested: false,
@@ -131,6 +131,7 @@ impl<'a> FullscreenUi<'a> {
         self.last_context_snapshot = None;
         self.sidebar_cost_nanodollars = None;
         self.history_prompt_started_ms = None;
+        self.visible_turn_started = None;
         self.loaded_session_message_count = 0;
         self.turn_had_reasoning = false;
         self.pending_images.clear();
@@ -404,7 +405,9 @@ impl<'a> FullscreenUi<'a> {
                     self.transcript
                         .push(TranscriptRow::with_title(TranscriptKind::Meta, "", meta));
                 }
-                self.history_prompt_started_ms = None;
+                if !keep_tool_calls_active {
+                    self.history_prompt_started_ms = None;
+                }
             }
             "tool_result" => self.push_history_tool_result(message, metadata),
             _ => {}
@@ -546,27 +549,89 @@ impl<'a> FullscreenUi<'a> {
         }
     }
 
+    fn reconcile_history_agent_rows(
+        &mut self,
+        edges: &[AgentEdgeRecord],
+        catalog: Option<&AgentCatalog>,
+    ) {
+        if edges.is_empty() {
+            return;
+        }
+        let mut used_edges = std::collections::BTreeSet::<usize>::new();
+        for row in &mut self.transcript {
+            if row.tool_name.as_deref() != Some("Agent")
+                || row.agent_target.is_some()
+                || !active_tool_row(row)
+            {
+                continue;
+            }
+            let Some((edge_index, edge)) = matching_agent_edge(row, edges, &used_edges) else {
+                continue;
+            };
+            used_edges.insert(edge_index);
+            row.agent_target = Some(edge.child_session_id.clone());
+            if let Some(title) = agent_edge_title(edge, catalog) {
+                row.title = title;
+            }
+            row.text = agent_child_status_text(
+                "Running",
+                row.agent_child_tool_uses,
+                row.agent_child_latest_tokens,
+            );
+            row.full_text = None;
+        }
+    }
+
     fn scroll_to_bottom(&mut self) {
         self.scroll = self.max_transcript_scroll();
         self.auto_follow_transcript = true;
         self.pending_scroll_to_bottom = true;
     }
 
-    fn running_elapsed(&self) -> Option<Duration> {
+    fn status_running_elapsed(&self, current_session: Option<&str>) -> Option<Duration> {
+        if !self.status_has_running(current_session) {
+            return None;
+        }
         #[cfg(test)]
         if let Some(elapsed) = self.running_elapsed_override {
             return Some(elapsed);
         }
-        self.running_started
+        self.visible_turn_started
             .or(self.turn_started)
             .map(|started| started.elapsed())
+            .or(Some(Duration::default()))
     }
 
-    fn request_interrupt(&mut self) -> bool {
-        let Some(running) = &self.running else {
+    fn status_has_running(&self, current_session: Option<&str>) -> bool {
+        self.running.is_some() || self.auxiliary_agent_matches_current_session(current_session)
+    }
+
+    fn auxiliary_agent_matches_current_session(&self, current_session: Option<&str>) -> bool {
+        let Some(session_id) = current_session else {
             return false;
         };
-        running.control.abort();
+        self.auxiliary_agent_tasks
+            .iter()
+            .any(|agent| auxiliary_agent_live_for_session(agent, session_id))
+    }
+
+    fn request_interrupt(&mut self, current_session: Option<&str>) -> bool {
+        let mut interrupted = false;
+        if let Some(running) = &self.running {
+            running.control.abort();
+            interrupted = true;
+        }
+        for agent in &self.auxiliary_agent_tasks {
+            if current_session
+                .is_some_and(|session_id| auxiliary_agent_live_for_session(agent, session_id))
+            {
+                agent.control.abort();
+                interrupted = true;
+            }
+        }
+        if !interrupted {
+            return false;
+        }
         for shell in &self.auxiliary_shell_tasks {
             shell.control.abort();
         }
@@ -1026,7 +1091,7 @@ impl<'a> FullscreenUi<'a> {
         self.streaming_tool_message_seq = 0;
         self.streaming_tool_message_open = false;
         self.turn_started = None;
-        self.running_started = Some(Instant::now());
+        self.visible_turn_started = Some(Instant::now());
         self.interrupt_requested = false;
         self.turn_provider.clear();
         self.turn_model.clear();
@@ -1227,7 +1292,11 @@ impl<'a> FullscreenUi<'a> {
             .unwrap_or_default()
         {
             "run_start" => {
-                self.turn_started = Some(Instant::now());
+                let now = Instant::now();
+                self.turn_started = Some(now);
+                if self.visible_turn_started.is_none() {
+                    self.visible_turn_started = Some(now);
+                }
                 self.turn_provider = value
                     .get("provider")
                     .and_then(Value::as_str)
@@ -1340,6 +1409,7 @@ impl<'a> FullscreenUi<'a> {
                     .as_ref()
                     .and_then(|key| self.tool_rows.get(key))
                     .copied()
+                    .or_else(|| self.matching_agent_placeholder_index(tool, value, &tool_call_id))
                     .unwrap_or_else(|| {
                         let mut row = TranscriptRow::with_title(
                             evidence_kind(tool),
@@ -1544,6 +1614,7 @@ impl<'a> FullscreenUi<'a> {
         if let Some(title) = agent_session_start_title(value) {
             row.title = title;
         }
+        self.remove_duplicate_agent_placeholders(index, value);
     }
 
     fn apply_agent_child_preview_event(
@@ -1608,6 +1679,7 @@ impl<'a> FullscreenUi<'a> {
     }
 
     fn upsert_streaming_tool_call(&mut self, call: StreamingToolCall) -> bool {
+        let value = serde_json::json!({ "args": call.args });
         let id_key = call.id.as_deref().map(tool_id_key);
         let intent_key = tool_intent_key(&call.tool_name);
         let idx = id_key
@@ -1615,8 +1687,14 @@ impl<'a> FullscreenUi<'a> {
             .and_then(|key| self.tool_rows.get(key))
             .or_else(|| self.tool_rows.get(&call.position_key))
             .or_else(|| self.tool_rows.get(&intent_key))
-            .copied();
-        let value = serde_json::json!({ "args": call.args });
+            .copied()
+            .or_else(|| {
+                self.matching_agent_placeholder_index(
+                    &call.tool_name,
+                    &value,
+                    call.id.as_deref().unwrap_or_default(),
+                )
+            });
         let mut active_tool_frame_requested = false;
         let idx = if let Some(idx) = idx {
             self.tool_rows.remove(&intent_key);
@@ -1671,7 +1749,7 @@ impl<'a> FullscreenUi<'a> {
         self.turn_terminal_message = None;
         self.turn_interrupted = false;
         self.turn_had_reasoning = false;
-        self.running_started = None;
+        self.visible_turn_started = None;
         self.interrupt_requested = false;
         self.focus = FocusMode::Composer;
     }
@@ -1860,6 +1938,60 @@ impl<'a> FullscreenUi<'a> {
         }
     }
 
+    fn matching_agent_placeholder_index(
+        &self,
+        tool: &str,
+        value: &Value,
+        tool_call_id: &str,
+    ) -> Option<usize> {
+        if tool != "Agent" {
+            return None;
+        }
+        let args = value.get("args").unwrap_or(&Value::Null);
+        let agent_name = agent_name_from(args, &Value::Null);
+        self.transcript
+            .iter()
+            .enumerate()
+            .find_map(|(index, row)| {
+                (row.tool_name.as_deref() == Some("Agent")
+                    && row.agent_target.is_none()
+                    && active_tool_row(row)
+                    && (row.tool_call_id.as_deref() == Some(tool_call_id)
+                        || row.tool_call_id.is_none())
+                    && agent_placeholder_title_matches(row, agent_name))
+                .then_some(index)
+            })
+    }
+
+    fn remove_duplicate_agent_placeholders(&mut self, keep_index: usize, value: &Value) {
+        let Some(agent_name) = agent_session_start_name(value) else {
+            return;
+        };
+        let tool_call_id = value
+            .get("tool_call_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let mut indices = self
+            .transcript
+            .iter()
+            .enumerate()
+            .filter_map(|(index, row)| {
+                (index != keep_index
+                    && row.tool_name.as_deref() == Some("Agent")
+                    && row.agent_target.is_none()
+                    && active_tool_row(row)
+                    && (row.tool_call_id.as_deref() == Some(tool_call_id)
+                        || row.tool_call_id.is_none())
+                    && agent_placeholder_title_matches(row, agent_name))
+                .then_some(index)
+            })
+            .collect::<Vec<_>>();
+        indices.sort_unstable_by(|a, b| b.cmp(a));
+        for index in indices {
+            self.remove_transcript_row(index);
+        }
+    }
+
     fn ensure_selection(&mut self) {
         if self
             .selected_target
@@ -2026,10 +2158,25 @@ impl<'a> FullscreenUi<'a> {
     }
 
     fn transcript_hit(&self, column: u16, row: u16) -> Option<TranscriptHitTarget> {
-        self.last_entry_areas
-            .iter()
-            .find_map(|(target, area)| rect_contains(*area, column, row).then_some(*target))
+        let mut first_hit = None;
+        for (target, area) in &self.last_entry_areas {
+            if !rect_contains(*area, column, row) {
+                continue;
+            }
+            if matches!(target, TranscriptHitTarget::AgentOpen(_)) {
+                return Some(*target);
+            }
+            first_hit.get_or_insert(*target);
+        }
+        first_hit
     }
+}
+
+fn auxiliary_agent_live_for_session(agent: &AuxiliaryAgentTask, session_id: &str) -> bool {
+    let Some(child_session_id) = agent.child_session_id.as_deref() else {
+        return false;
+    };
+    child_session_id == session_id || agent.session_id.as_deref() == Some(session_id)
 }
 
 fn apply_agent_child_value_preview(row: &mut TranscriptRow, value: &Value) -> bool {

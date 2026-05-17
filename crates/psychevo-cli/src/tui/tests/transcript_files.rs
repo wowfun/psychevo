@@ -138,27 +138,27 @@ fn command_row_renders_claude_style_prefixes_and_colored_context_bar() {
     let row = TranscriptRow::with_title(
         TranscriptKind::Command,
         "/context",
-        "Context Usage\n[MMMMM.....]\nS system  T tools  K skills  M input_messages  . free\ntokens: 5/10 (50.0%)",
+        "Context Usage\n[HHHHH.....]\nB base  D developer  P project  H history  C turn  U prompt  T tools  . free\ntokens: 5/10 (50.0%)",
     );
 
     let lines = transcript_lines(&row, false, true, 80, Path::new("/repo"), false);
     let rendered = lines.iter().map(line_text).collect::<Vec<_>>();
     assert_eq!(rendered[0], "> /context");
     assert_eq!(rendered[1], "  └  Context Usage");
-    assert_eq!(rendered[2], "     [MMMMM.....]");
+    assert_eq!(rendered[2], "     [HHHHH.....]");
     assert_eq!(
         rendered[3],
-        "     S system  T tools  K skills  M input_messages  . free"
+        "     B base  D developer  P project  H history  C turn  U prompt  T tools  . free"
     );
     assert_eq!(rendered[4], "     tokens: 5/10 (50.0%)");
 
-    let bar_m_style = lines[2].spans[6].style;
-    let legend_m_style = lines[3].spans[10].style;
+    let bar_h_style = lines[2].spans[6].style;
+    let legend_h_style = lines[3].spans[10].style;
     let legend_label_style = lines[3].spans[11].style;
-    assert_eq!(bar_m_style, legend_m_style);
-    assert_ne!(legend_m_style, legend_label_style);
+    assert_eq!(bar_h_style, legend_h_style);
+    assert_ne!(legend_h_style, legend_label_style);
     assert_eq!(legend_label_style, tui_theme().dim_style());
-    assert_eq!(lines[3].spans[11].content.as_ref(), " input_messages");
+    assert_eq!(lines[3].spans[11].content.as_ref(), " history");
 }
 
 #[test]
@@ -228,11 +228,54 @@ fn long_thinking_defaults_to_row_level_collapse_without_left_rail() {
 }
 
 #[test]
+fn long_thinking_can_expand_then_collapse_details() {
+    let long = (1..=12)
+        .map(|index| format!("line {index}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut row = TranscriptRow::with_title(TranscriptKind::Thinking, "Thinking", long);
+
+    toggle_transcript_row_details(&mut row);
+    assert!(row.expanded);
+    assert!(!row.details_collapsed);
+    let expanded = thinking_lines(&row, false, true, 80)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(expanded.contains("▾ collapse"), "{expanded}");
+    assert!(expanded.contains("line 3"), "{expanded}");
+
+    toggle_transcript_row_details(&mut row);
+    assert!(!row.expanded);
+    assert!(row.details_collapsed);
+    let collapsed = thinking_lines(&row, false, true, 80)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(collapsed.contains("▸ details"), "{collapsed}");
+    assert!(!collapsed.contains("line 1"), "{collapsed}");
+    assert!(!collapsed.contains("... 6 more lines"), "{collapsed}");
+
+    toggle_transcript_row_details(&mut row);
+    assert!(!row.expanded);
+    assert!(!row.details_collapsed);
+    let preview = thinking_lines(&row, false, true, 80)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(preview.contains("▸ 6 more lines"), "{preview}");
+    assert!(preview.contains("line 1"), "{preview}");
+}
+
+#[test]
 fn active_thinking_row_uses_activity_marker_and_elapsed() {
     let mut row = TranscriptRow::with_title(TranscriptKind::Thinking, "Thinking", "working");
     row.tool_started = Some(
         Instant::now()
-            .checked_sub(Duration::from_secs(2))
+            .checked_sub(Duration::from_millis(2_500))
             .expect("instant"),
     );
 
@@ -240,7 +283,9 @@ fn active_thinking_row_uses_activity_marker_and_elapsed() {
         .into_iter()
         .next()
         .expect("thinking row");
-    assert_eq!(line.spans[0].content.as_ref(), "◦ ");
+    let marker = line.spans[0].content.as_ref();
+    assert!(marker.ends_with(' '), "{marker}");
+    assert_ne!(marker, "◦ ");
     let rendered = line_text(&line);
     assert!(rendered.contains("Thinking"), "{rendered}");
     assert!(rendered.contains("2s"), "{rendered}");

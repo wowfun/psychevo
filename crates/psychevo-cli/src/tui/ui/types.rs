@@ -233,7 +233,7 @@ struct FullscreenUi<'a> {
     agent_child_event_backlog: BTreeMap<String, Vec<RunStreamEvent>>,
     auxiliary_shell_tasks: Vec<AuxiliaryShellTask>,
     pending_auxiliary_shell_commands: VecDeque<String>,
-    running_started: Option<Instant>,
+    visible_turn_started: Option<Instant>,
     #[cfg(test)]
     running_elapsed_override: Option<Duration>,
     interrupt_requested: bool,

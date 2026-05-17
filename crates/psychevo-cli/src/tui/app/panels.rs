@@ -824,6 +824,11 @@ fn model_capability_tags(model: &ConfiguredModel) -> Vec<String> {
         Some(false) => tags.push("no tools".to_string()),
         None => {}
     }
+    match caps.developer_role {
+        Some(true) => tags.push("developer".to_string()),
+        Some(false) => tags.push("no developer".to_string()),
+        None => {}
+    }
     if caps.attachment == Some(true) || caps.input_modalities.iter().any(|value| value != "text") {
         tags.push("multi-modal".to_string());
     }

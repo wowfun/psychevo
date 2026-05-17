@@ -482,32 +482,28 @@ fn metadata_reasoning_effort(metadata: Option<&Value>) -> Option<&str> {
         .filter(|value| !value.is_empty() && *value != "none")
 }
 
-fn tool_started_instant(value: &Value) -> Instant {
+fn instant_from_wall_timestamp_ms(started_at_ms: i64) -> Option<Instant> {
     let now = Instant::now();
-    let Some(started_at_ms) = value.get("started_at_ms").and_then(Value::as_i64) else {
-        return now;
-    };
-    let Some(elapsed_ms) = wall_now_ms().checked_sub(started_at_ms) else {
-        return now;
-    };
+    let elapsed_ms = wall_now_ms().checked_sub(started_at_ms)?;
     if elapsed_ms <= 0 {
-        return now;
+        return Some(now);
     }
     now.checked_sub(Duration::from_millis(elapsed_ms as u64))
-        .unwrap_or(now)
+        .or(Some(now))
+}
+
+fn tool_started_instant(value: &Value) -> Instant {
+    let Some(started_at_ms) = value.get("started_at_ms").and_then(Value::as_i64) else {
+        return Instant::now();
+    };
+    instant_from_wall_timestamp_ms(started_at_ms).unwrap_or_else(Instant::now)
 }
 
 fn history_tool_started_instant(message: &Value) -> Instant {
-    let now = Instant::now();
     let Some(started_at_ms) = message_timestamp_ms(message) else {
-        return now;
+        return Instant::now();
     };
-    let elapsed_ms = wall_now_ms().saturating_sub(started_at_ms);
-    if elapsed_ms <= 0 {
-        return now;
-    }
-    now.checked_sub(Duration::from_millis(elapsed_ms as u64))
-        .unwrap_or(now)
+    instant_from_wall_timestamp_ms(started_at_ms).unwrap_or_else(Instant::now)
 }
 
 fn wall_now_ms() -> i64 {

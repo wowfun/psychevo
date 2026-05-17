@@ -538,6 +538,12 @@ impl TuiApp {
         self.current_agent = next_agent;
         self.current_agent_explicit_default = true;
         self.refresh_selected_model();
+        if let Some(session_id) = self.current_session.as_deref()
+            && let Err(err) = self.reload_context_after_main_agent_switch(session_id)
+        {
+            ui.set_bottom_panel_notice(format!("failed to reload context: {err:#}"));
+            return Ok(());
+        }
         ui.bottom_panel = None;
         ui.refresh_sidebar(self);
         Ok(())
@@ -567,23 +573,45 @@ impl TuiApp {
             name.clone()
         };
         let metadata = main_agent_metadata(&input, &name, source, path.as_ref());
-        if let Some(session_id) = self.current_session.as_deref() {
-            if let Err(err) = SqliteStore::open(&self.db_path).and_then(|store| {
+        if let Some(session_id) = self.current_session.as_deref()
+            && let Err(err) = SqliteStore::open(&self.db_path).and_then(|store| {
                 store.set_session_metadata_field(
                     session_id,
                     SESSION_MAIN_AGENT_METADATA_KEY,
                     Some(metadata.clone()),
                 )
-            }) {
-                ui.set_bottom_panel_notice(format!("failed to save main agent: {err:#}"));
-                return Ok(());
-            }
+            })
+        {
+            ui.set_bottom_panel_notice(format!("failed to save main agent: {err:#}"));
+            return Ok(());
         }
         self.current_agent = Some(input);
         self.current_agent_explicit_default = false;
         self.refresh_selected_model();
+        if let Some(session_id) = self.current_session.as_deref()
+            && let Err(err) = self.reload_context_after_main_agent_switch(session_id)
+        {
+            ui.set_bottom_panel_notice(format!("failed to reload context: {err:#}"));
+            return Ok(());
+        }
         ui.bottom_panel = None;
         ui.refresh_sidebar(self);
+        Ok(())
+    }
+
+    fn reload_context_after_main_agent_switch(&self, session_id: &str) -> Result<()> {
+        reload_session_context(ReloadContextOptions {
+            db_path: self.db_path.clone(),
+            session: session_id.to_string(),
+            config_path: self.config_path.clone(),
+            mode: Some(self.current_mode),
+            inherited_env: Some(self.env_map.clone()),
+            agent: self.current_agent.clone(),
+            no_agents: self.no_agents,
+            no_skills: self.no_skills,
+            invalidation_reason: "main_agent_changed".to_string(),
+            notice: Some("The selected main agent changed; the session prompt prefix was rebuilt before this turn.".to_string()),
+        })?;
         Ok(())
     }
 
@@ -678,7 +706,7 @@ impl TuiApp {
         let agent = catalog
             .agents
             .into_iter()
-            .chain(catalog.shadowed_agents.into_iter())
+            .chain(catalog.shadowed_agents)
             .find(|agent| agent.file_path.as_ref() == Some(path));
         let Some(agent) = agent else {
             return Ok(None);

@@ -43,8 +43,8 @@ fn terminal_probe_parses_default_color_replies() {
 }
 
 #[test]
-fn motion_uses_static_activity_indicator_in_tests() {
-    assert_eq!(activity_spinner_frame(Duration::from_secs(12)), "◦");
+fn motion_uses_shared_activity_spinner_frames() {
+    assert_eq!(activity_spinner_frame(Duration::from_secs(12)), "⠼");
 }
 
 #[test]

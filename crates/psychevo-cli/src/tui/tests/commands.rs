@@ -221,7 +221,7 @@ async fn fullscreen_help_command_opens_bottom_help_panel() {
     assert!(text.contains("/usage - local usage and cost (aliases: /stats)"));
     assert!(text.contains("Reads persisted SQLite accounting and cost estimates"));
     assert!(text.contains(
-        "/export [path] [--format markdown|json] [-i|--include list] - write session export"
+        "/export [path] [-f|--format markdown|json] [-i|--include list] - write session export"
     ));
     assert!(text.contains("last-provider-request can expose hidden prompts"));
     assert!(text.contains("No custom commands available"));
@@ -413,10 +413,11 @@ async fn fullscreen_context_command_appends_compact_command_row() {
     assert_eq!(cell_count % 5, 0);
     assert!((50..=100).contains(&cell_count));
     assert!(
-        row.text
-            .contains("\nS system  T tools  K skills  M input_messages  . free\n\n")
+        row.text.contains(
+            "\nB base  D developer  P project  H history  C turn  U prompt  T tools  . free\n\n"
+        )
     );
-    assert!(row.text.contains("\ninput_messages:"));
+    assert!(row.text.contains("\ninput_history:"));
     assert!(!row.text.contains("\nmessages:"));
     assert!(!row.text.contains("unavailable"));
 }
@@ -642,9 +643,9 @@ async fn fullscreen_skills_command_lists_dynamic_entries_and_inserts_skill_marke
 fn test_context_snapshot() -> ContextSnapshot {
     let mut categories = BTreeMap::new();
     categories.insert(
-        "system_prompt".to_string(),
+        "base_policy".to_string(),
         ContextCategory {
-            label: "System prompt".to_string(),
+            label: "Base policy".to_string(),
             tokens: 10,
             estimated: true,
             status: "estimated".to_string(),
@@ -653,16 +654,15 @@ fn test_context_snapshot() -> ContextSnapshot {
         },
     );
     categories.insert(
-        "messages".to_string(),
+        "history".to_string(),
         ContextCategory {
-            label: "Messages".to_string(),
+            label: "History".to_string(),
             tokens: 40,
             estimated: true,
             status: "estimated".to_string(),
             percent: Some(40.0),
             details: serde_json::json!({
                 "roles": {"user": {"count": 1, "tokens": 40}},
-                "selected_skill_context": {"count": 0, "tokens": 0}
             }),
         },
     );

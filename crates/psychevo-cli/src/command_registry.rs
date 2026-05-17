@@ -46,6 +46,7 @@ pub(crate) enum SlashCommandAction {
     Sessions,
     Usage,
     Context,
+    ReloadContext,
     ModelShow,
     VariantSet,
     ModeSet,
@@ -193,6 +194,22 @@ pub(crate) const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         output_kind: CommandOutputKind::TranscriptStatusBlock,
         status: CommandStatus::Active,
         action: SlashCommandAction::Context,
+        common: true,
+    },
+    SlashCommandSpec {
+        canonical: "/reload-context",
+        aliases: &[],
+        usage: "/reload-context",
+        summary: "rebuild session prompt prefix",
+        help_detail: Some(
+            "Re-reads current local agents, skills, and AGENTS context for future turns in this session.",
+        ),
+        surface: TUI_SLASH,
+        group: COMMANDS,
+        argument_kind: CommandArgumentKind::None,
+        output_kind: CommandOutputKind::TranscriptStatusBlock,
+        status: CommandStatus::Active,
+        action: SlashCommandAction::ReloadContext,
         common: true,
     },
     SlashCommandSpec {
@@ -420,7 +437,7 @@ pub(crate) const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         canonical: "/export",
         aliases: &[],
-        usage: "/export [path] [--format markdown|json] [-i|--include list]",
+        usage: "/export [path] [-f|--format markdown|json] [-i|--include list]",
         summary: "write session export",
         help_detail: Some(
             "Writes a local artifact; last-provider-request can expose hidden prompts and tool data.",

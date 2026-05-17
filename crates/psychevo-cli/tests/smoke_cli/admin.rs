@@ -255,6 +255,7 @@ fn cli_session_export_and_share_emit_local_artifacts() {
     assert!(json_export.status.success());
     let value: Value = serde_json::from_slice(&json_export.stdout).expect("json");
     assert!(value.get("header").is_none());
+    assert!(value.get("prompt_prefix").is_none());
     assert_eq!(value["messages"][0]["session_seq"], 1);
     assert!(value.get("provider_input_evidence").is_none());
     assert!(value.get("last_provider_request").is_none());
@@ -276,7 +277,25 @@ fn cli_session_export_and_share_emit_local_artifacts() {
     assert_eq!(value["header"]["session"]["id"], "exported-session");
     assert_eq!(value["header"]["options"]["format"].as_str(), Some("json"));
     assert_eq!(value["header"]["options"]["include"], serde_json::json!(["header"]));
+    assert_eq!(value["header"]["prompt_prefix"]["prefix_hash"], "fixture-prefix-hash");
+    assert_eq!(
+        value["header"]["prompt_prefix"]["slots"][1]["slot"],
+        "agent_catalog"
+    );
+    assert!(value["header"]["prompt_prefix"]["slots"][1].get("content").is_none());
+    assert!(value.get("prompt_prefix").is_none());
     assert!(value.get("messages").is_none());
+
+    let markdown_header = admin_cmd(temp.path(), &psychevo_home, &workdir)
+        .args(["session", "export", "latest", "--include", "header"])
+        .output()
+        .expect("session export markdown header");
+    assert!(markdown_header.status.success());
+    let stdout = String::from_utf8(markdown_header.stdout).expect("stdout");
+    assert!(stdout.contains("### Prompt Prefix"));
+    assert!(!stdout.contains("\n## Prompt Prefix"));
+    assert!(stdout.contains("agent_catalog"));
+    assert!(!stdout.contains("Available agents"));
 
     let json_last_request = admin_cmd(temp.path(), &psychevo_home, &workdir)
         .args([
@@ -309,16 +328,37 @@ fn cli_session_export_and_share_emit_local_artifacts() {
     assert_eq!(last["reconstructed"], true);
     assert_eq!(last["body"]["model"], "model");
     let provider_messages = last["body"]["messages"].as_array().expect("messages");
-    assert_eq!(provider_messages[1]["role"], "user");
-    let grouped_project_context = provider_messages[1]["content"].as_str().expect("project context");
-    assert!(grouped_project_context.contains("hidden AGENTS root"));
-    assert!(grouped_project_context.contains("hidden AGENTS local"));
-    assert_eq!(provider_messages[2]["role"], "user");
-    assert!(provider_messages[2]["content"]
-        .as_str()
-        .expect("skill context")
-        .contains("<name>reviewer</name>"));
-    assert_eq!(provider_messages[3]["content"], "hello export");
+    let message_texts = provider_messages
+        .iter()
+        .filter_map(|message| message["content"].as_str())
+        .collect::<Vec<_>>();
+    let agent_catalog_index = message_texts
+        .iter()
+        .position(|text| text.contains("Available agents"))
+        .expect("agent catalog");
+    let skill_index = message_texts
+        .iter()
+        .position(|text| text.contains("Available skills"))
+        .expect("skill index");
+    let project_context_index = message_texts
+        .iter()
+        .position(|text| text.contains("hidden AGENTS root"))
+        .expect("project context");
+    let selected_skill_index = message_texts
+        .iter()
+        .position(|text| text.contains("<name>reviewer</name>"))
+        .expect("selected skill");
+    let prompt_index = message_texts
+        .iter()
+        .position(|text| *text == "hello export")
+        .expect("prompt");
+    assert!(agent_catalog_index < skill_index);
+    assert!(skill_index < project_context_index);
+    assert!(project_context_index < selected_skill_index);
+    assert!(selected_skill_index < prompt_index);
+    assert!(message_texts
+        .iter()
+        .any(|text| text.contains("hidden AGENTS local")));
     assert!(last["body"]["tools"]
         .as_array()
         .expect("tools")
@@ -343,6 +383,8 @@ fn cli_session_export_and_share_emit_local_artifacts() {
     assert!(markdown_last_request.status.success());
     let stdout = String::from_utf8(markdown_last_request.stdout).expect("stdout");
     assert!(stdout.contains("## Reconstructed Last Provider Request"));
+    assert!(stdout.contains("Available agents"));
+    assert!(stdout.contains("Available skills"));
     assert!(stdout.contains("hidden AGENTS"));
     assert_eq!(
         stdout
@@ -350,6 +392,32 @@ fn cli_session_export_and_share_emit_local_artifacts() {
             .count(),
         1
     );
+
+    conn.execute(
+        "UPDATE session_prompt_prefixes SET prefix_hash = 'newer-prefix-hash' WHERE session_id = ?1",
+        rusqlite::params!["exported-session"],
+    )
+    .expect("stale prefix hash");
+    let stale_last_request = admin_cmd(temp.path(), &psychevo_home, &workdir)
+        .args([
+            "session",
+            "export",
+            "latest",
+            "-f",
+            "json",
+            "--include",
+            "last-provider-request",
+        ])
+        .output()
+        .expect("stale session export json last request");
+    assert!(stale_last_request.status.success());
+    let value: Value = serde_json::from_slice(&stale_last_request.stdout).expect("json");
+    let warnings = value["last_provider_request"]["warnings"]
+        .as_array()
+        .expect("warnings");
+    assert!(warnings.iter().any(|warning| warning
+        .as_str()
+        .is_some_and(|text| text.contains("does not match") && text.contains("approximate"))));
 
     let old_reasoning_export = admin_cmd(temp.path(), &psychevo_home, &workdir)
         .args(["session", "export", "latest", "--with-reasoning"])
@@ -419,7 +487,7 @@ fn cli_session_export_and_share_emit_local_artifacts() {
     let path = PathBuf::from(value["path"].as_str().expect("path"));
     assert_eq!(
         path.file_name().and_then(|name| name.to_str()),
-        Some("psychevo-share-exported.md")
+        Some("psychevo-share-exported-sess.md")
     );
     let content = std::fs::read_to_string(path).expect("share artifact");
     assert!(content.contains("visible answer"));
@@ -490,6 +558,7 @@ fn cli_model_list_current_and_fetch_use_local_config_and_explicit_fetch_only() {
 }
 
 fn insert_export_fixture_messages(conn: &Connection, session_id: &str) {
+    let prompt_prefix_hash = "fixture-prefix-hash";
     let user = serde_json::json!({
         "role": "user",
         "content": [{"text": "hello export"}],
@@ -590,6 +659,23 @@ fn insert_export_fixture_messages(conn: &Connection, session_id: &str) {
         )
         .expect("insert message");
     }
+    let prompt_prefix_metadata = serde_json::json!({
+        "prompt_prefix": {
+            "hash": prompt_prefix_hash,
+            "version": 1,
+            "created_at_ms": 1_050,
+            "provider": "provider",
+            "model": "model",
+            "tool_declarations_hash": "fixture-tools-hash",
+            "invalidation_reason": "new_session"
+        }
+    });
+    conn.execute(
+        "UPDATE messages SET metadata_json = ?1 WHERE session_id = ?2 AND role = 'user'",
+        rusqlite::params![prompt_prefix_metadata.to_string(), session_id],
+    )
+    .expect("set user prompt prefix metadata");
+    insert_export_fixture_prompt_prefix(conn, session_id, prompt_prefix_hash);
     for (context_seq, source_kind, source_name, source_path, provider_group, block_index, context_kind, content_text, metadata_json) in [
         (
             1,
@@ -648,6 +734,83 @@ fn insert_export_fixture_messages(conn: &Connection, session_id: &str) {
         )
         .expect("insert context evidence");
     }
+}
+
+fn insert_export_fixture_prompt_prefix(conn: &Connection, session_id: &str, prefix_hash: &str) {
+    let slots = serde_json::json!([
+        {
+            "slot": "base/mode",
+            "tier": "base",
+            "semantic_role": "base_policy",
+            "provider_role": "system",
+            "order": 0,
+            "content": "Runtime mode: default from prefix snapshot.",
+            "content_hash": "base-hash",
+            "source_kind": "runtime",
+            "source_name": "mode",
+            "source_path": null
+        },
+        {
+            "slot": "agent_catalog",
+            "tier": "prefix",
+            "semantic_role": "developer_prompt",
+            "provider_role": "system",
+            "order": 1,
+            "content": "Available agents:\n- translate: Translate between Chinese and English.",
+            "content_hash": "agent-catalog-hash",
+            "source_kind": "agent_catalog",
+            "source_name": "active_agents",
+            "source_path": null
+        },
+        {
+            "slot": "skill_index",
+            "tier": "prefix",
+            "semantic_role": "developer_prompt",
+            "provider_role": "system",
+            "order": 2,
+            "content": "Available skills:\n- reviewer: Review text carefully.",
+            "content_hash": "skill-index-hash",
+            "source_kind": "skill_catalog",
+            "source_name": "active_skills",
+            "source_path": null
+        },
+        {
+            "slot": "project_context:0",
+            "tier": "prefix",
+            "semantic_role": "project_context",
+            "provider_role": "user",
+            "order": 3,
+            "content": "# AGENTS.md instructions for /repo\n\n<INSTRUCTIONS>\nhidden AGENTS root\n</INSTRUCTIONS>",
+            "content_hash": "project-root-hash",
+            "source_kind": "project_instruction",
+            "source_name": "AGENTS.md",
+            "source_path": "/repo/AGENTS.md"
+        },
+        {
+            "slot": "project_context:1",
+            "tier": "prefix",
+            "semantic_role": "project_context",
+            "provider_role": "user",
+            "order": 4,
+            "content": "# AGENTS.md instructions for /repo\n\n<INSTRUCTIONS>\nhidden AGENTS local\n</INSTRUCTIONS>",
+            "content_hash": "project-local-hash",
+            "source_kind": "project_instruction",
+            "source_name": "AGENTS.local.md",
+            "source_path": "/repo/AGENTS.local.md"
+        }
+    ]);
+    conn.execute(
+        r#"
+        INSERT INTO session_prompt_prefixes (
+            session_id, version, created_at_ms, provider, model,
+            prefix_hash, tool_declarations_hash, invalidation_reason,
+            slots_json, metadata_json
+        ) VALUES (?1, 1, 1050, 'provider', 'model', ?2, 'fixture-tools-hash',
+            'new_session', ?3, NULL)
+        "#,
+        rusqlite::params![session_id, prefix_hash, slots.to_string()],
+    )
+    .expect("insert prompt prefix");
 }
 
 fn set_export_fixture_session_metadata(conn: &Connection, session_id: &str) {

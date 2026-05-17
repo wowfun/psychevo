@@ -124,11 +124,12 @@ fn tui_snapshot_archived_session_action_bottom_panel() {
     assert_tui_snapshot("archived_session_action_bottom_panel", 120, 24, &app, ui);
 }
 
-#[test]
-fn tui_snapshot_running_turn_with_visible_thinking() {
+#[tokio::test]
+async fn tui_snapshot_running_turn_with_visible_thinking() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
-    let ui = fixture_ui(&app, FixtureKind::RunningThinking);
+    let mut ui = fixture_ui(&app, FixtureKind::RunningThinking);
+    attach_pending_agent_running(&mut ui);
     assert_tui_snapshot("running_turn_with_visible_thinking", 120, 24, &app, ui);
 }
 
@@ -188,19 +189,21 @@ fn tui_snapshot_rich_markdown_answer() {
     assert_tui_snapshot("rich_markdown_answer", 120, 24, &app, ui);
 }
 
-#[test]
-fn tui_snapshot_active_write_after_visible_answer() {
+#[tokio::test]
+async fn tui_snapshot_active_write_after_visible_answer() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
-    let ui = fixture_ui(&app, FixtureKind::ActiveWriteAfterAnswer);
+    let mut ui = fixture_ui(&app, FixtureKind::ActiveWriteAfterAnswer);
+    attach_pending_agent_running(&mut ui);
     assert_tui_snapshot("active_write_after_visible_answer", 120, 24, &app, ui);
 }
 
-#[test]
-fn tui_snapshot_active_visible_write_preamble() {
+#[tokio::test]
+async fn tui_snapshot_active_visible_write_preamble() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
-    let ui = fixture_ui(&app, FixtureKind::ActiveVisibleWritePreamble);
+    let mut ui = fixture_ui(&app, FixtureKind::ActiveVisibleWritePreamble);
+    attach_pending_agent_running(&mut ui);
     assert_tui_snapshot("active_visible_write_preamble", 120, 24, &app, ui);
 }
 
@@ -247,7 +250,7 @@ fn tui_snapshot_history_pending_write_call() {
         if row.title.starts_with("Updating ") {
             row.tool_started = Some(
                 Instant::now()
-                    .checked_sub(Duration::from_secs(2))
+                    .checked_sub(Duration::from_millis(2_500))
                     .expect("instant"),
             );
         }
@@ -255,8 +258,8 @@ fn tui_snapshot_history_pending_write_call() {
     assert_tui_snapshot("history_pending_write_call", 120, 18, &app, ui);
 }
 
-#[test]
-fn tui_snapshot_active_write_suppresses_failure_meta() {
+#[tokio::test]
+async fn tui_snapshot_active_write_suppresses_failure_meta() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -295,16 +298,17 @@ fn tui_snapshot_active_write_suppresses_failure_meta() {
         if row.title.starts_with("Updating ") {
             row.tool_started = Some(
                 Instant::now()
-                    .checked_sub(Duration::from_secs(2))
+                    .checked_sub(Duration::from_millis(2_500))
                     .expect("instant"),
             );
         }
     }
+    attach_pending_agent_running(&mut ui);
     assert_tui_snapshot("active_write_suppresses_failure_meta", 120, 18, &app, ui);
 }
 
-#[test]
-fn tui_snapshot_reasoning_suppresses_failure_meta() {
+#[tokio::test]
+async fn tui_snapshot_reasoning_suppresses_failure_meta() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -332,18 +336,20 @@ fn tui_snapshot_reasoning_suppresses_failure_meta() {
     ui.apply_stream_event(
         RunStreamEvent::ReasoningDelta {
             text: "The current time is approximately 15:20 UTC. Let me compose the full report now. I have all 10 stories and their comments.\n\nLet me compose this carefully.".to_string(),
-        },
+            },
         true,
         false,
     );
+    attach_pending_agent_running(&mut ui);
     assert_tui_snapshot("reasoning_suppresses_failure_meta", 120, 18, &app, ui);
 }
 
-#[test]
-fn tui_snapshot_active_reasoning_write() {
+#[tokio::test]
+async fn tui_snapshot_active_reasoning_write() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
-    let ui = fixture_ui(&app, FixtureKind::ActiveReasoningWrite);
+    let mut ui = fixture_ui(&app, FixtureKind::ActiveReasoningWrite);
+    attach_pending_agent_running(&mut ui);
     assert_tui_snapshot("active_reasoning_write", 120, 24, &app, ui);
 }
 

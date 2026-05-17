@@ -51,6 +51,175 @@ fn cli_run_positional_prompt_outputs_final_answer_and_persists_metadata() {
 }
 
 #[test]
+fn cli_run_selected_main_agent_includes_description_and_body() {
+    let server = MockSseServer::start(vec![sse_text("agent final")]);
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = temp.path().join("work");
+    std::fs::create_dir_all(workdir.join(".git")).expect("git");
+    std::fs::create_dir_all(workdir.join(".claude/agents")).expect("agents");
+    std::fs::write(
+        workdir.join(".claude/agents/translate.md"),
+        "---\nname: translate\ndescription: Detect the source language automatically. Translate Chinese to English; translate all other languages to Chinese.\n---\nPreserve tone, meaning, punctuation, emoji, and inline formatting. Return only the translated text.",
+    )
+    .expect("agent");
+    let config = write_run_config(&temp.path().join("config"), &server.base_url);
+    let output = isolated_run_cmd(temp.path(), &config, &db)
+        .args([
+            "run",
+            "--dir",
+            workdir.to_str().expect("workdir"),
+            "--agent",
+            "translate",
+            "-f",
+            "json",
+            "shell",
+        ])
+        .output()
+        .expect("pevo run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let request = server.request_json(0);
+    let system_messages = system_contents(&request);
+    let selected = system_messages
+        .iter()
+        .find(|message| message.contains("Main session agent: translate"))
+        .expect("selected agent system prompt");
+    assert!(
+        selected.contains("Purpose:\nDetect the source language automatically."),
+        "{selected}"
+    );
+    assert!(
+        selected.contains("Translate Chinese to English; translate all other languages to Chinese."),
+        "{selected}"
+    );
+    assert!(
+        selected.contains("Instructions:\nPreserve tone, meaning, punctuation"),
+        "{selected}"
+    );
+    assert_eq!(user_contents(&request), vec!["shell"]);
+}
+
+#[test]
+fn cli_run_child_agent_session_exports_prefix_and_last_request() {
+    let server = MockSseServer::start(vec![
+        sse_tool_agent_call("call_agent", "translate", "hello"),
+        sse_text("child translated"),
+        sse_text("parent final"),
+    ]);
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let psychevo_home = init_tui_home(temp.path());
+    let workdir = temp.path().join("work");
+    std::fs::create_dir_all(workdir.join(".git")).expect("git");
+    std::fs::create_dir_all(workdir.join(".claude/agents")).expect("agents");
+    std::fs::write(
+        workdir.join(".claude/agents/translate.md"),
+        "---\nname: translate\ndescription: Translate English to Chinese.\n---\nReturn only the translated text.",
+    )
+    .expect("agent");
+    let config = write_run_config(&temp.path().join("config"), &server.base_url);
+    let output = isolated_run_cmd(temp.path(), &config, &db)
+        .args([
+            "run",
+            "--dir",
+            workdir.to_str().expect("workdir"),
+            "-f",
+            "json",
+            "use translate",
+        ])
+        .output()
+        .expect("pevo run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let child_request = server.request_json(1);
+    let child_system = system_contents(&child_request);
+    assert!(child_system
+        .iter()
+        .any(|message| message.contains("Child agent: translate")));
+    assert!(child_system
+        .iter()
+        .any(|message| message.contains("child agent. Return a concise final answer")));
+
+    let conn = Connection::open(&db).expect("db");
+    let child_session: String = conn
+        .query_row("SELECT id FROM sessions WHERE source = 'agent'", [], |row| row.get(0))
+        .expect("child session");
+    let prefix_slots: Vec<String> = conn
+        .prepare(
+            "SELECT json_extract(value, '$.slot') FROM session_prompt_prefixes, json_each(slots_json) WHERE session_id = ?1 ORDER BY json_extract(value, '$.order')",
+        )
+        .expect("prepare")
+        .query_map([child_session.as_str()], |row| row.get::<_, String>(0))
+        .expect("query")
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .expect("slots");
+    assert_eq!(
+        prefix_slots,
+        vec![
+            "base/mode".to_string(),
+            "selected_child_agent".to_string(),
+            "child_agent_control".to_string(),
+        ]
+    );
+    let evidence_slots: Vec<String> = conn
+        .prepare(
+            "SELECT json_extract(metadata_json, '$.slot') FROM context_evidence WHERE session_id = ?1 ORDER BY context_seq",
+        )
+        .expect("prepare")
+        .query_map([child_session.as_str()], |row| row.get::<_, String>(0))
+        .expect("query")
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .expect("evidence");
+    assert_eq!(evidence_slots, prefix_slots);
+
+    let export = isolated_tui_cmd(temp.path(), &psychevo_home, &config, &db)
+        .args([
+            "session",
+            "export",
+            &child_session,
+            "-f",
+            "json",
+            "-i",
+            "h,m,lpr",
+        ])
+        .output()
+        .expect("child session export");
+    assert!(
+        export.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&export.stderr)
+    );
+    let value: Value = serde_json::from_slice(&export.stdout).expect("json export");
+    assert_eq!(
+        value["header"]["prompt_prefix"]["slots"][1]["slot"],
+        "selected_child_agent"
+    );
+    let exported_messages = value["last_provider_request"]["body"]["messages"]
+        .as_array()
+        .expect("provider messages");
+    assert!(exported_messages
+        .iter()
+        .any(|message| message["content"]
+            .as_str()
+            .is_some_and(|content| content.contains("Child agent: translate"))));
+    assert!(exported_messages
+        .iter()
+        .any(|message| message["content"]
+            .as_str()
+            .is_some_and(|content| content
+                .contains("You are running as a child agent"))));
+}
+
+#[test]
 fn cli_run_dir_controls_tool_workdir() {
     let server = MockSseServer::start(vec![sse_tool_read_then_done(), sse_text("read complete")]);
     let temp = tempdir().expect("temp");
@@ -320,7 +489,7 @@ fn cli_context_reports_latest_session_json() {
     assert_eq!(snapshot["type"], "context_snapshot");
     assert_eq!(snapshot["scope"], "session_estimate");
     assert_eq!(snapshot["total"]["tokens"], 3);
-    assert!(snapshot["categories"]["messages"]["tokens"].as_u64().is_some());
+    assert!(snapshot["categories"]["history"]["tokens"].as_u64().is_some());
     assert!(snapshot["categories"].get("input_messages").is_none());
     assert!(!String::from_utf8_lossy(&context.stdout).contains("unavailable"));
 
@@ -344,7 +513,7 @@ fn cli_context_reports_latest_session_json() {
     assert!(!text.contains("> /context"));
     assert!(!text.contains('└'));
     assert!(text.contains("\ntokens: 3 tokens\n"));
-    assert!(text.contains("\ninput_messages:"));
+    assert!(text.contains("\ninput_history:"));
     assert!(!text.contains("\nmessages:"));
     assert!(text.contains("\nscope: session estimate\nmodel: mock/mock-model\n"));
     assert!(!text.contains("bar:"));

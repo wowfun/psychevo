@@ -717,6 +717,166 @@ async fn foreground_agent_tool_result_is_single_claude_style_inspection_row() {
     assert!(ui.transcript[0].expanded);
 }
 
+#[test]
+fn agent_session_start_reuses_partial_agent_placeholder_row() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_call_pending",
+            "tool_name": "Agent",
+            "arguments_json": "{\"name\":\"general\"}",
+            "content_index": 0,
+            "call_index": 0
+        }),
+        false,
+    );
+    assert_eq!(ui.transcript.len(), 1);
+    assert_eq!(ui.transcript[0].title, "general");
+    assert!(ui.transcript[0].agent_target.is_none());
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_execution_start",
+            "tool_name": "Agent",
+            "tool_call_id": "agent-1",
+            "args": {
+                "name": "general",
+                "prompt": "Fetch the failed articles and comments."
+            }
+        }),
+        false,
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "agent_session_start",
+            "tool_call_id": "agent-1",
+            "agent_id": "agent-run-1",
+            "agent_name": "general",
+            "agent_description": "General-purpose subagent for focused coding tasks.",
+            "child_session_id": "019e33e0-a38c-72a0-8320-9d13124af9d8"
+        }),
+        false,
+    );
+
+    assert_eq!(ui.transcript.len(), 1);
+    let row = &ui.transcript[0];
+    assert_eq!(
+        row.title,
+        "general(General-purpose subagent for focused coding tasks.)"
+    );
+    assert_eq!(
+        row.agent_target.as_deref(),
+        Some("019e33e0-a38c-72a0-8320-9d13124af9d8")
+    );
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 120, 12);
+    let text = buffer_text(&buffer);
+    assert!(text.contains("Open"), "{text}");
+}
+
+#[test]
+fn loading_parent_history_restores_running_agent_open_from_edge() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    write_tui_agent(
+        &app,
+        "general",
+        "General-purpose subagent for focused coding tasks.",
+    );
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let parent = store
+        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .expect("parent session");
+    let child = store
+        .create_child_session_with_metadata(
+            &parent,
+            &app.workdir,
+            "agent",
+            "mock-model",
+            "mock",
+            None,
+        )
+        .expect("child session");
+    store
+        .upsert_agent_edge(
+            &parent,
+            &child,
+            psychevo_runtime::AgentEdgeStatus::Open,
+            Some(serde_json::json!({
+                "agent": {
+                    "id": "agent-run-1",
+                    "task_name": "general-task",
+                    "name": "general",
+                    "task": "Fetch the failed articles and comments."
+                }
+            })),
+        )
+        .expect("agent edge");
+    let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
+    insert_tui_message(
+        &conn,
+        &parent,
+        1,
+        "user",
+        1,
+        serde_json::json!({
+            "role": "user",
+            "content": [{"type": "text", "text": "Fetch failed articles"}],
+            "timestamp_ms": 1
+        }),
+    );
+    insert_tui_message(
+        &conn,
+        &parent,
+        2,
+        "assistant",
+        2,
+        serde_json::json!({
+            "role": "assistant",
+            "content": [{
+                "type": "tool_call",
+                "id": "agent-1",
+                "name": "Agent",
+                "arguments": {
+                    "name": "general",
+                    "prompt": "Fetch the failed articles and comments."
+                },
+                "arguments_json": "{\"name\":\"general\",\"prompt\":\"Fetch the failed articles and comments.\"}",
+                "content_index": 0,
+                "call_index": 0
+            }],
+            "timestamp_ms": 2,
+            "finish_reason": "tool_calls",
+            "outcome": "normal",
+            "model": "mock-model",
+            "provider": "mock"
+        }),
+    );
+    app.current_session = Some(parent);
+    let mut ui = FullscreenUi::new(&app);
+
+    app.load_current_session_history(&mut ui)
+        .expect("load parent history");
+
+    let agent_rows = ui
+        .transcript
+        .iter()
+        .filter(|row| row.tool_name.as_deref() == Some("Agent"))
+        .collect::<Vec<_>>();
+    assert_eq!(agent_rows.len(), 1);
+    let row = agent_rows[0];
+    assert_eq!(
+        row.title,
+        "general(General-purpose subagent for focused coding tasks.)"
+    );
+    assert_eq!(row.agent_target.as_deref(), Some(child.as_str()));
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 120, 12);
+    let text = buffer_text(&buffer);
+    assert!(text.contains("Open"), "{text}");
+}
+
 #[tokio::test]
 async fn running_agent_row_enter_opens_child_session_before_parent_turn_finishes() {
     let temp = tempdir().expect("temp");
@@ -750,6 +910,20 @@ async fn running_agent_row_enter_opens_child_session_before_parent_turn_finishes
             })),
         )
         .expect("agent edge");
+    let child_prompt_ms = wall_now_ms() - 12_500;
+    let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
+    insert_tui_message(
+        &conn,
+        &child,
+        1,
+        "user",
+        child_prompt_ms,
+        serde_json::json!({
+            "role": "user",
+            "content": [{"type": "text", "text": "translate text"}],
+            "timestamp_ms": child_prompt_ms
+        }),
+    );
     app.current_session = Some(parent.clone());
     let mut ui = FullscreenUi::new(&app);
     let mut row = TranscriptRow::with_title(
@@ -779,6 +953,12 @@ async fn running_agent_row_enter_opens_child_session_before_parent_turn_finishes
         rx,
         task: RunningTask::Agent(task),
     });
+    ui.start_assistant();
+    ui.visible_turn_started = Some(
+        Instant::now()
+            .checked_sub(Duration::from_secs(140))
+            .expect("instant"),
+    );
 
     app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .await
@@ -787,11 +967,226 @@ async fn running_agent_row_enter_opens_child_session_before_parent_turn_finishes
     assert_eq!(app.current_session.as_deref(), Some(child.as_str()));
     assert!(ui.running.is_none());
     assert_eq!(ui.auxiliary_agent_tasks.len(), 1);
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 100, 12);
+    let text = buffer_text(&buffer);
+    assert!(text.contains("12s · Esc"), "{text}");
+    assert!(!text.contains("2m20s · Esc"), "{text}");
     assert!(
         ui.transcript
             .iter()
             .all(|row| row.text != "finish the current turn before opening an agent session")
     );
+}
+
+#[tokio::test]
+async fn esc_interrupts_running_child_session_after_open() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let parent = store
+        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .expect("parent session");
+    let child = store
+        .create_child_session_with_metadata(
+            &parent,
+            &app.workdir,
+            "agent",
+            "mock-model",
+            "mock",
+            None,
+        )
+        .expect("child session");
+    store
+        .upsert_agent_edge(
+            &parent,
+            &child,
+            psychevo_runtime::AgentEdgeStatus::Open,
+            None,
+        )
+        .expect("agent edge");
+    app.current_session = Some(parent.clone());
+    let mut ui = FullscreenUi::new(&app);
+    let mut row = TranscriptRow::with_title(
+        TranscriptKind::Status,
+        "translate(Translate user message to Chinese)",
+        "running",
+    );
+    row.tool_name = Some("Agent".to_string());
+    row.agent_target = Some(child.clone());
+    row.tool_started = Some(Instant::now());
+    ui.transcript.push(row);
+    ui.focus = FocusMode::Transcript;
+    ui.ensure_selection();
+
+    let (_tx, rx) = mpsc::unbounded_channel();
+    let result = psychevo_runtime::RunResult {
+        session_id: parent.clone(),
+        ..finished_run_result(&app)
+    };
+    let task = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        Ok(result)
+    });
+    let (control, _) = run_control();
+    ui.running = Some(RunningTurn {
+        control,
+        rx,
+        task: RunningTask::Agent(task),
+    });
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .expect("open running child session");
+    assert_eq!(app.current_session.as_deref(), Some(child.as_str()));
+    assert!(ui.running.is_none());
+    assert_eq!(ui.auxiliary_agent_tasks.len(), 1);
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .await
+        .expect("interrupt child session");
+
+    assert!(ui.interrupt_requested);
+    for agent in &ui.auxiliary_agent_tasks {
+        agent.task.abort();
+    }
+}
+
+#[tokio::test]
+async fn esc_interrupts_running_child_from_parent_session_after_return() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let parent = store
+        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .expect("parent session");
+    let child = store
+        .create_child_session_with_metadata(
+            &parent,
+            &app.workdir,
+            "agent",
+            "mock-model",
+            "mock",
+            None,
+        )
+        .expect("child session");
+    store
+        .upsert_agent_edge(
+            &parent,
+            &child,
+            psychevo_runtime::AgentEdgeStatus::Open,
+            None,
+        )
+        .expect("agent edge");
+    let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
+    let parent_prompt_ms = wall_now_ms() - 22_500;
+    insert_tui_message(
+        &conn,
+        &parent,
+        1,
+        "user",
+        parent_prompt_ms,
+        serde_json::json!({
+            "role": "user",
+            "content": [{"type": "text", "text": "delegate this"}],
+            "timestamp_ms": parent_prompt_ms
+        }),
+    );
+    insert_tui_message(
+        &conn,
+        &parent,
+        2,
+        "assistant",
+        parent_prompt_ms + 1_000,
+        serde_json::json!({
+            "role": "assistant",
+            "content": [{
+                "type": "tool_call",
+                "id": "call_agent",
+                "name": "Agent",
+                "arguments": {
+                    "agent": "translate",
+                    "task": "translate text"
+                },
+                "arguments_json": "{\"agent\":\"translate\",\"task\":\"translate text\"}",
+                "arguments_error": null,
+                "content_index": 0,
+                "call_index": 0
+            }],
+            "timestamp_ms": parent_prompt_ms + 1_000,
+            "finish_reason": "tool_calls",
+            "outcome": "normal",
+            "model": "mock-model",
+            "provider": "mock"
+        }),
+    );
+    let child_prompt_ms = wall_now_ms() - 6_500;
+    insert_tui_message(
+        &conn,
+        &child,
+        1,
+        "user",
+        child_prompt_ms,
+        serde_json::json!({
+            "role": "user",
+            "content": [{"type": "text", "text": "translate text"}],
+            "timestamp_ms": child_prompt_ms
+        }),
+    );
+    app.current_session = Some(parent.clone());
+    let mut ui = FullscreenUi::new(&app);
+    let mut row = TranscriptRow::with_title(
+        TranscriptKind::Status,
+        "translate(Translate user message to Chinese)",
+        "running",
+    );
+    row.tool_name = Some("Agent".to_string());
+    row.agent_target = Some(child.clone());
+    row.tool_started = Some(Instant::now());
+    ui.transcript.push(row);
+    ui.focus = FocusMode::Transcript;
+    ui.ensure_selection();
+
+    let (_tx, rx) = mpsc::unbounded_channel();
+    let result = psychevo_runtime::RunResult {
+        session_id: parent.clone(),
+        ..finished_run_result(&app)
+    };
+    let task = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        Ok(result)
+    });
+    let (control, _) = run_control();
+    ui.running = Some(RunningTurn {
+        control,
+        rx,
+        task: RunningTask::Agent(task),
+    });
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .expect("open running child session");
+    app.handle_fullscreen_key(
+        &mut ui,
+        KeyEvent::new(KeyCode::Char('p'), KeyModifiers::ALT),
+    )
+    .await
+    .expect("return to parent");
+    assert_eq!(app.current_session.as_deref(), Some(parent.as_str()));
+    assert!(ui.running.is_none());
+    assert_eq!(ui.auxiliary_agent_tasks.len(), 1);
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 100, 12);
+    let text = buffer_text(&buffer);
+    assert!(text.contains("22s · Esc"), "{text}");
+    assert!(!text.contains("6s · Esc"), "{text}");
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .await
+        .expect("interrupt child from parent session");
+
+    assert!(ui.interrupt_requested);
+    for agent in &ui.auxiliary_agent_tasks {
+        agent.task.abort();
+    }
 }
 
 #[tokio::test]
@@ -833,6 +1228,23 @@ async fn agent_row_click_toggles_and_open_action_enters_child_session() {
     let row_id = row.id;
     ui.transcript.push(row);
     draw_fullscreen_for_test(&app, &mut ui, 100, 14);
+    let open_area = transcript_test_target_area(&ui, TranscriptHitTarget::AgentOpen(row_id));
+    let row_area = transcript_test_target_area(&ui, TranscriptHitTarget::Row(row_id));
+    assert_eq!(
+        ui.transcript_hit(open_area.x + 1, open_area.y),
+        Some(TranscriptHitTarget::AgentOpen(row_id))
+    );
+    assert_eq!(
+        ui.transcript_hit(row_area.x + 1, row_area.y),
+        Some(TranscriptHitTarget::Row(row_id))
+    );
+    let after_open = open_area.x.saturating_add(open_area.width).saturating_add(1);
+    if after_open < row_area.x.saturating_add(row_area.width) {
+        assert_eq!(
+            ui.transcript_hit(after_open, open_area.y),
+            Some(TranscriptHitTarget::Row(row_id))
+        );
+    }
 
     click_transcript_test_target(&mut app, &mut ui, TranscriptHitTarget::Row(row_id)).await;
     assert!(ui.transcript[0].expanded);
@@ -1177,11 +1589,7 @@ async fn click_transcript_test_target(
     ui: &mut FullscreenUi<'_>,
     target: TranscriptHitTarget,
 ) {
-    let area = ui
-        .last_entry_areas
-        .iter()
-        .find_map(|(entry_target, area)| (*entry_target == target).then_some(*area))
-        .expect("target area");
+    let area = transcript_test_target_area(ui, target);
     app.handle_fullscreen_mouse(
         ui,
         MouseEvent {
@@ -1204,4 +1612,11 @@ async fn click_transcript_test_target(
     )
     .await
     .expect("mouse up");
+}
+
+fn transcript_test_target_area(ui: &FullscreenUi<'_>, target: TranscriptHitTarget) -> Rect {
+    ui.last_entry_areas
+        .iter()
+        .find_map(|(entry_target, area)| (*entry_target == target).then_some(*area))
+        .expect("target area")
 }
