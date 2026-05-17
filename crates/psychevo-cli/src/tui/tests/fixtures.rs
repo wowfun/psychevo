@@ -15,7 +15,9 @@ fn draw_fullscreen_for_test(
 async fn drain_fullscreen_until_idle(app: &mut TuiApp, ui: &mut FullscreenUi<'_>) {
     for _ in 0..200 {
         app.drain_fullscreen_events(ui).await.expect("drain events");
-        if ui.running.is_none() && ui.queued_inputs.is_empty() && ui.auxiliary_shell_tasks.is_empty()
+        if ui.running.is_none()
+            && ui.queued_inputs.is_empty()
+            && ui.auxiliary_shell_tasks.is_empty()
         {
             return;
         }
@@ -33,7 +35,11 @@ fn test_app(temp: &tempfile::TempDir) -> TuiApp {
     let mut env_map = BTreeMap::new();
     env_map.insert(
         "HOME".to_string(),
-        temp.path().canonicalize().expect("temp canonical").display().to_string(),
+        temp.path()
+            .canonicalize()
+            .expect("temp canonical")
+            .display()
+            .to_string(),
     );
     let (clipboard_result_tx, clipboard_result_rx) = std::sync::mpsc::channel();
     TuiApp {
@@ -52,6 +58,10 @@ fn test_app(temp: &tempfile::TempDir) -> TuiApp {
         current_variant: Some("high".to_string()),
         selected_model: None,
         current_mode: RunMode::Build,
+        startup_agent: None,
+        current_agent: None,
+        current_agent_explicit_default: false,
+        no_agents: false,
         no_skills: false,
         skill_inputs: Vec::new(),
         thinking_visible: true,

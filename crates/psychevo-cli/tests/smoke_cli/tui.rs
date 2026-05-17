@@ -213,7 +213,7 @@ fn cli_tui_status_shows_configured_default_variant() {
     assert!(stdout.contains("model: mock/mock-model"));
     assert!(stdout.contains("variant: xhigh"));
     let expected_status = format!(
-        "workdir: {}\nhome: {}\ndb: {}\nsession: (none)\nmodel: mock/mock-model\nvariant: xhigh\nmode: default\ndebug: off",
+        "workdir: {}\nhome: {}\ndb: {}\nsession: (none)\nmodel: mock/mock-model\nvariant: xhigh\nmode: default\nagent: (default)\nagents: on\ndebug: off",
         workdir.display(),
         home.display(),
         db.display()
@@ -380,7 +380,19 @@ fn cli_tui_mode_set_plan_persists_and_uses_read_only_tools() {
         .collect::<Vec<_>>();
     assert_eq!(
         tool_names,
-        vec!["read", "list", "search", "list_skills", "view_skill"]
+        vec![
+            "read",
+            "list",
+            "search",
+            "list_skills",
+            "view_skill",
+            "Agent",
+            "list_agents",
+            "wait_agent",
+            "send_message",
+            "close_agent",
+            "resume_agent",
+        ]
     );
     assert_eq!(request["messages"][0]["role"], "system");
     assert!(

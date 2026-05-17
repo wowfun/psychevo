@@ -8,17 +8,17 @@ size=100x18
 --- text ---
 › Restore a reasoning-only daily report.
 
-• Thinking                                                                          ▸ 12 more lines
+• Thinking                                                                          ▸ 14 more lines
   └ Hacker News 日 报 已 生 成 完 成 ！ ✅
 
-    **文 件 ： ** `feeds/2026-05-10/hackernews-hot-04-03.md`（ 25KB）
-
-    ### 今 日  12 条 热 门 话 题 速 览 ：
-
-    | # | 话 题  | 💬  |
-    |---|------|-----|
+    ... 14 more lines
+    | 9 | **热 门 话 题  9** - 混 合  Markdown/CJK 宽 度 校 验 行  | 189 |
+    | 10 | **热 门 话 题  10** - 混 合  Markdown/CJK 宽 度 校 验 行  | 190 |
+    | 11 | **热 门 话 题  11** - 混 合  Markdown/CJK 宽 度 校 验 行  | 191 |
+    | 12 | **热 门 话 题  12** - 混 合  Markdown/CJK 宽 度 校 验 行  | 192 |
 
 ▌ xiaomi-token-plan/mimo-v2.5-pro low 7m05s 1 failure
+
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -28,17 +28,17 @@ mock/model  high  ~/work · main
 --- styles ---
 [dim]› [default]Restore a reasoning-only daily report.
 [default]
-[green]• [default]Thinking                                                                          [dim]▸ 12 more lines[default]
+[green]• [default]Thinking                                                                          [dim]▸ 14 more lines[default]
 [dim]  └ Hacker News 日[default] [dim]报[default] [dim]已[default] [dim]生[default] [dim]成[default] [dim]完[default] [dim]成[default] [dim]！[default] [dim]✅[default]
 [dim]    [default]
-[dim]    **文[default] [dim]件[default] [dim]：[default] [dim]** `feeds/2026-05-10/hackernews-hot-04-03.md`（[default] [dim]25KB）[default]
-[dim]    [default]
-[dim]    ### 今[default] [dim]日[default] [dim] 12 条[default] [dim]热[default] [dim]门[default] [dim]话[default] [dim]题[default] [dim]速[default] [dim]览[default] [dim]：[default]
-[dim]    [default]
-[dim]    | # | 话[default] [dim]题[default] [dim] | 💬[default] [dim] |[default]
-[dim]    |---|------|-----|[default]
+[dim]    ... 14 more lines[default]
+[dim]    | 9 | **热[default] [dim]门[default] [dim]话[default] [dim]题[default] [dim] 9** - 混[default] [dim]合[default] [dim] Markdown/CJK 宽[default] [dim]度[default] [dim]校[default] [dim]验[default] [dim]行[default] [dim] | 189 |[default]
+[dim]    | 10 | **热[default] [dim]门[default] [dim]话[default] [dim]题[default] [dim] 10** - 混[default] [dim]合[default] [dim] Markdown/CJK 宽[default] [dim]度[default] [dim]校[default] [dim]验[default] [dim]行[default] [dim] | 190 |[default]
+[dim]    | 11 | **热[default] [dim]门[default] [dim]话[default] [dim]题[default] [dim] 11** - 混[default] [dim]合[default] [dim] Markdown/CJK 宽[default] [dim]度[default] [dim]校[default] [dim]验[default] [dim]行[default] [dim] | 191 |[default]
+[dim]    | 12 | **热[default] [dim]门[default] [dim]话[default] [dim]题[default] [dim] 12** - 混[default] [dim]合[default] [dim] Markdown/CJK 宽[default] [dim]度[default] [dim]校[default] [dim]验[default] [dim]行[default] [dim] | 192 |[default]
 [default]
 [dim]▌ xiaomi-token-plan/mimo-v2.5-pro low 7m05s 1 failure[default]
+[default]
 [default]
 [default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────

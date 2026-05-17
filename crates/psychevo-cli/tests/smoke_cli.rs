@@ -247,6 +247,7 @@ fn write_home_skill(home: &Path, name: &str, description: &str, body: &str) {
 include!("smoke_cli/init.rs");
 include!("smoke_cli/run.rs");
 include!("smoke_cli/tui.rs");
+include!("smoke_cli/agent.rs");
 include!("smoke_cli/skills.rs");
 include!("smoke_cli/install.rs");
 include!("smoke_cli/admin.rs");

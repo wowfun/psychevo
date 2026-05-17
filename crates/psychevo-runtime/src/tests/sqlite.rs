@@ -1,5 +1,5 @@
 #[test]
-fn sqlite_schema_v7_migrates_v3_state_databases() {
+fn sqlite_schema_v8_migrates_v3_state_databases() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("v3.db");
     let workdir = temp.path().join("work").to_string_lossy().to_string();
@@ -70,7 +70,7 @@ fn sqlite_schema_v7_migrates_v3_state_databases() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 7);
+    assert_eq!(user_version, 8);
     let archived_at: Option<i64> = conn
         .query_row(
             "SELECT archived_at_ms FROM sessions WHERE id = 'session-v3'",
@@ -90,6 +90,11 @@ fn sqlite_schema_v7_migrates_v3_state_databases() {
             .any(|name| name == "source_kind")
     );
     assert!(
+        sqlite_columns(&conn, "agent_edges")
+            .iter()
+            .any(|name| name == "child_session_id")
+    );
+    assert!(
         sqlite_columns(&conn, "context_evidence")
             .iter()
             .any(|name| name == "provider_group")
@@ -103,7 +108,7 @@ fn sqlite_schema_v7_migrates_v3_state_databases() {
 }
 
 #[test]
-fn sqlite_schema_v7_migrates_v5_state_databases() {
+fn sqlite_schema_v8_migrates_v5_state_databases() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("v5.db");
     let workdir = temp.path().join("work").to_string_lossy().to_string();
@@ -185,7 +190,7 @@ fn sqlite_schema_v7_migrates_v5_state_databases() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 7);
+    assert_eq!(user_version, 8);
     assert!(
         sqlite_columns(&conn, "context_evidence")
             .iter()
@@ -205,7 +210,7 @@ fn sqlite_schema_v7_migrates_v5_state_databases() {
 }
 
 #[test]
-fn sqlite_schema_v7_migrates_v6_state_databases() {
+fn sqlite_schema_v8_migrates_v6_state_databases() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("v6.db");
     let workdir = temp.path().join("work").to_string_lossy().to_string();
@@ -307,7 +312,7 @@ fn sqlite_schema_v7_migrates_v6_state_databases() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 7);
+    assert_eq!(user_version, 8);
     let columns = sqlite_columns(&conn, "context_evidence");
     assert!(columns.iter().any(|name| name == "provider_group"));
     assert!(columns.iter().any(|name| name == "provider_block_index"));
@@ -321,7 +326,7 @@ fn sqlite_schema_v7_migrates_v6_state_databases() {
 }
 
 #[test]
-fn sqlite_schema_v7_rejects_old_state_databases() {
+fn sqlite_schema_v8_rejects_old_state_databases() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("old.db");
     {
@@ -673,6 +678,50 @@ fn sqlite_user_message_display_metadata_overrides_content_text() {
 }
 
 #[test]
+fn sqlite_agent_edges_round_trip_and_close_subtree() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let store = SqliteStore::open(&db).expect("store");
+    let parent = store
+        .create_session_with_metadata(&workdir, "run", "model", "provider", None)
+        .expect("parent");
+    let child = store
+        .create_child_session_with_metadata(&parent, &workdir, "agent", "model", "provider", None)
+        .expect("child");
+    let grandchild = store
+        .create_child_session_with_metadata(&child, &workdir, "agent", "model", "provider", None)
+        .expect("grandchild");
+    store
+        .upsert_agent_edge(
+            &parent,
+            &child,
+            AgentEdgeStatus::Open,
+            Some(json!({"agent": {"id": "agent-1", "task_name": "review"}})),
+        )
+        .expect("edge");
+    store
+        .upsert_agent_edge(&child, &grandchild, AgentEdgeStatus::Open, None)
+        .expect("grandchild edge");
+
+    let found = store
+        .find_agent_edge("review")
+        .expect("find")
+        .expect("edge found");
+    assert_eq!(found.child_session_id, child);
+    assert_eq!(found.status, AgentEdgeStatus::Open);
+
+    store.close_agent_edge_subtree(&child).expect("close");
+    let closed = store
+        .find_agent_edge("agent-1")
+        .expect("find")
+        .expect("closed edge");
+    assert_eq!(closed.status, AgentEdgeStatus::Closed);
+    let descendants = store.list_agent_edges_for_parent(&child).expect("children");
+    assert_eq!(descendants[0].status, AgentEdgeStatus::Closed);
+}
+
+#[test]
 fn sqlite_context_evidence_cascades_with_prompt_messages() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
@@ -758,7 +807,7 @@ fn sqlite_context_evidence_cascades_with_prompt_messages() {
 }
 
 #[test]
-fn sqlite_schema_v7_stores_reasoning_only_in_message_json_and_metrics_separately() {
+fn sqlite_schema_v8_stores_reasoning_only_in_message_json_and_metrics_separately() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");

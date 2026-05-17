@@ -347,8 +347,8 @@ fn long_read_tool_output_collapses_and_preserves_full_text() {
         .find(|row| row.kind == TranscriptKind::Explored)
         .expect("read evidence row");
     assert_eq!(row.title, "Explored src/long.rs");
-    assert_eq!(row.text.lines().count(), 9);
-    assert!(row.text.contains("... 56 more lines"));
+    assert_eq!(row.text.lines().count(), 7);
+    assert!(row.text.contains("... 58 more lines"));
     assert_eq!(row.full_text.as_deref(), Some(content.as_str()));
     assert!(row.is_expandable());
 }

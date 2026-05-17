@@ -223,6 +223,7 @@ include!("core.rs");
 include!("snapshots.rs");
 include!("transcript_files.rs");
 include!("input_popups.rs");
+include!("agents_panel.rs");
 include!("commands.rs");
 include!("models.rs");
 include!("runtime_sessions.rs");

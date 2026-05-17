@@ -114,7 +114,7 @@ fn markdown_code_blocks_have_boundaries_folding_and_highlighting() {
 
     assert!(text.contains("╭─ code rust"), "{text}");
     assert!(text.contains("╰─"), "{text}");
-    assert!(text.contains("... 2 more lines"), "{text}");
+    assert!(text.contains("... 4 more lines"), "{text}");
     assert!(lines.iter().flat_map(|line| &line.spans).any(|span| {
         span.content.as_ref() == "fn" && span.style.fg == Some(tui_theme().accent)
     }));

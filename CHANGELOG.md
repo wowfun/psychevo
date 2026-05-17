@@ -14,6 +14,10 @@
   export/share` and TUI `/export` `/share`, including Markdown/JSON export,
   opt-in reasoning, provider-input evidence bundles, and sensitive include
   flags such as `last-provider-request`.
+- Added first-class agent definitions and child-agent control across runtime,
+  CLI, and TUI, including discovery, selected-agent policy, parent-child
+  session edges, `/agents`, `/fork`, `pevo agent inspect`, depth controls, and
+  session-scoped main-agent switching.
 
 ### Changed
 
@@ -27,12 +31,24 @@
 - Renamed the CLI skill command family to canonical `pevo skill`, removed the
   obsolete `pevo skills` form, and migrated skill scope flags from `--project`
   to `--local`.
+- Changed TUI agent observability to use explicit `Open` actions, shared
+  expand/collapse behavior, live head-and-tail previews, transcript keyboard
+  focus, and deterministic screenshot coverage.
+- Changed Agent tool identity to use canonical `agent_type` definitions, keep
+  `name` as a compatibility alias, reject conflicts or unknown explicit names,
+  and persist resolved main-agent metadata per assistant turn.
 
 ### Fixed
 
 - Fixed `pevo tui` session resume so the bottom status line restores compact
   context-window usage from persisted provider input usage and session context
   limits before the first redraw.
+- Fixed subagent inspection so foreground runs keep one parent Agent row,
+  running child sessions stream live work when opened, parent previews update
+  without duplicate child rows, streamed Thinking chunks coalesce cleanly, and
+  latest child tool/token usage remains visible.
+- Fixed agent discovery diagnostics and `@agent-name` completion so invalid
+  definitions surface visibly and matching agent names take priority at `@`.
 
 ## 2026-05-15
 

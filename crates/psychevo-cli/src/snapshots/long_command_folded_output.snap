@@ -1,6 +1,5 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
-assertion_line: 667
 expression: combined
 ---
 fixture=long_command_folded_output
@@ -9,15 +8,15 @@ size=120x18
 --- text ---
 › Fetch comments from sqlite.
 
-• Ran cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db "SELECT id || '|' || by || '|' |… ▸ 4 more lines
+• Ran cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db "SELECT id || '|' || by || '|' |… ▸ 6 more lines
   └ 48070001||user1||cached comment text
     48070002||user2||cached comment text
-    48070003||user3||cached comment text
-    48070004||user4||cached comment text
-    48070005||user5||cached comment text
-    48070006||user6||cached comment text
-    48070007||user7||cached comment text
-    48070008||user8||cached comment text
+    ... 6 more lines
+    48070009||user9||cached comment text
+    48070010||user10||cached comment text
+    48070011||user11||cached comment text
+    48070012||user12||cached comment text
+
 
 
 
@@ -29,15 +28,15 @@ mock/model  high  ~/work · main
 --- styles ---
 [dim]› [default]Fetch comments from sqlite.
 [default]
-[green]• [default]Ran cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db "SELECT id || '|' || by || '|' |… [dim]▸ 4 more lines[default]
+[green]• [default]Ran cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db "SELECT id || '|' || by || '|' |… [dim]▸ 6 more lines[default]
 [dim]  └ [default]48070001||user1||cached comment text
 [dim]    [default]48070002||user2||cached comment text
-[dim]    [default]48070003||user3||cached comment text
-[dim]    [default]48070004||user4||cached comment text
-[dim]    [default]48070005||user5||cached comment text
-[dim]    [default]48070006||user6||cached comment text
-[dim]    [default]48070007||user7||cached comment text
-[dim]    [default]48070008||user8||cached comment text
+[dim]    [default]... 6 more lines
+[dim]    [default]48070009||user9||cached comment text
+[dim]    [default]48070010||user10||cached comment text
+[dim]    [default]48070011||user11||cached comment text
+[dim]    [default]48070012||user12||cached comment text
+[default]
 [default]
 [default]
 [default]

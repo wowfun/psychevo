@@ -133,6 +133,71 @@ class Handler(BaseHTTPRequestHandler):
                     "finish_reason": "stop"
                 }]
             }, delay=0.1)
+        elif "call_agent_translate_vhs" in body:
+            self.send_event({
+                "id": "resp_tui_capture_agent_parent_final",
+                "model": "mock-model",
+                "choices": [{
+                    "delta": {
+                        "content": "Translation complete: 添加了带有运行中和可用标签页的全屏 /agents 控制台。"
+                    },
+                    "finish_reason": "stop"
+                }]
+            }, delay=0.2)
+        elif "Translate the VHS sentence to Chinese" in body:
+            self.send_event({
+                "id": "resp_tui_capture_agent_child",
+                "model": "mock-model",
+                "choices": [{
+                    "delta": {
+                        "reasoning_content": "Inspecting the translation request inside the child session."
+                    },
+                    "finish_reason": None
+                }]
+            }, delay=3.0)
+            self.send_event({
+                "id": "resp_tui_capture_agent_child",
+                "model": "mock-model",
+                "choices": [{
+                    "delta": {
+                        "reasoning_content": " Checking terminology while the child session is open."
+                    },
+                    "finish_reason": None
+                }]
+            }, delay=4.0)
+            self.send_event({
+                "id": "resp_tui_capture_agent_child",
+                "model": "mock-model",
+                "choices": [{
+                    "delta": {
+                        "content": "添加了带有运行中和可用标签页的全屏 /agents 控制台。"
+                    },
+                    "finish_reason": "stop"
+                }],
+                "usage": {
+                    "prompt_tokens": 12000,
+                    "completion_tokens": 2500,
+                    "total_tokens": 14500
+                }
+            })
+        elif "Subagent foreground VHS fixture" in body:
+            self.send_event({
+                "id": "resp_tui_capture_agent_parent_tool",
+                "model": "mock-model",
+                "choices": [{
+                    "delta": {
+                        "tool_calls": [{
+                            "index": 0,
+                            "id": "call_agent_translate_vhs",
+                            "function": {
+                                "name": "Agent",
+                                "arguments": "{\"agent_type\":\"translate\",\"prompt\":\"Translate the VHS sentence to Chinese: Added the fullscreen /agents console with Running and Available tabs.\",\"task_name\":\"Translate user message to Chinese\"}"
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }]
+            }, delay=0.2)
         elif "Interrupted bash fixture" in body:
             self.send_event({
                 "id": "resp_tui_capture_interrupt",
@@ -374,7 +439,7 @@ Env PSYCHEVO_CONFIG $(json_quote "$config_path")
 Env TEST_PROVIDER_KEY "test-key"
 Type $(json_quote "$pevo_cmd")
 Enter
-Wait+Screen /Ask pevo|pevo/
+Wait+Screen /Ask pevo/
 Type "/model"
 Enter
 Wait+Screen /Add provider/
@@ -404,7 +469,7 @@ Wait+Screen /LONG_MARKDOWN_BOTTOM_MARKER/
 Sleep 300 ms
 PageUp 8
 Sleep 100 ms
-Down 80
+PageDown 40
 Wait+Screen /LONG_MARKDOWN_BOTTOM_MARKER/
 Sleep 300 ms
 Screenshot $(json_quote "$out_dir/05-long-markdown-bottom-scroll.png")
@@ -414,7 +479,7 @@ Wait+Screen /Ask pevo/
 Sleep 200 ms
 Type "Reasoning-only table bottom scroll fixture"
 Enter
-Wait+Screen /Thinking Story 1/
+Wait+Screen /REASONING_ONLY_BOTTOM_MARKER/
 Sleep 300 ms
 Screenshot $(json_quote "$out_dir/06-reasoning-only-collapsed.png")
 Ctrl+T
@@ -422,14 +487,14 @@ Space
 Sleep 200 ms
 PageUp 8
 Sleep 100 ms
-Down 80
+PageDown 40
 Wait+Screen /REASONING_ONLY_BOTTOM_MARKER/
 Sleep 300 ms
 Screenshot $(json_quote "$out_dir/07-reasoning-only-bottom-scroll.png")
 Escape
 Type "Visible write preamble fixture"
 Enter
-Wait+Screen /Changing files/
+Wait+Screen /Now I have all the data needed/
 Sleep 300 ms
 Screenshot $(json_quote "$out_dir/08-visible-write-preamble.png")
 Wait+Screen /VISIBLE_WRITE_FINAL/
@@ -442,6 +507,48 @@ Escape
 Wait+Screen /interrupted/
 Sleep 300 ms
 Screenshot $(json_quote "$out_dir/09-interrupted-bash.png")
+Type "/new"
+Enter
+Wait+Screen /Ask pevo/
+Sleep 200 ms
+Type "Subagent foreground VHS fixture"
+Enter
+Wait+Screen /translate\(Translate user message to Chinese\)/
+Sleep 300 ms
+Screenshot $(json_quote "$out_dir/10-agent-tool-running.png")
+Ctrl+T
+Enter
+Wait+Screen /Checking terminology/
+Sleep 300 ms
+Screenshot $(json_quote "$out_dir/11-agent-session-running.png")
+Sleep 5600 ms
+Alt+P
+Wait+Screen /14\.5k tokens/
+Sleep 300 ms
+Screenshot $(json_quote "$out_dir/12-agent-parent-completed.png")
+Type "/agents"
+Enter
+Wait+Screen /No running subagents/
+Sleep 300 ms
+Screenshot $(json_quote "$out_dir/12-agents-running.png")
+Tab
+Wait+Screen /Shadowed duplicates/
+Sleep 300 ms
+Screenshot $(json_quote "$out_dir/13-agents-available.png")
+Down
+Down
+Enter
+Wait+Screen /Start a background fresh-context child run/
+Sleep 300 ms
+Screenshot $(json_quote "$out_dir/14-agent-actions.png")
+Down
+Enter
+Wait+Screen /Run Agent/
+Sleep 300 ms
+Screenshot $(json_quote "$out_dir/15-agent-run-prompt.png")
+Sleep 500 ms
+Escape
+Escape
 Ctrl+D
 EOF
 }
@@ -449,7 +556,7 @@ EOF
 check_demo_artifacts() {
   local out_dir="$1"
   local missing=()
-  for file in 01-model-picker.png 02-running-thinking.png 03-final-ledger.png 04-shell-mode.png 05-long-markdown-bottom-scroll.png 06-reasoning-only-collapsed.png 07-reasoning-only-bottom-scroll.png 08-visible-write-preamble.png 09-interrupted-bash.png; do
+  for file in 01-model-picker.png 02-running-thinking.png 03-final-ledger.png 04-shell-mode.png 05-long-markdown-bottom-scroll.png 06-reasoning-only-collapsed.png 07-reasoning-only-bottom-scroll.png 08-visible-write-preamble.png 09-interrupted-bash.png 10-agent-tool-running.png 11-agent-session-running.png 12-agent-parent-completed.png 12-agents-running.png 13-agents-available.png 14-agent-actions.png 15-agent-run-prompt.png; do
     if [[ ! -s "$out_dir/$file" ]]; then
       missing+=("$file")
     fi
@@ -485,8 +592,38 @@ pevo TUI visual regression fixture
 line 02: stable local file evidence
 line 03: used by the read tool in the VHS demo
 EOF
+  mkdir -p "$workdir/.psychevo/agents" "$home/agents"
+  cat > "$workdir/.psychevo/agents/general.md" <<'EOF'
+---
+name: general
+description: Project general agent used to demonstrate active duplicate precedence.
+model: mock/mock-model
+tools: [read, list, search]
+background: true
+---
+Focus on the assigned local task and report a concise result.
+EOF
+  cat > "$workdir/.psychevo/agents/translate.md" <<'EOF'
+---
+name: translate
+description: Translate user message to Chinese
+model: mock/mock-model
+tools: []
+background: false
+---
+Translate the assigned text to Chinese and return only the translation.
+EOF
+  cat > "$home/agents/translator.md" <<'EOF'
+---
+name: translator
+description: Global read-only translation helper for the VHS agents panel.
+tools: [read]
+background: true
+---
+Translate the provided text while preserving technical terms.
+EOF
   git -C "$workdir" init -b main >/dev/null
-  printf 'fixture.txt\n' > "$workdir/.git/info/exclude"
+  printf 'fixture.txt\n.psychevo/\n' > "$workdir/.git/info/exclude"
 
   write_mock_server "$server_script"
   python3 -u "$server_script" "$port_file" "$request_log" &

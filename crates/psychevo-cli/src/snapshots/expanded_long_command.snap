@@ -1,6 +1,5 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
-assertion_line: 667
 expression: combined
 ---
 fixture=expanded_long_command
@@ -24,7 +23,7 @@ size=120x18
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
-mock/model  high  ~/work · main
+mock/model  high  transcript · Esc  ~/work · main
 
 --- styles ---
 [dim]› [default]Inspect HN comments with sqlite.
@@ -44,4 +43,4 @@ mock/model  high  ~/work · main
 [default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
-[default]mock/model  [magenta]high[default]  [dim]~/work · main[default]
+[default]mock/model  [magenta]high[default]  [cyan]transcript[dim] · Esc[default]  [dim]~/work · main[default]

@@ -35,6 +35,7 @@ async fn persistence_sink_streams_elapsed_metadata_for_assistant_message_end() {
         model_metadata: Default::default(),
         prompt_display: None,
         context_recorder: None,
+        selected_agent: None,
     };
 
     sink.emit(AgentEvent::MessageEnd {
@@ -81,6 +82,64 @@ async fn persistence_sink_streams_elapsed_metadata_for_assistant_message_end() {
 }
 
 #[tokio::test]
+async fn persistence_sink_persists_selected_agent_on_assistant_message_end() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let store = SqliteStore::open(&db).expect("store");
+    let session_id = store
+        .create_session_with_metadata(&workdir, "tui", "model", "provider", None)
+        .expect("session");
+    let sink = PersistenceSink {
+        store: store.clone(),
+        session_id: session_id.clone(),
+        prompt_snapshot: None,
+        prompt_snapshot_written: Arc::new(Mutex::new(false)),
+        prompt_context_evidence: Arc::new(Vec::new()),
+        started: Instant::now(),
+        tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
+        control: SmokeControl::None,
+        control_handle: None,
+        events: None,
+        stream_events: None,
+        include_reasoning: false,
+        reasoning_effort: None,
+        model_metadata: Default::default(),
+        prompt_display: None,
+        context_recorder: None,
+        selected_agent: Some(SelectedAgent {
+            name: "translate".to_string(),
+            source: "project".to_string(),
+            path: Some(workdir.join(".psychevo/agents/translate.md")),
+        }),
+    };
+
+    sink.emit(AgentEvent::MessageEnd {
+        message: Message::Assistant {
+            content: vec![AssistantBlock::Text {
+                text: "hi".to_string(),
+            }],
+            timestamp_ms: 1,
+            finish_reason: Some("stop".to_string()),
+            outcome: Outcome::Normal,
+            model: Some("model".to_string()),
+            provider: Some("provider".to_string()),
+        },
+        usage: None,
+        metadata: None,
+    })
+    .await
+    .expect("message end");
+
+    let summaries = store
+        .load_tui_message_summaries(&session_id)
+        .expect("summaries");
+    let metadata = summaries[0].metadata.as_ref().expect("metadata");
+    assert_eq!(metadata["selected_agent"]["name"], "translate");
+    assert_eq!(metadata["selected_agent"]["source"], "project");
+}
+
+#[tokio::test]
 async fn persistence_sink_projects_and_persists_terminal_reason() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
@@ -120,6 +179,7 @@ async fn persistence_sink_projects_and_persists_terminal_reason() {
         model_metadata: Default::default(),
         prompt_display: None,
         context_recorder: None,
+        selected_agent: None,
     };
 
     sink.emit(AgentEvent::AgentEnd {
@@ -195,6 +255,7 @@ async fn persistence_sink_persists_assistant_reasoning_effort_metadata() {
         model_metadata: Default::default(),
         prompt_display: None,
         context_recorder: None,
+        selected_agent: None,
     };
 
     sink.emit(AgentEvent::MessageEnd {
@@ -264,6 +325,7 @@ async fn persistence_sink_persists_tool_elapsed_metadata() {
         model_metadata: Default::default(),
         prompt_display: None,
         context_recorder: None,
+        selected_agent: None,
     };
 
     sink.emit(AgentEvent::ToolExecutionEnd {
@@ -361,6 +423,7 @@ async fn persistence_sink_persists_prompt_context_evidence_once() {
         model_metadata: Default::default(),
         prompt_display: None,
         context_recorder: None,
+        selected_agent: None,
     };
 
     sink.emit(AgentEvent::MessageEnd {

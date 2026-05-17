@@ -29,7 +29,7 @@ size=120x24
     15: crates/psychevo-cli/src/tui.rs evidence row
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
-mock/model  high  ~/work · main
+mock/model  high  transcript · Esc  ~/work · main
 
 --- styles ---
 [dim]› [default]Summarize the TUI snapshot harness.
@@ -55,4 +55,4 @@ mock/model  high  ~/work · main
 [dim]    [default]15: crates/psychevo-cli/src/tui.rs evidence row
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
-[default]mock/model  [magenta]high[default]  [dim]~/work · main[default]
+[default]mock/model  [magenta]high[default]  [cyan]transcript[dim] · Esc[default]  [dim]~/work · main[default]

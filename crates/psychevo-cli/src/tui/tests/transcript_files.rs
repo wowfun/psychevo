@@ -214,14 +214,15 @@ fn long_thinking_defaults_to_row_level_collapse_without_left_rail() {
     let row = TranscriptRow::with_title(TranscriptKind::Thinking, "Thinking", long);
     assert!(row.is_expandable());
     assert!(!row.expanded);
-    assert!(row.text.contains("... 4 more lines"));
+    assert!(row.text.contains("... 6 more lines"));
 
     let lines = thinking_lines(&row, false, true, 80);
     let rendered = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
     assert!(rendered.contains("• Thinking"), "{rendered}");
-    assert!(rendered.contains("▸ 4 more lines"), "{rendered}");
+    assert!(rendered.contains("▸ 6 more lines"), "{rendered}");
     assert!(rendered.contains("  └ line 1"), "{rendered}");
-    assert!(!rendered.contains("... 4 more lines"), "{rendered}");
+    assert!(rendered.contains("... 6 more lines"), "{rendered}");
+    assert!(rendered.contains("line 12"), "{rendered}");
     assert!(!rendered.contains("▌"), "{rendered}");
     assert!(!rendered.contains("Thinking:"), "{rendered}");
 }
@@ -341,8 +342,8 @@ fn long_tool_output_uses_shared_default_collapse() {
 
     assert!(row.is_expandable());
     assert!(!row.expanded);
-    assert_eq!(row.text.lines().count(), 9);
-    assert!(row.text.contains("... 4 more lines"));
+    assert_eq!(row.text.lines().count(), 7);
+    assert!(row.text.contains("... 6 more lines"));
     assert_eq!(row.full_text.as_deref(), Some(output.as_str()));
 
     let rendered = tool_lines(&row, false, true, 80)
@@ -350,10 +351,10 @@ fn long_tool_output_uses_shared_default_collapse() {
         .map(line_text)
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rendered.contains("▸ 4 more lines"), "{rendered}");
+    assert!(rendered.contains("▸ 6 more lines"), "{rendered}");
     assert!(rendered.contains("  └ line 01"), "{rendered}");
-    assert!(!rendered.contains("line 12"), "{rendered}");
-    assert!(!rendered.contains("... 4 more lines"), "{rendered}");
+    assert!(rendered.contains("line 12"), "{rendered}");
+    assert!(rendered.contains("... 6 more lines"), "{rendered}");
 }
 
 #[test]
@@ -364,7 +365,7 @@ fn long_single_line_tool_output_collapses_by_display_width() {
     assert!(row.is_expandable());
     assert!(!row.expanded);
     assert!(row.full_text.is_some());
-    assert!(row.text.ends_with('…'), "{}", row.text);
+    assert!(row.text.contains('…'), "{}", row.text);
 
     let rendered = tool_lines(&row, false, true, 140)
         .iter()
@@ -390,8 +391,8 @@ fn long_tool_output_collapses_by_display_tokens() {
     assert!(row.is_expandable());
     assert!(!row.expanded);
     assert_eq!(row.full_text.as_deref(), Some(output.as_str()));
-    assert_eq!(display_token_count(&row.text), LEDGER_BODY_COLLAPSE_TOKENS);
-    assert!(row.text.ends_with('…'), "{}", row.text);
+    assert!(display_token_count(&row.text) <= LEDGER_BODY_COLLAPSE_TOKENS + 1);
+    assert!(row.text.contains('…'), "{}", row.text);
 
     let rendered = tool_lines(&row, false, true, 120)
         .iter()
@@ -412,8 +413,8 @@ fn line_count_collapse_preview_is_bounded_by_display_tokens() {
 
     assert!(row.is_expandable());
     assert!(!row.expanded);
-    assert!(!row.text.contains("... 4 more lines"), "{}", row.text);
-    assert!(row.text.ends_with('…'), "{}", row.text);
+    assert!(!row.text.contains("... 6 more lines"), "{}", row.text);
+    assert!(row.text.contains('…') || row.text.contains("... omitted middle"), "{}", row.text);
     assert!(
         display_token_count(&row.text) <= LEDGER_BODY_COLLAPSE_TOKENS,
         "{}",
@@ -426,14 +427,15 @@ fn line_count_collapse_preview_is_bounded_by_display_tokens() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(rendered.contains("▸ more output"), "{rendered}");
-    assert!(!rendered.contains("▸ 4 more lines"), "{rendered}");
+    assert!(!rendered.contains("▸ 6 more lines"), "{rendered}");
 }
 
 #[test]
 fn unbroken_table_output_collapses_by_display_tokens() {
     let output = "-".repeat(900);
     assert!(
-        output.lines().count() <= LEDGER_BODY_COLLAPSE_LINES,
+        output.lines().count()
+            <= LEDGER_BODY_COLLAPSE_HEAD_LINES + LEDGER_BODY_COLLAPSE_TAIL_LINES,
         "test fixture should exercise token collapse before line collapse"
     );
     assert!(
@@ -445,7 +447,7 @@ fn unbroken_table_output_collapses_by_display_tokens() {
     assert!(row.is_expandable());
     assert!(!row.expanded);
     assert_eq!(row.full_text.as_deref(), Some(output.as_str()));
-    assert!(row.text.ends_with('…'), "{}", row.text);
+    assert!(row.text.contains('…'), "{}", row.text);
     assert!(row.text.len() < output.len(), "{}", row.text);
 
     let rendered = tool_lines(&row, false, true, 120)
@@ -489,9 +491,9 @@ fn long_command_and_long_output_expand_together() {
         .map(line_text)
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(collapsed.contains("▸ 4 more lines"), "{collapsed}");
+    assert!(collapsed.contains("▸ 6 more lines"), "{collapsed}");
     assert!(!collapsed.contains("command: cd /home/kevin"), "{collapsed}");
-    assert!(!collapsed.contains("json row 12"), "{collapsed}");
+    assert!(collapsed.contains("json row 12"), "{collapsed}");
 
     toggle_transcript_row_details(&mut row);
     let expanded = tool_lines(&row, false, true, 72)
@@ -532,7 +534,7 @@ fn long_running_command_row_expands_full_command() {
 }
 
 #[tokio::test]
-async fn ctrl_t_is_reserved_and_does_not_enter_transcript_focus() {
+async fn ctrl_t_enters_transcript_focus_without_toggling_row() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -544,8 +546,8 @@ async fn ctrl_t_is_reserved_and_does_not_enter_transcript_focus() {
         .await
         .expect("ctrl-t");
 
-    assert_eq!(ui.focus, FocusMode::Composer);
-    assert!(ui.selected_target.is_none());
+    assert_eq!(ui.focus, FocusMode::Transcript);
+    assert!(ui.selected_target.is_some());
     assert!(!ui.transcript[0].expanded);
 }
 
