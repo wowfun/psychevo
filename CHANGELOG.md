@@ -1,5 +1,48 @@
 # Changelog
 
+## 2026-05-18
+
+### Changed
+
+- Moved session export prompt-prefix metadata into artifact headers,
+  reconstructed last-provider-request from persisted prefix snapshots, and
+  added `-f` aliases for format flags.
+- Split `210-pevo-tui` into rendering and interaction specs, with focused
+  attachments and topic-owned testing notes.
+
+### Fixed
+
+- Fixed fullscreen TUI running status for visible parent and child sessions,
+  settled agent turns, and shared ledger-row spinner state.
+- Fixed Agent transcript rows to reuse streaming placeholders, restore
+  reloaded parent history with `Open`, and keep the `Open` hit target separate
+  from expand/collapse clicks.
+- Fixed long Thinking rows so expanded preview-collapsed rows can collapse back
+  to title-only details.
+- Fixed last-provider-request and child-agent exports to verify prompt-prefix
+  hashes and disclose persisted prefix, agent catalog, skill index, and
+  prompt-scoped evidence snapshots.
+- Lengthened default export/share artifact session-id prefixes so sibling
+  parent and child sessions do not overwrite the same path.
+
+## 2026-05-17
+
+### Added
+
+- Added typed prompt assembly for stable prefix slots, selected agents,
+  provider role fallback, prefix snapshots, and context reload commands.
+
+### Changed
+
+- Split context usage accounting into base, developer, project, history, turn,
+  prompt, tools, and free-space categories.
+
+### Fixed
+
+- Included selected-agent descriptions in main-session and child-agent prompts.
+- Let `Esc` interrupt inspected child-agent work from child or parent session
+  views.
+
 ## 2026-05-16
 
 ### Added
