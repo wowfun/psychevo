@@ -18,6 +18,8 @@ pub(crate) struct Cli {
 pub(crate) enum Commands {
     #[command(about = "Create or repair the global Psychevo home")]
     Init(InitArgs),
+    #[command(about = "List, inspect, run, and manage agents")]
+    Agent(AgentArgs),
     #[command(about = "List, view, create, install, and toggle local skills")]
     Skill(SkillsArgs),
     #[command(
@@ -140,6 +142,15 @@ pub(crate) struct RunArgs {
         help = "Include reasoning_delta events in JSON output; sanitized messages stay reasoning-free"
     )]
     pub(crate) include_reasoning: bool,
+    #[arg(
+        long,
+        value_name = "NAME_OR_PATH",
+        conflicts_with = "no_agents",
+        help = "Run this turn with a selected agent definition"
+    )]
+    pub(crate) agent: Option<String>,
+    #[arg(long, help = "Disable agent discovery and the Agent tool")]
+    pub(crate) no_agents: bool,
     #[arg(
         long,
         help = "Disable default and configured skill discovery for this run"
@@ -390,6 +401,15 @@ pub(crate) struct TuiArgs {
     #[arg(long, help = "Disable default and configured skill discovery")]
     pub(crate) no_skills: bool,
     #[arg(
+        long,
+        value_name = "NAME_OR_PATH",
+        conflicts_with = "no_agents",
+        help = "Use this agent as the main TUI session identity"
+    )]
+    pub(crate) agent: Option<String>,
+    #[arg(long, help = "Disable agent discovery and the Agent tool")]
+    pub(crate) no_agents: bool,
+    #[arg(
         long = "skill",
         value_name = "NAME_OR_PATH",
         help = "Add an explicit skill by name or filesystem path; repeatable"
@@ -400,6 +420,161 @@ pub(crate) struct TuiArgs {
         help = "Initial prompt; leading ! runs a local shell escape instead"
     )]
     pub(crate) message: Vec<String>,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct AgentArgs {
+    #[command(subcommand)]
+    pub(crate) command: AgentCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum AgentCommand {
+    #[command(about = "List discoverable agents")]
+    List(AgentListArgs),
+    #[command(about = "Show one agent definition")]
+    View(AgentNameArgs),
+    #[command(about = "Validate one agent definition")]
+    Validate(AgentNameArgs),
+    #[command(about = "Run one prompt with a selected agent")]
+    Run(AgentRunArgs),
+    #[command(about = "Show live and resumable agent runs")]
+    Status(AgentStatusArgs),
+    #[command(about = "Inspect one child-agent session")]
+    Inspect(AgentInspectArgs),
+    #[command(about = "Wait for one or more agent runs")]
+    Wait(AgentWaitArgs),
+    #[command(about = "Close an agent run and its descendants")]
+    Close(AgentIdArgs),
+    #[command(about = "Resume a closed agent run")]
+    Resume(AgentIdArgs),
+    #[command(about = "Send a message to an agent run")]
+    Send(AgentSendArgs),
+    #[command(about = "Attach to an agent run session")]
+    Attach(AgentIdArgs),
+    #[command(about = "Show recent transcript logs for an agent run")]
+    Logs(AgentLogsArgs),
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct AgentListArgs {
+    #[arg(long, help = "Emit structured JSON instead of human text")]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct AgentNameArgs {
+    #[arg(value_name = "NAME_OR_PATH", help = "Agent name or Markdown file path")]
+    pub(crate) name: String,
+    #[arg(long, help = "Emit structured JSON instead of human text")]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct AgentRunArgs {
+    #[arg(value_name = "NAME_OR_PATH", help = "Agent name or Markdown file path")]
+    pub(crate) name: String,
+    #[arg(
+        long = "dir",
+        value_name = "DIR",
+        help = "Run tools and resolve project config from this workdir"
+    )]
+    pub(crate) dir: Option<PathBuf>,
+    #[arg(
+        short = 'm',
+        long,
+        value_name = "PROVIDER/MODEL",
+        help = "Use this provider-qualified model for this run"
+    )]
+    pub(crate) model: Option<String>,
+    #[arg(
+        long,
+        value_enum,
+        value_name = "VARIANT",
+        help = "Override reasoning effort for this run"
+    )]
+    pub(crate) variant: Option<VariantArg>,
+    #[arg(long, value_enum, value_name = "FORMAT", default_value_t = RunFormatArg::Default, help = "Select human output or NDJSON machine output")]
+    pub(crate) format: RunFormatArg,
+    #[arg(
+        value_name = "MESSAGE",
+        help = "Prompt text; multiple words are joined and stdin is appended when present"
+    )]
+    pub(crate) message: Vec<String>,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct AgentStatusArgs {
+    #[arg(
+        long,
+        help = "Show agents across every session instead of the latest session tree"
+    )]
+    pub(crate) all: bool,
+    #[arg(long, help = "Emit structured JSON instead of human text")]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct AgentInspectArgs {
+    #[arg(value_name = "ID", help = "Agent id, task name, or child session id")]
+    pub(crate) id: String,
+    #[arg(
+        long,
+        value_name = "N",
+        default_value_t = 20,
+        help = "Maximum recent transcript rows to include"
+    )]
+    pub(crate) limit: usize,
+    #[arg(long, help = "Emit structured JSON instead of human text")]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct AgentWaitArgs {
+    #[arg(required = true, num_args = 1.., value_name = "TARGET", help = "Agent id or task name")]
+    pub(crate) targets: Vec<String>,
+    #[arg(
+        long,
+        value_name = "MS",
+        default_value_t = 30_000,
+        help = "Maximum wait time"
+    )]
+    pub(crate) timeout_ms: u64,
+    #[arg(long, help = "Emit structured JSON instead of human text")]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct AgentIdArgs {
+    #[arg(value_name = "ID", help = "Agent id, task name, or child session id")]
+    pub(crate) id: String,
+    #[arg(long, help = "Emit structured JSON instead of human text")]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct AgentSendArgs {
+    #[arg(value_name = "ID", help = "Agent id, task name, or child session id")]
+    pub(crate) id: String,
+    #[arg(required = true, num_args = 1.., value_name = "MESSAGE", help = "Message to queue")]
+    pub(crate) message: Vec<String>,
+    #[arg(long, help = "Emit structured JSON instead of human text")]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct AgentLogsArgs {
+    #[arg(value_name = "ID", help = "Agent id, task name, or child session id")]
+    pub(crate) id: String,
+    #[arg(
+        long,
+        value_name = "N",
+        default_value_t = 20,
+        help = "Maximum transcript rows to print"
+    )]
+    pub(crate) limit: usize,
+    #[arg(long, help = "Emit structured JSON instead of human text")]
+    pub(crate) json: bool,
 }
 
 #[derive(Debug, Parser)]

@@ -1,7 +1,12 @@
 impl TuiApp {
     async fn drain_fullscreen_events(&mut self, ui: &mut FullscreenUi<'_>) -> Result<bool> {
         let mut changed = false;
-        changed |= self.drain_finished_auxiliary_agent_tasks(ui).await?;
+        let (agent_changed, active_tool_frame_requested) =
+            self.drain_finished_auxiliary_agent_tasks(ui).await?;
+        changed |= agent_changed;
+        if active_tool_frame_requested {
+            return Ok(true);
+        }
         let (shell_changed, active_tool_frame_requested) =
             self.drain_auxiliary_shell_tasks(ui).await?;
         changed |= shell_changed;
@@ -12,6 +17,7 @@ impl TuiApp {
         changed |= self.drain_model_metadata_refresh(ui).await?;
         changed |= self.drain_model_catalog_fetches(ui).await?;
         changed |= ui.drain_file_search_results();
+        changed |= self.maybe_reload_live_agent_session(ui)?;
 
         let (had_pending, active_tool_frame_requested) =
             self.drain_available_fullscreen_stream_events(ui);
@@ -161,11 +167,47 @@ impl TuiApp {
         (had_pending, false)
     }
 
+    fn apply_pending_auxiliary_agent_events(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        owner_session: Option<&str>,
+        mut pending: VecDeque<RunStreamEvent>,
+    ) -> bool {
+        let mut had_pending = false;
+        while let Some(event) = pending.pop_front() {
+            had_pending = true;
+            self.apply_auxiliary_agent_stream_event(ui, owner_session, event);
+        }
+        had_pending
+    }
+
+    fn apply_auxiliary_agent_stream_event(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        owner_session: Option<&str>,
+        event: RunStreamEvent,
+    ) {
+        match event {
+            RunStreamEvent::Scoped { session_id, event } => {
+                self.apply_scoped_fullscreen_stream_event(ui, &session_id, *event);
+            }
+            other
+                if owner_session.is_some() && self.current_session.as_deref() == owner_session =>
+            {
+                self.apply_fullscreen_stream_event(ui, other);
+            }
+            _ => {}
+        }
+    }
+
     fn apply_fullscreen_stream_event(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         event: RunStreamEvent,
     ) -> bool {
+        if let RunStreamEvent::Scoped { session_id, event } = event {
+            return self.apply_scoped_fullscreen_stream_event(ui, &session_id, *event);
+        }
         if let RunStreamEvent::Event(value) = &event {
             if value.get("type").and_then(Value::as_str) == Some("context_snapshot")
                 && let Ok(snapshot) = serde_json::from_value::<ContextSnapshot>(value.clone())
@@ -173,12 +215,10 @@ impl TuiApp {
                 self.last_context_snapshot = Some(snapshot.clone());
                 ui.last_context_snapshot = Some(snapshot);
             }
-            let run_started = self.observe_fullscreen_value_event(value);
+            let run_started = self.observe_fullscreen_value_event(ui, value);
             let active_tool_frame_requested =
                 ui.apply_stream_event(event, self.thinking_visible, self.debug);
-            if run_started
-                && let Err(err) = self.start_pending_auxiliary_shells(ui)
-            {
+            if run_started && let Err(err) = self.start_pending_auxiliary_shells(ui) {
                 self.had_error = true;
                 ui.push_error(format!("error: {err:#}"));
             }
@@ -187,7 +227,34 @@ impl TuiApp {
         ui.apply_stream_event(event, self.thinking_visible, self.debug)
     }
 
-    fn observe_fullscreen_value_event(&mut self, value: &Value) -> bool {
+    fn apply_scoped_fullscreen_stream_event(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        session_id: &str,
+        event: RunStreamEvent,
+    ) -> bool {
+        if self.current_session.as_deref() == Some(session_id) {
+            return ui.apply_stream_event(event, self.thinking_visible, self.debug);
+        }
+        if agent_child_event_ends_live_backlog(&event) {
+            ui.agent_child_event_backlog.remove(session_id);
+        } else {
+            let backlog = ui
+                .agent_child_event_backlog
+                .entry(session_id.to_string())
+                .or_default();
+            backlog.push(event.clone());
+            const MAX_AGENT_CHILD_BACKLOG_EVENTS: usize = 200;
+            if backlog.len() > MAX_AGENT_CHILD_BACKLOG_EVENTS {
+                let drain = backlog.len() - MAX_AGENT_CHILD_BACKLOG_EVENTS;
+                backlog.drain(0..drain);
+            }
+        }
+        ui.apply_agent_child_preview_event(session_id, &event);
+        false
+    }
+
+    fn observe_fullscreen_value_event(&mut self, ui: &mut FullscreenUi<'_>, value: &Value) -> bool {
         if value.get("type").and_then(Value::as_str) != Some("run_start") {
             return false;
         }
@@ -198,6 +265,12 @@ impl TuiApp {
             self.current_session = Some(session_id.to_string());
             self.current_session_title = None;
         }
+        if let Err(err) = self.persist_main_agent_selection_for_session(session_id) {
+            self.had_error = true;
+            ui.push_error(format!(
+                "error: failed to persist main agent selection: {err:#}"
+            ));
+        }
         self.force_new_once = false;
         true
     }
@@ -205,18 +278,30 @@ impl TuiApp {
     fn finish_streamed_agent_turn(&mut self, ui: &mut FullscreenUi<'_>) {
         let outcome = ui.turn_outcome.unwrap_or(Outcome::Normal);
         let terminal_message = ui.turn_terminal_message.take();
-        if let Some(running) = ui.running.take()
-            && let RunningTask::Agent(task) = running.task
-        {
-            ui.auxiliary_agent_tasks.push(task);
+        if let Some(running) = ui.running.take() {
+            let owner_session = self.current_session.clone();
+            let RunningTurn { control, rx, task } = running;
+            match task {
+                RunningTask::Agent(task) => {
+                    ui.auxiliary_agent_tasks.push(AuxiliaryAgentTask {
+                        session_id: owner_session,
+                        rx,
+                        task,
+                    });
+                }
+                RunningTask::UserShell(task) => {
+                    ui.running = Some(RunningTurn {
+                        control,
+                        rx,
+                        task: RunningTask::UserShell(task),
+                    });
+                }
+            }
         }
         let interrupted = ui.interrupt_requested && outcome == Outcome::Aborted;
         if outcome != Outcome::Normal && !interrupted {
             self.had_error = true;
-            ui.push_error(turn_ended_error_text(
-                outcome,
-                terminal_message.as_deref(),
-            ));
+            ui.push_error(turn_ended_error_text(outcome, terminal_message.as_deref()));
         }
         ui.finish_turn();
         ui.refresh_sidebar(self);
@@ -231,12 +316,37 @@ impl TuiApp {
     async fn drain_finished_auxiliary_agent_tasks(
         &mut self,
         ui: &mut FullscreenUi<'_>,
-    ) -> Result<bool> {
+    ) -> Result<(bool, bool)> {
         let mut changed = false;
         let mut pending = Vec::new();
-        for task in std::mem::take(&mut ui.auxiliary_agent_tasks) {
-            if task.is_finished() {
-                if let Ok(Ok(result)) = task.await {
+        let mut tasks = std::mem::take(&mut ui.auxiliary_agent_tasks).into_iter();
+        while let Some(mut agent) = tasks.next() {
+            let mut events = VecDeque::new();
+            while let Ok(event) = agent.rx.try_recv() {
+                events.push_back(event);
+            }
+            let had_pending =
+                self.apply_pending_auxiliary_agent_events(ui, agent.session_id.as_deref(), events);
+            changed |= had_pending;
+            if had_pending {
+                ui.follow_transcript_if_needed();
+                ui.refresh_sidebar(self);
+            }
+
+            if agent.task.is_finished() {
+                let mut events = VecDeque::new();
+                while let Ok(event) = agent.rx.try_recv() {
+                    events.push_back(event);
+                }
+                let had_pending = self.apply_pending_auxiliary_agent_events(
+                    ui,
+                    agent.session_id.as_deref(),
+                    events,
+                );
+                if had_pending {
+                    ui.follow_transcript_if_needed();
+                }
+                if let Ok(Ok(result)) = agent.task.await {
                     self.last_context_snapshot = result.context_snapshot.clone();
                     ui.last_context_snapshot = result.context_snapshot;
                 }
@@ -244,11 +354,11 @@ impl TuiApp {
                 ui.refresh_sidebar(self);
                 changed = true;
             } else {
-                pending.push(task);
+                pending.push(agent);
             }
         }
         ui.auxiliary_agent_tasks = pending;
-        Ok(changed)
+        Ok((changed, false))
     }
 
     async fn drain_auxiliary_shell_tasks(
@@ -347,9 +457,11 @@ impl TuiApp {
                 .split(area)
         };
         let main = horizontal[0];
+        let session_identity = self.session_identity_label();
         if ui.bottom_panel.is_some() {
             ui.last_slash_menu_areas.clear();
             ui.last_file_popup_areas.clear();
+            ui.last_agent_popup_areas.clear();
             ui.last_skill_popup_areas.clear();
             let panel_height = bottom_panel_height(main.height);
             let vertical = Layout::default()
@@ -361,7 +473,7 @@ impl TuiApp {
                 ])
                 .split(main);
             ui.set_render_areas(vertical[0], None, vertical[2], Some(vertical[1]));
-            render_transcript(frame, vertical[0], ui);
+            render_transcript(frame, vertical[0], ui, None);
             if let Some(panel) = &mut ui.bottom_panel {
                 render_bottom_panel(frame, vertical[1], panel, &mut ui.last_bottom_panel_areas);
             }
@@ -374,21 +486,26 @@ impl TuiApp {
         }
         let composer_height = composer_height(&ui.textarea);
         let file_popup_height = ui.file_popup_height();
+        let agent_popup_height = ui.agent_popup_height();
         let skill_popup_height = ui.skill_popup_height();
         let composer_text = textarea_text(&ui.textarea);
-        let slash_items = if file_popup_height == 0 && skill_popup_height == 0 {
-            if ui.slash_menu_dismissed(&composer_text) {
-                Vec::new()
+        let slash_items =
+            if file_popup_height == 0 && agent_popup_height == 0 && skill_popup_height == 0 {
+                if ui.slash_menu_dismissed(&composer_text) {
+                    Vec::new()
+                } else {
+                    self.slash_menu_items(&composer_text)
+                }
             } else {
-                self.slash_menu_items(&composer_text)
-            }
-        } else {
-            Vec::new()
-        };
+                Vec::new()
+            };
         ui.clamp_slash_menu_selection(slash_items.len());
         ui.last_bottom_panel_areas.clear();
         if file_popup_height == 0 {
             ui.last_file_popup_areas.clear();
+        }
+        if agent_popup_height == 0 {
+            ui.last_agent_popup_areas.clear();
         }
         if skill_popup_height == 0 {
             ui.last_skill_popup_areas.clear();
@@ -398,7 +515,10 @@ impl TuiApp {
         } else {
             (slash_items.len() as u16).min(FILE_POPUP_MAX_ROWS as u16)
         };
-        let popup_height = file_popup_height.max(skill_popup_height).max(slash_height);
+        let popup_height = agent_popup_height
+            .max(file_popup_height)
+            .max(skill_popup_height)
+            .max(slash_height);
         let vertical = if popup_height == 0 {
             Layout::default()
                 .direction(Direction::Vertical)
@@ -421,24 +541,30 @@ impl TuiApp {
         };
         if popup_height == 0 {
             ui.set_render_areas(vertical[0], Some(vertical[1]), vertical[2], None);
-            render_transcript(frame, vertical[0], ui);
+            render_transcript(frame, vertical[0], ui, session_identity.as_deref());
             render_composer(frame, vertical[1], ui);
             render_status(frame, vertical[2], self, ui);
+        } else if agent_popup_height > 0 {
+            ui.set_render_areas(vertical[0], Some(vertical[2]), vertical[3], None);
+            render_transcript(frame, vertical[0], ui, session_identity.as_deref());
+            render_agent_popup(frame, vertical[1], ui);
+            render_composer(frame, vertical[2], ui);
+            render_status(frame, vertical[3], self, ui);
         } else if file_popup_height > 0 {
             ui.set_render_areas(vertical[0], Some(vertical[2]), vertical[3], None);
-            render_transcript(frame, vertical[0], ui);
+            render_transcript(frame, vertical[0], ui, session_identity.as_deref());
             render_file_popup(frame, vertical[1], ui);
             render_composer(frame, vertical[2], ui);
             render_status(frame, vertical[3], self, ui);
         } else if skill_popup_height > 0 {
             ui.set_render_areas(vertical[0], Some(vertical[2]), vertical[3], None);
-            render_transcript(frame, vertical[0], ui);
+            render_transcript(frame, vertical[0], ui, session_identity.as_deref());
             render_skill_popup(frame, vertical[1], ui);
             render_composer(frame, vertical[2], ui);
             render_status(frame, vertical[3], self, ui);
         } else {
             ui.set_render_areas(vertical[0], Some(vertical[2]), vertical[3], None);
-            render_transcript(frame, vertical[0], ui);
+            render_transcript(frame, vertical[0], ui, session_identity.as_deref());
             render_slash_menu(
                 frame,
                 vertical[1],
@@ -454,11 +580,24 @@ impl TuiApp {
         }
         render_active_selection(frame, ui);
     }
+}
 
+fn agent_child_event_ends_live_backlog(event: &RunStreamEvent) -> bool {
+    match event {
+        RunStreamEvent::Event(value) => matches!(
+            value.get("type").and_then(Value::as_str),
+            Some("message_end") | Some("run_end")
+        ),
+        RunStreamEvent::Scoped { event, .. } => agent_child_event_ends_live_backlog(event),
+        _ => false,
+    }
 }
 
 fn turn_ended_error_message(outcome: Outcome, terminal_reason: Option<TerminalReason>) -> String {
-    turn_ended_error_text(outcome, terminal_reason.map(TerminalReason::message).as_deref())
+    turn_ended_error_text(
+        outcome,
+        terminal_reason.map(TerminalReason::message).as_deref(),
+    )
 }
 
 fn turn_ended_error_text(outcome: Outcome, terminal_message: Option<&str>) -> String {

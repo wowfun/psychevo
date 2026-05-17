@@ -3,13 +3,18 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use psychevo_agent_core::{
-    AgentLoopRequest, ContextualUserBlock, ContextualUserMessage, ControlHandle, Message,
-    NoopEventSink, run_agent_loop, user_text_message,
+    AgentLoopRequest, AssistantBlock, ContextualUserBlock, ContextualUserMessage, ControlHandle,
+    Message, NoopEventSink, run_agent_loop, user_text_message,
 };
 use psychevo_ai::{GenerationProvider, OpenAiChatProvider, Outcome};
 use serde_json::json;
 use tokio::time;
 
+use crate::agents::{
+    AgentDefinition, AgentDiscoveryOptions, AgentToolContext, agent_tools, apply_agent_hooks,
+    apply_agent_tool_policy, discover_agents, format_agents_for_prompt, resolve_agent_definition,
+    resolve_agents_home, run_agent_hook_event, spawn_child_agent_background,
+};
 use crate::config::{ResolvedRunProvider, load_run_config, resolve_run_provider};
 use crate::context::prune_context;
 use crate::context_usage::{
@@ -30,7 +35,8 @@ use crate::snapshot::SnapshotStore;
 use crate::store::{ContextEvidenceInput, SqliteStore};
 use crate::tools::{coding_core_tools_for_mode, mode_instruction, skill_tools_for_mode};
 use crate::types::{
-    RunControl, RunOptions, RunResult, RunStreamEvent, RunStreamSink, RunWarning, SmokeControl,
+    AgentSpawnOptions, AgentSpawnResult, RunControl, RunOptions, RunResult, RunStreamEvent,
+    RunStreamSink, RunWarning, SelectedAgent, SmokeControl,
 };
 
 const TITLE_GENERATION_TIMEOUT_SECS: u64 = 15;
@@ -67,6 +73,150 @@ pub async fn run_live_streaming_controlled(
     .await
 }
 
+pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentSpawnResult> {
+    let workdir = canonical_workdir(&options.workdir)?;
+    if options.prompt.trim().is_empty() {
+        return Err(Error::Message("Agent prompt is empty".to_string()));
+    }
+    let run_options = RunOptions {
+        db_path: options.db_path.clone(),
+        workdir: workdir.clone(),
+        snapshot_root: None,
+        session: options.parent_session.clone(),
+        continue_latest: false,
+        prompt: options.prompt.clone(),
+        image_inputs: Vec::new(),
+        extract_prompt_image_sources: true,
+        prompt_display: None,
+        max_context_messages: None,
+        config_path: options.config_path.clone(),
+        model: options.model.clone(),
+        reasoning_effort: options.reasoning_effort.clone(),
+        include_reasoning: false,
+        mode: options.mode,
+        inherited_env: options.inherited_env.clone(),
+        agent: options.selected_parent_agent.clone(),
+        no_agents: false,
+        no_skills: options.no_skills,
+        skill_inputs: options.skill_inputs.clone(),
+    };
+    let loaded = load_run_config(&run_options, &workdir)?;
+    let agents_home = resolve_agents_home(&loaded.env, &workdir)?;
+    let agent_catalog = discover_agents(&AgentDiscoveryOptions {
+        home: agents_home,
+        workdir: workdir.clone(),
+        env: loaded.env.clone(),
+        explicit_inputs: options.selected_parent_agent.iter().cloned().collect(),
+        no_agents: false,
+    })?;
+    let selected_parent_agent = match &options.selected_parent_agent {
+        Some(input) => Some(resolve_agent_definition(
+            &agent_catalog,
+            input,
+            &workdir,
+            &loaded.env,
+        )?),
+        None => None,
+    };
+    let child_agent =
+        resolve_agent_definition(&agent_catalog, &options.agent, &workdir, &loaded.env)?;
+    if let Some(allowed) = selected_parent_agent
+        .as_ref()
+        .and_then(|agent| agent.tool_policy.allowed_agents.as_ref())
+        && !allowed.contains(&child_agent.name)
+    {
+        return Err(Error::Config(format!(
+            "agent `{}` is not allowed by selected-agent tool policy",
+            child_agent.name
+        )));
+    }
+    if selected_parent_agent
+        .as_ref()
+        .is_some_and(|agent| agent.tool_policy.denied_agents.contains(&child_agent.name))
+    {
+        return Err(Error::Config(format!(
+            "agent `{}` is denied by selected-agent tool policy",
+            child_agent.name
+        )));
+    }
+    let mut resolved_options = run_options.clone();
+    if resolved_options.model.is_none()
+        && let Some(model) = selected_parent_agent
+            .as_ref()
+            .and_then(|agent| agent.model.clone())
+    {
+        resolved_options.model = Some(model);
+    }
+    if resolved_options.reasoning_effort.is_none()
+        && let Some(effort) = selected_parent_agent
+            .as_ref()
+            .and_then(|agent| agent.effort.clone())
+    {
+        resolved_options.reasoning_effort = Some(effort);
+    }
+    let resolved = resolve_run_provider(&resolved_options, &loaded)?;
+    let store = SqliteStore::open(&options.db_path)?;
+    let selected_parent_summary = selected_agent_for_result(selected_parent_agent.as_ref());
+    let parent_session_id = if let Some(session_id) = options.parent_session.clone() {
+        store.resume_session(&session_id)?;
+        session_id
+    } else {
+        store.create_session_with_metadata(
+            &workdir,
+            "tui",
+            &resolved.model,
+            &resolved.provider,
+            Some(json!({
+                "provider_label": resolved.display_label.clone(),
+                "base_url": resolved.base_url.clone(),
+                "api_key_env": resolved.api_key_env.clone(),
+                "reasoning_effort": resolved.reasoning_effort.clone(),
+                "context_limit": resolved.context_limit,
+                "model_metadata": resolved.metadata.public_json(),
+                "mode": options.mode.as_str(),
+                "selected_agent": selected_parent_summary,
+            })),
+        )?
+    };
+    let provider: Arc<dyn GenerationProvider> = Arc::new(OpenAiChatProvider::new(
+        resolved.base_url.clone(),
+        resolved.api_key.clone(),
+        resolved.provider.clone(),
+    ));
+    let context = AgentToolContext {
+        provider,
+        model_provider: resolved.provider,
+        model: resolved.model,
+        generation_metadata: json!({
+            "model_metadata": resolved.metadata.public_json(),
+        }),
+        workdir,
+        mode: options.mode,
+        store,
+        parent_session_id: parent_session_id.clone(),
+        parent_context_snapshot: Vec::new(),
+        catalog: agent_catalog,
+        control_handle: None,
+        stream_events: None,
+        model_metadata: resolved.metadata,
+        env: loaded.env,
+        allowed_agent_names: selected_parent_agent
+            .as_ref()
+            .and_then(|agent| agent.tool_policy.allowed_agents.clone()),
+        denied_agent_names: selected_parent_agent
+            .as_ref()
+            .map(|agent| agent.tool_policy.denied_agents.clone())
+            .unwrap_or_default(),
+        required_agent_names: Vec::new(),
+        spawn_depth_remaining: None,
+    };
+    let agent = spawn_child_agent_background(context, child_agent, options.prompt)?;
+    Ok(AgentSpawnResult {
+        parent_session_id,
+        agent,
+    })
+}
+
 async fn run_live_internal(
     options: RunOptions,
     source: &str,
@@ -80,25 +230,72 @@ async fn run_live_internal(
     }
     let project_instructions = load_project_instructions(&workdir)?;
 
+    if options.no_agents && options.agent.is_some() {
+        return Err(Error::Config(
+            "--agent cannot be used together with no_agents".to_string(),
+        ));
+    }
     let loaded = load_run_config(&options, &workdir)?;
-    let resolved = resolve_run_provider(&options, &loaded)?;
+    let agents_home = resolve_agents_home(&loaded.env, &workdir)?;
+    let agent_catalog = discover_agents(&AgentDiscoveryOptions {
+        home: agents_home,
+        workdir: workdir.clone(),
+        env: loaded.env.clone(),
+        explicit_inputs: options.agent.iter().cloned().collect(),
+        no_agents: options.no_agents,
+    })?;
+    let selected_agent = match &options.agent {
+        Some(input) => Some(resolve_agent_definition(
+            &agent_catalog,
+            input,
+            &workdir,
+            &loaded.env,
+        )?),
+        None => None,
+    };
+    let mut resolved_options = options.clone();
+    if resolved_options.model.is_none()
+        && let Some(model) = selected_agent
+            .as_ref()
+            .and_then(|agent| agent.model.clone())
+    {
+        resolved_options.model = Some(model);
+    }
+    if resolved_options.reasoning_effort.is_none()
+        && let Some(effort) = selected_agent
+            .as_ref()
+            .and_then(|agent| agent.effort.clone())
+    {
+        resolved_options.reasoning_effort = Some(effort);
+    }
+    let resolved = resolve_run_provider(&resolved_options, &loaded)?;
     let skills_home = resolve_skills_home(&loaded.env, &workdir)?;
+    let mut explicit_skill_inputs = options.skill_inputs.clone();
+    if let Some(agent) = &selected_agent {
+        explicit_skill_inputs.extend(agent.skills.clone());
+    }
     let skill_options = SkillDiscoveryOptions {
         home: skills_home.clone(),
         workdir: workdir.clone(),
         config_path: options.config_path.clone(),
         env: loaded.env.clone(),
-        explicit_inputs: options.skill_inputs.clone(),
+        explicit_inputs: explicit_skill_inputs.clone(),
         no_skills: options.no_skills,
     };
     let skill_catalog = discover_skills(&skill_options)?;
     let selected_skills = selected_skills_for_run(
         &skill_catalog,
         &options.prompt,
-        &options.skill_inputs,
+        &explicit_skill_inputs,
         &workdir,
         &loaded.env,
     );
+    let selected_agent_summary = selected_agent_for_result(selected_agent.as_ref());
+    let required_agent_mentions = if options.no_agents {
+        Vec::new()
+    } else {
+        required_agent_mentions(&options.prompt, &agent_catalog.agents)
+    };
     let skill_context_fragments = skill_context_fragments(&selected_skills, &skill_catalog)?;
     let contextual_user_messages =
         contextual_user_messages_for_run(&project_instructions.fragments, &skill_context_fragments);
@@ -130,6 +327,7 @@ async fn run_live_internal(
                         "context_limit": resolved.context_limit,
                         "model_metadata": resolved.metadata.public_json(),
                         "mode": options.mode.as_str(),
+                        "selected_agent": selected_agent_summary.clone(),
                     })),
                 )?,
                 true,
@@ -150,6 +348,7 @@ async fn run_live_internal(
                     "context_limit": resolved.context_limit,
                     "model_metadata": resolved.metadata.public_json(),
                     "mode": options.mode.as_str(),
+                    "selected_agent": selected_agent_summary.clone(),
                 })),
             )?,
             true,
@@ -178,6 +377,9 @@ async fn run_live_internal(
         "context_limit": resolved.context_limit,
         "model_metadata": resolved.metadata.public_json(),
         "mode": options.mode.as_str(),
+        "selected_agent": selected_agent_summary.clone(),
+        "agents_enabled": !options.no_agents,
+        "agent_count": agent_catalog.agents.len(),
         "selected_skills": selected_skills.clone(),
     });
     if let Some(stream) = &stream_events {
@@ -228,6 +430,26 @@ async fn run_live_internal(
         );
     }
     let mut system_instructions = vec![mode_instruction(options.mode).to_string()];
+    if let Some(agent) = &selected_agent
+        && !agent.instructions.trim().is_empty()
+    {
+        system_instructions.push(format!(
+            "Main session agent: {}\n\n{}",
+            agent.name, agent.instructions
+        ));
+    }
+    if !options.no_agents {
+        let agents_prompt = format_agents_for_prompt(&agent_catalog.agents);
+        if !agents_prompt.trim().is_empty() {
+            system_instructions.push(agents_prompt);
+        }
+        if !required_agent_mentions.is_empty() {
+            system_instructions.push(format!(
+                "The user explicitly mentioned these agents: {}. You must call the Agent tool for each named agent before giving a final answer. The full user message remains the source of intent; write the child-agent task prompt yourself.",
+                required_agent_mentions.join(", ")
+            ));
+        }
+    }
     let skills_prompt = format_skills_for_prompt(&skill_catalog.skills);
     if !skills_prompt.trim().is_empty() {
         system_instructions.push(skills_prompt);
@@ -246,19 +468,49 @@ async fn run_live_internal(
         started: Instant::now(),
         tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
         control: SmokeControl::None,
-        control_handle: Some(control_handle),
+        control_handle: Some(control_handle.clone()),
         events: Some(Arc::clone(&events)),
-        stream_events,
+        stream_events: stream_events.clone(),
         include_reasoning: options.include_reasoning,
         reasoning_effort: resolved.reasoning_effort.clone(),
         model_metadata: resolved.metadata.clone(),
         context_recorder: Some(context_recorder.clone()),
         prompt_display: options.prompt_display.clone(),
+        selected_agent: selected_agent_summary.clone(),
     });
     let mut tools = coding_core_tools_for_mode(&workdir, options.mode);
-    if !options.no_skills || !options.skill_inputs.is_empty() {
+    if !options.no_skills || !explicit_skill_inputs.is_empty() {
         tools.extend(skill_tools_for_mode(skill_options, options.mode));
     }
+    if !options.no_agents {
+        tools.extend(agent_tools(AgentToolContext {
+            provider: Arc::clone(&provider),
+            model_provider: resolved.provider.clone(),
+            model: resolved.model.clone(),
+            generation_metadata: generation_metadata.clone(),
+            workdir: workdir.clone(),
+            mode: options.mode,
+            store: store.clone(),
+            parent_session_id: session_id.clone(),
+            parent_context_snapshot: previous_messages.clone(),
+            catalog: agent_catalog.clone(),
+            control_handle: Some(control_handle.clone()),
+            stream_events: stream_events.clone(),
+            model_metadata: resolved.metadata.clone(),
+            env: loaded.env.clone(),
+            allowed_agent_names: selected_agent
+                .as_ref()
+                .and_then(|agent| agent.tool_policy.allowed_agents.clone()),
+            denied_agent_names: selected_agent
+                .as_ref()
+                .map(|agent| agent.tool_policy.denied_agents.clone())
+                .unwrap_or_default(),
+            required_agent_names: required_agent_mentions.clone(),
+            spawn_depth_remaining: None,
+        }));
+    }
+    tools = apply_agent_tool_policy(tools, selected_agent.as_ref(), options.mode);
+    tools = apply_agent_hooks(tools, selected_agent.as_ref(), &workdir);
     if let Some(object) = generation_metadata.as_object_mut() {
         object.insert(
             "context_counting".to_string(),
@@ -299,6 +551,18 @@ async fn run_live_internal(
     };
     let completion =
         run_agent_loop(Arc::clone(&provider), request, sink, control_receivers).await?;
+    record_missed_required_agents(
+        &store,
+        &session_id,
+        &completion.messages,
+        &required_agent_mentions,
+    )?;
+    run_agent_hook_event(
+        selected_agent.as_ref(),
+        "Stop",
+        &workdir,
+        json!({ "outcome": completion.outcome.as_str() }),
+    );
     let final_answer = completion
         .messages
         .iter()
@@ -347,6 +611,7 @@ async fn run_live_internal(
         reasoning_effort: resolved.reasoning_effort,
         context_limit: resolved.context_limit,
         tool_failures,
+        selected_agent: selected_agent_summary,
         selected_skills,
         context_snapshot,
         events,
@@ -368,6 +633,104 @@ fn selected_skills_for_run(
         .into_iter()
         .filter(|skill| seen.insert(skill.path.clone()))
         .collect()
+}
+
+fn selected_agent_for_result(agent: Option<&AgentDefinition>) -> Option<SelectedAgent> {
+    agent.map(|agent| SelectedAgent {
+        name: agent.name.clone(),
+        source: agent.source.as_str().to_string(),
+        path: agent.file_path.clone(),
+    })
+}
+
+fn required_agent_mentions(prompt: &str, agents: &[AgentDefinition]) -> Vec<String> {
+    let known = agents
+        .iter()
+        .map(|agent| agent.name.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut found = std::collections::BTreeSet::new();
+    for raw in prompt.split_whitespace() {
+        let Some(rest) = raw.strip_prefix('@') else {
+            continue;
+        };
+        let name = rest.trim_matches(|ch: char| {
+            !(ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
+        });
+        if known.contains(name) {
+            found.insert(name.to_string());
+        }
+    }
+    found.into_iter().collect()
+}
+
+fn record_missed_required_agents(
+    store: &SqliteStore,
+    session_id: &str,
+    messages: &[Message],
+    required: &[String],
+) -> Result<()> {
+    if required.is_empty() {
+        return Ok(());
+    }
+    let called = called_agent_names(messages, required);
+    let missed = required
+        .iter()
+        .filter(|name| !called.contains(*name))
+        .cloned()
+        .collect::<Vec<_>>();
+    if missed.is_empty() {
+        return Ok(());
+    }
+    let text = format!(
+        "Required agent delegation was not performed: {}",
+        missed.join(", ")
+    );
+    store.append_message_with_metrics(
+        session_id,
+        &user_text_message(text),
+        None,
+        Some(json!({
+            "agent_notification": {
+                "type": "missing_required_agent_call",
+                "agents": missed,
+                "hidden": true
+            }
+        })),
+    )
+}
+
+fn called_agent_names(
+    messages: &[Message],
+    required: &[String],
+) -> std::collections::BTreeSet<String> {
+    let mut called = std::collections::BTreeSet::new();
+    for message in messages {
+        let Message::Assistant { content, .. } = message else {
+            continue;
+        };
+        for block in content {
+            let AssistantBlock::ToolCall(call) = block else {
+                continue;
+            };
+            if call.name != "Agent" {
+                continue;
+            }
+            let agent_type = call
+                .arguments
+                .get("agent_type")
+                .or_else(|| call.arguments.get("name"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .or_else(|| match required {
+                    [single] => Some(single.as_str()),
+                    _ => Some("general"),
+                })
+                .unwrap_or("general");
+            called.insert(agent_type.to_string());
+        }
+    }
+    called
 }
 
 fn contextual_user_messages_for_run(

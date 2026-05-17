@@ -45,6 +45,8 @@ pub(crate) enum SlashCommand {
     Undo,
     Redo,
     Skills,
+    Agents,
+    Fork(String),
     SkillInvoke { name: String, args: String },
     Upcoming(String),
 }
@@ -113,7 +115,7 @@ pub(crate) fn slash_help_sections(skill_count: Option<usize>) -> SlashHelpSectio
         "Ctrl+C/Ctrl+D - quit or copy active selection".to_string(),
         "Ctrl+O - copy latest answer as Markdown".to_string(),
         "Ctrl+B - toggle sidebar".to_string(),
-        "Ctrl+T - reserved for transcript review".to_string(),
+        "Ctrl+T - focus transcript; Esc returns to composer".to_string(),
         "Ctrl+R - search prompt history".to_string(),
         "Up/Down - move cursor or recall history at prompt boundaries".to_string(),
         "PageUp/PageDown - scroll".to_string(),
@@ -370,6 +372,11 @@ fn parse_registered_slash_command(
             parse_no_arguments(spec, command, rest)?;
             Ok(SlashCommand::Skills)
         }
+        SlashCommandAction::Agents => {
+            parse_no_arguments(spec, command, rest)?;
+            Ok(SlashCommand::Agents)
+        }
+        SlashCommandAction::Fork => parse_fork_command(spec, rest),
         SlashCommandAction::SkillInvoke => {
             unreachable!("dynamic skill commands are parsed before registry dispatch")
         }
@@ -568,6 +575,14 @@ fn parse_rename_command(spec: &SlashCommandSpec, rest: &[&str]) -> Result<SlashC
         return Err(anyhow!("usage: {}", spec.usage));
     }
     Ok(SlashCommand::Rename(title))
+}
+
+fn parse_fork_command(spec: &SlashCommandSpec, rest: &[&str]) -> Result<SlashCommand> {
+    let prompt = rest.join(" ");
+    if prompt.trim().is_empty() {
+        return Err(anyhow!("usage: {}", spec.usage));
+    }
+    Ok(SlashCommand::Fork(prompt))
 }
 
 pub(crate) fn validate_model_spec(value: &str) -> Result<()> {

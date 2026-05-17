@@ -218,6 +218,41 @@ fn render_skill_popup(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'
     render_display_rows(area, frame.buffer_mut(), &rows);
 }
 
+fn render_agent_popup(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_>) {
+    let theme = tui_theme();
+    ui.last_agent_popup_areas.clear();
+    let Some(popup) = &ui.agent_search.popup else {
+        return;
+    };
+    frame.render_widget(Block::default().style(theme.menu_style()), area);
+    let rows = popup
+        .matches
+        .iter()
+        .take(FILE_POPUP_MAX_ROWS)
+        .enumerate()
+        .map(|(index, item)| DisplayRow {
+            marker: "  ",
+            label: format!("@{} (agent)", item.name),
+            description: Some(item.description.clone()),
+            selected: index == popup.selected,
+            tone: DisplayRowTone::Identity,
+            ..DisplayRow::default()
+        })
+        .collect::<Vec<_>>();
+    for index in 0..rows.len().min(area.height as usize) {
+        ui.last_agent_popup_areas.push((
+            index,
+            Rect {
+                x: area.x,
+                y: area.y.saturating_add(index as u16),
+                width: area.width,
+                height: 1,
+            },
+        ));
+    }
+    render_display_rows(area, frame.buffer_mut(), &rows);
+}
+
 fn render_status(frame: &mut Frame<'_>, area: Rect, app: &TuiApp, ui: &FullscreenUi<'_>) {
     let theme = tui_theme();
     let model = app.model_display_value();
@@ -236,6 +271,11 @@ fn render_status(frame: &mut Frame<'_>, area: Rect, app: &TuiApp, ui: &Fullscree
     if ui.shell_mode || parse_shell_escape_input(&textarea_text(&ui.textarea)).is_some() {
         spans.push(Span::raw("  "));
         spans.push(Span::styled("shell", theme.accent_style()));
+    }
+    if ui.focus == FocusMode::Transcript {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled("transcript", theme.accent_style()));
+        spans.push(Span::styled(" · Esc", theme.dim_style()));
     }
     let auxiliary_shell_count =
         ui.auxiliary_shell_tasks.len() + ui.pending_auxiliary_shell_commands.len();
@@ -362,11 +402,15 @@ fn bottom_status_context_for_width(
     let full_workdir = directory_display_value(&app.workdir, home.as_deref());
     let branch = bottom_status_branch(&ui.sidebar.branch);
     let context = bottom_status_context_usage(ui);
+    let agent_hint = app.agent_breadcrumb_status();
 
     if let Some(context) = context.as_deref() {
         let mut segments = vec![context, full_workdir.as_str()];
         if let Some(branch) = branch.as_deref() {
             segments.push(branch);
+        }
+        if let Some(agent_hint) = agent_hint.as_deref() {
+            segments.push(agent_hint);
         }
         if let Some(value) = joined_segments_if_fits(&segments, available_width) {
             return Some(value);
@@ -402,8 +446,44 @@ fn bottom_status_context_for_width(
     if let Some(branch) = branch.as_deref() {
         segments.push(branch);
     }
+    if let Some(agent_hint) = agent_hint.as_deref() {
+        segments.push(agent_hint);
+    }
     if let Some(value) = joined_segments_if_fits(&segments, available_width) {
         return Some(value);
+    }
+
+    if let Some(agent_hint) = agent_hint.as_deref() {
+        if available_width > STATUS_WORKDIR_MIN_WIDTH.saturating_add(SEP_WIDTH) {
+            let mut compact_segments = Vec::new();
+            let branch_width = branch.as_deref().map(UnicodeWidthStr::width).unwrap_or(0);
+            let hint_width = UnicodeWidthStr::width(agent_hint);
+            let fixed_width = hint_width
+                .saturating_add(branch_width)
+                .saturating_add(usize::from(branch.is_some()).saturating_add(1) * SEP_WIDTH);
+            let workdir_width = available_width.saturating_sub(fixed_width);
+            if workdir_width >= STATUS_WORKDIR_MIN_WIDTH {
+                let compact_workdir = format_directory_display_with_home(
+                    &app.workdir,
+                    home.as_deref(),
+                    workdir_width,
+                );
+                if !compact_workdir.is_empty() {
+                    compact_segments.push(compact_workdir.as_str());
+                    if let Some(branch) = branch.as_deref() {
+                        compact_segments.push(branch);
+                    }
+                    compact_segments.push(agent_hint);
+                    if let Some(value) = joined_segments_if_fits(&compact_segments, available_width)
+                    {
+                        return Some(value);
+                    }
+                }
+            }
+        }
+        if UnicodeWidthStr::width(agent_hint) <= available_width {
+            return Some(agent_hint.to_string());
+        }
     }
 
     if available_width < STATUS_WORKDIR_MIN_WIDTH {
@@ -491,6 +571,18 @@ fn render_bottom_panel(
     }
     if let BottomPanel::ProviderWizard(panel) = panel {
         render_provider_wizard_panel(frame, area, panel);
+        return;
+    }
+    if let BottomPanel::AgentRunPrompt(panel) = panel {
+        render_agent_run_prompt_panel(frame, area, panel);
+        return;
+    }
+    if let BottomPanel::AgentEditor(panel) = panel {
+        render_agent_editor_panel(frame, area, panel);
+        return;
+    }
+    if let BottomPanel::Agents(panel) = panel {
+        render_agent_panel(frame, area, panel, row_areas);
         return;
     }
     if let BottomPanel::Models(panel) = panel {
@@ -584,6 +676,232 @@ fn render_bottom_panel(
     )));
 
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
+}
+
+fn render_agent_panel(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    panel: &mut AgentPanel,
+    row_areas: &mut Vec<(usize, Rect)>,
+) {
+    let theme = tui_theme();
+    row_areas.clear();
+    frame.render_widget(Block::default().style(theme.menu_style()), area);
+    let inner = Rect {
+        x: area.x.saturating_add(2),
+        y: area.y.saturating_add(1),
+        width: area.width.saturating_sub(4),
+        height: area.height.saturating_sub(2),
+    };
+    let selection = match panel.tab {
+        AgentTab::Running => &mut panel.running,
+        AgentTab::Available => &mut panel.available,
+    };
+    let notice_rows = if selection.notice.is_some() { 1 } else { 0 };
+    let reserved = 4 + notice_rows;
+    let visible_rows = inner.height.saturating_sub(reserved).max(1);
+    selection.ensure_selected_visible(visible_rows);
+
+    let mut lines = Vec::new();
+    lines.push(agent_panel_tabs(panel.tab));
+    lines.push(Line::from(vec![
+        Span::styled("Search ", theme.dim_style()),
+        Span::styled(selection.query.clone(), Style::default()),
+    ]));
+    let mut row_y = inner.y.saturating_add(lines.len() as u16);
+
+    let filtered = selection.filtered_indices();
+    if filtered.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            selection.empty_label.clone(),
+            theme.dim_style(),
+        )));
+    } else {
+        let mut last_group: Option<String> = None;
+        for (visible_index, row_index) in filtered
+            .iter()
+            .enumerate()
+            .skip(selection.scroll as usize)
+            .take(visible_rows as usize)
+        {
+            let row = &selection.rows[*row_index];
+            if row.group != last_group
+                && let Some(group) = row.group.clone()
+            {
+                lines.push(Line::from(Span::styled(
+                    group.clone(),
+                    theme.accent_style().add_modifier(Modifier::BOLD),
+                )));
+                row_y = row_y.saturating_add(1);
+                last_group = Some(group);
+            }
+            row_areas.push((
+                visible_index,
+                Rect {
+                    x: inner.x,
+                    y: row_y,
+                    width: inner.width,
+                    height: 1,
+                },
+            ));
+            lines.push(bottom_panel_row(
+                row,
+                visible_index == selection.selected,
+                inner.width,
+            ));
+            row_y = row_y.saturating_add(1);
+        }
+    }
+    lines.push(Line::from(""));
+    if let Some(notice) = &selection.notice {
+        lines.push(Line::from(Span::styled(notice.clone(), theme.dim_style())));
+    }
+    lines.push(Line::from(Span::styled(
+        selection.footer_text(),
+        theme.dim_style(),
+    )));
+
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
+}
+
+fn agent_panel_tabs(active: AgentTab) -> Line<'static> {
+    let theme = tui_theme();
+    let mut spans = vec![Span::styled("Agents", theme.accent_style())];
+    for tab in AgentPanel::tabs() {
+        spans.push(Span::raw("  "));
+        let style = if *tab == active {
+            theme.selected_row_style()
+        } else {
+            Style::default()
+        };
+        spans.push(Span::styled(format!(" {} ", tab.label()), style));
+    }
+    Line::from(spans)
+}
+
+fn render_agent_run_prompt_panel(frame: &mut Frame<'_>, area: Rect, panel: &AgentRunPromptPanel) {
+    let theme = tui_theme();
+    frame.render_widget(Block::default().style(theme.menu_style()), area);
+    let inner = Rect {
+        x: area.x.saturating_add(2),
+        y: area.y.saturating_add(1),
+        width: area.width.saturating_sub(4),
+        height: area.height.saturating_sub(2),
+    };
+    let prompt_value = if panel.prompt.is_empty() {
+        Span::styled("required", theme.dim_style())
+    } else {
+        Span::raw(panel.prompt.clone())
+    };
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("Run Agent", theme.dim_style().add_modifier(Modifier::BOLD)),
+            Span::styled(format!("  {}", panel.agent_name), theme.accent_style()),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("› Prompt ", theme.selected_row_style()),
+            prompt_value,
+        ]),
+        Line::from(""),
+    ];
+    if let Some(notice) = &panel.notice {
+        lines.push(Line::from(Span::styled(notice.clone(), theme.dim_style())));
+    }
+    lines.push(Line::from(Span::styled(
+        "Enter run in background  Esc back",
+        theme.dim_style(),
+    )));
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
+}
+
+fn render_agent_editor_panel(frame: &mut Frame<'_>, area: Rect, panel: &AgentEditorPanel) {
+    let theme = tui_theme();
+    frame.render_widget(Block::default().style(theme.menu_style()), area);
+    let inner = Rect {
+        x: area.x.saturating_add(2),
+        y: area.y.saturating_add(1),
+        width: area.width.saturating_sub(4),
+        height: area.height.saturating_sub(2),
+    };
+    let title = match panel.mode {
+        AgentEditorMode::Create => "Create Agent",
+        AgentEditorMode::Update { .. } => "Update Agent",
+    };
+    let mut lines = vec![Line::from(Span::styled(
+        title,
+        theme.dim_style().add_modifier(Modifier::BOLD),
+    ))];
+    lines.push(agent_editor_field_line(
+        panel,
+        AgentEditorField::Name,
+        &panel.name,
+    ));
+    lines.push(agent_editor_field_line(
+        panel,
+        AgentEditorField::Description,
+        &panel.description,
+    ));
+    lines.push(agent_editor_field_line(
+        panel,
+        AgentEditorField::Instructions,
+        &panel.instructions,
+    ));
+    lines.push(agent_editor_field_line(
+        panel,
+        AgentEditorField::Model,
+        &panel.model,
+    ));
+    lines.push(agent_editor_field_line(
+        panel,
+        AgentEditorField::Tools,
+        &panel.tools,
+    ));
+    lines.push(agent_editor_field_line(
+        panel,
+        AgentEditorField::PermissionMode,
+        &panel.permission_mode,
+    ));
+    lines.push(agent_editor_field_line(
+        panel,
+        AgentEditorField::Background,
+        if panel.background { "true" } else { "false" },
+    ));
+    lines.push(agent_editor_field_line(
+        panel,
+        AgentEditorField::MaxSpawnDepth,
+        &panel.max_spawn_depth,
+    ));
+    lines.push(Line::from(""));
+    if let Some(notice) = &panel.notice {
+        lines.push(Line::from(Span::styled(notice.clone(), theme.dim_style())));
+    }
+    lines.push(Line::from(Span::styled(
+        "Enter next/save  Up/Down field  Esc back",
+        theme.dim_style(),
+    )));
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
+}
+
+fn agent_editor_field_line(
+    panel: &AgentEditorPanel,
+    field: AgentEditorField,
+    value: &str,
+) -> Line<'static> {
+    let selected = panel.active_field == field;
+    let marker = if selected { "›" } else { " " };
+    let theme = tui_theme();
+    let style = if selected {
+        theme.panel_field_style()
+    } else {
+        Style::default()
+    };
+    let value = if value.is_empty() { " " } else { value };
+    Line::from(Span::styled(
+        format!("{marker} {}: {value}", field.label()),
+        style,
+    ))
 }
 
 fn render_model_panel(

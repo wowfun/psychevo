@@ -32,6 +32,8 @@ impl TuiApp {
                 self.current_session = None;
                 self.current_session_title = None;
                 self.force_new_once = true;
+                self.current_agent = self.startup_agent.clone();
+                self.current_agent_explicit_default = false;
                 ui.clear_transcript();
                 ui.replace_session_history_prompts(Vec::new());
                 ui.refresh_sidebar(self);
@@ -147,6 +149,7 @@ impl TuiApp {
                         ui.set_composer_text(&text);
                         ui.clear_slash_menu_dismissal();
                         ui.close_file_popup();
+                        ui.close_agent_popup();
                         ui.close_skill_popup();
                     }
                     Err(err) => {
@@ -210,6 +213,13 @@ impl TuiApp {
             }
             SlashCommand::Skills => {
                 ui.push_command_result(command_echo, None, self.skills_status_text(), false);
+            }
+            SlashCommand::Agents => {
+                ui.bottom_panel = Some(BottomPanel::Agents(self.agent_panel()));
+            }
+            SlashCommand::Fork(prompt) => {
+                let text = fork_prompt_marker(&prompt);
+                self.submit_fullscreen_prompt(ui, text, Vec::new())?;
             }
             SlashCommand::SkillInvoke { name, args } => {
                 let text = skill_prompt_marker(&name, &args);
@@ -438,6 +448,14 @@ impl TuiApp {
                 println!("{}", self.skills_status_text());
                 Ok(())
             }
+            SlashCommand::Agents => {
+                println!("{}", self.agents_status_text());
+                Ok(())
+            }
+            SlashCommand::Fork(prompt) => {
+                let prompt = fork_prompt_marker(&prompt);
+                return self.submit_prompt(prompt).await.map(|_| false);
+            }
             SlashCommand::SkillInvoke { name, args } => {
                 let prompt = skill_prompt_marker(&name, &args);
                 return self.submit_prompt(prompt).await.map(|_| false);
@@ -480,6 +498,60 @@ impl TuiApp {
             .map(|skill| format!("{}: {}", skill.name, skill.description))
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    fn agents_status_text(&self) -> String {
+        let Some(catalog) = self.current_agent_catalog() else {
+            return "Agents disabled.".to_string();
+        };
+        let mut sections = Vec::new();
+        if catalog.agents.is_empty() {
+            sections.push("Library\nNo agents found.".to_string());
+        } else {
+            sections.push(format!(
+                "Library\n{}",
+                catalog
+                    .agents
+                    .iter()
+                    .map(|agent| format!("{}: {}", agent.name, agent.description))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ));
+        }
+        if let Some(parent) = self.current_session.as_deref()
+            && let Ok(store) = SqliteStore::open(&self.db_path)
+        {
+            let value = agent_status_value(Some(&store), Some(parent), false);
+            let running = value
+                .get("agents")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            if running.is_empty() {
+                sections.push("Running/Completed\nNo child agents for this session.".to_string());
+            } else {
+                sections.push(format!(
+                    "Running/Completed\n{}",
+                    running
+                        .iter()
+                        .map(|agent| format!(
+                            "{}\t{}\t{}",
+                            agent.get("id").and_then(Value::as_str).unwrap_or_default(),
+                            agent
+                                .get("agent_name")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default(),
+                            agent
+                                .get("status")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default()
+                        ))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                ));
+            }
+        }
+        sections.join("\n\n")
     }
 
     fn help_status_text(&self) -> String {
@@ -902,6 +974,8 @@ fn slash_command_echo(command: &SlashCommand) -> String {
         SlashCommand::Undo => "/undo".to_string(),
         SlashCommand::Redo => "/redo".to_string(),
         SlashCommand::Skills => "/skills".to_string(),
+        SlashCommand::Agents => "/agents".to_string(),
+        SlashCommand::Fork(prompt) => format!("/fork {}", prompt.trim()),
         SlashCommand::SkillInvoke { name, args } => {
             if args.trim().is_empty() {
                 format!("/skill:{name}")
@@ -919,4 +993,11 @@ fn skill_prompt_marker(name: &str, args: &str) -> String {
     } else {
         format!("${name} {}", args.trim())
     }
+}
+
+fn fork_prompt_marker(prompt: &str) -> String {
+    format!(
+        "Use the Agent tool with agent_type=\"general\", fork_context=true, and background=true for this task:\n\n{}",
+        prompt.trim()
+    )
 }

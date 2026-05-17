@@ -69,6 +69,8 @@ async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
         include_reasoning: args.include_reasoning,
         mode: RunMode::Build,
         inherited_env: Some(env_map),
+        agent: args.agent.clone(),
+        no_agents: args.no_agents,
         no_skills: args.no_skills,
         skill_inputs: args.skill.clone(),
     })

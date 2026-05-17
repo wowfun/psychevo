@@ -58,8 +58,33 @@ pub struct RunOptions {
     pub include_reasoning: bool,
     pub mode: RunMode,
     pub inherited_env: Option<BTreeMap<String, String>>,
+    pub agent: Option<String>,
+    pub no_agents: bool,
     pub no_skills: bool,
     pub skill_inputs: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentSpawnOptions {
+    pub db_path: PathBuf,
+    pub workdir: PathBuf,
+    pub parent_session: Option<String>,
+    pub prompt: String,
+    pub agent: String,
+    pub config_path: Option<PathBuf>,
+    pub model: Option<String>,
+    pub reasoning_effort: Option<String>,
+    pub mode: RunMode,
+    pub inherited_env: Option<BTreeMap<String, String>>,
+    pub selected_parent_agent: Option<String>,
+    pub no_skills: bool,
+    pub skill_inputs: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentSpawnResult {
+    pub parent_session_id: String,
+    pub agent: crate::agents::AgentRunRecord,
 }
 
 pub const TUI_DISPLAY_METADATA_KEY: &str = "tui_display";
@@ -169,10 +194,19 @@ pub struct RunResult {
     pub reasoning_effort: Option<String>,
     pub context_limit: Option<u64>,
     pub tool_failures: usize,
+    pub selected_agent: Option<SelectedAgent>,
     pub selected_skills: Vec<SelectedSkill>,
     pub context_snapshot: Option<crate::context_usage::ContextSnapshot>,
     pub events: Vec<Value>,
     pub warnings: Vec<RunWarning>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SelectedAgent {
+    pub name: String,
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -586,8 +620,23 @@ pub struct TuiMessageSummary {
 #[derive(Debug, Clone, PartialEq)]
 pub enum RunStreamEvent {
     Event(Value),
-    ReasoningDelta { text: String },
+    ReasoningDelta {
+        text: String,
+    },
     ReasoningEnd,
+    Scoped {
+        session_id: String,
+        event: Box<RunStreamEvent>,
+    },
+}
+
+impl RunStreamEvent {
+    pub fn scoped(session_id: impl Into<String>, event: RunStreamEvent) -> Self {
+        Self::Scoped {
+            session_id: session_id.into(),
+            event: Box::new(event),
+        }
+    }
 }
 
 pub type RunStreamSink = Arc<dyn Fn(RunStreamEvent) + Send + Sync>;

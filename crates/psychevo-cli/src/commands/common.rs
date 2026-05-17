@@ -41,6 +41,8 @@ pub(crate) fn base_run_options(
         include_reasoning: false,
         mode: RunMode::Build,
         inherited_env: Some(env_map.clone()),
+        agent: None,
+        no_agents: false,
         no_skills: false,
         skill_inputs: Vec::new(),
     })

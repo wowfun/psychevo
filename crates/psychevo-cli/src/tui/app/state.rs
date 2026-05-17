@@ -14,6 +14,10 @@ struct TuiApp {
     current_variant: Option<String>,
     selected_model: Option<ConfiguredModel>,
     current_mode: RunMode,
+    startup_agent: Option<String>,
+    current_agent: Option<String>,
+    current_agent_explicit_default: bool,
+    no_agents: bool,
     no_skills: bool,
     skill_inputs: Vec<String>,
     thinking_visible: bool,
@@ -38,6 +42,20 @@ impl TuiApp {
             env: self.env_map.clone(),
             explicit_inputs: self.skill_inputs.clone(),
             no_skills: self.no_skills,
+        })
+        .ok()
+    }
+
+    fn current_agent_catalog(&self) -> Option<AgentCatalog> {
+        if self.no_agents {
+            return None;
+        }
+        discover_agents(&AgentDiscoveryOptions {
+            home: self.home.clone(),
+            workdir: self.workdir.clone(),
+            env: self.env_map.clone(),
+            explicit_inputs: self.current_agent.iter().cloned().collect(),
+            no_agents: self.no_agents,
         })
         .ok()
     }
@@ -92,8 +110,55 @@ impl TuiApp {
             .collect()
     }
 
+    fn agent_search_matches(&self, query: &str) -> Vec<AgentSearchMatch> {
+        let query = query.trim().to_lowercase();
+        let Some(catalog) = self.current_agent_catalog() else {
+            return Vec::new();
+        };
+        let mut matches = catalog
+            .agents
+            .into_iter()
+            .filter_map(|agent| {
+                skill_match_rank(&agent.name, &agent.description, &query).map(|rank| {
+                    (
+                        rank,
+                        AgentSearchMatch {
+                            name: agent.name,
+                            description: agent.description,
+                        },
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        matches.sort_by(|(left_rank, left), (right_rank, right)| {
+            left_rank
+                .cmp(right_rank)
+                .then_with(|| left.name.cmp(&right.name))
+        });
+        matches
+            .into_iter()
+            .take(FILE_POPUP_MAX_ROWS)
+            .map(|(_, entry)| entry)
+            .collect()
+    }
+
+    fn sync_agent_popup(&self, ui: &mut FullscreenUi<'_>) {
+        if ui.shell_mode || ui.current_skill_token().is_some() {
+            ui.close_agent_popup();
+            return;
+        }
+        let Some(token) = ui.current_agent_token() else {
+            ui.sync_agent_popup(Vec::new());
+            return;
+        };
+        ui.sync_agent_popup(self.agent_search_matches(&token.query));
+        if ui.agent_popup_visible() {
+            ui.close_file_popup();
+        }
+    }
+
     fn sync_skill_popup(&self, ui: &mut FullscreenUi<'_>) {
-        if ui.shell_mode || ui.current_file_token().is_some() {
+        if ui.shell_mode || ui.current_file_token().is_some() || ui.agent_popup_visible() {
             ui.close_skill_popup();
             return;
         }

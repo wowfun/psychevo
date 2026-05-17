@@ -143,6 +143,8 @@ fn prepare_user_shell_context(
         include_reasoning: false,
         mode: context.mode,
         inherited_env: context.inherited_env.clone(),
+        agent: None,
+        no_agents: true,
         no_skills: true,
         skill_inputs: Vec::new(),
     };

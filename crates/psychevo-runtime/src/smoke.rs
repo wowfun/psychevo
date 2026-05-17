@@ -75,6 +75,7 @@ pub async fn run_smoke(options: SmokeOptions) -> Result<SmokeResult> {
         model_metadata: ModelMetadata::default(),
         prompt_display: None,
         context_recorder: None,
+        selected_agent: None,
     });
     let request = AgentLoopRequest {
         model_provider: "fake".to_string(),

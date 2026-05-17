@@ -10,6 +10,12 @@ struct AuxiliaryShellTask {
     task: JoinHandle<psychevo_runtime::Result<psychevo_runtime::UserShellResult>>,
 }
 
+struct AuxiliaryAgentTask {
+    session_id: Option<String>,
+    rx: mpsc::UnboundedReceiver<RunStreamEvent>,
+    task: JoinHandle<psychevo_runtime::Result<psychevo_runtime::RunResult>>,
+}
+
 enum RunningTask {
     Agent(JoinHandle<psychevo_runtime::Result<psychevo_runtime::RunResult>>),
     UserShell(JoinHandle<psychevo_runtime::Result<psychevo_runtime::UserShellResult>>),

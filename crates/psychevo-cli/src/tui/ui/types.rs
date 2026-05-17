@@ -28,6 +28,7 @@ static NEXT_TRANSCRIPT_ROW_ID: AtomicU64 = AtomicU64::new(1);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum TranscriptHitTarget {
     Row(TranscriptRowId),
+    AgentOpen(TranscriptRowId),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -50,6 +51,11 @@ struct TranscriptRow {
     interrupted: bool,
     user_shell: bool,
     tool_call_id: Option<String>,
+    tool_name: Option<String>,
+    agent_target: Option<String>,
+    agent_child_tool_uses: i64,
+    agent_child_latest_tokens: Option<u64>,
+    agent_child_live_text: String,
     tool_started: Option<Instant>,
     tool_elapsed: Option<Duration>,
 }
@@ -97,6 +103,8 @@ struct TranscriptLayoutRowKey {
     failed: bool,
     interrupted: bool,
     user_shell: bool,
+    agent_tool: bool,
+    agent_open: bool,
     expanded: bool,
     details_collapsed: bool,
     expandable: bool,
@@ -125,6 +133,11 @@ impl TranscriptRow {
             interrupted: false,
             user_shell: false,
             tool_call_id: None,
+            tool_name: None,
+            agent_target: None,
+            agent_child_tool_uses: 0,
+            agent_child_latest_tokens: None,
+            agent_child_live_text: String::new(),
             tool_started: None,
             tool_elapsed: None,
         };
@@ -212,10 +225,12 @@ struct FullscreenUi<'a> {
     turn_terminal_message: Option<String>,
     turn_had_reasoning: bool,
     history_prompt_started_ms: Option<i64>,
+    loaded_session_message_count: usize,
     thinking_visible: bool,
     raw_visible: bool,
     running: Option<RunningTurn>,
-    auxiliary_agent_tasks: Vec<JoinHandle<psychevo_runtime::Result<psychevo_runtime::RunResult>>>,
+    auxiliary_agent_tasks: Vec<AuxiliaryAgentTask>,
+    agent_child_event_backlog: BTreeMap<String, Vec<RunStreamEvent>>,
     auxiliary_shell_tasks: Vec<AuxiliaryShellTask>,
     pending_auxiliary_shell_commands: VecDeque<String>,
     running_started: Option<Instant>,
@@ -259,6 +274,8 @@ struct FullscreenUi<'a> {
     last_slash_menu_areas: Vec<(usize, Rect)>,
     file_search: FileSearchState,
     last_file_popup_areas: Vec<(usize, Rect)>,
+    agent_search: AgentSearchState,
+    last_agent_popup_areas: Vec<(usize, Rect)>,
     skill_search: SkillSearchState,
     last_skill_popup_areas: Vec<(usize, Rect)>,
     last_bottom_panel_areas: Vec<(usize, Rect)>,
@@ -339,6 +356,245 @@ enum SessionListView {
 }
 
 #[derive(Debug, Clone)]
+struct AgentPanel {
+    running: BottomSelectionPanel,
+    available: BottomSelectionPanel,
+    tab: AgentTab,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AgentTab {
+    Running,
+    Available,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AgentAction {
+    UseAsMain,
+    Run,
+    View,
+    Update,
+    Delete,
+}
+
+#[derive(Debug, Clone)]
+struct AgentRunPromptPanel {
+    agent_name: String,
+    prompt: String,
+    notice: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct AgentEditorPanel {
+    mode: AgentEditorMode,
+    name: String,
+    description: String,
+    instructions: String,
+    model: String,
+    tools: String,
+    permission_mode: String,
+    background: bool,
+    max_spawn_depth: String,
+    active_field: AgentEditorField,
+    notice: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+enum AgentEditorMode {
+    Create,
+    Update { path: PathBuf },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AgentEditorField {
+    Name,
+    Description,
+    Instructions,
+    Model,
+    Tools,
+    PermissionMode,
+    Background,
+    MaxSpawnDepth,
+}
+
+impl AgentPanel {
+    fn new(running: BottomSelectionPanel, available: BottomSelectionPanel) -> Self {
+        Self {
+            running,
+            available,
+            tab: AgentTab::Running,
+        }
+    }
+
+    fn move_tab(&mut self, direction: isize) {
+        let current = self.tab_index() as isize;
+        let next = (current + direction).rem_euclid(Self::tabs().len() as isize) as usize;
+        self.tab = Self::tabs()[next];
+    }
+
+    fn tab_index(&self) -> usize {
+        Self::tabs()
+            .iter()
+            .position(|tab| *tab == self.tab)
+            .unwrap_or(0)
+    }
+
+    fn tabs() -> &'static [AgentTab] {
+        &[AgentTab::Running, AgentTab::Available]
+    }
+
+    fn selection(&self) -> &BottomSelectionPanel {
+        match self.tab {
+            AgentTab::Running => &self.running,
+            AgentTab::Available => &self.available,
+        }
+    }
+
+    fn selection_mut(&mut self) -> &mut BottomSelectionPanel {
+        match self.tab {
+            AgentTab::Running => &mut self.running,
+            AgentTab::Available => &mut self.available,
+        }
+    }
+}
+
+impl AgentTab {
+    fn label(self) -> &'static str {
+        match self {
+            AgentTab::Running => "Running",
+            AgentTab::Available => "Available",
+        }
+    }
+}
+
+impl AgentAction {
+    fn label(self) -> &'static str {
+        match self {
+            AgentAction::UseAsMain => "Use as main",
+            AgentAction::Run => "Run",
+            AgentAction::View => "View",
+            AgentAction::Update => "Update",
+            AgentAction::Delete => "Delete",
+        }
+    }
+}
+
+impl AgentRunPromptPanel {
+    fn new(agent_name: String) -> Self {
+        Self {
+            agent_name,
+            prompt: String::new(),
+            notice: None,
+        }
+    }
+}
+
+impl AgentEditorPanel {
+    fn create() -> Self {
+        Self {
+            mode: AgentEditorMode::Create,
+            name: String::new(),
+            description: String::new(),
+            instructions: String::new(),
+            model: String::new(),
+            tools: String::new(),
+            permission_mode: String::new(),
+            background: false,
+            max_spawn_depth: "0".to_string(),
+            active_field: AgentEditorField::Name,
+            notice: None,
+        }
+    }
+
+    fn move_field(&mut self, direction: isize) {
+        let fields = AgentEditorField::fields();
+        let current = fields
+            .iter()
+            .position(|field| *field == self.active_field)
+            .unwrap_or(0) as isize;
+        self.active_field =
+            fields[(current + direction).rem_euclid(fields.len() as isize) as usize];
+        self.notice = None;
+    }
+
+    fn insert_char(&mut self, ch: char) {
+        match self.active_field {
+            AgentEditorField::Name => self.name.push(ch),
+            AgentEditorField::Description => self.description.push(ch),
+            AgentEditorField::Instructions => self.instructions.push(ch),
+            AgentEditorField::Model => self.model.push(ch),
+            AgentEditorField::Tools => self.tools.push(ch),
+            AgentEditorField::PermissionMode => self.permission_mode.push(ch),
+            AgentEditorField::MaxSpawnDepth => self.max_spawn_depth.push(ch),
+            AgentEditorField::Background => {
+                if matches!(ch, 'y' | 'Y' | 't' | 'T' | '1') {
+                    self.background = true;
+                } else if matches!(ch, 'n' | 'N' | 'f' | 'F' | '0') {
+                    self.background = false;
+                }
+            }
+        }
+        self.notice = None;
+    }
+
+    fn backspace(&mut self) {
+        match self.active_field {
+            AgentEditorField::Name => {
+                self.name.pop();
+            }
+            AgentEditorField::Description => {
+                self.description.pop();
+            }
+            AgentEditorField::Instructions => {
+                self.instructions.pop();
+            }
+            AgentEditorField::Model => {
+                self.model.pop();
+            }
+            AgentEditorField::Tools => {
+                self.tools.pop();
+            }
+            AgentEditorField::PermissionMode => {
+                self.permission_mode.pop();
+            }
+            AgentEditorField::MaxSpawnDepth => {
+                self.max_spawn_depth.pop();
+            }
+            AgentEditorField::Background => self.background = false,
+        }
+        self.notice = None;
+    }
+}
+
+impl AgentEditorField {
+    fn fields() -> &'static [AgentEditorField] {
+        &[
+            AgentEditorField::Name,
+            AgentEditorField::Description,
+            AgentEditorField::Instructions,
+            AgentEditorField::Model,
+            AgentEditorField::Tools,
+            AgentEditorField::PermissionMode,
+            AgentEditorField::Background,
+            AgentEditorField::MaxSpawnDepth,
+        ]
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            AgentEditorField::Name => "Name",
+            AgentEditorField::Description => "Description",
+            AgentEditorField::Instructions => "Instructions",
+            AgentEditorField::Model => "Model",
+            AgentEditorField::Tools => "Tools",
+            AgentEditorField::PermissionMode => "Permission",
+            AgentEditorField::Background => "Background",
+            AgentEditorField::MaxSpawnDepth => "Max spawn depth",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct BottomSelectionRow {
     label: String,
     description: Option<String>,
@@ -355,6 +611,27 @@ struct BottomSelectionRow {
 #[derive(Debug, Clone)]
 enum BottomSelectionValue {
     Session(String),
+    AgentRunning {
+        id: String,
+        child_session_id: String,
+    },
+    AgentAvailable {
+        name: String,
+        source: AgentSource,
+        path: Option<PathBuf>,
+        shadowed: bool,
+    },
+    AgentAction {
+        name: String,
+        source: AgentSource,
+        path: Option<PathBuf>,
+        shadowed: bool,
+        action: AgentAction,
+    },
+    AgentMainDefault,
+    AgentCreate,
+    AgentSpawningToggle,
+    AgentDiagnostic(String),
     AddProvider,
     FetchAllModels,
     FetchProvider(String),
@@ -387,6 +664,10 @@ enum ModelRowSource {
 enum BottomPanel {
     Help(HelpPanel),
     Sessions(BottomSelectionPanel),
+    Agents(AgentPanel),
+    AgentActions(BottomSelectionPanel),
+    AgentRunPrompt(AgentRunPromptPanel),
+    AgentEditor(AgentEditorPanel),
     Models(ModelPanel),
     Stats(BottomSelectionPanel),
     ProviderWizard(ProviderWizardPanel),
@@ -479,6 +760,17 @@ impl BottomSelectionPanel {
         panel
     }
 
+    fn new_agent_actions(agent_name: &str, rows: Vec<BottomSelectionRow>) -> Self {
+        let mut panel = Self::new(
+            &format!("Agent {agent_name}"),
+            "",
+            "No actions available",
+            rows,
+        );
+        panel.footer = "Enter select  Esc back".to_string();
+        panel
+    }
+
     fn filtered_indices(&self) -> Vec<usize> {
         let query = self.query.trim().to_lowercase();
         if self
@@ -509,6 +801,9 @@ impl BottomSelectionPanel {
         let mut provider_rows = BTreeMap::new();
         for (index, row) in self.rows.iter().enumerate() {
             match &row.value {
+                BottomSelectionValue::AgentCreate => {
+                    include.insert(index, ());
+                }
                 BottomSelectionValue::AddProvider => {
                     include.insert(index, ());
                 }
@@ -692,6 +987,38 @@ impl BottomSelectionValue {
     fn key(&self) -> String {
         match self {
             BottomSelectionValue::Session(id) => format!("session:{id}"),
+            BottomSelectionValue::AgentRunning {
+                child_session_id, ..
+            } => {
+                format!("agent:running:{child_session_id}")
+            }
+            BottomSelectionValue::AgentAvailable {
+                name,
+                source,
+                path,
+                shadowed,
+            } => format!(
+                "agent:available:{name}:{}:{}:{}",
+                source.as_str(),
+                path.as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_default(),
+                shadowed
+            ),
+            BottomSelectionValue::AgentAction {
+                name, action, path, ..
+            } => format!(
+                "agent:action:{name}:{action:?}:{}",
+                path.as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_default()
+            ),
+            BottomSelectionValue::AgentMainDefault => "agent:main-default".to_string(),
+            BottomSelectionValue::AgentCreate => "agent:create".to_string(),
+            BottomSelectionValue::AgentSpawningToggle => "agent:spawning-toggle".to_string(),
+            BottomSelectionValue::AgentDiagnostic(message) => {
+                format!("agent:diagnostic:{message}")
+            }
             BottomSelectionValue::AddProvider => "provider:add".to_string(),
             BottomSelectionValue::FetchAllModels => "fetch:all".to_string(),
             BottomSelectionValue::FetchProvider(provider) => {
@@ -722,9 +1049,17 @@ impl BottomPanel {
     fn selection(&self) -> &BottomSelectionPanel {
         match self {
             BottomPanel::Sessions(panel) | BottomPanel::Stats(panel) => panel,
+            BottomPanel::Agents(panel) => match panel.tab {
+                AgentTab::Running => &panel.running,
+                AgentTab::Available => &panel.available,
+            },
+            BottomPanel::AgentActions(panel) => panel,
             BottomPanel::Models(panel) => &panel.models,
             BottomPanel::Help(_) => {
                 panic!("help panel does not expose a selection panel")
+            }
+            BottomPanel::AgentRunPrompt(_) | BottomPanel::AgentEditor(_) => {
+                panic!("agent form panel does not expose a selection panel")
             }
             BottomPanel::ProviderWizard(_) => {
                 panic!("provider wizard does not expose a selection panel")
@@ -736,9 +1071,17 @@ impl BottomPanel {
     fn selection_mut(&mut self) -> &mut BottomSelectionPanel {
         match self {
             BottomPanel::Sessions(panel) | BottomPanel::Stats(panel) => panel,
+            BottomPanel::Agents(panel) => match panel.tab {
+                AgentTab::Running => &mut panel.running,
+                AgentTab::Available => &mut panel.available,
+            },
+            BottomPanel::AgentActions(panel) => panel,
             BottomPanel::Models(panel) => &mut panel.models,
             BottomPanel::Help(_) => {
                 panic!("help panel does not expose a selection panel")
+            }
+            BottomPanel::AgentRunPrompt(_) | BottomPanel::AgentEditor(_) => {
+                panic!("agent form panel does not expose a selection panel")
             }
             BottomPanel::ProviderWizard(_) => {
                 panic!("provider wizard does not expose a selection panel")
@@ -755,6 +1098,10 @@ impl BottomPanel {
         match self {
             BottomPanel::Sessions(panel) => panel.session_view,
             BottomPanel::Help(_)
+            | BottomPanel::Agents(_)
+            | BottomPanel::AgentActions(_)
+            | BottomPanel::AgentRunPrompt(_)
+            | BottomPanel::AgentEditor(_)
             | BottomPanel::Models(_)
             | BottomPanel::Stats(_)
             | BottomPanel::ProviderWizard(_)

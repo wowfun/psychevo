@@ -13,6 +13,12 @@ impl TuiApp {
         if matches!(ui.bottom_panel, Some(BottomPanel::ProviderWizard(_))) {
             return self.handle_provider_wizard_key(ui, key);
         }
+        if matches!(ui.bottom_panel, Some(BottomPanel::AgentEditor(_))) {
+            return self.handle_agent_editor_key(ui, key);
+        }
+        if matches!(ui.bottom_panel, Some(BottomPanel::Agents(_))) {
+            return self.handle_agent_panel_key(ui, key);
+        }
         if matches!(ui.bottom_panel, Some(BottomPanel::Models(_))) {
             return self.handle_model_panel_key(ui, key);
         }
@@ -121,13 +127,52 @@ impl TuiApp {
                 self.load_current_session_history(ui)?;
                 ui.refresh_sidebar(self);
             }
+            Some(BottomSelectionValue::AgentRunning {
+                id,
+                child_session_id,
+            }) => {
+                let target = if child_session_id.is_empty() {
+                    id
+                } else {
+                    child_session_id
+                };
+                self.open_agent_target_session(ui, &target)?;
+            }
+            Some(BottomSelectionValue::AgentAvailable {
+                name,
+                source,
+                path,
+                shadowed,
+            }) => {
+                ui.bottom_panel = Some(BottomPanel::AgentActions(
+                    self.agent_action_panel(name, source, path, shadowed),
+                ));
+            }
+            Some(BottomSelectionValue::AgentAction {
+                name,
+                source,
+                path,
+                shadowed,
+                action,
+            }) => self.apply_agent_action(ui, name, source, path, shadowed, action)?,
+            Some(BottomSelectionValue::AgentCreate) => {
+                ui.bottom_panel = Some(BottomPanel::AgentEditor(AgentEditorPanel::create()));
+            }
+            Some(BottomSelectionValue::AgentMainDefault) => {
+                self.use_default_main_agent(ui)?;
+            }
+            Some(BottomSelectionValue::AgentSpawningToggle) => {
+                self.toggle_agent_spawning(ui);
+            }
+            Some(BottomSelectionValue::AgentDiagnostic(_)) => {}
             Some(BottomSelectionValue::AddProvider) => {
                 if self.config_path.is_some() {
                     ui.set_bottom_panel_notice(
                         "cannot add provider while PSYCHEVO_CONFIG is active",
                     );
                 } else {
-                    ui.bottom_panel = Some(BottomPanel::ProviderWizard(self.provider_wizard_panel()));
+                    ui.bottom_panel =
+                        Some(BottomPanel::ProviderWizard(self.provider_wizard_panel()));
                 }
             }
             Some(BottomSelectionValue::FetchAllModels) => {
@@ -175,11 +220,545 @@ impl TuiApp {
         Ok(())
     }
 
-    fn handle_model_panel_key(
+    fn handle_agent_panel_key(&mut self, ui: &mut FullscreenUi<'_>, key: KeyEvent) -> Result<bool> {
+        match key.code {
+            KeyCode::Esc => ui.bottom_panel = None,
+            KeyCode::Tab | KeyCode::Right => {
+                if let Some(BottomPanel::Agents(panel)) = &mut ui.bottom_panel {
+                    panel.move_tab(1);
+                }
+            }
+            KeyCode::BackTab | KeyCode::Left => {
+                if let Some(BottomPanel::Agents(panel)) = &mut ui.bottom_panel {
+                    panel.move_tab(-1);
+                }
+            }
+            KeyCode::Enter => {
+                let selected = ui
+                    .bottom_panel
+                    .as_ref()
+                    .and_then(BottomPanel::selected_value);
+                self.apply_bottom_panel_selection(ui, selected)?;
+            }
+            KeyCode::Char('s') | KeyCode::Char('S') => {
+                if let Some(BottomSelectionValue::AgentRunning { id, .. }) = ui
+                    .bottom_panel
+                    .as_ref()
+                    .and_then(BottomPanel::selected_value)
+                {
+                    self.stop_agent_from_panel(ui, &id)?;
+                }
+            }
+            KeyCode::Char('p') | KeyCode::Char('P') => {
+                self.toggle_agent_spawning(ui);
+            }
+            KeyCode::Char('r') | KeyCode::Char('R') => {
+                if let Some(BottomSelectionValue::AgentAvailable { name, .. }) = ui
+                    .bottom_panel
+                    .as_ref()
+                    .and_then(BottomPanel::selected_value)
+                {
+                    ui.bottom_panel =
+                        Some(BottomPanel::AgentRunPrompt(AgentRunPromptPanel::new(name)));
+                }
+            }
+            KeyCode::Char('v') | KeyCode::Char('V') => {
+                if let Some(BottomSelectionValue::AgentAvailable {
+                    name,
+                    source,
+                    path,
+                    shadowed,
+                }) = ui
+                    .bottom_panel
+                    .as_ref()
+                    .and_then(BottomPanel::selected_value)
+                {
+                    self.apply_agent_action(ui, name, source, path, shadowed, AgentAction::View)?;
+                }
+            }
+            KeyCode::Up => {
+                if let Some(BottomPanel::Agents(panel)) = &mut ui.bottom_panel {
+                    panel.selection_mut().move_selection(-1);
+                }
+            }
+            KeyCode::Down => {
+                if let Some(BottomPanel::Agents(panel)) = &mut ui.bottom_panel {
+                    panel.selection_mut().move_selection(1);
+                }
+            }
+            KeyCode::PageUp => {
+                if let Some(BottomPanel::Agents(panel)) = &mut ui.bottom_panel {
+                    panel.selection_mut().move_selection(-8);
+                }
+            }
+            KeyCode::PageDown => {
+                if let Some(BottomPanel::Agents(panel)) = &mut ui.bottom_panel {
+                    panel.selection_mut().move_selection(8);
+                }
+            }
+            KeyCode::Home => {
+                if let Some(BottomPanel::Agents(panel)) = &mut ui.bottom_panel {
+                    panel.selection_mut().move_to(0);
+                }
+            }
+            KeyCode::End => {
+                if let Some(BottomPanel::Agents(panel)) = &mut ui.bottom_panel {
+                    let len = panel.selection().filtered_indices().len();
+                    panel.selection_mut().move_to(len.saturating_sub(1));
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(BottomPanel::Agents(panel)) = &mut ui.bottom_panel {
+                    panel.selection_mut().backspace_query();
+                }
+            }
+            KeyCode::Char(c)
+                if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
+            {
+                if let Some(BottomPanel::Agents(panel)) = &mut ui.bottom_panel {
+                    panel.selection_mut().set_query_char(c);
+                }
+            }
+            _ => {}
+        }
+        Ok(false)
+    }
+
+    async fn handle_agent_run_prompt_key(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         key: KeyEvent,
     ) -> Result<bool> {
+        match key.code {
+            KeyCode::Esc => {
+                ui.bottom_panel = Some(BottomPanel::Agents(self.agent_panel()));
+                if let Some(BottomPanel::Agents(panel)) = &mut ui.bottom_panel {
+                    panel.tab = AgentTab::Available;
+                }
+            }
+            KeyCode::Enter => {
+                let (agent_name, prompt) = match ui.bottom_panel.as_ref() {
+                    Some(BottomPanel::AgentRunPrompt(panel)) => {
+                        (panel.agent_name.clone(), panel.prompt.clone())
+                    }
+                    _ => return Ok(false),
+                };
+                if prompt.trim().is_empty() {
+                    if let Some(BottomPanel::AgentRunPrompt(panel)) = &mut ui.bottom_panel {
+                        panel.notice = Some("prompt is required".to_string());
+                    }
+                    return Ok(false);
+                }
+                self.start_available_agent_run(ui, agent_name, prompt)
+                    .await?;
+            }
+            KeyCode::Backspace => {
+                if let Some(BottomPanel::AgentRunPrompt(panel)) = &mut ui.bottom_panel {
+                    panel.prompt.pop();
+                    panel.notice = None;
+                }
+            }
+            KeyCode::Char(c)
+                if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
+            {
+                if let Some(BottomPanel::AgentRunPrompt(panel)) = &mut ui.bottom_panel {
+                    panel.prompt.push(c);
+                    panel.notice = None;
+                }
+            }
+            _ => {}
+        }
+        Ok(false)
+    }
+
+    fn handle_agent_editor_key(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        key: KeyEvent,
+    ) -> Result<bool> {
+        match key.code {
+            KeyCode::Esc => {
+                ui.bottom_panel = Some(BottomPanel::Agents(self.agent_panel()));
+                if let Some(BottomPanel::Agents(panel)) = &mut ui.bottom_panel {
+                    panel.tab = AgentTab::Available;
+                }
+            }
+            KeyCode::Enter => {
+                let save = ui
+                    .bottom_panel
+                    .as_ref()
+                    .and_then(|panel| match panel {
+                        BottomPanel::AgentEditor(panel) => Some(
+                            panel.active_field
+                                == *AgentEditorField::fields()
+                                    .last()
+                                    .unwrap_or(&AgentEditorField::Background),
+                        ),
+                        _ => None,
+                    })
+                    .unwrap_or(false);
+                if save {
+                    self.save_agent_editor(ui)?;
+                } else if let Some(BottomPanel::AgentEditor(panel)) = &mut ui.bottom_panel {
+                    panel.move_field(1);
+                }
+            }
+            KeyCode::Up => {
+                if let Some(BottomPanel::AgentEditor(panel)) = &mut ui.bottom_panel {
+                    panel.move_field(-1);
+                }
+            }
+            KeyCode::Down | KeyCode::Tab => {
+                if let Some(BottomPanel::AgentEditor(panel)) = &mut ui.bottom_panel {
+                    panel.move_field(1);
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(BottomPanel::AgentEditor(panel)) = &mut ui.bottom_panel {
+                    panel.backspace();
+                }
+            }
+            KeyCode::Char(' ')
+                if ui.bottom_panel.as_ref().is_some_and(|panel| {
+                    matches!(
+                        panel,
+                        BottomPanel::AgentEditor(AgentEditorPanel {
+                            active_field: AgentEditorField::Background,
+                            ..
+                        })
+                    )
+                }) =>
+            {
+                if let Some(BottomPanel::AgentEditor(panel)) = &mut ui.bottom_panel {
+                    panel.background = !panel.background;
+                    panel.notice = None;
+                }
+            }
+            KeyCode::Char(c)
+                if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
+            {
+                if let Some(BottomPanel::AgentEditor(panel)) = &mut ui.bottom_panel {
+                    panel.insert_char(c);
+                }
+            }
+            _ => {}
+        }
+        Ok(false)
+    }
+
+    fn apply_agent_action(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        name: String,
+        source: AgentSource,
+        path: Option<PathBuf>,
+        shadowed: bool,
+        action: AgentAction,
+    ) -> Result<()> {
+        match action {
+            AgentAction::UseAsMain => {
+                self.use_agent_as_main(ui, name, source, path, shadowed)?;
+            }
+            AgentAction::Run => {
+                ui.bottom_panel = Some(BottomPanel::AgentRunPrompt(AgentRunPromptPanel::new(name)));
+            }
+            AgentAction::View => {
+                let text = self.agent_definition_detail_text(&name, path.as_ref(), shadowed)?;
+                ui.bottom_panel = None;
+                ui.push_command_result("/agents".to_string(), Some("Agent"), text, false);
+            }
+            AgentAction::Update => {
+                if !agent_definition_editable(source, path.as_ref()) {
+                    ui.set_bottom_panel_notice("agent definition is read-only");
+                    return Ok(());
+                }
+                let Some(path) = path else {
+                    ui.set_bottom_panel_notice("agent path is unavailable");
+                    return Ok(());
+                };
+                let Some(editor) = self.agent_editor_for_path(&path)? else {
+                    ui.set_bottom_panel_notice("agent definition could not be loaded");
+                    return Ok(());
+                };
+                ui.bottom_panel = Some(BottomPanel::AgentEditor(editor));
+            }
+            AgentAction::Delete => {
+                if !agent_definition_editable(source, path.as_ref()) {
+                    ui.set_bottom_panel_notice("agent definition is read-only");
+                    return Ok(());
+                }
+                let Some(path) = path else {
+                    ui.set_bottom_panel_notice("agent path is unavailable");
+                    return Ok(());
+                };
+                fs::remove_file(&path)?;
+                let mut panel = self.agent_panel();
+                panel.tab = AgentTab::Available;
+                panel.available.notice = Some(format!("deleted {}", path.display()));
+                ui.bottom_panel = Some(BottomPanel::Agents(panel));
+            }
+        }
+        Ok(())
+    }
+
+    fn use_default_main_agent(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
+        if ui.running.is_some() {
+            ui.set_bottom_panel_notice("finish the current turn before switching main agent");
+            return Ok(());
+        }
+        let next_agent = if let Some(session_id) = self.current_session.as_deref() {
+            let store = match SqliteStore::open(&self.db_path) {
+                Ok(store) => store,
+                Err(err) => {
+                    ui.set_bottom_panel_notice(format!("failed to save main agent: {err:#}"));
+                    return Ok(());
+                }
+            };
+            let metadata = match store.session_metadata(session_id) {
+                Ok(metadata) => metadata,
+                Err(err) => {
+                    ui.set_bottom_panel_notice(format!("failed to save main agent: {err:#}"));
+                    return Ok(());
+                }
+            };
+            if let Err(err) = store.set_session_metadata_field(
+                session_id,
+                SESSION_MAIN_AGENT_METADATA_KEY,
+                Some(main_agent_default_metadata()),
+            ) {
+                ui.set_bottom_panel_notice(format!("failed to save main agent: {err:#}"));
+                return Ok(());
+            }
+            metadata
+                .as_ref()
+                .and_then(|metadata| session_base_agent_name_from_metadata(Some(metadata)))
+        } else {
+            None
+        };
+        self.current_agent = next_agent;
+        self.current_agent_explicit_default = true;
+        self.refresh_selected_model();
+        ui.bottom_panel = None;
+        ui.refresh_sidebar(self);
+        Ok(())
+    }
+
+    fn use_agent_as_main(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        name: String,
+        source: AgentSource,
+        path: Option<PathBuf>,
+        shadowed: bool,
+    ) -> Result<()> {
+        if ui.running.is_some() {
+            ui.set_bottom_panel_notice("finish the current turn before switching main agent");
+            return Ok(());
+        }
+        if shadowed {
+            ui.set_bottom_panel_notice("shadowed agent definitions cannot be used as main");
+            return Ok(());
+        }
+        let input = if source == AgentSource::Explicit {
+            path.as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| name.clone())
+        } else {
+            name.clone()
+        };
+        let metadata = main_agent_metadata(&input, &name, source, path.as_ref());
+        if let Some(session_id) = self.current_session.as_deref() {
+            if let Err(err) = SqliteStore::open(&self.db_path).and_then(|store| {
+                store.set_session_metadata_field(
+                    session_id,
+                    SESSION_MAIN_AGENT_METADATA_KEY,
+                    Some(metadata.clone()),
+                )
+            }) {
+                ui.set_bottom_panel_notice(format!("failed to save main agent: {err:#}"));
+                return Ok(());
+            }
+        }
+        self.current_agent = Some(input);
+        self.current_agent_explicit_default = false;
+        self.refresh_selected_model();
+        ui.bottom_panel = None;
+        ui.refresh_sidebar(self);
+        Ok(())
+    }
+
+    fn stop_agent_from_panel(&mut self, ui: &mut FullscreenUi<'_>, id: &str) -> Result<()> {
+        let store = SqliteStore::open(&self.db_path)?;
+        let _ = stop_agent_id_with_grace(id, Some(&store), Duration::from_millis(1200))?;
+        let mut panel = self.agent_panel();
+        panel.tab = AgentTab::Running;
+        panel.running.notice = Some("agent subtree stopped".to_string());
+        ui.bottom_panel = Some(BottomPanel::Agents(panel));
+        Ok(())
+    }
+
+    fn toggle_agent_spawning(&mut self, ui: &mut FullscreenUi<'_>) {
+        let paused = !agent_spawn_paused();
+        set_agent_spawn_paused(paused);
+        let mut panel = self.agent_panel();
+        panel.tab = AgentTab::Running;
+        panel.running.notice = Some(if paused {
+            "new agent spawns paused".to_string()
+        } else {
+            "new agent spawns resumed".to_string()
+        });
+        ui.bottom_panel = Some(BottomPanel::Agents(panel));
+    }
+
+    async fn start_available_agent_run(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        agent_name: String,
+        prompt: String,
+    ) -> Result<()> {
+        let result = spawn_agent_background(AgentSpawnOptions {
+            db_path: self.db_path.clone(),
+            workdir: self.workdir.clone(),
+            parent_session: self.current_session.clone(),
+            prompt,
+            agent: agent_name.clone(),
+            config_path: self.config_path.clone(),
+            model: self.current_model.clone(),
+            reasoning_effort: self.current_variant.clone(),
+            mode: self.current_mode,
+            inherited_env: Some(self.env_map.clone()),
+            selected_parent_agent: self.current_agent.clone(),
+            no_skills: self.no_skills,
+            skill_inputs: self.skill_inputs.clone(),
+        })
+        .await?;
+        self.current_session = Some(result.parent_session_id);
+        self.refresh_current_session_title()?;
+        self.force_new_once = false;
+        ui.bottom_panel = None;
+        ui.clear_transcript();
+        self.load_current_session_history(ui)?;
+        ui.push_status(format!("agent started: {}", result.agent.id));
+        ui.refresh_sidebar(self);
+        Ok(())
+    }
+
+    fn agent_definition_detail_text(
+        &self,
+        name: &str,
+        path: Option<&PathBuf>,
+        shadowed: bool,
+    ) -> Result<String> {
+        let Some(catalog) = self.current_agent_catalog() else {
+            return Ok("Agents disabled.".to_string());
+        };
+        let agents = if shadowed {
+            catalog.shadowed_agents
+        } else {
+            catalog.agents
+        };
+        let agent = agents.into_iter().find(|agent| {
+            agent.name == name
+                && path
+                    .map(|path| agent.file_path.as_ref() == Some(path))
+                    .unwrap_or(true)
+        });
+        let Some(agent) = agent else {
+            return Ok(format!("agent not found: {name}"));
+        };
+        Ok(serde_json::to_string_pretty(
+            &psychevo_runtime::view_agent_value(&agent),
+        )?)
+    }
+
+    fn agent_editor_for_path(&self, path: &PathBuf) -> Result<Option<AgentEditorPanel>> {
+        let Some(catalog) = self.current_agent_catalog() else {
+            return Ok(None);
+        };
+        let agent = catalog
+            .agents
+            .into_iter()
+            .chain(catalog.shadowed_agents.into_iter())
+            .find(|agent| agent.file_path.as_ref() == Some(path));
+        let Some(agent) = agent else {
+            return Ok(None);
+        };
+        let tools = agent
+            .tool_policy
+            .allowed
+            .as_ref()
+            .map(|tools| tools.iter().cloned().collect::<Vec<_>>().join(", "))
+            .unwrap_or_default();
+        let permission_mode = agent
+            .tool_policy
+            .permission_mode
+            .map(|mode| match mode {
+                psychevo_runtime::AgentPermissionMode::Default => "default",
+                psychevo_runtime::AgentPermissionMode::AcceptEdits => "acceptEdits",
+                psychevo_runtime::AgentPermissionMode::Plan => "plan",
+            })
+            .unwrap_or_default()
+            .to_string();
+        Ok(Some(AgentEditorPanel {
+            mode: AgentEditorMode::Update { path: path.clone() },
+            name: agent.name,
+            description: agent.description,
+            instructions: agent.instructions,
+            model: agent.model.unwrap_or_default(),
+            tools,
+            permission_mode,
+            background: agent.background.unwrap_or(false),
+            max_spawn_depth: agent.max_spawn_depth.to_string(),
+            active_field: AgentEditorField::Name,
+            notice: None,
+        }))
+    }
+
+    fn save_agent_editor(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
+        let Some(BottomPanel::AgentEditor(panel)) = ui.bottom_panel.as_ref() else {
+            return Ok(());
+        };
+        let panel = panel.clone();
+        let name = panel.name.trim();
+        if !valid_local_agent_name(name) {
+            ui.set_bottom_panel_notice("name must use lowercase letters, digits, and hyphens");
+            return Ok(());
+        }
+        if panel.description.trim().is_empty() {
+            ui.set_bottom_panel_notice("description is required");
+            return Ok(());
+        }
+        if parse_agent_editor_max_spawn_depth(&panel).is_none() {
+            ui.set_bottom_panel_notice(format!(
+                "max spawn depth must be 0..{}",
+                MAX_AGENT_SPAWN_DEPTH_CAP
+            ));
+            return Ok(());
+        }
+        let path = match &panel.mode {
+            AgentEditorMode::Create => self
+                .workdir
+                .join(".psychevo")
+                .join("agents")
+                .join(format!("{}.md", name)),
+            AgentEditorMode::Update { path } => path.clone(),
+        };
+        if matches!(panel.mode, AgentEditorMode::Create) && path.exists() {
+            ui.set_bottom_panel_notice("agent file already exists");
+            return Ok(());
+        }
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&path, agent_editor_markdown(&panel))?;
+        let mut agent_panel = self.agent_panel();
+        agent_panel.tab = AgentTab::Available;
+        agent_panel.available.notice = Some(format!("saved {}", path.display()));
+        ui.bottom_panel = Some(BottomPanel::Agents(agent_panel));
+        Ok(())
+    }
+
+    fn handle_model_panel_key(&mut self, ui: &mut FullscreenUi<'_>, key: KeyEvent) -> Result<bool> {
         match key.code {
             KeyCode::Esc => {
                 self.model_catalog.abort_unfinished();
@@ -289,11 +868,7 @@ impl TuiApp {
         }
     }
 
-    fn handle_help_panel_key(
-        &mut self,
-        ui: &mut FullscreenUi<'_>,
-        key: KeyEvent,
-    ) -> Result<bool> {
+    fn handle_help_panel_key(&mut self, ui: &mut FullscreenUi<'_>, key: KeyEvent) -> Result<bool> {
         match key.code {
             KeyCode::Esc => {
                 ui.bottom_panel = None;
@@ -669,11 +1244,7 @@ impl TuiApp {
         self.start_model_metadata_refresh_task(false);
     }
 
-    fn start_model_metadata_refresh(
-        &mut self,
-        ui: &mut FullscreenUi<'_>,
-        user_initiated: bool,
-    ) {
+    fn start_model_metadata_refresh(&mut self, ui: &mut FullscreenUi<'_>, user_initiated: bool) {
         if self.model_catalog.metadata_refreshing() {
             if user_initiated {
                 ui.set_bottom_panel_notice("refreshing metadata");
@@ -717,8 +1288,10 @@ impl TuiApp {
         {
             push_model_metadata_target(&mut targets, &mut seen, &model, &self.model_catalog);
         }
-        if let Some((provider, model)) =
-            self.current_model.as_deref().and_then(|value| value.split_once('/'))
+        if let Some((provider, model)) = self
+            .current_model
+            .as_deref()
+            .and_then(|value| value.split_once('/'))
         {
             push_raw_model_metadata_target(
                 &mut targets,
@@ -1042,7 +1615,63 @@ impl TuiApp {
         }
         Ok(false)
     }
+}
 
+fn valid_local_agent_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
+}
+
+fn agent_editor_markdown(panel: &AgentEditorPanel) -> String {
+    let mut out = String::new();
+    out.push_str("---\n");
+    out.push_str(&format!("name: {}\n", yaml_single_quote(panel.name.trim())));
+    out.push_str(&format!(
+        "description: {}\n",
+        yaml_single_quote(panel.description.trim())
+    ));
+    if !panel.model.trim().is_empty() {
+        out.push_str(&format!(
+            "model: {}\n",
+            yaml_single_quote(panel.model.trim())
+        ));
+    }
+    if !panel.tools.trim().is_empty() {
+        out.push_str(&format!(
+            "tools: {}\n",
+            yaml_single_quote(panel.tools.trim())
+        ));
+    }
+    if !panel.permission_mode.trim().is_empty() {
+        out.push_str(&format!(
+            "permissionMode: {}\n",
+            yaml_single_quote(panel.permission_mode.trim())
+        ));
+    }
+    if panel.background {
+        out.push_str("background: true\n");
+    }
+    let max_spawn_depth = parse_agent_editor_max_spawn_depth(panel).unwrap_or(0);
+    out.push_str(&format!("maxSpawnDepth: {max_spawn_depth}\n"));
+    out.push_str("---\n\n");
+    out.push_str(panel.instructions.trim());
+    out.push('\n');
+    out
+}
+
+fn parse_agent_editor_max_spawn_depth(panel: &AgentEditorPanel) -> Option<u8> {
+    let raw = panel.max_spawn_depth.trim();
+    if raw.is_empty() {
+        return Some(0);
+    }
+    let value = raw.parse::<u8>().ok()?;
+    (value <= MAX_AGENT_SPAWN_DEPTH_CAP).then_some(value)
+}
+
+fn yaml_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
 }
 
 fn strip_dotenv_quotes(value: &str) -> &str {

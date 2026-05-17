@@ -1,3 +1,12 @@
+const SESSION_MAIN_AGENT_METADATA_KEY: &str = "main_agent";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum LoadedMainAgent {
+    Missing,
+    Default,
+    Agent(String),
+}
+
 impl TuiApp {
     fn refresh_selected_model(&mut self) {
         self.selected_model = selected_configured_model(&self.run_options(String::new()))
@@ -14,6 +23,84 @@ impl TuiApp {
             .flatten()
             .and_then(|summary| summary.title)
             .filter(|title| !title.trim().is_empty());
+        Ok(())
+    }
+
+    fn refresh_current_session_agent(&mut self) -> Result<()> {
+        let Some(session_id) = self.current_session.as_deref() else {
+            if !self.current_agent_explicit_default && self.current_agent.is_none() {
+                self.current_agent = self.startup_agent.clone();
+            }
+            return Ok(());
+        };
+        let store = SqliteStore::open(&self.db_path)?;
+        let metadata = store.session_metadata(session_id)?;
+        match main_agent_from_session_metadata(metadata.as_ref()) {
+            LoadedMainAgent::Default => {
+                self.current_agent = session_base_agent_name_from_metadata(metadata.as_ref());
+                self.current_agent_explicit_default = true;
+            }
+            LoadedMainAgent::Agent(agent) => {
+                self.current_agent = Some(agent);
+                self.current_agent_explicit_default = false;
+            }
+            LoadedMainAgent::Missing => {
+                if let Some(agent) = session_base_agent_name_from_metadata(metadata.as_ref()) {
+                    self.current_agent = Some(agent);
+                    self.current_agent_explicit_default = true;
+                } else {
+                    self.current_agent = self.startup_agent.clone();
+                    self.current_agent_explicit_default = false;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn session_identity_label(&self) -> Option<String> {
+        let agent = self.current_agent.as_deref()?.trim();
+        if agent.is_empty() {
+            return None;
+        }
+        self.current_agent_display_name(agent)
+    }
+
+    fn current_agent_display_name(&self, input: &str) -> Option<String> {
+        let catalog = self.current_agent_catalog()?;
+        resolve_agent_definition(&catalog, input, &self.workdir, &self.env_map)
+            .ok()
+            .map(|agent| agent.name)
+            .or_else(|| Some(input.to_string()))
+    }
+
+    fn main_agent_metadata_for_input(&self, input: &str) -> Result<Value> {
+        let catalog = self
+            .current_agent_catalog()
+            .ok_or_else(|| anyhow!("agents are disabled"))?;
+        let agent = resolve_agent_definition(&catalog, input, &self.workdir, &self.env_map)?;
+        Ok(main_agent_metadata(
+            input,
+            &agent.name,
+            agent.source,
+            agent.file_path.as_ref(),
+        ))
+    }
+
+    fn persist_main_agent_selection_for_session(&self, session_id: &str) -> Result<()> {
+        if self.current_agent_explicit_default {
+            SqliteStore::open(&self.db_path)?.set_session_metadata_field(
+                session_id,
+                SESSION_MAIN_AGENT_METADATA_KEY,
+                Some(main_agent_default_metadata()),
+            )?;
+        } else if let Some(input) = self.current_agent.as_deref() {
+            let value = self.main_agent_metadata_for_input(input)?;
+            SqliteStore::open(&self.db_path)?.set_session_metadata_field(
+                session_id,
+                SESSION_MAIN_AGENT_METADATA_KEY,
+                Some(value),
+            )?;
+        }
         Ok(())
     }
 
@@ -35,7 +122,160 @@ impl TuiApp {
         self.current_session = Some(id.clone());
         self.force_new_once = false;
         self.refresh_current_session_title()?;
+        self.refresh_current_session_agent()?;
         Ok(id)
+    }
+
+    fn open_agent_target_session(&mut self, ui: &mut FullscreenUi<'_>, target: &str) -> Result<()> {
+        if ui
+            .running
+            .as_ref()
+            .is_some_and(|running| matches!(running.task, RunningTask::UserShell(_)))
+        {
+            ui.push_status("finish the current shell command before opening an agent session");
+            return Ok(());
+        }
+        if let Some(running) = ui.running.take() {
+            let owner_session = self.current_session.clone();
+            let RunningTurn { control, rx, task } = running;
+            match task {
+                RunningTask::Agent(task) => {
+                    ui.auxiliary_agent_tasks.push(AuxiliaryAgentTask {
+                        session_id: owner_session,
+                        rx,
+                        task,
+                    });
+                    ui.finish_turn();
+                }
+                RunningTask::UserShell(task) => {
+                    ui.running = Some(RunningTurn {
+                        control,
+                        rx,
+                        task: RunningTask::UserShell(task),
+                    });
+                }
+            }
+        }
+        let store = SqliteStore::open(&self.db_path)?;
+        let edge = store
+            .find_agent_edge(target)?
+            .ok_or_else(|| anyhow!("agent not found: {target}"))?;
+        store.resume_session(&edge.child_session_id)?;
+        self.current_session = Some(edge.child_session_id.clone());
+        self.force_new_once = false;
+        self.refresh_current_session_title()?;
+        self.refresh_current_session_agent()?;
+        ui.bottom_panel = None;
+        ui.clear_transcript();
+        self.load_current_session_history(ui)?;
+        self.replay_agent_child_event_backlog(ui, &edge.child_session_id);
+        ui.refresh_sidebar(self);
+        Ok(())
+    }
+
+    fn maybe_reload_live_agent_session(&mut self, ui: &mut FullscreenUi<'_>) -> Result<bool> {
+        if ui.running.is_some() {
+            return Ok(false);
+        }
+        let Some(session_id) = self.current_session.clone() else {
+            return Ok(false);
+        };
+        let store = SqliteStore::open(&self.db_path)?;
+        let Some(edge) = store.find_agent_edge(&session_id)? else {
+            return Ok(false);
+        };
+        if edge.status != psychevo_runtime::AgentEdgeStatus::Open {
+            return Ok(false);
+        }
+        let message_count = store.load_tui_message_summaries(&session_id)?.len();
+        if message_count <= ui.loaded_session_message_count {
+            return Ok(false);
+        }
+        ui.clear_transcript();
+        self.load_current_session_history(ui)?;
+        Ok(true)
+    }
+
+    fn open_agent_parent_session(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
+        let Some(current) = self.current_session.clone() else {
+            return Ok(());
+        };
+        let store = SqliteStore::open(&self.db_path)?;
+        let Some(edge) = store.find_agent_edge(&current)? else {
+            ui.push_status("no parent agent session");
+            return Ok(());
+        };
+        self.open_session_direct(ui, &edge.parent_session_id)
+    }
+
+    fn open_agent_sibling_session(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        direction: isize,
+    ) -> Result<()> {
+        let Some(current) = self.current_session.clone() else {
+            return Ok(());
+        };
+        let store = SqliteStore::open(&self.db_path)?;
+        let Some(edge) = store.find_agent_edge(&current)? else {
+            ui.push_status("no sibling agent sessions");
+            return Ok(());
+        };
+        let siblings = store.list_agent_edges_for_parent(&edge.parent_session_id)?;
+        if siblings.len() <= 1 {
+            ui.push_status("no sibling agent sessions");
+            return Ok(());
+        }
+        let current_index = siblings
+            .iter()
+            .position(|sibling| sibling.child_session_id == current)
+            .unwrap_or(0) as isize;
+        let next = (current_index + direction).rem_euclid(siblings.len() as isize) as usize;
+        self.open_session_direct(ui, &siblings[next].child_session_id)
+    }
+
+    fn open_session_direct(&mut self, ui: &mut FullscreenUi<'_>, session_id: &str) -> Result<()> {
+        if ui.running.is_some() {
+            ui.push_status("finish the current turn before switching sessions");
+            return Ok(());
+        }
+        SqliteStore::open(&self.db_path)?.resume_session(session_id)?;
+        self.current_session = Some(session_id.to_string());
+        self.force_new_once = false;
+        self.refresh_current_session_title()?;
+        self.refresh_current_session_agent()?;
+        ui.bottom_panel = None;
+        ui.clear_transcript();
+        self.load_current_session_history(ui)?;
+        self.replay_agent_child_event_backlog(ui, session_id);
+        ui.refresh_sidebar(self);
+        Ok(())
+    }
+
+    fn replay_agent_child_event_backlog(&mut self, ui: &mut FullscreenUi<'_>, session_id: &str) {
+        let Some(events) = ui.agent_child_event_backlog.remove(session_id) else {
+            return;
+        };
+        for event in events {
+            ui.apply_stream_event(event, self.thinking_visible, self.debug);
+        }
+        ui.follow_transcript_if_needed();
+    }
+
+    fn agent_breadcrumb_status(&self) -> Option<String> {
+        let session_id = self.current_session.as_deref()?;
+        let store = SqliteStore::open(&self.db_path).ok()?;
+        let edge = store.find_agent_edge(session_id).ok().flatten()?;
+        let sibling_count = store
+            .list_agent_edges_for_parent(&edge.parent_session_id)
+            .map(|siblings| siblings.len())
+            .unwrap_or(0);
+        let mut parts = vec![format!("parent {}", short_session(&edge.parent_session_id))];
+        if sibling_count > 1 {
+            parts.push("siblings Alt+Up/Right".to_string());
+        }
+        parts.push("Alt+P".to_string());
+        Some(parts.join(" · "))
     }
 
     fn set_model_and_variant_no_print(
@@ -198,16 +438,19 @@ impl TuiApp {
 
     fn load_current_session_history(&self, ui: &mut FullscreenUi<'_>) -> Result<()> {
         let Some(session_id) = self.current_session.as_deref() else {
+            ui.loaded_session_message_count = 0;
             ui.replace_session_history_prompts(Vec::new());
             ui.refresh_sidebar(self);
             return Ok(());
         };
         let store = SqliteStore::open(&self.db_path)?;
-        ui.sidebar_context_limit = store
-            .session_metadata(session_id)?
-            .and_then(|metadata| metadata.get("context_limit").and_then(Value::as_u64));
+        let metadata = store.session_metadata(session_id)?;
+        ui.sidebar_context_limit =
+            session_context_limit_with_parent_fallback(&store, session_id, metadata.as_ref())?;
+        let summaries = store.load_tui_message_summaries(session_id)?;
+        ui.loaded_session_message_count = summaries.len();
         let mut history_prompts = Vec::new();
-        for summary in store.load_tui_message_summaries(session_id)? {
+        for summary in summaries {
             let value = serde_json::to_value(summary.message)?;
             if value.get("role").and_then(Value::as_str) == Some("user")
                 && let Some(text) = user_text_from_message(&value, summary.metadata.as_ref())
@@ -226,4 +469,93 @@ impl TuiApp {
         ui.refresh_sidebar(self);
         Ok(())
     }
+}
+
+fn session_context_limit_with_parent_fallback(
+    store: &SqliteStore,
+    session_id: &str,
+    metadata: Option<&Value>,
+) -> Result<Option<u64>> {
+    if let Some(limit) = metadata.and_then(session_context_limit) {
+        return Ok(Some(limit));
+    }
+    let Some(edge) = store.find_agent_edge(session_id)? else {
+        return Ok(None);
+    };
+    let parent_metadata = store.session_metadata(&edge.parent_session_id)?;
+    Ok(parent_metadata.as_ref().and_then(session_context_limit))
+}
+
+fn session_context_limit(metadata: &Value) -> Option<u64> {
+    metadata.get("context_limit").and_then(Value::as_u64)
+}
+
+fn main_agent_default_metadata() -> Value {
+    serde_json::json!({"mode": "default"})
+}
+
+fn main_agent_metadata(
+    input: &str,
+    name: &str,
+    source: AgentSource,
+    path: Option<&PathBuf>,
+) -> Value {
+    serde_json::json!({
+        "mode": "agent",
+        "input": input,
+        "name": name,
+        "source": source.as_str(),
+        "path": path,
+    })
+}
+
+fn main_agent_from_session_metadata(metadata: Option<&Value>) -> LoadedMainAgent {
+    let Some(metadata) = metadata else {
+        return LoadedMainAgent::Missing;
+    };
+    if let Some(main_agent) = metadata.get(SESSION_MAIN_AGENT_METADATA_KEY) {
+        if main_agent
+            .get("mode")
+            .and_then(Value::as_str)
+            .is_some_and(|mode| mode == "default")
+            || main_agent.is_null()
+        {
+            return LoadedMainAgent::Default;
+        }
+        if let Some(input) = main_agent
+            .get("input")
+            .and_then(Value::as_str)
+            .or_else(|| main_agent.get("name").and_then(Value::as_str))
+            .or_else(|| main_agent.get("path").and_then(Value::as_str))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return LoadedMainAgent::Agent(input.to_string());
+        }
+    }
+    if let Some(name) = metadata
+        .get("selected_agent")
+        .and_then(|value| {
+            value
+                .get("input")
+                .or_else(|| value.get("name"))
+                .or_else(|| value.get("path"))
+        })
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return LoadedMainAgent::Agent(name.to_string());
+    }
+    LoadedMainAgent::Missing
+}
+
+fn session_base_agent_name_from_metadata(metadata: Option<&Value>) -> Option<String> {
+    metadata?
+        .get("agent")
+        .and_then(|value| value.get("name"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
 }

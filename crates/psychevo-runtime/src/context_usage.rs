@@ -594,6 +594,8 @@ fn configured_context_limit(
         include_reasoning: false,
         mode: RunMode::Build,
         inherited_env: options.inherited_env.clone(),
+        agent: None,
+        no_agents: false,
         no_skills: false,
         skill_inputs: Vec::new(),
     };

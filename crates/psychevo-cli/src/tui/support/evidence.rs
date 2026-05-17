@@ -83,6 +83,7 @@ fn tool_title(tool: &str, value: &Value) -> String {
             }
         }
         "write" | "edit" => format!("Updated {}", path_from(args, result).unwrap_or("files")),
+        "Agent" => agent_tool_title(value).unwrap_or_else(|| "Agent".to_string()),
         other => format!("Tool {other}"),
     }
 }
@@ -119,6 +120,7 @@ fn active_tool_title(tool: &str, value: &Value) -> String {
         "write" | "edit" => path_from_args(args)
             .map(|path| format!("Updating {path}"))
             .unwrap_or_else(|| "Updating files".to_string()),
+        "Agent" => active_agent_tool_title(value),
         other => format!("Using {other}"),
     }
 }
@@ -174,6 +176,11 @@ fn tool_output_text(value: &Value) -> (String, Option<String>) {
     if let Some(timeout) = bash_timeout_output_text(value) {
         return collapse_ledger_body(&timeout);
     }
+    if value.get("tool_name").and_then(Value::as_str) == Some("Agent")
+        && let Some(output) = agent_tool_output_text(value)
+    {
+        return output;
+    }
     let result = value.get("result").unwrap_or(&Value::Null);
     let full = result
         .get("content")
@@ -184,6 +191,217 @@ fn tool_output_text(value: &Value) -> (String, Option<String>) {
         .map(str::to_string)
         .unwrap_or_else(|| format_tool_summary(value));
     collapse_ledger_body(&full)
+}
+
+fn active_agent_tool_title(value: &Value) -> String {
+    let args = value.get("args").unwrap_or(&Value::Null);
+    let agent = agent_name_from(args, &Value::Null);
+    let detail = agent_detail_from(args, &Value::Null);
+    agent_title(agent, detail)
+}
+
+fn agent_tool_title(value: &Value) -> Option<String> {
+    let args = value.get("args").unwrap_or(&Value::Null);
+    let result = value.get("result").unwrap_or(&Value::Null);
+    if result.is_null() && args.is_null() {
+        return None;
+    }
+    let agent = agent_name_from(args, result);
+    let detail = agent_detail_from(args, result);
+    Some(agent_title(agent, detail))
+}
+
+fn agent_session_start_title(value: &Value) -> Option<String> {
+    let agent = value
+        .get("agent_name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let detail = value
+        .get("agent_description")
+        .and_then(Value::as_str)
+        .or_else(|| value.get("task_name").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    Some(agent_title(agent, detail))
+}
+
+fn agent_name_from<'a>(args: &'a Value, result: &'a Value) -> &'a str {
+    result
+        .get("agent_name")
+        .and_then(Value::as_str)
+        .or_else(|| result.get("agent_type").and_then(Value::as_str))
+        .or_else(|| args.get("agent_type").and_then(Value::as_str))
+        .or_else(|| args.get("name").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("agent")
+}
+
+fn agent_detail_from<'a>(args: &'a Value, result: &'a Value) -> Option<&'a str> {
+    result
+        .get("agent_description")
+        .and_then(Value::as_str)
+        .or_else(|| args.get("description").and_then(Value::as_str))
+        .or_else(|| result.get("task_name").and_then(Value::as_str))
+        .or_else(|| args.get("task_name").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn agent_title(agent: &str, detail: Option<&str>) -> String {
+    match detail {
+        Some(detail) => format!("{agent}({})", single_line_preview(detail, 96)),
+        None => agent.to_string(),
+    }
+}
+
+fn single_line_preview(value: &str, max_chars: usize) -> String {
+    let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    truncate_chars(&compact, max_chars)
+}
+
+fn agent_tool_output_text(value: &Value) -> Option<(String, Option<String>)> {
+    let result = value.get("result")?;
+    let status = result
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("completed");
+    let outcome = result
+        .get("outcome")
+        .and_then(Value::as_str)
+        .unwrap_or(status);
+    let tool_calls = result
+        .get("child_session")
+        .and_then(|summary| summary.get("tool_call_count"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0)
+        .max(0);
+    let token_suffix = result
+        .get("child_session")
+        .and_then(agent_child_latest_tokens)
+        .map(|tokens| format!(" · {} tokens", format_compact_count(tokens)));
+    let preview = if result.get("background").and_then(Value::as_bool) == Some(true)
+        && status == "running"
+    {
+        "Started in background".to_string()
+    } else if status == "completed" || outcome == "normal" {
+        format!(
+            "Done ({}{}{})",
+            tool_calls,
+            format!(" {}", pluralize(tool_calls, "tool use")),
+            token_suffix.unwrap_or_default()
+        )
+    } else {
+        format!(
+            "{} ({}{}{})",
+            status_label(status, outcome),
+            tool_calls,
+            format!(" {}", pluralize(tool_calls, "tool use")),
+            token_suffix.unwrap_or_default()
+        )
+    };
+
+    let prompt = result
+        .get("task")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let response = result
+        .get("final_answer")
+        .or_else(|| result.get("summary"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| result.get("error").and_then(Value::as_str));
+    let session = result
+        .get("session_id")
+        .or_else(|| result.get("child_session_id"))
+        .and_then(Value::as_str);
+
+    let mut full_parts = Vec::new();
+    if let Some(prompt) = prompt {
+        full_parts.push(format!("Prompt:\n{prompt}"));
+    }
+    if let Some(response) = response {
+        full_parts.push(format!("Response:\n{response}"));
+    }
+    if let Some(session) = session {
+        full_parts.push(format!("Session: {}", short_session(session)));
+    }
+    let full = (!full_parts.is_empty())
+        .then(|| full_parts.join("\n\n"))
+        .filter(|full| full != &preview);
+    Some((preview, full))
+}
+
+fn pluralize(count: i64, singular: &str) -> String {
+    if count == 1 {
+        singular.to_string()
+    } else {
+        format!("{singular}s")
+    }
+}
+
+fn agent_child_latest_tokens(summary: &Value) -> Option<u64> {
+    summary
+        .get("latest_total_tokens")
+        .and_then(Value::as_u64)
+        .or_else(|| summary.get("latest_usage").and_then(usage_total_tokens))
+}
+
+fn usage_total_tokens(usage: &Value) -> Option<u64> {
+    usage
+        .get("total_tokens")
+        .and_then(Value::as_u64)
+        .or_else(|| {
+            let mut total = 0u64;
+            let mut any = false;
+            for key in [
+                "input_tokens",
+                "output_tokens",
+                "reasoning_tokens",
+                "cached_tokens",
+                "cache_write_tokens",
+            ] {
+                if let Some(value) = usage.get(key).and_then(Value::as_u64) {
+                    total = total.saturating_add(value);
+                    any = true;
+                }
+            }
+            any.then_some(total)
+        })
+}
+
+fn format_compact_count(value: u64) -> String {
+    if value >= 1_000_000 {
+        format!("{:.1}M", value as f64 / 1_000_000.0)
+    } else if value >= 1_000 {
+        format!("{:.1}k", value as f64 / 1_000.0)
+    } else {
+        value.to_string()
+    }
+}
+
+fn status_label(status: &str, outcome: &str) -> String {
+    match (status, outcome) {
+        ("errored", _) | (_, "failed") => "Failed".to_string(),
+        ("interrupted", _) | (_, "aborted") | (_, "interrupted") => "Interrupted".to_string(),
+        ("shutdown", _) | (_, "shutdown") => "Closed".to_string(),
+        ("running", _) => "Running".to_string(),
+        _ => status.replace('_', " "),
+    }
+}
+
+fn agent_target_from_tool_event(value: &Value) -> Option<String> {
+    let result = value.get("result")?;
+    result
+        .get("session_id")
+        .or_else(|| result.get("child_session_id"))
+        .and_then(Value::as_str)
+        .or_else(|| result.get("id").and_then(Value::as_str))
+        .or_else(|| result.get("task_name").and_then(Value::as_str))
+        .map(str::to_string)
 }
 
 fn bash_timeout_output_text(value: &Value) -> Option<String> {

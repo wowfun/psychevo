@@ -14,7 +14,7 @@ use crate::messages::{
 use crate::store::{ContextEvidenceInput, SqliteStore};
 use crate::types::{
     MessageAccounting, ModelMetadata, PromptDisplayMetadata, RunStreamEvent, RunStreamSink,
-    SmokeControl, TUI_DISPLAY_METADATA_KEY,
+    SelectedAgent, SmokeControl, TUI_DISPLAY_METADATA_KEY,
 };
 
 pub(crate) struct PersistenceSink {
@@ -34,6 +34,7 @@ pub(crate) struct PersistenceSink {
     pub(crate) model_metadata: ModelMetadata,
     pub(crate) context_recorder: Option<ContextRecorder>,
     pub(crate) prompt_display: Option<PromptDisplayMetadata>,
+    pub(crate) selected_agent: Option<SelectedAgent>,
 }
 
 impl EventSink for PersistenceSink {
@@ -52,6 +53,7 @@ impl EventSink for PersistenceSink {
         let model_metadata = self.model_metadata.clone();
         let context_recorder = self.context_recorder.clone();
         let prompt_display = self.prompt_display.clone();
+        let selected_agent = self.selected_agent.clone();
         let started = self.started;
         let tool_elapsed_ms = Arc::clone(&self.tool_elapsed_ms);
         Box::pin(async move {
@@ -72,6 +74,7 @@ impl EventSink for PersistenceSink {
                 elapsed,
                 &tool_elapsed_ms,
                 reasoning_effort.as_deref(),
+                selected_agent.as_ref(),
             );
             if let AgentEvent::MessageEnd {
                 message: Message::Assistant { .. },
@@ -192,6 +195,7 @@ fn annotate_sink_event(
     elapsed: Duration,
     tool_elapsed_ms: &Arc<Mutex<BTreeMap<String, u64>>>,
     reasoning_effort: Option<&str>,
+    selected_agent: Option<&SelectedAgent>,
 ) -> AgentEvent {
     match event {
         AgentEvent::MessageEnd {
@@ -201,7 +205,8 @@ fn annotate_sink_event(
         } => {
             let metadata = match &message {
                 Message::Assistant { .. } => {
-                    add_assistant_metadata(metadata, elapsed, reasoning_effort)
+                    let metadata = add_assistant_metadata(metadata, elapsed, reasoning_effort);
+                    add_selected_agent_metadata(metadata, selected_agent)
                 }
                 Message::ToolResult { tool_call_id, .. } => {
                     let elapsed_ms = tool_elapsed_ms
@@ -223,6 +228,26 @@ fn annotate_sink_event(
         }
         other => other,
     }
+}
+
+fn add_selected_agent_metadata(
+    metadata: Option<Value>,
+    selected_agent: Option<&SelectedAgent>,
+) -> Option<Value> {
+    let Some(selected_agent) = selected_agent else {
+        return metadata;
+    };
+    let mut object = match metadata {
+        Some(Value::Object(object)) => object,
+        Some(other) => {
+            let mut object = serde_json::Map::new();
+            object.insert("provider_metadata".to_string(), other);
+            object
+        }
+        None => serde_json::Map::new(),
+    };
+    object.insert("selected_agent".to_string(), json!(selected_agent));
+    Some(Value::Object(object))
 }
 
 fn prompt_user_metadata(

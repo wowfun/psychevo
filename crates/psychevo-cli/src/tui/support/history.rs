@@ -26,10 +26,19 @@ struct UserShellDisplay {
     outcome: String,
 }
 
+#[derive(Debug, Clone)]
+struct AgentNotificationProjection {
+    text: String,
+    target: Option<String>,
+}
+
 fn user_display_from_message(
     message: &Value,
     metadata: Option<&Value>,
 ) -> Option<UserPromptDisplay> {
+    if agent_notification_present(metadata) {
+        return None;
+    }
     if user_shell_display_from_message(message, metadata).is_some() {
         return None;
     }
@@ -45,6 +54,81 @@ fn user_display_from_message(
         text,
         attachment_meta,
     })
+}
+
+fn agent_notification_display(metadata: Option<&Value>) -> Option<String> {
+    agent_notification_projection(metadata).map(|projection| projection.text)
+}
+
+fn agent_notification_target(metadata: Option<&Value>) -> Option<String> {
+    agent_notification_projection(metadata).and_then(|projection| projection.target)
+}
+
+fn agent_notification_present(metadata: Option<&Value>) -> bool {
+    metadata
+        .and_then(|metadata| metadata.get("agent_notification"))
+        .is_some()
+}
+
+fn agent_notification_projection(metadata: Option<&Value>) -> Option<AgentNotificationProjection> {
+    let notification = metadata?.get("agent_notification")?;
+    if notification
+        .get("hidden")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    let target = notification
+        .get("child_session_id")
+        .and_then(Value::as_str)
+        .or_else(|| notification.get("agent_id").and_then(Value::as_str))
+        .map(str::to_string);
+    let kind = notification
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("agent_notification");
+    if kind == "missing_required_agent_call" {
+        let agents = notification
+            .get("agents")
+            .and_then(Value::as_array)
+            .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "))
+            .unwrap_or_default();
+        return Some(AgentNotificationProjection {
+            text: format!("required agent was not called: {agents}"),
+            target: None,
+        });
+    }
+    let name = notification
+        .get("agent_name")
+        .and_then(Value::as_str)
+        .unwrap_or("agent");
+    if kind == "agent_started" {
+        let summary = notification
+            .get("summary")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let text = if summary.trim().is_empty() {
+            format!("Agent `{name}` started in the background.")
+        } else {
+            format!("Agent `{name}` started in the background.\n\n{summary}")
+        };
+        return Some(AgentNotificationProjection { text, target });
+    }
+    let outcome = notification
+        .get("outcome")
+        .and_then(Value::as_str)
+        .unwrap_or("completed");
+    let summary = notification
+        .get("summary")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let text = if summary.trim().is_empty() {
+        format!("Agent `{name}` completed with outcome {outcome}.")
+    } else {
+        format!("Agent `{name}` completed with outcome {outcome}.\n\n{summary}")
+    };
+    Some(AgentNotificationProjection { text, target })
 }
 
 fn user_text_from_message(message: &Value, metadata: Option<&Value>) -> Option<String> {

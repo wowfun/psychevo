@@ -59,6 +59,8 @@ pub(crate) enum SlashCommandAction {
     Undo,
     Redo,
     Skills,
+    Agents,
+    Fork,
     SkillInvoke,
     Upcoming,
 }
@@ -368,6 +370,38 @@ pub(crate) const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         common: false,
     },
     SlashCommandSpec {
+        canonical: "/agents",
+        aliases: &[],
+        usage: "/agents",
+        summary: "list available agents",
+        help_detail: Some(
+            "Lists discovered agent definitions and current-session child agent runs; it does not call a provider.",
+        ),
+        surface: TUI_SLASH,
+        group: COMMANDS,
+        argument_kind: CommandArgumentKind::None,
+        output_kind: CommandOutputKind::TranscriptStatusBlock,
+        status: CommandStatus::Active,
+        action: SlashCommandAction::Agents,
+        common: false,
+    },
+    SlashCommandSpec {
+        canonical: "/fork",
+        aliases: &[],
+        usage: "/fork <prompt>",
+        summary: "delegate a forked agent",
+        help_detail: Some(
+            "Submits a request for the main agent to call the Agent tool with fork_context=true in the background.",
+        ),
+        surface: TUI_SLASH,
+        group: COMMANDS,
+        argument_kind: CommandArgumentKind::FreeFormTrailingText,
+        output_kind: CommandOutputKind::PromptSubmission,
+        status: CommandStatus::Active,
+        action: SlashCommandAction::Fork,
+        common: false,
+    },
+    SlashCommandSpec {
         canonical: "/compact",
         aliases: &[],
         usage: "/compact",
@@ -494,6 +528,17 @@ pub(crate) const CLI_COMMANDS: &[CliCommandSpec] = &[
         status: CommandStatus::Active,
     },
     CliCommandSpec {
+        canonical: "agent",
+        aliases: &[],
+        usage: "pevo agent <command>",
+        summary: "manage agents",
+        surface: PEVO_CLI,
+        group: COMMANDS,
+        argument_kind: CommandArgumentKind::RequiredValue,
+        output_kind: CommandOutputKind::ProcessResult,
+        status: CommandStatus::Active,
+    },
+    CliCommandSpec {
         canonical: "skill",
         aliases: &[],
         usage: "pevo skill <command>",
@@ -608,8 +653,8 @@ mod tests {
         assert_eq!(
             names,
             [
-                "init", "run", "smoke", "tui", "skill", "session", "model", "config", "auth",
-                "stats", "context",
+                "init", "run", "smoke", "tui", "agent", "skill", "session", "model", "config",
+                "auth", "stats", "context",
             ]
         );
         assert!(

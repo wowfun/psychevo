@@ -54,6 +54,14 @@ fn current_skill_token(textarea: &TextArea<'_>) -> Option<SkillToken> {
     skill_token_on_line(row, line, col)
 }
 
+fn current_agent_token(textarea: &TextArea<'_>) -> Option<AgentToken> {
+    let cursor = textarea.cursor();
+    let row = cursor.0;
+    let col = cursor.1;
+    let line = textarea.lines().get(row)?;
+    agent_token_on_line(row, line, col)
+}
+
 fn skill_token_on_line(row: usize, line: &str, cursor_col: usize) -> Option<SkillToken> {
     let chars = line.chars().collect::<Vec<_>>();
     let cursor_col = cursor_col.min(chars.len());
@@ -118,6 +126,41 @@ fn file_token_on_line(row: usize, line: &str, cursor_col: usize) -> Option<FileT
     None
 }
 
+fn agent_token_on_line(row: usize, line: &str, cursor_col: usize) -> Option<AgentToken> {
+    let chars = line.chars().collect::<Vec<_>>();
+    let cursor_col = cursor_col.min(chars.len());
+    let mut start = 0usize;
+    while start < chars.len() {
+        while start < chars.len() && chars[start].is_whitespace() {
+            start += 1;
+        }
+        if start >= chars.len() {
+            break;
+        }
+        let mut end = start;
+        while end < chars.len() && !chars[end].is_whitespace() {
+            end += 1;
+        }
+        if cursor_col >= start
+            && cursor_col <= end
+            && chars[start] == '@'
+            && chars[start + 1..end]
+                .iter()
+                .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || *ch == '-')
+        {
+            let query = chars[start + 1..end].iter().collect::<String>();
+            return Some(AgentToken {
+                row,
+                start_col: start,
+                end_col: end,
+                query,
+            });
+        }
+        start = end.saturating_add(1);
+    }
+    None
+}
+
 fn replace_current_file_token(textarea: &mut TextArea<'_>, path: &str) -> bool {
     let Some(token) = current_file_token(textarea) else {
         return false;
@@ -150,6 +193,13 @@ fn replace_current_skill_token(textarea: &mut TextArea<'_>, name: &str) -> bool 
         return false;
     };
     replace_token_range(textarea, token.row, token.start_col, token.end_col, &format!("${name}"))
+}
+
+fn replace_current_agent_token(textarea: &mut TextArea<'_>, name: &str) -> bool {
+    let Some(token) = current_agent_token(textarea) else {
+        return false;
+    };
+    replace_token_range(textarea, token.row, token.start_col, token.end_col, &format!("@{name}"))
 }
 
 fn replace_token_range(

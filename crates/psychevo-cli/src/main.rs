@@ -10,6 +10,7 @@ mod env;
 mod tui;
 
 use args::{Cli, Commands};
+use commands::agent::run_agent_command;
 use commands::auth::run_auth_command;
 use commands::config::run_config_command;
 use commands::context::run_context_command;
@@ -41,6 +42,7 @@ async fn run() -> Result<ExitCode> {
     let cli = Cli::parse();
     match cli.command {
         Commands::Init(args) => run_init_command(args),
+        Commands::Agent(args) => run_agent_command(args).await,
         Commands::Skill(args) => run_skills_command(args),
         Commands::Smoke(args) => run_smoke_command(args).await,
         Commands::Run(args) => run_run_command(args).await,

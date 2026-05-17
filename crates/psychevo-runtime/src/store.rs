@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -7,6 +8,7 @@ use std::time::Duration;
 use psychevo_agent_core::{AssistantBlock, Message, TerminalReason, now_ms};
 use psychevo_ai::Outcome;
 use rusqlite::{Connection, OptionalExtension, params};
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
@@ -18,7 +20,7 @@ use crate::types::{
     TuiMessageSummary,
 };
 
-const SQLITE_SCHEMA_VERSION: i64 = 7;
+const SQLITE_SCHEMA_VERSION: i64 = 8;
 const SESSION_REVERT_METADATA_KEY: &str = "revert";
 const MESSAGE_UNDO_METADATA_KEY: &str = "undo";
 const MESSAGE_PRE_SNAPSHOT_KEY: &str = "pre_snapshot";
@@ -78,6 +80,7 @@ include!("store/sessions.rs");
 include!("store/undo_state.rs");
 include!("store/messages.rs");
 include!("store/context_evidence.rs");
+include!("store/agents.rs");
 include!("store/lifecycle.rs");
 include!("store/retry.rs");
 include!("store/schema_helpers.rs");

@@ -70,7 +70,10 @@ impl TuiApp {
                 if outcome.should_quit {
                     break;
                 }
-            } else if ui.running.is_some() {
+            } else if ui.running.is_some()
+                || !ui.auxiliary_agent_tasks.is_empty()
+                || !ui.auxiliary_shell_tasks.is_empty()
+            {
                 needs_draw = true;
             }
         }
@@ -145,6 +148,7 @@ impl TuiApp {
                 ui.sync_pending_images_with_textarea();
                 ui.clear_slash_menu_dismissal();
                 ui.sync_file_popup(&self.workdir);
+                self.sync_agent_popup(ui);
                 self.sync_skill_popup(ui);
                 Ok(FullscreenEventOutcome {
                     needs_draw: true,
@@ -188,9 +192,33 @@ impl TuiApp {
             self.copy_latest_answer_markdown(ui);
             return Ok(false);
         }
+        if key.modifiers.contains(KeyModifiers::ALT) {
+            match key.code {
+                KeyCode::Left => {
+                    self.open_agent_parent_session(ui)?;
+                    return Ok(false);
+                }
+                KeyCode::Char('p') | KeyCode::Char('P') => {
+                    self.open_agent_parent_session(ui)?;
+                    return Ok(false);
+                }
+                KeyCode::Up => {
+                    self.open_agent_sibling_session(ui, -1)?;
+                    return Ok(false);
+                }
+                KeyCode::Right => {
+                    self.open_agent_sibling_session(ui, 1)?;
+                    return Ok(false);
+                }
+                _ => {}
+            }
+        }
         if key.code == KeyCode::Esc && ui.selection.anchor.is_some() {
             ui.clear_selection();
             return Ok(false);
+        }
+        if matches!(ui.bottom_panel, Some(BottomPanel::AgentRunPrompt(_))) {
+            return self.handle_agent_run_prompt_key(ui, key).await;
         }
         if ui.bottom_panel.is_some() {
             return self.handle_bottom_panel_key(ui, key);
@@ -205,12 +233,62 @@ impl TuiApp {
                 }
                 KeyCode::Up => ui.move_selection(-1),
                 KeyCode::Down => ui.move_selection(1),
-                KeyCode::Enter | KeyCode::Char(' ') => ui.toggle_selected(),
+                KeyCode::Enter => {
+                    if let Some(target) = ui.selected_agent_target() {
+                        self.open_agent_target_session(ui, &target)?;
+                    } else {
+                        ui.toggle_selected();
+                    }
+                }
+                KeyCode::Char(' ') => {
+                    if ui
+                        .selected_target
+                        .is_some_and(|target| ui.target_toggleable(target))
+                    {
+                        ui.toggle_selected();
+                    }
+                }
+                KeyCode::Char('o') | KeyCode::Char('O') => {
+                    if let Some(target) = ui.selected_agent_target() {
+                        self.open_agent_target_session(ui, &target)?;
+                    }
+                }
                 KeyCode::PageUp => ui.scroll_transcript(-6),
                 KeyCode::PageDown => ui.scroll_transcript(6),
                 _ => {}
             }
             return Ok(false);
+        }
+        if ui.agent_popup_visible() {
+            match key.code {
+                KeyCode::Up => {
+                    ui.move_agent_popup_selection(-1);
+                    return Ok(false);
+                }
+                KeyCode::Down => {
+                    ui.move_agent_popup_selection(1);
+                    return Ok(false);
+                }
+                KeyCode::Home => {
+                    ui.set_agent_popup_selection(0);
+                    return Ok(false);
+                }
+                KeyCode::End => {
+                    ui.set_agent_popup_selection(FILE_POPUP_MAX_ROWS.saturating_sub(1));
+                    return Ok(false);
+                }
+                KeyCode::Esc => {
+                    ui.dismiss_agent_popup();
+                    return Ok(false);
+                }
+                KeyCode::Tab | KeyCode::Enter if ui.selected_agent_name().is_some() => {
+                    ui.insert_selected_agent_marker();
+                    self.sync_agent_popup(ui);
+                    self.sync_skill_popup(ui);
+                    return Ok(false);
+                }
+                _ => {}
+            }
         }
         if ui.file_popup_visible() {
             match key.code {
@@ -237,12 +315,14 @@ impl TuiApp {
                 KeyCode::Tab => {
                     ui.insert_selected_file_path();
                     ui.sync_file_popup(&self.workdir);
+                    self.sync_agent_popup(ui);
                     self.sync_skill_popup(ui);
                     return Ok(false);
                 }
                 KeyCode::Enter if ui.selected_file_path().is_some() => {
                     ui.insert_selected_file_path();
                     ui.sync_file_popup(&self.workdir);
+                    self.sync_agent_popup(ui);
                     self.sync_skill_popup(ui);
                     return Ok(false);
                 }
@@ -273,6 +353,7 @@ impl TuiApp {
                 }
                 KeyCode::Tab | KeyCode::Enter if ui.selected_skill_name().is_some() => {
                     ui.insert_selected_skill_marker();
+                    self.sync_agent_popup(ui);
                     self.sync_skill_popup(ui);
                     return Ok(false);
                 }
@@ -282,6 +363,7 @@ impl TuiApp {
         let slash_input = textarea_text(&ui.textarea);
         let slash_count = if ui.shell_mode
             || ui.current_file_token().is_some()
+            || ui.current_agent_token().is_some()
             || ui.current_skill_token().is_some()
             || ui.slash_menu_dismissed(&slash_input)
         {
@@ -328,6 +410,8 @@ impl TuiApp {
             }
             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 ui.close_file_popup();
+                ui.close_agent_popup();
+                ui.close_skill_popup();
                 ui.history_search = true;
                 ui.history_query.clear();
                 ui.push_status("history search");
@@ -341,7 +425,9 @@ impl TuiApp {
                 ui.clear_slash_menu_dismissal();
             }
             KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                ui.push_status("transcript review reserved");
+                ui.focus = FocusMode::Transcript;
+                ui.ensure_selection();
+                ui.push_status("transcript review");
             }
             KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 let visible = !ui.sidebar_enabled();
@@ -376,6 +462,7 @@ impl TuiApp {
                     ) {
                         if let Some(name) = slash_skill_name(&command) {
                             ui.insert_skill_marker(&name);
+                            self.sync_agent_popup(ui);
                             self.sync_skill_popup(ui);
                             return Ok(false);
                         }
@@ -388,6 +475,7 @@ impl TuiApp {
                 ui.slash_menu_selected = 0;
                 ui.clear_slash_menu_dismissal();
                 ui.close_file_popup();
+                ui.close_agent_popup();
                 ui.close_skill_popup();
                 if self.submit_fullscreen_text(ui, submitted, true).await? {
                     return Ok(true);
@@ -425,6 +513,7 @@ impl TuiApp {
                     ui.textarea = new_textarea();
                     ui.clear_slash_menu_dismissal();
                     ui.close_file_popup();
+                    ui.close_agent_popup();
                     ui.close_skill_popup();
                     return Ok(false);
                 }
@@ -432,6 +521,7 @@ impl TuiApp {
                     ui.clear_composer();
                     ui.clear_slash_menu_dismissal();
                     ui.close_file_popup();
+                    ui.close_agent_popup();
                     ui.close_skill_popup();
                     return Ok(false);
                 }
@@ -443,6 +533,7 @@ impl TuiApp {
                 ui.exit_shell_mode();
                 ui.clear_slash_menu_dismissal();
                 ui.close_file_popup();
+                ui.close_agent_popup();
                 ui.close_skill_popup();
                 return Ok(false);
             }
@@ -463,6 +554,7 @@ impl TuiApp {
         }
         ui.sync_pending_images_with_textarea();
         ui.sync_file_popup(&self.workdir);
+        self.sync_agent_popup(ui);
         self.sync_skill_popup(ui);
         Ok(false)
     }
@@ -490,16 +582,24 @@ impl TuiApp {
                         .as_ref()
                         .and_then(BottomPanel::selected_value);
                     self.apply_bottom_panel_selection(ui, selected)?;
+                } else if let Some(index) = ui.agent_popup_hit(mouse.column, mouse.row) {
+                    ui.clear_selection();
+                    ui.set_agent_popup_selection(index);
+                    ui.insert_selected_agent_marker();
+                    self.sync_agent_popup(ui);
+                    self.sync_skill_popup(ui);
                 } else if let Some(index) = ui.file_popup_hit(mouse.column, mouse.row) {
                     ui.clear_selection();
                     ui.set_file_popup_selection(index);
                     ui.insert_selected_file_path();
                     ui.sync_file_popup(&self.workdir);
+                    self.sync_agent_popup(ui);
                     self.sync_skill_popup(ui);
                 } else if let Some(index) = ui.skill_popup_hit(mouse.column, mouse.row) {
                     ui.clear_selection();
                     ui.set_skill_popup_selection(index);
                     ui.insert_selected_skill_marker();
+                    self.sync_agent_popup(ui);
                     self.sync_skill_popup(ui);
                 } else if let Some(index) = ui.slash_menu_hit(mouse.column, mouse.row) {
                     ui.clear_selection();
@@ -520,6 +620,7 @@ impl TuiApp {
                         ui.clear_composer();
                         ui.slash_menu_selected = 0;
                         ui.clear_slash_menu_dismissal();
+                        ui.close_agent_popup();
                         ui.close_skill_popup();
                         ui.push_submitted_history(submitted.clone());
                         match parse_slash_command(&submitted) {
@@ -576,7 +677,11 @@ impl TuiApp {
                     .flatten();
                 if !self.start_copy_selected_text(ui) {
                     if let Some(target) = click_target {
-                        ui.toggle_target(target);
+                        if let Some(agent_target) = ui.agent_target_for_target(target) {
+                            self.open_agent_target_session(ui, &agent_target)?;
+                        } else {
+                            ui.toggle_target(target);
+                        }
                     }
                     ui.clear_selection();
                 }

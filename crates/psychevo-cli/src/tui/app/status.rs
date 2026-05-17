@@ -21,6 +21,8 @@ impl TuiApp {
             include_reasoning: false,
             mode: self.current_mode,
             inherited_env: Some(self.env_map.clone()),
+            agent: self.current_agent.clone(),
+            no_agents: self.no_agents,
             no_skills: self.no_skills,
             skill_inputs: self.skill_inputs.clone(),
         }
@@ -165,6 +167,11 @@ impl TuiApp {
             format!("model: {}", self.model_display_value()),
             self.variant_line(),
             format!("mode: {}", self.current_mode.as_str()),
+            format!(
+                "agent: {}",
+                self.current_agent.as_deref().unwrap_or("(default)")
+            ),
+            format!("agents: {}", if self.no_agents { "off" } else { "on" }),
             format!("debug: {}", on_off(self.debug)),
         ]
     }

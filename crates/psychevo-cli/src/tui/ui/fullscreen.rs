@@ -27,10 +27,12 @@ impl<'a> FullscreenUi<'a> {
             turn_terminal_message: None,
             turn_had_reasoning: false,
             history_prompt_started_ms: None,
+            loaded_session_message_count: 0,
             thinking_visible: app.thinking_visible,
             raw_visible: app.raw_visible,
             running: None,
             auxiliary_agent_tasks: Vec::new(),
+            agent_child_event_backlog: BTreeMap::new(),
             auxiliary_shell_tasks: Vec::new(),
             pending_auxiliary_shell_commands: VecDeque::new(),
             running_started: None,
@@ -74,6 +76,8 @@ impl<'a> FullscreenUi<'a> {
             last_slash_menu_areas: Vec::new(),
             file_search: FileSearchState::new(),
             last_file_popup_areas: Vec::new(),
+            agent_search: AgentSearchState::default(),
+            last_agent_popup_areas: Vec::new(),
             skill_search: SkillSearchState::default(),
             last_skill_popup_areas: Vec::new(),
             last_bottom_panel_areas: Vec::new(),
@@ -127,6 +131,7 @@ impl<'a> FullscreenUi<'a> {
         self.last_context_snapshot = None;
         self.sidebar_cost_nanodollars = None;
         self.history_prompt_started_ms = None;
+        self.loaded_session_message_count = 0;
         self.turn_had_reasoning = false;
         self.pending_images.clear();
         self.ephemeral_status = None;
@@ -138,7 +143,10 @@ impl<'a> FullscreenUi<'a> {
 
     fn set_thinking_visible(&mut self, visible: bool) {
         self.thinking_visible = visible;
-        if self.selected_target.is_some_and(|target| !self.target_visible(target)) {
+        if self
+            .selected_target
+            .is_some_and(|target| !self.target_visible(target))
+        {
             self.selected_row = None;
             self.selected_target = None;
             self.ensure_selection();
@@ -169,7 +177,9 @@ impl<'a> FullscreenUi<'a> {
 
     fn max_transcript_scroll(&self) -> u16 {
         if self.transcript_layout_matches_viewport() {
-            return self.transcript_layout.max_scroll(self.last_transcript_height);
+            return self
+                .transcript_layout
+                .max_scroll(self.last_transcript_height);
         }
         let total = transcript_total_height_for_ui(self, self.last_transcript_width)
             .min(usize::from(u16::MAX)) as u16;
@@ -302,7 +312,9 @@ impl<'a> FullscreenUi<'a> {
         self.transcript
             .iter()
             .rev()
-            .find(|row| row.kind == TranscriptKind::Answer && row_visible(row, self.thinking_visible))
+            .find(|row| {
+                row.kind == TranscriptKind::Answer && row_visible(row, self.thinking_visible)
+            })
             .and_then(|row| {
                 let text = row.full_text.as_deref().unwrap_or(&row.text);
                 (!text.trim().is_empty()).then(|| text.to_string())
@@ -332,7 +344,12 @@ impl<'a> FullscreenUi<'a> {
             .unwrap_or_default()
         {
             "user" => {
-                if let Some(display) = user_shell_display_from_message(message, metadata) {
+                if let Some(display) = agent_notification_display(metadata) {
+                    let mut row =
+                        TranscriptRow::with_title(TranscriptKind::Status, "Agent", display);
+                    row.agent_target = agent_notification_target(metadata);
+                    self.transcript.push(row);
+                } else if let Some(display) = user_shell_display_from_message(message, metadata) {
                     self.push_history_user_shell(display);
                 } else if let Some(display) = user_display_from_message(message, metadata) {
                     self.push_user_with_attachment_meta(display.text, display.attachment_meta);
@@ -341,16 +358,17 @@ impl<'a> FullscreenUi<'a> {
             }
             "assistant" => {
                 let tool_calls = history_tool_calls_from_message(message);
-                let has_reasoning = if let Some(reasoning) = assistant_reasoning_from_message(message) {
-                    self.transcript.push(TranscriptRow::with_title(
-                        TranscriptKind::Thinking,
-                        "Thinking",
-                        reasoning,
-                    ));
-                    true
-                } else {
-                    false
-                };
+                let has_reasoning =
+                    if let Some(reasoning) = assistant_reasoning_from_message(message) {
+                        self.transcript.push(TranscriptRow::with_title(
+                            TranscriptKind::Thinking,
+                            "Thinking",
+                            reasoning,
+                        ));
+                        true
+                    } else {
+                        false
+                    };
                 let has_answer = if let Some(text) = assistant_text_from_message(message) {
                     self.transcript.push(TranscriptRow::with_title(
                         TranscriptKind::Answer,
@@ -375,14 +393,13 @@ impl<'a> FullscreenUi<'a> {
                 }
                 if ((has_answer && visible_answer_message_receives_meta(message))
                     || (has_reasoning && reasoning_only_message_receives_meta(message)))
-                    && let Some(meta) =
-                        history_meta_text(
-                            message,
-                            usage,
-                            metadata,
-                            accounting,
-                            self.history_prompt_started_ms,
-                        )
+                    && let Some(meta) = history_meta_text(
+                        message,
+                        usage,
+                        metadata,
+                        accounting,
+                        self.history_prompt_started_ms,
+                    )
                 {
                     self.transcript
                         .push(TranscriptRow::with_title(TranscriptKind::Meta, "", meta));
@@ -415,8 +432,8 @@ impl<'a> FullscreenUi<'a> {
         );
         row.full_text = full;
         row.interrupted = tool_event_interrupted(&value);
-        row.failed = value.get("outcome").and_then(Value::as_str) != Some("normal")
-            && !row.interrupted;
+        row.failed =
+            value.get("outcome").and_then(Value::as_str) != Some("normal") && !row.interrupted;
         row.user_shell = true;
         self.transcript.push(row);
     }
@@ -427,6 +444,7 @@ impl<'a> FullscreenUi<'a> {
         let mut row =
             TranscriptRow::with_title(evidence_kind(&call.name), call.active_title, "preparing");
         row.tool_call_id = Some(call.id.clone());
+        row.tool_name = Some(call.name.clone());
         row.tool_started = Some(history_tool_started_instant(message));
         let idx = self.transcript.len();
         self.transcript.push(row);
@@ -446,6 +464,7 @@ impl<'a> FullscreenUi<'a> {
             "interrupted",
         );
         row.tool_call_id = Some(call.id);
+        row.tool_name = Some(call.name);
         row.tool_elapsed = metadata_elapsed_duration(metadata);
         row.interrupted = true;
         self.transcript.push(row);
@@ -470,8 +489,7 @@ impl<'a> FullscreenUi<'a> {
             .unwrap_or("");
         let result = serde_json::from_str::<Value>(content)
             .unwrap_or_else(|_| serde_json::json!({ "content": content }));
-        let outcome = if is_error
-            && result.get("error").and_then(Value::as_str) == Some("aborted")
+        let outcome = if is_error && result.get("error").and_then(Value::as_str) == Some("aborted")
         {
             "aborted"
         } else if is_error {
@@ -485,22 +503,29 @@ impl<'a> FullscreenUi<'a> {
             "outcome": outcome
         });
         let interrupted = tool_event_interrupted(&value);
-        let title = self
-            .history_tool_titles
-            .get(tool_call_id)
-            .cloned()
-            .unwrap_or_else(|| tool_title(tool, &value));
+        let title = if tool == "Agent" {
+            tool_title(tool, &value)
+        } else {
+            self.history_tool_titles
+                .get(tool_call_id)
+                .cloned()
+                .unwrap_or_else(|| tool_title(tool, &value))
+        };
         let idx = self.tool_rows.get(&tool_id_key(tool_call_id)).copied();
         let mut row = idx
             .and_then(|idx| self.transcript.get(idx).cloned())
             .unwrap_or_else(|| TranscriptRow::with_title(evidence_kind(tool), title.clone(), ""));
         row.kind = evidence_kind(tool);
         row.title = title;
+        row.tool_name = Some(tool.to_string());
         row.interrupted = interrupted;
         row.failed = is_error && !interrupted;
-        row.tool_elapsed =
-            metadata_elapsed_duration(metadata).or_else(|| row.tool_started.map(|started| started.elapsed()));
+        row.tool_elapsed = metadata_elapsed_duration(metadata)
+            .or_else(|| row.tool_started.map(|started| started.elapsed()));
         row.tool_started = None;
+        if tool == "Agent" {
+            row.agent_target = agent_target_from_tool_event(&value);
+        }
         if interrupted {
             row.text = "interrupted".to_string();
             row.full_text = None;
@@ -610,6 +635,7 @@ impl<'a> FullscreenUi<'a> {
         };
         self.slash_menu_selected = 0;
         self.clear_slash_menu_dismissal();
+        self.close_agent_popup();
         self.close_skill_popup();
         true
     }
@@ -633,6 +659,7 @@ impl<'a> FullscreenUi<'a> {
         self.reset_history_navigation();
         self.clear_slash_menu_dismissal();
         self.close_file_popup();
+        self.close_agent_popup();
         self.close_skill_popup();
     }
 
@@ -744,6 +771,65 @@ impl<'a> FullscreenUi<'a> {
 
     fn current_skill_token(&self) -> Option<SkillToken> {
         current_skill_token(&self.textarea)
+    }
+
+    fn current_agent_token(&self) -> Option<AgentToken> {
+        current_agent_token(&self.textarea)
+    }
+
+    fn sync_agent_popup(&mut self, matches: Vec<AgentSearchMatch>) {
+        let token = self.current_agent_token();
+        self.agent_search.sync(token.as_ref(), matches);
+    }
+
+    fn agent_popup_visible(&self) -> bool {
+        self.agent_search.popup.is_some()
+    }
+
+    fn agent_popup_height(&self) -> u16 {
+        self.agent_search.height()
+    }
+
+    fn close_agent_popup(&mut self) {
+        self.agent_search.close();
+        self.last_agent_popup_areas.clear();
+    }
+
+    fn dismiss_agent_popup(&mut self) {
+        let query = self.current_agent_token().map(|token| token.query);
+        self.agent_search.dismiss(query);
+        self.last_agent_popup_areas.clear();
+    }
+
+    fn selected_agent_name(&self) -> Option<String> {
+        self.agent_search.selected_name()
+    }
+
+    fn move_agent_popup_selection(&mut self, direction: isize) {
+        self.agent_search.move_selection(direction);
+    }
+
+    fn set_agent_popup_selection(&mut self, index: usize) {
+        self.agent_search.set_selection(index);
+    }
+
+    fn insert_selected_agent_marker(&mut self) {
+        let Some(name) = self.selected_agent_name() else {
+            return;
+        };
+        if replace_current_agent_token(&mut self.textarea, &name) {
+            self.agent_search.close();
+            self.agent_search.dismissed_query = None;
+            self.last_agent_popup_areas.clear();
+            self.clear_slash_menu_dismissal();
+        }
+    }
+
+    fn agent_popup_hit(&self, column: u16, row: u16) -> Option<usize> {
+        self.last_agent_popup_areas
+            .iter()
+            .find(|(_, area)| rect_contains(*area, column, row))
+            .map(|(index, _)| *index)
     }
 
     fn sync_skill_popup(&mut self, matches: Vec<SkillSearchMatch>) {
@@ -907,6 +993,8 @@ impl<'a> FullscreenUi<'a> {
         if let Some(panel) = &mut self.bottom_panel {
             match panel {
                 BottomPanel::ProviderWizard(panel) => panel.notice = Some(text.into()),
+                BottomPanel::AgentRunPrompt(panel) => panel.notice = Some(text.into()),
+                BottomPanel::AgentEditor(panel) => panel.notice = Some(text.into()),
                 _ => panel.selection_mut().notice = Some(text.into()),
             }
         }
@@ -917,11 +1005,7 @@ impl<'a> FullscreenUi<'a> {
         self.push_user_with_images(text, &[]);
     }
 
-    fn push_user_with_attachment_meta(
-        &mut self,
-        text: String,
-        attachment_meta: Option<String>,
-    ) {
+    fn push_user_with_attachment_meta(&mut self, text: String, attachment_meta: Option<String>) {
         self.transcript
             .push(TranscriptRow::with_title(TranscriptKind::Prompt, "", text));
         if let Some(meta) = attachment_meta {
@@ -1040,11 +1124,9 @@ impl<'a> FullscreenUi<'a> {
 
     fn insert_evidence_row(&mut self, row: TranscriptRow) -> usize {
         let index = if let Some(assistant_row) = self.assistant_row
-            && self
-                .transcript
-                .get(assistant_row)
-                .is_some_and(|row| row.kind == TranscriptKind::Answer && !row.text.trim().is_empty())
-        {
+            && self.transcript.get(assistant_row).is_some_and(|row| {
+                row.kind == TranscriptKind::Answer && !row.text.trim().is_empty()
+            }) {
             assistant_row.saturating_add(1)
         } else {
             self.assistant_row
@@ -1132,6 +1214,9 @@ impl<'a> FullscreenUi<'a> {
                 false
             }
             RunStreamEvent::Event(value) => self.apply_value_event(&value, debug),
+            RunStreamEvent::Scoped { event, .. } => {
+                self.apply_stream_event(*event, thinking_visible, debug)
+            }
         }
     }
 
@@ -1235,6 +1320,10 @@ impl<'a> FullscreenUi<'a> {
                 active_tool_frame_requested
             }
             "tool_call_pending" => self.apply_streaming_tool_calls(value),
+            "agent_session_start" => {
+                self.apply_agent_session_start(value);
+                false
+            }
             "tool_execution_start" => {
                 let user_shell = value.get("source").and_then(Value::as_str) == Some("user_shell");
                 let tool = value
@@ -1259,14 +1348,24 @@ impl<'a> FullscreenUi<'a> {
                         );
                         row.tool_call_id =
                             (!tool_call_id.is_empty()).then_some(tool_call_id.clone());
+                        row.tool_name = Some(tool.to_string());
                         row.tool_started = Some(tool_started_instant(value));
                         self.insert_evidence_row(row)
                     });
                 self.remove_turn_meta();
                 let row = &mut self.transcript[idx];
                 row.kind = evidence_kind(tool);
+                row.tool_name = Some(tool.to_string());
                 row.title = active_tool_title(tool, value);
-                row.text = "running".to_string();
+                if tool == "Agent" {
+                    row.text = agent_child_status_text("Running", 0, None);
+                    row.full_text = None;
+                    row.agent_child_tool_uses = 0;
+                    row.agent_child_latest_tokens = None;
+                    row.agent_child_live_text.clear();
+                } else {
+                    row.text = "running".to_string();
+                }
                 row.failed = false;
                 row.interrupted = false;
                 row.user_shell = user_shell;
@@ -1307,20 +1406,38 @@ impl<'a> FullscreenUi<'a> {
                     .get(&tool_id_key(tool_call_id))
                     .copied()
                     .unwrap_or_else(|| {
-                        self.insert_evidence_row(TranscriptRow::with_title(
+                        let mut row = TranscriptRow::with_title(
                             evidence_kind(tool),
                             tool_title(tool, value),
                             String::new(),
-                        ))
+                        );
+                        row.tool_name = Some(tool.to_string());
+                        self.insert_evidence_row(row)
                     });
                 let row = &mut self.transcript[idx];
                 row.kind = evidence_kind(tool);
+                row.tool_name = Some(tool.to_string());
                 row.title = tool_title_for_update(tool, value, &row.title);
                 row.failed = failed;
                 row.interrupted = interrupted;
                 row.user_shell = user_shell;
                 row.tool_elapsed = completed_live_tool_elapsed(row, Some(value));
                 row.tool_started = None;
+                if tool == "Agent" {
+                    row.agent_target = agent_target_from_tool_event(value);
+                    if let Some(summary) = value
+                        .get("result")
+                        .and_then(|result| result.get("child_session"))
+                    {
+                        row.agent_child_tool_uses = summary
+                            .get("tool_call_count")
+                            .and_then(Value::as_i64)
+                            .unwrap_or(row.agent_child_tool_uses)
+                            .max(0);
+                        row.agent_child_latest_tokens =
+                            agent_child_latest_tokens(summary).or(row.agent_child_latest_tokens);
+                    }
+                }
                 if interrupted {
                     row.text = "interrupted".to_string();
                     row.full_text = None;
@@ -1389,11 +1506,79 @@ impl<'a> FullscreenUi<'a> {
             active_tool_title(tool, &serde_json::json!({ "args": Value::Null })),
             "preparing",
         );
+        row.tool_name = Some(tool.to_string());
         row.tool_started = Some(Instant::now());
         let idx = self.insert_evidence_row(row);
         self.tool_rows.insert(key, idx);
         self.remove_turn_meta();
         true
+    }
+
+    fn apply_agent_session_start(&mut self, value: &Value) {
+        let Some(child_session_id) = value
+            .get("child_session_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return;
+        };
+        let index = value
+            .get("tool_call_id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+            .and_then(|id| self.tool_rows.get(&tool_id_key(id)).copied())
+            .or_else(|| {
+                self.transcript.iter().position(|row| {
+                    row.tool_name.as_deref() == Some("Agent")
+                        && active_tool_row(row)
+                        && row.agent_target.is_none()
+                })
+            });
+        let Some(index) = index else {
+            return;
+        };
+        let row = &mut self.transcript[index];
+        row.tool_name = Some("Agent".to_string());
+        row.agent_target = Some(child_session_id.to_string());
+        if let Some(title) = agent_session_start_title(value) {
+            row.title = title;
+        }
+    }
+
+    fn apply_agent_child_preview_event(
+        &mut self,
+        child_session_id: &str,
+        event: &RunStreamEvent,
+    ) -> bool {
+        let Some(row) = self
+            .transcript
+            .iter_mut()
+            .find(|row| row.agent_target.as_deref() == Some(child_session_id))
+        else {
+            return false;
+        };
+        let mut changed = false;
+        match event {
+            RunStreamEvent::ReasoningDelta { text } => {
+                if append_agent_child_live_fragment(
+                    &mut row.agent_child_live_text,
+                    "Thinking",
+                    text,
+                ) {
+                    changed = true;
+                }
+            }
+            RunStreamEvent::ReasoningEnd => {}
+            RunStreamEvent::Event(value) => {
+                changed |= apply_agent_child_value_preview(row, value);
+            }
+            RunStreamEvent::Scoped { .. } => {}
+        }
+        if changed {
+            refresh_agent_child_preview(row);
+        }
+        changed
     }
 
     fn remove_provisional_tool_intent(&mut self, tool: &str) {
@@ -1437,6 +1622,7 @@ impl<'a> FullscreenUi<'a> {
             self.tool_rows.remove(&intent_key);
             let row = &mut self.transcript[idx];
             row.kind = evidence_kind(&call.tool_name);
+            row.tool_name = Some(call.tool_name.clone());
             row.title = active_tool_title(&call.tool_name, &value);
             if row.text.is_empty() {
                 row.text = "preparing".to_string();
@@ -1455,6 +1641,7 @@ impl<'a> FullscreenUi<'a> {
                 active_tool_title(&call.tool_name, &value),
                 "preparing",
             );
+            row.tool_name = Some(call.tool_name.clone());
             row.tool_call_id = call.id.clone();
             row.tool_started = Some(Instant::now());
             active_tool_frame_requested = true;
@@ -1645,9 +1832,9 @@ impl<'a> FullscreenUi<'a> {
 
     fn has_active_tool_for(&self, tool: &str) -> bool {
         let kind = evidence_kind(tool);
-        self.transcript
-            .iter()
-            .any(|row| row.kind == kind && active_tool_row(row))
+        self.transcript.iter().any(|row| {
+            row.kind == kind && row.tool_name.as_deref() == Some(tool) && active_tool_row(row)
+        })
     }
 
     fn remove_orphan_provisional_tool_intents(&mut self, tool: &str, keep_index: Option<usize>) {
@@ -1660,6 +1847,7 @@ impl<'a> FullscreenUi<'a> {
             .filter_map(|(index, row)| {
                 (Some(index) != keep_index
                     && row.kind == kind
+                    && row.tool_name.as_deref() == Some(tool)
                     && row.title == fallback_title
                     && row.tool_call_id.is_none()
                     && active_tool_row(row))
@@ -1692,7 +1880,9 @@ impl<'a> FullscreenUi<'a> {
             .copied()
             .find(|target| self.target_toggleable(*target))
             .or_else(|| targets.last().copied());
-        self.selected_row = self.selected_target.and_then(|target| self.target_row_index(target));
+        self.selected_row = self
+            .selected_target
+            .and_then(|target| self.target_row_index(target));
     }
 
     fn move_selection(&mut self, direction: isize) {
@@ -1775,8 +1965,33 @@ impl<'a> FullscreenUi<'a> {
 
     fn target_row_index(&self, target: TranscriptHitTarget) -> Option<usize> {
         match target {
-            TranscriptHitTarget::Row(row_id) => self.transcript.iter().position(|row| row.id == row_id),
+            TranscriptHitTarget::Row(row_id) => {
+                self.transcript.iter().position(|row| row.id == row_id)
+            }
+            TranscriptHitTarget::AgentOpen(row_id) => {
+                self.transcript.iter().position(|row| row.id == row_id)
+            }
         }
+    }
+
+    fn agent_target_for_target(&self, target: TranscriptHitTarget) -> Option<String> {
+        match target {
+            TranscriptHitTarget::AgentOpen(row_id) => self
+                .transcript
+                .iter()
+                .find(|row| row.id == row_id)
+                .and_then(|row| row.agent_target.clone()),
+            TranscriptHitTarget::Row(_) => None,
+        }
+    }
+
+    fn selected_agent_target(&self) -> Option<String> {
+        let target = self.selected_target?;
+        let index = self.target_row_index(target)?;
+        self.transcript
+            .get(index)
+            .filter(|row| row.agent_target.is_some())
+            .and_then(|row| row.agent_target.clone())
     }
 
     fn set_selected_target(&mut self, target: Option<TranscriptHitTarget>) {
@@ -1791,12 +2006,13 @@ impl<'a> FullscreenUi<'a> {
                 .iter()
                 .find(|row| row.id == row_id)
                 .is_some_and(TranscriptRow::is_expandable),
+            TranscriptHitTarget::AgentOpen(_) => false,
         }
     }
 
     fn toggle_target(&mut self, target: TranscriptHitTarget) {
         match target {
-            TranscriptHitTarget::Row(row_id) => {
+            TranscriptHitTarget::Row(row_id) | TranscriptHitTarget::AgentOpen(row_id) => {
                 if let Some(row) = self.transcript.iter_mut().find(|row| row.id == row_id)
                     && row_visible(row, self.thinking_visible)
                     && row.is_expandable()
@@ -1814,6 +2030,118 @@ impl<'a> FullscreenUi<'a> {
             .iter()
             .find_map(|(target, area)| rect_contains(*area, column, row).then_some(*target))
     }
+}
+
+fn apply_agent_child_value_preview(row: &mut TranscriptRow, value: &Value) -> bool {
+    match value
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+    {
+        "tool_execution_start" => {
+            let tool = value
+                .get("tool_name")
+                .and_then(Value::as_str)
+                .unwrap_or("tool");
+            append_agent_child_live_line(
+                &mut row.agent_child_live_text,
+                active_tool_title(tool, value),
+            );
+            true
+        }
+        "tool_execution_end" => {
+            row.agent_child_tool_uses = row.agent_child_tool_uses.saturating_add(1);
+            let tool = value
+                .get("tool_name")
+                .and_then(Value::as_str)
+                .unwrap_or("tool");
+            append_agent_child_live_line(&mut row.agent_child_live_text, tool_title(tool, value));
+            true
+        }
+        "message_end" => {
+            if let Some(usage) = value.get("usage") {
+                row.agent_child_latest_tokens =
+                    usage_total_tokens(usage).or(row.agent_child_latest_tokens);
+            }
+            if let Some(text) =
+                assistant_text_from_event(value).filter(|text| !text.trim().is_empty())
+            {
+                append_agent_child_live_line(
+                    &mut row.agent_child_live_text,
+                    format!("Response: {}", single_line_preview(&text, 160)),
+                );
+            }
+            true
+        }
+        "agent_end" => true,
+        _ => false,
+    }
+}
+
+fn append_agent_child_live_line(buffer: &mut String, line: impl AsRef<str>) {
+    let line = line.as_ref().trim();
+    if line.is_empty() {
+        return;
+    }
+    if !buffer.is_empty() {
+        buffer.push('\n');
+    }
+    buffer.push_str(line);
+}
+
+fn append_agent_child_live_fragment(buffer: &mut String, label: &str, fragment: &str) -> bool {
+    if fragment.trim().is_empty() {
+        return false;
+    }
+    let prefix = format!("{label}: ");
+    let last_line_start = buffer.rfind('\n').map(|index| index + 1).unwrap_or(0);
+    if buffer
+        .get(last_line_start..)
+        .is_some_and(|line| line.starts_with(&prefix))
+    {
+        buffer.push_str(fragment);
+        return true;
+    }
+    append_agent_child_live_line(buffer, format!("{prefix}{}", fragment.trim_start()));
+    true
+}
+
+fn refresh_agent_child_preview(row: &mut TranscriptRow) {
+    let status = if active_tool_row(row) {
+        "Running"
+    } else if row.interrupted {
+        "Interrupted"
+    } else if row.failed {
+        "Failed"
+    } else {
+        "Done"
+    };
+    let status = agent_child_status_text(
+        status,
+        row.agent_child_tool_uses,
+        row.agent_child_latest_tokens,
+    );
+    if row.agent_child_live_text.trim().is_empty() {
+        row.text = status;
+        row.full_text = None;
+        return;
+    }
+    let full = format!("{status}\n{}", row.agent_child_live_text);
+    let (collapsed, full_text) = collapse_ledger_body(&full);
+    row.text = collapsed;
+    row.full_text = full_text;
+}
+
+fn agent_child_status_text(status: &str, tool_uses: i64, tokens: Option<u64>) -> String {
+    let token_suffix = tokens
+        .map(|tokens| format!(" · {} tokens", format_compact_count(tokens)))
+        .unwrap_or_default();
+    format!(
+        "{status} ({} {}{})",
+        tool_uses,
+        pluralize(tool_uses, "tool use"),
+        token_suffix
+    )
 }
 
 fn selected_skill_names_from_event(value: &Value) -> Option<Vec<String>> {

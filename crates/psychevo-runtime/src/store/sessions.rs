@@ -11,6 +11,39 @@ impl SqliteStore {
         provider: &str,
         metadata: Option<Value>,
     ) -> Result<String> {
+        self.create_session_with_parent_and_metadata(
+            workdir, source, None, model, provider, metadata,
+        )
+    }
+
+    pub fn create_child_session_with_metadata(
+        &self,
+        parent_session_id: &str,
+        workdir: &Path,
+        source: &str,
+        model: &str,
+        provider: &str,
+        metadata: Option<Value>,
+    ) -> Result<String> {
+        self.create_session_with_parent_and_metadata(
+            workdir,
+            source,
+            Some(parent_session_id),
+            model,
+            provider,
+            metadata,
+        )
+    }
+
+    fn create_session_with_parent_and_metadata(
+        &self,
+        workdir: &Path,
+        source: &str,
+        parent_session_id: Option<&str>,
+        model: &str,
+        provider: &str,
+        metadata: Option<Value>,
+    ) -> Result<String> {
         let id = Uuid::now_v7().to_string();
         let now = now_ms();
         let workdir = workdir.to_string_lossy().to_string();
@@ -24,10 +57,19 @@ impl SqliteStore {
                     id, source, parent_session_id, workdir, model, provider,
                     started_at_ms, updated_at_ms, ended_at_ms, end_reason, archived_at_ms,
                     message_count, tool_call_count, title, metadata_json
-                ) VALUES (?1, ?2, NULL, ?3, ?4, ?5,
-                    ?6, ?6, NULL, NULL, NULL, 0, 0, NULL, ?7)
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6,
+                    ?7, ?7, NULL, NULL, NULL, 0, 0, NULL, ?8)
                 "#,
-                params![&id, source, &workdir, model, provider, now, &metadata_json],
+                params![
+                    &id,
+                    source,
+                    parent_session_id,
+                    &workdir,
+                    model,
+                    provider,
+                    now,
+                    &metadata_json
+                ],
             )?;
             Ok(())
         })?;
@@ -128,6 +170,41 @@ impl SqliteStore {
         parse_optional_json(metadata)
     }
 
+    pub fn set_session_metadata_field(
+        &self,
+        session_id: &str,
+        key: &str,
+        value: Option<Value>,
+    ) -> Result<()> {
+        let changed = self.write_retry(|conn| {
+            let metadata_json = conn
+                .query_row(
+                    "SELECT metadata_json FROM sessions WHERE id = ?1",
+                    params![session_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()?;
+            let Some(metadata_json) = metadata_json else {
+                return Ok(0);
+            };
+            let mut metadata = metadata_object_sql(metadata_json.as_deref())?;
+            if let Some(value) = &value {
+                metadata.insert(key.to_string(), value.clone());
+            } else {
+                metadata.remove(key);
+            }
+            let metadata_json = metadata_json_sql(metadata)?;
+            conn.execute(
+                "UPDATE sessions SET metadata_json = ?1, updated_at_ms = ?2 WHERE id = ?3",
+                params![metadata_json, now_ms(), session_id],
+            )
+        })?;
+        if changed == 0 {
+            return Err(Error::Message(format!("session not found: {session_id}")));
+        }
+        Ok(())
+    }
+
     pub fn set_session_title(&self, session_id: &str, title: &str) -> Result<String> {
         let title = normalize_session_title(title)
             .ok_or_else(|| Error::Message("session title is empty".to_string()))?;
@@ -185,5 +262,4 @@ impl SqliteStore {
         }
         Ok(())
     }
-
 }

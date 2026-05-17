@@ -37,6 +37,216 @@ impl TuiApp {
         Ok(BottomSelectionPanel::new_sessions(view, rows))
     }
 
+    fn agent_panel(&self) -> AgentPanel {
+        AgentPanel::new(self.agent_running_panel(), self.agent_available_panel())
+    }
+
+    fn agent_running_panel(&self) -> BottomSelectionPanel {
+        let paused = agent_spawn_paused();
+        let mut rows = vec![BottomSelectionRow {
+            label: if paused {
+                "Resume spawning".to_string()
+            } else {
+                "Pause spawning".to_string()
+            },
+            description: Some(if paused {
+                "New Agent calls are blocked; running children continue".to_string()
+            } else {
+                "New Agent calls are allowed".to_string()
+            }),
+            detail: Some(format!(
+                "depth cap {}  concurrency unbounded",
+                MAX_AGENT_SPAWN_DEPTH_CAP
+            )),
+            group: Some("Controls".to_string()),
+            search_text: "pause resume spawning depth cap concurrency".to_string(),
+            is_current: paused,
+            is_default: false,
+            style: BottomRowStyle::Action,
+            footer: Some("Enter toggle  P toggle  Esc close  Tab available".to_string()),
+            value: BottomSelectionValue::AgentSpawningToggle,
+        }];
+        let mut live_count = 0usize;
+        if let Some(parent) = self.current_session.as_deref()
+            && let Ok(store) = SqliteStore::open(&self.db_path)
+        {
+            let value = agent_status_value(Some(&store), Some(parent), false);
+            if let Some(agents) = value.get("agents").and_then(Value::as_array) {
+                for agent in agents {
+                    let status = agent
+                        .get("status")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    if !matches!(status, "pending_init" | "running") {
+                        continue;
+                    }
+                    let child_session_id = agent
+                        .get("child_session_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string();
+                    if child_session_id.is_empty() {
+                        continue;
+                    }
+                    live_count = live_count.saturating_add(1);
+                    let id = agent
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .unwrap_or(child_session_id.as_str())
+                        .to_string();
+                    let name = agent
+                        .get("agent_name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("agent");
+                    let task = agent
+                        .get("task")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    let task_name = agent.get("task_name").and_then(Value::as_str);
+                    rows.push(BottomSelectionRow {
+                        label: name.to_string(),
+                        description: Some(truncate_chars(task, 80)),
+                        detail: Some(task_name.unwrap_or(status).to_string()),
+                        group: Some("Live child agents".to_string()),
+                        search_text: format!("{id} {child_session_id} {name} {task} {status}"),
+                        is_current: self.current_session.as_deref()
+                            == Some(child_session_id.as_str()),
+                        is_default: false,
+                        style: BottomRowStyle::Normal,
+                        footer: Some(
+                            "Enter open  S stop subtree  P pause/resume  Esc close  Tab available"
+                                .to_string(),
+                        ),
+                        value: BottomSelectionValue::AgentRunning {
+                            id,
+                            child_session_id,
+                        },
+                    });
+                }
+            }
+        }
+        if live_count == 0 {
+            rows.push(BottomSelectionRow {
+                label: "No running subagents".to_string(),
+                description: Some("Completed children stay reachable from Agent rows".to_string()),
+                detail: None,
+                group: Some("Live child agents".to_string()),
+                search_text: "no running subagents completed reachable agent rows".to_string(),
+                is_current: false,
+                is_default: false,
+                style: BottomRowStyle::Normal,
+                footer: Some("P pause/resume  Esc close  Tab available".to_string()),
+                value: BottomSelectionValue::AgentDiagnostic("no running subagents".to_string()),
+            });
+        }
+        let mut panel = BottomSelectionPanel::new("Agents", "", "No running subagents", rows);
+        panel.footer = if live_count == 0 {
+            "P pause/resume  Esc close  Tab available".to_string()
+        } else {
+            "Enter open  S stop subtree  P pause/resume  Esc close  Tab available  Type search"
+                .to_string()
+        };
+        panel
+    }
+
+    fn agent_available_panel(&self) -> BottomSelectionPanel {
+        let Some(catalog) = self.current_agent_catalog() else {
+            let mut panel = BottomSelectionPanel::new("Agents", "", "Agents disabled", Vec::new());
+            panel.footer = "Esc close".to_string();
+            return panel;
+        };
+        let mut rows = vec![
+            BottomSelectionRow {
+                label: "Default main agent".to_string(),
+                description: Some("Use the normal session identity for future turns".to_string()),
+                detail: self
+                    .current_agent
+                    .is_none()
+                    .then(|| "Current main".to_string()),
+                group: Some("Main session".to_string()),
+                search_text: "default main agent normal session identity".to_string(),
+                is_current: self.current_agent.is_none(),
+                is_default: self.current_agent.is_none(),
+                style: BottomRowStyle::Normal,
+                footer: Some("Enter use default  Esc close  Tab running".to_string()),
+                value: BottomSelectionValue::AgentMainDefault,
+            },
+            BottomSelectionRow {
+                label: "Create agent".to_string(),
+                description: Some("project .psychevo/agents".to_string()),
+                detail: None,
+                group: Some("Actions".to_string()),
+                search_text: "create new agent project .psychevo".to_string(),
+                is_current: false,
+                is_default: false,
+                style: BottomRowStyle::Action,
+                footer: Some("Enter create  Esc close  Tab running".to_string()),
+                value: BottomSelectionValue::AgentCreate,
+            },
+        ];
+        rows.extend(
+            catalog
+                .agents
+                .into_iter()
+                .map(|agent| agent_definition_row(agent, false, self.current_agent.as_deref())),
+        );
+        rows.extend(
+            catalog
+                .shadowed_agents
+                .into_iter()
+                .map(|agent| agent_definition_row(agent, true, self.current_agent.as_deref())),
+        );
+        rows.extend(catalog.diagnostics.into_iter().map(agent_diagnostic_row));
+        let mut panel = BottomSelectionPanel::new("Agents", "", "No agents available", rows);
+        panel.footer = "Enter actions  Esc close  Tab running  Type search".to_string();
+        panel
+    }
+
+    fn agent_action_panel(
+        &self,
+        name: String,
+        source: AgentSource,
+        path: Option<PathBuf>,
+        shadowed: bool,
+    ) -> BottomSelectionPanel {
+        let mut rows = Vec::new();
+        if !shadowed {
+            rows.push(agent_action_row(
+                &name,
+                source,
+                path.clone(),
+                shadowed,
+                AgentAction::UseAsMain,
+            ));
+        }
+        for action in [AgentAction::Run, AgentAction::View] {
+            rows.push(agent_action_row(
+                &name,
+                source,
+                path.clone(),
+                shadowed,
+                action,
+            ));
+        }
+        if agent_definition_editable(source, path.as_ref()) {
+            rows.push(agent_action_row(
+                &name,
+                source,
+                path.clone(),
+                shadowed,
+                AgentAction::Update,
+            ));
+            rows.push(agent_action_row(
+                &name,
+                source,
+                path,
+                shadowed,
+                AgentAction::Delete,
+            ));
+        }
+        BottomSelectionPanel::new_agent_actions(&name, rows)
+    }
+
     fn stats_panel(&self) -> Result<BottomSelectionPanel> {
         let report = usage_stats(StatsOptions {
             db_path: self.db_path.clone(),
@@ -654,6 +864,134 @@ fn stats_row(
         footer: None,
         value: BottomSelectionValue::StatsRow(key.into()),
     }
+}
+
+fn agent_definition_row(
+    agent: psychevo_runtime::AgentDefinition,
+    shadowed: bool,
+    current_agent: Option<&str>,
+) -> BottomSelectionRow {
+    let source = agent.source;
+    let path = agent.file_path.clone();
+    let state = if shadowed { "Shadowed" } else { "Active" };
+    let editable = agent_definition_editable(source, path.as_ref());
+    let source_label = source.as_str().replace('_', "-");
+    let current_main = current_agent.is_some_and(|current| {
+        current == agent.name.as_str()
+            || agent
+                .file_path
+                .as_ref()
+                .is_some_and(|path| current == path.display().to_string())
+    });
+    let definition_detail = if editable {
+        format!(
+            "{state} {source_label} editable  depth {}",
+            agent.max_spawn_depth
+        )
+    } else {
+        format!(
+            "{state} {source_label} read-only  depth {}",
+            agent.max_spawn_depth
+        )
+    };
+    let detail = if current_main && !shadowed {
+        format!("Current main  {definition_detail}")
+    } else {
+        definition_detail
+    };
+    BottomSelectionRow {
+        label: agent.name.clone(),
+        description: Some(agent.description.clone()),
+        detail: Some(detail),
+        group: Some(if shadowed {
+            "Shadowed duplicates".to_string()
+        } else {
+            "Available definitions".to_string()
+        }),
+        search_text: format!(
+            "{} {} {} {} {} {}",
+            agent.name,
+            agent.description,
+            source.as_str(),
+            path.as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_default(),
+            state,
+            agent.max_spawn_depth
+        ),
+        is_current: current_main && !shadowed,
+        is_default: false,
+        style: BottomRowStyle::Normal,
+        footer: Some("Enter actions  R run  V view  Esc close".to_string()),
+        value: BottomSelectionValue::AgentAvailable {
+            name: agent.name,
+            source,
+            path,
+            shadowed,
+        },
+    }
+}
+
+fn agent_diagnostic_row(diagnostic: psychevo_runtime::AgentDiagnostic) -> BottomSelectionRow {
+    let path = diagnostic
+        .path
+        .as_ref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_default();
+    BottomSelectionRow {
+        label: "Definition error".to_string(),
+        description: Some(diagnostic.message.clone()),
+        detail: (!path.is_empty()).then_some(path.clone()),
+        group: Some("Diagnostics".to_string()),
+        search_text: format!("{} {} {}", diagnostic.kind, diagnostic.message, path),
+        is_current: false,
+        is_default: false,
+        style: BottomRowStyle::Normal,
+        footer: Some("Read-only diagnostic  Esc close  Tab running".to_string()),
+        value: BottomSelectionValue::AgentDiagnostic(diagnostic.message),
+    }
+}
+
+fn agent_action_row(
+    name: &str,
+    source: AgentSource,
+    path: Option<PathBuf>,
+    shadowed: bool,
+    action: AgentAction,
+) -> BottomSelectionRow {
+    let description = match action {
+        AgentAction::UseAsMain => "Use this definition for future turns in the current session",
+        AgentAction::Run => "Start a background fresh-context child run",
+        AgentAction::View => "Show definition details",
+        AgentAction::Update => "Edit the .psychevo Markdown definition",
+        AgentAction::Delete => "Delete the .psychevo Markdown definition",
+    };
+    BottomSelectionRow {
+        label: action.label().to_string(),
+        description: Some(description.to_string()),
+        detail: None,
+        group: None,
+        search_text: format!("{name} {} {description}", action.label()),
+        is_current: false,
+        is_default: false,
+        style: if matches!(action, AgentAction::UseAsMain | AgentAction::Run) {
+            BottomRowStyle::Action
+        } else {
+            BottomRowStyle::Normal
+        },
+        footer: Some("Enter select  Esc back".to_string()),
+        value: BottomSelectionValue::AgentAction {
+            name: name.to_string(),
+            source,
+            path,
+            shadowed,
+            action,
+        },
+    }
+}
+
+fn agent_definition_editable(source: AgentSource, path: Option<&PathBuf>) -> bool {
+    matches!(source, AgentSource::Project | AgentSource::Global) && path.is_some()
 }
 
 fn json_i64(value: &Value, key: &str) -> i64 {
