@@ -11,13 +11,13 @@ size=120x20
 • Thinking
   └ I need to inspect files and run checks before answering.
 
-• Explored crates/psychevo-cli/src/tui/render/transcript.rs
+• read crates/psychevo-cli/src/tui/render/transcript.rs
   └ read 240 lines
-• Ran cargo test -p psychevo-cli tui::tests
+• bash cargo test -p psychevo-cli tui::tests
   └ ok
-• Updated crates/psychevo-cli/src/tui/render/transcript.rs
+• write crates/psychevo-cli/src/tui/render/transcript.rs
   └ write normal
-• Ran cargo fmt
+• bash cargo fmt
   └ ok
 
 The tool evidence stays flat even when several tool rows arrive consecutively.
@@ -33,13 +33,13 @@ mock/model  high  ~/work · main
 [green]• [default]Thinking
 [dim]  └ I need to inspect files and run checks before answering.[default]
 [default]
-[green]• [default]Explored crates/psychevo-cli/src/tui/render/transcript.rs
+[green]• [default]read crates/psychevo-cli/src/tui/render/transcript.rs
 [dim]  └ [default]read 240 lines
-[green]• [default]Ran cargo test -p psychevo-cli tui::tests
+[green]• [default]bash cargo test -p psychevo-cli tui::tests
 [dim]  └ [default]ok
-[green]• [default]Updated crates/psychevo-cli/src/tui/render/transcript.rs
+[green]• [default]write crates/psychevo-cli/src/tui/render/transcript.rs
 [dim]  └ [default]write normal
-[green]• [default]Ran cargo fmt
+[green]• [default]bash cargo fmt
 [dim]  └ [default]ok
 [default]
 [default]The tool evidence stays flat even when several tool rows arrive consecutively.

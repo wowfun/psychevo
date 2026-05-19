@@ -2,13 +2,19 @@
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
 expression: combined
 ---
-fixture=history_pending_write_call
-size=120x18
+fixture=clarify_answered_result
+size=120x24
 
 --- text ---
-NYT is behind a paywall. Based on comments, I can still summarize the Meta article. Let me now write the report.
+· Questions 3/3 answered
+  └ Which mode should we use?
+    answer: Fast (Recommended)
+    note: include tests
+    How much detail should the answer include?
+    answer: Brief
+    Which output format should be used?
+    answer: Markdown
 
-⠼ write feeds/2026-05-10/hackernews-hot-06-42.md                                                                     2s
 
 
 
@@ -23,12 +29,18 @@ NYT is behind a paywall. Based on comments, I can still summarize the Meta artic
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 › Ask pevo...
-mock/model  high  ~/work
+mock/model  high  ~/work · main
 
 --- styles ---
-[default]NYT is behind a paywall. Based on comments, I can still summarize the Meta article. Let me now write the report.
+[dim]· [default]Questions 3/3 answered
+[dim]  └ Which mode should we use?[default]
+[dim]    answer: Fast (Recommended)[default]
+[dim]    note: include tests[default]
+[dim]    How much detail should the answer include?[default]
+[dim]    answer: Brief[default]
+[dim]    Which output format should be used?[default]
+[dim]    answer: Markdown[default]
 [default]
-[cyan]⠼ [default]write feeds/2026-05-10/hackernews-hot-06-42.md                                                                     [dim]2s[default]
 [default]
 [default]
 [default]
@@ -43,4 +55,4 @@ mock/model  high  ~/work
 [default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [dim]›[default] [dim]Ask pevo...[default]
-[default]mock/model  [magenta]high[default]  [dim]~/work[default]
+[default]mock/model  [magenta]high[default]  [dim]~/work · main[default]

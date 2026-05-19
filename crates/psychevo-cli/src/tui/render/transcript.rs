@@ -47,7 +47,7 @@ fn apply_selection_highlight(
             let cell_end = cell.x.saturating_add(cell.width);
             for x in cell.x..cell_end {
                 if let Some(buffer_cell) = buffer.cell_mut((x, line.y)) {
-                    buffer_cell.set_bg(tui_theme().selection_bg);
+                    buffer_cell.set_style(text_selection_style());
                 }
             }
         }
@@ -489,6 +489,9 @@ fn transcript_lines(
     if row.kind == TranscriptKind::Command {
         return command_lines(row, selected, compact_trailing, width);
     }
+    if row.kind == TranscriptKind::Status {
+        return status_lines(row, selected, compact_trailing, width);
+    }
 
     let style = label_style(row.kind, row.failed);
     let marker = if selected { "›" } else { "▌" };
@@ -546,6 +549,82 @@ fn transcript_lines(
     }
     if out.is_empty() {
         out.push(Line::from(Span::styled(marker.to_string(), marker_style)));
+    }
+    if !compact_trailing {
+        out.push(Line::from(""));
+    }
+    out
+}
+
+fn status_lines(
+    row: &TranscriptRow,
+    selected: bool,
+    compact_trailing: bool,
+    width: u16,
+) -> Vec<Line<'static>> {
+    let theme = tui_theme();
+    let marker = if selected { "› " } else { "· " };
+    let marker_style = if selected {
+        focus_marker_style(row.failed)
+    } else if row.failed {
+        theme.error_style()
+    } else {
+        theme.dim_style()
+    };
+    let body_style = style_for_body(row.kind, row.failed);
+    let title = row.title.trim();
+    let show_title = !title.is_empty() && title != default_title(TranscriptKind::Status);
+    let mut out = Vec::new();
+    if show_title {
+        let title_style = if row.failed {
+            theme.error_style().add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().add_modifier(Modifier::BOLD)
+        };
+        out.push(ledger_title_line(
+            marker,
+            marker_style,
+            title,
+            title_style,
+            None,
+            row_expand_hint(row, selected, None).as_deref(),
+            width,
+        ));
+    }
+
+    let mut body_lines = Vec::new();
+    if show_title {
+        append_expandable_evidence_body(&mut body_lines, row);
+    } else if !row.details_collapsed {
+        body_lines.extend(row.expandable_text().lines().map(ToOwned::to_owned));
+    }
+    for (index, line) in body_lines.into_iter().enumerate() {
+        let prefix = if show_title {
+            if index == 0 { "  └ " } else { "    " }
+        } else if index == 0 {
+            marker
+        } else {
+            "  "
+        };
+        let prefix_style = if !show_title && index == 0 {
+            marker_style
+        } else {
+            theme.dim_style()
+        };
+        let mut spans = vec![Span::styled(prefix.to_string(), prefix_style)];
+        if let Some(context_line) = context_status_line(&line, body_style) {
+            spans.extend(context_line.spans);
+        } else {
+            spans.push(Span::styled(line, body_style));
+        }
+        out.push(Line::from(spans));
+    }
+
+    if out.is_empty() {
+        out.push(Line::from(Span::styled(
+            marker.trim_end().to_string(),
+            marker_style,
+        )));
     }
     if !compact_trailing {
         out.push(Line::from(""));
@@ -912,7 +991,10 @@ fn user_shell_lines(
 
 fn user_shell_command_text(row: &TranscriptRow) -> String {
     let title = row.title.trim();
-    for prefix in ["Running ! ", "Ran ! ", "! ", "Running ", "Ran "] {
+    if title == "!" {
+        return String::new();
+    }
+    for prefix in ["! ", "Running ! ", "Ran ! ", "Running ", "Ran "] {
         if let Some(command) = title.strip_prefix(prefix) {
             return command.trim().to_string();
         }
@@ -1184,32 +1266,9 @@ impl ToolRowPhase {
     }
 }
 
-fn tool_display_title(row: &TranscriptRow, phase: ToolRowPhase) -> String {
+fn tool_display_title(row: &TranscriptRow, _phase: ToolRowPhase) -> String {
     let title = row.title.trim();
-    if phase != ToolRowPhase::Active {
-        return title.to_string();
-    }
-    let Some((active_prefix, completed_prefix, fallback)) = tool_title_prefixes(row.kind) else {
-        return title.to_string();
-    };
-    if title.starts_with(active_prefix) {
-        return title.to_string();
-    }
-    let rest = title.strip_prefix(completed_prefix).unwrap_or(title).trim();
-    if rest.is_empty() {
-        fallback.to_string()
-    } else {
-        format!("{active_prefix} {rest}")
-    }
-}
-
-fn tool_title_prefixes(kind: TranscriptKind) -> Option<(&'static str, &'static str, &'static str)> {
-    match kind {
-        TranscriptKind::Explored => Some(("Exploring", "Explored", "Exploring")),
-        TranscriptKind::Ran => Some(("Running", "Ran", "Running command")),
-        TranscriptKind::Updated => Some(("Updating", "Updated", "Updating files")),
-        _ => None,
-    }
+    tool_title_as_invocation(row.tool_name.as_deref(), row.kind, title, row.user_shell)
 }
 
 fn foldable_evidence_body(row: &TranscriptRow) -> bool {
@@ -1258,7 +1317,8 @@ fn tool_title_detail(row: &TranscriptRow, title: &str) -> Option<String> {
     }
     let command = title
         .trim()
-        .strip_prefix("Running ")
+        .strip_prefix("bash ")
+        .or_else(|| title.trim().strip_prefix("Running "))
         .or_else(|| title.trim().strip_prefix("Ran "))
         .unwrap_or_else(|| title.trim());
     if UnicodeWidthStr::width(command) <= TOOL_TITLE_DETAIL_WIDTH {

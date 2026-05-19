@@ -3,6 +3,7 @@ fn evidence_kind(tool: &str) -> TranscriptKind {
         "read" | "list" | "search" => TranscriptKind::Explored,
         "bash" => TranscriptKind::Ran,
         "write" | "edit" => TranscriptKind::Updated,
+        "clarify" => TranscriptKind::Status,
         _ => TranscriptKind::Status,
     }
 }
@@ -27,121 +28,217 @@ fn completed_live_tool_elapsed(row: &TranscriptRow, metadata: Option<&Value>) ->
 }
 
 fn completed_tool_title_from_active(kind: TranscriptKind, title: &str) -> String {
-    let title = title.trim();
-    let Some((active_prefix, completed_prefix, fallback)) = tool_title_prefixes_for_kind(kind)
-    else {
-        return title.to_string();
-    };
-    if let Some(rest) = title.strip_prefix(active_prefix) {
-        let rest = rest.trim();
-        if rest.is_empty() {
-            completed_prefix.to_string()
-        } else {
-            format!("{completed_prefix} {rest}")
-        }
-    } else if title.is_empty() {
-        fallback.to_string()
-    } else {
-        title.to_string()
-    }
-}
-
-fn tool_title_prefixes_for_kind(
-    kind: TranscriptKind,
-) -> Option<(&'static str, &'static str, &'static str)> {
-    match kind {
-        TranscriptKind::Explored => Some(("Exploring", "Explored", "Explored")),
-        TranscriptKind::Ran => Some(("Running", "Ran", "Ran command")),
-        TranscriptKind::Updated => Some(("Updating", "Updated", "Updated files")),
-        _ => None,
-    }
+    tool_title_as_invocation(None, kind, title, false)
 }
 
 fn tool_title(tool: &str, value: &Value) -> String {
     let args = value.get("args").unwrap_or(&Value::Null);
     let result = value.get("result").unwrap_or(&Value::Null);
     match tool {
-        "read" | "list" => format!("Explored {}", path_from(args, result).unwrap_or(".")),
+        "read" | "list" => tool_name_title(tool, path_from(args, result)),
         "search" => {
             let query = args
                 .get("query")
                 .and_then(Value::as_str)
                 .or_else(|| result.get("query").and_then(Value::as_str))
-                .unwrap_or("text");
-            format!("Explored search {query}")
+                .filter(|query| !query.trim().is_empty());
+            tool_name_title("search", query)
         }
         "bash" => {
             let command = args
                 .get("command")
                 .and_then(Value::as_str)
-                .and_then(first_shell_command_line)
-                .unwrap_or("command");
+                .and_then(first_shell_command_line);
             if is_user_shell_value(value) {
-                format!("Ran ! {command}")
+                user_shell_title(command)
             } else {
-                format!("Ran {command}")
+                tool_name_title("bash", command)
             }
         }
-        "write" | "edit" => format!("Updated {}", path_from(args, result).unwrap_or("files")),
+        "write" | "edit" => tool_name_title(tool, path_from(args, result)),
         "Agent" => agent_tool_title(value).unwrap_or_else(|| "Agent".to_string()),
+        "clarify" => clarify_tool_title(value),
         other => format!("Tool {other}"),
     }
+}
+
+fn clarify_no_answer_result(value: &Value) -> bool {
+    if value.get("tool_name").and_then(Value::as_str) != Some("clarify") {
+        return false;
+    }
+    let Some(error) = value
+        .get("result")
+        .and_then(|result| result.get("error"))
+        .and_then(Value::as_str)
+    else {
+        return false;
+    };
+    matches!(
+        error,
+        "clarify was cancelled by the user"
+            | "timed out waiting for user input"
+            | "clarify was interrupted because the turn ended"
+            | "clarify response channel closed"
+    )
 }
 
 fn active_tool_title(tool: &str, value: &Value) -> String {
     let args = value.get("args").unwrap_or(&Value::Null);
     match tool {
-        "read" | "list" => path_from_args(args)
-            .map(|path| format!("Exploring {path}"))
-            .unwrap_or_else(|| "Exploring".to_string()),
+        "read" | "list" => tool_name_title(tool, path_from_args(args)),
         "search" => args
             .get("query")
             .and_then(Value::as_str)
-            .map(|query| format!("Exploring search {query}"))
-            .unwrap_or_else(|| "Exploring search".to_string()),
-        "bash" => args
-            .get("command")
-            .and_then(Value::as_str)
-            .and_then(first_shell_command_line)
-            .map(|command| {
-                if is_user_shell_value(value) {
-                    format!("Running ! {command}")
-                } else {
-                    format!("Running {command}")
-                }
-            })
-            .unwrap_or_else(|| {
-                if is_user_shell_value(value) {
-                    "Running ! command".to_string()
-                } else {
-                    "Running command".to_string()
-                }
-            }),
-        "write" | "edit" => path_from_args(args)
-            .map(|path| format!("Updating {path}"))
-            .unwrap_or_else(|| "Updating files".to_string()),
+            .filter(|query| !query.trim().is_empty())
+            .map_or_else(|| "search".to_string(), |query| tool_name_title("search", Some(query))),
+        "bash" => {
+            let command = args
+                .get("command")
+                .and_then(Value::as_str)
+                .and_then(first_shell_command_line);
+            if is_user_shell_value(value) {
+                user_shell_title(command)
+            } else {
+                tool_name_title("bash", command)
+            }
+        }
+        "write" | "edit" => tool_name_title(tool, path_from_args(args)),
         "Agent" => active_agent_tool_title(value),
-        other => format!("Using {other}"),
+        "clarify" => "Questions pending".to_string(),
+        other => format!("Tool {other}"),
     }
 }
 
 fn tool_title_for_update(tool: &str, value: &Value, existing_title: &str) -> String {
     let title = tool_title(tool, value);
-    if tool == "bash" && matches!(title.as_str(), "Ran command" | "Ran ! command") {
-        if existing_title.starts_with("Ran ") {
-            return existing_title.to_string();
-        }
-        if let Some(command) = existing_title.strip_prefix("Running ") {
-            return format!("Ran {command}");
+    if tool == "bash" && matches!(title.as_str(), "bash" | "!") {
+        let existing = tool_title_as_invocation(
+            Some(tool),
+            evidence_kind(tool),
+            existing_title,
+            is_user_shell_value(value),
+        );
+        if existing != "bash" && existing != "!" {
+            return existing;
         }
     }
-    if matches!(tool, "write" | "edit") && title == "Updated files"
-        && let Some(path) = existing_title.strip_prefix("Updating ")
-        && path != "files"
-    {
-        return format!("Updated {path}");
+    if matches!(tool, "write" | "edit") && title == tool {
+        let existing =
+            tool_title_as_invocation(Some(tool), evidence_kind(tool), existing_title, false);
+        if existing != tool {
+            return existing;
+        }
     }
     title
+}
+
+fn tool_name_title(tool: &str, detail: Option<&str>) -> String {
+    let Some(detail) = detail.map(str::trim).filter(|detail| !detail.is_empty()) else {
+        return tool.to_string();
+    };
+    format!("{tool} {detail}")
+}
+
+fn user_shell_title(command: Option<&str>) -> String {
+    let Some(command) = command.map(str::trim).filter(|command| !command.is_empty()) else {
+        return "!".to_string();
+    };
+    format!("! {command}")
+}
+
+fn tool_title_as_invocation(
+    tool: Option<&str>,
+    kind: TranscriptKind,
+    title: &str,
+    user_shell: bool,
+) -> String {
+    let title = title.trim();
+    if title.is_empty() {
+        return tool
+            .map(|tool| tool_name_title(tool, None))
+            .unwrap_or_default();
+    }
+    if user_shell
+        || title == "!"
+        || title.starts_with("! ")
+        || title.starts_with("Ran ! ")
+        || title.starts_with("Running ! ")
+    {
+        return legacy_user_shell_title(title);
+    }
+    if let Some(tool) = tool
+        && matches!(
+            tool,
+            "read" | "list" | "search" | "bash" | "write" | "edit"
+        )
+        && (title == tool || title.starts_with(&format!("{tool} ")))
+    {
+        return title.to_string();
+    }
+    match kind {
+        TranscriptKind::Explored => {
+            let tool = tool.unwrap_or("read");
+            if matches!(title, "Exploring" | "Explored") {
+                return tool.to_string();
+            }
+            if let Some(query) = title
+                .strip_prefix("Exploring search ")
+                .or_else(|| title.strip_prefix("Explored search "))
+            {
+                return tool_name_title("search", Some(query));
+            }
+            if let Some(rest) = title
+                .strip_prefix("Exploring ")
+                .or_else(|| title.strip_prefix("Explored "))
+            {
+                return tool_name_title(tool, Some(rest));
+            }
+            title.to_string()
+        }
+        TranscriptKind::Ran => {
+            if matches!(title, "Running" | "Ran" | "Running command" | "Ran command") {
+                return "bash".to_string();
+            }
+            if let Some(command) = title
+                .strip_prefix("Running ")
+                .or_else(|| title.strip_prefix("Ran "))
+            {
+                return tool_name_title("bash", Some(command));
+            }
+            title.to_string()
+        }
+        TranscriptKind::Updated => {
+            let tool = tool.unwrap_or("write");
+            if matches!(title, "Updating" | "Updated" | "Updating files" | "Updated files") {
+                return tool.to_string();
+            }
+            if let Some(path) = title
+                .strip_prefix("Updating ")
+                .or_else(|| title.strip_prefix("Updated "))
+            {
+                let path = path.trim();
+                if path == "files" {
+                    return tool.to_string();
+                }
+                return tool_name_title(tool, Some(path));
+            }
+            title.to_string()
+        }
+        _ => title.to_string(),
+    }
+}
+
+fn legacy_user_shell_title(title: &str) -> String {
+    let title = title.trim();
+    if title == "!" {
+        return "!".to_string();
+    }
+    for prefix in ["Running ! ", "Ran ! ", "! "] {
+        if let Some(command) = title.strip_prefix(prefix) {
+            return user_shell_title(Some(command));
+        }
+    }
+    title.to_string()
 }
 
 fn is_user_shell_value(value: &Value) -> bool {
@@ -181,6 +278,9 @@ fn tool_output_text(value: &Value) -> (String, Option<String>) {
     {
         return output;
     }
+    if value.get("tool_name").and_then(Value::as_str) == Some("clarify") {
+        return (clarify_tool_output_text(value), None);
+    }
     let result = value.get("result").unwrap_or(&Value::Null);
     let full = result
         .get("content")
@@ -191,6 +291,95 @@ fn tool_output_text(value: &Value) -> (String, Option<String>) {
         .map(str::to_string)
         .unwrap_or_else(|| format_tool_summary(value));
     collapse_ledger_body(&full)
+}
+
+fn clarify_tool_title(value: &Value) -> String {
+    if value.get("result").and_then(|result| result.get("error")).is_some()
+        && !clarify_no_answer_result(value)
+    {
+        return "Clarify failed".to_string();
+    }
+    let args = value.get("args").unwrap_or(&Value::Null);
+    let result = value.get("result").unwrap_or(&Value::Null);
+    let total = args
+        .get("questions")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or_default();
+    let answered = result
+        .get("answers")
+        .and_then(Value::as_array)
+        .map(|answers| {
+            answers
+                .iter()
+                .filter(|answer| {
+                    answer
+                        .get("answers")
+                        .and_then(Value::as_array)
+                        .is_some_and(|items| !items.is_empty())
+                })
+                .count()
+        })
+        .unwrap_or_default();
+    if total == 0 && answered > 0 {
+        format!("Questions {answered}/{answered} answered")
+    } else if total == 0 {
+        "Questions 0/0 answered".to_string()
+    } else {
+        format!("Questions {answered}/{total} answered")
+    }
+}
+
+fn clarify_tool_output_text(value: &Value) -> String {
+    let args = value.get("args").unwrap_or(&Value::Null);
+    let result = value.get("result").unwrap_or(&Value::Null);
+    if let Some(error) = result.get("error").and_then(Value::as_str)
+        && !clarify_no_answer_result(value)
+    {
+        return error.to_string();
+    }
+    let questions = args
+        .get("questions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    let answers = result.get("answers").and_then(Value::as_array);
+    let mut lines = Vec::new();
+    for (index, question) in questions.iter().enumerate() {
+        let text = question
+            .get("question")
+            .and_then(Value::as_str)
+            .unwrap_or("question");
+        let Some(answer_items) = answers
+            .and_then(|answers| answers.get(index))
+            .and_then(|answer| answer.get("answers"))
+            .and_then(Value::as_array)
+        else {
+            lines.push(format!("{text} (unanswered)"));
+            continue;
+        };
+        if answer_items.is_empty() {
+            lines.push(format!("{text} (unanswered)"));
+            continue;
+        }
+        lines.push(text.to_string());
+        for item in answer_items {
+            let Some(answer) = item.as_str() else {
+                continue;
+            };
+            if let Some(note) = answer.strip_prefix("user_note: ") {
+                lines.push(format!("note: {note}"));
+            } else {
+                lines.push(format!("answer: {answer}"));
+            }
+        }
+    }
+    if lines.is_empty() {
+        format_tool_summary(value)
+    } else {
+        lines.join("\n")
+    }
 }
 
 fn active_agent_tool_title(value: &Value) -> String {

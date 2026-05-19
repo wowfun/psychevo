@@ -11,7 +11,7 @@ size=120x24
 • Thinking
   └ Check layout boundaries, style roles, and expandable evidence.
 
-› Explored crates/psychevo-cli/src/tui.rs                                                                    ▾ collapse
+› read crates/psychevo-cli/src/tui.rs                                                                        ▾ collapse
   └ 01: crates/psychevo-cli/src/tui.rs evidence row
     02: crates/psychevo-cli/src/tui.rs evidence row
     03: crates/psychevo-cli/src/tui.rs evidence row
@@ -37,7 +37,7 @@ mock/model  high  transcript · Esc  ~/work · main
 [green]• [default]Thinking
 [dim]  └ Check layout boundaries, style roles, and expandable evidence.[default]
 [default]
-[cyan]› [default]Explored crates/psychevo-cli/src/tui.rs                                                                    [dim]▾ collapse[default]
+[cyan]› [default]read crates/psychevo-cli/src/tui.rs                                                                        [dim]▾ collapse[default]
 [dim]  └ [default]01: crates/psychevo-cli/src/tui.rs evidence row
 [dim]    [default]02: crates/psychevo-cli/src/tui.rs evidence row
 [dim]    [default]03: crates/psychevo-cli/src/tui.rs evidence row

@@ -1571,6 +1571,7 @@ fn known_tool_policy_name(name: &str) -> bool {
             | "bash"
             | "edit"
             | "write"
+            | "clarify"
             | "Agent"
             | "Skill"
             | "list_agents"
@@ -1755,6 +1756,7 @@ fn normalize_tool_name(raw: String) -> String {
         "Bash" | "bash" => "bash".to_string(),
         "Edit" | "edit" => "edit".to_string(),
         "Write" | "write" => "write".to_string(),
+        "Clarify" | "clarify" => "clarify".to_string(),
         "Agent" | "agent" | "Task" | "task" => "Agent".to_string(),
         "Skill" | "skill" => "Skill".to_string(),
         other => other.to_string(),
@@ -1815,6 +1817,7 @@ fn plan_mode_tool_allowed(name: &str) -> bool {
         "read"
             | "list"
             | "search"
+            | "clarify"
             | "list_skills"
             | "view_skill"
             | "Agent"
@@ -3809,6 +3812,52 @@ Plan the work.
             Some(&empty_string),
             RunMode::Build
         ));
+    }
+
+    #[test]
+    fn clarify_tool_policy_is_plan_safe_and_allow_deny_controllable() {
+        let tmp = TempDir::new().expect("tmp");
+        let allow_path = tmp.path().join("clarifier.md");
+        fs::write(
+            &allow_path,
+            "---\nname: clarifier\ndescription: Ask user\ntools: Clarify\n---\nAsk.\n",
+        )
+        .expect("write allow");
+        let deny_path = tmp.path().join("no-clarify.md");
+        fs::write(
+            &deny_path,
+            "---\nname: no-clarify\ndescription: No ask\ndisallowedTools: Clarify\n---\nNo ask.\n",
+        )
+        .expect("write deny");
+
+        let allow = parse_agent_file(&allow_path, AgentSource::Explicit).expect("allow");
+        let deny = parse_agent_file(&deny_path, AgentSource::Explicit).expect("deny");
+        assert_eq!(
+            allow.tool_policy.allowed,
+            Some(BTreeSet::from(["clarify".to_string()]))
+        );
+        assert!(deny.tool_policy.denied.contains("clarify"));
+        assert!(allow.diagnostics.is_empty());
+        assert!(deny.diagnostics.is_empty());
+
+        let base_tools = vec![test_tool("read"), test_tool("bash"), test_tool("clarify")];
+        let allowed = apply_agent_tool_policy(base_tools.clone(), Some(&allow), RunMode::Build)
+            .into_iter()
+            .map(|tool| tool.name().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(allowed, vec!["clarify"]);
+
+        let denied = apply_agent_tool_policy(base_tools.clone(), Some(&deny), RunMode::Build)
+            .into_iter()
+            .map(|tool| tool.name().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(denied, vec!["read", "bash"]);
+
+        let plan = apply_agent_tool_policy(base_tools, None, RunMode::Plan)
+            .into_iter()
+            .map(|tool| tool.name().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(plan, vec!["read", "clarify"]);
     }
 
     #[test]

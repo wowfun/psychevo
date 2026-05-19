@@ -827,6 +827,7 @@ fn fixed_key_chords() -> Vec<KeyChord> {
         "alt+enter",
         "ctrl+j",
         "esc",
+        "ctrl+a",
         "ctrl+c",
         "ctrl+d",
         "ctrl+o",
@@ -1849,6 +1850,16 @@ mod tests {
             parse_effective_slash_config(&serde_json::json!({
                 "tui": {
                     "slash_keybinds": { "/status": "enter" }
+                }
+            }))
+            .unwrap_err()
+            .to_string()
+            .contains("fixed key")
+        );
+        assert!(
+            parse_effective_slash_config(&serde_json::json!({
+                "tui": {
+                    "slash_keybinds": { "/status": "ctrl+a" }
                 }
             }))
             .unwrap_err()

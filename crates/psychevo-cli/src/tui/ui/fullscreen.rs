@@ -12,6 +12,8 @@ impl<'a> FullscreenUi<'a> {
             streaming_tool_message_open: false,
             deferred_stream_events: VecDeque::new(),
             history_tool_titles: BTreeMap::new(),
+            history_tool_args: BTreeMap::new(),
+            clarify_tool_args: BTreeMap::new(),
             shell_mode: false,
             turn_started: None,
             turn_provider: String::new(),
@@ -26,6 +28,7 @@ impl<'a> FullscreenUi<'a> {
             turn_outcome: None,
             turn_terminal_message: None,
             turn_had_reasoning: false,
+            turn_terminal_visible_answer: false,
             history_prompt_started_ms: None,
             loaded_session_message_count: 0,
             thinking_visible: app.thinking_visible,
@@ -37,6 +40,7 @@ impl<'a> FullscreenUi<'a> {
             auxiliary_shell_tasks: Vec::new(),
             pending_auxiliary_shell_commands: VecDeque::new(),
             visible_turn_started: None,
+            motion_started: Instant::now(),
             #[cfg(test)]
             running_elapsed_override: None,
             interrupt_requested: false,
@@ -51,11 +55,13 @@ impl<'a> FullscreenUi<'a> {
             selected_target: None,
             last_transcript_area: None,
             last_composer_area: None,
+            last_composer_input_area: None,
             last_status_area: None,
             last_bottom_panel_area: None,
             last_entry_areas: Vec::new(),
             mouse_down_target: None,
             mouse_dragged: false,
+            composer_mouse_selecting: false,
             sidebar_forced: app.state.sidebar_visible,
             sidebar_hidden: !app.state.sidebar_visible,
             last_sidebar_visible: false,
@@ -116,6 +122,8 @@ impl<'a> FullscreenUi<'a> {
         self.meta_row = None;
         self.tool_rows.clear();
         self.history_tool_titles.clear();
+        self.history_tool_args.clear();
+        self.clarify_tool_args.clear();
         self.scroll = 0;
         self.last_transcript_height = 0;
         self.last_transcript_width = 0;
@@ -126,6 +134,7 @@ impl<'a> FullscreenUi<'a> {
         self.last_entry_areas.clear();
         self.mouse_down_target = None;
         self.mouse_dragged = false;
+        self.composer_mouse_selecting = false;
         self.selection = SelectionState::default();
         self.terminal_clear_requested = true;
         self.sidebar_tokens = None;
@@ -307,6 +316,70 @@ impl<'a> FullscreenUi<'a> {
         self.selection = SelectionState::default();
     }
 
+    fn composer_input_hit(&self, column: u16, row: u16) -> bool {
+        self.last_composer_input_area
+            .is_some_and(|area| rect_contains(area, column, row))
+    }
+
+    fn move_composer_cursor_to_point(&mut self, column: u16, row: u16) -> bool {
+        let Some(area) = self.last_composer_input_area else {
+            return false;
+        };
+        let Some((text_row, text_col)) =
+            composer_cursor_from_point(&self.textarea, area, column, row)
+        else {
+            return false;
+        };
+        self.textarea.move_cursor(CursorMove::Jump(
+            text_row.min(u16::MAX as usize) as u16,
+            text_col.min(u16::MAX as usize) as u16,
+        ));
+        true
+    }
+
+    fn start_composer_mouse_selection(&mut self, column: u16, row: u16) -> bool {
+        if !self.composer_input_hit(column, row) {
+            return false;
+        }
+        self.clear_selection();
+        self.mouse_down_target = None;
+        self.mouse_dragged = false;
+        self.composer_mouse_selecting = true;
+        self.move_composer_cursor_to_point(column, row);
+        self.textarea.start_selection();
+        self.close_file_popup();
+        self.close_agent_popup();
+        self.close_skill_popup();
+        self.dismiss_slash_menu();
+        true
+    }
+
+    fn update_composer_mouse_selection(&mut self, column: u16, row: u16) -> bool {
+        if !self.composer_mouse_selecting {
+            return false;
+        }
+        self.move_composer_cursor_to_point(column, row);
+        true
+    }
+
+    fn finish_composer_mouse_selection(&mut self) -> bool {
+        if !self.composer_mouse_selecting {
+            return false;
+        }
+        self.composer_mouse_selecting = false;
+        if !self.mouse_dragged
+            || self
+                .textarea
+                .selection_range()
+                .is_none_or(|(start, end)| start == end)
+        {
+            self.textarea.cancel_selection();
+        }
+        self.mouse_down_target = None;
+        self.mouse_dragged = false;
+        true
+    }
+
     fn selected_text(&self) -> Option<String> {
         selected_text_from_lines(&self.screen_lines, &self.selection)
     }
@@ -446,6 +519,8 @@ impl<'a> FullscreenUi<'a> {
     fn push_history_active_tool_call(&mut self, message: &Value, call: HistoryToolCall) {
         self.history_tool_titles
             .insert(call.id.clone(), call.completed_title.clone());
+        self.history_tool_args
+            .insert(call.id.clone(), call.args.clone());
         let mut row =
             TranscriptRow::with_title(evidence_kind(&call.name), call.active_title, "preparing");
         row.tool_call_id = Some(call.id.clone());
@@ -463,6 +538,8 @@ impl<'a> FullscreenUi<'a> {
     ) {
         self.history_tool_titles
             .insert(call.id.clone(), call.completed_title.clone());
+        self.history_tool_args
+            .insert(call.id.clone(), call.args.clone());
         let mut row = TranscriptRow::with_title(
             evidence_kind(&call.name),
             call.completed_title,
@@ -502,13 +579,20 @@ impl<'a> FullscreenUi<'a> {
         } else {
             "normal"
         };
+        let args = self
+            .history_tool_args
+            .get(tool_call_id)
+            .cloned()
+            .unwrap_or(Value::Null);
         let value = serde_json::json!({
             "tool_name": tool,
+            "args": args,
             "result": result,
             "outcome": outcome
         });
         let interrupted = tool_event_interrupted(&value);
-        let title = if tool == "Agent" {
+        let clarify_no_answer = tool == "clarify" && clarify_no_answer_result(&value);
+        let title = if matches!(tool, "Agent" | "clarify") {
             tool_title(tool, &value)
         } else {
             self.history_tool_titles
@@ -524,7 +608,7 @@ impl<'a> FullscreenUi<'a> {
         row.title = title;
         row.tool_name = Some(tool.to_string());
         row.interrupted = interrupted;
-        row.failed = is_error && !interrupted;
+        row.failed = is_error && !interrupted && !clarify_no_answer;
         row.tool_elapsed = metadata_elapsed_duration(metadata)
             .or_else(|| row.tool_started.map(|started| started.elapsed()));
         row.tool_started = None;
@@ -604,6 +688,47 @@ impl<'a> FullscreenUi<'a> {
             .or(Some(Duration::default()))
     }
 
+    fn bottom_panel_activity_elapsed(&self) -> Duration {
+        #[cfg(test)]
+        if let Some(elapsed) = self.running_elapsed_override {
+            return elapsed;
+        }
+        self.motion_started.elapsed()
+    }
+
+    fn background_running_session_ids(&self, current_session: Option<&str>) -> BTreeSet<String> {
+        let mut sessions = BTreeSet::new();
+        if let Some(running) = &self.running
+            && let Some(session_id) = running.session_id.as_deref()
+            && Some(session_id) != current_session
+        {
+            sessions.insert(session_id.to_string());
+        }
+        for agent in &self.auxiliary_agent_tasks {
+            if !agent.visible_live {
+                continue;
+            }
+            if let Some(session_id) = agent.session_id.as_deref()
+                && Some(session_id) != current_session
+            {
+                sessions.insert(session_id.to_string());
+            }
+            if let Some(session_id) = agent.child_session_id.as_deref()
+                && Some(session_id) != current_session
+            {
+                sessions.insert(session_id.to_string());
+            }
+        }
+        for shell in &self.auxiliary_shell_tasks {
+            if let Some(session_id) = shell.session_id.as_deref()
+                && Some(session_id) != current_session
+            {
+                sessions.insert(session_id.to_string());
+            }
+        }
+        sessions
+    }
+
     fn status_has_running(&self, current_session: Option<&str>) -> bool {
         self.running.as_ref().is_some_and(|running| {
             current_session_matches(running.session_id.as_deref(), current_session)
@@ -677,6 +802,26 @@ impl<'a> FullscreenUi<'a> {
     fn clear_composer(&mut self) {
         self.textarea = new_textarea();
         self.shell_mode = false;
+    }
+
+    fn select_composer_all(&mut self) -> bool {
+        if textarea_text(&self.textarea).is_empty() {
+            return false;
+        }
+        self.textarea.select_all();
+        self.close_file_popup();
+        self.close_agent_popup();
+        self.close_skill_popup();
+        self.dismiss_slash_menu();
+        true
+    }
+
+    fn cancel_composer_selection(&mut self) -> bool {
+        if !self.textarea.is_selecting() {
+            return false;
+        }
+        self.textarea.cancel_selection();
+        true
     }
 
     fn set_composer_text(&mut self, text: &str) {
@@ -1049,8 +1194,13 @@ impl<'a> FullscreenUi<'a> {
     ) {
         self.last_transcript_area = Some(transcript);
         self.last_composer_area = composer;
+        self.last_composer_input_area = None;
         self.last_status_area = Some(status);
         self.last_bottom_panel_area = bottom_panel;
+    }
+
+    fn set_composer_input_area(&mut self, area: Option<Rect>) {
+        self.last_composer_input_area = area;
     }
 
     fn mouse_wheel_target(&self, column: u16, row: u16) -> Option<MouseWheelTarget> {
@@ -1128,6 +1278,7 @@ impl<'a> FullscreenUi<'a> {
         self.turn_outcome = None;
         self.turn_terminal_message = None;
         self.turn_had_reasoning = false;
+        self.turn_terminal_visible_answer = false;
     }
 
     fn push_status(&mut self, text: impl Into<String>) {
@@ -1302,11 +1453,64 @@ impl<'a> FullscreenUi<'a> {
                 }
                 false
             }
+            RunStreamEvent::ClarifyRequest(request) => {
+                self.open_clarify_panel(request);
+                true
+            }
+            RunStreamEvent::ClarifyResolved(event) => {
+                self.apply_clarify_resolved(event);
+                false
+            }
             RunStreamEvent::Event(value) => self.apply_value_event(&value, debug),
             RunStreamEvent::Scoped { event, .. } => {
                 self.apply_stream_event(*event, thinking_visible, debug)
             }
         }
+    }
+
+    fn open_clarify_panel(&mut self, request: ClarifyRequestEvent) {
+        self.clarify_tool_args.insert(
+            request.call_id.clone(),
+            clarify_request_args_value(&request),
+        );
+        let previous_panel = match self.bottom_panel.take() {
+            Some(BottomPanel::Clarify(mut panel)) => panel.restore_panel(),
+            other => other,
+        };
+        self.bottom_panel = Some(BottomPanel::Clarify(ClarifyPanel::new(
+            request,
+            previous_panel,
+        )));
+    }
+
+    fn apply_clarify_resolved(&mut self, event: ClarifyResolvedEvent) {
+        let Some(BottomPanel::Clarify(mut panel)) = self.bottom_panel.take() else {
+            return;
+        };
+        if panel.request.call_id != event.call_id {
+            self.bottom_panel = Some(BottomPanel::Clarify(panel));
+            return;
+        }
+        self.bottom_panel = panel.restore_panel();
+    }
+
+    fn value_with_cached_clarify_args(&self, value: &Value, tool_call_id: &str) -> Value {
+        let args_missing = value
+            .get("args")
+            .is_none_or(|args| {
+                args.is_null() || args.as_object().is_some_and(|obj| obj.is_empty())
+            });
+        if !args_missing {
+            return value.clone();
+        }
+        let Some(args) = self.clarify_tool_args.get(tool_call_id) else {
+            return value.clone();
+        };
+        let mut merged = value.clone();
+        if let Some(object) = merged.as_object_mut() {
+            object.insert("args".to_string(), args.clone());
+        }
+        merged
     }
 
     fn apply_value_event(&mut self, value: &Value, debug: bool) -> bool {
@@ -1395,6 +1599,9 @@ impl<'a> FullscreenUi<'a> {
                         message.is_some_and(visible_answer_message_receives_meta);
                     let allow_reasoning_only_meta =
                         message.is_some_and(reasoning_only_message_receives_meta);
+                    if allow_visible_answer_meta {
+                        self.turn_terminal_visible_answer = true;
+                    }
                     self.update_turn_meta(
                         debug,
                         allow_visible_answer_meta,
@@ -1428,6 +1635,15 @@ impl<'a> FullscreenUi<'a> {
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string();
+                if tool == "clarify" {
+                    if !tool_call_id.is_empty()
+                        && let Some(args) = value.get("args")
+                        && !args.is_null()
+                    {
+                        self.clarify_tool_args.insert(tool_call_id.clone(), args.clone());
+                    }
+                    return false;
+                }
                 let id_key = (!tool_call_id.is_empty()).then(|| tool_id_key(&tool_call_id));
                 let idx = id_key
                     .as_ref()
@@ -1482,14 +1698,22 @@ impl<'a> FullscreenUi<'a> {
                     .get("tool_call_id")
                     .and_then(Value::as_str)
                     .unwrap_or("");
+                let clarify_value;
+                let value = if tool == "clarify" {
+                    clarify_value = self.value_with_cached_clarify_args(value, tool_call_id);
+                    &clarify_value
+                } else {
+                    value
+                };
                 let outcome = value
                     .get("outcome")
                     .and_then(Value::as_str)
                     .unwrap_or("normal");
                 let interrupted = tool_event_interrupted(value);
                 let user_confirmed_interrupt = interrupted && self.interrupt_requested;
-                let failed = outcome != "normal" && !interrupted;
-                if outcome != "normal" && !user_shell && !interrupted {
+                let clarify_no_answer = tool == "clarify" && clarify_no_answer_result(value);
+                let failed = outcome != "normal" && !interrupted && !clarify_no_answer;
+                if outcome != "normal" && !user_shell && !interrupted && !clarify_no_answer {
                     self.turn_failures += 1;
                 }
                 if user_confirmed_interrupt {
@@ -1547,17 +1771,22 @@ impl<'a> FullscreenUi<'a> {
                 if is_write_like_tool(tool) {
                     self.remove_orphan_provisional_tool_intents(tool, Some(idx));
                 }
-                if !user_shell {
-                    self.update_turn_meta(debug, false, false, true);
+                if tool == "clarify" {
+                    self.clarify_tool_args.remove(tool_call_id);
                 }
                 false
             }
             "agent_end" => {
-                self.turn_outcome = outcome_from_value(value);
+                let outcome = outcome_from_value(value);
+                if self.interrupt_requested && outcome == Some(Outcome::Aborted) {
+                    self.turn_interrupted = true;
+                }
+                self.turn_outcome = outcome;
                 self.turn_terminal_message = value
                     .get("terminal_message")
                     .and_then(Value::as_str)
                     .map(str::to_string);
+                self.update_turn_meta(debug, false, false, true);
                 false
             }
             _ => false,
@@ -1575,6 +1804,9 @@ impl<'a> FullscreenUi<'a> {
         let message_scope = self.streaming_tool_message_seq;
         let mut active_tool_frame_requested = false;
         for mut call in streaming_tool_calls_from_event(value) {
+            if call.tool_name == "clarify" {
+                continue;
+            }
             call.position_key = scoped_tool_position_key(message_scope, &call.position_key);
             active_tool_frame_requested |= self.upsert_streaming_tool_call(call);
         }
@@ -1665,6 +1897,7 @@ impl<'a> FullscreenUi<'a> {
                 }
             }
             RunStreamEvent::ReasoningEnd => {}
+            RunStreamEvent::ClarifyRequest(_) | RunStreamEvent::ClarifyResolved(_) => {}
             RunStreamEvent::Event(value) => {
                 changed |= apply_agent_child_value_preview(row, value);
             }
@@ -1703,6 +1936,9 @@ impl<'a> FullscreenUi<'a> {
     }
 
     fn upsert_streaming_tool_call(&mut self, call: StreamingToolCall) -> bool {
+        if call.tool_name == "clarify" {
+            return false;
+        }
         let value = serde_json::json!({ "args": call.args });
         let id_key = call.id.as_deref().map(tool_id_key);
         let intent_key = tool_intent_key(&call.tool_name);
@@ -1773,6 +2009,7 @@ impl<'a> FullscreenUi<'a> {
         self.turn_terminal_message = None;
         self.turn_interrupted = false;
         self.turn_had_reasoning = false;
+        self.turn_terminal_visible_answer = false;
         self.visible_turn_started = None;
         self.interrupt_requested = false;
         self.focus = FocusMode::Composer;
@@ -1888,10 +2125,15 @@ impl<'a> FullscreenUi<'a> {
             self.remove_turn_meta();
             return;
         }
-        if !(allow_visible_answer && self.assistant_row.is_some()
+        if !(allow_visible_answer
+            && (self.assistant_row.is_some() || self.turn_terminal_visible_answer)
             || allow_reasoning_only && self.turn_had_reasoning
             || allow_failure_summary && (self.turn_failures > 0 || self.turn_interrupted))
         {
+            return;
+        }
+        if self.running.is_some() {
+            self.remove_turn_meta();
             return;
         }
         let meta = turn_meta_text(TurnMetaProjection {
@@ -2318,6 +2560,30 @@ fn agent_child_status_text(status: &str, tool_uses: i64, tokens: Option<u64>) ->
         pluralize(tool_uses, "tool use"),
         token_suffix
     )
+}
+
+fn clarify_request_args_value(request: &ClarifyRequestEvent) -> Value {
+    serde_json::json!({
+        "questions": request
+            .questions
+            .iter()
+            .map(|question| {
+                serde_json::json!({
+                    "question": question.question.clone(),
+                    "options": question
+                        .options
+                        .iter()
+                        .map(|option| {
+                            serde_json::json!({
+                                "label": option.label.clone(),
+                                "description": option.description.clone(),
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect::<Vec<_>>()
+    })
 }
 
 fn selected_skill_names_from_event(value: &Value) -> Option<Vec<String>> {

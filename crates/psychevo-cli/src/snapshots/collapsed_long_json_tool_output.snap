@@ -1,6 +1,5 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
-assertion_line: 670
 expression: combined
 ---
 fixture=collapsed_long_json_tool_output
@@ -9,7 +8,7 @@ size=120x18
 --- text ---
 › Inspect cached HN comments.
 
-• Ran sqlite3 feeds/.cache/hn.db                                                                          ▸ more output
+• bash sqlite3 feeds/.cache/hn.db                                                                         ▸ more output
   └ {"comments":[{"id":48070001,"by":"user1","text":"identity verification discussion identity verification discussion
 "},{"id":48070002,"by":"user2","text":"identity verification discussion identity verification discussion
 "},{"id":48070003,"by":"user3","text":"identity verification discussion identity verification discussion
@@ -29,7 +28,7 @@ mock/model  high  ~/work · main
 --- styles ---
 [dim]› [default]Inspect cached HN comments.
 [default]
-[green]• [default]Ran sqlite3 feeds/.cache/hn.db                                                                          [dim]▸ more output[default]
+[green]• [default]bash sqlite3 feeds/.cache/hn.db                                                                         [dim]▸ more output[default]
 [dim]  └ [default]{"comments":[{"id":48070001,"by":"user1","text":"identity verification discussion identity verification discussion
 [default]"},{"id":48070002,"by":"user2","text":"identity verification discussion identity verification discussion
 [default]"},{"id":48070003,"by":"user3","text":"identity verification discussion identity verification discussion

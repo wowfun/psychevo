@@ -184,6 +184,10 @@ impl TuiTheme {
     }
 }
 
+fn text_selection_style() -> Style {
+    Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
+}
+
 fn tui_theme() -> TuiTheme {
     static THEME: std::sync::OnceLock<TuiTheme> = std::sync::OnceLock::new();
     *THEME.get_or_init(|| {

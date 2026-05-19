@@ -34,7 +34,11 @@ impl TuiApp {
                 }
             })
             .collect();
-        Ok(BottomSelectionPanel::new_sessions(view, rows))
+        let mut panel = BottomSelectionPanel::new_sessions(view, rows);
+        if let Some(session_id) = current_session {
+            panel.select_value_key(&format!("session:{session_id}"));
+        }
+        Ok(panel)
     }
 
     fn agent_panel(&self) -> AgentPanel {

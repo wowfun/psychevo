@@ -149,7 +149,7 @@ async fn fullscreen_drain_keeps_queued_events_after_task_completion() {
     let active_tool_row = ui
         .transcript
         .iter()
-        .find(|row| row.title == "Exploring fixture.txt")
+        .find(|row| row.title == "read fixture.txt")
         .expect("active tool evidence row");
     assert!(active_tool_row.tool_started.is_some());
     assert!(ui.running.is_some());
@@ -162,14 +162,14 @@ async fn fullscreen_drain_keeps_queued_events_after_task_completion() {
     let tool_row = ui
         .transcript
         .iter()
-        .find(|row| row.title == "Explored fixture.txt")
+        .find(|row| row.title == "read fixture.txt")
         .expect("tool evidence row");
     assert_eq!(tool_row.kind, TranscriptKind::Explored);
     assert_eq!(tool_row.text, "fixture content");
     let tool_index = ui
         .transcript
         .iter()
-        .position(|row| row.title == "Explored fixture.txt")
+        .position(|row| row.title == "read fixture.txt")
         .expect("tool index");
     let answer_index = ui
         .transcript
@@ -178,6 +178,113 @@ async fn fullscreen_drain_keeps_queued_events_after_task_completion() {
         .expect("answer index");
     assert!(answer_index < tool_index);
     assert!(ui.running.is_none());
+}
+
+#[tokio::test]
+async fn final_message_defers_turn_meta_while_foreground_task_is_running() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    let (tx, rx) = mpsc::unbounded_channel();
+    tx.send(RunStreamEvent::Event(serde_json::json!({
+        "type": "run_start",
+        "session_id": "streamed-session",
+        "provider": "xiaomi-token-plan",
+        "model": "mimo-v2.5-pro",
+        "mode": "default"
+    })))
+    .expect("send run start");
+    tx.send(RunStreamEvent::Event(serde_json::json!({
+        "type": "tool_execution_end",
+        "tool_call_id": "call_sqlite",
+        "tool_name": "bash",
+        "args": {"command": "sqlite3 feeds.db"},
+        "result": {"output": "[]", "exit_code": 1},
+        "outcome": "failed"
+    })))
+    .expect("send tool end");
+    tx.send(RunStreamEvent::Event(serde_json::json!({
+        "type": "message_end",
+        "message": {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "I can continue with the remaining data."}],
+            "timestamp_ms": 2,
+            "finish_reason": "stop",
+            "outcome": "normal",
+            "provider": "xiaomi-token-plan",
+            "model": "mimo-v2.5-pro"
+        },
+        "metadata": {"elapsed_ms": 2_000}
+    })))
+    .expect("send answer");
+
+    let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(async move {
+        let _ = done_rx.await;
+        Ok(psychevo_runtime::RunResult {
+            session_id: "streamed-session".to_string(),
+            outcome: Outcome::Normal,
+            terminal_reason: None,
+            final_answer: "I can continue with the remaining data.".to_string(),
+            db_path: temp.path().join("state.db"),
+            workdir: temp.path().to_path_buf(),
+            provider: "xiaomi-token-plan".to_string(),
+            model: "mimo-v2.5-pro".to_string(),
+            base_url: "http://127.0.0.1".to_string(),
+            api_key_env: None,
+            reasoning_effort: None,
+            context_limit: None,
+            tool_failures: 1,
+            selected_agent: None,
+            selected_skills: Vec::new(),
+            context_snapshot: None,
+            events: Vec::new(),
+            warnings: Vec::new(),
+        })
+    });
+    let (control, _) = run_control();
+    ui.running = Some(RunningTurn {
+        session_id: None,
+        control,
+        rx,
+        task: RunningTask::Agent(task),
+    });
+
+    app.drain_fullscreen_events(&mut ui).await.expect("drain");
+
+    assert!(ui.running.is_some());
+    assert!(
+        ui.status_running_elapsed(app.current_session.as_deref())
+            .is_some()
+    );
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Answer && row.text == "I can continue with the remaining data."
+    }));
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.kind != TranscriptKind::Meta),
+        "{:?}",
+        ui.transcript
+    );
+
+    tx.send(RunStreamEvent::Event(serde_json::json!({
+        "type": "agent_end",
+        "outcome": "normal",
+        "messages": []
+    })))
+    .expect("send agent end");
+    app.drain_fullscreen_events(&mut ui)
+        .await
+        .expect("drain agent end");
+
+    assert!(ui.running.is_none());
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Meta
+            && row.text.contains("xiaomi-token-plan/mimo-v2.5-pro")
+            && row.text.contains("1 failure")
+    }));
+    let _ = done_tx.send(());
 }
 
 #[tokio::test]
@@ -269,7 +376,7 @@ async fn fast_reasoning_only_write_renders_updating_before_completion() {
     let updating = ui
         .transcript
         .iter()
-        .position(|row| row.title == "Updating files")
+        .position(|row| row.title == "write")
         .expect("provisional updating row");
     assert!(thinking < updating);
     assert!(ui.transcript[updating].tool_started.is_some());
@@ -290,7 +397,7 @@ async fn fast_reasoning_only_write_renders_updating_before_completion() {
     assert!(
         ui.transcript
             .iter()
-            .any(|row| row.title == "Updating /tmp/hackernews-hot-05-39.md")
+            .any(|row| row.title == "write /tmp/hackernews-hot-05-39.md")
     );
 
     app.drain_fullscreen_events(&mut ui)
@@ -300,7 +407,7 @@ async fn fast_reasoning_only_write_renders_updating_before_completion() {
     assert!(
         ui.transcript
             .iter()
-            .any(|row| row.title == "Updated feeds/2026-05-10/hackernews-hot-05-39.md")
+            .any(|row| row.title == "write feeds/2026-05-10/hackernews-hot-05-39.md")
     );
 }
 
@@ -376,7 +483,7 @@ async fn pending_write_tool_input_defers_later_completion_events() {
     assert!(
         ui.transcript
             .iter()
-            .any(|row| row.title == "Updating files")
+            .any(|row| row.title == "write")
     );
     assert_eq!(ui.deferred_stream_events.len(), 3);
     assert!(ui.running.is_some());
@@ -387,7 +494,7 @@ async fn pending_write_tool_input_defers_later_completion_events() {
     assert!(
         ui.transcript
             .iter()
-            .any(|row| row.title == "Updating /tmp/hackernews-hot-05-39.md")
+            .any(|row| row.title == "write /tmp/hackernews-hot-05-39.md")
     );
     assert_eq!(ui.deferred_stream_events.len(), 1);
 
@@ -398,7 +505,7 @@ async fn pending_write_tool_input_defers_later_completion_events() {
     assert!(
         ui.transcript
             .iter()
-            .any(|row| row.title == "Updated feeds/2026-05-10/hackernews-hot-05-39.md")
+            .any(|row| row.title == "write feeds/2026-05-10/hackernews-hot-05-39.md")
     );
 }
 
@@ -498,7 +605,7 @@ fn multi_message_turn_preserves_answer_rows_across_tool_cycles() {
     let tool = ui
         .transcript
         .iter()
-        .position(|row| row.title == "Explored fixture.txt")
+        .position(|row| row.title == "read fixture.txt")
         .expect("tool row");
     let second_answer = ui
         .transcript
@@ -1174,7 +1281,7 @@ fn load_history_rehydrates_pending_write_tool_call() {
     let mut ui = FullscreenUi::new(&app);
     app.load_current_session_history(&mut ui).expect("history");
     assert!(ui.transcript.iter().any(|row| {
-        row.title == "Updating feeds/2026-05-10/hackernews-hot-06-42.md"
+        row.title == "write feeds/2026-05-10/hackernews-hot-06-42.md"
             && row.tool_started.is_some()
     }));
     assert!(
@@ -1208,7 +1315,7 @@ fn load_history_rehydrates_pending_write_tool_call() {
     assert_eq!(rows.len(), 1);
     assert_eq!(
         rows[0].title,
-        "Updated feeds/2026-05-10/hackernews-hot-06-42.md"
+        "write feeds/2026-05-10/hackernews-hot-06-42.md"
     );
     assert!(rows[0].tool_started.is_none());
 }
@@ -1271,7 +1378,7 @@ fn load_history_does_not_rehydrate_aborted_tool_calls_as_running() {
         .expect("bash row");
     assert!(
         row.title
-            .starts_with("Ran cd /home/kevin/Projects/feedgarden")
+            .starts_with("bash cd /home/kevin/Projects/feedgarden")
     );
     assert!(!row.title.starts_with("Running "));
     assert_eq!(row.text, "interrupted");
@@ -1655,7 +1762,7 @@ async fn running_shell_switch_buffers_stream_until_return() {
     );
     assert!(ui.transcript.iter().any(|row| {
         row.kind == TranscriptKind::Ran
-            && row.title == "Ran ! printf shell-one"
+            && row.title == "! printf shell-one"
             && row.text == "shell-one"
     }));
 
@@ -1721,6 +1828,10 @@ async fn sessions_panel_selection_does_not_reorder_by_view_time() {
         .find(|row| matches!(&row.value, BottomSelectionValue::Session(id) if id == &older))
         .expect("older row");
     assert!(current_row.is_current);
+    assert!(matches!(
+        panel.selected_value(),
+        Some(BottomSelectionValue::Session(id)) if id == older
+    ));
 }
 
 fn session_panel_ids(panel: &BottomSelectionPanel) -> Vec<String> {
@@ -1739,18 +1850,23 @@ async fn sessions_panel_up_down_wraps_between_first_and_last_rows() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
-    let first = store
+    store
         .create_session_with_metadata(&app.workdir, "tui", "model-a", "mock", None)
         .expect("first");
     store
         .create_session_with_metadata(&app.workdir, "tui", "model-b", "mock", None)
         .expect("second");
-    app.current_session = Some(first);
+    app.current_session = None;
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::Sessions)
         .await
         .expect("sessions");
+    let Some(BottomPanel::Sessions(panel)) = &ui.bottom_panel else {
+        panic!("expected sessions panel");
+    };
+    assert_eq!(panel.selected, 0);
+
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))
         .expect("wrap up");
     let Some(BottomPanel::Sessions(panel)) = &ui.bottom_panel else {

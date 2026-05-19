@@ -730,6 +730,22 @@ fn attach_pending_agent_running(ui: &mut FullscreenUi<'_>) {
     });
 }
 
+fn attach_background_agent_running(ui: &mut FullscreenUi<'_>, session_id: &str) {
+    let (_tx, rx) = mpsc::unbounded_channel();
+    let task = tokio::spawn(async {
+        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::RunResult>>().await
+    });
+    let (control, _) = run_control();
+    ui.auxiliary_agent_tasks.push(AuxiliaryAgentTask {
+        session_id: Some(session_id.to_string()),
+        child_session_id: None,
+        visible_live: true,
+        control,
+        rx,
+        task,
+    });
+}
+
 fn buffer_style_text(buffer: &ratatui::buffer::Buffer) -> String {
     let area = *buffer.area();
     let mut text = String::new();

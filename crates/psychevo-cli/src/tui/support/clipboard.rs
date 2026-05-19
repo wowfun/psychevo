@@ -5,21 +5,40 @@ fn default_clipboard_sink() -> ClipboardSink {
 fn copy_text_to_clipboard(text: &str) -> io::Result<()> {
     copy_text_to_clipboard_with(
         text,
+        ClipboardEnvironment {
+            ssh_session: is_ssh_session(),
+            tmux_session: is_tmux_session(),
+        },
         local_clipboard_commands(),
         |candidate, text| pipe_to_command(candidate.command, candidate.args, text),
+        tmux_clipboard_copy,
         write_osc52_clipboard,
     )
 }
 
 fn copy_text_to_clipboard_with(
     text: &str,
+    environment: ClipboardEnvironment,
     candidates: Vec<ClipboardCommand>,
     mut local_copy: impl FnMut(ClipboardCommand, &str) -> io::Result<bool>,
-    osc52_copy: impl FnOnce(&str) -> io::Result<()>,
+    mut tmux_copy: impl FnMut(&str) -> io::Result<()>,
+    mut osc52_copy: impl FnMut(&str) -> io::Result<()>,
 ) -> io::Result<()> {
     if text.is_empty() {
         return Ok(());
     }
+
+    let osc52_result = osc52_copy(text);
+    if environment.ssh_session {
+        return terminal_clipboard_copy_with(
+            text,
+            environment.tmux_session,
+            osc52_result,
+            &mut tmux_copy,
+        )
+        .map_err(|err| io::Error::other(format!("clipboard copy failed: {err}")));
+    }
+
     let mut failures = Vec::new();
     for candidate in candidates {
         match local_copy(candidate, text) {
@@ -28,7 +47,7 @@ fn copy_text_to_clipboard_with(
             Err(err) => failures.push(format!("{}: {err}", candidate.command)),
         }
     }
-    match osc52_copy(text) {
+    match osc52_result {
         Ok(()) => Ok(()),
         Err(err) => {
             failures.push(format!("OSC52: {err}"));
@@ -38,6 +57,28 @@ fn copy_text_to_clipboard_with(
             )))
         }
     }
+}
+
+fn terminal_clipboard_copy_with(
+    text: &str,
+    tmux_session: bool,
+    osc52_result: io::Result<()>,
+    tmux_copy: &mut impl FnMut(&str) -> io::Result<()>,
+) -> io::Result<()> {
+    if !tmux_session {
+        return osc52_result.map_err(|err| io::Error::other(format!("OSC52: {err}")));
+    }
+
+    let tmux_result = tmux_copy(text);
+    if osc52_result.is_ok() || tmux_result.is_ok() {
+        return Ok(());
+    }
+
+    let osc52_err = osc52_result.expect_err("checked OSC52 error");
+    let tmux_err = tmux_result.expect_err("checked tmux error");
+    Err(io::Error::other(format!(
+        "OSC52: {osc52_err}; tmux: {tmux_err}"
+    )))
 }
 
 fn clipboard_failure_summary(failures: &[String]) -> String {
@@ -96,6 +137,12 @@ struct ClipboardCommand {
     args: &'static [&'static str],
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ClipboardEnvironment {
+    ssh_session: bool,
+    tmux_session: bool,
+}
+
 const NO_ARGS: &[&str] = &[];
 const POWERSHELL_CLIPBOARD_ARGS: &[&str] = &[
     "-NonInteractive",
@@ -113,6 +160,14 @@ fn local_clipboard_commands() -> Vec<ClipboardCommand> {
         is_probably_wsl(),
         is_wayland_session(),
     )
+}
+
+fn is_ssh_session() -> bool {
+    std::env::var_os("SSH_TTY").is_some() || std::env::var_os("SSH_CONNECTION").is_some()
+}
+
+fn is_tmux_session() -> bool {
+    std::env::var_os("TMUX").is_some() || std::env::var_os("TMUX_PANE").is_some()
 }
 
 fn is_wayland_session() -> bool {
@@ -216,6 +271,86 @@ fn pipe_to_command(command: &str, args: &[&str], text: &str) -> io::Result<bool>
     Ok(status.success())
 }
 
+fn tmux_clipboard_copy(text: &str) -> io::Result<()> {
+    tmux_clipboard_copy_ready(
+        || tmux_command_output(["show-options", "-gv", "set-clipboard"]),
+        || tmux_command_output(["info"]),
+    )?;
+    pipe_to_required_command("tmux", &["load-buffer", "-w", "-"], text)
+}
+
+fn tmux_clipboard_copy_ready(
+    set_clipboard_fn: impl FnOnce() -> io::Result<String>,
+    tmux_info_fn: impl FnOnce() -> io::Result<String>,
+) -> io::Result<()> {
+    let set_clipboard = set_clipboard_fn()?;
+    if set_clipboard.trim() == "off" {
+        return Err(io::Error::other("tmux clipboard forwarding is disabled"));
+    }
+
+    let tmux_info = tmux_info_fn()?;
+    if tmux_info.lines().any(|line| line.contains("Ms: [missing]")) {
+        return Err(io::Error::other(
+            "tmux clipboard forwarding is unavailable: missing Ms capability",
+        ));
+    }
+
+    Ok(())
+}
+
+fn tmux_command_output<const N: usize>(args: [&str; N]) -> io::Result<String> {
+    let output = StdCommand::new("tmux").args(args).output()?;
+    if output.status.success() {
+        return String::from_utf8(output.stdout)
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err));
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if stderr.is_empty() {
+        Err(io::Error::other(format!(
+            "tmux exited with status {}",
+            output.status
+        )))
+    } else {
+        Err(io::Error::other(format!("tmux failed: {stderr}")))
+    }
+}
+
+fn pipe_to_required_command(command: &str, args: &[&str], text: &str) -> io::Result<()> {
+    let mut child = StdCommand::new(command)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let Some(mut stdin) = child.stdin.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(io::Error::other(format!("failed to open {command} stdin")));
+    };
+    if let Err(err) = stdin.write_all(text.as_bytes()) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(err);
+    }
+    drop(stdin);
+
+    let output = child.wait_with_output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if stderr.is_empty() {
+        Err(io::Error::other(format!(
+            "{command} exited with status {}",
+            output.status
+        )))
+    } else {
+        Err(io::Error::other(format!("{command} failed: {stderr}")))
+    }
+}
+
 fn base64_encode(bytes: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
@@ -238,4 +373,3 @@ fn base64_encode(bytes: &[u8]) -> String {
     }
     out
 }
-

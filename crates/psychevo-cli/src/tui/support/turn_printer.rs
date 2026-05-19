@@ -53,6 +53,7 @@ impl TurnPrinter {
                 }
             }
             RunStreamEvent::Event(value) => self.render_value_event(value, out)?,
+            RunStreamEvent::ClarifyRequest(_) | RunStreamEvent::ClarifyResolved(_) => {}
             RunStreamEvent::Scoped { event, .. } => self.render_event(event, out)?,
         }
         out.flush()

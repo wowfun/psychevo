@@ -1,6 +1,5 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
-assertion_line: 678
 expression: combined
 ---
 fixture=active_reasoning_write
@@ -12,7 +11,7 @@ size=120x24
 ⠋ Thinking                                                                                                           0s
   └ Let me compose the full report now. I have all the data. Let me write it out.
 
-⠋ Updating /tmp/hackernews-hot-05-39.md                                                                              0s
+⠋ write /tmp/hackernews-hot-05-39.md                                                                                 0s
 
 
 
@@ -38,7 +37,7 @@ mock/model  high  ⠋ 0s · Esc  ~/work · main
 [cyan]⠋ [default]Thinking                                                                                                           [dim]0s[default]
 [dim]  └ Let me compose the full report now. I have all the data. Let me write it out.[default]
 [default]
-[cyan]⠋ [default]Updating /tmp/hackernews-hot-05-39.md                                                                              [dim]0s[default]
+[cyan]⠋ [default]write /tmp/hackernews-hot-05-39.md                                                                                 [dim]0s[default]
 [default]
 [default]
 [default]

@@ -1,18 +1,17 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
-assertion_line: 678
 expression: combined
 ---
 fixture=active_write_suppresses_failure_meta
 size=120x18
 
 --- text ---
-• Ran command                                                                                                        0s
+• bash                                                                                                               0s
   └ failed
 
 Now let me write the full report:
 
-⠼ Updating files                                                                                                     2s
+⠼ write                                                                                                              2s
 
 
 
@@ -27,12 +26,12 @@ Now let me write the full report:
 mock/model  high  ⠋ 0s · Esc  ~/work
 
 --- styles ---
-[red]• Ran command[default]                                                                                                        [dim]0s[default]
+[red]• bash[default]                                                                                                               [dim]0s[default]
 [dim]  └ [red]failed[default]
 [default]
 [default]Now let me write the full report:
 [default]
-[cyan]⠼ [default]Updating files                                                                                                     [dim]2s[default]
+[cyan]⠼ [default]write                                                                                                              [dim]2s[default]
 [default]
 [default]
 [default]

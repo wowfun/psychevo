@@ -13,6 +13,9 @@ impl TuiApp {
         if matches!(ui.bottom_panel, Some(BottomPanel::ProviderWizard(_))) {
             return self.handle_provider_wizard_key(ui, key);
         }
+        if matches!(ui.bottom_panel, Some(BottomPanel::Clarify(_))) {
+            return self.handle_clarify_panel_key(ui, key);
+        }
         if matches!(ui.bottom_panel, Some(BottomPanel::AgentEditor(_))) {
             return self.handle_agent_editor_key(ui, key);
         }
@@ -104,6 +107,187 @@ impl TuiApp {
             _ => {}
         }
         Ok(false)
+    }
+
+    fn handle_clarify_panel_key(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        key: KeyEvent,
+    ) -> Result<bool> {
+        let Some(BottomPanel::Clarify(mut panel)) = ui.bottom_panel.take() else {
+            return Ok(false);
+        };
+        let mut restore = false;
+        match panel.mode() {
+            ClarifyInputMode::Options => match key.code {
+                KeyCode::Esc => {
+                    if let Some(running) = ui.running.as_ref() {
+                        if running
+                            .control
+                            .submit_clarify_result(&panel.request.call_id, ClarifyResult::Cancelled)
+                        {
+                            restore = true;
+                        } else {
+                            panel.notice = Some("clarify request is no longer active".to_string());
+                        }
+                    } else {
+                        panel.notice = Some("clarify request is no longer active".to_string());
+                    }
+                }
+                KeyCode::Enter => {
+                    if panel.selected_is_other() {
+                        panel.set_mode(ClarifyInputMode::Other);
+                        panel.notice = None;
+                    } else {
+                        self.answer_clarify_selection(ui, &mut panel)?;
+                    }
+                    restore = panel.answers.iter().all(Option::is_some)
+                        && panel.notice.is_none();
+                }
+                KeyCode::Tab => {
+                    if panel.selected_is_other() {
+                        panel.set_mode(ClarifyInputMode::Other);
+                    } else {
+                        panel.set_mode(ClarifyInputMode::Note);
+                    }
+                    panel.notice = None;
+                }
+                KeyCode::Left => panel.move_question(-1),
+                KeyCode::Right => panel.move_question(1),
+                KeyCode::Up => panel.move_selection(-1),
+                KeyCode::Down => panel.move_selection(1),
+                KeyCode::Char(c) if c.is_ascii_digit() => {
+                    if let Some(index) = c.to_digit(10).and_then(|value| value.checked_sub(1)) {
+                        panel.select_index(index as usize);
+                    }
+                }
+                _ => {}
+            },
+            ClarifyInputMode::Other | ClarifyInputMode::Note => match key.code {
+                KeyCode::Esc => {
+                    panel.set_mode(ClarifyInputMode::Options);
+                    panel.notice = None;
+                }
+                KeyCode::Enter => {
+                    self.answer_clarify_selection(ui, &mut panel)?;
+                    restore = panel.answers.iter().all(Option::is_some)
+                        && panel.notice.is_none();
+                }
+                KeyCode::Left => panel.move_input_cursor(-1),
+                KeyCode::Right => panel.move_input_cursor(1),
+                KeyCode::Home => panel.move_input_cursor_to_start(),
+                KeyCode::End => panel.move_input_cursor_to_end(),
+                KeyCode::Backspace => {
+                    panel.pop_input_char();
+                }
+                KeyCode::Delete => {
+                    panel.delete_input_char();
+                }
+                KeyCode::Char(c)
+                    if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
+                {
+                    panel.push_input_char(c);
+                }
+                _ => {}
+            },
+        }
+
+        if restore {
+            ui.bottom_panel = panel.restore_panel();
+        } else {
+            ui.bottom_panel = Some(BottomPanel::Clarify(panel));
+        }
+        Ok(false)
+    }
+
+    fn handle_clarify_panel_click(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        index: usize,
+    ) -> Result<()> {
+        let Some(BottomPanel::Clarify(mut panel)) = ui.bottom_panel.take() else {
+            return Ok(());
+        };
+        panel.select_index(index);
+        if panel.selected_is_other() {
+            panel.set_mode(ClarifyInputMode::Other);
+            panel.notice = None;
+            ui.bottom_panel = Some(BottomPanel::Clarify(panel));
+        } else {
+            panel.set_mode(ClarifyInputMode::Options);
+            panel.notice = None;
+            self.answer_clarify_selection(ui, &mut panel)?;
+            if panel.answers.iter().all(Option::is_some) && panel.notice.is_none() {
+                ui.bottom_panel = panel.restore_panel();
+            } else {
+                ui.bottom_panel = Some(BottomPanel::Clarify(panel));
+            }
+        }
+        Ok(())
+    }
+
+    fn answer_clarify_selection(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        panel: &mut ClarifyPanel,
+    ) -> Result<()> {
+        let question_index = panel.question_index;
+        let Some(question) = panel.current_question().cloned() else {
+            panel.notice = Some("clarify question is missing".to_string());
+            return Ok(());
+        };
+        let selected = panel.selected();
+        let mut answers = Vec::new();
+        if selected >= question.options.len() {
+            if panel.mode() != ClarifyInputMode::Other {
+                panel.set_mode(ClarifyInputMode::Other);
+                panel.notice = None;
+                return Ok(());
+            }
+            panel.set_mode(ClarifyInputMode::Other);
+            let text = panel.other_draft().trim().to_string();
+            if text.is_empty() {
+                panel.notice = Some("type an answer for Other".to_string());
+                return Ok(());
+            }
+            answers.push(text);
+        } else if let Some(option) = question.options.get(selected) {
+            answers.push(option.label.clone());
+            let note = panel.note_draft(selected).trim().to_string();
+            if !note.is_empty() {
+                answers.push(format!("user_note: {}", note.trim()));
+            }
+        }
+        if let Some(slot) = panel.answers.get_mut(question_index) {
+            *slot = Some(ClarifyAnswer { answers });
+        }
+        panel.set_mode(ClarifyInputMode::Options);
+        panel.notice = None;
+        if panel.answers.iter().all(Option::is_some) {
+            let Some(running) = ui.running.as_ref() else {
+                panel.notice = Some("clarify request is no longer active".to_string());
+                return Ok(());
+            };
+            let response = ClarifyResponse {
+                answers: panel
+                    .answers
+                    .iter()
+                    .cloned()
+                    .map(|answer| answer.unwrap_or(ClarifyAnswer {
+                        answers: Vec::new(),
+                    }))
+                    .collect(),
+            };
+            if !running.control.submit_clarify_result(
+                &panel.request.call_id,
+                ClarifyResult::Answered(response),
+            ) {
+                panel.notice = Some("clarify request is no longer active".to_string());
+            }
+            return Ok(());
+        }
+        panel.move_to_next_unanswered();
+        Ok(())
     }
 
     fn apply_bottom_panel_selection(

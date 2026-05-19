@@ -376,6 +376,7 @@ fn assistant_message_has_tool_calls(message: &Value) -> bool {
 struct HistoryToolCall {
     id: String,
     name: String,
+    args: Value,
     active_title: String,
     completed_title: String,
 }
@@ -393,10 +394,11 @@ fn history_tool_calls_from_message(message: &Value) -> Vec<HistoryToolCall> {
             let id = block.get("id").and_then(Value::as_str)?;
             let name = block.get("name").and_then(Value::as_str)?;
             let args = tool_call_args_from_block(block);
-            let value = serde_json::json!({ "args": args });
+            let value = serde_json::json!({ "args": args.clone() });
             Some(HistoryToolCall {
                 id: id.to_string(),
                 name: name.to_string(),
+                args,
                 active_title: active_tool_title(name, &value),
                 completed_title: tool_title(name, &value),
             })

@@ -346,7 +346,7 @@ fn long_read_tool_output_collapses_and_preserves_full_text() {
         .iter()
         .find(|row| row.kind == TranscriptKind::Explored)
         .expect("read evidence row");
-    assert_eq!(row.title, "Explored src/long.rs");
+    assert_eq!(row.title, "read src/long.rs");
     assert_eq!(row.text.lines().count(), 7);
     assert!(row.text.contains("... 58 more lines"));
     assert_eq!(row.full_text.as_deref(), Some(content.as_str()));
@@ -357,7 +357,7 @@ fn long_read_tool_output_collapses_and_preserves_full_text() {
 fn running_tool_title_right_aligns_elapsed_duration() {
     let mut row = TranscriptRow::with_title(
         TranscriptKind::Ran,
-        "Ran cargo test --workspace --all-targets",
+        "bash cargo test --workspace --all-targets",
         "running",
     );
     row.tool_started = Some(
@@ -368,7 +368,7 @@ fn running_tool_title_right_aligns_elapsed_duration() {
 
     let title = line_text(&tool_lines(&row, false, true, 36)[0]);
 
-    assert!(title.contains("Running cargo"));
+    assert!(title.contains("bash cargo"));
     assert!(!title.starts_with("• "));
     assert!(title.ends_with("0s"));
     assert_eq!(UnicodeWidthStr::width(title.as_str()), 35);
@@ -382,18 +382,18 @@ fn active_tool_rows_render_present_tense_without_redundant_body() {
     for (kind, stored_title, expected_title) in [
         (
             TranscriptKind::Explored,
-            "Explored Cargo.toml",
-            "Exploring Cargo.toml",
+            "read Cargo.toml",
+            "read Cargo.toml",
         ),
         (
             TranscriptKind::Ran,
-            "Ran cargo test -p psychevo-cli",
-            "Running cargo test -p psychevo-cli",
+            "bash cargo test -p psychevo-cli",
+            "bash cargo test -p psychevo-cli",
         ),
         (
             TranscriptKind::Updated,
-            "Updated src/lib.rs",
-            "Updating src/lib.rs",
+            "write src/lib.rs",
+            "write src/lib.rs",
         ),
     ] {
         let mut row = TranscriptRow::with_title(kind, stored_title, "running");
@@ -415,7 +415,7 @@ fn expandable_tool_title_uses_text_hint_without_brackets() {
         .join("\n");
     let mut row = TranscriptRow::with_title(
         TranscriptKind::Explored,
-        "Explored src/long.rs",
+        "read src/long.rs",
         "line 01\nline 02\n... 10 more lines",
     );
     row.full_text = Some(content);
@@ -455,7 +455,7 @@ fn completed_tool_title_uses_fixed_elapsed_duration() {
 fn narrow_tool_title_preserves_elapsed_duration() {
     let mut row = TranscriptRow::with_title(
         TranscriptKind::Ran,
-        "Ran cargo test --workspace --all-targets",
+        "bash cargo test --workspace --all-targets",
         "",
     );
     row.tool_elapsed = Some(Duration::from_millis(12_340));
@@ -470,7 +470,7 @@ fn narrow_tool_title_preserves_elapsed_duration() {
 fn completed_tool_title_formats_elapsed_minutes() {
     let mut row = TranscriptRow::with_title(
         TranscriptKind::Ran,
-        "Ran cargo test --workspace --all-targets",
+        "bash cargo test --workspace --all-targets",
         "",
     );
     row.tool_elapsed = Some(Duration::from_millis(140_000));
@@ -509,7 +509,7 @@ fn streaming_tool_call_creates_pending_updating_row_before_execution() {
 
     assert_eq!(ui.transcript.len(), 1);
     assert_eq!(ui.transcript[0].kind, TranscriptKind::Updated);
-    assert_eq!(ui.transcript[0].title, "Updating files");
+    assert_eq!(ui.transcript[0].title, "write");
     assert_eq!(ui.transcript[0].text, "preparing");
     assert!(ui.transcript[0].tool_started.is_some());
     assert!(ui
@@ -561,12 +561,12 @@ fn streaming_tool_call_after_visible_text_stays_below_answer() {
         .position(|row| row.kind == TranscriptKind::Updated)
         .expect("tool row");
     assert!(answer < tool);
-    assert_eq!(ui.transcript[tool].title, "Updating report.md");
+    assert_eq!(ui.transcript[tool].title, "write report.md");
 
     ui.scroll_to_bottom();
     let buffer = draw_fullscreen_for_test(&app, &mut ui, 80, 8);
     let text = buffer_text(&buffer);
-    assert!(text.contains("Updating report.md"), "{text}");
+    assert!(text.contains("write report.md"), "{text}");
     assert!(!text.contains("Tool calls"), "{text}");
 }
 
@@ -635,7 +635,7 @@ fn message_end_text_plus_write_tool_shows_active_row_without_intermediate_meta()
         .position(|row| row.kind == TranscriptKind::Updated)
         .expect("tool row");
     assert!(answer < tool);
-    assert_eq!(ui.transcript[tool].title, "Updating /tmp/hackernews-hot-05-15.md");
+    assert_eq!(ui.transcript[tool].title, "write /tmp/hackernews-hot-05-15.md");
     assert!(
         ui.transcript
             .iter()
@@ -647,9 +647,101 @@ fn message_end_text_plus_write_tool_shows_active_row_without_intermediate_meta()
     ui.scroll_to_bottom();
     let buffer = draw_fullscreen_for_test(&app, &mut ui, 100, 8);
     let text = buffer_text(&buffer);
-    assert!(text.contains("Updating /tmp/hackernews-hot-05-15.md"), "{text}");
+    assert!(text.contains("write /tmp/hackernews-hot-05-15.md"), "{text}");
     assert!(!text.contains("Tool calls"), "{text}");
     assert!(!text.contains("xiaomi-token-plan/mimo-v2.5-pro"), "{text}");
+}
+
+#[test]
+fn failed_tool_end_does_not_create_intermediate_turn_meta() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.start_assistant();
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "run_start",
+            "provider": "xiaomi-token-plan",
+            "model": "mimo-v2.5-pro",
+            "mode": "default"
+        }),
+        false,
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_execution_start",
+            "tool_call_id": "call_sqlite",
+            "tool_name": "bash",
+            "args": {"command": "sqlite3 -json feeds.db"}
+        }),
+        false,
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_execution_end",
+            "tool_call_id": "call_sqlite",
+            "tool_name": "bash",
+            "args": {"command": "sqlite3 -json feeds.db"},
+            "result": {"output": "[]", "exit_code": 1},
+            "outcome": "failed"
+        }),
+        false,
+    );
+
+    let failed_tool = ui
+        .transcript
+        .iter()
+        .find(|row| row.kind == TranscriptKind::Ran)
+        .expect("failed tool row");
+    assert!(failed_tool.failed);
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.kind != TranscriptKind::Meta),
+        "{:?}",
+        ui.transcript
+    );
+
+    ui.apply_stream_event(
+        RunStreamEvent::ReasoningDelta {
+            text: "The query failed; I will continue with available context.".to_string(),
+        },
+        true,
+        false,
+    );
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.kind != TranscriptKind::Meta),
+        "{:?}",
+        ui.transcript
+    );
+
+    ui.apply_stream_event(RunStreamEvent::ReasoningEnd, true, false);
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "I continued after the failed query."}],
+                "timestamp_ms": 3,
+                "finish_reason": "stop",
+                "outcome": "normal",
+                "model": "mimo-v2.5-pro",
+                "provider": "xiaomi-token-plan"
+            },
+            "metadata": {"elapsed_ms": 1_200}
+        }),
+        false,
+    );
+
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.kind == TranscriptKind::Meta && row.text.contains("1 failure")),
+        "{:?}",
+        ui.transcript
+    );
 }
 
 #[test]
@@ -705,7 +797,7 @@ fn pending_write_tool_input_shows_updating_before_complete_arguments() {
         .position(|row| row.kind == TranscriptKind::Updated)
         .expect("tool row");
     assert!(answer < tool);
-    assert_eq!(ui.transcript[tool].title, "Updating files");
+    assert_eq!(ui.transcript[tool].title, "write");
     assert!(ui.transcript[tool].tool_started.is_some());
     assert!(
         ui.transcript
@@ -726,12 +818,12 @@ fn pending_write_tool_input_shows_updating_before_complete_arguments() {
         }),
         false,
     );
-    assert_eq!(ui.transcript[tool].title, "Updating feeds/report.md");
+    assert_eq!(ui.transcript[tool].title, "write feeds/report.md");
 
     ui.scroll_to_bottom();
     let buffer = draw_fullscreen_for_test(&app, &mut ui, 100, 8);
     let text = buffer_text(&buffer);
-    assert!(text.contains("Updating feeds/report.md"), "{text}");
+    assert!(text.contains("write feeds/report.md"), "{text}");
     assert!(!text.contains("Tool calls"), "{text}");
     assert!(!text.contains("xiaomi-token-plan/mimo-v2.5-pro"), "{text}");
 }
@@ -759,7 +851,7 @@ fn visible_write_preamble_creates_and_reconciles_provisional_updating_row() {
     let provisional = ui
         .transcript
         .iter()
-        .position(|row| row.title == "Updating files")
+        .position(|row| row.title == "write")
         .expect("provisional row");
     assert!(ui.transcript[provisional].tool_call_id.is_none());
 
@@ -774,7 +866,7 @@ fn visible_write_preamble_creates_and_reconciles_provisional_updating_row() {
         }),
         false,
     );
-    assert_eq!(ui.transcript[provisional].title, "Updating feeds/report.md");
+    assert_eq!(ui.transcript[provisional].title, "write feeds/report.md");
     assert_eq!(
         ui.transcript[provisional].tool_call_id.as_deref(),
         Some("call_write_report")
@@ -810,7 +902,7 @@ fn visible_write_preamble_does_not_leave_orphan_after_non_write_tool_message() {
     assert!(ui
         .transcript
         .iter()
-        .any(|row| row.title == "Updating files"));
+        .any(|row| row.title == "write"));
 
     ui.apply_value_event(
         &serde_json::json!({
@@ -843,14 +935,14 @@ fn visible_write_preamble_does_not_leave_orphan_after_non_write_tool_message() {
     assert!(
         ui.transcript
             .iter()
-            .all(|row| row.title != "Updating files"),
+            .all(|row| row.title != "write"),
         "{:?}",
         ui.transcript
     );
     assert!(ui
         .transcript
         .iter()
-        .any(|row| row.title == "Running date -u +%H-%M"));
+        .any(|row| row.title == "bash date -u +%H-%M"));
 }
 
 #[test]
@@ -931,18 +1023,18 @@ fn repeated_visible_write_preamble_does_not_duplicate_after_concrete_write_signa
     assert!(ui
         .transcript
         .iter()
-        .all(|row| row.title != "Updating files"));
+        .all(|row| row.title != "write"));
     let updated = ui
         .transcript
         .iter()
         .filter(|row| row.kind == TranscriptKind::Updated)
         .collect::<Vec<_>>();
     assert_eq!(updated.len(), 1);
-    assert_eq!(updated[0].title, "Updated feeds/report.md");
+    assert_eq!(updated[0].title, "write feeds/report.md");
 }
 
 #[test]
-fn active_write_removes_confusing_failure_meta_until_it_settles() {
+fn active_write_keeps_failed_tool_meta_suppressed_until_final_answer() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -970,7 +1062,7 @@ fn active_write_removes_confusing_failure_meta_until_it_settles() {
     assert!(ui
         .transcript
         .iter()
-        .any(|row| row.kind == TranscriptKind::Meta && row.text.contains("1 failure")));
+        .all(|row| row.kind != TranscriptKind::Meta));
 
     ui.apply_value_event(
         &serde_json::json!({
@@ -986,7 +1078,7 @@ fn active_write_removes_confusing_failure_meta_until_it_settles() {
     assert!(ui
         .transcript
         .iter()
-        .any(|row| row.title == "Updating files"));
+        .any(|row| row.title == "write"));
     assert!(
         ui.transcript
             .iter()
@@ -997,7 +1089,7 @@ fn active_write_removes_confusing_failure_meta_until_it_settles() {
 }
 
 #[test]
-fn reasoning_delta_removes_prior_failure_meta_while_turn_continues() {
+fn reasoning_delta_keeps_failed_tool_meta_suppressed_while_turn_continues() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -1025,7 +1117,7 @@ fn reasoning_delta_removes_prior_failure_meta_while_turn_continues() {
     assert!(ui
         .transcript
         .iter()
-        .any(|row| row.kind == TranscriptKind::Meta && row.text.contains("1 failure")));
+        .all(|row| row.kind != TranscriptKind::Meta));
 
     ui.apply_stream_event(
         RunStreamEvent::ReasoningDelta {
@@ -1046,7 +1138,7 @@ fn reasoning_delta_removes_prior_failure_meta_while_turn_continues() {
     assert!(ui
         .transcript
         .iter()
-        .all(|row| row.title != "Updating files"));
+        .all(|row| row.title != "write"));
 }
 
 #[test]
@@ -1134,7 +1226,7 @@ fn visible_write_preamble_provisional_row_is_removed_without_tool_call() {
     assert!(ui
         .transcript
         .iter()
-        .any(|row| row.title == "Updating files"));
+        .any(|row| row.title == "write"));
 
     ui.apply_value_event(
         &serde_json::json!({
@@ -1156,7 +1248,7 @@ fn visible_write_preamble_provisional_row_is_removed_without_tool_call() {
     assert!(ui
         .transcript
         .iter()
-        .all(|row| row.title != "Updating files"));
+        .all(|row| row.title != "write"));
 }
 
 #[test]
@@ -1219,7 +1311,7 @@ fn streaming_tool_call_migrates_position_key_to_tool_id_without_duplicate() {
         .filter(|row| row.kind == TranscriptKind::Updated)
         .collect::<Vec<_>>();
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].title, "Updating report.md");
+    assert_eq!(rows[0].title, "write report.md");
     assert_eq!(rows[0].text, "running");
     assert_eq!(rows[0].tool_call_id.as_deref(), Some("call_write"));
 }
@@ -1264,7 +1356,7 @@ fn streaming_tool_completion_reuses_pending_row_as_completed_evidence() {
     assert_eq!(ui.transcript.len(), 1);
     let row = &ui.transcript[0];
     assert_eq!(row.kind, TranscriptKind::Updated);
-    assert_eq!(row.title, "Updated report.md");
+    assert_eq!(row.title, "write report.md");
     assert!(row.text.contains("write normal"));
     assert_eq!(row.tool_elapsed, Some(Duration::from_millis(65_000)));
     assert!(row.tool_started.is_none());
@@ -1280,35 +1372,35 @@ fn completed_live_tool_elapsed_keeps_visible_active_duration_for_all_tool_phases
             serde_json::json!({"path": "Cargo.toml"}),
             serde_json::json!({"path": "Cargo.toml", "content": "body"}),
             TranscriptKind::Explored,
-            "Explored Cargo.toml",
+            "read Cargo.toml",
         ),
         (
             "search",
             serde_json::json!({"query": "Updating"}),
             serde_json::json!({"query": "Updating", "matches": []}),
             TranscriptKind::Explored,
-            "Explored search Updating",
+            "search Updating",
         ),
         (
             "bash",
             serde_json::json!({"command": "cargo test -p psychevo-cli"}),
             serde_json::json!({"output": "ok"}),
             TranscriptKind::Ran,
-            "Ran cargo test -p psychevo-cli",
+            "bash cargo test -p psychevo-cli",
         ),
         (
             "write",
             serde_json::json!({"path": "report.md", "content": "body"}),
             serde_json::json!({"path": "report.md", "bytes_written": 4}),
             TranscriptKind::Updated,
-            "Updated report.md",
+            "write report.md",
         ),
         (
             "edit",
             serde_json::json!({"path": "report.md", "old": "a", "new": "b"}),
             serde_json::json!({"path": "report.md", "replacements": 1}),
             TranscriptKind::Updated,
-            "Updated report.md",
+            "edit report.md",
         ),
     ];
 
@@ -1388,7 +1480,7 @@ fn interrupted_pending_tool_row_stops_timer_as_interrupted() {
     ui.finish_turn();
 
     let row = &ui.transcript[0];
-    assert_eq!(row.title, "Updated src/lib.rs");
+    assert_eq!(row.title, "edit src/lib.rs");
     assert_eq!(row.text, "interrupted");
     assert!(row.interrupted);
     assert!(!row.failed);
@@ -1439,7 +1531,7 @@ fn parallel_streaming_tool_calls_create_independent_active_rows() {
         .iter()
         .map(|row| row.title.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(titles, ["Exploring Cargo.toml", "Exploring search format_duration"]);
+    assert_eq!(titles, ["read Cargo.toml", "search format_duration"]);
 }
 
 #[test]
@@ -1521,7 +1613,7 @@ fn sequential_streaming_tool_calls_reuse_position_without_overwriting_rows() {
         })
         .map(|row| row.title.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(titles, ["Ran echo one", "Updated report.md"]);
+    assert_eq!(titles, ["bash echo one", "write report.md"]);
 }
 
 #[test]
@@ -1691,7 +1783,7 @@ fn history_tool_call_reasoning_message_does_not_get_turn_meta() {
     assert!(ui
         .transcript
         .iter()
-        .any(|row| row.title == "Exploring Cargo.toml"));
+        .any(|row| row.title == "read Cargo.toml"));
 }
 
 #[test]
@@ -1737,7 +1829,7 @@ fn history_aborted_tool_calls_render_interrupted_without_live_timer() {
         .iter()
         .find(|row| row.kind == TranscriptKind::Ran)
         .expect("interrupted bash row");
-    assert!(row.title.starts_with("Ran cd /home/kevin/Projects/feedgarden"));
+    assert!(row.title.starts_with("bash cd /home/kevin/Projects/feedgarden"));
     assert!(!row.title.starts_with("Running "));
     assert_eq!(row.text, "interrupted");
     assert!(row.interrupted);
@@ -1797,7 +1889,7 @@ fn history_text_plus_tool_call_message_shows_active_row_without_turn_meta() {
     );
     assert!(ui.transcript.iter().any(|row| {
         row.kind == TranscriptKind::Updated
-            && row.title == "Updating /tmp/hackernews-hot-05-15.md"
+            && row.title == "write /tmp/hackernews-hot-05-15.md"
             && row.tool_started.is_some()
     }));
     assert!(
@@ -1855,7 +1947,7 @@ fn history_aborted_tool_result_renders_interrupted_without_failure_style() {
         .iter()
         .find(|row| row.kind == TranscriptKind::Ran)
         .expect("interrupted history row");
-    assert_eq!(row.title, "Ran find /home/kevin -name tmp.txt -type f");
+    assert_eq!(row.title, "bash find /home/kevin -name tmp.txt -type f");
     assert_eq!(row.text, "interrupted");
     assert!(row.interrupted);
     assert!(!row.failed);
@@ -1911,7 +2003,7 @@ fn history_bash_timeout_renders_timeout_before_partial_output() {
         .iter()
         .find(|row| row.kind == TranscriptKind::Ran)
         .expect("timeout history row");
-    assert_eq!(row.title, "Ran python scripts/fetch.py");
+    assert_eq!(row.title, "bash python scripts/fetch.py");
     assert!(row.failed);
     assert!(row.text.starts_with(
         "timeout: command timed out after 120 seconds; partial output follows\n"
@@ -2057,7 +2149,7 @@ fn history_tool_result_updates_rehydrated_pending_write_row() {
     assert!(ui
         .transcript
         .iter()
-        .any(|row| row.title == "Updating feeds/2026-05-10/hackernews-hot-06-42.md"));
+        .any(|row| row.title == "write feeds/2026-05-10/hackernews-hot-06-42.md"));
 
     ui.push_history_message(
         &serde_json::json!({
@@ -2080,7 +2172,7 @@ fn history_tool_result_updates_rehydrated_pending_write_row() {
     assert_eq!(updated.len(), 1);
     assert_eq!(
         updated[0].title,
-        "Updated feeds/2026-05-10/hackernews-hot-06-42.md"
+        "write feeds/2026-05-10/hackernews-hot-06-42.md"
     );
     assert_eq!(updated[0].tool_elapsed, Some(Duration::from_millis(0)));
     assert!(updated[0].tool_started.is_none());
@@ -2413,14 +2505,14 @@ fn reasoning_only_write_message_shows_active_updating_without_meta() {
     let provisional = ui
         .transcript
         .iter()
-        .position(|row| row.title == "Updating files")
+        .position(|row| row.title == "write")
         .expect("provisional updating row");
     assert!(ui.transcript[provisional].tool_started.is_some());
     assert_eq!(ui.transcript[provisional].tool_call_id, None);
     assert!(
         ui.transcript
             .iter()
-            .all(|row| row.title != "Updating /tmp/hackernews-hot-05-39.md"),
+            .all(|row| row.title != "write /tmp/hackernews-hot-05-39.md"),
         "{:?}",
         ui.transcript
     );
@@ -2470,7 +2562,7 @@ fn reasoning_only_write_message_shows_active_updating_without_meta() {
     assert!(thinking < updating);
     assert_eq!(
         ui.transcript[updating].title,
-        "Updating /tmp/hackernews-hot-05-39.md"
+        "write /tmp/hackernews-hot-05-39.md"
     );
     assert!(ui.transcript[updating].tool_started.is_some());
     assert!(
@@ -2507,7 +2599,7 @@ fn hidden_thinking_write_intent_does_not_create_provisional_updating() {
     assert!(ui
         .transcript
         .iter()
-        .all(|row| row.title != "Updating files"));
+        .all(|row| row.title != "write"));
 }
 
 #[test]
@@ -2526,7 +2618,7 @@ fn visible_thinking_run_intent_creates_and_reconciles_running_command() {
     );
     assert!(ui.transcript.iter().any(|row| {
         row.kind == TranscriptKind::Ran
-            && row.title == "Running command"
+            && row.title == "bash"
             && row.tool_started.is_some()
     }));
 
@@ -2561,7 +2653,7 @@ fn visible_thinking_run_intent_creates_and_reconciles_running_command() {
         .filter(|row| row.kind == TranscriptKind::Ran)
         .collect::<Vec<_>>();
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].title, "Running wc -c report.md");
+    assert_eq!(rows[0].title, "bash wc -c report.md");
     assert_eq!(rows[0].tool_call_id.as_deref(), Some("call_wc"));
 }
 
@@ -2720,7 +2812,7 @@ fn bash_tool_title_uses_actual_first_command_line() {
             "args": {"command": "cargo test -p psychevo-cli\ncargo fmt"}
         }),
     );
-    assert_eq!(title, "Ran cargo test -p psychevo-cli");
+    assert_eq!(title, "bash cargo test -p psychevo-cli");
 }
 
 #[test]
@@ -2735,7 +2827,7 @@ fn bash_tool_title_skips_leading_shell_comments() {
     );
     assert_eq!(
         title,
-        "Ran curl -sL https://example.com | python3 -c 'print(1)'"
+        "bash curl -sL https://example.com | python3 -c 'print(1)'"
     );
 
     let active = active_tool_title(
@@ -2746,7 +2838,7 @@ fn bash_tool_title_skips_leading_shell_comments() {
             }
         }),
     );
-    assert_eq!(active, "Running python3 -c 'print(42)'");
+    assert_eq!(active, "bash python3 -c 'print(42)'");
 }
 
 #[test]
@@ -2780,8 +2872,8 @@ fn fullscreen_bash_title_survives_tool_end_without_args() {
         .iter()
         .find(|row| row.kind == TranscriptKind::Ran)
         .expect("bash row");
-    assert_eq!(row.title, "Ran cargo test -p psychevo-cli");
-    assert_ne!(row.title, "Ran command");
+    assert_eq!(row.title, "bash cargo test -p psychevo-cli");
+    assert_ne!(row.title, "bash command");
 }
 
 #[test]
@@ -2824,7 +2916,7 @@ fn history_tool_result_reuses_persisted_bash_command_title() {
         .iter()
         .find(|row| row.kind == TranscriptKind::Ran)
         .expect("history bash row");
-    assert_eq!(row.title, "Ran find . -maxdepth 2");
+    assert_eq!(row.title, "bash find . -maxdepth 2");
 }
 
 #[tokio::test]

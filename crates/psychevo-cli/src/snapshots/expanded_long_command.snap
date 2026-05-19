@@ -8,7 +8,7 @@ size=120x18
 --- text ---
 › Inspect HN comments with sqlite.
 
-› Ran cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db "SELECT id || '|' || by || '|' || te… ▾ collapse
+› bash cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db "SELECT id || '|' || by || '|' || t… ▾ collapse
   └ command: cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db "SELECT id || '|' || by || '|' || text
     FROM comments WHERE story_id = 48073680 ORDER BY id" 2>&1 | head -c 3000
     48073976||aurareturn||6 days of work to do this.
@@ -28,7 +28,7 @@ mock/model  high  transcript · Esc  ~/work · main
 --- styles ---
 [dim]› [default]Inspect HN comments with sqlite.
 [default]
-[cyan]› [default]Ran cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db "SELECT id || '|' || by || '|' || te… [dim]▾ collapse[default]
+[cyan]› [default]bash cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db "SELECT id || '|' || by || '|' || t… [dim]▾ collapse[default]
 [dim]  └ [default]command: cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db "SELECT id || '|' || by || '|' || text
 [dim]    [default]FROM comments WHERE story_id = 48073680 ORDER BY id" 2>&1 | head -c 3000
 [dim]    [default]48073976||aurareturn||6 days of work to do this.

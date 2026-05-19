@@ -78,6 +78,9 @@ impl TuiApp {
                     Ok(Ok(result)) => {
                         let interrupted =
                             ui.interrupt_requested && result.outcome == Outcome::Aborted;
+                        if interrupted {
+                            ui.turn_interrupted = true;
+                        }
                         restore_queued_after_interrupt |= interrupted;
                         self.last_context_snapshot = result.context_snapshot.clone();
                         ui.last_context_snapshot = result.context_snapshot.clone();
@@ -107,6 +110,9 @@ impl TuiApp {
                     Ok(Ok(result)) => {
                         let interrupted =
                             ui.interrupt_requested && result.outcome == Outcome::Aborted;
+                        if interrupted {
+                            ui.turn_interrupted = true;
+                        }
                         restore_queued_after_interrupt |= interrupted;
                         if let Some(session_id) = result.session_id {
                             ui.session_live_event_backlog.remove(&session_id);
@@ -131,6 +137,7 @@ impl TuiApp {
                     }
                 },
             }
+            ui.update_turn_meta(self.debug, true, true, true);
             ui.finish_turn();
             ui.refresh_sidebar(self);
             if restore_queued_after_interrupt {
@@ -307,6 +314,12 @@ impl TuiApp {
         if let Some(session_id) = event_session.as_deref()
             && self.current_session.as_deref() != Some(session_id)
         {
+            if matches!(event, RunStreamEvent::ClarifyRequest(_)) {
+                ui.push_status(format!(
+                    "clarify pending in session {}",
+                    short_session(session_id)
+                ));
+            }
             buffer_session_live_event(ui, session_id, event);
             return false;
         }
@@ -383,6 +396,12 @@ impl TuiApp {
         if session_live_event_ends_backlog(&event) {
             ui.session_live_event_backlog.remove(session_id);
         } else {
+            if matches!(event, RunStreamEvent::ClarifyRequest(_)) {
+                ui.push_status(format!(
+                    "clarify pending in session {}",
+                    short_session(session_id)
+                ));
+            }
             buffer_session_live_event(ui, session_id, event.clone());
         }
         if agent_child_event_ends_live_backlog(&event) {
@@ -463,10 +482,14 @@ impl TuiApp {
             }
         }
         let interrupted = ui.interrupt_requested && outcome == Outcome::Aborted;
+        if interrupted {
+            ui.turn_interrupted = true;
+        }
         if outcome != Outcome::Normal && !interrupted {
             self.had_error = true;
             ui.push_error(turn_ended_error_text(outcome, terminal_message.as_deref()));
         }
+        ui.update_turn_meta(self.debug, true, true, true);
         ui.finish_turn();
         ui.refresh_sidebar(self);
         if interrupted {
@@ -629,7 +652,16 @@ impl TuiApp {
             ui.last_file_popup_areas.clear();
             ui.last_agent_popup_areas.clear();
             ui.last_skill_popup_areas.clear();
-            let panel_height = bottom_panel_height(main.height);
+            let panel_height = ui
+                .bottom_panel
+                .as_ref()
+                .map(|panel| match panel {
+                    BottomPanel::Clarify(panel) => {
+                        panel.desired_height().min(bottom_panel_height(main.height))
+                    }
+                    _ => bottom_panel_height(main.height),
+                })
+                .unwrap_or_else(|| bottom_panel_height(main.height));
             let vertical = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
@@ -640,8 +672,20 @@ impl TuiApp {
                 .split(main);
             ui.set_render_areas(vertical[0], None, vertical[2], Some(vertical[1]));
             render_transcript(frame, vertical[0], ui, None);
+            let running_session_ids =
+                ui.background_running_session_ids(self.current_session.as_deref());
+            let activity_elapsed = ui.bottom_panel_activity_elapsed();
             if let Some(panel) = &mut ui.bottom_panel {
-                render_bottom_panel(frame, vertical[1], panel, &mut ui.last_bottom_panel_areas);
+                if let BottomPanel::Sessions(selection) = panel {
+                    selection.running_session_ids = running_session_ids;
+                }
+                render_bottom_panel(
+                    frame,
+                    vertical[1],
+                    panel,
+                    &mut ui.last_bottom_panel_areas,
+                    activity_elapsed,
+                );
             }
             render_status(frame, vertical[2], self, ui);
             if sidebar_visible {
@@ -655,16 +699,19 @@ impl TuiApp {
         let agent_popup_height = ui.agent_popup_height();
         let skill_popup_height = ui.skill_popup_height();
         let composer_text = textarea_text(&ui.textarea);
-        let slash_items =
-            if file_popup_height == 0 && agent_popup_height == 0 && skill_popup_height == 0 {
-                if ui.slash_menu_dismissed(&composer_text) {
-                    Vec::new()
-                } else {
-                    self.slash_menu_items(&composer_text)
-                }
-            } else {
+        let slash_items = if !ui.textarea.is_selecting()
+            && file_popup_height == 0
+            && agent_popup_height == 0
+            && skill_popup_height == 0
+        {
+            if ui.slash_menu_dismissed(&composer_text) {
                 Vec::new()
-            };
+            } else {
+                self.slash_menu_items(&composer_text)
+            }
+        } else {
+            Vec::new()
+        };
         ui.clamp_slash_menu_selection(slash_items.len());
         ui.last_bottom_panel_areas.clear();
         if file_popup_height == 0 {

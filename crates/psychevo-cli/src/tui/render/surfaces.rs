@@ -51,11 +51,14 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_>)
         height: area.height,
     };
     if input_area.width == 0 || input_area.height == 0 {
+        ui.set_composer_input_area(None);
         return;
     }
+    ui.set_composer_input_area(Some(input_area));
 
     ui.textarea.set_block(Block::default().style(surface_style));
     ui.textarea.set_style(surface_style);
+    ui.textarea.set_selection_style(text_selection_style());
     ui.textarea.set_placeholder_text("");
     frame.render_widget(&ui.textarea, input_area);
 
@@ -564,6 +567,7 @@ fn render_bottom_panel(
     area: Rect,
     panel: &mut BottomPanel,
     row_areas: &mut Vec<(usize, Rect)>,
+    activity_elapsed: Duration,
 ) {
     let theme = tui_theme();
     row_areas.clear();
@@ -573,6 +577,10 @@ fn render_bottom_panel(
     }
     if let BottomPanel::ProviderWizard(panel) = panel {
         render_provider_wizard_panel(frame, area, panel);
+        return;
+    }
+    if let BottomPanel::Clarify(panel) = panel {
+        render_clarify_panel(frame, area, panel, row_areas);
         return;
     }
     if let BottomPanel::AgentRunPrompt(panel) = panel {
@@ -664,6 +672,8 @@ fn render_bottom_panel(
                 row,
                 visible_index == selection.selected,
                 inner.width,
+                selection.row_has_running_activity(row),
+                activity_elapsed,
             ));
             row_y = row_y.saturating_add(1);
         }
@@ -678,6 +688,235 @@ fn render_bottom_panel(
     )));
 
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
+}
+
+fn render_clarify_panel(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    panel: &mut ClarifyPanel,
+    row_areas: &mut Vec<(usize, Rect)>,
+) {
+    let theme = tui_theme();
+    frame.render_widget(Block::default().style(theme.menu_style()), area);
+    let inner = Rect {
+        x: area.x.saturating_add(2),
+        y: area.y.saturating_add(1),
+        width: area.width.saturating_sub(4),
+        height: area.height.saturating_sub(2),
+    };
+    let Some(question) = panel.current_question() else {
+        frame.render_widget(
+            Paragraph::new("No clarify question").style(theme.dim_style()),
+            inner,
+        );
+        return;
+    };
+
+    let mut lines = Vec::new();
+    let mut cursor_position: Option<(u16, u16)> = None;
+    lines.push(Line::from(vec![Span::styled(
+        panel.question_progress(),
+        theme.dim_style().add_modifier(Modifier::BOLD),
+    )]));
+    lines.push(Line::from(Span::styled(
+        question.question.clone(),
+        theme.accent_style(),
+    )));
+    lines.push(Line::from(""));
+
+    let mode = panel.mode();
+    let selected_index = panel.selected();
+    for (index, option) in question.options.iter().enumerate() {
+        let row_y = inner.y.saturating_add(lines.len() as u16);
+        row_areas.push((
+            index,
+            Rect {
+                x: inner.x,
+                y: row_y,
+                width: inner.width,
+                height: 1,
+            },
+        ));
+        let selected = index == selected_index;
+        let marker = if selected { "›" } else { " " };
+        let prefix = format!("{marker} {}. ", index + 1);
+        let style = if selected {
+            theme.accent_style().add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+        let note = panel.note_draft(index);
+        let editing_note = selected && mode == ClarifyInputMode::Note;
+        let detail_spans = if editing_note || !note.is_empty() {
+            if editing_note {
+                cursor_position = Some((
+                    clarify_input_cursor_x(
+                        inner,
+                        &[
+                            prefix.as_str(),
+                            option.label.as_str(),
+                            "  ",
+                            "note: ",
+                        ],
+                        note,
+                        panel.note_cursor(index),
+                    ),
+                    row_y,
+                ));
+            }
+            vec![
+                Span::styled("note: ".to_string(), theme.dim_style()),
+                Span::styled(note.to_string(), Style::default()),
+            ]
+        } else {
+            let detail_style = if selected {
+                theme.accent_style()
+            } else {
+                theme.dim_style()
+            };
+            vec![Span::styled(option.description.clone(), detail_style)]
+        };
+        let mut spans = vec![
+            Span::styled(prefix, theme.dim_style()),
+        ];
+        spans.extend(clarify_option_label_spans(&option.label, style, &theme));
+        spans.push(Span::styled("  ", theme.dim_style()));
+        spans.extend(detail_spans);
+        lines.push(Line::from(spans));
+    }
+    let other_index = question.options.len();
+    let row_y = inner.y.saturating_add(lines.len() as u16);
+    row_areas.push((
+        other_index,
+        Rect {
+            x: inner.x,
+            y: row_y,
+            width: inner.width,
+            height: 1,
+        },
+    ));
+    let selected = other_index == selected_index;
+    let marker = if selected { "›" } else { " " };
+    let prefix = format!("{marker} {}. ", other_index + 1);
+    let style = if selected {
+        theme.accent_style().add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+    };
+    let other_draft = panel.other_draft();
+    let editing_other = selected && mode == ClarifyInputMode::Other;
+    let other_detail_spans = if editing_other || !other_draft.is_empty() {
+        if editing_other {
+            cursor_position = Some((
+                clarify_input_cursor_x(
+                    inner,
+                    &[prefix.as_str(), "Other", "  ", "answer: "],
+                    other_draft,
+                    panel.other_cursor(),
+                ),
+                row_y,
+            ));
+        }
+        vec![
+            Span::styled("answer: ".to_string(), theme.dim_style()),
+            Span::styled(other_draft.to_string(), Style::default()),
+        ]
+    } else {
+        vec![Span::styled(
+            "Type a custom answer".to_string(),
+            theme.dim_style(),
+        )]
+    };
+    let mut spans = vec![
+        Span::styled(prefix, theme.dim_style()),
+        Span::styled("Other", style),
+        Span::styled("  ", theme.dim_style()),
+    ];
+    spans.extend(other_detail_spans);
+    lines.push(Line::from(spans));
+
+    lines.push(Line::from(""));
+    if let Some(notice) = &panel.notice {
+        lines.push(Line::from(Span::styled(notice.clone(), theme.dim_style())));
+    }
+    lines.push(Line::from(Span::styled(
+        "tab to edit note/custom answer | enter to submit answer | ←/→ to navigate questions | esc to interrupt",
+        theme.dim_style(),
+    )));
+
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+    if let Some((x, y)) = cursor_position
+        && rect_contains(inner, x, y)
+    {
+        frame.set_cursor_position((x, y));
+    }
+}
+
+fn clarify_option_label_spans(
+    label: &str,
+    style: Style,
+    theme: &TuiTheme,
+) -> Vec<Span<'static>> {
+    let Some((base, marker, separator)) = split_recommended_marker(label) else {
+        return vec![Span::styled(label.to_string(), style)];
+    };
+    let marker_style = if style == Style::default() {
+        theme.accent_style().add_modifier(Modifier::BOLD)
+    } else {
+        style
+    };
+    let mut spans = Vec::new();
+    if !base.is_empty() {
+        spans.push(Span::styled(base.to_string(), style));
+        spans.push(Span::styled(separator.to_string(), style));
+    }
+    spans.push(Span::styled(marker.to_string(), marker_style));
+    spans
+}
+
+fn split_recommended_marker(label: &str) -> Option<(&str, &str, &'static str)> {
+    const MARKERS: &[&str] = &[
+        "(Recommended)",
+        "(recommended)",
+        "（Recommended）",
+        "（recommended）",
+        "（推荐）",
+    ];
+    for marker in MARKERS {
+        if let Some(index) = label.find(marker) {
+            let base = label[..index].trim_end();
+            let separator = if marker.starts_with('(') && !base.is_empty() {
+                " "
+            } else {
+                ""
+            };
+            return Some((base, &label[index..index + marker.len()], separator));
+        }
+    }
+    None
+}
+
+fn clarify_input_cursor_x(
+    inner: Rect,
+    prefixes: &[&str],
+    value: &str,
+    cursor: usize,
+) -> u16 {
+    let prefix_width = prefixes
+        .iter()
+        .map(|part| UnicodeWidthStr::width(*part))
+        .sum::<usize>();
+    let cursor_width = value
+        .chars()
+        .take(cursor)
+        .map(|ch| ch.width().unwrap_or(0))
+        .sum::<usize>();
+    let offset = prefix_width.saturating_add(cursor_width);
+    inner.x.saturating_add(
+        offset
+            .min(inner.width.saturating_sub(1) as usize)
+            .min(u16::MAX as usize) as u16,
+    )
 }
 
 fn render_agent_panel(
@@ -751,6 +990,8 @@ fn render_agent_panel(
                 row,
                 visible_index == selection.selected,
                 inner.width,
+                false,
+                Duration::default(),
             ));
             row_y = row_y.saturating_add(1);
         }
@@ -987,6 +1228,8 @@ fn render_model_list_tab(
                 row,
                 visible_index == selection.selected,
                 inner.width,
+                false,
+                Duration::default(),
             ));
             row_y = row_y.saturating_add(1);
         }
@@ -1146,7 +1389,12 @@ fn model_detail_capabilities(model: &ConfiguredModel) -> Vec<String> {
     let mut parts = Vec::new();
     push_bool_capability(&mut parts, caps.reasoning, "reasoning", "no reasoning");
     push_bool_capability(&mut parts, caps.tool_call, "tools", "no tools");
-    push_bool_capability(&mut parts, caps.developer_role, "developer role", "no developer role");
+    push_bool_capability(
+        &mut parts,
+        caps.developer_role,
+        "developer role",
+        "no developer role",
+    );
     push_bool_capability(
         &mut parts,
         caps.temperature,
@@ -1444,15 +1692,23 @@ fn provider_wizard_field_line(
     Line::from(Span::styled(format!("{marker} {label}: {value}"), style))
 }
 
-fn bottom_panel_row(row: &BottomSelectionRow, selected: bool, width: u16) -> Line<'static> {
+fn bottom_panel_row(
+    row: &BottomSelectionRow,
+    selected: bool,
+    width: u16,
+    running_activity: bool,
+    activity_elapsed: Duration,
+) -> Line<'static> {
     let theme = tui_theme();
     let select_marker = if selected { "›" } else { " " };
-    let state_marker = if row.is_current {
-        "● "
+    let state_marker = if running_activity {
+        format!("{} ", activity_spinner_frame(activity_elapsed))
+    } else if row.is_current {
+        "● ".to_string()
     } else if row.is_default {
-        "◆ "
+        "◆ ".to_string()
     } else {
-        "  "
+        "  ".to_string()
     };
     let prefix = format!("{select_marker} {state_marker}{}", row.label);
     let mut left = prefix.clone();

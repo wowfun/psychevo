@@ -1,6 +1,5 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
-assertion_line: 670
 expression: combined
 ---
 fixture=completed_ledger_collapsed_tool_output
@@ -12,7 +11,7 @@ size=120x24
 • Thinking
   └ Check layout boundaries, style roles, and expandable evidence.
 
-• Explored crates/psychevo-cli/src/tui.rs                                                               ▸ 18 more lines
+• read crates/psychevo-cli/src/tui.rs                                                                   ▸ 18 more lines
   └ 01: crates/psychevo-cli/src/tui.rs evidence row
     02: crates/psychevo-cli/src/tui.rs evidence row
     ... 18 more lines
@@ -38,7 +37,7 @@ mock/model  high  ~/work · main
 [green]• [default]Thinking
 [dim]  └ Check layout boundaries, style roles, and expandable evidence.[default]
 [default]
-[green]• [default]Explored crates/psychevo-cli/src/tui.rs                                                               [dim]▸ 18 more lines[default]
+[green]• [default]read crates/psychevo-cli/src/tui.rs                                                                   [dim]▸ 18 more lines[default]
 [dim]  └ [default]01: crates/psychevo-cli/src/tui.rs evidence row
 [dim]    [default]02: crates/psychevo-cli/src/tui.rs evidence row
 [dim]    [default]... 18 more lines

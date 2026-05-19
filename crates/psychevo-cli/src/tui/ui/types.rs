@@ -210,6 +210,8 @@ struct FullscreenUi<'a> {
     streaming_tool_message_open: bool,
     deferred_stream_events: VecDeque<RunStreamEvent>,
     history_tool_titles: BTreeMap<String, String>,
+    history_tool_args: BTreeMap<String, Value>,
+    clarify_tool_args: BTreeMap<String, Value>,
     shell_mode: bool,
     turn_started: Option<Instant>,
     turn_provider: String,
@@ -224,6 +226,7 @@ struct FullscreenUi<'a> {
     turn_outcome: Option<Outcome>,
     turn_terminal_message: Option<String>,
     turn_had_reasoning: bool,
+    turn_terminal_visible_answer: bool,
     history_prompt_started_ms: Option<i64>,
     loaded_session_message_count: usize,
     thinking_visible: bool,
@@ -235,6 +238,7 @@ struct FullscreenUi<'a> {
     auxiliary_shell_tasks: Vec<AuxiliaryShellTask>,
     pending_auxiliary_shell_commands: VecDeque<String>,
     visible_turn_started: Option<Instant>,
+    motion_started: Instant,
     #[cfg(test)]
     running_elapsed_override: Option<Duration>,
     interrupt_requested: bool,
@@ -249,11 +253,13 @@ struct FullscreenUi<'a> {
     selected_target: Option<TranscriptHitTarget>,
     last_transcript_area: Option<Rect>,
     last_composer_area: Option<Rect>,
+    last_composer_input_area: Option<Rect>,
     last_status_area: Option<Rect>,
     last_bottom_panel_area: Option<Rect>,
     last_entry_areas: Vec<(TranscriptHitTarget, Rect)>,
     mouse_down_target: Option<TranscriptHitTarget>,
     mouse_dragged: bool,
+    composer_mouse_selecting: bool,
     sidebar_forced: bool,
     sidebar_hidden: bool,
     last_sidebar_visible: bool,
@@ -345,6 +351,7 @@ struct BottomSelectionPanel {
     session_view: Option<SessionListView>,
     action_armed: bool,
     delete_confirm: Option<String>,
+    running_session_ids: BTreeSet<String>,
     rows: Vec<BottomSelectionRow>,
     query: String,
     selected: usize,
@@ -673,6 +680,7 @@ enum BottomPanel {
     Models(ModelPanel),
     Stats(BottomSelectionPanel),
     ProviderWizard(ProviderWizardPanel),
+    Clarify(ClarifyPanel),
     Variants {
         models: Box<ModelPanel>,
         panel: BottomSelectionPanel,
@@ -718,6 +726,398 @@ struct ProviderWizardPanel {
     notice: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct ClarifyPanel {
+    request: ClarifyRequestEvent,
+    question_index: usize,
+    states: Vec<ClarifyQuestionState>,
+    answers: Vec<Option<ClarifyAnswer>>,
+    previous_panel: Option<Box<BottomPanel>>,
+    notice: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ClarifyQuestionState {
+    selected: usize,
+    mode: ClarifyInputMode,
+    other_draft: String,
+    other_cursor: usize,
+    note_drafts: BTreeMap<usize, String>,
+    note_cursors: BTreeMap<usize, usize>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum ClarifyInputMode {
+    #[default]
+    Options,
+    Other,
+    Note,
+}
+
+impl ClarifyPanel {
+    fn new(request: ClarifyRequestEvent, previous_panel: Option<BottomPanel>) -> Self {
+        Self {
+            states: vec![ClarifyQuestionState::default(); request.questions.len()],
+            answers: vec![None; request.questions.len()],
+            request,
+            question_index: 0,
+            previous_panel: previous_panel.map(Box::new),
+            notice: None,
+        }
+    }
+
+    fn current_question(&self) -> Option<&ClarifyQuestion> {
+        self.request.questions.get(self.question_index)
+    }
+
+    fn option_count(&self) -> usize {
+        self.current_question()
+            .map(|question| question.options.len())
+            .unwrap_or_default()
+    }
+
+    fn current_state(&self) -> Option<&ClarifyQuestionState> {
+        self.states.get(self.question_index)
+    }
+
+    fn current_state_mut(&mut self) -> Option<&mut ClarifyQuestionState> {
+        self.states.get_mut(self.question_index)
+    }
+
+    fn selected(&self) -> usize {
+        self.current_state()
+            .map(|state| state.selected)
+            .unwrap_or_default()
+    }
+
+    fn mode(&self) -> ClarifyInputMode {
+        self.current_state()
+            .map(|state| state.mode)
+            .unwrap_or_default()
+    }
+
+    fn total_choices(&self) -> usize {
+        self.option_count().saturating_add(1)
+    }
+
+    fn selected_is_other(&self) -> bool {
+        self.selected() >= self.option_count()
+    }
+
+    fn other_draft(&self) -> &str {
+        self.current_state()
+            .map(|state| state.other_draft.as_str())
+            .unwrap_or_default()
+    }
+
+    fn other_cursor(&self) -> usize {
+        self.current_state()
+            .map(|state| state.other_cursor.min(char_count(&state.other_draft)))
+            .unwrap_or_default()
+    }
+
+    fn note_draft(&self, option_index: usize) -> &str {
+        self.current_state()
+            .and_then(|state| state.note_drafts.get(&option_index))
+            .map(String::as_str)
+            .unwrap_or_default()
+    }
+
+    fn note_cursor(&self, option_index: usize) -> usize {
+        self.current_state()
+            .map(|state| {
+                let draft = state
+                    .note_drafts
+                    .get(&option_index)
+                    .map(String::as_str)
+                    .unwrap_or_default();
+                state
+                    .note_cursors
+                    .get(&option_index)
+                    .copied()
+                    .unwrap_or_else(|| char_count(draft))
+                    .min(char_count(draft))
+            })
+            .unwrap_or_default()
+    }
+
+    fn desired_height(&self) -> u16 {
+        let option_rows = self.option_count().saturating_add(1) as u16;
+        let notice_rows = u16::from(self.notice.is_some());
+        let inner_rows = 1 // progress
+            + 1 // question
+            + 1 // spacer before options
+            + option_rows
+            + 1 // spacer before footer
+            + notice_rows
+            + 1; // footer
+        inner_rows.saturating_add(2).max(8)
+    }
+
+    fn move_selection(&mut self, delta: isize) {
+        let total = self.total_choices();
+        if total == 0 {
+            if let Some(state) = self.current_state_mut() {
+                state.selected = 0;
+            }
+            return;
+        }
+        let current = self.selected().min(total.saturating_sub(1)) as isize;
+        let selected = (current + delta).clamp(0, total.saturating_sub(1) as isize) as usize;
+        if let Some(state) = self.current_state_mut() {
+            state.selected = selected;
+            state.mode = ClarifyInputMode::Options;
+        }
+    }
+
+    fn select_index(&mut self, index: usize) {
+        let selected = index.min(self.total_choices().saturating_sub(1));
+        if let Some(state) = self.current_state_mut() {
+            state.selected = selected;
+            state.mode = ClarifyInputMode::Options;
+        }
+    }
+
+    fn move_question(&mut self, delta: isize) {
+        let total = self.request.questions.len();
+        if total == 0 {
+            self.question_index = 0;
+            return;
+        }
+        let current = self.question_index.min(total.saturating_sub(1)) as isize;
+        self.question_index = (current + delta).clamp(0, total.saturating_sub(1) as isize) as usize;
+        self.notice = None;
+    }
+
+    fn set_mode(&mut self, mode: ClarifyInputMode) {
+        let selected = self.selected();
+        if let Some(state) = self.current_state_mut() {
+            state.mode = mode;
+            match mode {
+                ClarifyInputMode::Other => {
+                    state.other_cursor = state.other_cursor.min(char_count(&state.other_draft));
+                }
+                ClarifyInputMode::Note => {
+                    let len = state
+                        .note_drafts
+                        .get(&selected)
+                        .map(|draft| char_count(draft))
+                        .unwrap_or_default();
+                    let cursor = state.note_cursors.entry(selected).or_insert(len);
+                    *cursor = (*cursor).min(len);
+                }
+                ClarifyInputMode::Options => {}
+            }
+        }
+    }
+
+    fn pop_input_char(&mut self) {
+        let selected = self.selected();
+        let Some(state) = self.current_state_mut() else {
+            return;
+        };
+        match state.mode {
+            ClarifyInputMode::Other => {
+                remove_previous_char(&mut state.other_draft, &mut state.other_cursor);
+            }
+            ClarifyInputMode::Note => {
+                let len = state
+                    .note_drafts
+                    .get(&selected)
+                    .map(|draft| char_count(draft))
+                    .unwrap_or_default();
+                let cursor = state.note_cursors.entry(selected).or_insert(len);
+                let note = state.note_drafts.entry(selected).or_default();
+                remove_previous_char(note, cursor);
+            }
+            ClarifyInputMode::Options => {}
+        }
+    }
+
+    fn delete_input_char(&mut self) {
+        let selected = self.selected();
+        let Some(state) = self.current_state_mut() else {
+            return;
+        };
+        match state.mode {
+            ClarifyInputMode::Other => {
+                remove_next_char(&mut state.other_draft, &mut state.other_cursor);
+            }
+            ClarifyInputMode::Note => {
+                let len = state
+                    .note_drafts
+                    .get(&selected)
+                    .map(|draft| char_count(draft))
+                    .unwrap_or_default();
+                let cursor = state.note_cursors.entry(selected).or_insert(len);
+                let note = state.note_drafts.entry(selected).or_default();
+                remove_next_char(note, cursor);
+            }
+            ClarifyInputMode::Options => {}
+        }
+    }
+
+    fn push_input_char(&mut self, c: char) {
+        let selected = self.selected();
+        let Some(state) = self.current_state_mut() else {
+            return;
+        };
+        match state.mode {
+            ClarifyInputMode::Other => {
+                insert_char(&mut state.other_draft, &mut state.other_cursor, c);
+            }
+            ClarifyInputMode::Note => {
+                let len = state
+                    .note_drafts
+                    .get(&selected)
+                    .map(|draft| char_count(draft))
+                    .unwrap_or_default();
+                let cursor = state.note_cursors.entry(selected).or_insert(len);
+                let note = state.note_drafts.entry(selected).or_default();
+                insert_char(note, cursor, c);
+            }
+            ClarifyInputMode::Options => {}
+        }
+    }
+
+    fn move_input_cursor(&mut self, delta: isize) {
+        let selected = self.selected();
+        let Some(state) = self.current_state_mut() else {
+            return;
+        };
+        match state.mode {
+            ClarifyInputMode::Other => {
+                move_cursor(&state.other_draft, &mut state.other_cursor, delta);
+            }
+            ClarifyInputMode::Note => {
+                let len = state
+                    .note_drafts
+                    .get(&selected)
+                    .map(|draft| char_count(draft))
+                    .unwrap_or_default();
+                let cursor = state.note_cursors.entry(selected).or_insert(len);
+                let note = state
+                    .note_drafts
+                    .get(&selected)
+                    .map(String::as_str)
+                    .unwrap_or_default();
+                move_cursor(note, cursor, delta);
+            }
+            ClarifyInputMode::Options => {}
+        }
+    }
+
+    fn move_input_cursor_to_start(&mut self) {
+        self.set_input_cursor(0);
+    }
+
+    fn move_input_cursor_to_end(&mut self) {
+        let len = match self.mode() {
+            ClarifyInputMode::Other => char_count(self.other_draft()),
+            ClarifyInputMode::Note => char_count(self.note_draft(self.selected())),
+            ClarifyInputMode::Options => 0,
+        };
+        self.set_input_cursor(len);
+    }
+
+    fn set_input_cursor(&mut self, cursor: usize) {
+        let selected = self.selected();
+        let Some(state) = self.current_state_mut() else {
+            return;
+        };
+        match state.mode {
+            ClarifyInputMode::Other => {
+                state.other_cursor = cursor.min(char_count(&state.other_draft));
+            }
+            ClarifyInputMode::Note => {
+                let len = state
+                    .note_drafts
+                    .get(&selected)
+                    .map(|draft| char_count(draft))
+                    .unwrap_or_default();
+                state.note_cursors.insert(selected, cursor.min(len));
+            }
+            ClarifyInputMode::Options => {}
+        }
+    }
+
+    fn move_to_next_unanswered(&mut self) {
+        let total = self.request.questions.len();
+        if total == 0 {
+            return;
+        }
+        let current = self.question_index.min(total.saturating_sub(1));
+        for offset in 1..=total {
+            let index = (current + offset) % total;
+            if self.answers.get(index).is_some_and(Option::is_none) {
+                self.question_index = index;
+                return;
+            }
+        }
+    }
+
+    fn question_progress(&self) -> String {
+        let total = self.request.questions.len();
+        let current = self.question_index.saturating_add(1);
+        let answered = self.answers.iter().filter(|answer| answer.is_some()).count();
+        let unanswered = total.saturating_sub(answered);
+        format!("Question {current}/{total} ({unanswered} unanswered)")
+    }
+
+    fn restore_panel(&mut self) -> Option<BottomPanel> {
+        self.previous_panel.take().map(|panel| *panel)
+    }
+}
+
+fn char_count(value: &str) -> usize {
+    value.chars().count()
+}
+
+fn byte_index_for_char(value: &str, char_index: usize) -> usize {
+    value
+        .char_indices()
+        .map(|(index, _)| index)
+        .nth(char_index)
+        .unwrap_or(value.len())
+}
+
+fn insert_char(value: &mut String, cursor: &mut usize, ch: char) {
+    let len = char_count(value);
+    *cursor = (*cursor).min(len);
+    let byte_index = byte_index_for_char(value, *cursor);
+    value.insert(byte_index, ch);
+    *cursor += 1;
+}
+
+fn remove_previous_char(value: &mut String, cursor: &mut usize) {
+    if *cursor == 0 {
+        return;
+    }
+    let len = char_count(value);
+    *cursor = (*cursor).min(len);
+    let start = byte_index_for_char(value, (*cursor).saturating_sub(1));
+    let end = byte_index_for_char(value, *cursor);
+    value.replace_range(start..end, "");
+    *cursor = (*cursor).saturating_sub(1);
+}
+
+fn remove_next_char(value: &mut String, cursor: &mut usize) {
+    let len = char_count(value);
+    *cursor = (*cursor).min(len);
+    if *cursor >= len {
+        return;
+    }
+    let start = byte_index_for_char(value, *cursor);
+    let end = byte_index_for_char(value, (*cursor).saturating_add(1));
+    value.replace_range(start..end, "");
+}
+
+fn move_cursor(value: &str, cursor: &mut usize, delta: isize) {
+    let len = char_count(value);
+    let current = (*cursor).min(len) as isize;
+    *cursor = (current + delta).clamp(0, len as isize) as usize;
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProviderWizardField {
     Label,
@@ -736,6 +1136,7 @@ impl BottomSelectionPanel {
             session_view: None,
             action_armed: false,
             delete_confirm: None,
+            running_session_ids: BTreeSet::new(),
             rows,
             query: String::new(),
             selected: 0,
@@ -858,6 +1259,17 @@ impl BottomSelectionPanel {
         self.filtered_indices()
             .get(self.selected)
             .and_then(|index| self.rows.get(*index))
+    }
+
+    fn row_has_running_activity(&self, row: &BottomSelectionRow) -> bool {
+        if row.is_current {
+            return false;
+        }
+        matches!(
+            &row.value,
+            BottomSelectionValue::Session(session_id)
+                if self.running_session_ids.contains(session_id)
+        )
     }
 
     fn selected_key(&self) -> String {
@@ -1066,6 +1478,9 @@ impl BottomPanel {
             BottomPanel::ProviderWizard(_) => {
                 panic!("provider wizard does not expose a selection panel")
             }
+            BottomPanel::Clarify(_) => {
+                panic!("clarify panel does not expose a selection panel")
+            }
             BottomPanel::Variants { panel, .. } => panel,
         }
     }
@@ -1088,6 +1503,9 @@ impl BottomPanel {
             BottomPanel::ProviderWizard(_) => {
                 panic!("provider wizard does not expose a selection panel")
             }
+            BottomPanel::Clarify(_) => {
+                panic!("clarify panel does not expose a selection panel")
+            }
             BottomPanel::Variants { panel, .. } => panel,
         }
     }
@@ -1107,6 +1525,7 @@ impl BottomPanel {
             | BottomPanel::Models(_)
             | BottomPanel::Stats(_)
             | BottomPanel::ProviderWizard(_)
+            | BottomPanel::Clarify(_)
             | BottomPanel::Variants { .. } => None,
         }
     }

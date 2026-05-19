@@ -2,13 +2,10 @@
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
 expression: combined
 ---
-fixture=history_pending_write_call
-size=120x18
+fixture=clarify_other_inline
+size=120x24
 
 --- text ---
-NYT is behind a paywall. Based on comments, I can still summarize the Meta article. Let me now write the report.
-
-⠼ write feeds/2026-05-10/hackernews-hot-06-42.md                                                                     2s
 
 
 
@@ -22,13 +19,19 @@ NYT is behind a paywall. Based on comments, I can still summarize the Meta artic
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-› Ask pevo...
-mock/model  high  ~/work
+
+  Question 1/3 (3 unanswered)
+  Which mode should we use?
+
+    1. Fast (Recommended)  Prioritize speed
+    2. Careful  Prioritize review
+  › 3. Other  answer: custom path
+
+  tab to edit note/custom answer | enter to submit answer | ←/→ to navigate questions | esc to interrupt
+
+mock/model  high  ~/work · main
 
 --- styles ---
-[default]NYT is behind a paywall. Based on comments, I can still summarize the Meta article. Let me now write the report.
-[default]
-[cyan]⠼ [default]write feeds/2026-05-10/hackernews-hot-06-42.md                                                                     [dim]2s[default]
 [default]
 [default]
 [default]
@@ -42,5 +45,14 @@ mock/model  high  ~/work
 [default]
 [default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-[dim]›[default] [dim]Ask pevo...[default]
-[default]mock/model  [magenta]high[default]  [dim]~/work[default]
+[default]
+[default]  [dim]Question 1/3 (3 unanswered)[default]
+[default]  [cyan]Which mode should we use?[default]
+[default]
+[default]  [dim]  1. [default]Fast [cyan](Recommended)[dim]  Prioritize speed[default]
+[default]  [dim]  2. [default]Careful[dim]  Prioritize review[default]
+[default]  [dim]› 3. [cyan]Other[dim]  answer: [default]custom path
+[default]
+[default]  [dim]tab to edit note/custom answer | enter to submit answer | ←/→ to navigate questions | esc to interrupt[default]
+[default]
+[default]mock/model  [magenta]high[default]  [dim]~/work · main[default]

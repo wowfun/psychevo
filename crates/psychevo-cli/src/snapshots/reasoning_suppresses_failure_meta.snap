@@ -1,13 +1,12 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
-assertion_line: 678
 expression: combined
 ---
 fixture=reasoning_suppresses_failure_meta
 size=120x18
 
 --- text ---
-• Ran command                                                                                                        0s
+• bash                                                                                                               0s
   └ failed
 
 ⠋ Thinking                                                                                                           0s
@@ -27,7 +26,7 @@ comments.
 mock/model  high  ⠋ 0s · Esc  ~/work
 
 --- styles ---
-[red]• Ran command[default]                                                                                                        [dim]0s[default]
+[red]• bash[default]                                                                                                               [dim]0s[default]
 [dim]  └ [red]failed[default]
 [default]
 [cyan]⠋ [default]Thinking                                                                                                           [dim]0s[default]

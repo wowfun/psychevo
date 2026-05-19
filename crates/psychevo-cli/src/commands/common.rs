@@ -43,6 +43,7 @@ pub(crate) fn base_run_options(
         permission_mode: None,
         approval_mode: None,
         approval_handler: None,
+        clarify_enabled: false,
         inherited_env: Some(env_map.clone()),
         agent: None,
         no_agents: false,

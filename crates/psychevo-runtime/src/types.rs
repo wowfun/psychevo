@@ -1,13 +1,15 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use futures::future::BoxFuture;
 use psychevo_agent_core::{ControlHandle, ControlReceivers, Message, TerminalReason};
 use psychevo_ai::Outcome;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio::sync::oneshot;
 
 use crate::skills::SelectedSkill;
 
@@ -61,6 +63,7 @@ pub struct RunOptions {
     pub permission_mode: Option<PermissionMode>,
     pub approval_mode: Option<ApprovalMode>,
     pub approval_handler: Option<Arc<dyn ApprovalHandler>>,
+    pub clarify_enabled: bool,
     pub inherited_env: Option<BTreeMap<String, String>>,
     pub agent: Option<String>,
     pub no_agents: bool,
@@ -793,6 +796,8 @@ pub enum RunStreamEvent {
         text: String,
     },
     ReasoningEnd,
+    ClarifyRequest(ClarifyRequestEvent),
+    ClarifyResolved(ClarifyResolvedEvent),
     Scoped {
         session_id: String,
         event: Box<RunStreamEvent>,
@@ -810,9 +815,90 @@ impl RunStreamEvent {
 
 pub type RunStreamSink = Arc<dyn Fn(RunStreamEvent) + Send + Sync>;
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClarifyQuestionOption {
+    pub label: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClarifyQuestion {
+    pub question: String,
+    pub options: Vec<ClarifyQuestionOption>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClarifyRequestEvent {
+    pub call_id: String,
+    pub questions: Vec<ClarifyQuestion>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClarifyAnswer {
+    pub answers: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClarifyResponse {
+    pub answers: Vec<ClarifyAnswer>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClarifyResult {
+    Answered(ClarifyResponse),
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClarifyResolvedReason {
+    Answered,
+    Cancelled,
+    TimedOut,
+    TurnFinished,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClarifyResolvedEvent {
+    pub call_id: String,
+    pub reason: ClarifyResolvedReason,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct ClarifyControl {
+    pending: Mutex<HashMap<String, oneshot::Sender<ClarifyResult>>>,
+}
+
+impl ClarifyControl {
+    pub(crate) fn register(&self, call_id: String) -> oneshot::Receiver<ClarifyResult> {
+        let (tx, rx) = oneshot::channel();
+        let mut pending = self.pending.lock().expect("clarify pending map poisoned");
+        pending.insert(call_id, tx);
+        rx
+    }
+
+    pub(crate) fn submit(&self, call_id: &str, result: ClarifyResult) -> bool {
+        let sender = self
+            .pending
+            .lock()
+            .expect("clarify pending map poisoned")
+            .remove(call_id);
+        sender.is_some_and(|sender| sender.send(result).is_ok())
+    }
+
+    pub(crate) fn remove(&self, call_id: &str) -> bool {
+        self.pending
+            .lock()
+            .expect("clarify pending map poisoned")
+            .remove(call_id)
+            .is_some()
+    }
+}
+
 #[derive(Clone)]
 pub struct RunControlHandle {
     pub(crate) inner: ControlHandle,
+    pub(crate) clarify: Arc<ClarifyControl>,
 }
 
 impl RunControlHandle {
@@ -826,6 +912,10 @@ impl RunControlHandle {
 
     pub fn inject_user_message(&self, message: Message) -> bool {
         self.inner.inject_user_message(message)
+    }
+
+    pub fn submit_clarify_result(&self, call_id: &str, result: ClarifyResult) -> bool {
+        self.clarify.submit(call_id, result)
     }
 }
 
@@ -844,6 +934,7 @@ pub struct RunControl {
 
 pub fn run_control() -> (RunControlHandle, RunControl) {
     let (inner, receivers) = ControlHandle::new();
-    let handle = RunControlHandle { inner };
+    let clarify = Arc::new(ClarifyControl::default());
+    let handle = RunControlHandle { inner, clarify };
     (handle.clone(), RunControl { handle, receivers })
 }

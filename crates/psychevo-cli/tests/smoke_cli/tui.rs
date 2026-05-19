@@ -48,7 +48,7 @@ fn cli_tui_bang_shell_rejects_missing_provider_config_before_execution() {
     assert!(!output.status.success());
     assert!(!marker.exists());
     let stdout = String::from_utf8(output.stdout).expect("stdout");
-    assert!(!stdout.contains("Ran touch marker"), "{stdout}");
+    assert!(!stdout.contains("bash touch marker"), "{stdout}");
     assert!(!stdout.contains("Prompt:"), "{stdout}");
     assert!(!stdout.contains("Answer:"), "{stdout}");
 }
@@ -78,7 +78,7 @@ fn cli_tui_bang_shell_persists_context_with_config() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8(output.stdout).expect("stdout");
-    assert!(stdout.contains("Ran ! printf shell-cli-ok"), "{stdout}");
+    assert!(stdout.contains("! printf shell-cli-ok"), "{stdout}");
     assert!(!stdout.contains("Prompt:"), "{stdout}");
     assert!(!stdout.contains("Answer:"), "{stdout}");
 
@@ -384,6 +384,7 @@ fn cli_tui_mode_set_plan_persists_and_uses_read_only_tools() {
             "read",
             "list",
             "search",
+            "clarify",
             "list_skills",
             "view_skill",
             "Agent",

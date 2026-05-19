@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -19,8 +19,9 @@ use crossterm::terminal::{
 use psychevo_ai::Outcome;
 use psychevo_runtime::{
     AgentCatalog, AgentDiscoveryOptions, AgentEdgeRecord, AgentSource, AgentSpawnOptions,
-    ConfigScope, ConfiguredModel, ContextFormatOptions, ContextOptions, ContextSnapshot,
-    CustomProviderInput, ImageInput, MAX_AGENT_SPAWN_DEPTH_CAP, ModelCatalogEntry,
+    ClarifyAnswer, ClarifyQuestion, ClarifyRequestEvent, ClarifyResolvedEvent, ClarifyResponse,
+    ClarifyResult, ConfigScope, ConfiguredModel, ContextFormatOptions, ContextOptions,
+    ContextSnapshot, CustomProviderInput, ImageInput, MAX_AGENT_SPAWN_DEPTH_CAP, ModelCatalogEntry,
     ModelCatalogProvider, ModelMetadataCacheTarget, PermissionMode, PromptAttachmentDisplay,
     PromptDisplayMetadata, ReloadContextOptions, RunControlHandle, RunMode, RunOptions,
     RunStreamEvent, RunStreamSink, SessionArtifactKind, SessionExportFormat, SessionExportOptions,
@@ -204,6 +205,7 @@ fn load_effective_tui_slash_config(
         permission_mode: None,
         approval_mode: None,
         approval_handler: None,
+        clarify_enabled: false,
         inherited_env: Some(env_map.clone()),
         agent: None,
         no_agents: false,

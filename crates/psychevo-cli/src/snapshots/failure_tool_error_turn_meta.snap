@@ -1,6 +1,5 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
-assertion_line: 667
 expression: combined
 ---
 fixture=failure_tool_error_turn_meta
@@ -9,7 +8,7 @@ size=120x24
 --- text ---
 › Run a command that fails.
 
-• Ran cargo test -p psychevo-cli
+• bash cargo test -p psychevo-cli
   └ exit_code=101
     compile error: fixture failure
 
@@ -35,7 +34,7 @@ mock/model  high  ~/work · main
 --- styles ---
 [dim]› [default]Run a command that fails.
 [default]
-[red]• Ran cargo test -p psychevo-cli[default]
+[red]• bash cargo test -p psychevo-cli[default]
 [dim]  └ [red]exit_code=101[default]
 [dim]    [red]compile error: fixture failure[default]
 [default]

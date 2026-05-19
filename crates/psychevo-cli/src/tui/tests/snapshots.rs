@@ -113,6 +113,23 @@ fn tui_snapshot_session_bottom_panel() {
     assert_tui_snapshot("session_bottom_panel", 120, 24, &app, ui);
 }
 
+#[tokio::test]
+async fn tui_snapshot_session_bottom_panel_background_running() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = fixture_ui(&app, FixtureKind::Idle);
+    ui.running_elapsed_override = Some(Duration::from_secs(12));
+    attach_background_agent_running(&mut ui, "session-b");
+    ui.bottom_panel = Some(BottomPanel::Sessions(stable_session_bottom_panel()));
+    assert_tui_snapshot(
+        "session_bottom_panel_background_running",
+        120,
+        24,
+        &app,
+        ui,
+    );
+}
+
 #[test]
 fn tui_snapshot_archived_session_action_bottom_panel() {
     let temp = tempdir().expect("temp");
@@ -247,7 +264,7 @@ fn tui_snapshot_history_pending_write_call() {
         })),
     );
     for row in &mut ui.transcript {
-        if row.title.starts_with("Updating ") {
+        if row.title.starts_with("write ") || row.title == "write" {
             row.tool_started = Some(
                 Instant::now()
                     .checked_sub(Duration::from_millis(2_500))
@@ -295,7 +312,7 @@ async fn tui_snapshot_active_write_suppresses_failure_meta() {
         false,
     );
     for row in &mut ui.transcript {
-        if row.title.starts_with("Updating ") {
+        if row.title.starts_with("write ") || row.title == "write" {
             row.tool_started = Some(
                 Instant::now()
                     .checked_sub(Duration::from_millis(2_500))

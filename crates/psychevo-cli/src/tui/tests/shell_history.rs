@@ -355,7 +355,7 @@ async fn shell_mode_submit_records_bang_history_and_executes_command_text() {
         ui.transcript
             .iter()
             .any(|row| row.kind == TranscriptKind::Ran
-                && row.title == "Ran ! printf shell-mode"
+                && row.title == "! printf shell-mode"
                 && row.text == "shell-mode")
     );
 }
@@ -435,12 +435,12 @@ async fn fullscreen_user_shell_runs_locally_and_drains_queued_shell_escape() {
     assert!(
         ran_rows
             .iter()
-            .any(|row| { row.title == "Ran ! printf shell-one" && row.text == "shell-one" })
+            .any(|row| { row.title == "! printf shell-one" && row.text == "shell-one" })
     );
     assert!(
         ran_rows
             .iter()
-            .any(|row| { row.title == "Ran ! printf shell-two" && row.text == "shell-two" })
+            .any(|row| { row.title == "! printf shell-two" && row.text == "shell-two" })
     );
     assert!(!app.had_error);
 }
@@ -506,7 +506,7 @@ async fn fullscreen_user_shell_during_agent_turn_waits_for_run_start_then_starts
         ui.transcript
             .iter()
             .any(|row| row.kind == TranscriptKind::Ran
-                && row.title == "Ran ! printf aux-shell"
+                && row.title == "! printf aux-shell"
                 && row.text == "aux-shell")
     );
 
@@ -598,7 +598,7 @@ async fn persisted_user_shell_history_reloads_as_ran_evidence() {
             .transcript
             .iter()
             .any(|row| row.kind == TranscriptKind::Ran
-                && row.title == "Ran ! printf reload-shell"
+                && row.title == "! printf reload-shell"
                 && row.text == "reload-shell")
     );
     assert!(
@@ -742,6 +742,19 @@ fn tool_failure_without_answer_keeps_failure_meta() {
     assert!(
         ui.transcript
             .iter()
+            .all(|row| row.kind != TranscriptKind::Meta)
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "agent_end",
+            "outcome": "normal",
+            "messages": []
+        }),
+        false,
+    );
+    assert!(
+        ui.transcript
+            .iter()
             .any(|row| { row.kind == TranscriptKind::Meta && row.text.contains("1 failure") })
     );
 }
@@ -785,7 +798,7 @@ fn interrupted_bash_tool_renders_interrupted_without_failure_meta() {
         .iter()
         .find(|row| row.kind == TranscriptKind::Ran)
         .expect("interrupted bash row");
-    assert_eq!(row.title, "Ran find /home/kevin -name tmp.txt -type f");
+    assert_eq!(row.title, "bash find /home/kevin -name tmp.txt -type f");
     assert_eq!(row.text, "interrupted");
     assert!(row.interrupted);
     assert!(!row.failed);
@@ -795,11 +808,72 @@ fn interrupted_bash_tool_renders_interrupted_without_failure_meta() {
             .iter()
             .all(|row| !(row.kind == TranscriptKind::Ran && row.text.contains("(no output)")))
     );
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.kind != TranscriptKind::Meta)
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "agent_end",
+            "outcome": "aborted",
+            "messages": []
+        }),
+        false,
+    );
     let meta = ui
         .transcript
         .iter()
         .find(|row| row.kind == TranscriptKind::Meta)
         .expect("interrupted meta");
+    assert!(meta.text.contains("interrupted"), "{meta:?}");
+    assert!(!meta.text.contains("failure"), "{meta:?}");
+}
+
+#[test]
+fn interrupted_reasoning_only_turn_meta_includes_interrupted() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.start_assistant();
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "run_start",
+            "provider": "xiaomi-token-plan",
+            "model": "mimo-v2.5-pro",
+            "mode": "default",
+            "metadata": {
+                "reasoning_effort": "high",
+                "elapsed_ms": 82_000
+            }
+        }),
+        false,
+    );
+    ui.apply_stream_event(
+        RunStreamEvent::ReasoningDelta {
+            text: "So the situation is incomplete.".to_string(),
+        },
+        true,
+        false,
+    );
+    let reasoning_row = ui.reasoning_row.expect("reasoning row");
+    ui.finish_thinking_row(reasoning_row);
+    ui.interrupt_requested = true;
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "agent_end",
+            "outcome": "aborted",
+            "messages": []
+        }),
+        false,
+    );
+    ui.update_turn_meta(false, true, true, true);
+
+    let meta = ui
+        .transcript
+        .iter()
+        .find(|row| row.kind == TranscriptKind::Meta)
+        .expect("interrupted reasoning meta");
     assert!(meta.text.contains("interrupted"), "{meta:?}");
     assert!(!meta.text.contains("failure"), "{meta:?}");
 }

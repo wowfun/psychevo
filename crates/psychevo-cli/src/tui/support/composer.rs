@@ -1,23 +1,60 @@
 fn new_textarea<'a>() -> TextArea<'a> {
     let mut textarea = TextArea::default();
-    let style = tui_theme().surface_style();
-    textarea.set_block(Block::default().style(style));
-    textarea.set_style(style);
-    textarea.set_wrap_mode(WrapMode::WordOrGlyph);
-    textarea.set_cursor_line_style(Style::default());
+    apply_composer_textarea_style(&mut textarea);
     textarea
 }
 
 fn textarea_with_text<'a>(text: &str) -> TextArea<'a> {
     let mut textarea = TextArea::new(text.split('\n').map(ToString::to_string).collect());
-    let style = tui_theme().surface_style();
+    apply_composer_textarea_style(&mut textarea);
+    textarea.move_cursor(CursorMove::Bottom);
+    textarea.move_cursor(CursorMove::End);
+    textarea
+}
+
+fn apply_composer_textarea_style(textarea: &mut TextArea<'_>) {
+    let theme = tui_theme();
+    let style = theme.surface_style();
     textarea.set_block(Block::default().style(style));
     textarea.set_style(style);
     textarea.set_wrap_mode(WrapMode::WordOrGlyph);
     textarea.set_cursor_line_style(Style::default());
-    textarea.move_cursor(CursorMove::Bottom);
-    textarea.move_cursor(CursorMove::End);
-    textarea
+    textarea.set_selection_style(text_selection_style());
+}
+
+fn composer_cursor_from_point(
+    textarea: &TextArea<'_>,
+    area: Rect,
+    column: u16,
+    row: u16,
+) -> Option<(usize, usize)> {
+    if area.width == 0 || area.height == 0 {
+        return None;
+    }
+    let lines = textarea.lines();
+    if lines.is_empty() {
+        return Some((0, 0));
+    }
+    let row_offset = row
+        .saturating_sub(area.y)
+        .min(area.height.saturating_sub(1)) as usize;
+    let text_row = row_offset.min(lines.len().saturating_sub(1));
+    let display_col = column.saturating_sub(area.x).min(area.width) as usize;
+    Some((
+        text_row,
+        composer_char_col_at_display_col(&lines[text_row], display_col),
+    ))
+}
+
+fn composer_char_col_at_display_col(line: &str, display_col: usize) -> usize {
+    let mut width = 0usize;
+    for (index, ch) in line.chars().enumerate() {
+        width = width.saturating_add(UnicodeWidthChar::width(ch).unwrap_or(0));
+        if width > display_col {
+            return index;
+        }
+    }
+    line.chars().count()
 }
 
 fn textarea_text(textarea: &TextArea<'_>) -> String {
@@ -26,11 +63,7 @@ fn textarea_text(textarea: &TextArea<'_>) -> String {
 
 fn textarea_with_lines_and_cursor<'a>(lines: Vec<String>, row: usize, col: usize) -> TextArea<'a> {
     let mut textarea = TextArea::new(lines);
-    let style = tui_theme().surface_style();
-    textarea.set_block(Block::default().style(style));
-    textarea.set_style(style);
-    textarea.set_wrap_mode(WrapMode::WordOrGlyph);
-    textarea.set_cursor_line_style(Style::default());
+    apply_composer_textarea_style(&mut textarea);
     textarea.move_cursor(CursorMove::Jump(
         row.min(u16::MAX as usize) as u16,
         col.min(u16::MAX as usize) as u16,
@@ -192,14 +225,26 @@ fn replace_current_skill_token(textarea: &mut TextArea<'_>, name: &str) -> bool 
     let Some(token) = current_skill_token(textarea) else {
         return false;
     };
-    replace_token_range(textarea, token.row, token.start_col, token.end_col, &format!("${name}"))
+    replace_token_range(
+        textarea,
+        token.row,
+        token.start_col,
+        token.end_col,
+        &format!("${name}"),
+    )
 }
 
 fn replace_current_agent_token(textarea: &mut TextArea<'_>, name: &str) -> bool {
     let Some(token) = current_agent_token(textarea) else {
         return false;
     };
-    replace_token_range(textarea, token.row, token.start_col, token.end_col, &format!("@{name}"))
+    replace_token_range(
+        textarea,
+        token.row,
+        token.start_col,
+        token.end_col,
+        &format!("@{name}"),
+    )
 }
 
 fn replace_token_range(

@@ -19,6 +19,7 @@ mod smoke;
 mod snapshot;
 mod stats;
 mod store;
+mod tool_surface;
 mod tools;
 mod types;
 mod undo;
@@ -83,17 +84,19 @@ pub use store::{AgentEdgeRecord, AgentEdgeStatus};
 pub use store::{ContextEvidenceInput, ContextEvidenceRecord, SqliteStore};
 pub use tools::tool_names_for_mode;
 pub use types::{
-    AgentSpawnOptions, AgentSpawnResult, ApprovalHandler, ApprovalMode, ConfigScope,
-    ConfiguredModel, CustomProviderInput, CustomProviderResult, ImageInput, ModelCatalogEntry,
-    ModelCatalogProvider, ModelMetadataCacheTarget, PermissionApprovalDecision,
-    PermissionApprovalOutcome, PermissionApprovalRequest, PermissionConfig, PermissionMode,
-    PromptAttachmentDisplay, PromptDisplayMetadata, ReloadContextOptions, ReloadContextResult,
-    RunControl, RunControlHandle, RunMode, RunOptions, RunResult, RunStreamEvent, RunStreamSink,
-    RunWarning, SanitizedMessageSummary, ScopedCustomProviderInput, SelectedAgent,
-    SessionExportMessageSummary, SessionRedoResult, SessionSummary, SessionUndoOptions,
-    SessionUndoResult, SmokeControl, SmokeOptions, SmokeResult, StatsOptions,
-    TUI_DISPLAY_METADATA_KEY, TuiMessageSummary, USER_SHELL_METADATA_KEY, UserShellContextOptions,
-    UserShellOptions, UserShellResult, run_control,
+    AgentSpawnOptions, AgentSpawnResult, ApprovalHandler, ApprovalMode, ClarifyAnswer,
+    ClarifyQuestion, ClarifyQuestionOption, ClarifyRequestEvent, ClarifyResolvedEvent,
+    ClarifyResolvedReason, ClarifyResponse, ClarifyResult, ConfigScope, ConfiguredModel,
+    CustomProviderInput, CustomProviderResult, ImageInput, ModelCatalogEntry, ModelCatalogProvider,
+    ModelMetadataCacheTarget, PermissionApprovalDecision, PermissionApprovalOutcome,
+    PermissionApprovalRequest, PermissionConfig, PermissionMode, PromptAttachmentDisplay,
+    PromptDisplayMetadata, ReloadContextOptions, ReloadContextResult, RunControl, RunControlHandle,
+    RunMode, RunOptions, RunResult, RunStreamEvent, RunStreamSink, RunWarning,
+    SanitizedMessageSummary, ScopedCustomProviderInput, SelectedAgent, SessionExportMessageSummary,
+    SessionRedoResult, SessionSummary, SessionUndoOptions, SessionUndoResult, SmokeControl,
+    SmokeOptions, SmokeResult, StatsOptions, TUI_DISPLAY_METADATA_KEY, TuiMessageSummary,
+    USER_SHELL_METADATA_KEY, UserShellContextOptions, UserShellOptions, UserShellResult,
+    run_control,
 };
 pub use undo::{redo_session, undo_session};
 pub use user_shell::run_user_shell_command_streaming_controlled;

@@ -13,6 +13,331 @@ fn run_mode_tool_names_enforce_plan_read_only_surface() {
     );
 }
 
+fn valid_clarify_args() -> Value {
+    json!({
+        "questions": [{
+            "question": "Which mode should we use?",
+            "options": [
+                {"label": "Fast", "description": "Prioritize speed"},
+                {"label": "Careful", "description": "Prioritize review"}
+            ]
+        }]
+    })
+}
+
+#[tokio::test]
+async fn clarify_tool_validates_schema_and_is_sequential() {
+    assert_eq!(
+        crate::tools::clarify_tool(None, None).execution_mode(),
+        psychevo_agent_core::ToolExecutionMode::Sequential
+    );
+
+    for (args, expected) in [
+        (
+            json!({"questions": []}),
+            "clarify requires one to three questions",
+        ),
+        (
+            json!({
+                "questions": [
+                    {
+                        "question": "Which mode?",
+                        "options": [
+                            {"label": "Fast", "description": "Prioritize speed"},
+                            {"label": "Careful", "description": "Prioritize review"}
+                        ]
+                    },
+                    {
+                        "question": "Which mode?",
+                        "options": [
+                            {"label": "Fast", "description": "Prioritize speed"},
+                            {"label": "Careful", "description": "Prioritize review"}
+                        ]
+                    },
+                    {
+                        "question": "Which mode?",
+                        "options": [
+                            {"label": "Fast", "description": "Prioritize speed"},
+                            {"label": "Careful", "description": "Prioritize review"}
+                        ]
+                    },
+                    {
+                        "question": "Which mode?",
+                        "options": [
+                            {"label": "Fast", "description": "Prioritize speed"},
+                            {"label": "Careful", "description": "Prioritize review"}
+                        ]
+                    }
+                ]
+            }),
+            "one to three questions",
+        ),
+        (
+            json!({
+                "questions": [{
+                    "id": "old_id",
+                    "header": "Old",
+                    "question": "Which mode?",
+                    "options": [
+                        {"label": "Fast", "description": "Prioritize speed"},
+                        {"label": "Careful", "description": "Prioritize review"}
+                    ]
+                }]
+            }),
+            "unknown field",
+        ),
+        (
+            json!({
+                "questions": [{
+                    "question": "Which mode?",
+                    "options": [
+                        {"label": "Fast", "description": "Prioritize speed"}
+                    ]
+                }]
+            }),
+            "two to three options",
+        ),
+        (
+            json!({
+                "questions": [{
+                    "question": "Which mode?",
+                    "options": [
+                        {"label": "", "description": "Prioritize speed"},
+                        {"label": "Careful", "description": "Prioritize review"}
+                    ]
+                }]
+            }),
+            "non-empty label and description",
+        ),
+        (
+            json!({
+                "questions": [{
+                    "question": "Which mode?",
+                    "secret": true,
+                    "options": [
+                        {"label": "Fast", "description": "Prioritize speed"},
+                        {"label": "Careful", "description": "Prioritize review"}
+                    ]
+                }]
+            }),
+            "unknown field",
+        ),
+    ] {
+        let output = crate::tools::clarify_tool_impl(args, None, None).await;
+        assert!(output.is_error);
+        let error = output.json["error"].as_str().expect("error");
+        assert!(
+            error.contains(expected),
+            "expected {expected:?} in {error:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn clarify_tool_round_trips_answer_and_rejects_late_response() {
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let captured_for_stream = Arc::clone(&captured);
+    let stream: RunStreamSink = Arc::new(move |event| {
+        captured_for_stream
+            .lock()
+            .expect("captured stream lock")
+            .push(event);
+    });
+    let (handle, _control) = run_control();
+    let fut = crate::tools::clarify_tool_impl(
+        valid_clarify_args(),
+        Some(handle.clarify.clone()),
+        Some(stream),
+    );
+    let task = tokio::spawn(fut);
+
+    let request_seen = wait_until(Duration::from_secs(2), || {
+        captured.lock().expect("captured stream lock").iter().any(
+            |event| matches!(
+                event,
+                RunStreamEvent::ClarifyRequest(request)
+                    if request.call_id == "call_clarify"
+                        && request.questions[0].question == "Which mode should we use?"
+            ),
+        )
+    })
+    .await;
+    assert!(request_seen, "clarify request event was not emitted");
+
+    assert!(handle.submit_clarify_result(
+        "call_clarify",
+        ClarifyResult::Answered(ClarifyResponse {
+            answers: vec![
+                ClarifyAnswer {
+                    answers: vec!["Careful".to_string(), "user_note: include tests".to_string()],
+                },
+            ],
+        }),
+    ));
+    let output = task.await.expect("clarify task");
+    assert!(!output.is_error);
+    assert_eq!(
+        output.json,
+        json!({
+            "answers": [
+                {
+                    "answers": ["Careful", "user_note: include tests"]
+                }
+            ]
+        })
+    );
+    assert!(!handle.submit_clarify_result(
+        "call_clarify",
+        ClarifyResult::Cancelled
+    ));
+    assert!(
+        captured.lock().expect("captured stream lock").iter().any(
+            |event| matches!(
+                event,
+                RunStreamEvent::ClarifyResolved(resolved)
+                    if resolved.call_id == "call_clarify"
+                        && resolved.reason == ClarifyResolvedReason::Answered
+            ),
+        )
+    );
+}
+
+#[tokio::test]
+async fn clarify_tool_cancel_and_timeout_emit_resolution() {
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let captured_for_stream = Arc::clone(&captured);
+    let stream: RunStreamSink = Arc::new(move |event| {
+        captured_for_stream
+            .lock()
+            .expect("captured stream lock")
+            .push(event);
+    });
+    let (handle, _control) = run_control();
+    let task = tokio::spawn(crate::tools::clarify_tool_impl(
+        valid_clarify_args(),
+        Some(handle.clarify.clone()),
+        Some(stream),
+    ));
+    assert!(
+        wait_until(Duration::from_secs(2), || captured
+            .lock()
+            .expect("captured stream lock")
+            .iter()
+            .any(|event| matches!(event, RunStreamEvent::ClarifyRequest(_))))
+        .await
+    );
+
+    assert!(handle.submit_clarify_result("call_clarify", ClarifyResult::Cancelled));
+    let output = task.await.expect("clarify task");
+    assert!(output.is_error);
+    assert_eq!(
+        output.json["error"],
+        "clarify was cancelled by the user"
+    );
+    assert!(
+        captured.lock().expect("captured stream lock").iter().any(
+            |event| matches!(
+                event,
+                RunStreamEvent::ClarifyResolved(resolved)
+                    if resolved.reason == ClarifyResolvedReason::Cancelled
+            ),
+        )
+    );
+
+    let timed_out_events = Arc::new(Mutex::new(Vec::new()));
+    let timed_out_events_for_stream = Arc::clone(&timed_out_events);
+    let timeout_stream: RunStreamSink = Arc::new(move |event| {
+        timed_out_events_for_stream
+            .lock()
+            .expect("timed out stream lock")
+            .push(event);
+    });
+    let (timeout_handle, _control) = run_control();
+    let timeout_output = tokio::time::timeout(
+        Duration::from_secs(2),
+        crate::tools::clarify_tool_impl(
+            valid_clarify_args(),
+            Some(timeout_handle.clarify.clone()),
+            Some(timeout_stream),
+        ),
+    )
+    .await
+    .expect("clarify should time out in tests");
+    assert!(timeout_output.is_error);
+    assert_eq!(
+        timeout_output.json["error"],
+        "timed out waiting for user input"
+    );
+    assert!(!timeout_handle.submit_clarify_result(
+        "call_clarify",
+        ClarifyResult::Cancelled
+    ));
+    assert!(
+        timed_out_events
+            .lock()
+            .expect("timed out stream lock")
+            .iter()
+            .any(|event| matches!(
+                event,
+                RunStreamEvent::ClarifyResolved(resolved)
+                    if resolved.reason == ClarifyResolvedReason::TimedOut
+            ))
+    );
+}
+
+#[tokio::test]
+async fn clarify_tool_returns_model_errors_for_invalid_or_unavailable_requests() {
+    let invalid = crate::tools::clarify_tool_impl(
+        json!({
+            "questions": [{
+                "id": "TargetMode",
+                "header": "Mode",
+                "question": "Which mode?",
+                "options": [
+                    {"label": "Fast", "description": "Prioritize speed"},
+                    {"label": "Careful", "description": "Prioritize review"}
+                ]
+            }]
+        }),
+        None,
+        None,
+    )
+    .await;
+    assert!(invalid.is_error);
+    assert!(
+        invalid.json["error"]
+            .as_str()
+            .expect("error")
+            .contains("unknown field")
+    );
+
+    let unavailable = crate::tools::clarify_tool_impl(
+        valid_clarify_args(),
+        None,
+        None,
+    )
+    .await;
+    assert!(unavailable.is_error);
+    assert_eq!(
+        unavailable.json["error"],
+        "clarify is not available in this execution context"
+    );
+}
+
+async fn wait_until(
+    timeout: Duration,
+    condition: impl Fn() -> bool,
+) -> bool {
+    let started = Instant::now();
+    while started.elapsed() < timeout {
+        if condition() {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    condition()
+}
+
 #[tokio::test]
 async fn user_shell_streams_bash_events_without_provider_config() {
     let temp = tempdir().expect("temp");

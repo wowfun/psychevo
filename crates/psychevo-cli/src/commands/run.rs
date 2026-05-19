@@ -93,6 +93,7 @@ async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
         permission_mode,
         approval_mode: None,
         approval_handler,
+        clarify_enabled: false,
         inherited_env: Some(env_map),
         agent: args.agent.clone(),
         no_agents: args.no_agents,

@@ -23,6 +23,7 @@ impl TuiApp {
             permission_mode: Some(self.current_permission_mode),
             approval_mode: None,
             approval_handler: None,
+            clarify_enabled: true,
             inherited_env: Some(self.env_map.clone()),
             agent: self.current_agent.clone(),
             no_agents: self.no_agents,

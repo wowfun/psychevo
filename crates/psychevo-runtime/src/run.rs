@@ -13,8 +13,8 @@ use tokio::time;
 use crate::agents::{
     AgentDefinition, AgentDiscoveryOptions, AgentToolContext, agent_catalog_for_prompt,
     agent_catalog_for_selected_policy, agent_mailbox_event_message,
-    agent_policy_allows_agent_spawn, agent_project_instructions_enabled, agent_tools,
-    apply_agent_hooks, apply_agent_tool_policy, discover_agents, effective_tool_names,
+    agent_policy_allows_agent_spawn, agent_project_instructions_enabled, apply_agent_hooks,
+    apply_agent_tool_policy, discover_agents, effective_tool_names,
     narrow_permission_mode_for_agent, resolve_agent_definition, resolve_agents_home,
     run_agent_hook_event, skill_catalog_visible_for_tools, spawn_child_agent_background,
 };
@@ -42,7 +42,7 @@ use crate::skills::{
 };
 use crate::snapshot::SnapshotStore;
 use crate::store::{PromptPrefixRecord, SqliteStore};
-use crate::tools::{coding_core_tools_for_mode, skill_tools_for_mode};
+use crate::tool_surface::{ClarifyToolSurface, ToolSurfaceAssembly, assemble_tool_surface};
 use crate::types::{
     AgentSpawnOptions, AgentSpawnResult, ModelMetadata, PermissionConfig, ReloadContextOptions,
     ReloadContextResult, RunControl, RunOptions, RunResult, RunStreamEvent, RunStreamSink,
@@ -140,17 +140,13 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
     let skill_catalog = discover_skills(&skill_options)?;
     let project_instructions = load_project_instructions(&workdir)?;
     let model_metadata = session_model_metadata(&metadata);
-    let mut tools = coding_core_tools_for_mode(&workdir, mode);
-    if !options.no_skills {
-        tools.extend(skill_tools_for_mode(skill_options, mode));
-    }
-    if !options.no_agents {
+    let agent_tools = if !options.no_agents {
         let provider: Arc<dyn GenerationProvider> = Arc::new(OpenAiChatProvider::new(
             String::new(),
             String::new(),
             summary.provider.clone(),
         ));
-        tools.extend(agent_tools(AgentToolContext {
+        Some(AgentToolContext {
             provider,
             model_provider: summary.provider.clone(),
             model: summary.model.clone(),
@@ -201,8 +197,17 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
                 .unwrap_or_default(),
             required_agent_names: Vec::new(),
             spawn_depth_remaining: None,
-        }));
-    }
+        })
+    } else {
+        None
+    };
+    let mut tools = assemble_tool_surface(ToolSurfaceAssembly {
+        workdir: workdir.clone(),
+        mode,
+        clarify: ClarifyToolSurface::Disabled,
+        skills: (!options.no_skills).then_some(skill_options),
+        agents: agent_tools,
+    });
     tools = apply_agent_tool_policy(tools, selected_agent.as_ref(), mode);
     tools = apply_agent_hooks(tools, selected_agent.as_ref(), &workdir);
     let effective_tool_names = effective_tool_names(&tools);
@@ -297,6 +302,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         permission_mode: options.permission_mode,
         approval_mode: options.approval_mode,
         approval_handler: options.approval_handler.clone(),
+        clarify_enabled: false,
         inherited_env: options.inherited_env.clone(),
         agent: options.selected_parent_agent.clone(),
         no_agents: false,
@@ -666,11 +672,17 @@ async fn run_live_internal(
             mode: options.mode,
         },
     ));
-    let (control_handle, control_receivers) = match control {
-        Some(control) => (control.handle.inner.clone(), control.receivers),
-        None => ControlHandle::new(),
-    };
     let stream_events_after = stream_events.clone();
+    let (control_handle, control_receivers, clarify_control) = match control {
+        Some(control) => {
+            let clarify = Some(control.handle.clarify.clone());
+            (control.handle.inner.clone(), control.receivers, clarify)
+        }
+        None => {
+            let (handle, receivers) = ControlHandle::new();
+            (handle, receivers, None)
+        }
+    };
     let mut generation_metadata = json!({
         "model_metadata": resolved.metadata.public_json(),
     });
@@ -682,12 +694,8 @@ async fn run_live_internal(
             serde_json::Value::String(effort.clone()),
         );
     }
-    let mut tools = coding_core_tools_for_mode(&workdir, options.mode);
-    if !options.no_skills || !explicit_skill_inputs.is_empty() {
-        tools.extend(skill_tools_for_mode(skill_options, options.mode));
-    }
-    if !options.no_agents {
-        tools.extend(agent_tools(AgentToolContext {
+    let agent_tools = if !options.no_agents {
+        Some(AgentToolContext {
             provider: Arc::clone(&provider),
             model_provider: resolved.provider.clone(),
             model: resolved.model.clone(),
@@ -720,8 +728,21 @@ async fn run_live_internal(
                 .unwrap_or_default(),
             required_agent_names: required_agent_mentions.clone(),
             spawn_depth_remaining: None,
-        }));
-    }
+        })
+    } else {
+        None
+    };
+    let mut tools = assemble_tool_surface(ToolSurfaceAssembly {
+        workdir: workdir.clone(),
+        mode: options.mode,
+        clarify: if options.clarify_enabled {
+            ClarifyToolSurface::enabled(clarify_control, stream_events.clone())
+        } else {
+            ClarifyToolSurface::Disabled
+        },
+        skills: (!options.no_skills || !explicit_skill_inputs.is_empty()).then_some(skill_options),
+        agents: agent_tools,
+    });
     tools = apply_agent_tool_policy(tools, selected_agent.as_ref(), options.mode);
     tools = apply_agent_hooks(tools, selected_agent.as_ref(), &workdir);
     let permission_runtime = PermissionRuntime::new(

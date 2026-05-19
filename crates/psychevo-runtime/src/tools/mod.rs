@@ -46,6 +46,13 @@ pub(crate) fn coding_core_tools_for_mode(
     }
 }
 
+pub(crate) fn clarify_tool(
+    control: Option<Arc<crate::types::ClarifyControl>>,
+    stream: Option<crate::types::RunStreamSink>,
+) -> Arc<dyn ToolBinding> {
+    Arc::new(ClarifyTool::new(control, stream))
+}
+
 pub(crate) fn skill_tools_for_mode(
     options: SkillDiscoveryOptions,
     mode: RunMode,
@@ -92,10 +99,10 @@ pub fn tool_names_for_mode(mode: RunMode) -> Vec<&'static str> {
 pub(crate) fn mode_instruction(mode: RunMode) -> &'static str {
     match mode {
         RunMode::Build => {
-            "Runtime mode: default. You may use the available coding tools to read, edit, write, and run commands under the selected workdir."
+            "Runtime mode: default. You may use the available coding tools to read, edit, write, and run commands under the selected workdir. When available, use clarify for meaningful user decisions or feedback, not permission approval."
         }
         RunMode::Plan => {
-            "Runtime mode: plan. This turn is hard read-only. Use only the available read, list, and search tools to inspect the workdir. Do not write files, edit files, run shell commands, or claim to have modified the workspace."
+            "Runtime mode: plan. This turn is hard read-only. Use only the available read, list, search, and clarify tools to inspect the workdir and ask meaningful user questions. Do not write files, edit files, run shell commands, or claim to have modified the workspace."
         }
     }
 }
@@ -126,6 +133,7 @@ include!("write.rs");
 include!("edit.rs");
 include!("patch.rs");
 include!("bash.rs");
+include!("clarify.rs");
 include!("skills.rs");
 include!("args.rs");
 include!("truncation.rs");

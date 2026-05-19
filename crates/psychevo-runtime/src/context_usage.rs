@@ -3,10 +3,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use futures::future::BoxFuture;
-use psychevo_agent_core::{Message, PromptInstruction, ToolBinding};
+use psychevo_agent_core::{Message, PromptInstruction};
 use psychevo_ai::{
     AbortSignal, GenerationProvider, GenerationRequest, GenerationStream, ModelTarget,
-    OpenAiChatTokenCount, ToolDeclaration, count_openai_chat_request,
+    OpenAiChatTokenCount, count_openai_chat_request,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -19,6 +19,7 @@ use crate::skills::{
     SkillDiscoveryOptions, discover_skills, format_skills_for_prompt, resolve_skills_home,
 };
 use crate::store::SqliteStore;
+use crate::tool_surface::tool_declarations;
 use crate::tools::{coding_core_tools_for_mode, mode_instruction, skill_tools_for_mode};
 use crate::types::RunMode;
 
@@ -399,17 +400,6 @@ pub(crate) fn context_counting_metadata(
     })
 }
 
-pub(crate) fn tool_declarations(tools: &[Arc<dyn ToolBinding>]) -> Vec<ToolDeclaration> {
-    tools
-        .iter()
-        .map(|tool| ToolDeclaration {
-            name: tool.name().to_string(),
-            description: tool.description().to_string(),
-            parameters: tool.parameters(),
-        })
-        .collect()
-}
-
 pub fn format_context_snapshot_text(snapshot: &ContextSnapshot, include_bar: bool) -> String {
     format_context_snapshot_text_with_options(
         snapshot,
@@ -640,6 +630,7 @@ fn configured_context_limit(
         permission_mode: None,
         approval_mode: None,
         approval_handler: None,
+        clarify_enabled: false,
         inherited_env: options.inherited_env.clone(),
         agent: None,
         no_agents: false,

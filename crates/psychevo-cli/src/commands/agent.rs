@@ -150,6 +150,7 @@ async fn run_agent(args: AgentRunArgs) -> Result<ExitCode> {
         permission_mode: None,
         approval_mode: None,
         approval_handler: None,
+        clarify_enabled: false,
         inherited_env: Some(env_map),
         agent: Some(args.name),
         no_agents: false,

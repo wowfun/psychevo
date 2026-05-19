@@ -94,7 +94,7 @@ fn bash_timeout_failure_shows_timeout_before_partial_output() {
         .find(|row| row.kind == TranscriptKind::Ran)
         .expect("bash row");
     assert!(row.failed);
-    assert_eq!(row.title, "Ran python scripts/fetch.py");
+    assert_eq!(row.title, "bash python scripts/fetch.py");
     assert!(row.text.starts_with(
         "timeout: command timed out after 120 seconds; partial output follows\n"
     ));
@@ -689,9 +689,74 @@ fn selected_thinking_and_tool_rows_use_single_line_focus_marker() {
         .iter()
         .map(line_text)
         .collect::<Vec<_>>();
-    assert!(tool.first().is_some_and(|line| line.starts_with("› Ran ls")), "{tool:?}");
+    assert!(tool.first().is_some_and(|line| line.starts_with("› bash ls")), "{tool:?}");
     assert!(tool.get(1).is_some_and(|line| line.starts_with("  └ ")), "{tool:?}");
     assert!(!tool.iter().skip(1).any(|line| line.starts_with("> ")), "{tool:?}");
+}
+
+#[test]
+fn status_rows_use_quiet_notice_marker_and_hide_default_title() {
+    let row = TranscriptRow::simple(
+        TranscriptKind::Status,
+        "mode: plan\nskill loaded: reviewer",
+    );
+    let lines = status_lines(&row, false, true, 80);
+    let rendered = lines.iter().map(line_text).collect::<Vec<_>>();
+
+    assert_eq!(rendered, vec!["· mode: plan", "  skill loaded: reviewer"]);
+    assert_eq!(lines[0].spans[0].style, tui_theme().dim_style());
+    assert!(!rendered.iter().any(|line| line.contains("Status")), "{rendered:?}");
+    assert!(!rendered.iter().any(|line| line.contains("▌")), "{rendered:?}");
+
+    let selected = status_lines(&row, true, true, 80)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>();
+    assert_eq!(selected, vec!["› mode: plan", "  skill loaded: reviewer"]);
+    assert!(!selected.iter().skip(1).any(|line| line.starts_with("› ")), "{selected:?}");
+}
+
+#[test]
+fn status_tool_rows_keep_title_hint_and_tree_detail() {
+    let mut row = TranscriptRow::with_title(
+        TranscriptKind::Status,
+        "Tool view_skill",
+        "# X Daily\n... 174 more lines",
+    );
+    row.full_text = Some("# X Daily\nfull skill content".to_string());
+
+    let rendered = status_lines(&row, false, true, 80)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>();
+
+    assert!(rendered[0].starts_with("· Tool view_skill"), "{rendered:?}");
+    assert!(rendered[0].contains("▸ 174 more lines"), "{rendered:?}");
+    assert_eq!(rendered[1], "  └ # X Daily");
+    assert!(!rendered.iter().any(|line| line.contains("... 174 more lines")), "{rendered:?}");
+    assert!(!rendered.iter().any(|line| line.contains("▌")), "{rendered:?}");
+}
+
+#[test]
+fn clarify_status_results_use_shared_status_notice_renderer() {
+    let mut row = TranscriptRow::with_title(
+        TranscriptKind::Status,
+        "Questions 1/1 answered",
+        "Which mode should we use?\nanswer: Fast\nnote: include tests",
+    );
+    row.tool_name = Some("clarify".to_string());
+
+    let rendered = status_lines(&row, false, true, 80)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>();
+
+    assert_eq!(rendered[0], "· Questions 1/1 answered");
+    assert_eq!(rendered[1], "  └ Which mode should we use?");
+    assert_eq!(rendered[2], "    answer: Fast");
+    assert_eq!(rendered[3], "    note: include tests");
+    assert!(!rendered.iter().any(|line| line.starts_with("• Questions")), "{rendered:?}");
+    assert!(!rendered.iter().any(|line| line.starts_with("  • ")), "{rendered:?}");
 }
 
 async fn click_transcript_target(
@@ -1104,7 +1169,13 @@ fn bottom_panel_row_right_aligns_detail_with_wide_title() {
     };
 
     let width = 54;
-    let text = line_text(&bottom_panel_row(&row, false, width));
+    let text = line_text(&bottom_panel_row(
+        &row,
+        false,
+        width,
+        false,
+        Duration::default(),
+    ));
 
     assert!(text.ends_with("08:50"));
     assert_eq!(UnicodeWidthStr::width(text.as_str()), usize::from(width));

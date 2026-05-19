@@ -139,6 +139,10 @@ fn selection_can_copy_sidebar_rendered_text() {
     ui.update_selection(x + 14, y);
 
     assert_eq!(ui.selected_text().as_deref(), Some("Modified Files"));
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 120, 10);
+    let cell = buffer.cell((x, y)).expect("sidebar selected cell");
+    assert!(cell.modifier.contains(Modifier::REVERSED));
+    assert!(cell.modifier.contains(Modifier::BOLD));
 }
 
 #[test]
@@ -274,13 +278,11 @@ fn multiline_transcript_selection_ignores_same_row_sidebar_text() {
     assert!(!selected.contains("Context"));
 
     let buffer = draw_fullscreen_for_test(&app, &mut ui, 120, 10);
-    assert_ne!(
-        buffer
-            .cell((sidebar_row.0, sidebar_row.1))
-            .expect("sidebar cell")
-            .bg,
-        TUI_SELECTION_BG
-    );
+    let sidebar_cell = buffer
+        .cell((sidebar_row.0, sidebar_row.1))
+        .expect("sidebar cell");
+    assert!(!sidebar_cell.modifier.contains(Modifier::REVERSED));
+    assert_ne!(sidebar_cell.bg, TUI_SELECTION_BG);
 }
 
 #[tokio::test]
@@ -293,18 +295,16 @@ async fn active_selection_highlights_rendered_buffer_and_esc_clears() {
     ui.update_selection(6, 0);
 
     let buffer = draw_fullscreen_for_test(&app, &mut ui, 32, 8);
-    assert_eq!(
-        buffer.cell((2, 0)).expect("highlight start").bg,
-        TUI_SELECTION_BG
-    );
-    assert_eq!(
-        buffer.cell((5, 0)).expect("highlight end").bg,
-        TUI_SELECTION_BG
-    );
-    assert_ne!(
-        buffer.cell((6, 0)).expect("outside highlight").bg,
-        TUI_SELECTION_BG
-    );
+    let start = buffer.cell((2, 0)).expect("highlight start");
+    assert!(start.modifier.contains(Modifier::REVERSED));
+    assert!(start.modifier.contains(Modifier::BOLD));
+    assert_ne!(start.bg, TUI_SELECTION_BG);
+    let end = buffer.cell((5, 0)).expect("highlight end");
+    assert!(end.modifier.contains(Modifier::REVERSED));
+    assert!(end.modifier.contains(Modifier::BOLD));
+    assert_ne!(end.bg, TUI_SELECTION_BG);
+    let outside = buffer.cell((6, 0)).expect("outside highlight");
+    assert!(!outside.modifier.contains(Modifier::REVERSED));
 
     let should_quit = app
         .handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
@@ -313,7 +313,13 @@ async fn active_selection_highlights_rendered_buffer_and_esc_clears() {
 
     assert!(!should_quit);
     let buffer = draw_fullscreen_for_test(&app, &mut ui, 32, 8);
-    assert_ne!(buffer.cell((2, 0)).expect("cleared").bg, TUI_SELECTION_BG);
+    assert!(
+        !buffer
+            .cell((2, 0))
+            .expect("cleared")
+            .modifier
+            .contains(Modifier::REVERSED)
+    );
 }
 
 #[test]
@@ -322,6 +328,15 @@ fn osc52_sequence_encodes_clipboard_text() {
     assert_eq!(
         osc52_sequence_with_passthrough("hello", false).expect("osc52"),
         "\x1b]52;c;aGVsbG8=\x07"
+    );
+}
+
+#[test]
+fn osc52_sequence_encodes_cjk_clipboard_text_as_utf8() {
+    assert_eq!(base64_encode("中文测试".as_bytes()), "5Lit5paH5rWL6K+V");
+    assert_eq!(
+        osc52_sequence_with_passthrough("中文测试", false).expect("osc52"),
+        "\x1b]52;c;5Lit5paH5rWL6K+V\x07"
     );
 }
 
@@ -430,11 +445,16 @@ fn clipboard_backend_reports_failure_when_all_backends_fail() {
 
     let result = copy_text_to_clipboard_with(
         "hello",
+        ClipboardEnvironment {
+            ssh_session: false,
+            tmux_session: false,
+        },
         candidates,
         |candidate, _| {
             tried.push(candidate.command);
             Ok(false)
         },
+        |_| panic!("local clipboard fallback should not use tmux"),
         |_| Err(io::Error::other("osc blocked")),
     );
 
@@ -445,6 +465,214 @@ fn clipboard_backend_reports_failure_when_all_backends_fail() {
     assert!(message.contains("powershell.exe unavailable"));
     assert!(message.contains("clip.exe unavailable"));
     assert!(message.contains("OSC52: osc blocked"));
+}
+
+#[test]
+fn local_clipboard_emits_osc52_before_native_commands() {
+    let calls = std::cell::RefCell::new(Vec::new());
+
+    let result = copy_text_to_clipboard_with(
+        "hello",
+        ClipboardEnvironment {
+            ssh_session: false,
+            tmux_session: false,
+        },
+        vec![ClipboardCommand {
+            command: "remote-copy",
+            args: NO_ARGS,
+        }],
+        |candidate, _| {
+            calls.borrow_mut().push(candidate.command);
+            Ok(true)
+        },
+        |_| panic!("local clipboard should not use tmux"),
+        |text| {
+            calls.borrow_mut().push("OSC52");
+            assert_eq!(text, "hello");
+            Ok(())
+        },
+    );
+
+    assert!(result.is_ok());
+    assert_eq!(calls.into_inner(), ["OSC52", "remote-copy"]);
+}
+
+#[test]
+fn ssh_clipboard_skips_remote_native_commands_and_uses_osc52() {
+    let mut local_calls = 0;
+    let mut tmux_calls = 0;
+    let mut osc_text = None;
+
+    let result = copy_text_to_clipboard_with(
+        "hello",
+        ClipboardEnvironment {
+            ssh_session: true,
+            tmux_session: false,
+        },
+        local_clipboard_commands_for(false, false, true, true),
+        |_, _| {
+            local_calls += 1;
+            Ok(true)
+        },
+        |_| {
+            tmux_calls += 1;
+            Ok(())
+        },
+        |text| {
+            osc_text = Some(text.to_string());
+            Ok(())
+        },
+    );
+
+    assert!(result.is_ok());
+    assert_eq!(local_calls, 0);
+    assert_eq!(tmux_calls, 0);
+    assert_eq!(osc_text.as_deref(), Some("hello"));
+}
+
+#[test]
+fn ssh_tmux_clipboard_emits_osc52_and_tmux_load_buffer() {
+    let mut local_calls = 0;
+    let mut tmux_text = None;
+    let mut osc_text = None;
+
+    let result = copy_text_to_clipboard_with(
+        "hello",
+        ClipboardEnvironment {
+            ssh_session: true,
+            tmux_session: true,
+        },
+        local_clipboard_commands_for(false, false, false, false),
+        |_, _| {
+            local_calls += 1;
+            Ok(true)
+        },
+        |text| {
+            tmux_text = Some(text.to_string());
+            Ok(())
+        },
+        |text| {
+            osc_text = Some(text.to_string());
+            Ok(())
+        },
+    );
+
+    assert!(result.is_ok());
+    assert_eq!(local_calls, 0);
+    assert_eq!(osc_text.as_deref(), Some("hello"));
+    assert_eq!(tmux_text.as_deref(), Some("hello"));
+}
+
+#[test]
+fn ssh_tmux_clipboard_succeeds_when_tmux_fails_after_osc52() {
+    let mut local_calls = 0;
+    let mut tmux_calls = 0;
+    let mut osc_text = None;
+
+    let result = copy_text_to_clipboard_with(
+        "hello",
+        ClipboardEnvironment {
+            ssh_session: true,
+            tmux_session: true,
+        },
+        local_clipboard_commands_for(false, false, false, false),
+        |_, _| {
+            local_calls += 1;
+            Ok(true)
+        },
+        |_| {
+            tmux_calls += 1;
+            Err(io::Error::other("tmux unavailable"))
+        },
+        |text| {
+            osc_text = Some(text.to_string());
+            Ok(())
+        },
+    );
+
+    assert!(result.is_ok());
+    assert_eq!(local_calls, 0);
+    assert_eq!(tmux_calls, 1);
+    assert_eq!(osc_text.as_deref(), Some("hello"));
+}
+
+#[test]
+fn ssh_tmux_clipboard_succeeds_when_osc52_fails_but_tmux_succeeds() {
+    let mut local_calls = 0;
+    let mut tmux_text = None;
+    let mut osc_calls = 0;
+
+    let result = copy_text_to_clipboard_with(
+        "hello",
+        ClipboardEnvironment {
+            ssh_session: true,
+            tmux_session: true,
+        },
+        local_clipboard_commands_for(false, false, false, false),
+        |_, _| {
+            local_calls += 1;
+            Ok(true)
+        },
+        |text| {
+            tmux_text = Some(text.to_string());
+            Ok(())
+        },
+        |_| {
+            osc_calls += 1;
+            Err(io::Error::other("osc blocked"))
+        },
+    );
+
+    assert!(result.is_ok());
+    assert_eq!(local_calls, 0);
+    assert_eq!(osc_calls, 1);
+    assert_eq!(tmux_text.as_deref(), Some("hello"));
+}
+
+#[test]
+fn ssh_tmux_clipboard_reports_osc52_and_tmux_failures() {
+    let result = copy_text_to_clipboard_with(
+        "hello",
+        ClipboardEnvironment {
+            ssh_session: true,
+            tmux_session: true,
+        },
+        local_clipboard_commands_for(false, false, false, false),
+        |_, _| panic!("ssh clipboard should not use remote native commands"),
+        |_| Err(io::Error::other("tmux unavailable")),
+        |_| Err(io::Error::other("osc blocked")),
+    );
+
+    let message = result.expect_err("clipboard failure").to_string();
+    assert!(message.contains("OSC52: osc blocked"));
+    assert!(message.contains("tmux: tmux unavailable"));
+}
+
+#[test]
+fn tmux_clipboard_ready_rejects_disabled_or_missing_forwarding() {
+    assert!(tmux_clipboard_copy_ready(
+        || Ok("external\n".to_string()),
+        || Ok("193: Ms: (string) \\033]52;%p1%s;%p2%s\\a\n".to_string()),
+    )
+    .is_ok());
+    assert_eq!(
+        tmux_clipboard_copy_ready(
+            || Ok("off\n".to_string()),
+            || panic!("tmux info should not be queried when forwarding is disabled"),
+        )
+        .expect_err("disabled forwarding")
+        .to_string(),
+        "tmux clipboard forwarding is disabled"
+    );
+    assert_eq!(
+        tmux_clipboard_copy_ready(
+            || Ok("external\n".to_string()),
+            || Ok("193: Ms: [missing]\n".to_string()),
+        )
+        .expect_err("missing Ms")
+        .to_string(),
+        "tmux clipboard forwarding is unavailable: missing Ms capability"
+    );
 }
 
 #[tokio::test]

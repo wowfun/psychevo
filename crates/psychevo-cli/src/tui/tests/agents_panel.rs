@@ -1502,7 +1502,7 @@ async fn scoped_child_stream_updates_parent_agent_tail_without_child_rows() {
             .text
             .contains("Running (1 tool use · 15 tokens)")
     );
-    assert!(ui.transcript[0].text.contains("Explored src/lib.rs"));
+    assert!(ui.transcript[0].text.contains("read src/lib.rs"));
     assert!(ui.transcript[0].text.contains("Response: translated"));
 }
 

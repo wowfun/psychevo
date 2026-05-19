@@ -48,6 +48,7 @@ async fn run_live_read_tool(provider: &str) {
         permission_mode: None,
         approval_mode: None,
         approval_handler: None,
+        clarify_enabled: false,
         inherited_env: Some(inherited_env),
         agent: None,
         no_agents: false,

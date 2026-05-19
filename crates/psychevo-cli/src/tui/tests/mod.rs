@@ -220,6 +220,7 @@ fn test_app_with_models(temp: &tempfile::TempDir) -> TuiApp {
 
 // Test chunks stay in this module so existing helpers remain shared.
 include!("core.rs");
+include!("clarify.rs");
 include!("snapshots.rs");
 include!("transcript_files.rs");
 include!("input_popups.rs");

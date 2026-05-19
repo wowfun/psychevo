@@ -367,6 +367,7 @@ impl TuiApp {
         }
         let slash_input = textarea_text(&ui.textarea);
         let slash_count = if ui.shell_mode
+            || ui.textarea.is_selecting()
             || ui.current_file_token().is_some()
             || ui.current_agent_token().is_some()
             || ui.current_skill_token().is_some()
@@ -400,6 +401,13 @@ impl TuiApp {
                 }
                 _ => {}
             }
+        }
+        if key.code == KeyCode::Char('a') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            ui.select_composer_all();
+            return Ok(false);
+        }
+        if key.code == KeyCode::Esc && ui.cancel_composer_selection() {
+            return Ok(false);
         }
         match key.code {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -584,25 +592,27 @@ impl TuiApp {
                 Ok(Some(false))
             }
             Some(SlashShortcutMatch::Command(command_line)) => {
-                let should_quit = match parse_slash_command_with_config(
-                    &command_line,
-                    &self.slash_config,
-                ) {
-                    Ok(Some(command)) => {
-                        self.handle_fullscreen_command_with_echo(ui, command, Some(command_line))
+                let should_quit =
+                    match parse_slash_command_with_config(&command_line, &self.slash_config) {
+                        Ok(Some(command)) => {
+                            self.handle_fullscreen_command_with_echo(
+                                ui,
+                                command,
+                                Some(command_line),
+                            )
                             .await?
-                    }
-                    Ok(None) => false,
-                    Err(err) => {
-                        ui.push_command_result(
-                            normalize_submitted_slash_echo(&command_line),
-                            None,
-                            format!("error: {err:#}"),
-                            true,
-                        );
-                        false
-                    }
-                };
+                        }
+                        Ok(None) => false,
+                        Err(err) => {
+                            ui.push_command_result(
+                                normalize_submitted_slash_echo(&command_line),
+                                None,
+                                format!("error: {err:#}"),
+                                true,
+                            );
+                            false
+                        }
+                    };
                 Ok(Some(should_quit))
             }
             None => Ok(None),
@@ -615,6 +625,7 @@ impl TuiApp {
             && !ui.history_search
             && !ui.shell_mode
             && ui.selection.anchor.is_none()
+            && !ui.textarea.is_selecting()
             && !ui.agent_popup_visible()
             && !ui.file_popup_visible()
             && !ui.skill_popup_visible()
@@ -635,7 +646,14 @@ impl TuiApp {
                 self.handle_fullscreen_mouse_wheel(ui, mouse.column, mouse.row, 3);
             }
             MouseEventKind::Down(MouseButton::Left) => {
-                if let Some(index) = ui.bottom_panel_hit(mouse.column, mouse.row) {
+                if matches!(ui.bottom_panel, Some(BottomPanel::Clarify(_))) {
+                    if let Some(index) = ui.bottom_panel_hit(mouse.column, mouse.row) {
+                        ui.clear_selection();
+                        self.handle_clarify_panel_click(ui, index)?;
+                    } else {
+                        ui.clear_selection();
+                    }
+                } else if let Some(index) = ui.bottom_panel_hit(mouse.column, mouse.row) {
                     ui.clear_selection();
                     if let Some(panel) = &mut ui.bottom_panel {
                         panel.selection_mut().set_selected(index);
@@ -685,7 +703,7 @@ impl TuiApp {
                         ui.close_agent_popup();
                         ui.close_skill_popup();
                         ui.push_submitted_history(submitted.clone());
-                    match parse_slash_command_with_config(&submitted, &self.slash_config) {
+                        match parse_slash_command_with_config(&submitted, &self.slash_config) {
                             Ok(Some(command)) => {
                                 return self
                                     .handle_fullscreen_command_with_echo(
@@ -707,6 +725,8 @@ impl TuiApp {
                             }
                         }
                     }
+                } else if ui.start_composer_mouse_selection(mouse.column, mouse.row) {
+                    return Ok(false);
                 } else if let Some(target) = ui.transcript_hit(mouse.column, mouse.row) {
                     ui.mouse_down_target = Some(target);
                     ui.mouse_dragged = false;
@@ -727,9 +747,16 @@ impl TuiApp {
             }
             MouseEventKind::Drag(MouseButton::Left) => {
                 ui.mouse_dragged = true;
-                ui.update_selection(mouse.column, mouse.row);
+                if !ui.update_composer_mouse_selection(mouse.column, mouse.row) {
+                    ui.update_selection(mouse.column, mouse.row);
+                }
             }
             MouseEventKind::Up(MouseButton::Left) => {
+                if ui.composer_mouse_selecting {
+                    ui.update_composer_mouse_selection(mouse.column, mouse.row);
+                    ui.finish_composer_mouse_selection();
+                    return Ok(false);
+                }
                 ui.update_selection(mouse.column, mouse.row);
                 let up_target = ui.transcript_hit(mouse.column, mouse.row);
                 let click_target = (!ui.mouse_dragged

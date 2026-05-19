@@ -13,13 +13,16 @@ use psychevo_ai::{
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use crate::agents::{AgentCatalog, AgentToolContext, agent_mailbox_event_message, agent_tools};
+use crate::agents::{AgentCatalog, AgentToolContext, agent_mailbox_event_message};
 use crate::error::{Error, Result};
 use crate::skills::SkillDiscoveryOptions;
 use crate::store::{
     AgentMailboxEventRecord, ContextEvidenceRecord, PromptPrefixRecord, SqliteStore,
 };
-use crate::tools::{coding_core_tools_for_mode, mode_instruction, skill_tools_for_mode};
+use crate::tool_surface::{
+    ClarifyToolSurface, ToolSurfaceAssembly, assemble_tool_surface, tool_declarations,
+};
+use crate::tools::mode_instruction;
 use crate::types::{ModelMetadata, RunMode, SessionSummary};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -1202,18 +1205,6 @@ fn reconstructed_tool_declarations(
     workdir: &Path,
     mode: RunMode,
 ) -> Vec<ToolDeclaration> {
-    let mut tools = coding_core_tools_for_mode(workdir, mode);
-    tools.extend(skill_tools_for_mode(
-        SkillDiscoveryOptions {
-            home: workdir.join(".psychevo"),
-            workdir: workdir.to_path_buf(),
-            config_path: None,
-            env: BTreeMap::new(),
-            explicit_inputs: Vec::new(),
-            no_skills: false,
-        },
-        mode,
-    ));
     let base_url = metadata
         .get("base_url")
         .and_then(Value::as_str)
@@ -1224,53 +1215,59 @@ fn reconstructed_tool_declarations(
         String::new(),
         summary.provider.clone(),
     ));
-    tools.extend(agent_tools(AgentToolContext {
-        provider,
-        model_provider: summary.provider.clone(),
-        model: summary.model.clone(),
-        provider_label: metadata
-            .get("provider_label")
-            .and_then(Value::as_str)
-            .unwrap_or(summary.provider.as_str())
-            .to_string(),
-        base_url,
-        api_key_env: metadata
-            .get("api_key_env")
-            .and_then(Value::as_str)
-            .map(str::to_string),
-        reasoning_effort: metadata
-            .get("reasoning_effort")
-            .and_then(Value::as_str)
-            .map(str::to_string),
-        context_limit: metadata.get("context_limit").and_then(Value::as_u64),
-        generation_metadata: json_value_object_with_model_metadata(metadata),
+    let tools = assemble_tool_surface(ToolSurfaceAssembly {
         workdir: workdir.to_path_buf(),
         mode,
-        permission_config: Default::default(),
-        permission_mode: Default::default(),
-        approval_mode: Default::default(),
-        approval_handler: None,
-        store: store.clone(),
-        parent_session_id: summary.id.clone(),
-        parent_context_snapshot: Vec::new(),
-        catalog: AgentCatalog::default(),
-        control_handle: None,
-        stream_events: None,
-        model_metadata: ModelMetadata::default(),
-        env: BTreeMap::new(),
-        allowed_agent_names: None,
-        denied_agent_names: BTreeSet::new(),
-        required_agent_names: Vec::new(),
-        spawn_depth_remaining: None,
-    }));
-    tools
-        .iter()
-        .map(|tool| ToolDeclaration {
-            name: tool.name().to_string(),
-            description: tool.description().to_string(),
-            parameters: tool.parameters(),
-        })
-        .collect()
+        clarify: ClarifyToolSurface::declaration_only(),
+        skills: Some(SkillDiscoveryOptions {
+            home: workdir.join(".psychevo"),
+            workdir: workdir.to_path_buf(),
+            config_path: None,
+            env: BTreeMap::new(),
+            explicit_inputs: Vec::new(),
+            no_skills: false,
+        }),
+        agents: Some(AgentToolContext {
+            provider,
+            model_provider: summary.provider.clone(),
+            model: summary.model.clone(),
+            provider_label: metadata
+                .get("provider_label")
+                .and_then(Value::as_str)
+                .unwrap_or(summary.provider.as_str())
+                .to_string(),
+            base_url,
+            api_key_env: metadata
+                .get("api_key_env")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            reasoning_effort: metadata
+                .get("reasoning_effort")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            context_limit: metadata.get("context_limit").and_then(Value::as_u64),
+            generation_metadata: json_value_object_with_model_metadata(metadata),
+            workdir: workdir.to_path_buf(),
+            mode,
+            permission_config: Default::default(),
+            permission_mode: Default::default(),
+            approval_mode: Default::default(),
+            approval_handler: None,
+            store: store.clone(),
+            parent_session_id: summary.id.clone(),
+            parent_context_snapshot: Vec::new(),
+            catalog: AgentCatalog::default(),
+            control_handle: None,
+            stream_events: None,
+            model_metadata: ModelMetadata::default(),
+            env: BTreeMap::new(),
+            allowed_agent_names: None,
+            denied_agent_names: BTreeSet::new(),
+            required_agent_names: Vec::new(),
+            spawn_depth_remaining: None,
+        }),
+    });
+    tool_declarations(&tools)
 }
 
 fn json_value_object_with_model_metadata(metadata: &Value) -> Value {
@@ -1939,6 +1936,151 @@ mod tests {
                 .get("tools")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn export_last_provider_request_reconstructs_clarify_declaration() {
+        let tmp = TempDir::new().expect("tmp");
+        let db = tmp.path().join("state.db");
+        let store = SqliteStore::open(&db).expect("store");
+        let session = store
+            .create_session_with_metadata(
+                tmp.path(),
+                "tui",
+                "model",
+                "provider",
+                Some(serde_json::json!({
+                    "base_url": "https://example.test/v1",
+                    "mode": "plan",
+                    "model_metadata": {
+                        "capabilities": {
+                            "tool_call": true
+                        }
+                    }
+                })),
+            )
+            .expect("session");
+        let prefix_hash = "clarify-tools-prefix";
+        let prompt_prefix_metadata = serde_json::json!({
+            "prompt_prefix": {
+                "hash": prefix_hash,
+                "version": 1,
+                "created_at_ms": 1,
+                "provider": "provider",
+                "model": "model",
+                "tool_declarations_hash": "clarify-tools-hash",
+                "invalidation_reason": "new_session",
+                "effective_tools": ["clarify"],
+                "agent_catalog_visible": false,
+                "visible_agents": [],
+                "skill_catalog_visible": false,
+                "project_instructions_visible": false,
+                "project_instructions_role": null
+            }
+        });
+        store
+            .append_message_with_undo_snapshot_metadata_and_context_evidence(
+                &session,
+                &user_text_message("ask before proceeding"),
+                Some(prompt_prefix_metadata),
+                None,
+                &[],
+            )
+            .expect("append user");
+        store
+            .append_message(
+                &session,
+                &Message::Assistant {
+                    content: vec![AssistantBlock::Text {
+                        text: "I will ask.".to_string(),
+                    }],
+                    timestamp_ms: 2,
+                    finish_reason: Some("stop".to_string()),
+                    outcome: Outcome::Normal,
+                    model: Some("model".to_string()),
+                    provider: Some("provider".to_string()),
+                },
+            )
+            .expect("append assistant");
+        store
+            .upsert_session_prompt_prefix(PromptPrefixRecord {
+                session_id: session.clone(),
+                version: 0,
+                created_at_ms: 1,
+                provider: "provider".to_string(),
+                model: "model".to_string(),
+                prefix_hash: prefix_hash.to_string(),
+                tool_declarations_hash: "clarify-tools-hash".to_string(),
+                invalidation_reason: Some("new_session".to_string()),
+                slots: vec![PromptPrefixSlotRecord {
+                    slot: "base/mode".to_string(),
+                    tier: "base".to_string(),
+                    semantic_role: "base_policy".to_string(),
+                    provider_role: "system".to_string(),
+                    order: 0,
+                    content: "Runtime mode: plan. Use clarify when needed.".to_string(),
+                    content_hash: "base".to_string(),
+                    source_kind: Some("runtime".to_string()),
+                    source_name: Some("mode".to_string()),
+                    source_path: None,
+                }],
+                metadata: Some(serde_json::json!({
+                    "mode": "plan",
+                    "selected_agent": null,
+                    "agents_enabled": true,
+                    "effective_tools": ["clarify"],
+                    "agent_catalog_visible": false,
+                    "visible_agents": [],
+                    "skill_catalog_visible": false,
+                    "project_instructions_visible": false,
+                    "project_instructions_role": null
+                })),
+            })
+            .expect("prefix");
+
+        let artifact = render_session_export(
+            &store,
+            &session,
+            SessionExportOptions {
+                format: SessionExportFormat::Json,
+                include: SessionExportIncludeSet::from_values([
+                    SessionExportInclude::Header,
+                    SessionExportInclude::LastProviderRequest,
+                ]),
+                artifact_kind: SessionArtifactKind::Export,
+            },
+        )
+        .expect("export");
+        let value: Value = serde_json::from_str(&artifact.content).expect("json");
+        assert_eq!(
+            value["header"]["prompt_prefix"]["metadata"]["effective_tools"],
+            serde_json::json!(["clarify"])
+        );
+        let tools = value["last_provider_request"]["body"]["tools"]
+            .as_array()
+            .expect("tools");
+        assert_eq!(tools.len(), 1);
+        let clarify = tools
+            .iter()
+            .find(|tool| tool["function"]["name"] == "clarify")
+            .expect("clarify declaration");
+        assert_eq!(
+            clarify["function"]["parameters"]["properties"]["questions"]["maxItems"],
+            serde_json::json!(3)
+        );
+        assert_eq!(
+            clarify["function"]["parameters"]["properties"]["questions"]["items"]["properties"]["options"]
+                ["maxItems"],
+            serde_json::json!(3)
+        );
+        let question_properties =
+            clarify["function"]["parameters"]["properties"]["questions"]["items"]["properties"]
+                .as_object()
+                .expect("question properties");
+        assert!(question_properties.contains_key("question"));
+        assert!(question_properties.contains_key("options"));
+        assert!(!question_properties.contains_key("id"));
+        assert!(!question_properties.contains_key("header"));
     }
 
     #[test]

@@ -46,6 +46,7 @@ fn base_options(temp: &tempfile::TempDir) -> RunOptions {
         permission_mode: None,
         approval_mode: None,
         approval_handler: None,
+        clarify_enabled: false,
         inherited_env: Some(BTreeMap::from([(
             "HOME".to_string(),
             temp.path().to_string_lossy().to_string(),

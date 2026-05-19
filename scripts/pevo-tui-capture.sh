@@ -295,6 +295,38 @@ class Handler(BaseHTTPRequestHandler):
                     "finish_reason": "stop"
                 }]
             })
+        elif "Clarify VHS fixture" in body and "call_clarify_vhs" not in body:
+            self.send_event({
+                "id": "resp_tui_capture_clarify",
+                "model": "mock-model",
+                "choices": [{
+                    "delta": {
+                        "tool_calls": [{
+                            "index": 0,
+                            "id": "call_clarify_vhs",
+                            "function": {
+                                "name": "clarify",
+                                "arguments": json.dumps({
+                                    "questions": [{
+                                        "question": "Which Reddit API path should pevo use?",
+                                        "options": [
+                                            {
+                                                "label": "Register app (Recommended)",
+                                                "description": "Create a Reddit app and use OAuth credentials"
+                                            },
+                                            {
+                                                "label": "Public JSON endpoint",
+                                                "description": "Use unauthenticated JSON with tighter limits"
+                                            }
+                                        ]
+                                    }]
+                                })
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }]
+            }, delay=0.2)
         elif "Long markdown bottom scroll fixture" in body:
             rows = "\n".join(
                 f"| {index} | **Story {index}** - long Markdown table row used to validate transcript bottom scrolling | {100 + index} |"
@@ -448,7 +480,7 @@ Screenshot $(json_quote "$out_dir/01-model-picker.png")
 Escape
 Type "Inspect the snapshot harness and read fixture.txt"
 Enter
-Wait+Screen /Running sleep 2 && cat fixture.txt/
+Wait+Screen /bash sleep 2 && cat fixture.txt/
 Sleep 200 ms
 Screenshot $(json_quote "$out_dir/02-running-thinking.png")
 Wait+Screen /SNAPSHOT_DEMO_FINAL/
@@ -501,12 +533,31 @@ Wait+Screen /VISIBLE_WRITE_FINAL/
 Sleep 200 ms
 Type "Interrupted bash fixture"
 Enter
-Wait+Screen /Running sleep 60/
+Wait+Screen /bash sleep 60/
 Sleep 300 ms
 Escape
 Wait+Screen /interrupted/
 Sleep 300 ms
 Screenshot $(json_quote "$out_dir/09-interrupted-bash.png")
+Type "/new"
+Enter
+Wait+Screen /Ask pevo/
+Sleep 200 ms
+Type "Clarify VHS fixture"
+Enter
+Wait+Screen /Question 1\/1 \(1 unanswered\)/
+Sleep 300 ms
+Screenshot $(json_quote "$out_dir/16-clarify-panel.png")
+Down 2
+Enter
+Type "Use OAuth credentials"
+Sleep 300 ms
+Screenshot $(json_quote "$out_dir/17-clarify-other-inline.png")
+Enter
+Wait+Screen /Questions 1\/1 answered/
+Sleep 300 ms
+Screenshot $(json_quote "$out_dir/18-clarify-result.png")
+Wait+Screen /SNAPSHOT_DEMO_FINAL/
 Type "/new"
 Enter
 Wait+Screen /Ask pevo/
@@ -556,7 +607,7 @@ EOF
 check_demo_artifacts() {
   local out_dir="$1"
   local missing=()
-  for file in 01-model-picker.png 02-running-thinking.png 03-final-ledger.png 04-shell-mode.png 05-long-markdown-bottom-scroll.png 06-reasoning-only-collapsed.png 07-reasoning-only-bottom-scroll.png 08-visible-write-preamble.png 09-interrupted-bash.png 10-agent-tool-running.png 11-agent-session-running.png 12-agent-parent-completed.png 12-agents-running.png 13-agents-available.png 14-agent-actions.png 15-agent-run-prompt.png; do
+  for file in 01-model-picker.png 02-running-thinking.png 03-final-ledger.png 04-shell-mode.png 05-long-markdown-bottom-scroll.png 06-reasoning-only-collapsed.png 07-reasoning-only-bottom-scroll.png 08-visible-write-preamble.png 09-interrupted-bash.png 10-agent-tool-running.png 11-agent-session-running.png 12-agent-parent-completed.png 12-agents-running.png 13-agents-available.png 14-agent-actions.png 15-agent-run-prompt.png 16-clarify-panel.png 17-clarify-other-inline.png 18-clarify-result.png; do
     if [[ ! -s "$out_dir/$file" ]]; then
       missing+=("$file")
     fi
