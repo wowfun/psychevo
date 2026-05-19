@@ -11,9 +11,12 @@ use serde_json::json;
 use tokio::time;
 
 use crate::agents::{
-    AgentDefinition, AgentDiscoveryOptions, AgentToolContext, agent_tools, apply_agent_hooks,
-    apply_agent_tool_policy, discover_agents, resolve_agent_definition, resolve_agents_home,
-    run_agent_hook_event, spawn_child_agent_background,
+    AgentDefinition, AgentDiscoveryOptions, AgentToolContext, agent_catalog_for_prompt,
+    agent_catalog_for_selected_policy, agent_mailbox_event_message,
+    agent_policy_allows_agent_spawn, agent_project_instructions_enabled, agent_tools,
+    apply_agent_hooks, apply_agent_tool_policy, discover_agents, effective_tool_names,
+    narrow_permission_mode_for_agent, resolve_agent_definition, resolve_agents_home,
+    run_agent_hook_event, skill_catalog_visible_for_tools, spawn_child_agent_background,
 };
 use crate::config::{ResolvedRunProvider, load_run_config, resolve_run_provider};
 use crate::context::prune_context;
@@ -24,12 +27,13 @@ use crate::error::{Error, Result};
 use crate::events::PersistenceSink;
 use crate::messages::assistant_text;
 use crate::paths::canonical_workdir;
+use crate::permissions::PermissionRuntime;
 use crate::project_instructions::load_project_instructions;
 use crate::prompt_assembly::{
     PROMPT_PREFIX_NOTICE_METADATA_KEY, PromptPrefixRecordInput, assemble_main_prompt_prefix,
-    assembly_from_prefix_record, context_evidence_for_request, prompt_prefix_record,
-    skill_contextual_user_messages, tool_declarations_hash, turn_prefix_notice_instruction,
-    turn_required_agent_instruction,
+    assembly_from_prefix_record, context_evidence_for_request, developer_provider_role,
+    prompt_prefix_record, skill_contextual_user_messages, tool_declarations_hash,
+    turn_prefix_notice_instruction, turn_required_agent_instruction,
 };
 use crate::prompt_image::prompt_message_from_inputs_with_options;
 use crate::skills::{
@@ -40,9 +44,9 @@ use crate::snapshot::SnapshotStore;
 use crate::store::{PromptPrefixRecord, SqliteStore};
 use crate::tools::{coding_core_tools_for_mode, skill_tools_for_mode};
 use crate::types::{
-    AgentSpawnOptions, AgentSpawnResult, ModelMetadata, ReloadContextOptions, ReloadContextResult,
-    RunControl, RunOptions, RunResult, RunStreamEvent, RunStreamSink, RunWarning, SelectedAgent,
-    SmokeControl,
+    AgentSpawnOptions, AgentSpawnResult, ModelMetadata, PermissionConfig, ReloadContextOptions,
+    ReloadContextResult, RunControl, RunOptions, RunResult, RunStreamEvent, RunStreamSink,
+    RunWarning, SelectedAgent, SmokeControl,
 };
 
 const TITLE_GENERATION_TIMEOUT_SECS: u64 = 15;
@@ -176,6 +180,10 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
             }),
             workdir: workdir.clone(),
             mode,
+            permission_config: PermissionConfig::default(),
+            permission_mode: Default::default(),
+            approval_mode: Default::default(),
+            approval_handler: None,
             store: store.clone(),
             parent_session_id: summary.id.clone(),
             parent_context_snapshot: Vec::new(),
@@ -197,19 +205,35 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
     }
     tools = apply_agent_tool_policy(tools, selected_agent.as_ref(), mode);
     tools = apply_agent_hooks(tools, selected_agent.as_ref(), &workdir);
+    let effective_tool_names = effective_tool_names(&tools);
+    let prompt_agents = if options.no_agents {
+        Vec::new()
+    } else {
+        agent_catalog_for_prompt(&agent_catalog.agents, selected_agent.as_ref(), &tools)
+    };
+    let prompt_skills = if skill_catalog_visible_for_tools(&tools) {
+        skill_catalog.skills.clone()
+    } else {
+        Vec::new()
+    };
+    let prompt_project_instructions = if agent_project_instructions_enabled(selected_agent.as_ref())
+    {
+        project_instructions.fragments.as_slice()
+    } else {
+        &[]
+    };
+    let project_instructions_role = (!prompt_project_instructions.is_empty())
+        .then(|| developer_provider_role(&model_metadata.capabilities).to_string());
     let tool_declarations_hash = tool_declarations_hash(&tools);
     let selected_agent_summary = selected_agent_for_result(selected_agent.as_ref());
     let assembly = assemble_main_prompt_prefix(
         mode,
         selected_agent.as_ref(),
-        if options.no_agents {
-            &[]
-        } else {
-            &agent_catalog.agents
-        },
-        &skill_catalog.skills,
-        &project_instructions.fragments,
+        &prompt_agents,
+        &prompt_skills,
+        prompt_project_instructions,
         &model_metadata.capabilities,
+        !tools.is_empty(),
     );
     let record = prompt_prefix_record(PromptPrefixRecordInput {
         session_id: &summary.id,
@@ -223,6 +247,12 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
             "mode": mode.as_str(),
             "selected_agent": selected_agent_summary,
             "agents_enabled": !options.no_agents,
+            "effective_tools": effective_tool_names,
+            "agent_catalog_visible": !prompt_agents.is_empty(),
+            "visible_agents": prompt_agents.iter().map(|agent| agent.name.clone()).collect::<Vec<_>>(),
+            "skill_catalog_visible": !prompt_skills.is_empty(),
+            "project_instructions_visible": !prompt_project_instructions.is_empty(),
+            "project_instructions_role": project_instructions_role,
         })),
     });
     let record = store.upsert_session_prompt_prefix(record)?;
@@ -264,6 +294,9 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         reasoning_effort: options.reasoning_effort.clone(),
         include_reasoning: false,
         mode: options.mode,
+        permission_mode: options.permission_mode,
+        approval_mode: options.approval_mode,
+        approval_handler: options.approval_handler.clone(),
         inherited_env: options.inherited_env.clone(),
         agent: options.selected_parent_agent.clone(),
         no_agents: false,
@@ -271,6 +304,14 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         skill_inputs: options.skill_inputs.clone(),
     };
     let loaded = load_run_config(&run_options, &workdir)?;
+    let permission_mode = options
+        .permission_mode
+        .or(loaded.config.permissions.permission_mode)
+        .unwrap_or_default();
+    let approval_mode = options
+        .approval_mode
+        .or(loaded.config.permissions.approval_mode)
+        .unwrap_or_default();
     let agents_home = resolve_agents_home(&loaded.env, &workdir)?;
     let agent_catalog = discover_agents(&AgentDiscoveryOptions {
         home: agents_home,
@@ -288,8 +329,18 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         )?),
         None => None,
     };
+    let permission_mode =
+        narrow_permission_mode_for_agent(permission_mode, selected_parent_agent.as_ref());
     let child_agent =
         resolve_agent_definition(&agent_catalog, &options.agent, &workdir, &loaded.env)?;
+    if selected_parent_agent
+        .as_ref()
+        .is_some_and(|agent| !agent_policy_allows_agent_spawn(agent))
+    {
+        return Err(Error::Config(
+            "agent spawning is not allowed by selected-agent tool policy".to_string(),
+        ));
+    }
     if let Some(allowed) = selected_parent_agent
         .as_ref()
         .and_then(|agent| agent.tool_policy.allowed_agents.as_ref())
@@ -344,6 +395,8 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
                 "context_limit": resolved.context_limit,
                 "model_metadata": resolved.metadata.public_json(),
                 "mode": options.mode.as_str(),
+                "permission_mode": permission_mode.as_str(),
+                "approval_mode": approval_mode.as_str(),
                 "selected_agent": selected_parent_summary,
             })),
         )?
@@ -368,6 +421,10 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         }),
         workdir,
         mode: options.mode,
+        permission_config: loaded.config.permissions.clone(),
+        permission_mode,
+        approval_mode,
+        approval_handler: options.approval_handler.clone(),
         store,
         parent_session_id: parent_session_id.clone(),
         parent_context_snapshot: Vec::new(),
@@ -412,6 +469,14 @@ async fn run_live_internal(
         ));
     }
     let loaded = load_run_config(&options, &workdir)?;
+    let permission_mode = options
+        .permission_mode
+        .or(loaded.config.permissions.permission_mode)
+        .unwrap_or_default();
+    let approval_mode = options
+        .approval_mode
+        .or(loaded.config.permissions.approval_mode)
+        .unwrap_or_default();
     let agents_home = resolve_agents_home(&loaded.env, &workdir)?;
     let agent_catalog = discover_agents(&AgentDiscoveryOptions {
         home: agents_home,
@@ -429,6 +494,8 @@ async fn run_live_internal(
         )?),
         None => None,
     };
+    let permission_mode =
+        narrow_permission_mode_for_agent(permission_mode, selected_agent.as_ref());
     let mut resolved_options = options.clone();
     if resolved_options.model.is_none()
         && let Some(model) = selected_agent
@@ -467,14 +534,13 @@ async fn run_live_internal(
         &loaded.env,
     );
     let selected_agent_summary = selected_agent_for_result(selected_agent.as_ref());
-    let required_agent_mentions = if options.no_agents {
+    let required_agent_catalog = if options.no_agents {
         Vec::new()
     } else {
-        required_agent_mentions(&options.prompt, &agent_catalog.agents)
+        agent_catalog_for_selected_policy(&agent_catalog.agents, selected_agent.as_ref())
     };
+    let required_agent_mentions = required_agent_mentions(&options.prompt, &required_agent_catalog);
     let skill_context_fragments = skill_context_fragments(&selected_skills, &skill_catalog)?;
-    let project_instruction_context_message_count =
-        usize::from(!project_instructions.fragments.is_empty());
     let selected_skill_context_message_count = skill_context_fragments.len();
     let store = SqliteStore::open(&options.db_path)?;
     let (session_id, created_session) = if let Some(session_id) = options.session.clone() {
@@ -501,6 +567,8 @@ async fn run_live_internal(
                         "context_limit": resolved.context_limit,
                         "model_metadata": resolved.metadata.public_json(),
                         "mode": options.mode.as_str(),
+                        "permission_mode": permission_mode.as_str(),
+                        "approval_mode": approval_mode.as_str(),
                         "selected_agent": selected_agent_summary.clone(),
                     })),
                 )?,
@@ -520,9 +588,11 @@ async fn run_live_internal(
                     "api_key_env": resolved.api_key_env.clone(),
                     "reasoning_effort": resolved.reasoning_effort.clone(),
                     "context_limit": resolved.context_limit,
-                    "model_metadata": resolved.metadata.public_json(),
-                    "mode": options.mode.as_str(),
-                    "selected_agent": selected_agent_summary.clone(),
+                "model_metadata": resolved.metadata.public_json(),
+                "mode": options.mode.as_str(),
+                "permission_mode": permission_mode.as_str(),
+                "approval_mode": approval_mode.as_str(),
+                "selected_agent": selected_agent_summary.clone(),
                 })),
             )?,
             true,
@@ -551,6 +621,8 @@ async fn run_live_internal(
         "context_limit": resolved.context_limit,
         "model_metadata": resolved.metadata.public_json(),
         "mode": options.mode.as_str(),
+        "permission_mode": permission_mode.as_str(),
+        "approval_mode": approval_mode.as_str(),
         "selected_agent": selected_agent_summary.clone(),
         "agents_enabled": !options.no_agents,
         "agent_count": agent_catalog.agents.len(),
@@ -570,6 +642,13 @@ async fn run_live_internal(
         store.load_messages(&session_id)?,
         options.max_context_messages,
     );
+    let prompt_session_seq = store.next_message_seq(&session_id)?;
+    let mailbox_context_messages = store
+        .deliver_pending_agent_mailbox_events_for_prompt(&session_id, prompt_session_seq)?
+        .into_iter()
+        .filter(|record| record.delivered_at_ms.is_some())
+        .map(|record| agent_mailbox_event_message(&record))
+        .collect::<Vec<_>>();
     let provider: Arc<dyn GenerationProvider> = Arc::new(OpenAiChatProvider::new(
         resolved.base_url.clone(),
         resolved.api_key.clone(),
@@ -620,6 +699,10 @@ async fn run_live_internal(
             generation_metadata: generation_metadata.clone(),
             workdir: workdir.clone(),
             mode: options.mode,
+            permission_config: loaded.config.permissions.clone(),
+            permission_mode,
+            approval_mode,
+            approval_handler: options.approval_handler.clone(),
             store: store.clone(),
             parent_session_id: session_id.clone(),
             parent_context_snapshot: previous_messages.clone(),
@@ -641,11 +724,47 @@ async fn run_live_internal(
     }
     tools = apply_agent_tool_policy(tools, selected_agent.as_ref(), options.mode);
     tools = apply_agent_hooks(tools, selected_agent.as_ref(), &workdir);
+    let permission_runtime = PermissionRuntime::new(
+        workdir.clone(),
+        workdir.join(".psychevo"),
+        loaded.config.permissions.clone(),
+        permission_mode,
+        approval_mode,
+        options.approval_handler.clone(),
+    );
+    tools = permission_runtime.wrap_tools(tools);
+    let effective_tool_names = effective_tool_names(&tools);
+    let prompt_agents = if options.no_agents {
+        Vec::new()
+    } else {
+        agent_catalog_for_prompt(&agent_catalog.agents, selected_agent.as_ref(), &tools)
+    };
+    let prompt_skills = if skill_catalog_visible_for_tools(&tools) {
+        skill_catalog.skills.clone()
+    } else {
+        Vec::new()
+    };
+    let prompt_project_instructions = if agent_project_instructions_enabled(selected_agent.as_ref())
+    {
+        project_instructions.fragments.as_slice()
+    } else {
+        &[]
+    };
+    let project_instructions_role = (!prompt_project_instructions.is_empty())
+        .then(|| developer_provider_role(&resolved.metadata.capabilities).to_string());
     let tool_declarations_hash = tool_declarations_hash(&tools);
     let prefix_metadata = json!({
         "mode": options.mode.as_str(),
+        "permission_mode": permission_mode.as_str(),
+        "approval_mode": approval_mode.as_str(),
         "selected_agent": selected_agent_summary.clone(),
         "agents_enabled": !options.no_agents,
+        "effective_tools": effective_tool_names,
+        "agent_catalog_visible": !prompt_agents.is_empty(),
+        "visible_agents": prompt_agents.iter().map(|agent| agent.name.clone()).collect::<Vec<_>>(),
+        "skill_catalog_visible": !prompt_skills.is_empty(),
+        "project_instructions_visible": !prompt_project_instructions.is_empty(),
+        "project_instructions_role": project_instructions_role,
     });
     let stored_prefix = store.load_session_prompt_prefix(&session_id)?;
     let invalidation_reason = stored_prefix.as_ref().and_then(|record| {
@@ -656,6 +775,7 @@ async fn run_live_internal(
             options.mode,
             selected_agent_summary.as_ref(),
             &tool_declarations_hash,
+            &prefix_metadata,
         )
     });
     let needs_prefix_rebuild =
@@ -664,14 +784,11 @@ async fn run_live_internal(
         let assembly = assemble_main_prompt_prefix(
             options.mode,
             selected_agent.as_ref(),
-            if options.no_agents {
-                &[]
-            } else {
-                &agent_catalog.agents
-            },
-            &skill_catalog.skills,
-            &project_instructions.fragments,
+            &prompt_agents,
+            &prompt_skills,
+            prompt_project_instructions,
             &resolved.metadata.capabilities,
+            !tools.is_empty(),
         );
         let reason = if created_session {
             "new_session".to_string()
@@ -686,7 +803,7 @@ async fn run_live_internal(
             tool_declarations_hash: tool_declarations_hash.clone(),
             invalidation_reason: Some(reason),
             slots: assembly.prefix_slots.clone(),
-            metadata: Some(prefix_metadata),
+            metadata: Some(prefix_metadata.clone()),
         });
         let record = store.upsert_session_prompt_prefix(record)?;
         (assembly, record)
@@ -724,6 +841,12 @@ async fn run_live_internal(
         "model": prompt_prefix_record.model,
         "tool_declarations_hash": prompt_prefix_record.tool_declarations_hash,
         "invalidation_reason": prompt_prefix_record.invalidation_reason,
+        "effective_tools": prefix_metadata.get("effective_tools").cloned().unwrap_or_default(),
+        "agent_catalog_visible": prefix_metadata.get("agent_catalog_visible").cloned().unwrap_or_default(),
+        "visible_agents": prefix_metadata.get("visible_agents").cloned().unwrap_or_default(),
+        "skill_catalog_visible": prefix_metadata.get("skill_catalog_visible").cloned().unwrap_or_default(),
+        "project_instructions_visible": prefix_metadata.get("project_instructions_visible").cloned().unwrap_or_default(),
+        "project_instructions_role": prefix_metadata.get("project_instructions_role").cloned().unwrap_or_default(),
     });
     let sink = Arc::new(PersistenceSink {
         store: store.clone(),
@@ -753,10 +876,9 @@ async fn run_live_internal(
                 &prompt_assembly.prompt_instructions,
                 turn_prompt_instructions.len(),
                 previous_messages.len(),
-                project_instruction_context_message_count,
+                prompt_assembly.prefix_contextual_user_messages.len(),
                 selected_skill_context_message_count,
-                skill_catalog
-                    .skills
+                prompt_skills
                     .iter()
                     .map(|skill| skill.name.clone())
                     .collect(),
@@ -770,7 +892,7 @@ async fn run_live_internal(
         prompt_instructions: prompt_assembly.prompt_instructions,
         turn_prompt_instructions,
         previous_messages,
-        context_messages: Vec::new(),
+        context_messages: mailbox_context_messages,
         prefix_contextual_user_messages: prompt_assembly.prefix_contextual_user_messages,
         turn_contextual_user_messages,
         prompt_messages: vec![
@@ -930,6 +1052,7 @@ fn prompt_prefix_invalidation_reason(
     mode: crate::types::RunMode,
     selected_agent: Option<&SelectedAgent>,
     tool_declarations_hash: &str,
+    expected_metadata: &serde_json::Value,
 ) -> Option<String> {
     if record.provider != provider
         || record.model != model
@@ -950,6 +1073,22 @@ fn prompt_prefix_invalidation_reason(
         != &expected_agent
     {
         return Some("main_agent_changed".to_string());
+    }
+    for key in [
+        "effective_tools",
+        "agent_catalog_visible",
+        "visible_agents",
+        "skill_catalog_visible",
+        "project_instructions_visible",
+        "project_instructions_role",
+    ] {
+        if metadata.get(key).unwrap_or(&serde_json::Value::Null)
+            != expected_metadata
+                .get(key)
+                .unwrap_or(&serde_json::Value::Null)
+        {
+            return Some("runtime_context_changed".to_string());
+        }
     }
     None
 }

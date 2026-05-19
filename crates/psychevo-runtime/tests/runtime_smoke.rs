@@ -27,7 +27,7 @@ async fn smoke_text_only_persists_session_and_messages() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 9);
+    assert_eq!(user_version, 10);
     let message_count: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM messages WHERE session_id = ?1",

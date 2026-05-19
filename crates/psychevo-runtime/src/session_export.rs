@@ -1,22 +1,26 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use psychevo_agent_core::{
     AssistantBlock, ContextualUserBlock, ContextualUserMessage, Message, PromptInstruction,
     UserContentBlock,
 };
 use psychevo_ai::{
-    GenerationRequest, ModelTarget, ToolDeclaration, openai_chat_completions_endpoint,
-    openai_chat_request_body,
+    GenerationProvider, GenerationRequest, ModelTarget, OpenAiChatProvider, ToolDeclaration,
+    openai_chat_completions_endpoint, openai_chat_request_body,
 };
 use serde::Serialize;
 use serde_json::{Map, Value};
 
+use crate::agents::{AgentCatalog, AgentToolContext, agent_mailbox_event_message, agent_tools};
 use crate::error::{Error, Result};
 use crate::skills::SkillDiscoveryOptions;
-use crate::store::{ContextEvidenceRecord, PromptPrefixRecord, SqliteStore};
+use crate::store::{
+    AgentMailboxEventRecord, ContextEvidenceRecord, PromptPrefixRecord, SqliteStore,
+};
 use crate::tools::{coding_core_tools_for_mode, mode_instruction, skill_tools_for_mode};
-use crate::types::{RunMode, SessionSummary};
+use crate::types::{ModelMetadata, RunMode, SessionSummary};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -223,6 +227,8 @@ struct ExportDocument<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     messages: Option<Vec<ExportMessageValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    mailbox_events: Option<Vec<ExportMailboxEventValue>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     provider_input_evidence: Option<Vec<ExportPromptEvidence>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     last_provider_request: Option<ProviderRequestExport>,
@@ -267,6 +273,31 @@ struct ExportMessageValue {
 }
 
 #[derive(Serialize)]
+struct ExportMailboxEventValue {
+    id: i64,
+    parent_session_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    child_session_id: Option<String>,
+    agent_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    task_name: Option<String>,
+    agent_name: String,
+    created_at_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    delivered_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    delivered_prompt_session_seq: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    delivered_after_session_seq: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    delivered_tool_call_id: Option<String>,
+    content_text: String,
+    payload: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metadata: Option<Value>,
+}
+
+#[derive(Serialize)]
 struct ExportPromptPrefixValue {
     version: i64,
     created_at_ms: i64,
@@ -276,6 +307,8 @@ struct ExportPromptPrefixValue {
     tool_declarations_hash: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     invalidation_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metadata: Option<Value>,
     slots: Vec<ExportPromptPrefixSlotValue>,
 }
 
@@ -385,6 +418,12 @@ pub fn render_session_export(
     } else {
         None
     };
+    let mailbox_events = store
+        .load_agent_mailbox_events(session_id)?
+        .into_iter()
+        .map(export_mailbox_event_value)
+        .collect::<Vec<_>>();
+    let mailbox_events = (!mailbox_events.is_empty()).then_some(mailbox_events);
     let prompt_prefix = prompt_prefix_record.map(export_prompt_prefix_value);
     let format = options.format;
     let content = match format {
@@ -392,6 +431,7 @@ pub fn render_session_export(
             &summary,
             prompt_prefix.as_ref(),
             messages.as_deref(),
+            mailbox_events.as_deref(),
             evidence.as_ref(),
             last_request.as_ref(),
             &options,
@@ -401,6 +441,7 @@ pub fn render_session_export(
                 &summary,
                 prompt_prefix,
                 &messages,
+                mailbox_events,
                 evidence,
                 last_request,
                 options,
@@ -485,6 +526,7 @@ fn export_prompt_prefix_value(record: PromptPrefixRecord) -> ExportPromptPrefixV
         prefix_hash: record.prefix_hash,
         tool_declarations_hash: record.tool_declarations_hash,
         invalidation_reason: record.invalidation_reason,
+        metadata: record.metadata,
         slots: record
             .slots
             .into_iter()
@@ -539,6 +581,25 @@ fn export_evidence_item(record: ContextEvidenceRecord) -> ExportEvidenceItem {
     }
 }
 
+fn export_mailbox_event_value(record: AgentMailboxEventRecord) -> ExportMailboxEventValue {
+    ExportMailboxEventValue {
+        id: record.id,
+        parent_session_id: record.parent_session_id,
+        child_session_id: record.child_session_id,
+        agent_id: record.agent_id,
+        task_name: record.task_name,
+        agent_name: record.agent_name,
+        created_at_ms: record.created_at_ms,
+        delivered_at_ms: record.delivered_at_ms,
+        delivered_prompt_session_seq: record.delivered_prompt_session_seq,
+        delivered_after_session_seq: record.delivered_after_session_seq,
+        delivered_tool_call_id: record.delivered_tool_call_id,
+        content_text: record.content_text,
+        payload: record.payload,
+        metadata: record.metadata,
+    }
+}
+
 fn reconstruct_last_provider_request(
     store: &SqliteStore,
     session_id: &str,
@@ -557,7 +618,7 @@ fn reconstruct_last_provider_request(
     let mode = session_mode_from_metadata(&metadata, &mut warnings);
     let generation_metadata = generation_metadata_from_session_metadata(&metadata, &mut warnings);
     let workdir = PathBuf::from(&summary.workdir);
-    let tools = reconstructed_tool_declarations(&workdir, mode);
+    let all_tools = reconstructed_tool_declarations(store, summary, &metadata, &workdir, mode);
     let mut current_prompt = None;
     let mut last_request = None;
 
@@ -572,6 +633,13 @@ fn reconstruct_last_provider_request(
             continue;
         };
         let mut request_warnings = warnings.clone();
+        let effective_tool_names = effective_tool_names_from_prefix_metadata(
+            prompt_metadata,
+            &record.metadata,
+            prompt_prefix,
+            &mut request_warnings,
+        );
+        let tools = filter_tool_declarations(&all_tools, &effective_tool_names);
         let context = ProviderMessageReconstruction {
             store,
             session_id,
@@ -593,7 +661,7 @@ fn reconstruct_last_provider_request(
                 model: summary.model.clone(),
             },
             messages: provider_messages,
-            tools: tools.clone(),
+            tools,
             metadata: generation_metadata.clone(),
         };
         let body = openai_chat_request_body(&request, &base_url);
@@ -632,6 +700,9 @@ fn reconstructed_provider_messages(
     let evidence = context
         .store
         .load_context_evidence(context.session_id, prompt_session_seq)?;
+    let mailbox_events = context
+        .store
+        .load_agent_mailbox_events(context.session_id)?;
     if let Some(prefix) = matching_prompt_prefix(
         context.prompt_prefix,
         prompt_metadata,
@@ -640,6 +711,7 @@ fn reconstructed_provider_messages(
     ) {
         return reconstructed_provider_messages_from_prefix(
             &evidence,
+            &mailbox_events,
             prefix,
             context.messages,
             assistant_index,
@@ -647,22 +719,9 @@ fn reconstructed_provider_messages(
         );
     }
 
-    let mut provider_messages = Vec::new();
-    let mut system_count = 0usize;
-    for item in evidence
-        .iter()
-        .filter(|item| item.source_kind == "system_instruction")
-    {
-        if item.content_text.trim().is_empty() {
-            continue;
-        }
-        provider_messages.push(serde_json::json!({
-            "role": "system",
-            "content": item.content_text.clone(),
-        }));
-        system_count += 1;
-    }
-    if system_count == 0 {
+    let mut provider_messages =
+        prompt_instruction_values_from_evidence(&evidence, "prefix_prompt_instructions");
+    if provider_messages.is_empty() {
         provider_messages.push(serde_json::json!({
             "role": "system",
             "content": mode_instruction(context.mode),
@@ -679,7 +738,17 @@ fn reconstructed_provider_messages(
         .take_while(|record| record.session_seq < prompt_session_seq)
     {
         provider_messages.push(message_to_value(&record.message)?);
+        push_mailbox_events_delivered_after_message(
+            &mut provider_messages,
+            &mailbox_events,
+            record.session_seq,
+        )?;
     }
+    push_mailbox_events_delivered_for_prompt(
+        &mut provider_messages,
+        &mailbox_events,
+        prompt_session_seq,
+    )?;
 
     if evidence.is_empty() {
         warnings.push(
@@ -699,6 +768,11 @@ fn reconstructed_provider_messages(
         .filter(|record| record.session_seq >= prompt_session_seq)
     {
         provider_messages.push(message_to_value(&record.message)?);
+        push_mailbox_events_delivered_after_message(
+            &mut provider_messages,
+            &mailbox_events,
+            record.session_seq,
+        )?;
     }
 
     Ok(provider_messages)
@@ -706,6 +780,7 @@ fn reconstructed_provider_messages(
 
 fn reconstructed_provider_messages_from_prefix(
     evidence: &[ContextEvidenceRecord],
+    mailbox_events: &[AgentMailboxEventRecord],
     prefix: &PromptPrefixRecord,
     messages: &[ExportMessageRecord],
     assistant_index: usize,
@@ -722,7 +797,17 @@ fn reconstructed_provider_messages_from_prefix(
         .take_while(|record| record.session_seq < prompt_session_seq)
     {
         provider_messages.push(message_to_value(&record.message)?);
+        push_mailbox_events_delivered_after_message(
+            &mut provider_messages,
+            mailbox_events,
+            record.session_seq,
+        )?;
     }
+    push_mailbox_events_delivered_for_prompt(
+        &mut provider_messages,
+        mailbox_events,
+        prompt_session_seq,
+    )?;
 
     provider_messages.extend(turn_prompt_instruction_values_from_evidence(evidence));
     for message in turn_contextual_user_messages_from_evidence(evidence) {
@@ -735,6 +820,11 @@ fn reconstructed_provider_messages_from_prefix(
         .filter(|record| record.session_seq >= prompt_session_seq)
     {
         provider_messages.push(message_to_value(&record.message)?);
+        push_mailbox_events_delivered_after_message(
+            &mut provider_messages,
+            mailbox_events,
+            record.session_seq,
+        )?;
     }
 
     Ok(provider_messages)
@@ -822,7 +912,11 @@ fn prefix_contextual_user_messages(prefix: &PromptPrefixRecord) -> Vec<Contextua
     let mut slots = prefix
         .slots
         .iter()
-        .filter(|slot| slot.semantic_role == "project_context" && !slot.content.trim().is_empty())
+        .filter(|slot| {
+            slot.provider_role == "user"
+                && slot.semantic_role == "project_context"
+                && !slot.content.trim().is_empty()
+        })
         .collect::<Vec<_>>();
     slots.sort_by_key(|slot| slot.order);
     let blocks = slots
@@ -850,10 +944,17 @@ fn prefix_contextual_user_messages(prefix: &PromptPrefixRecord) -> Vec<Contextua
 }
 
 fn turn_prompt_instruction_values_from_evidence(evidence: &[ContextEvidenceRecord]) -> Vec<Value> {
+    prompt_instruction_values_from_evidence(evidence, "turn_prompt_instructions")
+}
+
+fn prompt_instruction_values_from_evidence(
+    evidence: &[ContextEvidenceRecord],
+    provider_group: &str,
+) -> Vec<Value> {
     let mut items = evidence
         .iter()
         .filter(|item| {
-            item.provider_group.as_deref() == Some("turn_prompt_instructions")
+            item.provider_group.as_deref() == Some(provider_group)
                 && !item.content_text.trim().is_empty()
         })
         .collect::<Vec<_>>();
@@ -866,13 +967,42 @@ fn turn_prompt_instruction_values_from_evidence(evidence: &[ContextEvidenceRecor
     items
         .into_iter()
         .map(|item| {
+            let metadata = item.metadata.as_ref();
+            let slot = metadata
+                .and_then(|metadata| metadata.get("slot"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .or_else(|| item.source_name.clone());
+            let tier = metadata
+                .and_then(|metadata| metadata.get("tier"))
+                .and_then(Value::as_str)
+                .unwrap_or_else(|| {
+                    if provider_group.starts_with("prefix_") {
+                        "prefix"
+                    } else {
+                        "turn"
+                    }
+                });
+            let semantic_role = metadata
+                .and_then(|metadata| metadata.get("semantic_role"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .or_else(|| item.context_kind.clone());
+            let content_hash = metadata
+                .and_then(|metadata| metadata.get("content_hash"))
+                .and_then(Value::as_str);
+            let order = metadata
+                .and_then(|metadata| metadata.get("order"))
+                .and_then(Value::as_u64);
             serde_json::json!({
                 "role": item.role,
                 "content": item.content_text,
                 "metadata": {
-                    "prompt_slot": item.source_name,
-                    "prompt_slot_tier": "turn",
-                    "prompt_semantic_role": item.context_kind,
+                    "prompt_slot": slot,
+                    "prompt_slot_tier": tier,
+                    "prompt_semantic_role": semantic_role,
+                    "prompt_content_hash": content_hash,
+                    "prompt_order": order,
                     "source_kind": item.source_kind,
                     "source_name": item.source_name,
                     "source_path": item.source_path,
@@ -967,6 +1097,35 @@ fn message_to_value(message: &Message) -> Result<Value> {
     Ok(serde_json::to_value(message)?)
 }
 
+fn push_mailbox_events_delivered_after_message(
+    provider_messages: &mut Vec<Value>,
+    mailbox_events: &[AgentMailboxEventRecord],
+    session_seq: i64,
+) -> Result<()> {
+    for event in mailbox_events
+        .iter()
+        .filter(|event| event.delivered_after_session_seq == Some(session_seq))
+    {
+        provider_messages.push(message_to_value(&agent_mailbox_event_message(event))?);
+    }
+    Ok(())
+}
+
+fn push_mailbox_events_delivered_for_prompt(
+    provider_messages: &mut Vec<Value>,
+    mailbox_events: &[AgentMailboxEventRecord],
+    prompt_session_seq: i64,
+) -> Result<()> {
+    for event in mailbox_events.iter().filter(|event| {
+        event
+            .delivered_prompt_session_seq
+            .is_some_and(|seq| seq <= prompt_session_seq)
+    }) {
+        provider_messages.push(message_to_value(&agent_mailbox_event_message(event))?);
+    }
+    Ok(())
+}
+
 fn base_reconstruction_warnings(metadata: &Value) -> Vec<String> {
     let mut warnings = vec![
         "request body is reconstructed from persisted session data, not captured from the original HTTP request".to_string(),
@@ -1036,7 +1195,13 @@ fn generation_metadata_from_session_metadata(
     Value::Object(object)
 }
 
-fn reconstructed_tool_declarations(workdir: &Path, mode: RunMode) -> Vec<ToolDeclaration> {
+fn reconstructed_tool_declarations(
+    store: &SqliteStore,
+    summary: &SessionSummary,
+    metadata: &Value,
+    workdir: &Path,
+    mode: RunMode,
+) -> Vec<ToolDeclaration> {
     let mut tools = coding_core_tools_for_mode(workdir, mode);
     tools.extend(skill_tools_for_mode(
         SkillDiscoveryOptions {
@@ -1049,6 +1214,55 @@ fn reconstructed_tool_declarations(workdir: &Path, mode: RunMode) -> Vec<ToolDec
         },
         mode,
     ));
+    let base_url = metadata
+        .get("base_url")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let provider: Arc<dyn GenerationProvider> = Arc::new(OpenAiChatProvider::new(
+        base_url.clone(),
+        String::new(),
+        summary.provider.clone(),
+    ));
+    tools.extend(agent_tools(AgentToolContext {
+        provider,
+        model_provider: summary.provider.clone(),
+        model: summary.model.clone(),
+        provider_label: metadata
+            .get("provider_label")
+            .and_then(Value::as_str)
+            .unwrap_or(summary.provider.as_str())
+            .to_string(),
+        base_url,
+        api_key_env: metadata
+            .get("api_key_env")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        reasoning_effort: metadata
+            .get("reasoning_effort")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        context_limit: metadata.get("context_limit").and_then(Value::as_u64),
+        generation_metadata: json_value_object_with_model_metadata(metadata),
+        workdir: workdir.to_path_buf(),
+        mode,
+        permission_config: Default::default(),
+        permission_mode: Default::default(),
+        approval_mode: Default::default(),
+        approval_handler: None,
+        store: store.clone(),
+        parent_session_id: summary.id.clone(),
+        parent_context_snapshot: Vec::new(),
+        catalog: AgentCatalog::default(),
+        control_handle: None,
+        stream_events: None,
+        model_metadata: ModelMetadata::default(),
+        env: BTreeMap::new(),
+        allowed_agent_names: None,
+        denied_agent_names: BTreeSet::new(),
+        required_agent_names: Vec::new(),
+        spawn_depth_remaining: None,
+    }));
     tools
         .iter()
         .map(|tool| ToolDeclaration {
@@ -1059,10 +1273,78 @@ fn reconstructed_tool_declarations(workdir: &Path, mode: RunMode) -> Vec<ToolDec
         .collect()
 }
 
+fn json_value_object_with_model_metadata(metadata: &Value) -> Value {
+    let mut object = Map::new();
+    if let Some(model_metadata) = metadata.get("model_metadata") {
+        object.insert("model_metadata".to_string(), model_metadata.clone());
+    }
+    Value::Object(object)
+}
+
+fn effective_tool_names_from_prefix_metadata(
+    prompt_metadata: &Option<Value>,
+    assistant_metadata: &Option<Value>,
+    prompt_prefix: Option<&PromptPrefixRecord>,
+    warnings: &mut Vec<String>,
+) -> Vec<String> {
+    if let Some(names) = effective_tool_names_from_message_metadata(prompt_metadata) {
+        return names;
+    }
+    if let Some(names) = effective_tool_names_from_message_metadata(assistant_metadata) {
+        return names;
+    }
+    if let Some(names) =
+        prompt_prefix.and_then(|prefix| effective_tool_names_from_value(prefix.metadata.as_ref()?))
+    {
+        return names;
+    }
+    warnings.push(
+        "prompt prefix metadata does not include effective_tools; no tool declarations were reconstructed"
+            .to_string(),
+    );
+    Vec::new()
+}
+
+fn effective_tool_names_from_message_metadata(metadata: &Option<Value>) -> Option<Vec<String>> {
+    metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("prompt_prefix"))
+        .and_then(effective_tool_names_from_value)
+}
+
+fn effective_tool_names_from_value(value: &Value) -> Option<Vec<String>> {
+    value
+        .get("effective_tools")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+}
+
+fn filter_tool_declarations(
+    declarations: &[ToolDeclaration],
+    effective_names: &[String],
+) -> Vec<ToolDeclaration> {
+    let effective = effective_names
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    declarations
+        .iter()
+        .filter(|tool| effective.contains(tool.name.as_str()))
+        .cloned()
+        .collect()
+}
+
 fn export_document<'a>(
     summary: &'a SessionSummary,
     prompt_prefix: Option<ExportPromptPrefixValue>,
     messages: &Option<Vec<ExportMessageRecord>>,
+    mailbox_events: Option<Vec<ExportMailboxEventValue>>,
     evidence: Option<Vec<ExportPromptEvidence>>,
     last_request: Option<ProviderRequestExport>,
     options: SessionExportOptions,
@@ -1104,6 +1386,7 @@ fn export_document<'a>(
                 })
                 .collect()
         }),
+        mailbox_events,
         provider_input_evidence: evidence.filter(|items| !items.is_empty()),
         last_provider_request: last_request,
     }
@@ -1113,6 +1396,7 @@ fn render_markdown(
     summary: &SessionSummary,
     prompt_prefix: Option<&ExportPromptPrefixValue>,
     messages: Option<&[ExportMessageRecord]>,
+    mailbox_events: Option<&[ExportMailboxEventValue]>,
     evidence: Option<&Vec<ExportPromptEvidence>>,
     last_request: Option<&ProviderRequestExport>,
     options: &SessionExportOptions,
@@ -1160,6 +1444,28 @@ fn render_markdown(
         for record in messages {
             push_line(&mut out, "");
             render_markdown_message(&mut out, record);
+        }
+    }
+    if let Some(mailbox_events) = mailbox_events.filter(|items| !items.is_empty()) {
+        if !out.is_empty() {
+            push_line(&mut out, "");
+        }
+        push_line(&mut out, "## Mailbox Events");
+        for event in mailbox_events {
+            push_line(&mut out, "");
+            push_line(&mut out, &format!("### Mailbox event #{}", event.id));
+            push_line(&mut out, &format!("- agent: `{}`", event.agent_name));
+            push_line(&mut out, &format!("- agent_id: `{}`", event.agent_id));
+            if let Some(seq) = event.delivered_prompt_session_seq {
+                push_line(
+                    &mut out,
+                    &format!("- delivered_prompt_session_seq: `{seq}`"),
+                );
+            }
+            if let Some(seq) = event.delivered_after_session_seq {
+                push_line(&mut out, &format!("- delivered_after_session_seq: `{seq}`"));
+            }
+            push_fenced_json(&mut out, &event.payload);
         }
     }
     if let Some(evidence) = evidence.filter(|items| !items.is_empty()) {
@@ -1289,6 +1595,10 @@ fn render_markdown_prompt_prefix(out: &mut String, prefix: &ExportPromptPrefixVa
             out,
             &format!("- invalidation_reason: `{}`", markdown_inline(reason)),
         );
+    }
+    if let Some(metadata) = &prefix.metadata {
+        push_line(out, "- metadata:");
+        push_fenced_json(out, metadata);
     }
     push_line(out, "");
     push_line(out, "| slot | role | tier | hash | source |");
@@ -1481,6 +1791,11 @@ fn short_session_id(session_id: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use psychevo_agent_core::{ToolCallBlock, user_text_message};
+    use psychevo_ai::Outcome;
+    use tempfile::TempDir;
+
+    use crate::store::{AgentMailboxEventInput, PromptPrefixSlotRecord};
 
     #[test]
     fn default_export_filename_distinguishes_sibling_uuidv7_sessions() {
@@ -1497,5 +1812,332 @@ mod tests {
         assert_ne!(parent, child);
         assert_eq!(parent, "psychevo-session-019e3716-eeb0.json");
         assert_eq!(child, "psychevo-session-019e3716-fa89.json");
+    }
+
+    #[test]
+    fn export_last_provider_request_omits_tools_for_empty_effective_policy() {
+        let tmp = TempDir::new().expect("tmp");
+        let db = tmp.path().join("state.db");
+        let store = SqliteStore::open(&db).expect("store");
+        let session = store
+            .create_session_with_metadata(
+                tmp.path(),
+                "run",
+                "model",
+                "provider",
+                Some(serde_json::json!({
+                    "base_url": "https://example.test/v1",
+                    "mode": "default",
+                    "model_metadata": {
+                        "capabilities": {
+                            "tool_call": true
+                        }
+                    }
+                })),
+            )
+            .expect("session");
+        let prefix_hash = "empty-tools-prefix";
+        let prompt_prefix_metadata = serde_json::json!({
+            "prompt_prefix": {
+                "hash": prefix_hash,
+                "version": 1,
+                "created_at_ms": 1,
+                "provider": "provider",
+                "model": "model",
+                "tool_declarations_hash": "empty-tools-hash",
+                "invalidation_reason": "new_session",
+                "effective_tools": [],
+                "agent_catalog_visible": false,
+                "visible_agents": [],
+                "skill_catalog_visible": false,
+                "project_instructions_visible": false,
+                "project_instructions_role": null
+            }
+        });
+        store
+            .append_message_with_undo_snapshot_metadata_and_context_evidence(
+                &session,
+                &user_text_message("translate this"),
+                Some(prompt_prefix_metadata),
+                None,
+                &[],
+            )
+            .expect("append user");
+        store
+            .append_message(
+                &session,
+                &Message::Assistant {
+                    content: vec![AssistantBlock::Text {
+                        text: "translated".to_string(),
+                    }],
+                    timestamp_ms: 2,
+                    finish_reason: Some("stop".to_string()),
+                    outcome: Outcome::Normal,
+                    model: Some("model".to_string()),
+                    provider: Some("provider".to_string()),
+                },
+            )
+            .expect("append assistant");
+        store
+            .upsert_session_prompt_prefix(PromptPrefixRecord {
+                session_id: session.clone(),
+                version: 0,
+                created_at_ms: 1,
+                provider: "provider".to_string(),
+                model: "model".to_string(),
+                prefix_hash: prefix_hash.to_string(),
+                tool_declarations_hash: "empty-tools-hash".to_string(),
+                invalidation_reason: Some("new_session".to_string()),
+                slots: vec![PromptPrefixSlotRecord {
+                    slot: "base/mode".to_string(),
+                    tier: "base".to_string(),
+                    semantic_role: "base_policy".to_string(),
+                    provider_role: "system".to_string(),
+                    order: 0,
+                    content: "Runtime mode: default. No callable tools are available.".to_string(),
+                    content_hash: "base".to_string(),
+                    source_kind: Some("runtime".to_string()),
+                    source_name: Some("mode".to_string()),
+                    source_path: None,
+                }],
+                metadata: Some(serde_json::json!({
+                    "mode": "default",
+                    "selected_agent": null,
+                    "agents_enabled": true,
+                    "effective_tools": [],
+                    "agent_catalog_visible": false,
+                    "visible_agents": [],
+                    "skill_catalog_visible": false,
+                    "project_instructions_visible": false,
+                    "project_instructions_role": null
+                })),
+            })
+            .expect("prefix");
+
+        let artifact = render_session_export(
+            &store,
+            &session,
+            SessionExportOptions {
+                format: SessionExportFormat::Json,
+                include: SessionExportIncludeSet::from_values([
+                    SessionExportInclude::Header,
+                    SessionExportInclude::LastProviderRequest,
+                ]),
+                artifact_kind: SessionArtifactKind::Export,
+            },
+        )
+        .expect("export");
+        let value: Value = serde_json::from_str(&artifact.content).expect("json");
+        assert_eq!(
+            value["header"]["prompt_prefix"]["metadata"]["effective_tools"],
+            serde_json::json!([])
+        );
+        assert!(
+            value["last_provider_request"]["body"]
+                .as_object()
+                .expect("body")
+                .get("tools")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn export_last_provider_request_includes_mailbox_result_once_after_wait() {
+        let tmp = TempDir::new().expect("tmp");
+        let db = tmp.path().join("state.db");
+        let store = SqliteStore::open(&db).expect("store");
+        let session = store
+            .create_session_with_metadata(
+                tmp.path(),
+                "run",
+                "model",
+                "provider",
+                Some(serde_json::json!({
+                    "base_url": "https://example.test/v1",
+                    "mode": "default",
+                    "model_metadata": {
+                        "capabilities": {
+                            "tool_call": true
+                        }
+                    }
+                })),
+            )
+            .expect("session");
+        let prefix_hash = "mailbox-prefix";
+        let prompt_prefix_metadata = serde_json::json!({
+            "prompt_prefix": {
+                "hash": prefix_hash,
+                "version": 1,
+                "created_at_ms": 1,
+                "provider": "provider",
+                "model": "model",
+                "tool_declarations_hash": "mailbox-tools-hash",
+                "invalidation_reason": "new_session",
+                "effective_tools": ["wait_agent"],
+                "agent_catalog_visible": false,
+                "visible_agents": [],
+                "skill_catalog_visible": false,
+                "project_instructions_visible": false,
+                "project_instructions_role": null
+            }
+        });
+        store
+            .append_message_with_undo_snapshot_metadata_and_context_evidence(
+                &session,
+                &user_text_message("wait for workers"),
+                Some(prompt_prefix_metadata),
+                None,
+                &[],
+            )
+            .expect("append user");
+        store
+            .append_message(
+                &session,
+                &Message::Assistant {
+                    content: vec![AssistantBlock::ToolCall(ToolCallBlock {
+                        id: "call-wait".to_string(),
+                        name: "wait_agent".to_string(),
+                        arguments: serde_json::json!({"timeout_ms": 1000}),
+                        arguments_json: "{\"timeout_ms\":1000}".to_string(),
+                        arguments_error: None,
+                        content_index: 0,
+                        call_index: 0,
+                    })],
+                    timestamp_ms: 2,
+                    finish_reason: Some("tool_calls".to_string()),
+                    outcome: Outcome::Normal,
+                    model: Some("model".to_string()),
+                    provider: Some("provider".to_string()),
+                },
+            )
+            .expect("append assistant tool call");
+        store
+            .append_message(
+                &session,
+                &Message::ToolResult {
+                    tool_call_id: "call-wait".to_string(),
+                    tool_name: "wait_agent".to_string(),
+                    content: "{\"message\":\"Wait completed.\",\"timed_out\":false}".to_string(),
+                    is_error: false,
+                    timestamp_ms: 3,
+                },
+            )
+            .expect("append wait result");
+        let final_answer = "unique mailbox final answer";
+        let payload = serde_json::json!({
+            "author": "/root/worker",
+            "recipient": "/root",
+            "other_recipients": [],
+            "content": format!(
+                "<subagent_notification>\n{}\n</subagent_notification>",
+                serde_json::json!({
+                    "agent_id": "agent-1",
+                    "agent_name": "worker",
+                    "status": "completed",
+                    "outcome": "normal",
+                    "final_answer": final_answer
+                })
+            ),
+            "trigger_turn": false
+        });
+        store
+            .append_agent_mailbox_event(AgentMailboxEventInput {
+                parent_session_id: session.clone(),
+                child_session_id: None,
+                agent_id: "agent-1".to_string(),
+                task_name: Some("worker".to_string()),
+                agent_name: "worker".to_string(),
+                content_text: serde_json::to_string(&payload).expect("payload text"),
+                payload,
+                metadata: None,
+            })
+            .expect("mailbox event");
+        store
+            .deliver_pending_agent_mailbox_events_for_tool(&session, "call-wait", 3)
+            .expect("deliver");
+        store
+            .append_message(
+                &session,
+                &Message::Assistant {
+                    content: vec![AssistantBlock::Text {
+                        text: "synthesized".to_string(),
+                    }],
+                    timestamp_ms: 4,
+                    finish_reason: Some("stop".to_string()),
+                    outcome: Outcome::Normal,
+                    model: Some("model".to_string()),
+                    provider: Some("provider".to_string()),
+                },
+            )
+            .expect("append final assistant");
+        store
+            .upsert_session_prompt_prefix(PromptPrefixRecord {
+                session_id: session.clone(),
+                version: 0,
+                created_at_ms: 1,
+                provider: "provider".to_string(),
+                model: "model".to_string(),
+                prefix_hash: prefix_hash.to_string(),
+                tool_declarations_hash: "mailbox-tools-hash".to_string(),
+                invalidation_reason: Some("new_session".to_string()),
+                slots: vec![PromptPrefixSlotRecord {
+                    slot: "base/mode".to_string(),
+                    tier: "base".to_string(),
+                    semantic_role: "base_policy".to_string(),
+                    provider_role: "system".to_string(),
+                    order: 0,
+                    content: "Runtime mode: default.".to_string(),
+                    content_hash: "base".to_string(),
+                    source_kind: Some("runtime".to_string()),
+                    source_name: Some("mode".to_string()),
+                    source_path: None,
+                }],
+                metadata: Some(serde_json::json!({
+                    "mode": "default",
+                    "selected_agent": null,
+                    "agents_enabled": true,
+                    "effective_tools": ["wait_agent"],
+                    "agent_catalog_visible": false,
+                    "visible_agents": [],
+                    "skill_catalog_visible": false,
+                    "project_instructions_visible": false,
+                    "project_instructions_role": null
+                })),
+            })
+            .expect("prefix");
+
+        let artifact = render_session_export(
+            &store,
+            &session,
+            SessionExportOptions {
+                format: SessionExportFormat::Json,
+                include: SessionExportIncludeSet::from_values([
+                    SessionExportInclude::Header,
+                    SessionExportInclude::LastProviderRequest,
+                ]),
+                artifact_kind: SessionArtifactKind::Export,
+            },
+        )
+        .expect("export");
+        let value: Value = serde_json::from_str(&artifact.content).expect("json");
+        let body = &value["last_provider_request"]["body"];
+        let body_text = serde_json::to_string(body).expect("body text");
+        assert_eq!(body_text.matches(final_answer).count(), 1);
+        let wait_tool_result = body["messages"]
+            .as_array()
+            .expect("messages")
+            .iter()
+            .find(|message| {
+                message.get("role").and_then(Value::as_str) == Some("tool")
+                    && message.get("tool_call_id").and_then(Value::as_str) == Some("call-wait")
+            })
+            .expect("wait tool result");
+        assert!(
+            !wait_tool_result
+                .get("content")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .contains(final_answer)
+        );
     }
 }

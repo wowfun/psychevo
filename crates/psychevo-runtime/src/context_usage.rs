@@ -314,15 +314,16 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
         }));
     }
     let project_instructions = load_project_instructions(&workdir)?;
-    for fragment in &project_instructions.fragments {
+    for (index, fragment) in project_instructions.fragments.iter().enumerate() {
         request_messages.push(json!({
-            "role": "user",
-            "content": [{ "text": fragment.content.clone() }],
+            "role": "system",
+            "content": format!(
+                "Project instructions below are policy context, not user task content.\n\n{}",
+                fragment.content
+            ),
             "metadata": {
-                "contextual_user": true,
-                "provider_group": "project_instructions",
-                "context_category": "project_context",
-                "hidden": true,
+                "prompt_slot": format!("project_context:{index}"),
+                "prompt_semantic_role": "developer_prompt",
             },
         }));
     }
@@ -343,7 +344,7 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
                 "system_prompt_message_count": 1,
                 "skill_index_message_count": if catalog.skills.is_empty() { 0 } else { 1 },
                 "previous_message_count": messages.len(),
-                "project_instruction_context_message_count": project_instructions.fragments.len(),
+                "project_instruction_context_message_count": 0,
                 "selected_skill_context_message_count": 0,
                 "skill_names": catalog.skills.iter().map(|skill| skill.name.clone()).collect::<Vec<_>>(),
             }
@@ -636,6 +637,9 @@ fn configured_context_limit(
         reasoning_effort: None,
         include_reasoning: false,
         mode: RunMode::Build,
+        permission_mode: None,
+        approval_mode: None,
+        approval_handler: None,
         inherited_env: options.inherited_env.clone(),
         agent: None,
         no_agents: false,

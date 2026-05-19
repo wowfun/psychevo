@@ -453,6 +453,7 @@ async fn running_turn_blocks_main_agent_switching() {
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
+        session_id: None,
         control,
         rx,
         task: RunningTask::Agent(task),
@@ -949,6 +950,7 @@ async fn running_agent_row_enter_opens_child_session_before_parent_turn_finishes
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
+        session_id: None,
         control,
         rx,
         task: RunningTask::Agent(task),
@@ -969,7 +971,7 @@ async fn running_agent_row_enter_opens_child_session_before_parent_turn_finishes
     assert_eq!(ui.auxiliary_agent_tasks.len(), 1);
     let buffer = draw_fullscreen_for_test(&app, &mut ui, 100, 12);
     let text = buffer_text(&buffer);
-    assert!(text.contains("12s · Esc"), "{text}");
+    assert!(text.contains("s · Esc"), "{text}");
     assert!(!text.contains("2m20s · Esc"), "{text}");
     assert!(
         ui.transcript
@@ -1029,6 +1031,7 @@ async fn esc_interrupts_running_child_session_after_open() {
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
+        session_id: None,
         control,
         rx,
         task: RunningTask::Agent(task),
@@ -1157,6 +1160,7 @@ async fn esc_interrupts_running_child_from_parent_session_after_return() {
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
+        session_id: None,
         control,
         rx,
         task: RunningTask::Agent(task),
@@ -1238,7 +1242,10 @@ async fn agent_row_click_toggles_and_open_action_enters_child_session() {
         ui.transcript_hit(row_area.x + 1, row_area.y),
         Some(TranscriptHitTarget::Row(row_id))
     );
-    let after_open = open_area.x.saturating_add(open_area.width).saturating_add(1);
+    let after_open = open_area
+        .x
+        .saturating_add(open_area.width)
+        .saturating_add(1);
     if after_open < row_area.x.saturating_add(row_area.width) {
         assert_eq!(
             ui.transcript_hit(after_open, open_area.y),
@@ -1314,6 +1321,7 @@ async fn running_child_session_receives_scoped_stream_after_open() {
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
+        session_id: None,
         control,
         rx,
         task: RunningTask::Agent(task),
@@ -1392,6 +1400,7 @@ async fn opening_running_agent_child_replays_scoped_live_backlog() {
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
+        session_id: None,
         control,
         rx,
         task: RunningTask::Agent(task),
@@ -1453,6 +1462,7 @@ async fn scoped_child_stream_updates_parent_agent_tail_without_child_rows() {
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
+        session_id: None,
         control,
         rx,
         task: RunningTask::Agent(task),

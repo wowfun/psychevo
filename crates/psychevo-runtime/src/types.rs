@@ -3,6 +3,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use futures::future::BoxFuture;
 use psychevo_agent_core::{ControlHandle, ControlReceivers, Message, TerminalReason};
 use psychevo_ai::Outcome;
 use serde::{Deserialize, Serialize};
@@ -57,6 +58,9 @@ pub struct RunOptions {
     pub reasoning_effort: Option<String>,
     pub include_reasoning: bool,
     pub mode: RunMode,
+    pub permission_mode: Option<PermissionMode>,
+    pub approval_mode: Option<ApprovalMode>,
+    pub approval_handler: Option<Arc<dyn ApprovalHandler>>,
     pub inherited_env: Option<BTreeMap<String, String>>,
     pub agent: Option<String>,
     pub no_agents: bool,
@@ -75,6 +79,9 @@ pub struct AgentSpawnOptions {
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub mode: RunMode,
+    pub permission_mode: Option<PermissionMode>,
+    pub approval_mode: Option<ApprovalMode>,
+    pub approval_handler: Option<Arc<dyn ApprovalHandler>>,
     pub inherited_env: Option<BTreeMap<String, String>>,
     pub selected_parent_agent: Option<String>,
     pub no_skills: bool,
@@ -160,6 +167,140 @@ pub enum RunMode {
     Plan,
     #[default]
     Build,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PermissionMode {
+    #[default]
+    Default,
+    AcceptEdits,
+    DontAsk,
+    BypassPermissions,
+}
+
+impl PermissionMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::AcceptEdits => "acceptEdits",
+            Self::DontAsk => "dontAsk",
+            Self::BypassPermissions => "bypassPermissions",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "default" => Some(Self::Default),
+            "acceptEdits" | "accept_edits" | "accept-edits" => Some(Self::AcceptEdits),
+            "dontAsk" | "dont_ask" | "dont-ask" => Some(Self::DontAsk),
+            "bypassPermissions" | "bypass_permissions" | "bypass-permissions" => {
+                Some(Self::BypassPermissions)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn bypasses_prompt_asks(self) -> bool {
+        matches!(self, Self::BypassPermissions)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalMode {
+    #[default]
+    Manual,
+    Smart,
+}
+
+impl ApprovalMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::Smart => "smart",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "manual" => Some(Self::Manual),
+            "smart" => Some(Self::Smart),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PermissionConfig {
+    pub approval_mode: Option<ApprovalMode>,
+    pub permission_mode: Option<PermissionMode>,
+    pub smart_model: Option<String>,
+    pub allow: Vec<String>,
+    pub ask: Vec<String>,
+    pub deny: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PermissionApprovalRequest {
+    pub tool_call_id: String,
+    pub tool_name: String,
+    pub summary: String,
+    pub reason: String,
+    pub matched_rule: Option<String>,
+    pub suggested_rule: Option<String>,
+    pub allow_always: bool,
+    pub timeout_secs: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PermissionApprovalOutcome {
+    AllowOnce,
+    AllowSession,
+    AllowAlways,
+    Deny,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PermissionApprovalDecision {
+    pub outcome: PermissionApprovalOutcome,
+}
+
+impl PermissionApprovalDecision {
+    pub fn allow_once() -> Self {
+        Self {
+            outcome: PermissionApprovalOutcome::AllowOnce,
+        }
+    }
+
+    pub fn allow_session() -> Self {
+        Self {
+            outcome: PermissionApprovalOutcome::AllowSession,
+        }
+    }
+
+    pub fn allow_always() -> Self {
+        Self {
+            outcome: PermissionApprovalOutcome::AllowAlways,
+        }
+    }
+
+    pub fn deny() -> Self {
+        Self {
+            outcome: PermissionApprovalOutcome::Deny,
+        }
+    }
+}
+
+pub trait ApprovalHandler: Send + Sync + fmt::Debug {
+    fn timeout_secs(&self) -> u64 {
+        300
+    }
+
+    fn request_permission(
+        &self,
+        request: PermissionApprovalRequest,
+    ) -> BoxFuture<'static, PermissionApprovalDecision>;
 }
 
 impl RunMode {

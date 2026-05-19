@@ -32,6 +32,8 @@ pub(crate) struct TuiWorkdirState {
     pub(crate) variant: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) permission_mode: Option<String>,
 }
 
 impl Default for TuiState {
@@ -84,6 +86,12 @@ impl TuiState {
             .and_then(|entry| entry.mode.clone())
     }
 
+    pub(crate) fn permission_mode_for(&self, workdir: &str) -> Option<String> {
+        self.workdirs
+            .get(workdir)
+            .and_then(|entry| entry.permission_mode.clone())
+    }
+
     pub(crate) fn set_model(&mut self, workdir: &str, model: String) {
         self.workdirs.entry(workdir.to_string()).or_default().model = Some(model.clone());
         self.push_recent_model(model);
@@ -104,6 +112,13 @@ impl TuiState {
 
     pub(crate) fn set_mode(&mut self, workdir: &str, mode: String) {
         self.workdirs.entry(workdir.to_string()).or_default().mode = Some(mode);
+    }
+
+    pub(crate) fn set_permission_mode(&mut self, workdir: &str, mode: String) {
+        self.workdirs
+            .entry(workdir.to_string())
+            .or_default()
+            .permission_mode = Some(mode);
     }
 
     pub(crate) fn set_thinking_visible(&mut self, visible: bool) {
@@ -150,6 +165,7 @@ mod tests {
         state.set_model("/repo", "mock/model".to_string());
         state.set_variant("/repo", "high".to_string());
         state.set_mode("/repo", "plan".to_string());
+        state.set_permission_mode("/repo", "acceptEdits".to_string());
         state.set_thinking_visible(false);
         state.set_raw_visible(true);
         state.set_sidebar_visible(true);
@@ -159,6 +175,10 @@ mod tests {
         assert_eq!(loaded.model_for("/repo").as_deref(), Some("mock/model"));
         assert_eq!(loaded.variant_for("/repo").as_deref(), Some("high"));
         assert_eq!(loaded.mode_for("/repo").as_deref(), Some("plan"));
+        assert_eq!(
+            loaded.permission_mode_for("/repo").as_deref(),
+            Some("acceptEdits")
+        );
         assert!(!loaded.thinking_visible);
         assert!(loaded.raw_visible);
         assert!(loaded.sidebar_visible);

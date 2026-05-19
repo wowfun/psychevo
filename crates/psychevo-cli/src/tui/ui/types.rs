@@ -231,6 +231,7 @@ struct FullscreenUi<'a> {
     running: Option<RunningTurn>,
     auxiliary_agent_tasks: Vec<AuxiliaryAgentTask>,
     agent_child_event_backlog: BTreeMap<String, Vec<RunStreamEvent>>,
+    session_live_event_backlog: BTreeMap<String, Vec<RunStreamEvent>>,
     auxiliary_shell_tasks: Vec<AuxiliaryShellTask>,
     pending_auxiliary_shell_commands: VecDeque<String>,
     visible_turn_started: Option<Instant>,
@@ -271,6 +272,7 @@ struct FullscreenUi<'a> {
     history_query: String,
     slash_menu_selected: usize,
     slash_menu_dismissed_input: Option<String>,
+    pending_leader_started: Option<Instant>,
     last_slash_menu_areas: Vec<(usize, Rect)>,
     file_search: FileSearchState,
     last_file_popup_areas: Vec<(usize, Rect)>,
@@ -679,7 +681,7 @@ enum BottomPanel {
 
 #[derive(Debug, Clone)]
 struct HelpPanel {
-    skill_count: Option<usize>,
+    sections: SlashHelpSections,
     tab: HelpTab,
     scroll: u16,
 }
@@ -1115,9 +1117,9 @@ impl BottomPanel {
 }
 
 impl HelpPanel {
-    fn new(skill_count: Option<usize>) -> Self {
+    fn new(sections: SlashHelpSections) -> Self {
         Self {
-            skill_count,
+            sections,
             tab: HelpTab::General,
             scroll: 0,
         }

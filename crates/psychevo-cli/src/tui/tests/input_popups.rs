@@ -398,7 +398,9 @@ async fn slash_menu_selection_can_choose_mode_over_model() {
         row.kind == TranscriptKind::Command
             && row.title == "/mode"
             && row.failed
-            && row.text.contains("error: usage: /mode <plan|default>")
+            && row.text.contains(
+                "error: usage: /mode <plan|default|acceptEdits|dontAsk|bypassPermissions>",
+            )
     }));
 }
 
@@ -412,7 +414,7 @@ async fn slash_menu_up_down_wrap_between_first_and_last_rows() {
     app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))
         .await
         .expect("up");
-    assert_eq!(ui.slash_menu_selected, 1);
+    assert_eq!(ui.slash_menu_selected, 2);
 
     app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
         .await
@@ -423,6 +425,11 @@ async fn slash_menu_up_down_wrap_between_first_and_last_rows() {
         .await
         .expect("down");
     assert_eq!(ui.slash_menu_selected, 1);
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .await
+        .expect("down");
+    assert_eq!(ui.slash_menu_selected, 2);
 
     app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
         .await

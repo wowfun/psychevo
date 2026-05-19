@@ -121,11 +121,7 @@ impl TuiApp {
                 if archived {
                     SqliteStore::open(&self.db_path)?.restore_session(&session_id)?;
                 }
-                self.switch_session_no_print(&session_id)?;
-                ui.bottom_panel = None;
-                ui.clear_transcript();
-                self.load_current_session_history(ui)?;
-                ui.refresh_sidebar(self);
+                self.open_session_direct(ui, &session_id)?;
             }
             Some(BottomSelectionValue::AgentRunning {
                 id,
@@ -654,6 +650,9 @@ impl TuiApp {
             model: self.current_model.clone(),
             reasoning_effort: self.current_variant.clone(),
             mode: self.current_mode,
+            permission_mode: None,
+            approval_mode: None,
+            approval_handler: None,
             inherited_env: Some(self.env_map.clone()),
             selected_parent_agent: self.current_agent.clone(),
             no_skills: self.no_skills,

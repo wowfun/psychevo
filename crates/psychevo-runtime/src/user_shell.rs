@@ -36,10 +36,14 @@ pub async fn run_user_shell_command_streaming_controlled(
         .as_ref()
         .map(|context| prepare_user_shell_context(context, &workdir, &command))
         .transpose()?;
+    let stream_session_id = prepared_context
+        .as_ref()
+        .map(|context| context.session_id.clone());
 
     let tool_call_id = "user_shell".to_string();
     stream(RunStreamEvent::Event(json!({
         "type": "tool_execution_start",
+        "session_id": stream_session_id.clone(),
         "tool_call_id": tool_call_id,
         "tool_name": "bash",
         "args": {"command": command.clone()},
@@ -80,6 +84,7 @@ pub async fn run_user_shell_command_streaming_controlled(
     let elapsed = started.elapsed();
     stream(RunStreamEvent::Event(json!({
         "type": "tool_execution_end",
+        "session_id": stream_session_id,
         "tool_call_id": tool_call_id,
         "tool_name": "bash",
         "result": result.clone(),
@@ -142,6 +147,9 @@ fn prepare_user_shell_context(
         reasoning_effort: context.reasoning_effort.clone(),
         include_reasoning: false,
         mode: context.mode,
+        permission_mode: None,
+        approval_mode: None,
+        approval_handler: None,
         inherited_env: context.inherited_env.clone(),
         agent: None,
         no_agents: true,

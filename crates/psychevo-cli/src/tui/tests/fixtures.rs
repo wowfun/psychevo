@@ -58,6 +58,7 @@ fn test_app(temp: &tempfile::TempDir) -> TuiApp {
         current_variant: Some("high".to_string()),
         selected_model: None,
         current_mode: RunMode::Build,
+        current_permission_mode: PermissionMode::Default,
         startup_agent: None,
         current_agent: None,
         current_agent_explicit_default: false,
@@ -75,6 +76,7 @@ fn test_app(temp: &tempfile::TempDir) -> TuiApp {
         clipboard_result_tx,
         clipboard_result_rx,
         clipboard_copies_in_flight: 0,
+        slash_config: EffectiveSlashConfig::default(),
     }
 }
 
@@ -721,6 +723,7 @@ fn attach_pending_agent_running(ui: &mut FullscreenUi<'_>) {
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
+        session_id: None,
         control,
         rx,
         task: RunningTask::Agent(task),

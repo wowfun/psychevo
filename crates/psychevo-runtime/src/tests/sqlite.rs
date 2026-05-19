@@ -1,5 +1,5 @@
 #[test]
-fn sqlite_schema_v9_migrates_v3_state_databases() {
+fn sqlite_schema_v10_migrates_v3_state_databases() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("v3.db");
     let workdir = temp.path().join("work").to_string_lossy().to_string();
@@ -70,7 +70,7 @@ fn sqlite_schema_v9_migrates_v3_state_databases() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 9);
+    assert_eq!(user_version, 10);
     let archived_at: Option<i64> = conn
         .query_row(
             "SELECT archived_at_ms FROM sessions WHERE id = 'session-v3'",
@@ -94,6 +94,7 @@ fn sqlite_schema_v9_migrates_v3_state_databases() {
             .iter()
             .any(|name| name == "child_session_id")
     );
+    assert!(!sqlite_columns(&conn, "agent_mailbox_events").is_empty());
     assert!(
         sqlite_columns(&conn, "context_evidence")
             .iter()
@@ -108,7 +109,7 @@ fn sqlite_schema_v9_migrates_v3_state_databases() {
 }
 
 #[test]
-fn sqlite_schema_v9_migrates_v5_state_databases() {
+fn sqlite_schema_v10_migrates_v5_state_databases() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("v5.db");
     let workdir = temp.path().join("work").to_string_lossy().to_string();
@@ -190,7 +191,7 @@ fn sqlite_schema_v9_migrates_v5_state_databases() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 9);
+    assert_eq!(user_version, 10);
     assert!(
         sqlite_columns(&conn, "context_evidence")
             .iter()
@@ -201,6 +202,7 @@ fn sqlite_schema_v9_migrates_v5_state_databases() {
             .iter()
             .any(|name| name == "provider_block_index")
     );
+    assert!(!sqlite_columns(&conn, "agent_mailbox_events").is_empty());
     assert_eq!(
         store
             .latest_run_session_for_workdir(&temp.path().join("work"))
@@ -210,7 +212,7 @@ fn sqlite_schema_v9_migrates_v5_state_databases() {
 }
 
 #[test]
-fn sqlite_schema_v9_migrates_v6_state_databases() {
+fn sqlite_schema_v10_migrates_v6_state_databases() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("v6.db");
     let workdir = temp.path().join("work").to_string_lossy().to_string();
@@ -312,11 +314,12 @@ fn sqlite_schema_v9_migrates_v6_state_databases() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 9);
+    assert_eq!(user_version, 10);
     let columns = sqlite_columns(&conn, "context_evidence");
     assert!(columns.iter().any(|name| name == "provider_group"));
     assert!(columns.iter().any(|name| name == "provider_block_index"));
     assert!(columns.iter().any(|name| name == "context_kind"));
+    assert!(!sqlite_columns(&conn, "agent_mailbox_events").is_empty());
     assert_eq!(
         store
             .latest_run_session_for_workdir(&temp.path().join("work"))
@@ -326,7 +329,7 @@ fn sqlite_schema_v9_migrates_v6_state_databases() {
 }
 
 #[test]
-fn sqlite_schema_v9_rejects_old_state_databases() {
+fn sqlite_schema_v10_rejects_old_state_databases() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("old.db");
     {
@@ -535,12 +538,7 @@ fn sqlite_append_to_archived_session_reopens_and_updates_recency() {
     );
 }
 
-fn set_session_times(
-    conn: &Connection,
-    session_id: &str,
-    started_at_ms: i64,
-    updated_at_ms: i64,
-) {
+fn set_session_times(conn: &Connection, session_id: &str, started_at_ms: i64, updated_at_ms: i64) {
     conn.execute(
         "UPDATE sessions SET started_at_ms = ?2, updated_at_ms = ?3 WHERE id = ?1",
         rusqlite::params![session_id, started_at_ms, updated_at_ms],
@@ -600,7 +598,14 @@ fn sqlite_context_evidence_is_prompt_scoped_and_hidden_from_messages() {
 
     let messages = store.load_messages(&session_id).expect("messages");
     assert_eq!(messages.len(), 1);
-    assert_eq!(store.session_summary(&session_id).unwrap().unwrap().message_count, 1);
+    assert_eq!(
+        store
+            .session_summary(&session_id)
+            .unwrap()
+            .unwrap()
+            .message_count,
+        1
+    );
 
     let evidence = store
         .load_context_evidence(&session_id, prompt_seq)
@@ -617,7 +622,10 @@ fn sqlite_context_evidence_is_prompt_scoped_and_hidden_from_messages() {
         Some("system_instruction")
     );
     assert_eq!(evidence[1].source_kind, "selected_skill");
-    assert_eq!(evidence[1].source_path.as_deref(), Some("/tmp/reviewer/SKILL.md"));
+    assert_eq!(
+        evidence[1].source_path.as_deref(),
+        Some("/tmp/reviewer/SKILL.md")
+    );
     assert_eq!(
         evidence[1].provider_group.as_deref(),
         Some("selected_skill:0:reviewer")
@@ -807,7 +815,7 @@ fn sqlite_context_evidence_cascades_with_prompt_messages() {
 }
 
 #[test]
-fn sqlite_schema_v9_stores_reasoning_only_in_message_json_and_metrics_separately() {
+fn sqlite_schema_v10_stores_reasoning_only_in_message_json_and_metrics_separately() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
@@ -986,7 +994,10 @@ fn accounting_uses_cache_reasoning_and_over_200k_pricing() {
     .expect("accounting");
     assert_eq!(accounting.billable_input_tokens, Some(250_000));
     assert_eq!(accounting.billable_output_tokens, Some(25));
-    assert_eq!(accounting.pricing_tier.as_deref(), Some("context_over_200k"));
+    assert_eq!(
+        accounting.pricing_tier.as_deref(),
+        Some("context_over_200k")
+    );
     assert_eq!(accounting.pricing_source.as_deref(), Some("test-pricing"));
     assert_eq!(
         accounting.estimated_cost_nanodollars,

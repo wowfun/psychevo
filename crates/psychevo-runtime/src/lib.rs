@@ -7,6 +7,7 @@ mod error;
 mod events;
 mod messages;
 mod paths;
+mod permissions;
 mod project_instructions;
 mod prompt_assembly;
 mod prompt_image;
@@ -32,13 +33,16 @@ pub use agents::{
     AgentSource, AgentToolPolicy, MAX_AGENT_SPAWN_DEPTH_CAP, agent_spawn_paused,
     agent_status_value, close_agent_id, discover_agents, list_agents_value,
     resolve_agent_definition, resume_agent_id, send_agent_message, set_agent_spawn_paused,
-    stop_agent_id_with_grace, view_agent_value, wait_agent_id, wait_agent_targets,
+    stop_agent_id_with_grace, view_agent_value, view_agent_value_with_catalog, wait_agent_id,
+    wait_agent_mailbox,
 };
 pub use config::{
-    auth_status_value, config_provider_list_value, config_show_value, configured_models,
+    append_local_permission_allow_rule, append_local_permission_rule, auth_status_value,
+    config_provider_list_value, config_show_value, configured_models,
     create_global_custom_provider, create_scoped_custom_provider, custom_provider_api_key_env,
-    fetch_model_catalog, model_catalog_endpoint, model_catalog_providers,
-    refresh_model_metadata_cache, selected_configured_model, set_provider_api_key,
+    fetch_model_catalog, model_catalog_endpoint, model_catalog_providers, permission_rules_value,
+    refresh_model_metadata_cache, remove_local_permission_rule, selected_configured_model,
+    set_provider_api_key,
 };
 pub use context::prune_context;
 pub use context_usage::{
@@ -79,13 +83,15 @@ pub use store::{AgentEdgeRecord, AgentEdgeStatus};
 pub use store::{ContextEvidenceInput, ContextEvidenceRecord, SqliteStore};
 pub use tools::tool_names_for_mode;
 pub use types::{
-    AgentSpawnOptions, AgentSpawnResult, ConfigScope, ConfiguredModel, CustomProviderInput,
-    CustomProviderResult, ImageInput, ModelCatalogEntry, ModelCatalogProvider,
-    ModelMetadataCacheTarget, PromptAttachmentDisplay, PromptDisplayMetadata, ReloadContextOptions,
-    ReloadContextResult, RunControl, RunControlHandle, RunMode, RunOptions, RunResult,
-    RunStreamEvent, RunStreamSink, RunWarning, SanitizedMessageSummary, ScopedCustomProviderInput,
-    SelectedAgent, SessionExportMessageSummary, SessionRedoResult, SessionSummary,
-    SessionUndoOptions, SessionUndoResult, SmokeControl, SmokeOptions, SmokeResult, StatsOptions,
+    AgentSpawnOptions, AgentSpawnResult, ApprovalHandler, ApprovalMode, ConfigScope,
+    ConfiguredModel, CustomProviderInput, CustomProviderResult, ImageInput, ModelCatalogEntry,
+    ModelCatalogProvider, ModelMetadataCacheTarget, PermissionApprovalDecision,
+    PermissionApprovalOutcome, PermissionApprovalRequest, PermissionConfig, PermissionMode,
+    PromptAttachmentDisplay, PromptDisplayMetadata, ReloadContextOptions, ReloadContextResult,
+    RunControl, RunControlHandle, RunMode, RunOptions, RunResult, RunStreamEvent, RunStreamSink,
+    RunWarning, SanitizedMessageSummary, ScopedCustomProviderInput, SelectedAgent,
+    SessionExportMessageSummary, SessionRedoResult, SessionSummary, SessionUndoOptions,
+    SessionUndoResult, SmokeControl, SmokeOptions, SmokeResult, StatsOptions,
     TUI_DISPLAY_METADATA_KEY, TuiMessageSummary, USER_SHELL_METADATA_KEY, UserShellContextOptions,
     UserShellOptions, UserShellResult, run_control,
 };

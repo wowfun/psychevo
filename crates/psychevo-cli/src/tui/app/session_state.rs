@@ -116,6 +116,7 @@ impl TuiApp {
             .unwrap_or_else(|| "New session".to_string())
     }
 
+    #[cfg(test)]
     fn switch_session_no_print(&mut self, reference: &str) -> Result<String> {
         let id = self.resolve_session_ref(reference)?;
         SqliteStore::open(&self.db_path)?.resume_session(&id)?;
@@ -139,29 +140,7 @@ impl TuiApp {
         let edge = store
             .find_agent_edge(target)?
             .ok_or_else(|| anyhow!("agent not found: {target}"))?;
-        if let Some(running) = ui.running.take() {
-            let owner_session = self.current_session.clone();
-            let RunningTurn { control, rx, task } = running;
-            match task {
-                RunningTask::Agent(task) => {
-                    ui.auxiliary_agent_tasks.push(AuxiliaryAgentTask {
-                        session_id: owner_session,
-                        child_session_id: Some(edge.child_session_id.clone()),
-                        control,
-                        rx,
-                        task,
-                    });
-                    ui.finish_turn();
-                }
-                RunningTask::UserShell(task) => {
-                    ui.running = Some(RunningTurn {
-                        control,
-                        rx,
-                        task: RunningTask::UserShell(task),
-                    });
-                }
-            }
-        }
+        self.detach_running_for_session_switch(ui, Some(edge.child_session_id.clone()));
         store.resume_session(&edge.child_session_id)?;
         self.current_session = Some(edge.child_session_id.clone());
         self.force_new_once = false;
@@ -170,6 +149,7 @@ impl TuiApp {
         ui.bottom_panel = None;
         ui.clear_transcript();
         self.load_current_session_history(ui)?;
+        self.replay_session_live_event_backlog(ui, &edge.child_session_id);
         self.replay_agent_child_event_backlog(ui, &edge.child_session_id);
         ui.refresh_sidebar(self);
         Ok(())
@@ -279,10 +259,7 @@ impl TuiApp {
     }
 
     fn open_session_direct(&mut self, ui: &mut FullscreenUi<'_>, session_id: &str) -> Result<()> {
-        if ui.running.is_some() {
-            ui.push_status("finish the current turn before switching sessions");
-            return Ok(());
-        }
+        self.detach_running_for_session_switch(ui, None);
         SqliteStore::open(&self.db_path)?.resume_session(session_id)?;
         self.current_session = Some(session_id.to_string());
         self.force_new_once = false;
@@ -291,9 +268,61 @@ impl TuiApp {
         ui.bottom_panel = None;
         ui.clear_transcript();
         self.load_current_session_history(ui)?;
+        self.replay_session_live_event_backlog(ui, session_id);
         self.replay_agent_child_event_backlog(ui, session_id);
         ui.refresh_sidebar(self);
         Ok(())
+    }
+
+    fn detach_running_for_session_switch(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        child_session_id: Option<String>,
+    ) {
+        let owner_session = ui
+            .running
+            .as_ref()
+            .and_then(|running| running.session_id.clone());
+        let mut pending = std::mem::take(&mut ui.deferred_stream_events);
+        if let Some(running) = &mut ui.running {
+            while let Ok(event) = running.rx.try_recv() {
+                pending.push_back(event);
+            }
+        }
+        let had_pending = if owner_session.is_some() {
+            self.apply_pending_owned_fullscreen_stream_events(ui, owner_session.as_deref(), pending)
+        } else {
+            self.apply_pending_fullscreen_stream_events_without_frames(ui, pending)
+        };
+        if had_pending {
+            ui.follow_transcript_if_needed();
+            ui.refresh_sidebar(self);
+        }
+        let Some(running) = ui.running.take() else {
+            return;
+        };
+        let owner_session = running.session_id.or_else(|| self.current_session.clone());
+        match running.task {
+            RunningTask::Agent(task) => {
+                ui.auxiliary_agent_tasks.push(AuxiliaryAgentTask {
+                    session_id: owner_session,
+                    child_session_id,
+                    visible_live: true,
+                    control: running.control,
+                    rx: running.rx,
+                    task,
+                });
+            }
+            RunningTask::UserShell(task) => {
+                ui.auxiliary_shell_tasks.push(AuxiliaryShellTask {
+                    session_id: owner_session,
+                    control: running.control,
+                    rx: running.rx,
+                    task,
+                });
+            }
+        }
+        ui.finish_turn();
     }
 
     fn replay_agent_child_event_backlog(&mut self, ui: &mut FullscreenUi<'_>, session_id: &str) {
@@ -303,6 +332,15 @@ impl TuiApp {
         for event in events {
             ui.apply_stream_event(event, self.thinking_visible, self.debug);
         }
+        ui.follow_transcript_if_needed();
+    }
+
+    fn replay_session_live_event_backlog(&mut self, ui: &mut FullscreenUi<'_>, session_id: &str) {
+        let Some(events) = ui.session_live_event_backlog.remove(session_id) else {
+            return;
+        };
+        let pending = events.into();
+        self.apply_pending_owned_fullscreen_stream_events(ui, Some(session_id), pending);
         ui.follow_transcript_if_needed();
     }
 
@@ -354,11 +392,26 @@ impl TuiApp {
     }
 
     fn set_mode_no_print(&mut self, mode: &str) -> Result<()> {
-        let Some(parsed) = RunMode::parse(mode) else {
-            return Err(anyhow!("mode must be one of plan, default"));
+        let (run_mode, permission_mode) = match mode {
+            "plan" => (RunMode::Plan, PermissionMode::Default),
+            "default" => (RunMode::Build, PermissionMode::Default),
+            "acceptEdits" | "accept-edits" => (RunMode::Build, PermissionMode::AcceptEdits),
+            "dontAsk" | "dont-ask" => (RunMode::Build, PermissionMode::DontAsk),
+            "bypassPermissions" | "bypass-permissions" => {
+                (RunMode::Build, PermissionMode::BypassPermissions)
+            }
+            _ => {
+                return Err(anyhow!(
+                    "mode must be one of plan, default, acceptEdits, dontAsk, bypassPermissions"
+                ));
+            }
         };
-        self.current_mode = parsed;
-        self.state.set_mode(&self.workdir_key, mode.to_string());
+        self.current_mode = run_mode;
+        self.current_permission_mode = permission_mode;
+        self.state
+            .set_mode(&self.workdir_key, run_mode.as_str().to_string());
+        self.state
+            .set_permission_mode(&self.workdir_key, permission_mode.as_str().to_string());
         self.state.save(&self.state_path)?;
         Ok(())
     }
@@ -434,20 +487,24 @@ impl TuiApp {
     }
 
     fn cycle_mode(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
-        let next = match self.current_mode {
-            RunMode::Plan => RunMode::Build,
-            RunMode::Build => RunMode::Plan,
+        let next = match (self.current_mode, self.current_permission_mode) {
+            (RunMode::Build, PermissionMode::Default) => "acceptEdits",
+            (RunMode::Build, PermissionMode::AcceptEdits) => "plan",
+            (RunMode::Plan, _) => "default",
+            _ => "default",
         };
-        self.set_mode_no_print(next.as_str())?;
+        self.set_mode_no_print(next)?;
         ui.refresh_sidebar(self);
         Ok(())
     }
 
+    #[cfg(test)]
     fn resolve_session_ref(&self, reference: &str) -> Result<String> {
         let sessions = self.sessions_for_workdir()?;
         resolve_session_ref_from_summaries(&sessions, reference)
     }
 
+    #[cfg(test)]
     fn sessions_for_workdir(&self) -> Result<Vec<SessionSummary>> {
         SqliteStore::open(&self.db_path)?
             .list_sessions_for_workdir_with_sources(&self.workdir, TUI_SESSION_SOURCES)

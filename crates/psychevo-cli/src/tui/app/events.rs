@@ -53,6 +53,7 @@ impl TuiApp {
             .is_some_and(|running| running.task.is_finished())
         {
             let mut running = ui.running.take().expect("checked running");
+            let owner_session = running.session_id.clone();
             let task = running.task;
             let completed = match task {
                 RunningTask::Agent(task) => RunningCompletion::Agent(Box::new(task.await)),
@@ -62,8 +63,11 @@ impl TuiApp {
             while let Ok(event) = running.rx.try_recv() {
                 pending.push_back(event);
             }
-            let (had_pending, _active_tool_frame_requested) =
-                self.apply_pending_fullscreen_stream_events(ui, pending);
+            let had_pending = self.apply_pending_owned_fullscreen_stream_events(
+                ui,
+                owner_session.as_deref(),
+                pending,
+            );
             changed = true;
             if had_pending {
                 ui.follow_transcript_if_needed();
@@ -77,9 +81,11 @@ impl TuiApp {
                         restore_queued_after_interrupt |= interrupted;
                         self.last_context_snapshot = result.context_snapshot.clone();
                         ui.last_context_snapshot = result.context_snapshot.clone();
-                        self.current_session = Some(result.session_id.clone());
-                        self.refresh_current_session_title()?;
-                        self.force_new_once = false;
+                        ui.session_live_event_backlog.remove(&result.session_id);
+                        if self.current_session.as_deref() == Some(result.session_id.as_str()) {
+                            self.refresh_current_session_title()?;
+                            self.force_new_once = false;
+                        }
                         if result.outcome != Outcome::Normal && !interrupted {
                             self.had_error = true;
                             ui.push_error(turn_ended_error_message(
@@ -103,9 +109,11 @@ impl TuiApp {
                             ui.interrupt_requested && result.outcome == Outcome::Aborted;
                         restore_queued_after_interrupt |= interrupted;
                         if let Some(session_id) = result.session_id {
-                            self.current_session = Some(session_id);
-                            self.refresh_current_session_title()?;
-                            self.force_new_once = false;
+                            ui.session_live_event_backlog.remove(&session_id);
+                            if self.current_session.as_deref() == Some(session_id.as_str()) {
+                                self.refresh_current_session_title()?;
+                                self.force_new_once = false;
+                            }
                         }
                         if (result.outcome != Outcome::Normal || result.tool_failures > 0)
                             && !interrupted
@@ -142,12 +150,24 @@ impl TuiApp {
         ui: &mut FullscreenUi<'_>,
     ) -> (bool, bool) {
         let mut pending = std::mem::take(&mut ui.deferred_stream_events);
+        let owner_session = ui
+            .running
+            .as_ref()
+            .and_then(|running| running.session_id.clone());
         if let Some(running) = &mut ui.running {
             while let Ok(event) = running.rx.try_recv() {
                 pending.push_back(event);
             }
         }
-        self.apply_pending_fullscreen_stream_events(ui, pending)
+        if owner_session.is_none() {
+            self.apply_pending_fullscreen_stream_events(ui, pending)
+        } else {
+            self.apply_pending_owned_fullscreen_stream_events_with_frames(
+                ui,
+                owner_session.as_deref(),
+                pending,
+            )
+        }
     }
 
     fn apply_pending_fullscreen_stream_events(
@@ -167,6 +187,19 @@ impl TuiApp {
         (had_pending, false)
     }
 
+    fn apply_pending_fullscreen_stream_events_without_frames(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        mut pending: VecDeque<RunStreamEvent>,
+    ) -> bool {
+        let mut had_pending = false;
+        while let Some(event) = pending.pop_front() {
+            had_pending = true;
+            self.apply_fullscreen_stream_event(ui, event);
+        }
+        had_pending
+    }
+
     fn apply_pending_auxiliary_agent_events(
         &mut self,
         ui: &mut FullscreenUi<'_>,
@@ -181,6 +214,58 @@ impl TuiApp {
         had_pending
     }
 
+    fn apply_pending_auxiliary_shell_events(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        owner_session: Option<&str>,
+        mut pending: VecDeque<RunStreamEvent>,
+    ) -> (bool, bool) {
+        let mut had_pending = false;
+        while let Some(event) = pending.pop_front() {
+            had_pending = true;
+            let active_tool_frame_requested =
+                self.apply_auxiliary_shell_stream_event(ui, owner_session, event);
+            if active_tool_frame_requested {
+                ui.deferred_stream_events.extend(pending);
+                return (true, true);
+            }
+        }
+        (had_pending, false)
+    }
+
+    fn apply_pending_owned_fullscreen_stream_events(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        owner_session: Option<&str>,
+        mut pending: VecDeque<RunStreamEvent>,
+    ) -> bool {
+        let mut had_pending = false;
+        while let Some(event) = pending.pop_front() {
+            had_pending = true;
+            self.apply_owned_fullscreen_stream_event(ui, owner_session, event);
+        }
+        had_pending
+    }
+
+    fn apply_pending_owned_fullscreen_stream_events_with_frames(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        owner_session: Option<&str>,
+        mut pending: VecDeque<RunStreamEvent>,
+    ) -> (bool, bool) {
+        let mut had_pending = false;
+        while let Some(event) = pending.pop_front() {
+            had_pending = true;
+            let active_tool_frame_requested =
+                self.apply_owned_fullscreen_stream_event(ui, owner_session, event);
+            if active_tool_frame_requested {
+                ui.deferred_stream_events.extend(pending);
+                return (true, true);
+            }
+        }
+        (had_pending, false)
+    }
+
     fn apply_auxiliary_agent_stream_event(
         &mut self,
         ui: &mut FullscreenUi<'_>,
@@ -191,13 +276,44 @@ impl TuiApp {
             RunStreamEvent::Scoped { session_id, event } => {
                 self.apply_scoped_fullscreen_stream_event(ui, &session_id, *event);
             }
-            other
-                if owner_session.is_some() && self.current_session.as_deref() == owner_session =>
-            {
-                self.apply_fullscreen_stream_event(ui, other);
+            other => {
+                self.apply_owned_fullscreen_stream_event(ui, owner_session, other);
             }
-            _ => {}
         }
+    }
+
+    fn apply_auxiliary_shell_stream_event(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        owner_session: Option<&str>,
+        event: RunStreamEvent,
+    ) -> bool {
+        self.apply_owned_fullscreen_stream_event(ui, owner_session, event)
+    }
+
+    fn apply_owned_fullscreen_stream_event(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        owner_session: Option<&str>,
+        event: RunStreamEvent,
+    ) -> bool {
+        if let RunStreamEvent::Scoped { session_id, event } = event {
+            return self.apply_scoped_fullscreen_stream_event(ui, &session_id, *event);
+        }
+        let event_has_session = stream_event_session_id(&event).is_some();
+        let event_session = stream_event_session_id(&event)
+            .map(str::to_string)
+            .or_else(|| owner_session.map(str::to_string));
+        if let Some(session_id) = event_session.as_deref()
+            && self.current_session.as_deref() != Some(session_id)
+        {
+            buffer_session_live_event(ui, session_id, event);
+            return false;
+        }
+        if !event_has_session && let Some(session_id) = event_session.as_deref() {
+            buffer_session_live_event(ui, session_id, event.clone());
+        }
+        self.apply_fullscreen_stream_event(ui, event)
     }
 
     fn apply_fullscreen_stream_event(
@@ -207,6 +323,33 @@ impl TuiApp {
     ) -> bool {
         if let RunStreamEvent::Scoped { session_id, event } = event {
             return self.apply_scoped_fullscreen_stream_event(ui, &session_id, *event);
+        }
+        if let Some(session_id) = stream_event_session_id(&event).map(str::to_string) {
+            let running_owner_missing = ui
+                .running
+                .as_ref()
+                .is_some_and(|running| running.session_id.is_none());
+            if let Some(running) = ui.running.as_mut()
+                && running.session_id.is_none()
+            {
+                running.session_id = Some(session_id.clone());
+            }
+            if running_owner_missing && self.current_session.is_none() {
+                self.current_session = Some(session_id.clone());
+                self.current_session_title = None;
+            }
+            if self
+                .current_session
+                .as_deref()
+                .is_some_and(|current| current != session_id)
+                && !running_owner_missing
+            {
+                buffer_session_live_event(ui, &session_id, event);
+                return false;
+            }
+            if self.current_session.as_deref() == Some(session_id.as_str()) {
+                buffer_session_live_event(ui, &session_id, event.clone());
+            }
         }
         if let RunStreamEvent::Event(value) = &event {
             if value.get("type").and_then(Value::as_str) == Some("context_snapshot")
@@ -234,7 +377,13 @@ impl TuiApp {
         event: RunStreamEvent,
     ) -> bool {
         if self.current_session.as_deref() == Some(session_id) {
+            buffer_session_live_event(ui, session_id, event.clone());
             return ui.apply_stream_event(event, self.thinking_visible, self.debug);
+        }
+        if session_live_event_ends_backlog(&event) {
+            ui.session_live_event_backlog.remove(session_id);
+        } else {
+            buffer_session_live_event(ui, session_id, event.clone());
         }
         if agent_child_event_ends_live_backlog(&event) {
             ui.agent_child_event_backlog.remove(session_id);
@@ -265,6 +414,11 @@ impl TuiApp {
             self.current_session = Some(session_id.to_string());
             self.current_session_title = None;
         }
+        if let Some(running) = ui.running.as_mut()
+            && running.session_id.is_none()
+        {
+            running.session_id = Some(session_id.to_string());
+        }
         if let Err(err) = self.persist_main_agent_selection_for_session(session_id) {
             self.had_error = true;
             ui.push_error(format!(
@@ -280,12 +434,19 @@ impl TuiApp {
         let terminal_message = ui.turn_terminal_message.take();
         if let Some(running) = ui.running.take() {
             let owner_session = self.current_session.clone();
-            let RunningTurn { control, rx, task } = running;
+            let RunningTurn {
+                session_id,
+                control,
+                rx,
+                task,
+            } = running;
+            let owner_session = session_id.or(owner_session);
             match task {
                 RunningTask::Agent(task) => {
                     ui.auxiliary_agent_tasks.push(AuxiliaryAgentTask {
                         session_id: owner_session,
                         child_session_id: None,
+                        visible_live: false,
                         control,
                         rx,
                         task,
@@ -293,6 +454,7 @@ impl TuiApp {
                 }
                 RunningTask::UserShell(task) => {
                     ui.running = Some(RunningTurn {
+                        session_id: owner_session,
                         control,
                         rx,
                         task: RunningTask::UserShell(task),
@@ -350,6 +512,7 @@ impl TuiApp {
                 if let Ok(Ok(result)) = agent.task.await {
                     self.last_context_snapshot = result.context_snapshot.clone();
                     ui.last_context_snapshot = result.context_snapshot;
+                    ui.session_live_event_backlog.remove(&result.session_id);
                 }
                 self.refresh_current_session_title()?;
                 ui.refresh_sidebar(self);
@@ -375,7 +538,7 @@ impl TuiApp {
                 pending.push_back(event);
             }
             let (had_pending, active_tool_frame_requested) =
-                self.apply_pending_fullscreen_stream_events(ui, pending);
+                self.apply_pending_auxiliary_shell_events(ui, shell.session_id.as_deref(), pending);
             changed |= had_pending;
             if had_pending {
                 ui.follow_transcript_if_needed();
@@ -393,8 +556,8 @@ impl TuiApp {
                 while let Ok(event) = shell.rx.try_recv() {
                     pending.push_back(event);
                 }
-                let (had_pending, active_tool_frame_requested) =
-                    self.apply_pending_fullscreen_stream_events(ui, pending);
+                let (had_pending, active_tool_frame_requested) = self
+                    .apply_pending_auxiliary_shell_events(ui, shell.session_id.as_deref(), pending);
                 if had_pending {
                     ui.follow_transcript_if_needed();
                 }
@@ -410,9 +573,11 @@ impl TuiApp {
                         let interrupted =
                             ui.interrupt_requested && result.outcome == Outcome::Aborted;
                         if let Some(session_id) = result.session_id {
-                            self.current_session = Some(session_id);
-                            self.refresh_current_session_title()?;
-                            self.force_new_once = false;
+                            ui.session_live_event_backlog.remove(&session_id);
+                            if self.current_session.as_deref() == Some(session_id.as_str()) {
+                                self.refresh_current_session_title()?;
+                                self.force_new_once = false;
+                            }
                         }
                         if (result.outcome != Outcome::Normal || result.tool_failures > 0)
                             && !interrupted
@@ -590,6 +755,42 @@ fn agent_child_event_ends_live_backlog(event: &RunStreamEvent) -> bool {
             Some("message_end") | Some("run_end")
         ),
         RunStreamEvent::Scoped { event, .. } => agent_child_event_ends_live_backlog(event),
+        _ => false,
+    }
+}
+
+fn stream_event_session_id(event: &RunStreamEvent) -> Option<&str> {
+    match event {
+        RunStreamEvent::Event(value) => value.get("session_id").and_then(Value::as_str),
+        RunStreamEvent::Scoped { session_id, .. } => Some(session_id.as_str()),
+        _ => None,
+    }
+}
+
+fn buffer_session_live_event(ui: &mut FullscreenUi<'_>, session_id: &str, event: RunStreamEvent) {
+    if session_live_event_ends_backlog(&event) {
+        ui.session_live_event_backlog.remove(session_id);
+        return;
+    }
+    let backlog = ui
+        .session_live_event_backlog
+        .entry(session_id.to_string())
+        .or_default();
+    backlog.push(event);
+    const MAX_SESSION_LIVE_BACKLOG_EVENTS: usize = 500;
+    if backlog.len() > MAX_SESSION_LIVE_BACKLOG_EVENTS {
+        let drain = backlog.len() - MAX_SESSION_LIVE_BACKLOG_EVENTS;
+        backlog.drain(0..drain);
+    }
+}
+
+fn session_live_event_ends_backlog(event: &RunStreamEvent) -> bool {
+    match event {
+        RunStreamEvent::Event(value) => matches!(
+            value.get("type").and_then(Value::as_str),
+            Some("message_end") | Some("agent_end") | Some("run_end")
+        ),
+        RunStreamEvent::Scoped { event, .. } => session_live_event_ends_backlog(event),
         _ => false,
     }
 }

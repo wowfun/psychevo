@@ -74,6 +74,7 @@ async fn running_status_line_shows_spinner_elapsed_and_esc_hint() {
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
+        session_id: None,
         control,
         rx,
         task: RunningTask::Agent(task),
@@ -109,6 +110,7 @@ async fn status_line_elapsed_survives_run_and_tool_phase_changes() {
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
+        session_id: None,
         control,
         rx,
         task: RunningTask::Agent(task),
@@ -192,6 +194,7 @@ async fn esc_interrupts_running_turn_without_transcript_row() {
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
+        session_id: None,
         control,
         rx,
         task: RunningTask::Agent(task),
@@ -230,6 +233,7 @@ async fn esc_dismisses_slash_menu_before_interrupting_running_turn() {
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
+        session_id: None,
         control,
         rx,
         task: RunningTask::Agent(task),
@@ -384,17 +388,11 @@ fn user_shell_transcript_row_uses_prompt_surface_command_line() {
         "!"
     );
     assert_eq!(
-        buffer
-            .cell((0, command_y))
-            .expect("user shell marker")
-            .fg,
+        buffer.cell((0, command_y)).expect("user shell marker").fg,
         TUI_CYAN
     );
     assert_eq!(
-        buffer
-            .cell((0, command_y))
-            .expect("user shell marker")
-            .bg,
+        buffer.cell((0, command_y)).expect("user shell marker").bg,
         TUI_SURFACE_BG
     );
     assert_eq!(
@@ -463,6 +461,7 @@ async fn fullscreen_user_shell_during_agent_turn_waits_for_run_start_then_starts
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
+        session_id: None,
         control,
         rx,
         task: RunningTask::Agent(task),
@@ -533,6 +532,7 @@ async fn auxiliary_user_shell_missing_config_does_not_execute_marker_command() {
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
+        session_id: None,
         control,
         rx,
         task: RunningTask::Agent(task),

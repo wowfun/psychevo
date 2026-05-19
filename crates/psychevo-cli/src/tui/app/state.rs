@@ -14,6 +14,7 @@ struct TuiApp {
     current_variant: Option<String>,
     selected_model: Option<ConfiguredModel>,
     current_mode: RunMode,
+    current_permission_mode: PermissionMode,
     startup_agent: Option<String>,
     current_agent: Option<String>,
     current_agent_explicit_default: bool,
@@ -31,6 +32,7 @@ struct TuiApp {
     clipboard_result_tx: std::sync::mpsc::Sender<Result<(), String>>,
     clipboard_result_rx: std::sync::mpsc::Receiver<Result<(), String>>,
     clipboard_copies_in_flight: usize,
+    slash_config: EffectiveSlashConfig,
 }
 
 impl TuiApp {
@@ -61,13 +63,18 @@ impl TuiApp {
     }
 
     fn slash_items(&self) -> Vec<SlashMenuItem> {
-        let mut items = base_slash_menu_items();
+        let mut items = configured_slash_menu_items(&self.slash_config);
         if let Some(catalog) = self.current_skill_catalog() {
             for skill in catalog.skills {
+                let command = format!("/skill:{}", skill.name);
                 items.push(SlashMenuItem {
-                    command: format!("/skill:{}", skill.name),
+                    command: command.clone(),
                     description: skill.description,
                     upcoming: false,
+                    aliases: Vec::new(),
+                    replacement: command.clone(),
+                    completion: command,
+                    configured_alias: false,
                 });
             }
         }

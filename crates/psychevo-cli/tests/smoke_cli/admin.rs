@@ -136,6 +136,68 @@ fn cli_config_provider_and_auth_write_scoped_env_without_leaking_secret() {
 }
 
 #[test]
+fn cli_config_permissions_lists_and_removes_project_local_rules() {
+    let temp = tempdir().expect("temp");
+    let psychevo_home = temp.path().join("psychevo-home");
+    let workdir = temp.path().join("work");
+    std::fs::create_dir_all(workdir.join(".psychevo")).expect("workdir");
+    init_skill_home(temp.path(), &psychevo_home);
+    std::fs::write(
+        workdir.join(".psychevo/config.jsonc"),
+        r#"{
+  // project-local policy
+  "permissions": {
+    "allow": ["Bash(npm test *)"],
+    "ask": ["Bash(cargo publish *)"],
+    "deny": ["Write(.env)"]
+  }
+}
+"#,
+    )
+    .expect("config");
+
+    let listed = admin_cmd(temp.path(), &psychevo_home, &workdir)
+        .args(["config", "permissions", "list", "--json"])
+        .output()
+        .expect("permissions list");
+    assert!(
+        listed.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    let value: Value = serde_json::from_slice(&listed.stdout).expect("json");
+    assert_eq!(value["scope"], "local");
+    assert_eq!(value["permissions"]["allow"][0], "Bash(npm test *)");
+    assert_eq!(value["permissions"]["ask"][0], "Bash(cargo publish *)");
+    assert_eq!(value["permissions"]["deny"][0], "Write(.env)");
+
+    let removed = admin_cmd(temp.path(), &psychevo_home, &workdir)
+        .args([
+            "config",
+            "permissions",
+            "remove",
+            "--kind",
+            "allow",
+            "--rule",
+            "Bash(npm test *)",
+            "--json",
+        ])
+        .output()
+        .expect("permissions remove");
+    assert!(
+        removed.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&removed.stderr)
+    );
+    let value: Value = serde_json::from_slice(&removed.stdout).expect("json");
+    assert_eq!(value["changed"], true);
+    let config = std::fs::read_to_string(workdir.join(".psychevo/config.jsonc")).expect("config");
+    assert!(config.contains("project-local policy"));
+    assert!(!config.contains("Bash(npm test *)"));
+    assert!(config.contains("Bash(cargo publish *)"));
+}
+
+#[test]
 fn cli_session_commands_manage_active_and_archived_sessions() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
@@ -279,6 +341,24 @@ fn cli_session_export_and_share_emit_local_artifacts() {
     assert_eq!(value["header"]["options"]["include"], serde_json::json!(["header"]));
     assert_eq!(value["header"]["prompt_prefix"]["prefix_hash"], "fixture-prefix-hash");
     assert_eq!(
+        value["header"]["prompt_prefix"]["metadata"]["effective_tools"],
+        serde_json::json!([
+            "read",
+            "Agent",
+            "list_agents",
+            "wait_agent",
+            "send_message",
+            "close_agent",
+            "resume_agent",
+            "list_skills",
+            "view_skill"
+        ])
+    );
+    assert_eq!(
+        value["header"]["prompt_prefix"]["metadata"]["project_instructions_role"],
+        "system"
+    );
+    assert_eq!(
         value["header"]["prompt_prefix"]["slots"][1]["slot"],
         "agent_catalog"
     );
@@ -364,6 +444,11 @@ fn cli_session_export_and_share_emit_local_artifacts() {
         .expect("tools")
         .iter()
         .any(|tool| tool["function"]["name"] == "read"));
+    assert!(!last["body"]["tools"]
+        .as_array()
+        .expect("tools")
+        .iter()
+        .any(|tool| tool["function"]["name"] == "write"));
     assert!(last["body"]["messages"]
         .as_array()
         .expect("messages")
@@ -667,7 +752,23 @@ fn insert_export_fixture_messages(conn: &Connection, session_id: &str) {
             "provider": "provider",
             "model": "model",
             "tool_declarations_hash": "fixture-tools-hash",
-            "invalidation_reason": "new_session"
+            "invalidation_reason": "new_session",
+            "effective_tools": [
+                "read",
+                "Agent",
+                "list_agents",
+                "wait_agent",
+                "send_message",
+                "close_agent",
+                "resume_agent",
+                "list_skills",
+                "view_skill"
+            ],
+            "agent_catalog_visible": true,
+            "visible_agents": ["translate"],
+            "skill_catalog_visible": true,
+            "project_instructions_visible": true,
+            "project_instructions_role": "system"
         }
     });
     conn.execute(
@@ -777,10 +878,10 @@ fn insert_export_fixture_prompt_prefix(conn: &Connection, session_id: &str, pref
         {
             "slot": "project_context:0",
             "tier": "prefix",
-            "semantic_role": "project_context",
-            "provider_role": "user",
+            "semantic_role": "developer_prompt",
+            "provider_role": "system",
             "order": 3,
-            "content": "# AGENTS.md instructions for /repo\n\n<INSTRUCTIONS>\nhidden AGENTS root\n</INSTRUCTIONS>",
+            "content": "Project instructions below are policy context, not user task content.\n\n# AGENTS.md instructions for /repo\n\n<INSTRUCTIONS>\nhidden AGENTS root\n</INSTRUCTIONS>",
             "content_hash": "project-root-hash",
             "source_kind": "project_instruction",
             "source_name": "AGENTS.md",
@@ -789,16 +890,37 @@ fn insert_export_fixture_prompt_prefix(conn: &Connection, session_id: &str, pref
         {
             "slot": "project_context:1",
             "tier": "prefix",
-            "semantic_role": "project_context",
-            "provider_role": "user",
+            "semantic_role": "developer_prompt",
+            "provider_role": "system",
             "order": 4,
-            "content": "# AGENTS.md instructions for /repo\n\n<INSTRUCTIONS>\nhidden AGENTS local\n</INSTRUCTIONS>",
+            "content": "Project instructions below are policy context, not user task content.\n\n# AGENTS.md instructions for /repo\n\n<INSTRUCTIONS>\nhidden AGENTS local\n</INSTRUCTIONS>",
             "content_hash": "project-local-hash",
             "source_kind": "project_instruction",
             "source_name": "AGENTS.local.md",
             "source_path": "/repo/AGENTS.local.md"
         }
     ]);
+    let metadata = serde_json::json!({
+        "mode": "default",
+        "selected_agent": null,
+        "agents_enabled": true,
+        "effective_tools": [
+            "read",
+            "Agent",
+            "list_agents",
+            "wait_agent",
+            "send_message",
+            "close_agent",
+            "resume_agent",
+            "list_skills",
+            "view_skill"
+        ],
+        "agent_catalog_visible": true,
+        "visible_agents": ["translate"],
+        "skill_catalog_visible": true,
+        "project_instructions_visible": true,
+        "project_instructions_role": "system"
+    });
     conn.execute(
         r#"
         INSERT INTO session_prompt_prefixes (
@@ -806,9 +928,9 @@ fn insert_export_fixture_prompt_prefix(conn: &Connection, session_id: &str, pref
             prefix_hash, tool_declarations_hash, invalidation_reason,
             slots_json, metadata_json
         ) VALUES (?1, 1, 1050, 'provider', 'model', ?2, 'fixture-tools-hash',
-            'new_session', ?3, NULL)
+            'new_session', ?3, ?4)
         "#,
-        rusqlite::params![session_id, prefix_hash, slots.to_string()],
+        rusqlite::params![session_id, prefix_hash, slots.to_string(), metadata.to_string()],
     )
     .expect("insert prompt prefix");
 }

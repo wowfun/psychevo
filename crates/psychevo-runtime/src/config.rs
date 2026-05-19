@@ -9,15 +9,17 @@ use serde_json::{Value, json};
 use crate::error::{Error, Result};
 use crate::paths::canonical_workdir;
 use crate::types::{
-    ConfigScope, ConfiguredModel, CustomProviderInput, CustomProviderResult, ModelCapabilities,
-    ModelCatalogEntry, ModelCatalogProvider, ModelCost, ModelCostTier, ModelLimits, ModelMetadata,
-    ModelMetadataCacheTarget, RunOptions, ScopedCustomProviderInput,
+    ApprovalMode, ConfigScope, ConfiguredModel, CustomProviderInput, CustomProviderResult,
+    ModelCapabilities, ModelCatalogEntry, ModelCatalogProvider, ModelCost, ModelCostTier,
+    ModelLimits, ModelMetadata, ModelMetadataCacheTarget, PermissionConfig, PermissionMode,
+    RunOptions, ScopedCustomProviderInput,
 };
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct RunConfig {
     model: ModelSelection,
     provider: BTreeMap<String, ConfigProviderEntry>,
+    pub(crate) permissions: PermissionConfig,
 }
 
 // Configuration internals are split by loading, parsing, resolution, and catalog concerns.
@@ -30,3 +32,4 @@ include!("config/catalog_helpers.rs");
 include!("config/models.rs");
 include!("config/custom_provider.rs");
 include!("config/cli_views.rs");
+include!("config/permissions.rs");

@@ -1,5 +1,6 @@
+#[cfg(test)]
 fn slash_completion(input: &str) -> Option<String> {
-    slash_completion_with_items(input, &base_slash_menu_items())
+    slash_completion_with_items(input, &crate::tui::slash::base_slash_menu_items())
 }
 
 fn slash_completion_with_items(input: &str, items: &[SlashMenuItem]) -> Option<String> {
@@ -18,11 +19,15 @@ fn slash_completion_with_items(input: &str, items: &[SlashMenuItem]) -> Option<S
     }
     let commands = items
         .iter()
-        .map(|item| item.command.as_str())
+        .map(|item| item.completion.as_str())
         .collect::<Vec<_>>();
     let common = common_prefix(&commands);
     let completed = if common.len() > typed.len() {
         common
+    } else if let Some(item) = items.first().filter(|item| item.configured_alias)
+        && item.completion.len() > typed.len()
+    {
+        item.completion.clone()
     } else if commands.contains(&typed) || commands.len() > 1 {
         return None;
     } else {
@@ -42,7 +47,7 @@ fn selected_slash_menu_command_with_items(
     let typed = input.trim_start();
     slash_menu_items_from(typed, items)
         .get(selected_index)
-        .map(|item| item.command.clone())
+        .map(|item| item.replacement.clone())
 }
 
 fn should_submit_typed_slash(input: &str) -> bool {

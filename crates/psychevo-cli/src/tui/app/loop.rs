@@ -362,6 +362,9 @@ impl TuiApp {
                 _ => {}
             }
         }
+        if let Some(should_quit) = self.handle_slash_shortcut_key(ui, key).await? {
+            return Ok(should_quit);
+        }
         let slash_input = textarea_text(&ui.textarea);
         let slash_count = if ui.shell_mode
             || ui.current_file_token().is_some()
@@ -454,6 +457,7 @@ impl TuiApp {
                     ui.composer_submission_text()
                 } else if parse_shell_escape_input(&line).is_some()
                     || should_submit_typed_slash(&line)
+                    || self.slash_config.is_configured_alias_token(&line)
                 {
                     line.clone()
                 } else {
@@ -491,7 +495,7 @@ impl TuiApp {
             }
             KeyCode::Tab => {
                 if !ui.shell_mode {
-                    ui.complete_slash_command();
+                    ui.complete_slash_command(&self.slash_items());
                 }
             }
             KeyCode::Char('1')
@@ -561,6 +565,63 @@ impl TuiApp {
         Ok(false)
     }
 
+    async fn handle_slash_shortcut_key(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        key: KeyEvent,
+    ) -> Result<Option<bool>> {
+        if !self.slash_shortcuts_active(ui) {
+            ui.pending_leader_started = None;
+            return Ok(None);
+        }
+        let leader_pending = ui
+            .pending_leader_started
+            .take()
+            .is_some_and(|started| started.elapsed() <= self.slash_config.leader_timeout());
+        match self.slash_config.shortcut_for_key(&key, leader_pending) {
+            Some(SlashShortcutMatch::LeaderPrefix) => {
+                ui.pending_leader_started = Some(Instant::now());
+                Ok(Some(false))
+            }
+            Some(SlashShortcutMatch::Command(command_line)) => {
+                let should_quit = match parse_slash_command_with_config(
+                    &command_line,
+                    &self.slash_config,
+                ) {
+                    Ok(Some(command)) => {
+                        self.handle_fullscreen_command_with_echo(ui, command, Some(command_line))
+                            .await?
+                    }
+                    Ok(None) => false,
+                    Err(err) => {
+                        ui.push_command_result(
+                            normalize_submitted_slash_echo(&command_line),
+                            None,
+                            format!("error: {err:#}"),
+                            true,
+                        );
+                        false
+                    }
+                };
+                Ok(Some(should_quit))
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn slash_shortcuts_active(&self, ui: &FullscreenUi<'_>) -> bool {
+        ui.focus == FocusMode::Composer
+            && ui.bottom_panel.is_none()
+            && !ui.history_search
+            && !ui.shell_mode
+            && ui.selection.anchor.is_none()
+            && !ui.agent_popup_visible()
+            && !ui.file_popup_visible()
+            && !ui.skill_popup_visible()
+            && textarea_text(&ui.textarea).trim().is_empty()
+            && ui.pending_images.is_empty()
+    }
+
     async fn handle_fullscreen_mouse(
         &mut self,
         ui: &mut FullscreenUi<'_>,
@@ -624,7 +685,7 @@ impl TuiApp {
                         ui.close_agent_popup();
                         ui.close_skill_popup();
                         ui.push_submitted_history(submitted.clone());
-                        match parse_slash_command(&submitted) {
+                    match parse_slash_command_with_config(&submitted, &self.slash_config) {
                             Ok(Some(command)) => {
                                 return self
                                     .handle_fullscreen_command_with_echo(

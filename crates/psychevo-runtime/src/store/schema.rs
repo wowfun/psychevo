@@ -21,6 +21,7 @@ impl SqliteStore {
             && user_version != 6
             && user_version != 7
             && user_version != 8
+            && user_version != 9
         {
             return Err(Error::Config(format!(
                 "state database schema version {user_version} is not supported; run `pevo init --reset-state` or set PSYCHEVO_DB to a new state database"
@@ -124,12 +125,31 @@ impl SqliteStore {
                 metadata_json TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS agent_mailbox_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                parent_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                child_session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+                agent_id TEXT NOT NULL,
+                task_name TEXT,
+                agent_name TEXT NOT NULL,
+                created_at_ms INTEGER NOT NULL,
+                delivered_at_ms INTEGER,
+                delivered_prompt_session_seq INTEGER,
+                delivered_after_session_seq INTEGER,
+                delivered_tool_call_id TEXT,
+                content_text TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                metadata_json TEXT
+            );
+
             CREATE INDEX IF NOT EXISTS idx_messages_session_seq
                 ON messages(session_id, session_seq);
             CREATE INDEX IF NOT EXISTS idx_context_evidence_prompt
                 ON context_evidence(session_id, prompt_session_seq, context_seq);
             CREATE INDEX IF NOT EXISTS idx_agent_edges_parent
                 ON agent_edges(parent_session_id, status, updated_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_agent_mailbox_parent_pending
+                ON agent_mailbox_events(parent_session_id, delivered_at_ms, created_at_ms);
             "#,
         )?;
         if user_version == 3 && !sqlite_column_exists(&conn, "sessions", "archived_at_ms")? {
@@ -169,5 +189,4 @@ impl SqliteStore {
             conn: Arc::new(Mutex::new(conn)),
         })
     }
-
 }

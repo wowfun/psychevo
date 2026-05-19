@@ -29,6 +29,7 @@ impl TuiApp {
                 ui.push_command_result(command_echo, None, self.status_text(), false);
             }
             SlashCommand::New => {
+                self.detach_running_for_session_switch(ui, None);
                 self.current_session = None;
                 self.current_session_title = None;
                 self.force_new_once = true;
@@ -71,7 +72,10 @@ impl TuiApp {
                     ui.push_command_result(
                         command_echo,
                         None,
-                        format!("reloaded context: {} v{}", result.prefix_hash, result.version),
+                        format!(
+                            "reloaded context: {} v{}",
+                            result.prefix_hash, result.version
+                        ),
                         false,
                     );
                     ui.refresh_sidebar(self);
@@ -102,6 +106,9 @@ impl TuiApp {
             SlashCommand::ModeSet(mode) => {
                 self.set_mode_no_print(&mode)?;
                 ui.refresh_sidebar(self);
+            }
+            SlashCommand::Permissions => {
+                ui.push_command_result(command_echo, None, self.permissions_status_text()?, false);
             }
             SlashCommand::ThinkingToggle => {
                 let enabled = !self.thinking_visible;
@@ -278,7 +285,7 @@ impl TuiApp {
             }
         }
         let slash_command = if should_parse_slash_command_input(&text) {
-            parse_slash_command(&text)
+            parse_slash_command_with_config(&text, &self.slash_config)
         } else {
             Ok(None)
         };
@@ -313,6 +320,7 @@ impl TuiApp {
         let prompt = prompt_without_image_placeholders(&display_prompt, &images);
         if ui.running.is_some() {
             ui.queued_inputs.push_back(QueuedInput::Prompt {
+                session_id: self.current_session.clone(),
                 prompt,
                 display_prompt,
                 images,
@@ -350,7 +358,10 @@ impl TuiApp {
             return self.start_auxiliary_fullscreen_shell(ui, command);
         }
         if ui.running.is_some() {
-            ui.queued_inputs.push_back(QueuedInput::Shell(command));
+            ui.queued_inputs.push_back(QueuedInput::Shell {
+                session_id: self.current_session.clone(),
+                command,
+            });
             return Ok(());
         }
         self.start_fullscreen_shell(ui, command)
@@ -358,16 +369,25 @@ impl TuiApp {
 
     fn start_next_queued_input(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
         while ui.running.is_none() {
-            let Some(next) = ui.queued_inputs.pop_front() else {
+            let Some(index) =
+                ui.queued_inputs
+                    .iter()
+                    .position(|input| match queued_input_session_id(input) {
+                        Some(session_id) => Some(session_id) == self.current_session.as_deref(),
+                        None => true,
+                    })
+            else {
                 break;
             };
+            let next = ui.queued_inputs.remove(index).expect("queued input index");
             match next {
                 QueuedInput::Prompt {
                     prompt,
                     display_prompt,
                     images,
+                    ..
                 } => self.start_fullscreen_turn(ui, prompt, display_prompt, images)?,
-                QueuedInput::Shell(command) => self.start_fullscreen_shell(ui, command)?,
+                QueuedInput::Shell { command, .. } => self.start_fullscreen_shell(ui, command)?,
             }
         }
         Ok(())
@@ -382,7 +402,7 @@ impl TuiApp {
             return Ok(false);
         }
         let slash_command = if should_parse_slash_command_input(line) {
-            parse_slash_command(line)
+            parse_slash_command_with_config(line, &self.slash_config)
         } else {
             Ok(None)
         };
@@ -455,12 +475,19 @@ impl TuiApp {
                     invalidation_reason: "manual_reload".to_string(),
                     notice: None,
                 })?;
-                println!("reloaded context: {} v{}", result.prefix_hash, result.version);
+                println!(
+                    "reloaded context: {} v{}",
+                    result.prefix_hash, result.version
+                );
                 Ok(())
             }
             SlashCommand::ModelShow => self.show_model(),
             SlashCommand::VariantSet(variant) => self.set_variant(variant),
             SlashCommand::ModeSet(mode) => self.set_mode(mode),
+            SlashCommand::Permissions => {
+                println!("{}", self.permissions_status_text()?);
+                Ok(())
+            }
             SlashCommand::ThinkingToggle => self.toggle_thinking(),
             SlashCommand::ThinkingSet(enabled) => self.set_thinking(enabled),
             SlashCommand::RawToggle => self.toggle_raw(),
@@ -534,6 +561,36 @@ impl TuiApp {
             .join("\n")
     }
 
+    fn permissions_status_text(&self) -> Result<String> {
+        let options = self.run_options(String::new());
+        let value = permission_rules_value(&options, ConfigScope::Local)?;
+        let permissions = &value["permissions"];
+        let mut lines = vec![
+            format!("mode: {}", self.current_mode.as_str()),
+            format!("permission_mode: {}", self.current_permission_mode.as_str()),
+            format!(
+                "approval_mode: {}",
+                permissions["approval_mode"].as_str().unwrap_or("manual")
+            ),
+            format!(
+                "path: {}",
+                value["path"].as_str().unwrap_or(".psychevo/config.jsonc")
+            ),
+        ];
+        for kind in ["allow", "ask", "deny"] {
+            lines.push(format!("{kind}:"));
+            let rules = permissions[kind].as_array().cloned().unwrap_or_default();
+            if rules.is_empty() {
+                lines.push("  (none)".to_string());
+            } else {
+                for rule in rules {
+                    lines.push(format!("  {}", rule.as_str().unwrap_or("-")));
+                }
+            }
+        }
+        Ok(lines.join("\n"))
+    }
+
     fn agents_status_text(&self) -> String {
         let Some(catalog) = self.current_agent_catalog() else {
             return "Agents disabled.".to_string();
@@ -589,11 +646,14 @@ impl TuiApp {
     }
 
     fn help_status_text(&self) -> String {
-        format_slash_help(self.current_skill_count())
+        format_slash_help_with_config(self.current_skill_count(), &self.slash_config)
     }
 
     fn help_panel(&self) -> HelpPanel {
-        HelpPanel::new(self.current_skill_count())
+        HelpPanel::new(slash_help_sections_with_config(
+            self.current_skill_count(),
+            &self.slash_config,
+        ))
     }
 
     fn current_skill_count(&self) -> Option<usize> {
@@ -830,6 +890,7 @@ impl TuiApp {
     ) -> Result<()> {
         if ui.running.is_some() {
             ui.queued_inputs.push_back(QueuedInput::Prompt {
+                session_id: self.current_session.clone(),
                 prompt,
                 display_prompt,
                 images,
@@ -858,6 +919,7 @@ impl TuiApp {
         });
         ui.scroll_to_bottom();
         ui.running = Some(RunningTurn {
+            session_id: self.current_session.clone(),
             control: control_handle,
             rx,
             task: RunningTask::Agent(task),
@@ -869,7 +931,10 @@ impl TuiApp {
 
     fn start_fullscreen_shell(&mut self, ui: &mut FullscreenUi<'_>, command: String) -> Result<()> {
         if ui.running.is_some() {
-            ui.queued_inputs.push_back(QueuedInput::Shell(command));
+            ui.queued_inputs.push_back(QueuedInput::Shell {
+                session_id: self.current_session.clone(),
+                command,
+            });
             return Ok(());
         }
         if command.trim().is_empty() {
@@ -892,6 +957,7 @@ impl TuiApp {
         });
         ui.scroll_to_bottom();
         ui.running = Some(RunningTurn {
+            session_id: self.current_session.clone(),
             control: control_handle,
             rx,
             task: RunningTask::UserShell(task),
@@ -929,6 +995,7 @@ impl TuiApp {
         });
         ui.scroll_to_bottom();
         ui.auxiliary_shell_tasks.push(AuxiliaryShellTask {
+            session_id: self.current_session.clone(),
             control: control_handle,
             rx,
             task,
@@ -978,6 +1045,7 @@ fn slash_command_echo(command: &SlashCommand) -> String {
         SlashCommand::ModelShow => "/model".to_string(),
         SlashCommand::VariantSet(variant) => format!("/variant {variant}"),
         SlashCommand::ModeSet(mode) => format!("/mode {mode}"),
+        SlashCommand::Permissions => "/permissions".to_string(),
         SlashCommand::ThinkingToggle => "/show-thinking".to_string(),
         SlashCommand::ThinkingSet(enabled) => {
             format!("/show-thinking {}", if *enabled { "on" } else { "off" })

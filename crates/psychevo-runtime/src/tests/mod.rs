@@ -43,6 +43,9 @@ fn base_options(temp: &tempfile::TempDir) -> RunOptions {
         reasoning_effort: None,
         include_reasoning: false,
         mode: RunMode::Build,
+        permission_mode: None,
+        approval_mode: None,
+        approval_handler: None,
         inherited_env: Some(BTreeMap::from([(
             "HOME".to_string(),
             temp.path().to_string_lossy().to_string(),

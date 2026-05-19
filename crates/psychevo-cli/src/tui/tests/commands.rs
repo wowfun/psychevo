@@ -15,7 +15,9 @@ async fn mode_slash_command_requires_value() {
         row.kind == TranscriptKind::Command
             && row.title == "/mode"
             && row.failed
-            && row.text.contains("error: usage: /mode <plan|default>")
+            && row.text.contains(
+                "error: usage: /mode <plan|default|acceptEdits|dontAsk|bypassPermissions>",
+            )
     }));
 }
 
@@ -173,6 +175,103 @@ async fn ctrl_o_copies_latest_answer_raw_markdown() {
 }
 
 #[tokio::test]
+async fn configured_slash_alias_and_leader_shortcut_dispatch_commands() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    app.slash_config = parse_effective_slash_config(&serde_json::json!({
+        "tui": {
+            "slash_aliases": {
+                "/status": ["/expr"]
+            },
+            "slash_keybinds": {
+                "/status": "<leader>s"
+            }
+        }
+    }))
+    .expect("slash config");
+    let mut ui = FullscreenUi::new(&app);
+    let matches = app.slash_menu_items("/ex");
+    assert_eq!(matches[0].command, "/expr");
+    assert!(
+        matches[0]
+            .description
+            .contains("alias for /status")
+    );
+
+    ui.textarea = textarea_with_text("/ex");
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+        .await
+        .expect("alias tab");
+    assert_eq!(textarea_text(&ui.textarea), "/expr");
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .expect("alias enter");
+
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command
+            && row.title == "/expr"
+            && row.text.contains("workdir:")
+    }));
+
+    let mut ui = FullscreenUi::new(&app);
+    app.handle_fullscreen_key(
+        &mut ui,
+        KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL),
+    )
+    .await
+    .expect("leader");
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE))
+        .await
+        .expect("leader command");
+
+    assert!(ui.history.is_empty());
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command
+            && row.title == "/status"
+            && row.text.contains("workdir:")
+    }));
+}
+
+#[tokio::test]
+async fn configured_slash_shortcuts_do_not_fire_while_editing_or_in_panel() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    app.slash_config = parse_effective_slash_config(&serde_json::json!({
+        "tui": {
+            "slash_keybinds": {
+                "/status": ["<leader>s", "alt+s"]
+            }
+        }
+    }))
+    .expect("slash config");
+    let mut ui = FullscreenUi::new(&app);
+    ui.textarea = textarea_with_text("draft");
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Char('s'), KeyModifiers::ALT))
+        .await
+        .expect("shortcut while editing");
+
+    assert!(ui.transcript.is_empty());
+    assert_eq!(textarea_text(&ui.textarea), "draft");
+
+    let mut ui = FullscreenUi::new(&app);
+    ui.bottom_panel = Some(BottomPanel::Help(app.help_panel()));
+    app.handle_fullscreen_key(
+        &mut ui,
+        KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL),
+    )
+    .await
+    .expect("leader in panel");
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE))
+        .await
+        .expect("s in panel");
+
+    assert!(ui.transcript.is_empty());
+    assert!(matches!(ui.bottom_panel, Some(BottomPanel::Help(_))));
+}
+
+#[tokio::test]
 async fn fullscreen_status_uses_single_multiline_command_row() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
@@ -210,7 +309,12 @@ async fn fullscreen_help_command_opens_bottom_help_panel() {
         panic!("help panel missing");
     };
     assert_eq!(panel.tab, HelpTab::General);
-    assert_eq!(panel.skill_count, Some(0));
+    assert!(
+        panel
+            .sections
+            .custom_commands
+            .contains(&"No custom commands available".to_string())
+    );
     assert!(ui.transcript.is_empty());
 
     let text = app.help_status_text();
@@ -226,6 +330,42 @@ async fn fullscreen_help_command_opens_bottom_help_panel() {
     assert!(text.contains("last-provider-request can expose hidden prompts"));
     assert!(text.contains("No custom commands available"));
     assert!(!text.contains("pevo run"));
+}
+
+#[tokio::test]
+async fn fullscreen_help_custom_commands_show_configured_slash_targets() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    app.slash_config = parse_effective_slash_config(&serde_json::json!({
+        "tui": {
+            "leader_key": "ctrl+x",
+            "slash_aliases": {
+                "/export -i lpr -f json": ["/expr"]
+            },
+            "slash_keybinds": {
+                "/export -i lpr -f json": "<leader>e"
+            }
+        }
+    }))
+    .expect("slash config");
+    let mut ui = FullscreenUi::new(&app);
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Help)
+        .await
+        .expect("help");
+
+    let Some(BottomPanel::Help(panel)) = &ui.bottom_panel else {
+        panic!("help panel missing");
+    };
+    assert!(panel.sections.custom_commands.iter().any(|row| {
+        row == "/export -i lpr -f json - write session export (aliases: /expr) (shortcuts: <leader>e)"
+    }));
+    assert!(
+        !panel
+            .sections
+            .custom_commands
+            .contains(&"No custom commands available".to_string())
+    );
 }
 
 #[tokio::test]

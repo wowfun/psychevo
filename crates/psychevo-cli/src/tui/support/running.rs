@@ -1,10 +1,12 @@
 struct RunningTurn {
+    session_id: Option<String>,
     control: RunControlHandle,
     rx: mpsc::UnboundedReceiver<RunStreamEvent>,
     task: RunningTask,
 }
 
 struct AuxiliaryShellTask {
+    session_id: Option<String>,
     control: RunControlHandle,
     rx: mpsc::UnboundedReceiver<RunStreamEvent>,
     task: JoinHandle<psychevo_runtime::Result<psychevo_runtime::UserShellResult>>,
@@ -13,6 +15,7 @@ struct AuxiliaryShellTask {
 struct AuxiliaryAgentTask {
     session_id: Option<String>,
     child_session_id: Option<String>,
+    visible_live: bool,
     control: RunControlHandle,
     rx: mpsc::UnboundedReceiver<RunStreamEvent>,
     task: JoinHandle<psychevo_runtime::Result<psychevo_runtime::RunResult>>,
@@ -60,17 +63,29 @@ impl RunningTask {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum QueuedInput {
     Prompt {
+        session_id: Option<String>,
         prompt: String,
         display_prompt: String,
         images: Vec<PendingImageAttachment>,
     },
-    Shell(String),
+    Shell {
+        session_id: Option<String>,
+        command: String,
+    },
+}
+
+fn queued_input_session_id(input: &QueuedInput) -> Option<&str> {
+    match input {
+        QueuedInput::Prompt { session_id, .. } | QueuedInput::Shell { session_id, .. } => {
+            session_id.as_deref()
+        }
+    }
 }
 
 fn queued_input_text(input: QueuedInput) -> String {
     match input {
         QueuedInput::Prompt { display_prompt, .. } => display_prompt,
-        QueuedInput::Shell(command) => format!("!{command}"),
+        QueuedInput::Shell { command, .. } => format!("!{command}"),
     }
 }
 

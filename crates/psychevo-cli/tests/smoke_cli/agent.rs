@@ -62,3 +62,47 @@ fn cli_agent_inspect_json_includes_identity_and_depth() {
     assert_eq!(body["parent_session"]["id"], parent);
     assert_eq!(body["child_session"]["id"], child);
 }
+
+#[test]
+fn cli_agent_validate_json_reports_effective_empty_tools_policy() {
+    let temp = tempdir().expect("temp");
+    let psychevo_home = init_tui_home(temp.path());
+    let agents_dir = psychevo_home.join("agents");
+    std::fs::create_dir_all(&agents_dir).expect("agents dir");
+    std::fs::write(
+        agents_dir.join("translate.md"),
+        "---\nname: translate\ndescription: Translate only\ntools: []\n---\nTranslate.\n",
+    )
+    .expect("agent");
+
+    let output = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &psychevo_home)
+        .args(["agent", "validate", "translate", "--json"])
+        .output()
+        .expect("pevo agent validate");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let body: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json");
+    assert_eq!(body["valid"], true);
+    assert_eq!(body["agent"]["tool_policy"]["tools"], serde_json::json!([]));
+    assert_eq!(
+        body["agent"]["effective_policy"]["tools"]["mode"],
+        "explicit_empty"
+    );
+    assert_eq!(
+        body["agent"]["effective_policy"]["agent_catalog"]["visible"],
+        false
+    );
+    assert_eq!(
+        body["agent"]["effective_policy"]["skill_catalog"]["visible"],
+        false
+    );
+    assert_eq!(
+        body["agent"]["effective_policy"]["project_instructions"]["visible"],
+        true
+    );
+}

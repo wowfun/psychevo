@@ -20,7 +20,7 @@ use crate::types::{
     TuiMessageSummary,
 };
 
-const SQLITE_SCHEMA_VERSION: i64 = 9;
+const SQLITE_SCHEMA_VERSION: i64 = 10;
 const SESSION_REVERT_METADATA_KEY: &str = "revert";
 const MESSAGE_UNDO_METADATA_KEY: &str = "undo";
 const MESSAGE_PRE_SNAPSHOT_KEY: &str = "pre_snapshot";
@@ -97,6 +97,36 @@ pub struct PromptPrefixRecord {
     pub metadata: Option<Value>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentMailboxEventRecord {
+    pub id: i64,
+    pub parent_session_id: String,
+    pub child_session_id: Option<String>,
+    pub agent_id: String,
+    pub task_name: Option<String>,
+    pub agent_name: String,
+    pub created_at_ms: i64,
+    pub delivered_at_ms: Option<i64>,
+    pub delivered_prompt_session_seq: Option<i64>,
+    pub delivered_after_session_seq: Option<i64>,
+    pub delivered_tool_call_id: Option<String>,
+    pub content_text: String,
+    pub payload: Value,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentMailboxEventInput {
+    pub parent_session_id: String,
+    pub child_session_id: Option<String>,
+    pub agent_id: String,
+    pub task_name: Option<String>,
+    pub agent_name: String,
+    pub content_text: String,
+    pub payload: Value,
+    pub metadata: Option<Value>,
+}
+
 #[derive(Clone)]
 pub struct SqliteStore {
     conn: Arc<Mutex<Connection>>,
@@ -110,6 +140,7 @@ include!("store/messages.rs");
 include!("store/context_evidence.rs");
 include!("store/prompt_prefix.rs");
 include!("store/agents.rs");
+include!("store/agent_mailbox.rs");
 include!("store/lifecycle.rs");
 include!("store/retry.rs");
 include!("store/schema_helpers.rs");

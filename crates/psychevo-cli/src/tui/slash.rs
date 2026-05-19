@@ -1,7 +1,12 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::time::Duration;
+
 use anyhow::{Result, anyhow};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use psychevo_runtime::{
     SessionArtifactKind, SessionExportFormat, SessionExportIncludeSet, split_image_source_argument,
 };
+use serde_json::Value;
 
 use crate::command_registry::{
     CUSTOM_SKILL_COMMAND, CommandArgumentKind, CommandGroup, CommandStatus, CommandSurface,
@@ -35,6 +40,7 @@ pub(crate) enum SlashCommand {
     ModelShow,
     VariantSet(String),
     ModeSet(String),
+    Permissions,
     ThinkingToggle,
     ThinkingSet(bool),
     RawToggle,
@@ -71,6 +77,17 @@ pub(crate) struct SlashMenuItem {
     pub(crate) command: String,
     pub(crate) description: String,
     pub(crate) upcoming: bool,
+    pub(crate) aliases: Vec<SlashMenuAlias>,
+    pub(crate) replacement: String,
+    pub(crate) completion: String,
+    pub(crate) configured_alias: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SlashMenuAlias {
+    pub(crate) alias: String,
+    pub(crate) replacement: String,
+    pub(crate) target: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,19 +97,191 @@ pub(crate) struct SlashHelpSections {
     pub(crate) custom_commands: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EffectiveSlashConfig {
+    aliases: BTreeMap<String, String>,
+    keybinds: Vec<SlashKeybind>,
+    leader_key: KeyChord,
+    leader_timeout: Duration,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SlashKeybind {
+    command: String,
+    sequence: SlashKeySequence,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SlashShortcutMatch {
+    LeaderPrefix,
+    Command(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SlashKeySequence {
+    Chord(KeyChord),
+    Leader(KeyChord),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct KeyChord {
+    code: KeyCode,
+    modifiers: KeyModifiers,
+    display: String,
+}
+
+const DEFAULT_LEADER_KEY: &str = "ctrl+x";
+const DEFAULT_LEADER_TIMEOUT_MS: u64 = 2000;
+const DYNAMIC_SKILL_PREFIX: &str = "/skill:";
+const OBSOLETE_SLASH_COMMAND_TOKENS: &[&str] = &["/models", "/thinking", "/raw", "/session"];
+
+impl Default for EffectiveSlashConfig {
+    fn default() -> Self {
+        Self {
+            aliases: BTreeMap::new(),
+            keybinds: Vec::new(),
+            leader_key: KeyChord {
+                code: KeyCode::Char('x'),
+                modifiers: KeyModifiers::CONTROL,
+                display: DEFAULT_LEADER_KEY.to_string(),
+            },
+            leader_timeout: Duration::from_millis(DEFAULT_LEADER_TIMEOUT_MS),
+        }
+    }
+}
+
+impl EffectiveSlashConfig {
+    pub(crate) fn leader_timeout(&self) -> Duration {
+        self.leader_timeout
+    }
+
+    pub(crate) fn shortcut_for_key(
+        &self,
+        key: &KeyEvent,
+        leader_pending: bool,
+    ) -> Option<SlashShortcutMatch> {
+        if leader_pending {
+            for keybind in &self.keybinds {
+                if let SlashKeySequence::Leader(chord) = &keybind.sequence
+                    && chord.matches(key)
+                {
+                    return Some(SlashShortcutMatch::Command(keybind.command.clone()));
+                }
+            }
+        }
+        if self.leader_key.matches(key) && self.keybinds.iter().any(SlashKeybind::uses_leader) {
+            return Some(SlashShortcutMatch::LeaderPrefix);
+        }
+        self.keybinds.iter().find_map(|keybind| {
+            if let SlashKeySequence::Chord(chord) = &keybind.sequence
+                && chord.matches(key)
+            {
+                return Some(SlashShortcutMatch::Command(keybind.command.clone()));
+            }
+            None
+        })
+    }
+
+    pub(crate) fn is_configured_alias_token(&self, line: &str) -> bool {
+        let trimmed = line.trim();
+        !trimmed.chars().any(char::is_whitespace) && self.aliases.contains_key(trimmed)
+    }
+
+    fn expand_alias_line(&self, line: &str) -> Option<String> {
+        let trimmed = line.trim();
+        let (command, rest) = split_command_token(trimmed);
+        let target = self.aliases.get(command)?;
+        let rest = rest.trim();
+        if rest.is_empty() {
+            Some(target.clone())
+        } else {
+            Some(format!("{target} {rest}"))
+        }
+    }
+
+    fn aliases_for(&self, canonical: &str) -> Vec<String> {
+        self.aliases
+            .iter()
+            .filter(|(_, target)| canonical_command_token(target).as_deref() == Some(canonical))
+            .map(|(alias, target)| {
+                if target.trim() == canonical {
+                    alias.clone()
+                } else {
+                    format!("{alias} -> {target}")
+                }
+            })
+            .collect()
+    }
+
+    fn shortcuts_for(&self, canonical: &str) -> Vec<String> {
+        self.keybinds
+            .iter()
+            .filter(|keybind| {
+                canonical_command_token(&keybind.command).as_deref() == Some(canonical)
+            })
+            .map(|keybind| {
+                if keybind.command.trim() == canonical {
+                    keybind.sequence.display()
+                } else {
+                    format!("{} -> {}", keybind.sequence.display(), keybind.command)
+                }
+            })
+            .collect()
+    }
+}
+
+impl SlashKeybind {
+    fn uses_leader(&self) -> bool {
+        matches!(self.sequence, SlashKeySequence::Leader(_))
+    }
+}
+
+impl SlashKeySequence {
+    fn display(&self) -> String {
+        match self {
+            Self::Chord(chord) => chord.display.clone(),
+            Self::Leader(chord) => format!("<leader>{}", chord.display),
+        }
+    }
+}
+
+impl KeyChord {
+    fn matches(&self, key: &KeyEvent) -> bool {
+        self.code == normalize_key_code(&key.code)
+            && self.modifiers == normalized_modifiers(key.modifiers)
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn base_slash_menu_items() -> Vec<SlashMenuItem> {
+    configured_slash_menu_items(&EffectiveSlashConfig::default())
+}
+
+pub(crate) fn configured_slash_menu_items(config: &EffectiveSlashConfig) -> Vec<SlashMenuItem> {
     SLASH_COMMANDS
         .iter()
         .map(|spec| SlashMenuItem {
             command: spec.canonical.to_string(),
             description: spec.summary.to_string(),
             upcoming: spec.status == CommandStatus::Upcoming,
+            aliases: menu_aliases_for_spec(spec, config),
+            replacement: spec.canonical.to_string(),
+            completion: spec.canonical.to_string(),
+            configured_alias: false,
         })
         .collect()
 }
 
+#[cfg(test)]
 pub(crate) fn format_slash_help(skill_count: Option<usize>) -> String {
-    let sections = slash_help_sections(skill_count);
+    format_slash_help_with_config(skill_count, &EffectiveSlashConfig::default())
+}
+
+pub(crate) fn format_slash_help_with_config(
+    skill_count: Option<usize>,
+    config: &EffectiveSlashConfig,
+) -> String {
+    let sections = slash_help_sections_with_config(skill_count, config);
     let mut lines = Vec::new();
     lines.push("General".to_string());
     lines.extend(sections.general);
@@ -105,7 +294,10 @@ pub(crate) fn format_slash_help(skill_count: Option<usize>) -> String {
     lines.join("\n")
 }
 
-pub(crate) fn slash_help_sections(skill_count: Option<usize>) -> SlashHelpSections {
+pub(crate) fn slash_help_sections_with_config(
+    skill_count: Option<usize>,
+    config: &EffectiveSlashConfig,
+) -> SlashHelpSections {
     let mut general = vec![
         "Shortcuts".to_string(),
         "Enter - submit".to_string(),
@@ -129,7 +321,7 @@ pub(crate) fn slash_help_sections(skill_count: Option<usize>) -> SlashHelpSectio
             && spec.common
             && spec.status == CommandStatus::Active
         {
-            general.push(help_command_row(spec));
+            general.push(help_command_row(spec, config));
         }
     }
 
@@ -139,7 +331,7 @@ pub(crate) fn slash_help_sections(skill_count: Option<usize>) -> SlashHelpSectio
         .filter(|spec| spec.group == CommandGroup::Commands)
     {
         debug_assert_eq!(spec.surface, CommandSurface::TuiSlash);
-        commands.extend(help_command_rows(spec));
+        commands.extend(help_command_rows(spec, config));
     }
 
     let custom_commands = match skill_count {
@@ -151,9 +343,17 @@ pub(crate) fn slash_help_sections(skill_count: Option<usize>) -> SlashHelpSectio
             if let Some(detail) = CUSTOM_SKILL_COMMAND.help_detail {
                 rows.push(format!("  {detail}"));
             }
+            rows.extend(configured_custom_command_rows(config));
             rows
         }
-        _ => vec!["No custom commands available".to_string()],
+        _ => {
+            let rows = configured_custom_command_rows(config);
+            if rows.is_empty() {
+                vec!["No custom commands available".to_string()]
+            } else {
+                rows
+            }
+        }
     };
 
     SlashHelpSections {
@@ -163,21 +363,517 @@ pub(crate) fn slash_help_sections(skill_count: Option<usize>) -> SlashHelpSectio
     }
 }
 
-fn help_command_row(spec: &SlashCommandSpec) -> String {
-    let aliases = if spec.aliases.is_empty() {
+fn help_command_row(spec: &SlashCommandSpec, config: &EffectiveSlashConfig) -> String {
+    let mut aliases = spec
+        .aliases
+        .iter()
+        .map(|value| (*value).to_string())
+        .collect::<Vec<_>>();
+    aliases.extend(config.aliases_for(spec.canonical));
+    let aliases = if aliases.is_empty() {
         String::new()
     } else {
-        format!(" (aliases: {})", spec.aliases.join(", "))
+        format!(" (aliases: {})", aliases.join(", "))
     };
-    format!("{} - {}{}", spec.usage, spec.summary, aliases)
+    let shortcuts = config.shortcuts_for(spec.canonical);
+    let shortcuts = if shortcuts.is_empty() {
+        String::new()
+    } else {
+        format!(" (shortcuts: {})", shortcuts.join(", "))
+    };
+    format!("{} - {}{}{}", spec.usage, spec.summary, aliases, shortcuts)
 }
 
-fn help_command_rows(spec: &SlashCommandSpec) -> Vec<String> {
-    let mut rows = vec![help_command_row(spec)];
+fn help_command_rows(spec: &SlashCommandSpec, config: &EffectiveSlashConfig) -> Vec<String> {
+    let mut rows = vec![help_command_row(spec, config)];
     if let Some(detail) = spec.help_detail {
         rows.push(format!("  {detail}"));
     }
     rows
+}
+
+fn menu_aliases_for_spec(
+    spec: &SlashCommandSpec,
+    config: &EffectiveSlashConfig,
+) -> Vec<SlashMenuAlias> {
+    let mut aliases = spec
+        .aliases
+        .iter()
+        .map(|alias| SlashMenuAlias {
+            alias: (*alias).to_string(),
+            replacement: (*alias).to_string(),
+            target: None,
+        })
+        .collect::<Vec<_>>();
+    aliases.extend(
+        config
+            .aliases
+            .iter()
+            .filter(|(_, target)| {
+                canonical_command_token(target).as_deref() == Some(spec.canonical)
+            })
+            .map(|(alias, target)| SlashMenuAlias {
+                alias: alias.clone(),
+                replacement: alias.clone(),
+                target: Some(target.clone()),
+            }),
+    );
+    aliases
+}
+
+fn configured_custom_command_rows(config: &EffectiveSlashConfig) -> Vec<String> {
+    let targets = config
+        .aliases
+        .values()
+        .chain(config.keybinds.iter().map(|keybind| &keybind.command))
+        .collect::<BTreeSet<_>>();
+    targets
+        .into_iter()
+        .map(|target| configured_custom_command_row(target, config))
+        .collect()
+}
+
+fn configured_custom_command_row(target: &str, config: &EffectiveSlashConfig) -> String {
+    let summary = canonical_command_token(target)
+        .and_then(|canonical| slash_command_spec(&canonical).map(|spec| spec.summary))
+        .unwrap_or("configured slash command");
+    let aliases = config
+        .aliases
+        .iter()
+        .filter(|(_, candidate)| candidate.as_str() == target)
+        .map(|(alias, _)| alias.as_str())
+        .collect::<Vec<_>>();
+    let aliases = if aliases.is_empty() {
+        String::new()
+    } else {
+        format!(" (aliases: {})", aliases.join(", "))
+    };
+    let shortcuts = config
+        .keybinds
+        .iter()
+        .filter(|keybind| keybind.command == target)
+        .map(|keybind| keybind.sequence.display())
+        .collect::<Vec<_>>();
+    let shortcuts = if shortcuts.is_empty() {
+        String::new()
+    } else {
+        format!(" (shortcuts: {})", shortcuts.join(", "))
+    };
+    format!("{target} - {summary}{aliases}{shortcuts}")
+}
+
+pub(crate) fn parse_effective_slash_config(root: &Value) -> Result<EffectiveSlashConfig> {
+    let Some(tui) = root.get("tui") else {
+        return Ok(EffectiveSlashConfig::default());
+    };
+    let object = tui
+        .as_object()
+        .ok_or_else(|| anyhow!("tui must be an object"))?;
+    let leader_key = match object.get("leader_key") {
+        Some(value) => parse_required_key_chord(value, "tui.leader_key")?,
+        None => EffectiveSlashConfig::default().leader_key,
+    };
+    let leader_timeout = match object.get("leader_timeout_ms") {
+        Some(value) => Duration::from_millis(
+            value
+                .as_u64()
+                .filter(|value| *value > 0)
+                .ok_or_else(|| anyhow!("tui.leader_timeout_ms must be a positive integer"))?,
+        ),
+        None => Duration::from_millis(DEFAULT_LEADER_TIMEOUT_MS),
+    };
+    let aliases = parse_configured_aliases(object.get("slash_aliases"))?;
+    let keybinds = parse_configured_keybinds(object.get("slash_keybinds"))?;
+    let config = EffectiveSlashConfig {
+        aliases,
+        keybinds,
+        leader_key,
+        leader_timeout,
+    };
+    validate_effective_slash_config(&config)?;
+    Ok(config)
+}
+
+fn parse_configured_aliases(value: Option<&Value>) -> Result<BTreeMap<String, String>> {
+    let Some(value) = value else {
+        return Ok(BTreeMap::new());
+    };
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow!("tui.slash_aliases must be an object"))?;
+    let mut aliases = BTreeMap::new();
+    for (target, value) in object {
+        let target = validate_configured_slash_target(target, "tui.slash_aliases")?;
+        for alias in parse_alias_values(value, &format!("tui.slash_aliases.{target}"))? {
+            if aliases.insert(alias.clone(), target.clone()).is_some() {
+                return Err(anyhow!("duplicate slash alias: {alias}"));
+            }
+        }
+    }
+    Ok(aliases)
+}
+
+fn parse_alias_values(value: &Value, path: &str) -> Result<Vec<String>> {
+    match value {
+        Value::String(value) => Ok(vec![validate_configured_alias(value, path)?]),
+        Value::Array(values) => values
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                let value = value
+                    .as_str()
+                    .ok_or_else(|| anyhow!("{path}[{index}] must be a string"))?;
+                validate_configured_alias(value, &format!("{path}[{index}]"))
+            })
+            .collect(),
+        _ => Err(anyhow!("{path} must be a string or array of strings")),
+    }
+}
+
+fn validate_configured_alias(value: &str, path: &str) -> Result<String> {
+    let alias = value.trim();
+    if alias.is_empty() || !alias.starts_with('/') || alias.chars().any(char::is_whitespace) {
+        return Err(anyhow!("{path} must be a slash alias without whitespace"));
+    }
+    if alias.starts_with(DYNAMIC_SKILL_PREFIX) {
+        return Err(anyhow!("{path} must not use the dynamic /skill: prefix"));
+    }
+    Ok(alias.to_string())
+}
+
+fn parse_configured_keybinds(value: Option<&Value>) -> Result<Vec<SlashKeybind>> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow!("tui.slash_keybinds must be an object"))?;
+    let mut keybinds = Vec::new();
+    for (target, value) in object {
+        let target = validate_configured_slash_target(target, "tui.slash_keybinds")?;
+        for sequence in parse_key_sequences(value, &format!("tui.slash_keybinds.{target}"))? {
+            keybinds.push(SlashKeybind {
+                command: target.clone(),
+                sequence,
+            });
+        }
+    }
+    Ok(keybinds)
+}
+
+fn validate_configured_slash_target(value: &str, path: &str) -> Result<String> {
+    let target = value.trim();
+    if target.is_empty() || !target.starts_with('/') {
+        return Err(anyhow!("{path} keys must be slash command lines"));
+    }
+    let (command, _) = split_command_token(target);
+    if command.starts_with(DYNAMIC_SKILL_PREFIX) {
+        return Err(anyhow!("{path} does not support dynamic /skill: commands"));
+    }
+    parse_slash_command(target)
+        .map_err(|err| anyhow!("{path} target {target:?} is invalid: {err:#}"))?
+        .ok_or_else(|| anyhow!("{path} target {target:?} is not a slash command"))?;
+    Ok(target.to_string())
+}
+
+fn parse_required_key_chord(value: &Value, path: &str) -> Result<KeyChord> {
+    let value = value
+        .as_str()
+        .ok_or_else(|| anyhow!("{path} must be a string"))?;
+    let value = value.trim();
+    if value.eq_ignore_ascii_case("none") || value.starts_with("<leader>") {
+        return Err(anyhow!("{path} must be a single key chord"));
+    }
+    parse_key_chord(value, path)
+}
+
+fn parse_key_sequences(value: &Value, path: &str) -> Result<Vec<SlashKeySequence>> {
+    let raw = match value {
+        Value::String(value) => split_key_sequence_list(value),
+        Value::Array(values) => {
+            let mut items = Vec::new();
+            for (index, value) in values.iter().enumerate() {
+                let value = value
+                    .as_str()
+                    .ok_or_else(|| anyhow!("{path}[{index}] must be a string"))?;
+                items.extend(split_key_sequence_list(value));
+            }
+            items
+        }
+        Value::Bool(false) => vec!["none".to_string()],
+        _ => {
+            return Err(anyhow!(
+                "{path} must be a string, array of strings, or false"
+            ));
+        }
+    };
+    if raw.is_empty() {
+        return Err(anyhow!("{path} must include at least one shortcut"));
+    }
+    if raw.iter().any(|value| value.eq_ignore_ascii_case("none")) {
+        if raw.len() == 1 {
+            return Ok(Vec::new());
+        }
+        return Err(anyhow!("{path} uses none with other shortcuts"));
+    }
+    raw.iter()
+        .map(|value| parse_key_sequence(value, path))
+        .collect()
+}
+
+fn split_key_sequence_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn parse_key_sequence(value: &str, path: &str) -> Result<SlashKeySequence> {
+    let value = value.trim();
+    if let Some(rest) = value.strip_prefix("<leader>") {
+        let rest = rest.strip_prefix('+').unwrap_or(rest).trim();
+        if rest.is_empty() {
+            return Err(anyhow!("{path} has an empty leader shortcut"));
+        }
+        return Ok(SlashKeySequence::Leader(parse_key_chord(rest, path)?));
+    }
+    Ok(SlashKeySequence::Chord(parse_key_chord(value, path)?))
+}
+
+fn parse_key_chord(value: &str, path: &str) -> Result<KeyChord> {
+    let mut modifiers = KeyModifiers::empty();
+    let mut key_name = None;
+    for part in value
+        .split('+')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+    {
+        match part.to_lowercase().as_str() {
+            "ctrl" | "control" => modifiers |= KeyModifiers::CONTROL,
+            "alt" | "meta" => modifiers |= KeyModifiers::ALT,
+            "shift" => modifiers |= KeyModifiers::SHIFT,
+            _ if key_name.is_none() => key_name = Some(part.to_lowercase()),
+            _ => return Err(anyhow!("{path} has invalid key chord {value:?}")),
+        }
+    }
+    let key_name = key_name.ok_or_else(|| anyhow!("{path} has empty key chord"))?;
+    let (code, modifiers) = key_code_from_name(&key_name, modifiers)
+        .ok_or_else(|| anyhow!("{path} has unsupported key {key_name:?}"))?;
+    Ok(KeyChord {
+        code,
+        modifiers,
+        display: key_chord_display(&code, modifiers),
+    })
+}
+
+fn key_code_from_name(name: &str, mut modifiers: KeyModifiers) -> Option<(KeyCode, KeyModifiers)> {
+    let code = match name {
+        "enter" | "return" => KeyCode::Enter,
+        "esc" | "escape" => KeyCode::Esc,
+        "tab" if modifiers.contains(KeyModifiers::SHIFT) => {
+            modifiers.remove(KeyModifiers::SHIFT);
+            KeyCode::BackTab
+        }
+        "tab" => KeyCode::Tab,
+        "backtab" => KeyCode::BackTab,
+        "space" => KeyCode::Char(' '),
+        "backspace" => KeyCode::Backspace,
+        "delete" | "del" => KeyCode::Delete,
+        "home" => KeyCode::Home,
+        "end" => KeyCode::End,
+        "pageup" | "pgup" => KeyCode::PageUp,
+        "pagedown" | "pgdn" => KeyCode::PageDown,
+        "up" => KeyCode::Up,
+        "down" => KeyCode::Down,
+        "left" => KeyCode::Left,
+        "right" => KeyCode::Right,
+        value if value.len() == 1 => KeyCode::Char(value.chars().next()?),
+        value if value.starts_with('f') => {
+            let number = value.trim_start_matches('f').parse::<u8>().ok()?;
+            if (1..=24).contains(&number) {
+                KeyCode::F(number)
+            } else {
+                return None;
+            }
+        }
+        _ => return None,
+    };
+    Some((code, modifiers))
+}
+
+fn key_chord_display(code: &KeyCode, modifiers: KeyModifiers) -> String {
+    let mut parts = Vec::new();
+    if modifiers.contains(KeyModifiers::CONTROL) {
+        parts.push("ctrl".to_string());
+    }
+    if modifiers.contains(KeyModifiers::ALT) {
+        parts.push("alt".to_string());
+    }
+    if modifiers.contains(KeyModifiers::SHIFT) {
+        parts.push("shift".to_string());
+    }
+    parts.push(key_code_display(code));
+    parts.join("+")
+}
+
+fn key_code_display(code: &KeyCode) -> String {
+    match code {
+        KeyCode::Char(' ') => "space".to_string(),
+        KeyCode::Char(ch) => ch.to_string(),
+        KeyCode::Enter => "enter".to_string(),
+        KeyCode::Esc => "esc".to_string(),
+        KeyCode::Tab => "tab".to_string(),
+        KeyCode::BackTab => "shift+tab".to_string(),
+        KeyCode::Backspace => "backspace".to_string(),
+        KeyCode::Delete => "delete".to_string(),
+        KeyCode::Home => "home".to_string(),
+        KeyCode::End => "end".to_string(),
+        KeyCode::PageUp => "pageup".to_string(),
+        KeyCode::PageDown => "pagedown".to_string(),
+        KeyCode::Up => "up".to_string(),
+        KeyCode::Down => "down".to_string(),
+        KeyCode::Left => "left".to_string(),
+        KeyCode::Right => "right".to_string(),
+        KeyCode::F(number) => format!("f{number}"),
+        other => format!("{other:?}").to_lowercase(),
+    }
+}
+
+fn validate_effective_slash_config(config: &EffectiveSlashConfig) -> Result<()> {
+    validate_alias_conflicts(config)?;
+    validate_keybind_conflicts(config)
+}
+
+fn validate_alias_conflicts(config: &EffectiveSlashConfig) -> Result<()> {
+    let mut reserved = SLASH_COMMANDS
+        .iter()
+        .flat_map(|spec| {
+            std::iter::once(spec.canonical.to_string())
+                .chain(spec.aliases.iter().map(|alias| (*alias).to_string()))
+        })
+        .collect::<BTreeSet<_>>();
+    reserved.extend(
+        OBSOLETE_SLASH_COMMAND_TOKENS
+            .iter()
+            .map(|value| (*value).to_string()),
+    );
+    let mut seen = BTreeSet::new();
+    for alias in config.aliases.keys() {
+        if reserved.contains(alias) {
+            return Err(anyhow!(
+                "slash alias conflicts with built-in command: {alias}"
+            ));
+        }
+        if alias.starts_with(DYNAMIC_SKILL_PREFIX) {
+            return Err(anyhow!(
+                "slash alias conflicts with dynamic /skill: prefix: {alias}"
+            ));
+        }
+        if !seen.insert(alias.clone()) {
+            return Err(anyhow!("duplicate slash alias: {alias}"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_keybind_conflicts(config: &EffectiveSlashConfig) -> Result<()> {
+    if fixed_key_chords()
+        .iter()
+        .any(|fixed| fixed == &config.leader_key)
+    {
+        return Err(anyhow!(
+            "tui.leader_key conflicts with fixed key {}",
+            config.leader_key.display
+        ));
+    }
+    let mut seen = BTreeSet::new();
+    for keybind in &config.keybinds {
+        let display = keybind.sequence.display();
+        if !seen.insert(display.clone()) {
+            return Err(anyhow!("duplicate slash shortcut: {display}"));
+        }
+        match &keybind.sequence {
+            SlashKeySequence::Chord(chord) => {
+                if fixed_key_chords().iter().any(|fixed| fixed == chord) {
+                    return Err(anyhow!(
+                        "slash shortcut conflicts with fixed key: {display}"
+                    ));
+                }
+                if chord == &config.leader_key {
+                    return Err(anyhow!(
+                        "slash shortcut conflicts with leader key: {display}"
+                    ));
+                }
+            }
+            SlashKeySequence::Leader(chord) => {
+                if fixed_key_chords().iter().any(|fixed| fixed == chord) {
+                    return Err(anyhow!(
+                        "slash shortcut conflicts with fixed key: {display}"
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn fixed_key_chords() -> Vec<KeyChord> {
+    [
+        "enter",
+        "shift+enter",
+        "ctrl+enter",
+        "alt+enter",
+        "ctrl+j",
+        "esc",
+        "ctrl+c",
+        "ctrl+d",
+        "ctrl+o",
+        "ctrl+r",
+        "ctrl+t",
+        "ctrl+b",
+        "tab",
+        "shift+tab",
+        "pageup",
+        "pagedown",
+        "up",
+        "down",
+        "home",
+        "end",
+        "shift+1",
+        "alt+left",
+        "alt+right",
+        "alt+up",
+        "alt+p",
+    ]
+    .iter()
+    .filter_map(|value| parse_key_chord(value, "fixed").ok())
+    .collect()
+}
+
+fn normalize_key_code(code: &KeyCode) -> KeyCode {
+    match code {
+        KeyCode::Char(ch) => KeyCode::Char(ch.to_ascii_lowercase()),
+        other => *other,
+    }
+}
+
+fn normalized_modifiers(modifiers: KeyModifiers) -> KeyModifiers {
+    modifiers & (KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT)
+}
+
+fn split_command_token(line: &str) -> (&str, &str) {
+    let trimmed = line.trim();
+    match trimmed.find(char::is_whitespace) {
+        Some(index) => (&trimmed[..index], &trimmed[index..]),
+        None => (trimmed, ""),
+    }
+}
+
+fn canonical_command_token(line: &str) -> Option<String> {
+    let (command, _) = split_command_token(line);
+    slash_command_spec(command).map(|spec| spec.canonical.to_string())
 }
 
 #[cfg(test)]
@@ -221,15 +917,31 @@ fn slash_menu_items_for(
         .iter()
         .enumerate()
         .filter_map(|(index, item)| {
-            slash_match_score(&item.command, &query, mode).map(|score| (score, index, item))
+            best_slash_item_match(item, &query, mode).map(|matched| (matched, index, item))
         })
         .collect::<Vec<_>>();
-    items.sort_by_key(|(score, index, _)| (*score, *index));
+    items.sort_by_key(|(matched, index, _)| {
+        (
+            matched.score,
+            usize::from(!matched.configured_alias),
+            *index,
+            matched.alias_index,
+        )
+    });
     let mut items = items
         .into_iter()
-        .map(|(_, _, item)| item)
+        .map(|(matched, _, item)| {
+            let mut item = item.clone();
+            item.command = matched.command;
+            item.replacement = matched.replacement;
+            item.completion = matched.completion;
+            item.configured_alias = matched.configured_alias;
+            if let Some(description) = matched.description {
+                item.description = description;
+            }
+            item
+        })
         .take(8)
-        .cloned()
         .collect::<Vec<_>>();
     if query != "/"
         && let Some(index) = items.iter().position(|item| item.command == query)
@@ -238,6 +950,62 @@ fn slash_menu_items_for(
         items.insert(0, exact);
     }
     items
+}
+
+struct SlashItemMatch {
+    score: u16,
+    alias_index: usize,
+    replacement: String,
+    completion: String,
+    command: String,
+    description: Option<String>,
+    configured_alias: bool,
+}
+
+fn best_slash_item_match(
+    item: &SlashMenuItem,
+    query: &str,
+    mode: MatchMode,
+) -> Option<SlashItemMatch> {
+    let canonical = slash_match_score(&item.command, query, mode).map(|score| SlashItemMatch {
+        score,
+        alias_index: 0,
+        replacement: item.command.clone(),
+        completion: item.command.clone(),
+        command: item.command.clone(),
+        description: None,
+        configured_alias: false,
+    });
+    let alias = item
+        .aliases
+        .iter()
+        .enumerate()
+        .filter_map(|(index, alias)| {
+            slash_match_score(&alias.alias, query, mode).map(|score| SlashItemMatch {
+                score,
+                alias_index: index.saturating_add(1),
+                replacement: alias.replacement.clone(),
+                completion: alias.alias.clone(),
+                command: if alias.target.is_some() {
+                    alias.alias.clone()
+                } else {
+                    item.command.clone()
+                },
+                description: alias
+                    .target
+                    .as_ref()
+                    .map(|target| format!("alias for {target} - {}", item.description)),
+                configured_alias: alias.target.is_some(),
+            })
+        });
+    canonical.into_iter().chain(alias).min_by_key(|matched| {
+        let configured_alias_priority = usize::from(!matched.configured_alias);
+        (
+            matched.score,
+            configured_alias_priority,
+            matched.alias_index,
+        )
+    })
 }
 
 fn slash_match_score(command: &str, query: &str, mode: MatchMode) -> Option<u16> {
@@ -276,6 +1044,20 @@ fn fuzzy_subsequence_score(command: &str, query: &str) -> Option<u16> {
 }
 
 pub(crate) fn parse_slash_command(line: &str) -> Result<Option<SlashCommand>> {
+    parse_slash_command_inner(line)
+}
+
+pub(crate) fn parse_slash_command_with_config(
+    line: &str,
+    config: &EffectiveSlashConfig,
+) -> Result<Option<SlashCommand>> {
+    if let Some(expanded) = config.expand_alias_line(line) {
+        return parse_slash_command_inner(&expanded);
+    }
+    parse_slash_command_inner(line)
+}
+
+fn parse_slash_command_inner(line: &str) -> Result<Option<SlashCommand>> {
     let trimmed = line.trim();
     if !trimmed.starts_with('/') {
         return Ok(None);
@@ -356,6 +1138,10 @@ fn parse_registered_slash_command(
         }
         SlashCommandAction::VariantSet => parse_variant_command(spec, rest),
         SlashCommandAction::ModeSet => parse_mode_command(spec, rest),
+        SlashCommandAction::Permissions => {
+            parse_no_arguments(spec, command, rest)?;
+            Ok(SlashCommand::Permissions)
+        }
         SlashCommandAction::Thinking => parse_thinking_command(spec, rest),
         SlashCommandAction::Raw => parse_raw_command(spec, rest),
         SlashCommandAction::Copy => {
@@ -616,8 +1402,11 @@ pub(crate) fn validate_variant(value: &str) -> Result<()> {
 
 pub(crate) fn validate_mode(value: &str) -> Result<()> {
     match value {
-        "plan" | "default" => Ok(()),
-        _ => Err(anyhow!("mode must be one of plan, default")),
+        "plan" | "default" | "acceptEdits" | "accept-edits" | "dontAsk" | "dont-ask"
+        | "bypassPermissions" | "bypass-permissions" => Ok(()),
+        _ => Err(anyhow!(
+            "mode must be one of plan, default, acceptEdits, dontAsk, bypassPermissions"
+        )),
     }
 }
 
@@ -727,7 +1516,7 @@ mod tests {
             parse_slash_command("/mode set plan")
                 .unwrap_err()
                 .to_string()
-                .contains("usage: /mode <plan|default>")
+                .contains("usage: /mode <plan|default|acceptEdits|dontAsk|bypassPermissions>")
         );
         assert!(parse_slash_command("/mode build").is_err());
         assert!(parse_slash_command("/mode maybe").is_err());
@@ -914,17 +1703,178 @@ mod tests {
     }
 
     #[test]
+    fn configured_aliases_can_target_concrete_flagged_commands() {
+        let config = parse_effective_slash_config(&serde_json::json!({
+            "tui": {
+                "slash_aliases": {
+                    "/export -f json -i messages": ["/xj"]
+                },
+                "slash_keybinds": {
+                    "/export -f json -i messages": "<leader>x"
+                }
+            }
+        }))
+        .expect("config");
+
+        assert_eq!(
+            parse_slash_command_with_config("/xj out.json", &config).unwrap(),
+            Some(SlashCommand::Export(TuiExportOptions {
+                path: Some("out.json".to_string()),
+                format: SessionExportFormat::Json,
+                include: SessionExportIncludeSet::parse("messages", SessionArtifactKind::Export)
+                    .unwrap(),
+            }))
+        );
+
+        let items = configured_slash_menu_items(&config);
+        let matches = slash_menu_items_from("/x", &items);
+        assert_eq!(matches[0].command, "/xj");
+        assert!(
+            matches[0]
+                .description
+                .contains("alias for /export -f json -i messages")
+        );
+        assert_eq!(matches[0].completion, "/xj");
+        assert_eq!(matches[0].replacement, "/xj");
+
+        let help = format_slash_help_with_config(Some(0), &config);
+        assert!(help.contains("/xj -> /export -f json -i messages"));
+        assert!(help.contains("<leader>x -> /export -f json -i messages"));
+        let sections = slash_help_sections_with_config(Some(0), &config);
+        assert_eq!(
+            sections.custom_commands,
+            vec![
+                "/export -f json -i messages - write session export (aliases: /xj) (shortcuts: <leader>x)"
+                    .to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn configured_custom_command_help_rows_are_deduped() {
+        let config = parse_effective_slash_config(&serde_json::json!({
+            "tui": {
+                "slash_aliases": {
+                    "/status": ["/st", "/state"]
+                },
+                "slash_keybinds": {
+                    "/status": ["alt+s", "<leader>s"]
+                }
+            }
+        }))
+        .expect("config");
+
+        let sections = slash_help_sections_with_config(Some(2), &config);
+        let configured_rows = sections
+            .custom_commands
+            .iter()
+            .filter(|row| row.starts_with("/status - "))
+            .collect::<Vec<_>>();
+        assert_eq!(configured_rows.len(), 1);
+        assert!(configured_rows[0].contains("(aliases: /st, /state)"));
+        assert!(configured_rows[0].contains("(shortcuts: alt+s, <leader>s)"));
+    }
+
+    #[test]
+    fn configured_slash_keybinds_match_direct_and_leader_sequences() {
+        let config = parse_effective_slash_config(&serde_json::json!({
+            "tui": {
+                "leader_key": "ctrl+x",
+                "slash_keybinds": {
+                    "/status": "alt+s",
+                    "/model": "<leader>m",
+                    "/usage": "none"
+                }
+            }
+        }))
+        .expect("config");
+
+        assert_eq!(
+            config.shortcut_for_key(&KeyEvent::new(KeyCode::Char('s'), KeyModifiers::ALT), false),
+            Some(SlashShortcutMatch::Command("/status".to_string()))
+        );
+        assert_eq!(
+            config.shortcut_for_key(
+                &KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL),
+                false
+            ),
+            Some(SlashShortcutMatch::LeaderPrefix)
+        );
+        assert_eq!(
+            config.shortcut_for_key(&KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE), true),
+            Some(SlashShortcutMatch::Command("/model".to_string()))
+        );
+        assert_eq!(
+            config.shortcut_for_key(&KeyEvent::new(KeyCode::Char('u'), KeyModifiers::ALT), false),
+            None
+        );
+    }
+
+    #[test]
+    fn configured_slash_conflicts_are_rejected() {
+        assert!(
+            parse_effective_slash_config(&serde_json::json!({
+                "tui": {
+                    "slash_aliases": { "/status": ["/model"] }
+                }
+            }))
+            .unwrap_err()
+            .to_string()
+            .contains("conflicts with built-in command")
+        );
+        assert!(
+            parse_effective_slash_config(&serde_json::json!({
+                "tui": {
+                    "slash_aliases": { "/not-real": ["/nr"] }
+                }
+            }))
+            .unwrap_err()
+            .to_string()
+            .contains("target")
+        );
+        assert!(
+            parse_effective_slash_config(&serde_json::json!({
+                "tui": {
+                    "slash_keybinds": {
+                        "/status": "alt+s",
+                        "/model": "alt+s"
+                    }
+                }
+            }))
+            .unwrap_err()
+            .to_string()
+            .contains("duplicate slash shortcut")
+        );
+        assert!(
+            parse_effective_slash_config(&serde_json::json!({
+                "tui": {
+                    "slash_keybinds": { "/status": "enter" }
+                }
+            }))
+            .unwrap_err()
+            .to_string()
+            .contains("fixed key")
+        );
+        assert!(
+            parse_effective_slash_config(&serde_json::json!({
+                "tui": {
+                    "slash_keybinds": { "/status": "" }
+                }
+            }))
+            .unwrap_err()
+            .to_string()
+            .contains("must include at least one shortcut")
+        );
+    }
+
+    #[test]
     fn slash_menu_filters_and_marks_upcoming() {
         assert_eq!(slash_menu_items("/he")[0].command, "/help");
         assert_eq!(slash_menu_items("/usage")[0].command, "/usage");
-        assert!(
-            slash_menu_items("/stats")
-                .iter()
-                .all(|item| item.command != "/stats")
-        );
-        assert!(slash_prefix_menu_items("/stats").is_empty());
-        assert!(slash_menu_items("/clear").is_empty());
-        assert!(slash_menu_items("/resume").is_empty());
+        assert_eq!(slash_menu_items("/stats")[0].command, "/usage");
+        assert_eq!(slash_prefix_menu_items("/stats")[0].command, "/usage");
+        assert_eq!(slash_menu_items("/clear")[0].command, "/new");
+        assert_eq!(slash_menu_items("/resume")[0].command, "/sessions");
         assert_eq!(slash_menu_items("/session").len(), 1);
         assert_eq!(slash_menu_items("/session")[0].command, "/sessions");
         assert!(slash_menu_items("/session ").is_empty());
@@ -936,7 +1886,7 @@ mod tests {
         );
         let mode = slash_menu_items("/mode");
         assert_eq!(mode[0].command, "/mode");
-        assert_eq!(mode[0].description, "set plan/default mode");
+        assert_eq!(mode[0].description, "set runtime permission mode");
         let variant = slash_menu_items("/var");
         assert_eq!(variant[0].command, "/variant");
         assert_eq!(variant[0].description, "set reasoning effort");
@@ -1001,6 +1951,10 @@ mod tests {
             command: "/skill:reviewer".to_string(),
             description: "Review code changes".to_string(),
             upcoming: false,
+            aliases: Vec::new(),
+            replacement: "/skill:reviewer".to_string(),
+            completion: "/skill:reviewer".to_string(),
+            configured_alias: false,
         });
 
         let matches = slash_menu_items_from("/skill:r", &items);

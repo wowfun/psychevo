@@ -19,24 +19,26 @@ use crossterm::terminal::{
 use psychevo_ai::Outcome;
 use psychevo_runtime::{
     AgentCatalog, AgentDiscoveryOptions, AgentEdgeRecord, AgentSource, AgentSpawnOptions,
-    ConfiguredModel, ContextFormatOptions, ContextOptions, ContextSnapshot, CustomProviderInput,
-    ImageInput, MAX_AGENT_SPAWN_DEPTH_CAP, ModelCatalogEntry, ModelCatalogProvider,
-    ModelMetadataCacheTarget, PromptAttachmentDisplay, PromptDisplayMetadata, ReloadContextOptions,
-    RunControlHandle, RunMode, RunOptions, RunStreamEvent, RunStreamSink, SessionArtifactKind,
-    SessionExportFormat, SessionExportOptions, SessionExportWriteResult, SessionSummary,
-    SessionUndoOptions, SkillCatalog, SkillDiscoveryOptions, SqliteStore, StatsOptions,
-    TUI_DISPLAY_METADATA_KEY, TerminalReason, TuiMessageSummary, USER_SHELL_METADATA_KEY,
-    UserShellContextOptions, UserShellOptions, agent_spawn_paused, agent_status_value,
-    canonicalize_workdir, configured_models, context_snapshot, create_global_custom_provider,
+    ConfigScope, ConfiguredModel, ContextFormatOptions, ContextOptions, ContextSnapshot,
+    CustomProviderInput, ImageInput, MAX_AGENT_SPAWN_DEPTH_CAP, ModelCatalogEntry,
+    ModelCatalogProvider, ModelMetadataCacheTarget, PermissionMode, PromptAttachmentDisplay,
+    PromptDisplayMetadata, ReloadContextOptions, RunControlHandle, RunMode, RunOptions,
+    RunStreamEvent, RunStreamSink, SessionArtifactKind, SessionExportFormat, SessionExportOptions,
+    SessionExportWriteResult, SessionSummary, SessionUndoOptions, SkillCatalog,
+    SkillDiscoveryOptions, SqliteStore, StatsOptions, TUI_DISPLAY_METADATA_KEY, TerminalReason,
+    TuiMessageSummary, USER_SHELL_METADATA_KEY, UserShellContextOptions, UserShellOptions,
+    agent_spawn_paused, agent_status_value, canonicalize_workdir, config_show_value,
+    configured_models, context_snapshot, create_global_custom_provider,
     custom_provider_api_key_env, default_session_export_filename, discover_agents, discover_skills,
     fetch_model_catalog, format_context_snapshot_text_with_options, format_context_total_value,
     format_context_total_value_parts, model_catalog_providers,
     model_metadata_explicitly_disallows_image_input, normalize_context_bar_width,
-    prompt_starts_with_supported_image_path, redo_session, refresh_model_metadata_cache,
-    reload_session_context, resolve_agent_definition, resolve_image_source, run_control,
-    run_live_streaming, run_live_streaming_controlled, run_user_shell_command_streaming_controlled,
-    selected_configured_model, set_agent_spawn_paused, spawn_agent_background,
-    stop_agent_id_with_grace, undo_session, usage_stats, write_session_export,
+    permission_rules_value, prompt_starts_with_supported_image_path, redo_session,
+    refresh_model_metadata_cache, reload_session_context, resolve_agent_definition,
+    resolve_image_source, run_control, run_live_streaming, run_live_streaming_controlled,
+    run_user_shell_command_streaming_controlled, selected_configured_model, set_agent_spawn_paused,
+    spawn_agent_background, stop_agent_id_with_grace, undo_session, usage_stats,
+    write_session_export,
 };
 use ratatui::Frame;
 use ratatui::Terminal;
@@ -62,9 +64,10 @@ use self::plain::{
     TuiRenderer, assistant_text_from_event, format_session_line, format_tool_summary,
 };
 use self::slash::{
-    SlashCommand, SlashMenuItem, VARIANTS, base_slash_menu_items, format_slash_help,
-    parse_slash_command, slash_help_sections, slash_menu_items_from, slash_prefix_menu_items_from,
-    validate_model_spec, validate_variant,
+    EffectiveSlashConfig, SlashCommand, SlashHelpSections, SlashMenuItem, SlashShortcutMatch,
+    VARIANTS, configured_slash_menu_items, format_slash_help_with_config,
+    parse_effective_slash_config, parse_slash_command_with_config, slash_help_sections_with_config,
+    slash_menu_items_from, slash_prefix_menu_items_from, validate_model_spec, validate_variant,
 };
 use self::state::TuiState;
 use crate::args::TuiArgs;
@@ -89,6 +92,12 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
         None => cwd,
     };
     let workdir = canonicalize_workdir(&workdir)?;
+    let slash_config = load_effective_tui_slash_config(
+        &env_map,
+        db_path.clone(),
+        workdir.clone(),
+        config_path.clone(),
+    )?;
     let workdir_key = workdir.to_string_lossy().to_string();
     let state_path = home.join("tui-state.json");
     let state = TuiState::load(&state_path)?;
@@ -101,6 +110,19 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
         .mode_for(&workdir_key)
         .and_then(|value| RunMode::parse(&value))
         .unwrap_or_default();
+    let current_permission_mode = args
+        .permission_mode
+        .map(|mode| mode.permission_mode())
+        .or_else(|| {
+            state
+                .permission_mode_for(&workdir_key)
+                .and_then(|value| PermissionMode::parse(&value))
+        })
+        .unwrap_or_default();
+    let current_mode = args
+        .permission_mode
+        .map(|mode| mode.run_mode())
+        .unwrap_or(current_mode);
     let thinking_visible = state.thinking_visible;
     let raw_visible = state.raw_visible;
     let current_session = if let Some(session) = &args.session {
@@ -130,6 +152,7 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
         current_variant,
         selected_model: None,
         current_mode,
+        current_permission_mode,
         startup_agent: args.agent.clone(),
         current_agent: args.agent.clone(),
         current_agent_explicit_default: false,
@@ -147,12 +170,48 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
         clipboard_result_tx,
         clipboard_result_rx,
         clipboard_copies_in_flight: 0,
+        slash_config,
     };
     app.start_missing_model_metadata_cache_warmup();
     app.refresh_selected_model();
     app.refresh_current_session_title()?;
     app.refresh_current_session_agent()?;
     app.run(args.message.join(" ")).await
+}
+
+fn load_effective_tui_slash_config(
+    env_map: &BTreeMap<String, String>,
+    db_path: PathBuf,
+    workdir: PathBuf,
+    config_path: Option<PathBuf>,
+) -> Result<EffectiveSlashConfig> {
+    let options = RunOptions {
+        db_path,
+        workdir,
+        snapshot_root: None,
+        session: None,
+        continue_latest: false,
+        prompt: String::new(),
+        image_inputs: Vec::new(),
+        extract_prompt_image_sources: false,
+        prompt_display: None,
+        max_context_messages: None,
+        config_path,
+        model: None,
+        reasoning_effort: None,
+        include_reasoning: false,
+        mode: RunMode::Build,
+        permission_mode: None,
+        approval_mode: None,
+        approval_handler: None,
+        inherited_env: Some(env_map.clone()),
+        agent: None,
+        no_agents: false,
+        no_skills: false,
+        skill_inputs: Vec::new(),
+    };
+    let document = config_show_value(&options, ConfigScope::Effective)?;
+    parse_effective_slash_config(&document["value"])
 }
 
 // Kept as same-module includes for the first behavior-preserving split.

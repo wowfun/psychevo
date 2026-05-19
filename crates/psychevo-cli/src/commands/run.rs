@@ -1,12 +1,17 @@
 use std::env;
-use std::io::{self, IsTerminal, Read};
+use std::io::{self, IsTerminal, Read, Write};
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
+use futures::future::BoxFuture;
 use psychevo_ai::Outcome;
-use psychevo_runtime::{RunMode, RunOptions, run_live};
+use psychevo_runtime::{
+    ApprovalHandler, PermissionApprovalDecision, PermissionApprovalRequest, PermissionMode,
+    RunMode, RunOptions, run_live,
+};
 
-use crate::args::{RunArgs, RunFormatArg};
+use crate::args::{PermissionModeArg, RunArgs, RunFormatArg};
 use crate::env::{
     ensure_home_initialized, env_path, env_value, inherited_env, resolve_explicit_path,
     resolve_psychevo_home, resolve_state_db,
@@ -51,6 +56,23 @@ async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
     if prompt.trim().is_empty() {
         return Err(anyhow!("You must provide a message"));
     }
+    if args.permission_mode == Some(PermissionModeArg::BypassPermissions) {
+        return Err(anyhow!(
+            "use --dangerously-skip-permissions to select bypassPermissions"
+        ));
+    }
+    let mode_arg = if args.dangerously_skip_permissions {
+        Some(PermissionModeArg::BypassPermissions)
+    } else {
+        args.permission_mode
+    };
+    let run_mode = mode_arg
+        .map(PermissionModeArg::run_mode)
+        .unwrap_or(RunMode::Build);
+    let permission_mode = mode_arg
+        .map(PermissionModeArg::permission_mode)
+        .filter(|mode| *mode != PermissionMode::Default);
+    let approval_handler = interactive_approval_handler();
 
     let result = run_live(RunOptions {
         db_path,
@@ -67,7 +89,10 @@ async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
         model: args.model.clone(),
         reasoning_effort: args.variant.map(|variant| variant.as_str().to_string()),
         include_reasoning: args.include_reasoning,
-        mode: RunMode::Build,
+        mode: run_mode,
+        permission_mode,
+        approval_mode: None,
+        approval_handler,
         inherited_env: Some(env_map),
         agent: args.agent.clone(),
         no_agents: args.no_agents,
@@ -122,4 +147,61 @@ fn read_prompt(message: &[String]) -> Result<String> {
         }
     }
     Ok(prompt)
+}
+
+fn interactive_approval_handler() -> Option<Arc<dyn ApprovalHandler>> {
+    (io::stdin().is_terminal() && io::stderr().is_terminal())
+        .then(|| Arc::new(CliApprovalHandler) as Arc<dyn ApprovalHandler>)
+}
+
+#[derive(Debug)]
+struct CliApprovalHandler;
+
+impl ApprovalHandler for CliApprovalHandler {
+    fn timeout_secs(&self) -> u64 {
+        60
+    }
+
+    fn request_permission(
+        &self,
+        request: PermissionApprovalRequest,
+    ) -> BoxFuture<'static, PermissionApprovalDecision> {
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || prompt_for_permission(request))
+                .await
+                .unwrap_or_else(|_| PermissionApprovalDecision::deny())
+        })
+    }
+}
+
+fn prompt_for_permission(request: PermissionApprovalRequest) -> PermissionApprovalDecision {
+    let mut stderr = io::stderr();
+    let _ = writeln!(stderr, "permission required: {}", request.reason);
+    let _ = writeln!(stderr, "tool: {}", request.tool_name);
+    let _ = writeln!(stderr, "action: {}", request.summary);
+    if let Some(rule) = &request.matched_rule {
+        let _ = writeln!(stderr, "matched rule: {rule}");
+    }
+    if request.allow_always
+        && let Some(rule) = &request.suggested_rule
+    {
+        let _ = writeln!(stderr, "suggested always rule: {rule}");
+    }
+    let prompt = if request.allow_always {
+        "Allow? [o]nce, [s]ession, [a]lways, [d]eny: "
+    } else {
+        "Allow? [o]nce, [s]ession, [d]eny: "
+    };
+    let _ = write!(stderr, "{prompt}");
+    let _ = stderr.flush();
+    let mut line = String::new();
+    if io::stdin().read_line(&mut line).is_err() {
+        return PermissionApprovalDecision::deny();
+    }
+    match line.trim().to_ascii_lowercase().as_str() {
+        "o" | "once" | "y" | "yes" => PermissionApprovalDecision::allow_once(),
+        "s" | "session" => PermissionApprovalDecision::allow_session(),
+        "a" | "always" if request.allow_always => PermissionApprovalDecision::allow_always(),
+        _ => PermissionApprovalDecision::deny(),
+    }
 }

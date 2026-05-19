@@ -64,7 +64,8 @@ async fn shift_tab_cycles_mode_without_status_row() {
     .await
     .expect("shift tab");
 
-    assert_eq!(app.current_mode, RunMode::Plan);
+    assert_eq!(app.current_mode, RunMode::Build);
+    assert_eq!(app.current_permission_mode, PermissionMode::AcceptEdits);
     assert!(
         !ui.transcript
             .iter()
@@ -134,6 +135,7 @@ async fn fullscreen_drain_keeps_queued_events_after_task_completion() {
     let task = tokio::spawn(async move { Ok(result) });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
+        session_id: None,
         control,
         rx,
         task: RunningTask::Agent(task),
@@ -247,6 +249,7 @@ async fn fast_reasoning_only_write_renders_updating_before_completion() {
     let task = tokio::spawn(async move { Ok(result) });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
+        session_id: None,
         control,
         rx,
         task: RunningTask::Agent(task),
@@ -271,10 +274,11 @@ async fn fast_reasoning_only_write_renders_updating_before_completion() {
     assert!(thinking < updating);
     assert!(ui.transcript[updating].tool_started.is_some());
     assert!(ui.transcript[updating].tool_call_id.is_none());
-    assert!(ui
-        .transcript
-        .iter()
-        .all(|row| row.kind != TranscriptKind::Meta));
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.kind != TranscriptKind::Meta)
+    );
     assert!(ui.running.is_some());
     assert_eq!(ui.deferred_stream_events.len(), 3);
 
@@ -283,19 +287,21 @@ async fn fast_reasoning_only_write_renders_updating_before_completion() {
         .expect("second drain");
     assert!(ui.running.is_some());
     assert_eq!(ui.deferred_stream_events.len(), 1);
-    assert!(ui
-        .transcript
-        .iter()
-        .any(|row| row.title == "Updating /tmp/hackernews-hot-05-39.md"));
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.title == "Updating /tmp/hackernews-hot-05-39.md")
+    );
 
     app.drain_fullscreen_events(&mut ui)
         .await
         .expect("third drain");
     assert!(ui.running.is_none());
-    assert!(ui
-        .transcript
-        .iter()
-        .any(|row| row.title == "Updated feeds/2026-05-10/hackernews-hot-05-39.md"));
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.title == "Updated feeds/2026-05-10/hackernews-hot-05-39.md")
+    );
 }
 
 #[tokio::test]
@@ -355,6 +361,7 @@ async fn pending_write_tool_input_defers_later_completion_events() {
     let task = tokio::spawn(async move { Ok(result) });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
+        session_id: None,
         control,
         rx,
         task: RunningTask::Agent(task),
@@ -366,30 +373,33 @@ async fn pending_write_tool_input_defers_later_completion_events() {
     app.drain_fullscreen_events(&mut ui)
         .await
         .expect("first drain");
-    assert!(ui
-        .transcript
-        .iter()
-        .any(|row| row.title == "Updating files"));
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.title == "Updating files")
+    );
     assert_eq!(ui.deferred_stream_events.len(), 3);
     assert!(ui.running.is_some());
 
     app.drain_fullscreen_events(&mut ui)
         .await
         .expect("second drain");
-    assert!(ui
-        .transcript
-        .iter()
-        .any(|row| row.title == "Updating /tmp/hackernews-hot-05-39.md"));
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.title == "Updating /tmp/hackernews-hot-05-39.md")
+    );
     assert_eq!(ui.deferred_stream_events.len(), 1);
 
     app.drain_fullscreen_events(&mut ui)
         .await
         .expect("third drain");
     assert!(ui.running.is_none());
-    assert!(ui
-        .transcript
-        .iter()
-        .any(|row| row.title == "Updated feeds/2026-05-10/hackernews-hot-05-39.md"));
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.title == "Updated feeds/2026-05-10/hackernews-hot-05-39.md")
+    );
 }
 
 #[test]
@@ -560,6 +570,7 @@ async fn fullscreen_agent_end_releases_turn_before_auxiliary_task_finishes() {
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
+        session_id: None,
         control,
         rx,
         task: RunningTask::Agent(task),
@@ -643,6 +654,7 @@ async fn fullscreen_refreshes_title_after_detached_agent_task_finishes() {
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
+        session_id: None,
         control,
         rx,
         task: RunningTask::Agent(task),
@@ -699,6 +711,7 @@ async fn interrupted_turn_restores_queued_inputs_to_composer_without_autostart()
     let task = tokio::spawn(async move { Ok(result) });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
+        session_id: None,
         control,
         rx,
         task: RunningTask::Agent(task),
@@ -707,6 +720,7 @@ async fn interrupted_turn_restores_queued_inputs_to_composer_without_autostart()
     ui.turn_outcome = Some(Outcome::Aborted);
     ui.interrupt_requested = true;
     ui.queued_inputs.push_back(QueuedInput::Prompt {
+        session_id: app.current_session.clone(),
         prompt: "queued prompt".to_string(),
         display_prompt: "[Image #1] queued prompt".to_string(),
         images: vec![PendingImageAttachment {
@@ -714,8 +728,10 @@ async fn interrupted_turn_restores_queued_inputs_to_composer_without_autostart()
             image: ImageInput::ImageUrl("https://example.test/image.png".to_string()),
         }],
     });
-    ui.queued_inputs
-        .push_back(QueuedInput::Shell("printf queued-shell".to_string()));
+    ui.queued_inputs.push_back(QueuedInput::Shell {
+        session_id: app.current_session.clone(),
+        command: "printf queued-shell".to_string(),
+    });
     ui.textarea = textarea_with_text("draft");
 
     app.finish_streamed_agent_turn(&mut ui);
@@ -814,12 +830,9 @@ fn streamed_budget_exhaustion_renders_specific_error_row() {
     app.finish_streamed_agent_turn(&mut ui);
 
     assert!(app.had_error);
-    assert!(
-        ui.transcript
-            .iter()
-            .any(|row| row.kind == TranscriptKind::Error
-                && row.text.contains("model-turn limit (128)"))
-    );
+    assert!(ui.transcript.iter().any(
+        |row| row.kind == TranscriptKind::Error && row.text.contains("model-turn limit (128)")
+    ));
     assert!(
         ui.transcript
             .iter()
@@ -856,6 +869,7 @@ async fn completed_normal_task_with_tool_failures_does_not_mark_tui_error() {
     let task = tokio::spawn(async move { Ok(result) });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
+        session_id: None,
         control,
         rx,
         task: RunningTask::Agent(task),
@@ -903,29 +917,21 @@ async fn completed_budget_exhaustion_renders_specific_error_row() {
     let task = tokio::spawn(async move { Ok(result) });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
+        session_id: None,
         control,
         rx,
         task: RunningTask::Agent(task),
     });
-    while !ui
-        .running
-        .as_ref()
-        .expect("running")
-        .task
-        .is_finished()
-    {
+    while !ui.running.as_ref().expect("running").task.is_finished() {
         tokio::task::yield_now().await;
     }
 
     app.drain_fullscreen_events(&mut ui).await.expect("drain");
 
     assert!(app.had_error);
-    assert!(
-        ui.transcript
-            .iter()
-            .any(|row| row.kind == TranscriptKind::Error
-                && row.text.contains("model-turn limit (128)"))
-    );
+    assert!(ui.transcript.iter().any(
+        |row| row.kind == TranscriptKind::Error && row.text.contains("model-turn limit (128)")
+    ));
     assert!(
         ui.transcript
             .iter()
@@ -1263,7 +1269,10 @@ fn load_history_does_not_rehydrate_aborted_tool_calls_as_running() {
         .iter()
         .find(|row| row.kind == TranscriptKind::Ran)
         .expect("bash row");
-    assert!(row.title.starts_with("Ran cd /home/kevin/Projects/feedgarden"));
+    assert!(
+        row.title
+            .starts_with("Ran cd /home/kevin/Projects/feedgarden")
+    );
     assert!(!row.title.starts_with("Running "));
     assert_eq!(row.text, "interrupted");
     assert!(row.interrupted);
@@ -1355,6 +1364,304 @@ async fn sessions_panel_switches_without_status_row() {
     assert_eq!(textarea_text(&ui.textarea), "/sessions");
     ui.recall_history(1);
     assert_eq!(textarea_text(&ui.textarea), "draft");
+}
+
+#[tokio::test]
+async fn running_session_switch_buffers_stream_until_return() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let first = store
+        .create_session_with_metadata(&app.workdir, "tui", "model-a", "mock", None)
+        .expect("first");
+    let second = store
+        .create_session_with_metadata(&app.workdir, "tui", "model-b", "mock", None)
+        .expect("second");
+    app.current_session = Some(first.clone());
+    let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
+    insert_tui_message(
+        &conn,
+        &second,
+        1,
+        "user",
+        1,
+        serde_json::json!({
+            "role": "user",
+            "content": [{"text": "second prompt"}],
+            "timestamp_ms": 1
+        }),
+    );
+
+    let mut ui = FullscreenUi::new(&app);
+    let (tx, rx) = mpsc::unbounded_channel();
+    let task = tokio::spawn(async {
+        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::RunResult>>().await
+    });
+    let (control, _) = run_control();
+    ui.running = Some(RunningTurn {
+        session_id: Some(first.clone()),
+        control,
+        rx,
+        task: RunningTask::Agent(task),
+    });
+    ui.start_assistant();
+    ui.running_elapsed_override = Some(Duration::from_secs(9));
+
+    tx.send(RunStreamEvent::ReasoningDelta {
+        text: "first session visible before switch".to_string(),
+    })
+    .expect("send visible stream");
+    app.drain_fullscreen_events(&mut ui)
+        .await
+        .expect("drain visible stream");
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Thinking
+            && row.text.contains("first session visible before switch")
+    }));
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Sessions)
+        .await
+        .expect("sessions");
+    for ch in second.chars().take(8) {
+        app.handle_bottom_panel_key(
+            &mut ui,
+            KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
+        )
+        .expect("query");
+    }
+    app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("select");
+
+    assert_eq!(app.current_session.as_deref(), Some(second.as_str()));
+    assert!(ui.running.is_none());
+    assert_eq!(ui.auxiliary_agent_tasks.len(), 1);
+    assert_eq!(
+        ui.status_running_elapsed(app.current_session.as_deref()),
+        None
+    );
+
+    tx.send(RunStreamEvent::ReasoningDelta {
+        text: "first session hidden stream".to_string(),
+    })
+    .expect("send hidden stream");
+    app.drain_fullscreen_events(&mut ui)
+        .await
+        .expect("drain hidden stream");
+
+    assert_eq!(app.current_session.as_deref(), Some(second.as_str()));
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| !row.text.contains("first session hidden stream"))
+    );
+
+    app.open_session_direct(&mut ui, &first)
+        .expect("switch back to first");
+
+    assert_eq!(app.current_session.as_deref(), Some(first.as_str()));
+    assert!(
+        ui.status_running_elapsed(app.current_session.as_deref())
+            .is_some()
+    );
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Thinking && row.text.contains("first session hidden stream")
+    }));
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Thinking
+            && row.text.contains("first session visible before switch")
+    }));
+
+    for agent in &ui.auxiliary_agent_tasks {
+        agent.task.abort();
+    }
+}
+
+#[tokio::test]
+async fn background_session_completion_does_not_steal_current_session() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let first = store
+        .create_session_with_metadata(&app.workdir, "tui", "model-a", "mock", None)
+        .expect("first");
+    let second = store
+        .create_session_with_metadata(&app.workdir, "tui", "model-b", "mock", None)
+        .expect("second");
+    app.current_session = Some(first.clone());
+
+    let mut ui = FullscreenUi::new(&app);
+    let (_tx, rx) = mpsc::unbounded_channel();
+    let result = psychevo_runtime::RunResult {
+        session_id: first.clone(),
+        ..finished_run_result(&app)
+    };
+    let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(async move {
+        let _ = done_rx.await;
+        Ok(result)
+    });
+    let (control, _) = run_control();
+    ui.running = Some(RunningTurn {
+        session_id: Some(first.clone()),
+        control,
+        rx,
+        task: RunningTask::Agent(task),
+    });
+    ui.start_assistant();
+
+    app.open_session_direct(&mut ui, &second)
+        .expect("switch to second");
+    assert_eq!(app.current_session.as_deref(), Some(second.as_str()));
+
+    let _ = done_tx.send(());
+    while !ui
+        .auxiliary_agent_tasks
+        .iter()
+        .all(|agent| agent.task.is_finished())
+    {
+        tokio::task::yield_now().await;
+    }
+    app.drain_fullscreen_events(&mut ui)
+        .await
+        .expect("drain completion");
+
+    assert_eq!(app.current_session.as_deref(), Some(second.as_str()));
+    assert!(ui.auxiliary_agent_tasks.is_empty());
+}
+
+#[tokio::test]
+async fn new_session_does_not_receive_previous_running_output() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let first = store
+        .create_session_with_metadata(&app.workdir, "tui", "model-a", "mock", None)
+        .expect("first");
+    app.current_session = Some(first.clone());
+
+    let mut ui = FullscreenUi::new(&app);
+    let (tx, rx) = mpsc::unbounded_channel();
+    let task = tokio::spawn(async {
+        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::RunResult>>().await
+    });
+    let (control, _) = run_control();
+    ui.running = Some(RunningTurn {
+        session_id: Some(first),
+        control,
+        rx,
+        task: RunningTask::Agent(task),
+    });
+    ui.start_assistant();
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::New)
+        .await
+        .expect("new");
+    assert_eq!(app.current_session, None);
+    assert!(ui.running.is_none());
+
+    tx.send(RunStreamEvent::ReasoningDelta {
+        text: "stale running output".to_string(),
+    })
+    .expect("send stale output");
+    app.drain_fullscreen_events(&mut ui)
+        .await
+        .expect("drain stale output");
+
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| !row.text.contains("stale running output"))
+    );
+
+    for agent in &ui.auxiliary_agent_tasks {
+        agent.task.abort();
+    }
+}
+
+#[tokio::test]
+async fn running_shell_switch_buffers_stream_until_return() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let first = store
+        .create_session_with_metadata(&app.workdir, "tui", "model-a", "mock", None)
+        .expect("first");
+    let second = store
+        .create_session_with_metadata(&app.workdir, "tui", "model-b", "mock", None)
+        .expect("second");
+    app.current_session = Some(first.clone());
+
+    let mut ui = FullscreenUi::new(&app);
+    let (tx, rx) = mpsc::unbounded_channel();
+    let task = tokio::spawn(async {
+        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::UserShellResult>>().await
+    });
+    let (control, _) = run_control();
+    ui.running = Some(RunningTurn {
+        session_id: Some(first.clone()),
+        control,
+        rx,
+        task: RunningTask::UserShell(task),
+    });
+    ui.start_assistant();
+
+    app.open_session_direct(&mut ui, &second)
+        .expect("switch to second");
+    assert_eq!(app.current_session.as_deref(), Some(second.as_str()));
+    assert!(ui.running.is_none());
+    assert_eq!(ui.auxiliary_shell_tasks.len(), 1);
+    assert_eq!(
+        ui.status_running_elapsed(app.current_session.as_deref()),
+        None
+    );
+
+    tx.send(RunStreamEvent::Event(serde_json::json!({
+        "type": "tool_execution_start",
+        "session_id": first,
+        "tool_call_id": "user_shell",
+        "tool_name": "bash",
+        "args": {"command": "printf shell-one"},
+        "source": "user_shell",
+    })))
+    .expect("send shell start");
+    tx.send(RunStreamEvent::Event(serde_json::json!({
+        "type": "tool_execution_end",
+        "session_id": first,
+        "tool_call_id": "user_shell",
+        "tool_name": "bash",
+        "result": {"output": "shell-one", "exit_code": 0, "truncated": false},
+        "outcome": "normal",
+        "source": "user_shell",
+    })))
+    .expect("send shell end");
+    app.drain_fullscreen_events(&mut ui)
+        .await
+        .expect("drain hidden shell");
+
+    assert_eq!(app.current_session.as_deref(), Some(second.as_str()));
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| !row.text.contains("shell-one"))
+    );
+
+    app.open_session_direct(&mut ui, &first)
+        .expect("switch back to first");
+
+    assert_eq!(app.current_session.as_deref(), Some(first.as_str()));
+    assert!(
+        ui.status_running_elapsed(app.current_session.as_deref())
+            .is_some()
+    );
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Ran
+            && row.title == "Ran ! printf shell-one"
+            && row.text == "shell-one"
+    }));
+
+    for shell in &ui.auxiliary_shell_tasks {
+        shell.task.abort();
+    }
 }
 
 #[tokio::test]
@@ -1653,6 +1960,7 @@ async fn sessions_panel_action_mode_does_not_pollute_search_and_rejects_running_
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
+        session_id: None,
         control,
         rx,
         task: RunningTask::Agent(task),

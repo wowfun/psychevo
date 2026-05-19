@@ -100,6 +100,23 @@ pub(crate) fn mode_instruction(mode: RunMode) -> &'static str {
     }
 }
 
+pub(crate) fn mode_instruction_for_tool_availability(
+    mode: RunMode,
+    tools_available: bool,
+) -> &'static str {
+    if tools_available {
+        return mode_instruction(mode);
+    }
+    match mode {
+        RunMode::Build => {
+            "Runtime mode: default. No callable tools are available for this invocation. Answer from the provided instructions, context, and user prompt only; do not claim to read, write, edit, run shell commands, call agents, or access skills."
+        }
+        RunMode::Plan => {
+            "Runtime mode: plan. No callable tools are available for this invocation. Answer from the provided instructions, context, and user prompt only; do not claim to inspect files, run searches, call agents, or access skills."
+        }
+    }
+}
+
 // Tool implementations are split by tool family and included in this module.
 include!("workdir.rs");
 include!("read.rs");

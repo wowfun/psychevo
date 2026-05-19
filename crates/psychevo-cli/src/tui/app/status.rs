@@ -20,6 +20,9 @@ impl TuiApp {
             reasoning_effort: self.current_variant.clone(),
             include_reasoning: false,
             mode: self.current_mode,
+            permission_mode: Some(self.current_permission_mode),
+            approval_mode: None,
+            approval_handler: None,
             inherited_env: Some(self.env_map.clone()),
             agent: self.current_agent.clone(),
             no_agents: self.no_agents,
@@ -167,6 +170,7 @@ impl TuiApp {
             format!("model: {}", self.model_display_value()),
             self.variant_line(),
             format!("mode: {}", self.current_mode.as_str()),
+            format!("permission_mode: {}", self.current_permission_mode.as_str()),
             format!(
                 "agent: {}",
                 self.current_agent.as_deref().unwrap_or("(default)")

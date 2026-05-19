@@ -9,7 +9,7 @@ use psychevo_runtime::{
     AgentCatalog, AgentDiscoveryOptions, AgentEdgeRecord, RunMode, RunOptions, SessionSummary,
     SqliteStore, TuiMessageSummary, agent_status_value, close_agent_id, discover_agents,
     list_agents_value, resolve_agent_definition, resume_agent_id, send_agent_message,
-    view_agent_value, wait_agent_targets,
+    view_agent_value_with_catalog, wait_agent_mailbox,
 };
 use serde_json::{Value, json};
 
@@ -72,7 +72,7 @@ fn view_agent(args: AgentNameArgs) -> Result<ExitCode> {
     let workdir = cwd.canonicalize().unwrap_or(cwd);
     let catalog = catalog_for(&home, &workdir, env_map.clone())?;
     let agent = resolve_agent_definition(&catalog, &args.name, &workdir, &env_map)?;
-    let value = view_agent_value(&agent);
+    let value = view_agent_value_with_catalog(&agent, Some(&catalog));
     if args.json {
         println!("{}", serde_json::to_string(&value)?);
     } else {
@@ -91,7 +91,7 @@ fn validate_agent(args: AgentNameArgs) -> Result<ExitCode> {
     let agent = resolve_agent_definition(&catalog, &args.name, &workdir, &env_map)?;
     let value = json!({
         "valid": true,
-        "agent": view_agent_value(&agent),
+        "agent": view_agent_value_with_catalog(&agent, Some(&catalog)),
     });
     if args.json {
         println!("{}", serde_json::to_string(&value)?);
@@ -147,6 +147,9 @@ async fn run_agent(args: AgentRunArgs) -> Result<ExitCode> {
         reasoning_effort: args.variant.map(|variant| variant.as_str().to_string()),
         include_reasoning: false,
         mode: RunMode::Build,
+        permission_mode: None,
+        approval_mode: None,
+        approval_handler: None,
         inherited_env: Some(env_map),
         agent: Some(args.name),
         no_agents: false,
@@ -253,12 +256,12 @@ async fn wait_agent(args: AgentWaitArgs) -> Result<ExitCode> {
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     let db_path = resolve_state_db(&env_map, &home, &cwd)?;
     let store = SqliteStore::open(&db_path)?;
-    let value = wait_agent_targets(
-        &args.targets,
-        Duration::from_millis(args.timeout_ms),
-        Some(&store),
-    )
-    .await?;
+    let workdir = cwd.canonicalize().unwrap_or(cwd);
+    let session_id = store
+        .latest_run_session_for_workdir(&workdir)?
+        .ok_or_else(|| anyhow!("no run session found for {}", workdir.display()))?;
+    let value =
+        wait_agent_mailbox(&session_id, Duration::from_millis(args.timeout_ms), &store).await?;
     if args.json {
         println!("{}", serde_json::to_string(&value)?);
     } else {
@@ -669,24 +672,17 @@ fn print_agent_status(value: &Value) {
 }
 
 fn print_wait_report(value: &Value) {
-    let Some(statuses) = value.get("statuses").and_then(Value::as_object) else {
-        println!("No agents found.");
-        return;
-    };
-    for record in statuses.values() {
-        print_agent_value(record);
-    }
-    if let Some(timed_out) = value.get("timed_out").and_then(Value::as_array)
-        && !timed_out.is_empty()
+    let message = value
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or("Wait completed.");
+    println!("{message}");
+    if value
+        .get("timed_out")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
     {
-        eprintln!(
-            "timed out: {}",
-            timed_out
-                .iter()
-                .filter_map(Value::as_str)
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
+        eprintln!("timed out");
     }
 }
 

@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use psychevo_runtime::{SessionArtifactKind, SessionExportIncludeSet, SmokeControl};
+use psychevo_runtime::{
+    PermissionMode, RunMode, SessionArtifactKind, SessionExportIncludeSet, SmokeControl,
+};
 
 #[derive(Debug, Parser)]
 #[command(name = "pevo")]
@@ -142,6 +144,19 @@ pub(crate) struct RunArgs {
         help = "Include reasoning_delta events in JSON output; sanitized messages stay reasoning-free"
     )]
     pub(crate) include_reasoning: bool,
+    #[arg(
+        long = "permission-mode",
+        value_enum,
+        value_name = "MODE",
+        help = "Override permission mode: default, acceptEdits, plan, dontAsk, or bypassPermissions"
+    )]
+    pub(crate) permission_mode: Option<PermissionModeArg>,
+    #[arg(
+        long = "dangerously-skip-permissions",
+        conflicts_with = "permission_mode",
+        help = "Skip prompt-level permission prompts for this run; hard denies still apply"
+    )]
+    pub(crate) dangerously_skip_permissions: bool,
     #[arg(
         long,
         value_name = "NAME_OR_PATH",
@@ -382,6 +397,13 @@ pub(crate) struct TuiArgs {
     )]
     pub(crate) variant: Option<VariantArg>,
     #[arg(
+        long = "permission-mode",
+        value_enum,
+        value_name = "MODE",
+        help = "Initial permission mode: default, acceptEdits, plan, dontAsk, or bypassPermissions"
+    )]
+    pub(crate) permission_mode: Option<PermissionModeArg>,
+    #[arg(
         short = 's',
         long,
         value_name = "ID",
@@ -531,8 +553,6 @@ pub(crate) struct AgentInspectArgs {
 
 #[derive(Debug, Parser)]
 pub(crate) struct AgentWaitArgs {
-    #[arg(required = true, num_args = 1.., value_name = "TARGET", help = "Agent id or task name")]
-    pub(crate) targets: Vec<String>,
     #[arg(
         long,
         value_name = "MS",
@@ -766,6 +786,8 @@ pub(crate) enum ConfigCommand {
     Show(ConfigShowArgs),
     #[command(about = "Inspect and add provider configuration")]
     Provider(ConfigProviderArgs),
+    #[command(about = "List and remove project-local permission rules")]
+    Permissions(ConfigPermissionsArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -790,6 +812,35 @@ pub(crate) struct ConfigShowArgs {
 pub(crate) struct ConfigProviderArgs {
     #[command(subcommand)]
     pub(crate) command: ConfigProviderCommand,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct ConfigPermissionsArgs {
+    #[command(subcommand)]
+    pub(crate) command: ConfigPermissionsCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum ConfigPermissionsCommand {
+    #[command(about = "List project-local permission rules")]
+    List(ConfigJsonArgs),
+    #[command(about = "Remove one project-local permission rule")]
+    Remove(ConfigPermissionRemoveArgs),
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct ConfigPermissionRemoveArgs {
+    #[arg(
+        long,
+        value_enum,
+        value_name = "KIND",
+        help = "Rule list: allow, ask, or deny"
+    )]
+    pub(crate) kind: PermissionRuleKindArg,
+    #[arg(long, value_name = "RULE", help = "Exact rule string to remove")]
+    pub(crate) rule: String,
+    #[arg(long, help = "Emit structured JSON instead of human text")]
+    pub(crate) json: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -917,6 +968,26 @@ pub(crate) enum VariantArg {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum PermissionModeArg {
+    Default,
+    #[value(name = "acceptEdits", alias = "accept-edits")]
+    AcceptEdits,
+    Plan,
+    #[value(name = "dontAsk", alias = "dont-ask")]
+    DontAsk,
+    #[value(name = "bypassPermissions", alias = "bypass-permissions")]
+    BypassPermissions,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub(crate) enum PermissionRuleKindArg {
+    Allow,
+    Ask,
+    Deny,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 #[value(rename_all = "kebab-case")]
 pub(crate) enum RunFormatArg {
     Default,
@@ -950,6 +1021,34 @@ impl VariantArg {
             VariantArg::High => "high",
             VariantArg::Xhigh => "xhigh",
             VariantArg::Max => "max",
+        }
+    }
+}
+
+impl PermissionModeArg {
+    pub(crate) fn run_mode(self) -> RunMode {
+        match self {
+            Self::Plan => RunMode::Plan,
+            _ => RunMode::Build,
+        }
+    }
+
+    pub(crate) fn permission_mode(self) -> PermissionMode {
+        match self {
+            Self::Default | Self::Plan => PermissionMode::Default,
+            Self::AcceptEdits => PermissionMode::AcceptEdits,
+            Self::DontAsk => PermissionMode::DontAsk,
+            Self::BypassPermissions => PermissionMode::BypassPermissions,
+        }
+    }
+}
+
+impl PermissionRuleKindArg {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Allow => "allow",
+            Self::Ask => "ask",
+            Self::Deny => "deny",
         }
     }
 }
@@ -1031,6 +1130,12 @@ mod tests {
         );
         assert!(Cli::try_parse_from(["pevo", "run", "-f", "json", "hello"]).is_ok());
         assert!(
+            Cli::try_parse_from(["pevo", "run", "--permission-mode", "dontAsk", "hello"]).is_ok()
+        );
+        assert!(
+            Cli::try_parse_from(["pevo", "run", "--dangerously-skip-permissions", "hello"]).is_ok()
+        );
+        assert!(
             Cli::try_parse_from(["pevo", "agent", "run", "reviewer", "-f", "json", "hello"])
                 .is_ok()
         );
@@ -1091,6 +1196,20 @@ mod tests {
         );
         assert!(Cli::try_parse_from(["pevo", "model", "fetch", "mock", "--json"]).is_ok());
         assert!(Cli::try_parse_from(["pevo", "config", "show", "--local", "--json"]).is_ok());
+        assert!(Cli::try_parse_from(["pevo", "config", "permissions", "list", "--json"]).is_ok());
+        assert!(
+            Cli::try_parse_from([
+                "pevo",
+                "config",
+                "permissions",
+                "remove",
+                "--kind",
+                "allow",
+                "--rule",
+                "Bash(npm test *)",
+            ])
+            .is_ok()
+        );
         assert!(
             Cli::try_parse_from(["pevo", "auth", "set", "mock", "--api-key-stdin", "--local"])
                 .is_ok()

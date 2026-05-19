@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 
 use futures::future::BoxFuture;
 use psychevo_agent_core::{
-    AgentLoopRequest, ControlHandle, Message, ToolBinding, ToolExecutionMode, ToolOutput,
-    user_text_message,
+    AgentLoopRequest, AssistantBlock, ControlHandle, Message, ToolBinding, ToolExecutionMode,
+    ToolOutput, user_text_message,
 };
 use psychevo_ai::{AbortSignal, GenerationProvider, Outcome};
 use serde::{Deserialize, Serialize};
@@ -23,16 +23,19 @@ use crate::context_usage::ContextRecorder;
 use crate::error::{Error, Result};
 use crate::events::PersistenceSink;
 use crate::messages::assistant_text;
+use crate::permissions::PermissionRuntime;
 use crate::prompt_assembly::{
     PromptPrefixRecordInput, assemble_child_prompt_prefix, context_evidence_for_request,
     prompt_prefix_record, tool_declarations_hash,
 };
 use crate::skills::resolve_skills_home;
-use crate::store::{AgentEdgeRecord, AgentEdgeStatus, SqliteStore};
+use crate::store::{
+    AgentEdgeRecord, AgentEdgeStatus, AgentMailboxEventInput, AgentMailboxEventRecord, SqliteStore,
+};
 use crate::tools::coding_core_tools_for_mode;
 use crate::types::{
-    ModelMetadata, RunMode, RunStreamEvent, RunStreamSink, SelectedAgent, SessionSummary,
-    SmokeControl,
+    ApprovalHandler, ApprovalMode, ModelMetadata, PermissionConfig, PermissionMode, RunMode,
+    RunStreamEvent, RunStreamSink, SelectedAgent, SessionSummary, SmokeControl,
 };
 
 const MAX_AGENT_NAME_LEN: usize = 64;
@@ -127,6 +130,7 @@ pub struct AgentDefinition {
     pub initial_prompt: Option<String>,
     pub max_turns: Option<usize>,
     pub max_spawn_depth: u8,
+    pub project_instructions: Option<bool>,
     pub effort: Option<String>,
     pub diagnostics: Vec<AgentDiagnostic>,
 }
@@ -249,6 +253,8 @@ struct RawAgentFrontmatter {
     max_turns: Option<usize>,
     #[serde(rename = "maxSpawnDepth", alias = "max_spawn_depth")]
     max_spawn_depth: Option<u8>,
+    #[serde(rename = "projectInstructions", alias = "project_instructions")]
+    project_instructions: Option<Value>,
     effort: Option<String>,
     memory: Option<Value>,
     isolation: Option<Value>,
@@ -267,6 +273,10 @@ pub(crate) struct AgentToolContext {
     pub(crate) generation_metadata: Value,
     pub(crate) workdir: PathBuf,
     pub(crate) mode: RunMode,
+    pub(crate) permission_config: PermissionConfig,
+    pub(crate) permission_mode: PermissionMode,
+    pub(crate) approval_mode: ApprovalMode,
+    pub(crate) approval_handler: Option<Arc<dyn ApprovalHandler>>,
     pub(crate) store: SqliteStore,
     pub(crate) parent_session_id: String,
     pub(crate) parent_context_snapshot: Vec<Message>,
@@ -382,6 +392,8 @@ pub fn list_agents_value(catalog: &AgentCatalog) -> Value {
                 "disallowed_agents": agent.tool_policy.denied_agents,
                 "permission_mode": agent.tool_policy.permission_mode,
                 "max_spawn_depth": agent.max_spawn_depth,
+                "project_instructions": agent.project_instructions,
+                "effective_policy": agent_effective_policy_value(agent, Some(catalog)),
                 "diagnostics": agent.diagnostics,
             })
         }).collect::<Vec<_>>(),
@@ -398,6 +410,8 @@ pub fn list_agents_value(catalog: &AgentCatalog) -> Value {
                 "disallowed_agents": agent.tool_policy.denied_agents,
                 "permission_mode": agent.tool_policy.permission_mode,
                 "max_spawn_depth": agent.max_spawn_depth,
+                "project_instructions": agent.project_instructions,
+                "effective_policy": agent_effective_policy_value(agent, Some(catalog)),
                 "diagnostics": agent.diagnostics,
             })
         }).collect::<Vec<_>>(),
@@ -406,6 +420,13 @@ pub fn list_agents_value(catalog: &AgentCatalog) -> Value {
 }
 
 pub fn view_agent_value(agent: &AgentDefinition) -> Value {
+    view_agent_value_with_catalog(agent, None)
+}
+
+pub fn view_agent_value_with_catalog(
+    agent: &AgentDefinition,
+    catalog: Option<&AgentCatalog>,
+) -> Value {
     json!({
         "name": agent.name,
         "description": agent.description,
@@ -426,9 +447,60 @@ pub fn view_agent_value(agent: &AgentDefinition) -> Value {
         "initial_prompt": agent.initial_prompt,
         "max_turns": agent.max_turns,
         "max_spawn_depth": agent.max_spawn_depth,
+        "project_instructions": agent.project_instructions,
         "effort": agent.effort,
+        "tool_policy": {
+            "tools": agent.tool_policy.allowed,
+            "disallowed_tools": agent.tool_policy.denied,
+            "allowed_agents": agent.tool_policy.allowed_agents,
+            "disallowed_agents": agent.tool_policy.denied_agents,
+            "permissions": agent.tool_policy.permissions,
+            "permission_mode": agent.tool_policy.permission_mode,
+            "mcp_servers": agent.tool_policy.mcp_servers,
+        },
+        "effective_policy": agent_effective_policy_value(agent, catalog),
         "diagnostics": agent.diagnostics,
     })
+}
+
+pub fn agent_effective_policy_value(
+    agent: &AgentDefinition,
+    catalog: Option<&AgentCatalog>,
+) -> Value {
+    let tools_mode = match &agent.tool_policy.allowed {
+        None => "inherit",
+        Some(allowed) if allowed.is_empty() => "explicit_empty",
+        Some(_) => "explicit_allowlist",
+    };
+    let agent_catalog_visible = agent_policy_allows_agent_catalog(agent);
+    let visible_agents = catalog.filter(|_| agent_catalog_visible).map(|catalog| {
+        agent_catalog_for_policy(agent, &catalog.agents)
+            .into_iter()
+            .map(|agent| agent.name)
+            .collect::<Vec<_>>()
+    });
+    json!({
+        "tools": {
+            "mode": tools_mode,
+            "allowed": agent.tool_policy.allowed,
+            "denied": agent.tool_policy.denied,
+        },
+        "agent_catalog": {
+            "visible": agent_catalog_visible,
+            "agents": visible_agents,
+        },
+        "skill_catalog": {
+            "visible": agent_policy_allows_skill_catalog(agent),
+        },
+        "project_instructions": {
+            "visible": agent_project_instructions_enabled(Some(agent)),
+            "raw": agent.project_instructions,
+        },
+    })
+}
+
+pub(crate) fn agent_project_instructions_enabled(agent: Option<&AgentDefinition>) -> bool {
+    agent.is_none_or(|agent| agent.project_instructions != Some(false))
 }
 
 pub fn format_agents_for_prompt(catalog: &[AgentDefinition]) -> String {
@@ -480,6 +552,65 @@ pub(crate) fn apply_agent_tool_policy(
         .into_iter()
         .filter(|tool| agent_allows_tool(tool.name(), agent, mode))
         .collect()
+}
+
+pub(crate) fn narrow_permission_mode_for_agent(
+    parent: PermissionMode,
+    agent: Option<&AgentDefinition>,
+) -> PermissionMode {
+    let Some(agent_mode) = agent.and_then(|agent| agent.tool_policy.permission_mode) else {
+        return parent;
+    };
+    match agent_mode {
+        AgentPermissionMode::Plan => parent,
+        AgentPermissionMode::Default => match parent {
+            PermissionMode::AcceptEdits | PermissionMode::BypassPermissions => {
+                PermissionMode::Default
+            }
+            PermissionMode::Default | PermissionMode::DontAsk => parent,
+        },
+        AgentPermissionMode::AcceptEdits => match parent {
+            PermissionMode::AcceptEdits | PermissionMode::BypassPermissions => {
+                PermissionMode::AcceptEdits
+            }
+            PermissionMode::Default | PermissionMode::DontAsk => parent,
+        },
+    }
+}
+
+pub(crate) fn effective_tool_names(tools: &[Arc<dyn ToolBinding>]) -> Vec<String> {
+    tools.iter().map(|tool| tool.name().to_string()).collect()
+}
+
+pub(crate) fn agent_catalog_for_prompt(
+    catalog: &[AgentDefinition],
+    selected_agent: Option<&AgentDefinition>,
+    tools: &[Arc<dyn ToolBinding>],
+) -> Vec<AgentDefinition> {
+    if !tools.iter().any(|tool| tool.name() == "Agent") {
+        return Vec::new();
+    }
+    agent_catalog_for_selected_policy(catalog, selected_agent)
+}
+
+pub(crate) fn agent_catalog_for_selected_policy(
+    catalog: &[AgentDefinition],
+    selected_agent: Option<&AgentDefinition>,
+) -> Vec<AgentDefinition> {
+    match selected_agent {
+        Some(agent) => agent_catalog_for_policy(agent, catalog),
+        None => catalog.to_vec(),
+    }
+}
+
+pub(crate) fn skill_catalog_visible_for_tools(tools: &[Arc<dyn ToolBinding>]) -> bool {
+    let has_list = tools.iter().any(|tool| tool.name() == "list_skills");
+    let has_view = tools.iter().any(|tool| tool.name() == "view_skill");
+    has_list && has_view
+}
+
+pub(crate) fn agent_policy_allows_agent_spawn(agent: &AgentDefinition) -> bool {
+    agent_policy_allows_agent_catalog(agent)
 }
 
 pub(crate) fn apply_agent_hooks(
@@ -598,29 +729,23 @@ pub async fn wait_agent_id(id: &str, timeout: Duration) -> Result<Option<AgentRu
     }
 }
 
-pub async fn wait_agent_targets(
-    targets: &[String],
+pub async fn wait_agent_mailbox(
+    parent_session_id: &str,
     timeout: Duration,
-    store: Option<&SqliteStore>,
+    store: &SqliteStore,
 ) -> Result<Value> {
     let started = Instant::now();
     loop {
-        let statuses = targets
-            .iter()
-            .map(|target| {
-                let record = find_agent_record(target, store);
-                (target.clone(), record)
-            })
-            .collect::<BTreeMap<_, _>>();
-        let timed_out = statuses
-            .iter()
-            .filter(|(_, record)| !agent_status_is_final(record.status))
-            .map(|(target, _)| target.clone())
-            .collect::<Vec<_>>();
-        if timed_out.is_empty() || started.elapsed() >= timeout {
+        if store.has_pending_agent_mailbox_events(parent_session_id)? {
             return Ok(json!({
-                "statuses": statuses,
-                "timed_out": timed_out,
+                "message": "Wait completed.",
+                "timed_out": false,
+            }));
+        }
+        if started.elapsed() >= timeout {
+            return Ok(json!({
+                "message": "Wait timed out.",
+                "timed_out": true,
             }));
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -1009,21 +1134,6 @@ fn edge_spawn_depth_remaining(edge: &AgentEdgeRecord) -> u8 {
         .unwrap_or(0)
 }
 
-fn find_agent_record(target: &str, store: Option<&SqliteStore>) -> AgentRunRecord {
-    if let Some(record) = {
-        let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-        find_live_record_locked(&runs, target)
-    } {
-        return record;
-    }
-    if let Some(store) = store
-        && let Ok(Some(edge)) = store.find_agent_edge(target)
-    {
-        return agent_record_from_edge(store, edge);
-    }
-    not_found_record(target)
-}
-
 fn find_live_record_locked(
     runs: &HashMap<String, AgentRunState>,
     target: &str,
@@ -1192,27 +1302,6 @@ fn agent_status_is_final(status: AgentRunStatus) -> bool {
     )
 }
 
-fn not_found_record(target: &str) -> AgentRunRecord {
-    AgentRunRecord {
-        id: target.to_string(),
-        task_name: None,
-        agent_name: String::new(),
-        task: String::new(),
-        parent_session_id: String::new(),
-        child_session_id: None,
-        role: AgentInvocationRole::Subagent,
-        background: false,
-        status: AgentRunStatus::NotFound,
-        edge_status: None,
-        started_at_ms: now_ms(),
-        ended_at_ms: Some(now_ms()),
-        outcome: Some("not_found".to_string()),
-        final_answer: None,
-        error: Some(format!("agent not found: {target}")),
-        effective_max_spawn_depth: None,
-    }
-}
-
 fn load_agent_dir(
     catalog: &mut AgentCatalog,
     winners: &mut BTreeMap<String, PathBuf>,
@@ -1355,6 +1444,11 @@ fn agent_from_raw(
     if let Some(message) = permission_diagnostic {
         diagnostics.push(AgentDiagnostic::warning(message, path.clone()));
     }
+    let (project_instructions, project_instructions_diagnostic) =
+        parse_project_instructions(raw.project_instructions.as_ref());
+    if let Some(message) = project_instructions_diagnostic {
+        diagnostics.push(AgentDiagnostic::warning(message, path.clone()));
+    }
     let tool_policy = parse_agent_tool_policy(
         raw.tools.as_ref(),
         raw.disallowed_tools.as_ref(),
@@ -1362,6 +1456,7 @@ fn agent_from_raw(
         permission_mode,
         raw.mcp_servers.as_ref(),
     );
+    diagnostics.extend(tool_policy_diagnostics(&tool_policy, path.clone()));
     let model = raw.model.and_then(|value| {
         let trimmed = value.trim();
         (!trimmed.is_empty() && trimmed != "inherit").then(|| trimmed.to_string())
@@ -1384,6 +1479,7 @@ fn agent_from_raw(
             .filter(|value| !value.is_empty()),
         max_turns: raw.max_turns,
         max_spawn_depth: clamp_agent_spawn_depth(raw.max_spawn_depth),
+        project_instructions,
         effort: raw.effort,
         diagnostics,
     })
@@ -1414,17 +1510,83 @@ fn parse_agent_tool_policy(
     permission_mode: Option<AgentPermissionMode>,
     mcp_servers: Option<&Value>,
 ) -> AgentToolPolicy {
-    let allowed = parse_tool_entries(tools, ToolEntryMode::Allow);
+    let allowed = parse_allowed_tool_entries(tools);
     let denied = parse_tool_entries(disallowed_tools, ToolEntryMode::Deny);
+    let (allowed_tools, allowed_agents) = match allowed {
+        Some(allowed) => (
+            Some(allowed.tools),
+            (!allowed.agents.is_empty()).then_some(allowed.agents),
+        ),
+        None => (None, None),
+    };
     AgentToolPolicy {
-        allowed: (!allowed.tools.is_empty()).then_some(allowed.tools),
+        allowed: allowed_tools,
         denied: denied.tools,
-        allowed_agents: (!allowed.agents.is_empty()).then_some(allowed.agents),
+        allowed_agents,
         denied_agents: denied.agents,
         permissions,
         permission_mode,
         mcp_servers: parse_mcp_server_set(mcp_servers),
     }
+}
+
+fn parse_allowed_tool_entries(value: Option<&Value>) -> Option<ParsedToolEntries> {
+    match value {
+        None | Some(Value::Null) => None,
+        Some(Value::String(raw)) if raw.trim().is_empty() => None,
+        Some(Value::Array(items)) if items.is_empty() => Some(ParsedToolEntries::default()),
+        Some(_) => Some(parse_tool_entries(value, ToolEntryMode::Allow)),
+    }
+}
+
+fn tool_policy_diagnostics(
+    policy: &AgentToolPolicy,
+    path: Option<PathBuf>,
+) -> Vec<AgentDiagnostic> {
+    let mut diagnostics = Vec::new();
+    for tool in policy
+        .allowed
+        .iter()
+        .flat_map(|tools| tools.iter())
+        .chain(policy.denied.iter())
+    {
+        if !known_tool_policy_name(tool) {
+            diagnostics.push(AgentDiagnostic::warning(
+                format!(
+                    "agent tool `{tool}` is not a known built-in tool; preserving it for compatibility"
+                ),
+                path.clone(),
+            ));
+        }
+    }
+    diagnostics
+}
+
+fn known_tool_policy_name(name: &str) -> bool {
+    matches!(
+        name,
+        "read"
+            | "search"
+            | "list"
+            | "bash"
+            | "edit"
+            | "write"
+            | "Agent"
+            | "Skill"
+            | "list_agents"
+            | "wait_agent"
+            | "send_message"
+            | "close_agent"
+            | "resume_agent"
+            | "list_skills"
+            | "view_skill"
+            | "create_skill"
+            | "patch_skill"
+            | "remove_skill"
+            | "enable_skill"
+            | "disable_skill"
+            | "install_skill"
+    ) || mcp_tool_server(name).is_some()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1543,6 +1705,20 @@ fn parse_permission_mode(value: Option<&Value>) -> (Option<AgentPermissionMode>,
     }
 }
 
+fn parse_project_instructions(value: Option<&Value>) -> (Option<bool>, Option<String>) {
+    match value {
+        None | Some(Value::Null) => (None, None),
+        Some(Value::Bool(enabled)) => (Some(*enabled), None),
+        Some(_) => (
+            None,
+            Some(
+                "projectInstructions must be a boolean when set; defaulting to injected project instructions"
+                    .to_string(),
+            ),
+        ),
+    }
+}
+
 fn parse_string_set(value: Option<&Value>) -> Option<BTreeSet<String>> {
     let items = parse_string_vec(value);
     (!items.is_empty()).then(|| items.into_iter().collect())
@@ -1580,6 +1756,7 @@ fn normalize_tool_name(raw: String) -> String {
         "Edit" | "edit" => "edit".to_string(),
         "Write" | "write" => "write".to_string(),
         "Agent" | "agent" | "Task" | "task" => "Agent".to_string(),
+        "Skill" | "skill" => "Skill".to_string(),
         other => other.to_string(),
     }
 }
@@ -1598,7 +1775,11 @@ fn agent_allows_tool(name: &str, agent: Option<&AgentDefinition>, mode: RunMode)
         return false;
     }
     let canonical = normalize_tool_name(name.to_string());
-    if agent.tool_policy.denied.contains(&canonical) || agent.tool_policy.denied.contains(name) {
+    let policy_names = tool_policy_names(name, &canonical);
+    if policy_names
+        .iter()
+        .any(|name| agent.tool_policy.denied.contains(name.as_str()))
+    {
         return false;
     }
     if let Some(server) = mcp_tool_server(name)
@@ -1608,13 +1789,24 @@ fn agent_allows_tool(name: &str, agent: Option<&AgentDefinition>, mode: RunMode)
         return false;
     }
     match &agent.tool_policy.allowed {
-        Some(allowed) => {
-            allowed.contains(&canonical)
-                || allowed.contains(name)
-                || (agent_control_tool_name(name) && allowed.contains("Agent"))
-        }
+        Some(allowed) => policy_names
+            .iter()
+            .any(|name| allowed.contains(name.as_str())),
         None => true,
     }
+}
+
+fn tool_policy_names(name: &str, canonical: &str) -> Vec<String> {
+    let mut names = Vec::from([canonical.to_string(), name.to_string()]);
+    if agent_control_tool_name(name) {
+        names.push("Agent".to_string());
+    }
+    if skill_read_tool_name(name) {
+        names.push("Skill".to_string());
+    }
+    names.sort();
+    names.dedup();
+    names
 }
 
 fn plan_mode_tool_allowed(name: &str) -> bool {
@@ -1651,6 +1843,57 @@ fn agent_control_tool_name(name: &str) -> bool {
         name,
         "Agent" | "list_agents" | "wait_agent" | "send_message" | "close_agent" | "resume_agent"
     )
+}
+
+fn skill_read_tool_name(name: &str) -> bool {
+    matches!(name, "list_skills" | "view_skill")
+}
+
+fn agent_policy_allows_agent_catalog(agent: &AgentDefinition) -> bool {
+    if agent.tool_policy.denied.contains("Agent") {
+        return false;
+    }
+    match &agent.tool_policy.allowed {
+        Some(allowed) => allowed.contains("Agent"),
+        None => true,
+    }
+}
+
+fn agent_policy_allows_skill_catalog(agent: &AgentDefinition) -> bool {
+    if agent.tool_policy.denied.contains("Skill")
+        || agent.tool_policy.denied.contains("list_skills")
+        || agent.tool_policy.denied.contains("view_skill")
+    {
+        return false;
+    }
+    match &agent.tool_policy.allowed {
+        Some(allowed) => {
+            allowed.contains("Skill")
+                || (allowed.contains("list_skills") && allowed.contains("view_skill"))
+        }
+        None => true,
+    }
+}
+
+fn agent_catalog_for_policy(
+    agent: &AgentDefinition,
+    catalog: &[AgentDefinition],
+) -> Vec<AgentDefinition> {
+    if !agent_policy_allows_agent_catalog(agent) {
+        return Vec::new();
+    }
+    catalog
+        .iter()
+        .filter(|candidate| {
+            agent
+                .tool_policy
+                .allowed_agents
+                .as_ref()
+                .is_none_or(|allowed| allowed.contains(&candidate.name))
+        })
+        .filter(|candidate| !agent.tool_policy.denied_agents.contains(&candidate.name))
+        .cloned()
+        .collect()
 }
 
 fn valid_agent_name(name: &str) -> bool {
@@ -1777,6 +2020,7 @@ fn built_in_agent(
         initial_prompt: None,
         max_turns: None,
         max_spawn_depth: 0,
+        project_instructions: None,
         effort: None,
         diagnostics: Vec::new(),
     }
@@ -2341,11 +2585,24 @@ async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     tools.extend(agent_tools(child_agent_tool_context));
     tools = apply_agent_tool_policy(tools, Some(&child.agent), child.context.mode);
     tools = apply_agent_hooks(tools, Some(&child.agent), &child.context.workdir);
+    let permission_mode =
+        narrow_permission_mode_for_agent(child.context.permission_mode, Some(&child.agent));
+    let permission_runtime = PermissionRuntime::new(
+        child.context.workdir.clone(),
+        child.context.workdir.join(".psychevo"),
+        child.context.permission_config.clone(),
+        permission_mode,
+        child.context.approval_mode,
+        child.context.approval_handler.clone(),
+    );
+    tools = permission_runtime.wrap_tools(tools);
+    let effective_tool_names = effective_tool_names(&tools);
     let tool_declarations_hash = tool_declarations_hash(&tools);
     let prompt_assembly = assemble_child_prompt_prefix(
         child.context.mode,
         &child.agent,
         &child.context.model_metadata.capabilities,
+        !tools.is_empty(),
     );
     let selected_agent = SelectedAgent {
         name: child.agent.name.clone(),
@@ -2354,9 +2611,17 @@ async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     };
     let prefix_metadata = json!({
         "mode": child.context.mode.as_str(),
+        "permission_mode": permission_mode.as_str(),
+        "approval_mode": child.context.approval_mode.as_str(),
         "selected_agent": selected_agent.clone(),
         "agent_role": invocation_role_str(child.role),
         "parent_session_id": child.context.parent_session_id.clone(),
+        "effective_tools": effective_tool_names,
+        "agent_catalog_visible": false,
+        "visible_agents": [],
+        "skill_catalog_visible": false,
+        "project_instructions_visible": false,
+        "project_instructions_role": serde_json::Value::Null,
     });
     let prefix_record = prompt_prefix_record(PromptPrefixRecordInput {
         session_id: &child_session,
@@ -2370,7 +2635,7 @@ async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
             "new_child_session".to_string()
         }),
         slots: prompt_assembly.prefix_slots.clone(),
-        metadata: Some(prefix_metadata),
+        metadata: Some(prefix_metadata.clone()),
     });
     let prefix_record = child
         .context
@@ -2384,6 +2649,12 @@ async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         "model": prefix_record.model,
         "tool_declarations_hash": prefix_record.tool_declarations_hash,
         "invalidation_reason": prefix_record.invalidation_reason,
+        "effective_tools": prefix_metadata.get("effective_tools").cloned().unwrap_or_default(),
+        "agent_catalog_visible": prefix_metadata.get("agent_catalog_visible").cloned().unwrap_or_default(),
+        "visible_agents": prefix_metadata.get("visible_agents").cloned().unwrap_or_default(),
+        "skill_catalog_visible": prefix_metadata.get("skill_catalog_visible").cloned().unwrap_or_default(),
+        "project_instructions_visible": prefix_metadata.get("project_instructions_visible").cloned().unwrap_or_default(),
+        "project_instructions_role": prefix_metadata.get("project_instructions_role").cloned().unwrap_or_default(),
     });
     let prompt_context_evidence = context_evidence_for_request(
         &prompt_assembly.prompt_instructions,
@@ -2440,8 +2711,6 @@ async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         selected_agent: Some(selected_agent),
         prompt_prefix_metadata: Some(prompt_prefix_metadata),
     });
-    let notification_agent_name = child.agent.name.clone();
-    let parent_control_handle = child.context.control_handle.clone();
     let parent_store = child.context.store.clone();
     let parent_session_id = child.context.parent_session_id.clone();
     let completion = match psychevo_agent_core::run_agent_loop(
@@ -2486,15 +2755,7 @@ async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         }),
     );
     if child.background {
-        if let Some(parent) = parent_control_handle {
-            let text = agent_notification_text(
-                &notification_agent_name,
-                completion.outcome.as_str(),
-                &final_answer,
-            );
-            let _ = parent.inject_user_message(user_text_message(text));
-        }
-        let _ = append_parent_agent_notification(
+        let _ = append_parent_agent_mailbox_event(
             &parent_store,
             &parent_session_id,
             &record,
@@ -2636,6 +2897,14 @@ fn child_agent_metadata(input: ChildAgentMetadataInput<'_>) -> Value {
             "mode".to_string(),
             Value::String(context.mode.as_str().to_string()),
         );
+        object.insert(
+            "permission_mode".to_string(),
+            Value::String(context.permission_mode.as_str().to_string()),
+        );
+        object.insert(
+            "approval_mode".to_string(),
+            Value::String(context.approval_mode.as_str().to_string()),
+        );
         let context_limit = context
             .context_limit
             .or_else(|| context.model_metadata.context_limit());
@@ -2664,13 +2933,6 @@ fn child_agent_metadata(input: ChildAgentMetadataInput<'_>) -> Value {
         }),
     );
     Value::Object(object)
-}
-
-fn agent_notification_text(agent_name: &str, outcome: &str, final_answer: &str) -> String {
-    format!(
-        "Agent `{}` completed with outcome {}.\n\n{}",
-        agent_name, outcome, final_answer
-    )
 }
 
 fn append_parent_agent_start_notification(
@@ -2703,38 +2965,86 @@ fn append_parent_agent_start_notification(
     )
 }
 
-fn append_parent_agent_notification(
+fn append_parent_agent_mailbox_event(
     store: &SqliteStore,
     parent_session_id: &str,
     record: &AgentRunRecord,
     outcome: &str,
     final_answer: &str,
 ) -> Result<()> {
-    let text = format!(
-        "Agent `{}` completed with outcome {}.\n\n{}",
-        record.agent_name, outcome, final_answer
-    );
-    let message = user_text_message(text.clone());
-    store.append_message_with_metrics(
-        parent_session_id,
-        &message,
-        None,
-        Some(json!({
-            AGENT_NOTIFICATION_METADATA_KEY: {
-                "type": "agent_completed",
-                "agent_id": record.id,
-                "task_name": record.task_name,
-                "agent_name": record.agent_name,
-                "child_session_id": record.child_session_id,
-                "status": record.status,
-                "outcome": outcome,
-                "summary": final_answer,
-                "background": record.background,
-                "effective_max_spawn_depth": record.effective_max_spawn_depth,
-                "hidden": !record.background
-            }
+    let content = subagent_notification_content(record, outcome, final_answer);
+    let payload = inter_agent_communication_payload(record, content.clone());
+    let content_text = serde_json::to_string(&payload)?;
+    store.append_agent_mailbox_event(AgentMailboxEventInput {
+        parent_session_id: parent_session_id.to_string(),
+        child_session_id: record.child_session_id.clone(),
+        agent_id: record.id.clone(),
+        task_name: record.task_name.clone(),
+        agent_name: record.agent_name.clone(),
+        content_text,
+        payload,
+        metadata: Some(json!({
+            "type": "agent_completed",
+            "agent_id": record.id,
+            "task_name": record.task_name,
+            "agent_name": record.agent_name,
+            "child_session_id": record.child_session_id,
+            "status": record.status,
+            "outcome": outcome,
+            "summary": final_answer,
+            "background": record.background,
+            "effective_max_spawn_depth": record.effective_max_spawn_depth
         })),
+    })?;
+    Ok(())
+}
+
+fn subagent_notification_content(
+    record: &AgentRunRecord,
+    outcome: &str,
+    final_answer: &str,
+) -> String {
+    format!(
+        "<subagent_notification>\n{}\n</subagent_notification>",
+        json!({
+            "agent_id": record.id,
+            "task_name": record.task_name,
+            "agent_name": record.agent_name,
+            "child_session_id": record.child_session_id,
+            "status": record.status,
+            "outcome": outcome,
+            "final_answer": final_answer,
+        })
     )
+}
+
+fn inter_agent_communication_payload(record: &AgentRunRecord, content: String) -> Value {
+    let author = record
+        .task_name
+        .as_deref()
+        .map(sanitize_task_name)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| sanitize_task_name(&record.agent_name));
+    json!({
+        "author": format!("/root/{author}"),
+        "recipient": "/root",
+        "other_recipients": [],
+        "content": content,
+        "trigger_turn": false
+    })
+}
+
+pub(crate) fn agent_mailbox_event_message(record: &AgentMailboxEventRecord) -> Message {
+    Message::Assistant {
+        content: vec![AssistantBlock::Text {
+            text: record.content_text.clone(),
+        }],
+        timestamp_ms: record.delivered_at_ms.unwrap_or(record.created_at_ms),
+        finish_reason: Some("inter_agent_communication".to_string()),
+        outcome: Outcome::Normal,
+        model: None,
+        provider: None,
+    }
 }
 
 fn fork_messages(
@@ -2857,17 +3167,15 @@ impl ToolBinding for WaitAgentTool {
     }
 
     fn description(&self) -> &str {
-        "Wait for one or more agents to reach a final status."
+        "Wait for a background agent mailbox update. The result only reports wait status; agent output is delivered through mailbox context."
     }
 
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "targets": {"type": "array", "items": {"type": "string"}},
                 "timeout_ms": {"type": "integer", "minimum": 0}
             },
-            "required": ["targets"],
             "additionalProperties": false
         })
     }
@@ -2878,33 +3186,55 @@ impl ToolBinding for WaitAgentTool {
 
     fn execute(
         &self,
-        _tool_call_id: String,
+        tool_call_id: String,
         args: Value,
         _abort: AbortSignal,
     ) -> BoxFuture<'static, ToolOutput> {
         let store = self.context.store.clone();
+        let parent_session_id = self.context.parent_session_id.clone();
+        let control_handle = self.context.control_handle.clone();
         Box::pin(async move {
-            let targets = args
-                .get("targets")
-                .and_then(Value::as_array)
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .map(str::to_string)
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
             let timeout_ms = args
                 .get("timeout_ms")
                 .and_then(Value::as_u64)
                 .unwrap_or(30_000);
-            match wait_agent_targets(&targets, Duration::from_millis(timeout_ms), Some(&store))
-                .await
+            let value = match wait_agent_mailbox(
+                &parent_session_id,
+                Duration::from_millis(timeout_ms),
+                &store,
+            )
+            .await
             {
-                Ok(value) => ToolOutput::ok(value),
-                Err(err) => ToolOutput::error(err.to_string()),
+                Ok(value) => value,
+                Err(err) => return ToolOutput::error(err.to_string()),
+            };
+            let timed_out = value
+                .get("timed_out")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if !timed_out {
+                let delivered_after_seq = match store.next_message_seq(&parent_session_id) {
+                    Ok(seq) => seq,
+                    Err(err) => return ToolOutput::error(err.to_string()),
+                };
+                let delivered = match store.deliver_pending_agent_mailbox_events_for_tool(
+                    &parent_session_id,
+                    &tool_call_id,
+                    delivered_after_seq,
+                ) {
+                    Ok(records) => records,
+                    Err(err) => return ToolOutput::error(err.to_string()),
+                };
+                if let Some(handle) = control_handle {
+                    for record in delivered.iter().filter(|record| {
+                        record.delivered_tool_call_id.as_deref() == Some(tool_call_id.as_str())
+                            && record.delivered_after_session_seq == Some(delivered_after_seq)
+                    }) {
+                        let _ = handle.inject_user_message(agent_mailbox_event_message(record));
+                    }
+                }
             }
+            ToolOutput::ok(value)
         })
     }
 }
@@ -3155,8 +3485,68 @@ fn now_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use psychevo_agent_core::AssistantBlock;
+    use futures::future::BoxFuture;
+    use psychevo_agent_core::{AssistantBlock, ToolBinding, ToolExecutionMode, ToolOutput};
+    use psychevo_ai::{AbortSignal, FakeProvider};
     use tempfile::TempDir;
+    use tokio::sync::watch;
+
+    struct TestTool(&'static str);
+
+    impl ToolBinding for TestTool {
+        fn name(&self) -> &str {
+            self.0
+        }
+
+        fn description(&self) -> &str {
+            "test tool"
+        }
+
+        fn parameters(&self) -> Value {
+            json!({"type": "object", "properties": {}})
+        }
+
+        fn execution_mode(&self) -> ToolExecutionMode {
+            ToolExecutionMode::Parallel
+        }
+
+        fn execute(
+            &self,
+            _tool_call_id: String,
+            _args: Value,
+            _abort: AbortSignal,
+        ) -> BoxFuture<'static, ToolOutput> {
+            Box::pin(async { ToolOutput::ok(json!({})) })
+        }
+    }
+
+    fn test_tool(name: &'static str) -> Arc<dyn ToolBinding> {
+        Arc::new(TestTool(name))
+    }
+
+    fn test_agent_run_record(
+        parent_session_id: String,
+        child_session_id: Option<String>,
+    ) -> AgentRunRecord {
+        AgentRunRecord {
+            id: "agent-1".to_string(),
+            task_name: Some("worker-task".to_string()),
+            agent_name: "worker".to_string(),
+            task: "do the work".to_string(),
+            parent_session_id,
+            child_session_id,
+            role: AgentInvocationRole::Subagent,
+            background: true,
+            status: AgentRunStatus::Completed,
+            edge_status: Some(AgentEdgeStatus::Open),
+            started_at_ms: 1,
+            ended_at_ms: Some(2),
+            outcome: Some("normal".to_string()),
+            final_answer: Some("mailbox final".to_string()),
+            error: None,
+            effective_max_spawn_depth: Some(0),
+        }
+    }
 
     fn env(home: &Path) -> BTreeMap<String, String> {
         BTreeMap::from([
@@ -3265,6 +3655,500 @@ Plan the work.
         assert!(agent_allows_tool("read", Some(&agent), RunMode::Build));
         assert!(agent_allows_tool("Agent", Some(&agent), RunMode::Build));
         assert!(!agent_allows_tool("bash", Some(&agent), RunMode::Build));
+    }
+
+    #[tokio::test]
+    async fn background_completion_records_mailbox_event_without_parent_user_message() {
+        let tmp = TempDir::new().expect("tmp");
+        let store = SqliteStore::open(&tmp.path().join("state.sqlite")).expect("store");
+        let parent = store
+            .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+            .expect("parent");
+        let child = store
+            .create_child_session_with_metadata(
+                &parent,
+                tmp.path(),
+                "agent",
+                "model",
+                "provider",
+                None,
+            )
+            .expect("child");
+        let record = test_agent_run_record(parent.clone(), Some(child));
+
+        append_parent_agent_mailbox_event(&store, &parent, &record, "normal", "mailbox final")
+            .expect("mailbox event");
+
+        assert!(store.load_messages(&parent).expect("messages").is_empty());
+        let events = store.load_agent_mailbox_events(&parent).expect("events");
+        assert_eq!(events.len(), 1);
+        assert!(events[0].content_text.contains("mailbox final"));
+        assert!(
+            events[0].payload["content"]
+                .as_str()
+                .expect("content")
+                .contains("<subagent_notification>")
+        );
+    }
+
+    #[tokio::test]
+    async fn wait_agent_mailbox_returns_status_without_final_answer() {
+        let tmp = TempDir::new().expect("tmp");
+        let store = SqliteStore::open(&tmp.path().join("state.sqlite")).expect("store");
+        let parent = store
+            .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+            .expect("parent");
+        let record = test_agent_run_record(parent.clone(), None);
+        append_parent_agent_mailbox_event(&store, &parent, &record, "normal", "mailbox final")
+            .expect("mailbox event");
+
+        let value = wait_agent_mailbox(&parent, Duration::from_millis(0), &store)
+            .await
+            .expect("wait");
+        assert_eq!(value["timed_out"], false);
+        assert_eq!(value["message"], "Wait completed.");
+        assert!(value.get("final_answer").is_none());
+        assert!(value.get("statuses").is_none());
+
+        let empty_parent = store
+            .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+            .expect("empty parent");
+        let value = wait_agent_mailbox(&empty_parent, Duration::from_millis(0), &store)
+            .await
+            .expect("timeout");
+        assert_eq!(value["timed_out"], true);
+    }
+
+    #[test]
+    fn agent_permission_mode_can_only_narrow_parent_mode() {
+        let mut agent = AgentDefinition {
+            name: "worker".to_string(),
+            description: "Worker".to_string(),
+            instructions: String::new(),
+            file_path: None,
+            source: AgentSource::Explicit,
+            model: None,
+            tool_policy: AgentToolPolicy::default(),
+            skills: Vec::new(),
+            hooks: None,
+            background: None,
+            initial_prompt: None,
+            max_turns: None,
+            max_spawn_depth: 0,
+            project_instructions: None,
+            effort: None,
+            diagnostics: Vec::new(),
+        };
+        agent.tool_policy.permission_mode = Some(AgentPermissionMode::AcceptEdits);
+        assert_eq!(
+            narrow_permission_mode_for_agent(PermissionMode::Default, Some(&agent)),
+            PermissionMode::Default
+        );
+        assert_eq!(
+            narrow_permission_mode_for_agent(PermissionMode::BypassPermissions, Some(&agent)),
+            PermissionMode::AcceptEdits
+        );
+
+        agent.tool_policy.permission_mode = Some(AgentPermissionMode::Default);
+        assert_eq!(
+            narrow_permission_mode_for_agent(PermissionMode::AcceptEdits, Some(&agent)),
+            PermissionMode::Default
+        );
+        assert_eq!(
+            narrow_permission_mode_for_agent(PermissionMode::DontAsk, Some(&agent)),
+            PermissionMode::DontAsk
+        );
+    }
+
+    #[test]
+    fn empty_tools_array_is_explicit_empty_allowlist() {
+        let tmp = TempDir::new().expect("tmp");
+        let inherit_path = tmp.path().join("inherit.md");
+        fs::write(
+            &inherit_path,
+            "---\nname: inherit\ndescription: Inherit tools\n---\nBody.\n",
+        )
+        .expect("write inherit");
+        let empty_path = tmp.path().join("translate.md");
+        fs::write(
+            &empty_path,
+            "---\nname: translate\ndescription: Translate only\ntools: []\n---\nTranslate.\n",
+        )
+        .expect("write empty");
+        let empty_string_path = tmp.path().join("empty-string.md");
+        fs::write(
+            &empty_string_path,
+            "---\nname: empty-string\ndescription: Empty string inherits\ntools: ''\n---\nBody.\n",
+        )
+        .expect("write empty string");
+
+        let inherit = parse_agent_file(&inherit_path, AgentSource::Explicit).expect("inherit");
+        let empty = parse_agent_file(&empty_path, AgentSource::Explicit).expect("empty");
+        let empty_string =
+            parse_agent_file(&empty_string_path, AgentSource::Explicit).expect("empty string");
+
+        assert_eq!(inherit.tool_policy.allowed, None);
+        assert!(agent_allows_tool("read", Some(&inherit), RunMode::Build));
+        assert_eq!(empty.tool_policy.allowed, Some(BTreeSet::new()));
+        for name in [
+            "read",
+            "write",
+            "bash",
+            "Agent",
+            "list_skills",
+            "view_skill",
+        ] {
+            assert!(
+                !agent_allows_tool(name, Some(&empty), RunMode::Build),
+                "{name} should be blocked"
+            );
+        }
+        assert_eq!(empty_string.tool_policy.allowed, None);
+        assert!(agent_allows_tool(
+            "read",
+            Some(&empty_string),
+            RunMode::Build
+        ));
+    }
+
+    #[test]
+    fn project_instructions_policy_parses_boolean_and_defaults_to_injected() {
+        let tmp = TempDir::new().expect("tmp");
+        let omitted_path = tmp.path().join("omitted.md");
+        fs::write(
+            &omitted_path,
+            "---\nname: omitted\ndescription: Omitted policy\n---\nBody.\n",
+        )
+        .expect("write omitted");
+        let null_path = tmp.path().join("null.md");
+        fs::write(
+            &null_path,
+            "---\nname: null-agent\ndescription: Null policy\nprojectInstructions: null\n---\nBody.\n",
+        )
+        .expect("write null");
+        let false_path = tmp.path().join("false.md");
+        fs::write(
+            &false_path,
+            "---\nname: no-project\ndescription: No project instructions\nprojectInstructions: false\n---\nBody.\n",
+        )
+        .expect("write false");
+        let invalid_path = tmp.path().join("invalid.md");
+        fs::write(
+            &invalid_path,
+            "---\nname: invalid\ndescription: Invalid policy\nprojectInstructions: off\n---\nBody.\n",
+        )
+        .expect("write invalid");
+
+        let omitted = parse_agent_file(&omitted_path, AgentSource::Explicit).expect("omitted");
+        let null = parse_agent_file(&null_path, AgentSource::Explicit).expect("null");
+        let disabled = parse_agent_file(&false_path, AgentSource::Explicit).expect("false");
+        let invalid = parse_agent_file(&invalid_path, AgentSource::Explicit).expect("invalid");
+
+        assert_eq!(omitted.project_instructions, None);
+        assert!(agent_project_instructions_enabled(Some(&omitted)));
+        assert_eq!(null.project_instructions, None);
+        assert!(agent_project_instructions_enabled(Some(&null)));
+        assert_eq!(disabled.project_instructions, Some(false));
+        assert!(!agent_project_instructions_enabled(Some(&disabled)));
+        assert_eq!(invalid.project_instructions, None);
+        assert!(agent_project_instructions_enabled(Some(&invalid)));
+        assert!(
+            invalid
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("projectInstructions"))
+        );
+        assert_eq!(
+            view_agent_value(&disabled)["effective_policy"]["project_instructions"]["visible"],
+            false
+        );
+    }
+
+    #[test]
+    fn empty_tools_suppresses_agent_and_skill_prompt_catalogs() {
+        let agent = built_in_agent(
+            "translate",
+            "Translate only",
+            "Translate.",
+            Some(BTreeSet::new()),
+        );
+        let worker = built_in_agent("worker", "Worker", "Work.", None);
+        let skill = crate::skills::Skill {
+            name: "reviewer".to_string(),
+            description: "Review code".to_string(),
+            file_path: PathBuf::from("/tmp/reviewer/SKILL.md"),
+            base_dir: PathBuf::from("/tmp/reviewer"),
+            source: crate::skills::SkillSource::Project,
+            disable_model_invocation: false,
+        };
+        let tools = apply_agent_tool_policy(
+            vec![
+                test_tool("Agent"),
+                test_tool("list_skills"),
+                test_tool("view_skill"),
+            ],
+            Some(&agent),
+            RunMode::Build,
+        );
+
+        let prompt_agents = agent_catalog_for_prompt(&[worker], Some(&agent), &tools);
+        let prompt_skills = if skill_catalog_visible_for_tools(&tools) {
+            vec![skill]
+        } else {
+            Vec::new()
+        };
+        let assembly = crate::prompt_assembly::assemble_main_prompt_prefix(
+            RunMode::Build,
+            Some(&agent),
+            &prompt_agents,
+            &prompt_skills,
+            &[],
+            &Default::default(),
+            !tools.is_empty(),
+        );
+
+        assert!(tools.is_empty());
+        assert!(prompt_agents.is_empty());
+        assert!(prompt_skills.is_empty());
+        assert!(
+            !assembly
+                .prefix_slots
+                .iter()
+                .any(|slot| slot.slot == "agent_catalog")
+        );
+        assert!(
+            !assembly
+                .prefix_slots
+                .iter()
+                .any(|slot| slot.slot == "skill_index")
+        );
+        assert!(
+            assembly.prefix_slots[0]
+                .content
+                .contains("No callable tools are available")
+        );
+        assert!(!assembly.prefix_slots[0].content.contains("read, edit"));
+    }
+
+    #[test]
+    fn project_instructions_are_developer_prompt_slots_with_system_fallback() {
+        let fragment = crate::project_instructions::ProjectInstructionFragment {
+            source_name: "AGENTS.md".to_string(),
+            source_path: PathBuf::from("/tmp/repo/AGENTS.md"),
+            directory: PathBuf::from("/tmp/repo"),
+            content:
+                "# AGENTS.md instructions for /tmp/repo\n\n<INSTRUCTIONS>\nUse Chinese.\n</INSTRUCTIONS>"
+                    .to_string(),
+            truncated: false,
+            original_bytes: 12,
+            included_bytes: 12,
+        };
+        let developer_caps = crate::types::ModelCapabilities {
+            developer_role: Some(true),
+            ..Default::default()
+        };
+        let developer_assembly = crate::prompt_assembly::assemble_main_prompt_prefix(
+            RunMode::Build,
+            None,
+            &[],
+            &[],
+            std::slice::from_ref(&fragment),
+            &developer_caps,
+            true,
+        );
+        assert!(
+            developer_assembly
+                .prefix_contextual_user_messages
+                .is_empty()
+        );
+        let project_slot = developer_assembly
+            .prefix_slots
+            .iter()
+            .find(|slot| slot.source_kind.as_deref() == Some("project_instruction"))
+            .expect("project slot");
+        assert_eq!(project_slot.provider_role, "developer");
+        assert_eq!(project_slot.semantic_role, "developer_prompt");
+        assert!(
+            project_slot
+                .content
+                .contains("policy context, not user task content")
+        );
+
+        let fallback_assembly = crate::prompt_assembly::assemble_main_prompt_prefix(
+            RunMode::Build,
+            None,
+            &[],
+            &[],
+            &[fragment],
+            &Default::default(),
+            true,
+        );
+        let fallback_slot = fallback_assembly
+            .prefix_slots
+            .iter()
+            .find(|slot| slot.source_kind.as_deref() == Some("project_instruction"))
+            .expect("fallback project slot");
+        assert_eq!(fallback_slot.provider_role, "system");
+    }
+
+    #[tokio::test]
+    async fn agent_name_allowlist_filters_prompt_catalog_and_spawn() {
+        let tmp = TempDir::new().expect("tmp");
+        let path = tmp.path().join("coordinator.md");
+        fs::write(
+            &path,
+            r#"---
+name: coordinator
+description: Coordinate selected agents
+tools: Agent(worker, researcher)
+---
+Coordinate.
+"#,
+        )
+        .expect("write");
+        let coordinator = parse_agent_file(&path, AgentSource::Explicit).expect("coordinator");
+        let worker = built_in_agent("worker", "Worker", "Work.", None);
+        let researcher = built_in_agent("researcher", "Researcher", "Research.", None);
+        let explore = built_in_agent("explore-extra", "Explore", "Explore.", None);
+        let catalog = AgentCatalog {
+            agents: vec![worker, researcher, explore],
+            shadowed_agents: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        let tools = apply_agent_tool_policy(
+            vec![test_tool("Agent"), test_tool("list_agents")],
+            Some(&coordinator),
+            RunMode::Build,
+        );
+        let visible = agent_catalog_for_prompt(&catalog.agents, Some(&coordinator), &tools)
+            .into_iter()
+            .map(|agent| agent.name)
+            .collect::<Vec<_>>();
+        assert_eq!(visible, vec!["worker", "researcher"]);
+
+        let store = SqliteStore::open(&tmp.path().join("state.sqlite")).expect("store");
+        let parent = store
+            .create_session_with_metadata(tmp.path(), "test", "model", "provider", None)
+            .expect("parent");
+        let (_tx, rx) = watch::channel(false);
+        let err = spawn_subagent(
+            AgentToolContext {
+                provider: Arc::new(FakeProvider::new(Vec::new())),
+                model_provider: "provider".to_string(),
+                model: "model".to_string(),
+                provider_label: "provider".to_string(),
+                base_url: "http://127.0.0.1:9/v1".to_string(),
+                api_key_env: None,
+                reasoning_effort: None,
+                context_limit: None,
+                generation_metadata: json!({}),
+                workdir: tmp.path().to_path_buf(),
+                mode: RunMode::Build,
+                permission_config: PermissionConfig::default(),
+                permission_mode: PermissionMode::Default,
+                approval_mode: ApprovalMode::Manual,
+                approval_handler: None,
+                store,
+                parent_session_id: parent,
+                parent_context_snapshot: Vec::new(),
+                catalog,
+                control_handle: None,
+                stream_events: None,
+                model_metadata: ModelMetadata::default(),
+                env: BTreeMap::new(),
+                allowed_agent_names: coordinator.tool_policy.allowed_agents.clone(),
+                denied_agent_names: coordinator.tool_policy.denied_agents.clone(),
+                required_agent_names: Vec::new(),
+                spawn_depth_remaining: None,
+            },
+            AgentToolArgs {
+                agent_type: Some("explore-extra".to_string()),
+                name: None,
+                prompt: "explore".to_string(),
+                task_name: None,
+                background: None,
+                model: None,
+                fork_context: false,
+                fork_turns: None,
+                max_turns: None,
+                max_spawn_depth: None,
+            },
+            "call".to_string(),
+            AbortSignal::new(rx),
+        )
+        .await
+        .expect_err("unlisted agent should be rejected");
+        assert!(err.to_string().contains("not allowed"));
+    }
+
+    #[test]
+    fn skill_alias_controls_read_only_skill_surface() {
+        let tmp = TempDir::new().expect("tmp");
+        let allow_path = tmp.path().join("skill-reader.md");
+        fs::write(
+            &allow_path,
+            "---\nname: skill-reader\ndescription: Skill reader\ntools: Skill\n---\nRead skills.\n",
+        )
+        .expect("write allow");
+        let deny_path = tmp.path().join("no-skill-reader.md");
+        fs::write(
+            &deny_path,
+            "---\nname: no-skill-reader\ndescription: No skill read\ndisallowedTools: Skill\n---\nNo skills.\n",
+        )
+        .expect("write deny");
+
+        let allow = parse_agent_file(&allow_path, AgentSource::Explicit).expect("allow");
+        let deny = parse_agent_file(&deny_path, AgentSource::Explicit).expect("deny");
+        let skill_tools = vec![
+            test_tool("list_skills"),
+            test_tool("view_skill"),
+            test_tool("create_skill"),
+        ];
+        let allowed = apply_agent_tool_policy(skill_tools.clone(), Some(&allow), RunMode::Build)
+            .into_iter()
+            .map(|tool| tool.name().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(allowed, vec!["list_skills", "view_skill"]);
+        assert!(agent_policy_allows_skill_catalog(&allow));
+
+        let denied = apply_agent_tool_policy(skill_tools, Some(&deny), RunMode::Build)
+            .into_iter()
+            .map(|tool| tool.name().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(denied, vec!["create_skill"]);
+        assert!(!skill_catalog_visible_for_tools(&[test_tool(
+            "create_skill"
+        )]));
+        assert!(!agent_policy_allows_skill_catalog(&deny));
+    }
+
+    #[test]
+    fn unknown_tool_names_are_preserved_with_diagnostics() {
+        let tmp = TempDir::new().expect("tmp");
+        let path = tmp.path().join("external.md");
+        fs::write(
+            &path,
+            "---\nname: external\ndescription: External tool\ntools: custom_tool\n---\nUse external tool.\n",
+        )
+        .expect("write");
+
+        let agent = parse_agent_file(&path, AgentSource::Explicit).expect("agent");
+
+        assert!(
+            agent
+                .tool_policy
+                .allowed
+                .as_ref()
+                .expect("allowed")
+                .contains("custom_tool")
+        );
+        assert!(
+            agent
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("custom_tool"))
+        );
     }
 
     #[test]

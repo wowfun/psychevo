@@ -1,6 +1,6 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
-assertion_line: 667
+assertion_line: 680
 expression: combined
 ---
 fixture=slash_menu_prefix_filtering
@@ -25,10 +25,10 @@ size=120x24
 
 
 
-
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 › /model  choose or fetch model
-  /mode  set plan/default mode
+  /mode  set runtime permission mode
+  /permissions  show permission policy
 › /mo
 mock/model  high  ~/work · main
 
@@ -51,9 +51,9 @@ mock/model  high  ~/work · main
 [default]
 [default]
 [default]
-[default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [cyan]› /model[default]  [dim]choose or fetch model[default]
-[cyan]  /mode[default]  [dim]set plan/default mode[default]
+[cyan]  /mode[default]  [dim]set runtime permission mode[default]
+[cyan]  /permissions[default]  [dim]show permission policy[default]
 [dim]›[default] /mo
 [default]mock/model  [magenta]high[default]  [dim]~/work · main[default]

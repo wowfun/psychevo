@@ -33,6 +33,7 @@ impl<'a> FullscreenUi<'a> {
             running: None,
             auxiliary_agent_tasks: Vec::new(),
             agent_child_event_backlog: BTreeMap::new(),
+            session_live_event_backlog: BTreeMap::new(),
             auxiliary_shell_tasks: Vec::new(),
             pending_auxiliary_shell_commands: VecDeque::new(),
             visible_turn_started: None,
@@ -73,6 +74,7 @@ impl<'a> FullscreenUi<'a> {
             history_query: String::new(),
             slash_menu_selected: 0,
             slash_menu_dismissed_input: None,
+            pending_leader_started: None,
             last_slash_menu_areas: Vec::new(),
             file_search: FileSearchState::new(),
             last_file_popup_areas: Vec::new(),
@@ -603,7 +605,10 @@ impl<'a> FullscreenUi<'a> {
     }
 
     fn status_has_running(&self, current_session: Option<&str>) -> bool {
-        self.running.is_some() || self.auxiliary_agent_matches_current_session(current_session)
+        self.running.as_ref().is_some_and(|running| {
+            current_session_matches(running.session_id.as_deref(), current_session)
+        }) || self.auxiliary_agent_matches_current_session(current_session)
+            || self.auxiliary_shell_matches_current_session(current_session)
     }
 
     fn auxiliary_agent_matches_current_session(&self, current_session: Option<&str>) -> bool {
@@ -615,9 +620,20 @@ impl<'a> FullscreenUi<'a> {
             .any(|agent| auxiliary_agent_live_for_session(agent, session_id))
     }
 
+    fn auxiliary_shell_matches_current_session(&self, current_session: Option<&str>) -> bool {
+        let Some(session_id) = current_session else {
+            return false;
+        };
+        self.auxiliary_shell_tasks
+            .iter()
+            .any(|shell| shell.session_id.as_deref() == Some(session_id))
+    }
+
     fn request_interrupt(&mut self, current_session: Option<&str>) -> bool {
         let mut interrupted = false;
-        if let Some(running) = &self.running {
+        if let Some(running) = &self.running
+            && current_session_matches(running.session_id.as_deref(), current_session)
+        {
             running.control.abort();
             interrupted = true;
         }
@@ -626,6 +642,14 @@ impl<'a> FullscreenUi<'a> {
                 .is_some_and(|session_id| auxiliary_agent_live_for_session(agent, session_id))
             {
                 agent.control.abort();
+                interrupted = true;
+            }
+        }
+        for shell in &self.auxiliary_shell_tasks {
+            if current_session
+                .is_some_and(|session_id| shell.session_id.as_deref() == Some(session_id))
+            {
+                shell.control.abort();
                 interrupted = true;
             }
         }
@@ -763,9 +787,9 @@ impl<'a> FullscreenUi<'a> {
             .collect()
     }
 
-    fn complete_slash_command(&mut self) {
+    fn complete_slash_command(&mut self, items: &[SlashMenuItem]) {
         let input = textarea_text(&self.textarea);
-        if let Some(completed) = slash_completion(&input) {
+        if let Some(completed) = slash_completion_with_items(&input, items) {
             self.textarea = textarea_with_text(&completed);
             self.slash_menu_selected = 0;
             self.clear_slash_menu_dismissal();
@@ -1949,18 +1973,15 @@ impl<'a> FullscreenUi<'a> {
         }
         let args = value.get("args").unwrap_or(&Value::Null);
         let agent_name = agent_name_from(args, &Value::Null);
-        self.transcript
-            .iter()
-            .enumerate()
-            .find_map(|(index, row)| {
-                (row.tool_name.as_deref() == Some("Agent")
-                    && row.agent_target.is_none()
-                    && active_tool_row(row)
-                    && (row.tool_call_id.as_deref() == Some(tool_call_id)
-                        || row.tool_call_id.is_none())
-                    && agent_placeholder_title_matches(row, agent_name))
-                .then_some(index)
-            })
+        self.transcript.iter().enumerate().find_map(|(index, row)| {
+            (row.tool_name.as_deref() == Some("Agent")
+                && row.agent_target.is_none()
+                && active_tool_row(row)
+                && (row.tool_call_id.as_deref() == Some(tool_call_id)
+                    || row.tool_call_id.is_none())
+                && agent_placeholder_title_matches(row, agent_name))
+            .then_some(index)
+        })
     }
 
     fn remove_duplicate_agent_placeholders(&mut self, keep_index: usize, value: &Value) {
@@ -2173,10 +2194,18 @@ impl<'a> FullscreenUi<'a> {
 }
 
 fn auxiliary_agent_live_for_session(agent: &AuxiliaryAgentTask, session_id: &str) -> bool {
-    let Some(child_session_id) = agent.child_session_id.as_deref() else {
+    if !agent.visible_live {
         return false;
-    };
-    child_session_id == session_id || agent.session_id.as_deref() == Some(session_id)
+    }
+    agent.child_session_id.as_deref() == Some(session_id)
+        || agent.session_id.as_deref() == Some(session_id)
+}
+
+fn current_session_matches(owner_session: Option<&str>, current_session: Option<&str>) -> bool {
+    match owner_session {
+        Some(owner_session) => current_session == Some(owner_session),
+        None => true,
+    }
 }
 
 fn apply_agent_child_value_preview(row: &mut TranscriptRow, value: &Value) -> bool {

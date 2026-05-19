@@ -58,9 +58,11 @@ fn cli_run_selected_main_agent_includes_description_and_body() {
     let workdir = temp.path().join("work");
     std::fs::create_dir_all(workdir.join(".git")).expect("git");
     std::fs::create_dir_all(workdir.join(".claude/agents")).expect("agents");
+    std::fs::write(workdir.join("AGENTS.md"), "Do not translate this project instruction.")
+        .expect("agents");
     std::fs::write(
         workdir.join(".claude/agents/translate.md"),
-        "---\nname: translate\ndescription: Detect the source language automatically. Translate Chinese to English; translate all other languages to Chinese.\n---\nPreserve tone, meaning, punctuation, emoji, and inline formatting. Return only the translated text.",
+        "---\nname: translate\ndescription: Detect the source language automatically. Translate Chinese to English; translate all other languages to Chinese.\ntools: []\nprojectInstructions: false\n---\nPreserve tone, meaning, punctuation, emoji, and inline formatting. Return only the translated text.",
     )
     .expect("agent");
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
@@ -101,6 +103,13 @@ fn cli_run_selected_main_agent_includes_description_and_body() {
         selected.contains("Instructions:\nPreserve tone, meaning, punctuation"),
         "{selected}"
     );
+    assert!(!request.as_object().expect("request").contains_key("tools"));
+    assert!(!system_messages
+        .iter()
+        .any(|message| message.contains("Do not translate this project instruction")));
+    assert!(system_messages
+        .iter()
+        .any(|message| message.contains("No callable tools are available")));
     assert_eq!(user_contents(&request), vec!["shell"]);
 }
 
@@ -684,13 +693,20 @@ fn cli_run_injects_agents_project_instructions_without_persisting_as_messages() 
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let contents = user_contents(&server.request_json(0));
-    assert_eq!(contents.len(), 2);
-    assert!(contents[0].contains("# AGENTS.md instructions for"));
-    assert!(contents[0].contains("Use root workflow."));
-    assert!(contents[0].contains("Use pevo workflow."));
-    assert!(contents[0].contains("Use local workflow."));
-    assert_eq!(contents[1], "do it");
+    let request = server.request_json(0);
+    let contents = user_contents(&request);
+    assert_eq!(contents, vec!["do it"]);
+    let system_messages = system_contents(&request);
+    assert!(system_messages
+        .iter()
+        .any(|message| message.contains("# AGENTS.md instructions for")
+            && message.contains("Use root workflow.")));
+    assert!(system_messages
+        .iter()
+        .any(|message| message.contains("Use pevo workflow.")));
+    assert!(system_messages
+        .iter()
+        .any(|message| message.contains("Use local workflow.")));
 
     let conn = Connection::open(db).expect("db");
     let user_messages = conn
@@ -709,16 +725,29 @@ fn cli_run_injects_agents_project_instructions_without_persisting_as_messages() 
         )
         .expect("context evidence");
     assert_eq!(evidence_count, 3);
-    let grouped_blocks: Vec<i64> = conn
+    let grouped_blocks: Vec<(String, String, i64)> = conn
         .prepare(
-            "SELECT provider_block_index FROM context_evidence WHERE source_kind = 'project_instruction' AND provider_group = 'project_instructions' ORDER BY context_seq",
+            "SELECT role, provider_group, provider_block_index FROM context_evidence WHERE source_kind = 'project_instruction' ORDER BY context_seq",
         )
         .expect("prepare")
-        .query_map([], |row| row.get::<_, i64>(0))
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })
         .expect("query")
         .collect::<rusqlite::Result<Vec<_>>>()
         .expect("rows");
-    assert_eq!(grouped_blocks, vec![0, 1, 2]);
+    assert_eq!(
+        grouped_blocks,
+        vec![
+            ("system".to_string(), "prefix_prompt_instructions".to_string(), 2),
+            ("system".to_string(), "prefix_prompt_instructions".to_string(), 3),
+            ("system".to_string(), "prefix_prompt_instructions".to_string(), 4),
+        ]
+    );
 }
 
 #[test]
@@ -753,13 +782,16 @@ fn cli_run_keeps_agents_skill_and_prompt_as_separate_provider_messages() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let contents = user_contents(&server.request_json(0));
-    assert_eq!(contents.len(), 3);
-    assert!(contents[0].contains("# AGENTS.md instructions for"));
-    assert!(contents[0].contains("Use project workflow."));
-    assert!(contents[1].contains("<skill>"));
-    assert!(contents[1].contains("Follow the reviewer workflow."));
-    assert_eq!(contents[2], "$reviewer do it");
+    let request = server.request_json(0);
+    let contents = user_contents(&request);
+    assert_eq!(contents.len(), 2);
+    assert!(contents[0].contains("<skill>"));
+    assert!(contents[0].contains("Follow the reviewer workflow."));
+    assert_eq!(contents[1], "$reviewer do it");
+    assert!(system_contents(&request)
+        .iter()
+        .any(|message| message.contains("# AGENTS.md instructions for")
+            && message.contains("Use project workflow.")));
 
     let conn = Connection::open(db).expect("db");
     let user_evidence: Vec<(String, String)> = conn
@@ -773,16 +805,26 @@ fn cli_run_keeps_agents_skill_and_prompt_as_separate_provider_messages() {
         .expect("rows");
     assert_eq!(
         user_evidence,
-        vec![
-            (
-                "project_instruction".to_string(),
-                "project_instructions".to_string()
-            ),
-            (
-                "selected_skill".to_string(),
-                "selected_skill:0:reviewer".to_string()
-            ),
-        ]
+        vec![(
+            "selected_skill".to_string(),
+            "selected_skill:0:reviewer".to_string()
+        )]
+    );
+    let project_evidence: Vec<(String, String)> = conn
+        .prepare(
+            "SELECT role, provider_group FROM context_evidence WHERE source_kind = 'project_instruction' ORDER BY context_seq",
+        )
+        .expect("prepare")
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .expect("query")
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .expect("rows");
+    assert_eq!(
+        project_evidence,
+        vec![(
+            "system".to_string(),
+            "prefix_prompt_instructions".to_string()
+        )]
     );
 }
 

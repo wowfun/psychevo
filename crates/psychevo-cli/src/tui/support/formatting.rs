@@ -44,6 +44,7 @@ fn variant_description(variant: &str) -> &'static str {
     }
 }
 
+#[cfg(test)]
 fn resolve_session_ref_from_summaries(
     sessions: &[SessionSummary],
     reference: &str,

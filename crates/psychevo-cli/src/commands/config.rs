@@ -4,13 +4,14 @@ use std::process::ExitCode;
 use anyhow::Result;
 use psychevo_runtime::{
     ConfigScope, ScopedCustomProviderInput, config_provider_list_value, config_show_value,
-    create_scoped_custom_provider,
+    create_scoped_custom_provider, permission_rules_value, remove_local_permission_rule,
 };
 use serde_json::{Value, json};
 
 use crate::args::{
-    ConfigArgs, ConfigCommand, ConfigJsonArgs, ConfigProviderAddArgs, ConfigProviderArgs,
-    ConfigProviderCommand, ConfigShowArgs,
+    ConfigArgs, ConfigCommand, ConfigJsonArgs, ConfigPermissionRemoveArgs, ConfigPermissionsArgs,
+    ConfigPermissionsCommand, ConfigProviderAddArgs, ConfigProviderArgs, ConfigProviderCommand,
+    ConfigShowArgs,
 };
 use crate::commands::common::{
     base_run_options, config_scope_dir, print_json_error, read_secret_from_stdin, scope_label,
@@ -40,6 +41,7 @@ fn run_config_command_inner(args: &ConfigArgs) -> Result<ExitCode> {
             print_config_document(&value, args.json)?;
         }
         ConfigCommand::Provider(args) => run_provider_command(args, &env_map, &home, &cwd)?,
+        ConfigCommand::Permissions(args) => run_permissions_command(args, &env_map, &home, &cwd)?,
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -97,6 +99,51 @@ fn run_provider_command(
         }
         ConfigProviderCommand::Add(args) => add_provider(args, home, cwd),
     }
+}
+
+fn run_permissions_command(
+    args: &ConfigPermissionsArgs,
+    env_map: &std::collections::BTreeMap<String, String>,
+    home: &std::path::Path,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    match &args.command {
+        ConfigPermissionsCommand::List(args) => {
+            let options = base_run_options(env_map, home, cwd)?;
+            let value = permission_rules_value(&options, ConfigScope::Local)?;
+            print_permissions_list(&value, args.json)
+        }
+        ConfigPermissionsCommand::Remove(args) => remove_permission_rule(args, home, cwd),
+    }
+}
+
+fn remove_permission_rule(
+    args: &ConfigPermissionRemoveArgs,
+    home: &std::path::Path,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    let result = remove_local_permission_rule(
+        config_scope_dir(home, cwd, true)?,
+        args.kind.as_str(),
+        &args.rule,
+    )?;
+    let value = json!({
+        "scope": scope_label(true),
+        "path": result.config_path,
+        "kind": result.kind,
+        "rule": result.rule,
+        "changed": result.changed,
+    });
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&value)?);
+    } else if result.changed {
+        println!("removed {} rule: {}", result.kind, result.rule);
+        println!("path: {}", result.config_path.display());
+    } else {
+        println!("permission rule not found: {}", result.rule);
+        println!("path: {}", result.config_path.display());
+    }
+    Ok(())
 }
 
 fn add_provider(
@@ -188,6 +235,42 @@ fn print_provider_list(value: &Value, as_json: bool) -> Result<()> {
     Ok(())
 }
 
+fn print_permissions_list(value: &Value, as_json: bool) -> Result<()> {
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(value)?);
+    } else {
+        println!("scope: {}", value["scope"].as_str().unwrap_or("-"));
+        if let Some(path) = value["path"].as_str() {
+            println!("path: {path}");
+        }
+        let permissions = &value["permissions"];
+        println!(
+            "approval_mode: {}",
+            permissions["approval_mode"].as_str().unwrap_or("-")
+        );
+        println!(
+            "permission_mode: {}",
+            permissions["permission_mode"].as_str().unwrap_or("-")
+        );
+        println!(
+            "smart_model: {}",
+            permissions["smart_model"].as_str().unwrap_or("-")
+        );
+        for kind in ["allow", "ask", "deny"] {
+            println!("{kind}:");
+            let rules = permissions[kind].as_array().cloned().unwrap_or_default();
+            if rules.is_empty() {
+                println!("  -");
+            } else {
+                for rule in rules {
+                    println!("  {}", rule.as_str().unwrap_or("-"));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn config_scope(args: &ConfigShowArgs) -> ConfigScope {
     if args.global {
         ConfigScope::Global
@@ -205,6 +288,10 @@ fn config_json(args: &ConfigArgs) -> bool {
         ConfigCommand::Provider(args) => match &args.command {
             ConfigProviderCommand::List(args) => args.json,
             ConfigProviderCommand::Add(args) => args.json,
+        },
+        ConfigCommand::Permissions(args) => match &args.command {
+            ConfigPermissionsCommand::List(args) => args.json,
+            ConfigPermissionsCommand::Remove(args) => args.json,
         },
     }
 }

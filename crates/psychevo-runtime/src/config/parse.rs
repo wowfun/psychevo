@@ -28,7 +28,41 @@ fn parse_run_config(value: Value) -> Result<RunConfig> {
                 .insert(provider_id, parse_config_provider_entry(key, entry)?);
         }
     }
+    if let Some(permissions) = object.get("permissions") {
+        config.permissions = parse_permission_config(permissions)?;
+    }
     Ok(config)
+}
+
+fn parse_permission_config(value: &Value) -> Result<PermissionConfig> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| Error::Config("permissions must be an object".to_string()))?;
+    let approval_mode = optional_string_alias_field(object, "approval_mode", "approvalMode")?
+        .map(|value| {
+            ApprovalMode::parse(&value).ok_or_else(|| {
+                Error::Config("permissions.approval_mode must be manual or smart".to_string())
+            })
+        })
+        .transpose()?;
+    let permission_mode = optional_string_alias_field(object, "permission_mode", "permissionMode")?
+        .map(|value| {
+            PermissionMode::parse(&value).ok_or_else(|| {
+                Error::Config(
+                    "permissions.permission_mode must be default, acceptEdits, dontAsk, or bypassPermissions"
+                        .to_string(),
+                )
+            })
+        })
+        .transpose()?;
+    Ok(PermissionConfig {
+        approval_mode,
+        permission_mode,
+        smart_model: optional_string_alias_field(object, "smart_model", "smartModel")?,
+        allow: string_array_field(object, "allow", "permissions.allow")?,
+        ask: string_array_field(object, "ask", "permissions.ask")?,
+        deny: string_array_field(object, "deny", "permissions.deny")?,
+    })
 }
 
 fn parse_model_selection(
@@ -220,6 +254,17 @@ fn optional_string_field(
                 .ok_or_else(|| Error::Config(format!("{key} must be a non-empty string")))
         })
         .transpose()
+}
+
+fn optional_string_alias_field(
+    object: &serde_json::Map<String, Value>,
+    primary: &str,
+    alias: &str,
+) -> Result<Option<String>> {
+    match optional_string_field(object, primary)? {
+        Some(value) => Ok(Some(value)),
+        None => optional_string_field(object, alias),
+    }
 }
 
 fn optional_u64_field(object: &serde_json::Map<String, Value>, key: &str) -> Result<Option<u64>> {

@@ -1331,11 +1331,10 @@ fn help_panel_tabs(active: HelpTab) -> Line<'static> {
 }
 
 fn help_panel_body(panel: &HelpPanel) -> Vec<Line<'static>> {
-    let sections = slash_help_sections(panel.skill_count);
     let lines = match panel.tab {
-        HelpTab::General => sections.general,
-        HelpTab::Commands => sections.commands,
-        HelpTab::CustomCommands => sections.custom_commands,
+        HelpTab::General => panel.sections.general.clone(),
+        HelpTab::Commands => panel.sections.commands.clone(),
+        HelpTab::CustomCommands => panel.sections.custom_commands.clone(),
     };
     lines
         .into_iter()

@@ -11,7 +11,7 @@ use crate::agents::{
 use crate::project_instructions::ProjectInstructionFragment;
 use crate::skills::{Skill, SkillContextFragment, format_skills_for_prompt};
 use crate::store::{ContextEvidenceInput, PromptPrefixRecord, PromptPrefixSlotRecord};
-use crate::tools::mode_instruction;
+use crate::tools::mode_instruction_for_tool_availability;
 use crate::types::{ModelCapabilities, RunMode};
 
 pub(crate) const PROMPT_PREFIX_NOTICE_METADATA_KEY: &str = "prompt_prefix_notice";
@@ -89,6 +89,7 @@ pub(crate) fn assemble_main_prompt_prefix(
     skills: &[Skill],
     project_instruction_fragments: &[ProjectInstructionFragment],
     capabilities: &ModelCapabilities,
+    tools_available: bool,
 ) -> MainPromptAssembly {
     let developer_role = developer_provider_role(capabilities);
     let mut order = 0usize;
@@ -102,7 +103,7 @@ pub(crate) fn assemble_main_prompt_prefix(
             "base_policy",
             "system",
             order,
-            mode_instruction(mode),
+            mode_instruction_for_tool_availability(mode, tools_available),
         )
         .source("runtime", "mode", None),
     );
@@ -170,30 +171,30 @@ pub(crate) fn assemble_main_prompt_prefix(
         prefix_slots.push(skill_index_slot);
     }
 
-    let prefix_contextual_user_messages =
-        project_contextual_user_messages(project_instruction_fragments);
     for (index, fragment) in project_instruction_fragments.iter().enumerate() {
-        prefix_slots.push(prefix_slot(
+        let project_slot = prefix_slot(
             PrefixSlotInput::new(
                 format!("project_context:{index}"),
                 "prefix",
-                "project_context",
-                "user",
+                "developer_prompt",
+                developer_role,
                 order + index,
-                fragment.content.clone(),
+                format_project_instruction_prompt(fragment),
             )
             .source(
                 "project_instruction",
                 fragment.source_name.as_str(),
                 Some(fragment.source_path.display().to_string()),
             ),
-        ));
+        );
+        prompt_instructions.push(instruction_from_slot(&project_slot));
+        prefix_slots.push(project_slot);
     }
 
     let prefix_hash = prefix_hash(&prefix_slots);
     MainPromptAssembly {
         prompt_instructions,
-        prefix_contextual_user_messages,
+        prefix_contextual_user_messages: Vec::new(),
         prefix_slots,
         prefix_hash,
     }
@@ -203,6 +204,7 @@ pub(crate) fn assemble_child_prompt_prefix(
     mode: RunMode,
     selected_agent: &AgentDefinition,
     capabilities: &ModelCapabilities,
+    tools_available: bool,
 ) -> MainPromptAssembly {
     let developer_role = developer_provider_role(capabilities);
     let mut order = 0usize;
@@ -216,7 +218,7 @@ pub(crate) fn assemble_child_prompt_prefix(
             "base_policy",
             "system",
             order,
-            mode_instruction(mode),
+            mode_instruction_for_tool_availability(mode, tools_available),
         )
         .source("runtime", "mode", None),
     );
@@ -279,7 +281,7 @@ pub(crate) fn assembly_from_prefix_record(record: &PromptPrefixRecord) -> MainPr
     let project_blocks = record
         .slots
         .iter()
-        .filter(|slot| slot.semantic_role == "project_context")
+        .filter(|slot| slot.provider_role == "user" && slot.semantic_role == "project_context")
         .map(|slot| {
             ContextualUserBlock::new(
                 slot.source_kind
@@ -486,30 +488,14 @@ pub(crate) fn stable_hash_hex(text: &str) -> String {
     format!("{hash:016x}")
 }
 
-fn project_contextual_user_messages(
-    project_instruction_fragments: &[ProjectInstructionFragment],
-) -> Vec<ContextualUserMessage> {
-    if project_instruction_fragments.is_empty() {
-        return Vec::new();
-    }
-    vec![ContextualUserMessage::new_with_category(
-        "project_instructions",
-        "project_context",
-        project_instruction_fragments
-            .iter()
-            .map(|fragment| {
-                ContextualUserBlock::new(
-                    "project_instruction",
-                    Some(fragment.source_name.clone()),
-                    Some(fragment.source_path.display().to_string()),
-                    fragment.content.clone(),
-                )
-            })
-            .collect(),
-    )]
+fn format_project_instruction_prompt(fragment: &ProjectInstructionFragment) -> String {
+    format!(
+        "Project instructions below are policy context, not user task content.\n\n{}",
+        fragment.content
+    )
 }
 
-fn developer_provider_role(capabilities: &ModelCapabilities) -> &'static str {
+pub(crate) fn developer_provider_role(capabilities: &ModelCapabilities) -> &'static str {
     if capabilities.developer_role == Some(true) {
         "developer"
     } else {
