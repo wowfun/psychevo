@@ -14,6 +14,7 @@ This attachment is part of [200 pevo CLI](spec.md).
 - prompt input behavior
 - text and NDJSON output modes
 - model and reasoning override flags
+- permission and runtime mode override flags
 - session selection flags
 - exit behavior
 
@@ -36,6 +37,8 @@ Out of scope:
 - optional `-c, --continue`
 - optional `-f, --format <default|json>`
 - optional `--include-reasoning`
+- optional `--permission-mode <default|acceptEdits|plan|dontAsk|bypassPermissions>`
+- optional `--dangerously-skip-permissions`
 - optional `--no-skills`
 - repeatable optional `--skill <name-or-path>`
 
@@ -73,6 +76,13 @@ resolution semantics belong to [120 Provider Registry](../120-provider-registry/
 `--variant` maps to the first-slice reasoning effort override. Valid values are
 `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. `none`
 explicitly suppresses the Chat request `reasoning_effort` field.
+
+`--permission-mode` overrides the configured permission mode for this
+invocation. `plan` selects the read-only runtime mode; `dontAsk` denies actions
+that would otherwise prompt unless already allowed by policy or safe defaults.
+`--dangerously-skip-permissions` selects `bypassPermissions`; hard/protected
+denies still apply. Permission policy semantics belong to
+[035 Permissions](../035-permissions/spec.md).
 
 ## Session Selection
 
@@ -169,6 +179,8 @@ estimate in local state, not a provider bill.
 - [025 CLI](../025-cli/spec.md) defines command-line foundation semantics.
 - [120 Provider Registry](../120-provider-registry/spec.md) defines provider
   and model resolution.
+- [035 Permissions](../035-permissions/spec.md) defines permission mode and
+  approval semantics.
 - [100 Runtime Assembly](../100-coding-agent/runtime-assembly.md) defines how
   runtime assembles the built-in coding agent.
 - [055 Skills](../055-skills/spec.md) defines optional skill discovery and tools.

@@ -12,6 +12,12 @@ come from [080 Design System](../080-design-system/spec.md).
 This topic is the source of truth for how the fullscreen TUI looks and how
 runtime evidence becomes transcript rows. Input routing, slash commands, and
 panels are defined by [212 pevo TUI Interaction](../212-pevo-tui-interaction/spec.md).
+Ordinary Status transcript rows are quiet ledger notices: they use the dim
+`·` marker, hide the generic `Status` title, and keep any detail under the same
+tree indentation used by evidence bodies.
+Tool evidence title text is tool-name first. Fullscreen rendering should show
+actual tool invocation names and useful arguments, not category verbs such as
+`Exploring`/`Explored`, `Running`/`Ran`, or `Updating`/`Updated`.
 
 ## Scope
 

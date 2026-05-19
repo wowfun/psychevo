@@ -19,8 +19,8 @@ stdin/stdout, it keeps the deterministic line-by-line scripted behavior.
   visibility, and sidebar visibility
 - user-configured slash command aliases and shortcuts loaded from effective
   `config.jsonc`
-- session resume, switching, archiving/deletion, titles, undo/redo-adjacent
-  session behavior, and history loading
+- session resume, switching, archiving/deletion, titles, running-session list
+  indicators, undo/redo-adjacent session behavior, and history loading
 - model, variant, mode, thinking visibility, raw transcript visibility, local
   stats, context-usage, and status state surfaces
 - responsive foreground interruption and preservation of every visible

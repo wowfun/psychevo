@@ -32,6 +32,21 @@ startup.
   the first suggestion is selected by default and `Enter` executes that
   suggestion directly.
 - `Shift+Enter`, `Ctrl+Enter`, `Alt+Enter`, and `Ctrl+J` insert a newline.
+- `Ctrl+A` in composer focus selects all existing composer text with visible
+  input-local highlighting. With that selection active, `Backspace` and
+  `Delete` clear the selection, and ordinary typing or bracketed paste replaces
+  the selected text. Empty composer `Ctrl+A` is a no-op. Composer text selection
+  does not copy to the clipboard and does not replace transcript/sidebar text
+  selection behavior.
+- Mouse drag inside the composer input area starts an input-local textarea
+  selection using the same editor selection state as `Ctrl+A`. Dragging updates
+  the textarea cursor to extend the selection, mouse release keeps a non-empty
+  composer selection for editing, and a simple click only moves the cursor and
+  cancels any old composer selection. Composer mouse selection uses
+  high-contrast reverse-video/bold highlighting so it remains visible against
+  the composer background. It is edit-only: release does not copy to the
+  clipboard, and later `Backspace`, `Delete`, typing, or bracketed paste replace
+  the selected text.
 - Shell mode is an explicit composer state, not literal `!` text in the
   textarea. Pressing `Shift+1` from an empty composer enters shell mode and
   leaves the textarea empty. While shell mode is active, the composer prompt
@@ -78,10 +93,10 @@ startup.
   `cat src<Tab>` do not trigger shell-native completion.
 - `Shift+Tab` cycles `default -> acceptEdits -> plan -> default`. Dangerous
   bypass modes are not part of the normal cycle.
-- `Esc` clears active UI state before it can interrupt work: text selection,
-  file and skill popups, slash menu, bottom selection panes, history search,
-  and an empty shell-mode composer all take priority. If none of those states
-  is active and foreground work is running, `Esc` requests
+- `Esc` clears active UI state before it can interrupt work: transcript/sidebar
+  text selection, file and skill popups, slash menu, composer text selection,
+  bottom selection panes, history search, and an empty shell-mode composer all
+  take priority. If none of those states is active and foreground work is running, `Esc` requests
   interruption through runtime control. Runtime-controlled provider generation
   and foreground shell waits must wake on that signal instead of waiting for the
   next provider chunk, shell polling interval, or title-generation follow-up.
@@ -141,14 +156,23 @@ composer edits. Left-click selection is
 supported for slash menu rows and bottom selection pane rows, and those
 interactive row hits take precedence over starting text selection.
 Mouse drag selection over rendered transcript and sidebar text is also
-supported. The active selection is highlighted while dragging, uses text from
-the final rendered buffer rather than pre-wrapped logical lines, locks to the
-rendered region where the drag started, and trims only right-side terminal
-padding when copying. A drag that starts in the transcript must not copy same-row
-sidebar text, and a drag that starts in the sidebar must not copy same-row
-transcript text. On mouse release, selected text is copied through the
-application clipboard backend and then the selection is cleared. On WSL,
-detection must work even when
+supported. Composer input-area drags take the composer edit-selection path
+instead and must not update or copy the transcript/sidebar app-native
+selection. The active transcript/sidebar selection is highlighted while
+dragging, uses text from the final rendered buffer rather than pre-wrapped
+logical lines, locks to the rendered region where the drag started, and trims
+only right-side terminal padding when copying. A drag that starts in the
+transcript must not copy same-row sidebar text, and a drag that starts in the
+sidebar must not copy same-row transcript text. On mouse release, selected text
+is copied through the application clipboard backend and then the selection is
+cleared. Clipboard copy
+emits terminal-mediated OSC52 before native clipboard backends so SSH sessions
+can reach the local terminal clipboard even when remote environment variables
+are incomplete. In SSH sessions, remote native clipboard commands must be
+skipped. Inside tmux, SSH copy also attempts `tmux load-buffer -w -` when
+clipboard forwarding is available; neither remote native clipboard commands nor
+a tmux-only success may short-circuit terminal-mediated copy. On WSL, detection
+must work even when
 `WSL_INTEROP` and `WSL_DISTRO_NAME` are absent by inspecting Linux kernel
 release/version text for WSL markers. WSL copy prefers `powershell.exe`
 `Set-Clipboard` with UTF-8 stdin, then `clip.exe`, then terminal-mediated

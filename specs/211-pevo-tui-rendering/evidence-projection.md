@@ -14,26 +14,25 @@ TUI renders runtime events into semantic ledger evidence:
 - user prompts become unlabeled dark prompt blocks without a left rail
 - folded reasoning becomes flat `Thinking` evidence; explicit new paragraphs in
   reasoning content start without label-width indentation
-- `read`, `list`, and `search` tool calls become `Explored` evidence
-- `bash` tool calls become `Ran <first command line>` evidence; the title must
-  expose the first actual shell command from the tool arguments rather than a
+- tool calls become flat tool evidence rows whose visible title starts with
+  the actual tool invocation name, for example `read <path>`, `list <path>`,
+  `search <query>`, `bash <first command line>`, `write <path>`, or
+  `edit <path>`.
+- `bash` tool titles must expose the first actual shell command from the tool
+  arguments rather than a
   generic `command` placeholder whenever the runtime supplied it. Leading blank
   lines and full-line shell comments, including model-written planning comments
   such as `# Try webcache`, are skipped for title selection so the ledger shows
   the executable command line. Completed tool updates must preserve the command
   title captured from the start event when the end event only contains the
   result.
-- `write` and `edit` tool calls become `Updated` evidence
 - before a tool completes, fullscreen TUI may project transient active evidence
   from streaming assistant tool-call blocks, runtime pending tool-call input
-  events, and tool-execution start events:
-  `read`/`list`/`search` render as `Exploring`, `bash` as `Running`, and
-  `write`/`edit` as `Updating`; completion converts the same row back to the
-  completed `Explored`/`Ran`/`Updated` title. Active tool rows must keep the
-  present-tense display while their local timer is live, even if an intermediate
-  title value was restored as completed-tense text. They should not show a
-  redundant body line that says only `running` or `preparing`; the active title,
-  spinner/activity marker, and right-side elapsed duration carry that state.
+  events, and tool-execution start events. Active and completed rows keep the
+  same tool-name-first title language; completion updates the same row in place
+  and may fill in a more concrete path, query, or command. Active rows should
+  not show a redundant body line that says only `running` or `preparing`; the
+  spinner/activity marker and right-side elapsed duration carry that state.
 - assistant visible output becomes unlabeled answer body text without a left
   rail
 - turn-level metadata becomes unlabeled material directly after a visible
@@ -44,9 +43,9 @@ Tool failures remain in their original evidence group and render as failures
 instead of being moved into a separate generic error log. Interrupted tool
 evidence is distinct from ordinary failure evidence: a tool result with
 `outcome: "aborted"` or `error: "aborted"` renders a muted `interrupted` marker
-in the existing `Explored`/`Ran`/`Updated` row rather than a red failure body
-or `(no output)`. `bash` timeout failures must render an explicit timeout
-line in the failed `Ran` row even when the command produced partial output.
+in the existing tool evidence row rather than a red failure body or
+`(no output)`. `bash` timeout failures must render an explicit timeout line in
+the failed `bash` row even when the command produced partial output.
 When the overall turn outcome is `normal`, tool failures are summarized by the
 failed tool row and turn metadata, not by an additional red `Error` transcript
 row. A red turn-ended error row is reserved for non-normal turn outcomes, so
@@ -62,11 +61,10 @@ Active tool evidence is local TUI projection only. Runtime must surface a
 named pending tool-call input event as soon as a provider streams the tool name,
 before waiting for complete JSON arguments or local execution. While the model
 is still producing tool input, the transcript shows a short `preparing` body
-with a generic title if arguments are not yet complete, for example
-`Updating files`, `Exploring`, or `Running command`. Once complete arguments
-are available, or once the corresponding `tool_execution_start` arrives, the
-active title should update to the concrete path/query/command without inserting
-a duplicate row. Active tool
+with the tool name if arguments are not yet complete, for example `write`,
+`read`, or `bash`. Once complete arguments are available, or once the
+corresponding `tool_execution_start` arrives, the active title should update to
+the concrete path/query/command without inserting a duplicate row. Active tool
 rows match primarily by `tool_call_id`; if the id has not arrived yet,
 fullscreen TUI uses the assistant tool-call `content_index:call_index` pair
 scoped to the current assistant message as a temporary key and migrates it when
@@ -80,29 +78,28 @@ When Thinking is visible, fullscreen TUI may show a provisional active tool row
 from visible Thinking text that explicitly announces imminent tool use, such as
 `Let me write...` or `Let me run...`, because some providers stream long
 tool-input generation as reasoning before emitting the structured tool-call
-block. This provisional row uses a generic title such as `Updating files` or
-`Running command`, never a guessed path or command. Hidden thinking must not
+block. This provisional row uses a generic tool-name title such as `write` or
+`bash`, never a guessed path or command. Hidden thinking must not
 create a provisional row from reasoning text. A concrete assistant tool-call
 block, runtime pending tool-call input event, or runtime `tool_execution_start`
 must replace the provisional row with the real active row when it arrives; if an
 assistant message finishes without a matching tool call, the provisional row is
-removed. Once concrete signal arrives, the active `Exploring`, `Running`, or
-`Updating` row must be rendered for at least one frame before later same-turn
-events can convert it to completed `Explored`, `Ran`, or `Updated` evidence.
+removed. Once concrete signal arrives, the active tool-name row must be
+rendered for at least one frame before later same-turn events can settle it as
+completed evidence.
 This applies even when local tool execution completes in the same event-drain
 tick, such as a 0ms `write` after a long provider-side tool-argument generation
 phase.
 
 Transcript folding is row-level only. The renderer must not synthesize
 `Thinking` or `Tool calls (N)` section headers. `Thinking` rows and tool
-evidence rows (`Explored`/`Ran`/`Updated`, including active
-`Exploring`/`Running`/`Updating` display) are rendered through the same ledger
-evidence row component and are individually foldable when they have rendered
-detail text. Short rows default open; selecting an open foldable row shows
-`▾ collapse`, and collapsed short rows show `▸ details`. Long `Ran`/`Running`
-command titles stay single-line with ellipsis in the title row so elapsed time
-remains visible, but rows with long command titles can expand to show the
-complete wrapped command below the title. Long Thinking bodies and long tool
+evidence rows are rendered through the same ledger evidence row component and
+are individually foldable when they have rendered detail text. Short rows
+default open; selecting an open foldable row shows `▾ collapse`, and collapsed
+short rows show `▸ details`. Long `bash` command titles stay single-line with
+ellipsis in the title row so elapsed time remains visible, but rows with long
+command titles can expand to show the complete wrapped command below the title.
+Long Thinking bodies and long tool
 outputs use the same default collapse threshold: eight logical lines, 200
 display tokens, or roughly 1200 display cells. Display-token counting is a
 local UI heuristic: ordinary whitespace-delimited spans count as one token, and
@@ -128,32 +125,31 @@ assistant messages whose `finish_reason` is `tool_calls` and whose outcome is
 still `normal` must also rehydrate their unmatched tool-call blocks as active
 ledger evidence until the matching `tool_result` record is encountered. The
 later `tool_result` updates that same row in place rather than appending a
-duplicate, so reconnecting or reloading a running session still shows
-`Updating <path>` during provider-side or local write gaps. If a persisted
+duplicate, so reconnecting or reloading a running session still shows the
+active tool row during provider-side or local write gaps. If a persisted
 assistant message is already terminally interrupted (`finish_reason=aborted` or
 an `aborted`/`failed`/`stopped` outcome), unmatched tool calls from that message
 render as static muted `interrupted` evidence with no live timer. History
-reload must never turn those aborted tool calls back into active
-`Exploring`/`Running`/`Updating` rows.
+reload must never turn those aborted tool calls back into active tool rows.
 For providers that buffer tool-call input until the end of a long write
-argument generation, fullscreen TUI may show a provisional `Updating files`
-row from visible assistant preamble text only when that visible text explicitly
+argument generation, fullscreen TUI may show a provisional `write` row from
+visible assistant preamble text only when that visible text explicitly
 announces an imminent write/change action. This fallback is not allowed for
 folded reasoning text, must be replaced by the real tool row when a concrete
 tool signal arrives, and must be removed if the assistant message finishes
 without a write/edit tool call. Repeated message updates for the same visible
-preamble must not create additional provisional `Updating files` rows once a
-concrete active write/edit row exists. Completion must leave exactly one
-completed `Updated` row for the tool call and no orphan active fallback rows.
+preamble must not create additional provisional `write` rows once a concrete
+active write/edit row exists. Completion must leave exactly one completed tool
+row for the tool call and no orphan active fallback rows.
 
 Tool evidence shows elapsed execution duration on the right side of the tool
 title row. Active Thinking rows also show a right-side elapsed value while
 reasoning is streaming, but completed Thinking rows do not synthesize a
-duration from turn metadata. Running tools refresh elapsed from the local start
+duration from turn metadata. Active tools refresh elapsed from the local start
 instant while the turn is live; completed live rows freeze the larger of the
 runtime-supplied `elapsed_ms` and the active ledger duration since the first
-concrete `Exploring`/`Running`/`Updating` signal, so a provider-side pending
-period does not collapse to `0s` when local execution is instant. Completed
+concrete tool signal, so a provider-side pending period does not collapse to
+`0s` when local execution is instant. Completed
 rows must not continue increasing on later redraws. TUI history reload restores
 completed tool duration from the tool-result message metadata when available
 and does not recompute old completed rows from the current wall clock. Narrow

@@ -36,18 +36,21 @@ Out of scope:
 Required rendering coverage:
 
 - Evidence-ledger projection for unlabeled prompt blocks without left rails,
-  flat expandable Thinking rows, flat `Explored`/`Ran`/`Updated` tool rows
-  without `Tool calls` section headers, failures inside their original group,
-  unlabeled answer body text, compact metadata rails, and turn metadata only
-  after visible answers, terminal reasoning-only messages, or failure summaries.
-- Tool evidence titles must use the first actual bash command line, skip
-  leading blank/comment-only shell lines, and survive start-to-end updates even
-  when end events omit arguments.
-- Active `Exploring`/`Running`/`Updating` rows must appear from streaming
+  flat expandable Thinking rows, flat tool-name-first evidence rows without
+  `Tool calls` section headers, failures inside their original group, unlabeled
+  answer body text, compact metadata rails, and turn metadata only after visible
+  answers, terminal reasoning-only messages, or failure summaries.
+- Tool evidence titles must start with the actual tool invocation name. `bash`
+  titles must use the first actual command line, skip leading blank/comment-only
+  shell lines, and survive start-to-end updates even when end events omit
+  arguments.
+- Active tool-name-first rows must appear from streaming
   assistant tool-call blocks, runtime pending tool-call input events, and local
   tool-execution starts; they must migrate temporary content keys to
-  `tool_call_id`, avoid duplicate rows, suppress premature turn metadata, and
-  settle into completed rows while preserving the visible active duration.
+  `tool_call_id`, avoid duplicate rows, suppress premature turn metadata during
+  intermediate `tool_execution_end` events and while the foreground running
+  marker remains visible after terminal `message_end`, and settle into
+  completed rows while preserving the visible active duration.
 - Interrupted pending rows render as muted `interrupted` evidence, aborted bash
   results render `interrupted` instead of `(no output)`, timeout failures render
   an explicit timeout line before partial output, and user-confirmed interrupts
@@ -60,7 +63,7 @@ Required rendering coverage:
   below one minute, `XmYYs` at one minute or more, zero-padded minute seconds,
   and floor rounding from persisted millisecond precision.
 - Active fullscreen evidence cache keys must track elapsed labels and spinner
-  frames so `Running`/`Exploring`/`Updating` rows refresh while live.
+  frames so active tool-name-first rows refresh while live.
 - Running-state status-line snapshots must show the same shared activity marker
   plus elapsed/`Esc` appended to the stable bottom status line, use
   deterministic elapsed values, and omit `Working` or active phase labels that
@@ -88,6 +91,9 @@ Required rendering coverage:
   with a leading `›` prompt marker, fall back to `RGB(38,38,38)` when no
   terminal background is known, keep an empty composer to one visible row, and
   preserve full-width prompt backgrounds for wrapped/CJK rows.
+- Composer, transcript, and sidebar active text selection must share a
+  reverse-video/bold highlight that remains visible on full-width user prompt
+  surfaces without depending on the prompt surface background color.
 - Terminal-adaptive theme derivation for dark, light, and unknown backgrounds
   must cover prompt/composer surfaces, popup/menu surfaces, selected row
   contrast, accent styles, and shared activity motion without relying on a live
@@ -115,9 +121,9 @@ Required rendering coverage:
   stability during unrelated model events, home-relative `~`, non-home absolute
   paths, long center truncation, CJK/wide-character width, and branch omission.
 - Plain non-terminal renderer output must cover `Prompt`, `Thinking`, active
-  `Exploring`/`Running`/`Updating` preparation notices, completed `Explored`,
-  `Ran`, `Updated`, `Answer`, and `Meta` blocks, including `--debug`, without
-  repeated preparation lines for every argument delta.
+  tool-name-first preparation notices, completed tool-name-first evidence,
+  `Answer`, and `Meta` blocks, including `--debug`, without repeated
+  preparation lines for every argument delta.
 
 ## Visual Regression
 

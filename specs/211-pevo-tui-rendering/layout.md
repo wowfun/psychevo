@@ -65,30 +65,40 @@ responses in the same foreground turn append new answer blocks instead of
 overwriting earlier visible text.
 If a single assistant message streams visible text and then a tool call, the
 active tool evidence is placed after that visible text and before turn metadata,
-so the current `Exploring`/`Running`/`Updating` state remains visible at the
-bottom of the ledger.
+so the current tool-name-first active row remains visible at the bottom of the
+ledger.
 Assistant messages whose `finish_reason` is `tool_calls` are intermediate
 ledger material, even when they contain visible text. They must not render
 turn metadata until a final visible answer, terminal reasoning-only message, or
-tool failure summary requires it.
-Turn metadata must not render while any active `Exploring`/`Running`/`Updating`
-tool row is still live. If an earlier failure summary meta row exists and a new
+terminal tool failure summary requires it. A `tool_execution_end` event by
+itself is not a terminal turn boundary and must not create a turn metadata row,
+even when that tool failed and no active tool row remains.
+Turn metadata must not render while any active tool row is still live. If an
+earlier failure summary meta row exists and a new
 active tool row appears, fullscreen TUI removes that meta row and lets the final
-answer, terminal reasoning-only message, or later failure summary recreate
+answer, terminal reasoning-only message, or terminal failure summary recreate
 metadata after active evidence settles.
+Turn metadata must also not render while the current foreground run still owns
+the bottom status-line running marker, even if a terminal assistant
+`message_end` has already arrived. Fullscreen TUI defers that metadata until
+the foreground run is released at `agent_end`/turn-finish time so the ledger
+does not show a completed provider/model summary under an active `Esc`
+interrupt hint.
 Turn metadata also must not remain below a currently streaming `Thinking` or
 visible assistant block. If a prior tool failure created interim turn metadata
 and the provider continues with reasoning or answer text, fullscreen TUI removes
 that metadata until the assistant message reaches a terminal normal answer,
-terminal normal reasoning-only result, or another failure summary state.
+terminal normal reasoning-only result, or terminal failure summary state.
 
 Assistant messages that contain only folded reasoning and tool calls do not
 render turn metadata. Tool-only Thinking sections must remain compact evidence.
 If an assistant message ends the turn normally with folded reasoning but no
 visible text, fullscreen TUI may restore turn metadata after that final
 Thinking block so history resume still exposes provider/model/elapsed context.
-Aborted or interrupted reasoning-only messages are not terminal reports and
-must not create a metadata block below `Thinking`.
+Aborted or interrupted reasoning-only message events are not terminal reports
+by themselves and must not create a metadata block below `Thinking` before the
+turn settles. When a user-confirmed interrupted reasoning-only turn does settle
+and metadata is rendered, that metadata must include `interrupted`.
 
 The bottom area contains a compact composer with the same full-width adaptive
 input surface used by historical user prompts, a leading dim `›` prompt marker,
@@ -99,6 +109,11 @@ composer styling as fresh typed input and must not re-enable the textarea
 default cursor-line underline. An empty composer defaults to one visible input
 row; non-empty input grows with its wrapped/logical line count up to six visible
 rows.
+
+Active text selection in the composer, transcript, and sidebar uses one shared
+high-contrast reverse-video plus bold style instead of relying on a color-only
+selection background. This keeps selection visible on prompt blocks and other
+full-width surfaces that already carry their own adaptive background.
 
 The composer must not show the current mode in its border/title. The fixed
 status line under the composer shows mode, model, and compact context usage by
@@ -141,7 +156,7 @@ TUI must not add a separate `Working` label, active phase text such as
 `Running`, a multi-line status widget, or a transcript row merely because
 interruption was requested. Existing shell-mode marking remains in the same
 status line and does not move the model or variant text. Active phase names and
-phase-level elapsed timers belong in ledger rows only. When a running child
+phase-level elapsed timers should not be added to the status line. When a running child
 agent is opened for inspection and the parent foreground turn is detached into
 auxiliary tracking, the inspected child session counts as running only while the
 tracked child task matches the visible child session, and its status-line

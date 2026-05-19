@@ -53,8 +53,11 @@ Required interaction coverage:
   targets in `Custom commands`, no CLI command appendix, bottom help
   tabs/navigation, no transcript row, no accepted arguments, and scripted
   output without command-row wrapping.
-- Composer behavior for prompt submit, newline insertion, current-session
-  persisted user-prompt history seeding, history recall with draft restoration,
+- Composer behavior for prompt submit, newline insertion, `Ctrl+A` full-text
+  selection with visible highlighting, composer mouse drag selection,
+  input-local selection clearing via `Backspace` and `Delete`, selection
+  replacement via typing and bracketed paste, current-session persisted
+  user-prompt history seeding, history recall with draft restoration,
   multi-line boundary behavior, and history search.
 - Slash menu behavior for exact, prefix, and subsequence fuzzy matching,
   default first selection, Up/Down/Home/End navigation, mouse click, prefix-only
@@ -144,23 +147,27 @@ Required interaction coverage:
   snapshot restore, repeated boundary movement, composer prompt restoration,
   cleanup before next prompt, and bounded no-op/error paths for no session, no
   user message, missing snapshot, non-Git workdir, and unsettled turns.
-- `Esc` priority: selection, file popup, skill popup, slash menu, bottom pane,
-  history search, and empty shell composer clear before interruption; provider
-  transport and foreground shell waits wake promptly; post-abort title
-  generation is skipped; idle `Esc` is non-destructive.
+- `Esc` priority: transcript/sidebar selection, file popup, skill popup, slash
+  menu, composer selection, bottom pane, history search, and empty shell
+  composer clear before interruption; provider transport and foreground shell
+  waits wake promptly; post-abort title generation is skipped; idle `Esc` is
+  non-destructive.
 - Transcript focus behavior: `Ctrl+T`, `Esc`, Up/Down focused row movement,
   Enter/Space toggles/opening, PageUp/PageDown scrolling from composer and
   transcript focus, and composer-focus Up/Down remaining input/history boundary
   keys.
 - Fullscreen mouse behavior: alternate-screen mouse capture, alternate-scroll,
   no any-motion tracking, hover-routed wheel scrolling, composer/status wheel
-  ignored, slash/bottom-pane click priority, app-native drag selection, final
-  rendered-buffer extraction, wide-character preservation, transcript/sidebar
-  region locking, right-padding trimming, visible highlight, non-blocking
-  clipboard copy, `Ctrl+C` selection copy, and bounded clipboard failures.
+  ignored, slash/bottom-pane click priority, composer input drag selection with
+  CJK-aware cursor mapping and edit-only release behavior, app-native
+  transcript/sidebar drag selection, final rendered-buffer extraction,
+  wide-character preservation, transcript/sidebar region locking,
+  right-padding trimming, visible highlight, non-blocking clipboard copy,
+  `Ctrl+C` selection copy, and bounded clipboard failures.
 - Clipboard backend coverage for WSL kernel marker detection, WSL
   `powershell.exe` then `clip.exe`, Linux Wayland `wl-copy`, X11 fallbacks,
-  OSC52 payload bounds, and no fullscreen exit on copy failure.
+  SSH terminal-mediated copy, tmux clipboard forwarding fallback, OSC52 payload
+  bounds, UTF-8/CJK OSC52 payloads, and no fullscreen exit on copy failure.
 - Interruption and queueing: interrupted foreground turns restore queued prompt
   and shell inputs to the composer, normal completion drains queued inputs FIFO,
   and settled interrupted transcript evidence remains distinct from ordinary

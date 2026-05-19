@@ -53,3 +53,5 @@ Out of scope:
   state, sessions, and cross-cutting behavior.
 - [211 pevo TUI Rendering](../211-pevo-tui-rendering/spec.md) defines
   transcript, status-line, sidebar, and visual projection behavior.
+- [035 Permissions](../035-permissions/spec.md) defines permission modes and
+  approval semantics projected through interactive commands.

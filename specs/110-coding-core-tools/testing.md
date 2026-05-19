@@ -13,6 +13,8 @@ Define acceptance expectations and validation scenarios for the `coding-core` to
 - Each tool returns model-visible JSON results with the stable fields defined by [110 Coding Core Tools](spec.md).
 - Failures are observable through top-level `error` and any tool-specific outcome fields.
 - Truncation, timeout, abort, resource denial, ambiguity, not-found, and conflict behavior are observable.
+- Permission denial is observable as a normal failed tool result or
+  before-agent-start rejection through the owning runtime boundary.
 
 ## Current Implementation Slice
 
@@ -50,7 +52,9 @@ resources.
   pipes left open by descendants.
 - `bash` closes command stdin so prompt-style commands observe EOF instead of
   reading from the interactive TUI.
-- Resource denial, boundary failure, or missing working context becomes JSON `error` or before-agent-start rejection according to the owning boundary.
+- Resource denial, permission denial, boundary failure, or missing working
+  context becomes JSON `error` or before-agent-start rejection according to the
+  owning boundary.
 
 ## Validation Boundaries
 

@@ -87,6 +87,20 @@ TUI startup resume, and from latest-session resolution until restored.
 Non-terminal scripted `/sessions`, `/resume`, and `/continue` continue to print
 only active sessions.
 
+When the fullscreen session pane opens and the current visible session appears
+in the active view, the selected-row arrow defaults to that current session
+instead of the first latest-activity row. If no current session appears in the
+opened view, selection falls back to the first visible row.
+
+In the fullscreen session pane, rows for sessions that still own background
+work after the user switches away render a low-intensity live marker using the
+shared `activity_spinner_frame(elapsed)` motion primitive. The marker is part
+of the row's existing leading state area, so it must not add a second line,
+change row height, change click targets, or rewrite persisted session recency.
+The current-session marker remains reserved for the visible session; when a
+visible session is also running, the fixed bottom status line remains the
+primary running indicator.
+
 Both active and archived session views are ordered latest-activity-first by the
 persisted session latest-activity time. Restoring an archived session exposes it
 in the active view at its existing activity position; it does not make the

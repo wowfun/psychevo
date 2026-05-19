@@ -224,6 +224,9 @@ selects the read-only runtime mode. `dontAsk` is non-interactive and denies
 any action that would otherwise prompt unless it already matches
 `permissions.allow` or a safe default. `--dangerously-skip-permissions` is the
 explicit bypass flag and selects `bypassPermissions`; hard denies still apply.
+Permission semantics, rule precedence, approval modes, and hard-deny behavior
+are defined by [035 Permissions](../035-permissions/spec.md); this topic owns
+only the concrete `pevo` command spelling and output surface.
 
 `pevo config permissions list/remove` manages the current workdir's
 project-local `.psychevo/config.jsonc` permission rules. `allow always` approval
@@ -267,5 +270,5 @@ the installed binary, and optionally initializes the global Psychevo home.
 - [200 Testing](testing.md) defines acceptance coverage.
 - [120 Provider Registry](../120-provider-registry/spec.md) defines
   provider/model configuration and resolution.
-- [130 Permissions](../130-permissions/spec.md) defines permission rules,
+- [035 Permissions](../035-permissions/spec.md) defines permission rules,
   approval modes, and bypass semantics.

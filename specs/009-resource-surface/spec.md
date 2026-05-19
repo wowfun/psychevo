@@ -61,6 +61,11 @@ Access gates may apply during context assembly, tool request handling, tool exec
 
 Access gates produce resource decisions. They do not define permission schemas, approval UX, human confirmation flows, policy rule languages, or failure presentation.
 
+The concrete runtime permission policy is one specialization of resource gates.
+[035 Permissions](../035-permissions/spec.md) owns permission modes, approval
+semantics, rule precedence, and the first dangerous-action policy. This spec
+continues to own the generic allow, deny, and defer decision model.
+
 ## Resource Decisions
 
 A resource decision is allow, deny, or defer.
@@ -95,5 +100,7 @@ Durable evidence may represent that a resource fact was allowed, denied, or defe
 - [005 Durable Evidence](../005-durable-evidence/spec.md) defines durable evidence semantics for inspectable agent-invocation facts.
 - [006 Context Assembly](../006-context-assembly/spec.md) defines model visibility and projection for resource facts.
 - [007 Tool Surface](../007-tool-surface/spec.md) defines tool declarations and execution bindings that may use resource operations.
+- [035 Permissions](../035-permissions/spec.md) defines the concrete runtime
+  permission policy that specializes resource gates for local operations.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines how resource facts relate to other state families.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines how capability contributions may provide resource candidates or gates.

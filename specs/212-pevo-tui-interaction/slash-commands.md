@@ -200,7 +200,9 @@ bottom selection panes do not render subtitles.
 `/permissions` shows the effective approval mode, permission mode, configured
 local allow/ask/deny rules, and the project-local config path. Rule mutation is
 owned by the dedicated permissions management surface and must not be sent as a
-model prompt.
+model prompt. Permission policy semantics are defined by
+[035 Permissions](../035-permissions/spec.md); this topic owns only the
+interactive projection.
 
 `/sessions`, `/resume`, and `/continue` show date-grouped session rows sorted by
 latest persisted activity with right-aligned activity time and visible-message

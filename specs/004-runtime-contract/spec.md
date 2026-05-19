@@ -14,6 +14,7 @@ Define the runtime contract owned by `psychevo-runtime`.
 - model context assembly
 - resource surface wiring
 - agent-invocation scoped tool surface assembly
+- permission policy, permission mode, approval handler, and session grant wiring
 - capability extension resolution
 - stop, abort, and cancellation signal wiring
 - durable evidence sink wiring
@@ -25,7 +26,7 @@ Out of scope:
 - model catalogs, fallback priority, or provider selection policy
 - authentication storage, OAuth, environment lookup, headers, transport, retries, or billing
 - concrete tool names, tool schemas, tool behavior, or permission rules
-- resource permission schemas, policy rule languages, approval UX, sandbox behavior, path rules, concrete enforcement mechanics, or security policy
+- permission rule languages, approval UX, sandbox behavior, path rules, concrete enforcement mechanics, or security policy
 - plugin manifests, extension APIs, package formats, discovery paths, hot reload, startup protocols, shutdown protocols, or healthcheck protocols
 - durable record, trace, replay, session storage, or persistence formats
 - CLI parsing, terminal rendering, process behavior, or exit codes
@@ -60,6 +61,7 @@ After a session boundary exists, runtime assembles an agent invocation from call
 - model context
 - resource surface
 - agent-invocation scoped tool surface
+- permission policy inputs, permission mode, approval handler, and session grants
 - generation-request tool declaration snapshots
 - capability extension selections
 - optional selected agent definition and child-agent control scope
@@ -72,9 +74,23 @@ Runtime wires provider configuration needed by an agent invocation. Authenticati
 
 Runtime assembles model context for generation requests. [006 Context Assembly](../006-context-assembly/spec.md) defines context projection, visibility boundaries, and transformation boundaries. This spec does not define prompt templates, prompt section ordering, context schemas, memory behavior, or which runtime inputs become loop-visible messages.
 
-Runtime wires the resource surface for non-model resources used by context assembly and tool execution. [009 Resource Surface](../009-resource-surface/spec.md) defines resource boundaries, access gates, and resource decisions. This spec does not define resource permission schemas, policy rule languages, approval UX, sandbox behavior, path rules, concrete enforcement mechanics, or security policy.
+Runtime wires the resource surface for non-model resources used by context
+assembly and tool execution. [009 Resource Surface](../009-resource-surface/spec.md)
+defines resource boundaries, access gates, and resource decisions.
+[035 Permissions](../035-permissions/spec.md) defines the concrete runtime
+permission policy that may specialize those gates. This spec does not define
+permission rule languages, approval UX, sandbox behavior, path rules, concrete
+enforcement mechanics, or security policy.
 
 Runtime assembles the agent-invocation scoped tool surface and supplies tool declaration snapshots for generation requests. Runtime may refresh those snapshots between generation requests when registry, availability, or toolset expansion facts change. [007 Tool Surface](../007-tool-surface/spec.md) defines the declaration snapshot, binding, and selection contract. This spec does not define concrete tool names, tool schemas, tool result formats, or tool permission rules.
+
+Runtime assembles permission policy inputs for an accepted invocation, including
+resolved permission configuration, runtime mode, permission mode, approval mode,
+approval handler availability, and session-scoped grants. Permission assembly
+is invocation state: it constrains tool execution and resource operations but
+does not change which tool declarations runtime may expose.
+[035 Permissions](../035-permissions/spec.md) owns permission semantics, rule
+precedence, approval behavior, and fallback policy.
 
 Runtime resolves optional capability targets and toolset hints from built-in, runtime-provided, or external contributions. If required capability material, working context, toolset, model, resource boundary, or evidence wiring cannot be assembled, runtime rejects the request before `agent_start`. A before-agent-start rejection is an invocation rejection, not a failed agent invocation. [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability source, contribution, activation, availability, and conflict boundaries. This spec does not define plugin manifests, extension APIs, package formats, discovery paths, hot reload, startup protocols, shutdown protocols, or healthcheck protocols.
 
@@ -108,6 +124,8 @@ that projection must not redefine message content or provider replay semantics.
 - [001 Architecture](../001-architecture/spec.md) defines Rust workspace layout, crate boundaries, runtime coordination, and dependency direction.
 - [002 Agent Execution](../002-agent-execution/spec.md) defines agent-core execution semantics and core event families.
 - [003 AI Protocol](../003-ai-protocol/spec.md) defines provider-neutral generation semantics consumed by agent execution.
+- [035 Permissions](../035-permissions/spec.md) defines runtime permission
+  policy, approval semantics, and permission modes wired by runtime.
 - [005 Durable Evidence](../005-durable-evidence/spec.md) defines the durable evidence contract connected by runtime evidence sink wiring.
 - [006 Context Assembly](../006-context-assembly/spec.md) defines model context assembly and transformation boundaries.
 - [007 Tool Surface](../007-tool-surface/spec.md) defines agent-invocation scoped tool surface semantics.

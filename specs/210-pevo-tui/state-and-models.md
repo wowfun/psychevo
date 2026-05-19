@@ -84,8 +84,10 @@ per-workdir mode. Default mode exposes the current full coding-core tools.
 - `search`: literal text search under the selected workdir with limits and
   truncation metadata
 
-Plan mode must not expose `bash`, `write`, or `edit`. Its read-only semantics
-must not depend only on provider instructions.
+When interactive clarify support is enabled, fullscreen TUI may also expose
+the read-only `clarify` tool in plan mode to ask bounded user questions. Plan
+mode must not expose `bash`, `write`, or `edit`. Its read-only semantics must
+not depend only on provider instructions.
 
 User shell escape is a user-supplied shell context action, not a model-visible
 tool. It is available in both `plan` and `default` modes and must not add

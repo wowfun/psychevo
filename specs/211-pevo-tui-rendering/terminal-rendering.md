@@ -122,16 +122,18 @@ Successful turn completion and mode changes must not add synthetic `Ok` or
 `Status mode` rows to the transcript. The bottom status line is the source of
 truth for the current mode.
 
-Tool starts and ends render as compact evidence blocks. Long tool result bodies
-are summarized rather than dumped unless the block is expanded.
+Tool starts and ends render as compact evidence blocks whose titles start with
+the actual tool invocation name. Long tool result bodies are summarized rather
+than dumped unless the block is expanded.
 
-User shell escapes render through the same compact `Ran <first command line>`
-evidence used for shell tool evidence, with failures remaining in that evidence
-group. The provider-visible persisted record is a user-role text fragment:
+User shell escapes render through the same compact shell evidence shape, but
+with the local `! <first command line>` invocation label instead of a `Ran`
+category verb. Failures remain in that evidence group. The provider-visible
+persisted record is a user-role text fragment:
 `<user_shell_command><command>...</command><result>Exit code: ... Duration: ...
 seconds Truncated: ... Output: ...</result></user_shell_command>`. TUI display
 metadata and message content text must keep session reloads and history recall
-human-facing: reload renders the persisted shell record as `Ran <first command
+human-facing: reload renders the persisted shell record as `! <first command
 line>` evidence rather than a raw XML user prompt, and composer history recalls
 it as `!<command>`.
 
@@ -162,8 +164,8 @@ and provider reasoning wire fields must also not appear in rendered
 
 For non-terminal stdin/stdout, `pevo tui` keeps deterministic line-by-line
 behavior and renders plain, no-ANSI semantic blocks: `Prompt`, `Thinking`,
-`Explored`, `Ran`, `Updated`, `Answer`, and `Meta`. Lines beginning with `!`
-after leading whitespace run as user shell escapes and do not require provider
+tool-name-first evidence, `Answer`, and `Meta`. Lines beginning with `!` after
+leading whitespace run as user shell escapes and do not require provider
 credentials. The plain projection keeps block labels for machine-readable
-diagnostics even where fullscreen TUI uses unlabeled prompt and metadata
-presentation. `--debug` also affects this plain projection.
+diagnostics where they still exist, even where fullscreen TUI uses unlabeled
+prompt and metadata presentation. `--debug` also affects this plain projection.

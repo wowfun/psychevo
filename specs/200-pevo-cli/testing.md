@@ -115,6 +115,19 @@ scripts/validate.sh broad
 - `pevo auth status` and `pevo auth set --api-key-stdin` never print raw
   secrets in human or JSON output.
 
+## Permission Coverage
+
+- `pevo run --permission-mode` accepts `default`, `acceptEdits`, `plan`,
+  `dontAsk`, and `bypassPermissions`; `plan` selects the read-only runtime mode.
+- `--dangerously-skip-permissions` selects `bypassPermissions`, while hard
+  denies still apply.
+- `dontAsk` denies actions that would otherwise prompt unless they already
+  match `permissions.allow` or a safe default.
+- `pevo config permissions list/remove` manages local allow, ask, and deny
+  rules in the current workdir's project-local `.psychevo/config.jsonc`.
+- `allow always` approval writes project-local JSONC, preserves existing JSONC
+  syntax, and skips exact duplicate rules.
+
 ## Install Script Coverage
 
 - `scripts/install.sh` passes POSIX shell syntax validation with `sh -n`.

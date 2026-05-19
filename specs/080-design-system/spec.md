@@ -11,6 +11,29 @@ lives in [211 pevo TUI Rendering](../211-pevo-tui-rendering/spec.md), and
 interaction behavior lives in
 [212 pevo TUI Interaction](../212-pevo-tui-interaction/spec.md).
 
+## Scope
+
+- shared TUI visual language and surface hierarchy
+- compact glyph language, color roles, and adaptive terminal fallback
+- core transcript, prompt, composer, status line, sidebar, picker, and bottom
+  panel surface treatment
+- evidence language for inline ledger rows, collapsed details, and active work
+- composer-first interaction baseline and default shortcut expectations
+- internal measurement-and-rendering contract for TUI components
+- deterministic design-system validation expectations
+
+Out of scope:
+
+- concrete TUI command behavior, slash parsing, file completion, and selection
+  mechanics; these belong to [212 pevo TUI Interaction](../212-pevo-tui-interaction/spec.md)
+- transcript layout, evidence projection, sidebar composition, and terminal
+  rendering implementation; these belong to
+  [211 pevo TUI Rendering](../211-pevo-tui-rendering/spec.md)
+- durable session, model, and fullscreen command state; these belong to
+  [210 pevo TUI](../210-pevo-tui/spec.md)
+- runtime evidence semantics, storage formats, provider payloads, or public
+  Rust APIs
+
 ## Direction
 
 Psychevo uses an Adaptive Workbench design language: compact, evidence-led,
@@ -47,6 +70,8 @@ The shared glyph language is deliberately small:
 
 - `›` marks prompt, focus, or selected rows.
 - `•` marks evidence and active work.
+- `·` marks quiet status or notice rows that should remain visually below
+  evidence.
 - `▸` and `▾` mark collapsed and expanded detail.
 
 ASCII fallbacks may be added for terminals that cannot render these glyphs, but
@@ -92,14 +117,16 @@ section headers such as `Tool calls`, vertical rails, or separate activity logs.
 Rows default to a short title plus the most useful detail. Long stdout, JSON,
 diffs, raw data, and repeated preparation text collapse.
 
-Tool verbs are stable user-facing language:
+Tool evidence titles are tool-name first. Fullscreen ledger rows should show
+the actual invocation name, such as `read path`, `search query`, `bash command`,
+or `write path`, rather than category verbs such as `Exploring`, `Explored`,
+`Running`, `Ran`, `Updating`, or `Updated`. Active state is carried by the
+activity marker, elapsed time, and body suppression rules, not by changing the
+title verb.
 
-- read, list, and search tools: `Exploring` while active, `Explored` when done
-- shell tools: `Running` while active, `Ran` when done
-- write and edit tools: `Updating` while active, `Updated` when done
-
-The code model should use the same `Updated` concept internally; legacy
-`Changed` naming is not part of the design system.
+The code model may keep coarse internal evidence kinds for grouping and style,
+but those names are not user-facing design language. Legacy `Changed` naming is
+not part of the design system.
 
 Active evidence uses a bullet, elapsed time, and restrained motion. It should
 not add redundant body-only lines such as `running` or `preparing` when the
@@ -148,3 +175,16 @@ blocks, measured heights, and shared column measurements.
 Design-system tests are deterministic. They should verify visual roles,
 adaptive theme fallback, component layout, cache invalidation, and interaction
 semantics without live providers, API keys, or terminal palette dependence.
+
+## Related Topics
+
+- [005 Durable Evidence](../005-durable-evidence/spec.md) defines the evidence
+  semantics that the TUI design makes inspectable.
+- [070 Experience](../070-experience/spec.md) defines cross-surface UX and DX
+  expectations.
+- [210 pevo TUI](../210-pevo-tui/spec.md) defines the fullscreen interactive
+  terminal command and shared TUI state.
+- [211 pevo TUI Rendering](../211-pevo-tui-rendering/spec.md) defines concrete
+  transcript, status-line, sidebar, and terminal rendering behavior.
+- [212 pevo TUI Interaction](../212-pevo-tui-interaction/spec.md) defines
+  concrete input handling, slash commands, and selection behavior.
