@@ -71,11 +71,15 @@ invocation safety policy, scoped MCP availability, and resource boundaries.
 ## Run Lifecycle And Control
 
 Foreground subagents block the tool call until completion and return the final
-summary as the tool result.
+summary as the tool result. The foreground final summary must not also be
+projected through the parent mailbox.
 
 Background subagents return a handle immediately. Completion records final
-summary and status, and may inject or project a subagent-result observation to
-the parent session.
+summary and status, then writes one parent mailbox event. Runtime must not
+persist that completion as a normal parent `user` message. The mailbox payload
+uses structured inter-agent communication content containing a
+`subagent_notification` with the agent identity, status, outcome, and
+`final_answer`.
 
 Interactive clients may also start a background subagent directly from a
 selected definition. That run uses fresh child context by default, records the
@@ -85,12 +89,21 @@ discoverable after it leaves the live running view.
 
 Control tools use first-class agent naming rather than subagent-specific names:
 `list_agents`, `wait_agent`, `send_message`, `close_agent`, and
-`resume_agent`. `wait_agent` may wait on multiple targets and returns both
-statuses and timeout information. `close_agent` closes the target's control
-edge, requests shutdown for running work, recursively closes open descendants,
-and returns the previous status. `send_message` can automatically resume a
-closed or completed agent in the background and continue it as a new turn.
-Runtime also exposes a pause-new-spawns state for interactive control surfaces.
+`resume_agent`. `wait_agent` accepts only an optional timeout, waits for any
+pending or newly arriving parent mailbox event, and returns a small status
+object with `message` and `timed_out`. It never returns child `final_answer`
+content. When multiple background children complete before a wait boundary, one
+wait delivery drains the current pending batch; the parent model may call
+`wait_agent` again to wait for later completions. If the model never calls
+`wait_agent`, pending mailbox events remain buffered until the next parent
+model-input boundary, where they are delivered once and retained as structured
+mailbox history for subsequent requests.
+
+`close_agent` closes the target's control edge, requests shutdown for running
+work, recursively closes open descendants, and returns the previous status.
+`send_message` can automatically resume a closed or completed agent in the
+background and continue it as a new turn. Runtime also exposes a
+pause-new-spawns state for interactive control surfaces.
 Pausing blocks future `Agent` spawn requests while leaving already running
 children alone. Resuming allows new spawn requests again. Stop subtree uses the
 same cooperative-then-force semantics as stopping a single child, applied to
@@ -124,12 +137,12 @@ is still the only parent-transcript inspection affordance for that invocation.
 The canonical `Agent` argument for selecting a definition is `agent_type`, but
 runtime also accepts `name` as a compatibility alias and treats it identically
 for execution and required-agent mention accounting.
-Completion may still write a hidden contextual user notification to the parent
-session so later parent turns can see child-agent status without treating the
-notification as new human intent. TUI must not render hidden notifications as
-separate rows. Background/manual starts and completions may write visible local
-status rows because they do not otherwise have a foreground tool-result row.
-Start observations are UI-facing local records and are not human prompts.
+Completion observations are mailbox events, not human prompts. TUI may render
+agent start, wait, close, and completion status as tool/event rows, but those
+rows must not create a second model-visible copy of the child final answer.
+Legacy hidden contextual user notifications may still appear in old sessions;
+TUI must not render hidden notifications as separate rows. Start observations
+are UI-facing local records and are not human prompts.
 Child metadata records the resolved definition name, generated or provided
 `task_name`, parent session id, source/path, role, background/fork settings, and
 effective remaining spawn depth.

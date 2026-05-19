@@ -60,11 +60,11 @@ normative order:
 7. turn-scoped hints and selected skill body
 8. current prompt
 
-`base/mode`, selected main agent, agent catalog, and skill index are
-instruction slots. AGENTS/project context is contextual-user context and is
-placed before retained history to keep the prefix stable. Selected skill bodies
-and required `@agent` call hints are turn-scoped and appear after history and
-before the current prompt.
+`base/mode`, selected main agent, agent catalog, skill index, and
+AGENTS/project context are instruction slots. AGENTS/project context is policy
+context rather than user task input and is placed before retained history to
+keep the prefix stable. Selected skill bodies and required `@agent` call hints
+are turn-scoped and appear after history and before the current prompt.
 
 Provider projection must preserve the semantic separation between instruction
 slots, contextual-user project context, retained transcript history,
@@ -89,6 +89,10 @@ constraints. Child agents use the same identity/purpose/body construction with
 child-run control guidance owned by the subagent runtime. Child-agent sessions
 persist their own prefix snapshot for the actual child invocation, including
 the selected child-agent identity/body and child-run control slot.
+
+When the effective tool surface for an invocation is empty, the base/mode slot
+uses a minimal no-tools instruction instead of the normal coding-mode wording.
+It must not claim read, write, edit, shell, agent, or skill capability.
 
 ## Prefix Snapshot
 
@@ -132,9 +136,9 @@ When `developer_role` is false or unknown, developer-policy slots fall back to
 provider role `system`. This fallback changes only the provider role; the
 semantic role and slot accounting remain developer-policy material.
 
-AGENTS/project context remains contextual-user context. Selected skill bodies
-and required `@agent` call hints remain turn-scoped and are not part of the
-session-stable prefix.
+AGENTS/project context uses the same provider-role fallback as
+developer-policy slots. Selected skill bodies and required `@agent` call hints
+remain turn-scoped and are not part of the session-stable prefix.
 
 ## Usage Categories
 
@@ -150,18 +154,18 @@ Context usage projections use these top-level categories:
 - `free_space`
 
 Selected-agent text is counted as `developer_prompt`, not as skills. Skill
-index entries are counted as `developer_prompt`; selected skill body text is
-counted as `turn_context`.
+index entries and AGENTS/project instructions are counted as
+`developer_prompt`; selected skill body text is counted as `turn_context`.
 
 ## Export And Share
 
 Default export/share header output exposes prefix slot names, hashes, source
-metadata, provider-role fallback, and stale or approximate markers only. Full
-hidden prefix text is included only by explicit full-input or
-last-provider-request style options that already warn about hidden prompt
-disclosure. `last-provider-request` reconstructs hidden prefix messages from
-the persisted snapshot only when the corresponding user prompt's recorded
-prefix hash matches the latest retained snapshot. Assistant-turn prefix
-metadata is only a fallback for older records. Otherwise the export must mark
-the request as approximate or unavailable instead of silently applying a newer
-prefix.
+metadata, prompt-prefix metadata, provider-role fallback, and stale or
+approximate markers only. Full hidden prefix text is included only by explicit
+full-input or last-provider-request style options that already warn about
+hidden prompt disclosure. `last-provider-request` reconstructs hidden prefix
+messages and tools from the persisted snapshot only when the corresponding user
+prompt's recorded prefix hash matches the latest retained snapshot.
+Assistant-turn prefix metadata is only a fallback for older records. Otherwise
+the export must mark the request as approximate or unavailable instead of
+silently applying a newer prefix.

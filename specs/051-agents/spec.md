@@ -54,12 +54,13 @@ Agent definition files use Markdown with optional YAML frontmatter followed by
 the agent instruction body. Runtime accepts compatibility fields including
 `name`, `description`, `model`, `tools`, `disallowedTools`, `permission`,
 `permissions`, `permissionMode`, `mcpServers`, `skills`, `hooks`,
-`background`, `initialPrompt`, `maxTurns`, `maxSpawnDepth`, and `effort`.
-`maxSpawnDepth` is a Psychevo extension that defaults to `0`; it controls how
-many additional descendant spawn levels a child created from this definition
-may use, as defined by [051 Subagents](subagents.md). `memory` and
-`isolation: worktree` are parsed for compatibility but are unsupported in the
-first implementation slice and must produce diagnostics rather than executing.
+`background`, `initialPrompt`, `maxTurns`, `maxSpawnDepth`,
+`projectInstructions`, and `effort`. `maxSpawnDepth` is a Psychevo extension
+that defaults to `0`; it controls how many additional descendant spawn levels a
+child created from this definition may use, as defined by
+[051 Subagents](subagents.md). `memory` and `isolation: worktree` are parsed
+for compatibility but are unsupported in the first implementation slice and
+must produce diagnostics rather than executing.
 
 Runtime validates names using lowercase letters, digits, and hyphens. Missing
 or empty descriptions are diagnostics and prevent model-index loading. Unknown
@@ -120,6 +121,14 @@ resource, context, session, or runtime-mode constraints. The selected agent may
 narrow tools, add context candidates, or prefer a model, but runtime remains
 responsible for assembling one valid invocation boundary.
 
+`projectInstructions` is a Psychevo extension for selected main agents. When
+omitted, `null`, or `true`, runtime injects AGENTS/project instructions for the
+invocation. When `false`, runtime does not inject AGENTS/project instructions
+for that selected agent. Non-boolean values are diagnostics and default to
+injection. Project instructions are policy context, not task input; when
+injected, they use the developer-policy prompt surface with provider-role
+fallback to `system` for models that do not support `developer`.
+
 ## Tool Policy
 
 Agent tool policy is an invocation-scoped constraint, not direct execution
@@ -130,6 +139,15 @@ authority. Runtime computes effective tools as the intersection of:
 - the selected agent's allow and deny policy
 - scoped MCP availability
 - parent invocation safety policy
+
+`tools` is an allowlist for the selected agent. When omitted, `null`, or an
+empty string, the selected agent inherits the runtime-available tool surface
+subject to the other constraints in this section. A YAML empty array,
+`tools: []`, is an explicit empty allowlist and exposes no tools.
+`disallowedTools` is a denylist.
+When both `tools` and `disallowedTools` are set, runtime removes denied tools
+first and then resolves the allowlist against the remaining pool; a tool listed
+in both is removed.
 
 `RunMode::Build` may expose mutating coding tools. `RunMode::Plan` is a hard
 read-only ceiling; agent definitions cannot expand it into mutating tools.
@@ -147,11 +165,33 @@ Compatibility tool aliases normalize to Psychevo tool names:
 - `Edit` -> `edit`
 - `Write` -> `write`
 - `Agent` and `Task` -> agent-spawn/control tools
+- `Skill` -> read-only skill access, including `list_skills`, `view_skill`,
+  and model-visible skill catalog entries
 
 Named restrictions such as `Agent(review,explore)` or `Task(review,explore)`
-are runtime-enforced. The `Agent` spawn entrypoint may
-only target allowed names after the active runtime mode, selected-agent policy,
-and parent safety policy are applied.
+are runtime-enforced and affect model-visible agent catalog projection. The
+`Agent` spawn entrypoint may only target allowed names after the active runtime
+mode, selected-agent policy, and parent safety policy are applied. If `Agent` is
+not in the effective tool surface, runtime must not inject the agent catalog
+prompt slot for that invocation. If `Agent(review,explore)` is effective,
+runtime must show only those allowed agent definitions, minus denied names.
+
+The `skills` frontmatter field preloads selected skill content when supported;
+it is not a callable capability grant. Runtime exposes the skill catalog prompt
+slot only when the effective tool surface includes the read-only `Skill`
+surface.
+
+When an invocation's effective tool surface is empty, runtime must use a
+minimal no-tools base prompt that states no callable tools are available. It
+must not claim read, write, edit, shell, agent, or skill capability for that
+invocation.
+
+Invocation and export metadata records the effective tool names, visible agent
+catalog state, visible skill catalog state, and project-instruction visibility
+and provider role used for that run. `last-provider-request` reconstruction
+must use the recorded effective tool names rather than mode defaults; when the
+effective list is empty, the reconstructed provider body omits `tools` just as
+the actual provider request would.
 
 MCP tools use canonical MCP tool identifiers. MCP scope may narrow available
 MCP tools but must not bypass runtime capability selection or resource policy.

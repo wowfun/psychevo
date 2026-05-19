@@ -40,10 +40,19 @@ Required interaction coverage:
   variant, mode validation, `/copy`, `Ctrl+O`, `/show-raw`, invalid
   `/show-raw` arguments, `/rename`, `/sessions`/`/resume`/`/continue`, and
   ambiguous session prefix handling.
+- Configured slash aliases and shortcuts: effective config loading, project
+  overriding global values, alias parsing for concrete slash lines with flags,
+  trailing alias arguments appended before parsing, configured alias rows in
+  the slash menu with Tab/Enter behavior, help alias/shortcut text, shortcut
+  dispatch only from an empty composer, no history write for shortcut dispatch,
+  `none` clearing a binding, leader-key timeout, and startup rejection for
+  unknown commands, malformed aliases, duplicate aliases, duplicate shortcuts,
+  and fixed-key conflicts.
 - `/help` fullscreen bottom pane and scripted output with `General`,
-  `Commands`, and `Custom commands` groups, compact aliases, no alias menu
-  rows, no CLI command appendix, bottom help tabs/navigation, no transcript row,
-  no accepted arguments, and scripted output without command-row wrapping.
+  `Commands`, and `Custom commands` groups, compact aliases, configured slash
+  targets in `Custom commands`, no CLI command appendix, bottom help
+  tabs/navigation, no transcript row, no accepted arguments, and scripted
+  output without command-row wrapping.
 - Composer behavior for prompt submit, newline insertion, current-session
   persisted user-prompt history seeding, history recall with draft restoration,
   multi-line boundary behavior, and history search.

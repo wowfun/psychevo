@@ -9,9 +9,24 @@ Define fullscreen key handling, composer behavior, paste handling, mouse routing
 
 ## Keymap
 
-The first fullscreen keymap is fixed and composer-first. V1 keeps the key
-handling organized for future user keymap configuration, but it does not expose
-custom keymaps.
+The fullscreen keymap is composer-first. Core editing, quit, pane, popup,
+selection, and interruption controls remain fixed so the terminal surface stays
+recoverable. Users may configure slash command shortcuts only through the
+effective `config.jsonc` `tui.slash_keybinds` map.
+
+Slash command shortcuts execute only when composer focus is active, the
+composer is empty, shell mode is inactive, no selection, popup, bottom pane, or
+history search is active, and no other higher-priority input state consumes the
+key. They dispatch the configured slash input through normal slash parsing and
+command handling, do not write composer history, and echo the configured slash
+input in any command result row.
+
+Shortcut values may be one key chord, a comma-separated list, an array of
+chords, `none`, or a single `<leader>` sequence such as `<leader>m`.
+`leader_key` defaults to `ctrl+x`, and `leader_timeout_ms` defaults to 2000.
+V1 supports only one chord after `<leader>`. Invalid shortcuts, duplicate
+shortcuts, and shortcuts that conflict with fixed recovery/input keys reject
+startup.
 
 - `Enter` submits the composer. When slash completion suggestions are visible,
   the first suggestion is selected by default and `Enter` executes that
@@ -61,7 +76,8 @@ custom keymaps.
   the existing whitespace quoting rules. Image paths selected this way remain
   plain text paths and do not create attachments. Naked shell words such as
   `cat src<Tab>` do not trigger shell-native completion.
-- `Shift+Tab` cycles `default -> plan -> default`.
+- `Shift+Tab` cycles `default -> acceptEdits -> plan -> default`. Dangerous
+  bypass modes are not part of the normal cycle.
 - `Esc` clears active UI state before it can interrupt work: text selection,
   file and skill popups, slash menu, bottom selection panes, history search,
   and an empty shell-mode composer all take priority. If none of those states

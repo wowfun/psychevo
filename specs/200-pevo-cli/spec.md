@@ -25,8 +25,8 @@ product-level environment variables.
 
 Out of scope:
 
-- approvals, file attachments, fork/server attach, remote session publishing,
-  provider login, or auth stores
+- file attachments, fork/server attach, remote session publishing, provider
+  login, or auth stores
 - provider transport semantics beyond explicit `/models` fetches, OAuth, or
   credential pools
 - SQLite schema details beyond product path selection
@@ -218,6 +218,17 @@ creation. Config writes default to the global `$PSYCHEVO_HOME` scope; `--local`
 writes the current workdir's `.psychevo` scope; `--global` explicitly selects
 the default scope. `--global` and `--local` are mutually exclusive.
 
+`pevo run` accepts `--permission-mode <default|acceptEdits|plan|dontAsk|bypassPermissions>`
+to override the configured permission mode for that invocation. `plan` also
+selects the read-only runtime mode. `dontAsk` is non-interactive and denies
+any action that would otherwise prompt unless it already matches
+`permissions.allow` or a safe default. `--dangerously-skip-permissions` is the
+explicit bypass flag and selects `bypassPermissions`; hard denies still apply.
+
+`pevo config permissions list/remove` manages the current workdir's
+project-local `.psychevo/config.jsonc` permission rules. `allow always` approval
+writes use the same project-local rule store.
+
 `pevo auth` owns credential status and API-key writes for configured or
 built-in providers. It supports `status` and `set`; destructive
 unset/logout/remove behavior is not part of this batch. Raw API keys are never
@@ -256,3 +267,5 @@ the installed binary, and optionally initializes the global Psychevo home.
 - [200 Testing](testing.md) defines acceptance coverage.
 - [120 Provider Registry](../120-provider-registry/spec.md) defines
   provider/model configuration and resolution.
+- [130 Permissions](../130-permissions/spec.md) defines permission rules,
+  approval modes, and bypass semantics.

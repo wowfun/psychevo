@@ -20,7 +20,8 @@ The first TUI supports:
 - `/sessions`, `/resume`, `/continue`
 - `/model`
 - `/variant <none|minimal|low|medium|high|xhigh|max>`
-- `/mode <plan|default>`
+- `/mode <plan|default|acceptEdits|dontAsk|bypassPermissions>`
+- `/permissions`
 - `/show-thinking`
 - `/show-thinking on`
 - `/show-thinking off`
@@ -41,8 +42,13 @@ The first TUI supports:
 - future disabled entries in the slash menu: `/compact`
 
 Slash command discovery is registry-backed and remains a lightweight menu above
-the composer. The slash menu shows canonical command labels only, stays a flat
-list with at most 8 rows, and does not show hidden aliases or group headers.
+the composer. The slash menu stays a flat list with at most 8 rows and does
+not show group headers. Built-in compatibility aliases may match the canonical
+command row but do not appear as independent menu rows. User-configured
+aliases appear as alias rows when matched: the row label is the alias token,
+the description identifies the configured target slash line and canonical
+summary, Tab completes to the alias token, and Enter or mouse selection
+submits the alias token so normal alias expansion performs execution.
 Slash menu summaries stay compact enough for one-line discovery. Expanded
 `/help` may add short detail lines for commands whose consequences are easy to
 miss, such as local artifact writes, provider calls, session mutation, display
@@ -64,18 +70,21 @@ expand back to the full local result. `/help` does not accept arguments.
 `/status`, `/context`, `/model`, `/sessions`, `/new`, `/copy`, `/undo`,
 `/redo`, and `/quit`. `Commands` lists all built-in slash commands in canonical registry
 order. `Custom commands` summarizes dynamic skill invocation as
-`/skill:<name> [args]` with the discovered skill count, or reports
-`No custom commands available` when skills are disabled or none are discovered.
+`/skill:<name> [args]` with the discovered skill count and lists each concrete
+slash line configured with user aliases or shortcuts. It reports
+`No custom commands available` only when no skills and no configured slash
+targets are available.
 Help rows use `<usage> - <summary>` and may append compact alias text on the
-canonical command row. Rows with expanded detail render the detail immediately
-after the command row as a short indented continuation line. Fullscreen `/help`
+canonical command row. If a command has configured shortcuts, the same row may
+also append compact shortcut text. Rows with expanded detail render the detail
+immediately after the command row as a short indented continuation line. Fullscreen `/help`
 opens a bottom help pane with
 `Help`, `General`, `Commands`, and `Custom commands` header tabs; `Esc` closes
 the pane, and tab/arrow navigation may switch help sections. Scripted `/help`
 prints the same deterministic help text without opening a pane.
 
-`/status` shows workdir, home, db, session, model, variant, mode, and debug
-state as one multi-line status block. It does not include thinking or raw
+`/status` shows workdir, home, db, session, model, variant, mode, permission
+mode, and debug state as one multi-line status block. It does not include thinking or raw
 visibility; `/show-thinking` and `/show-raw` remain the dedicated commands for
 changing and reporting those settings. Fullscreen TUI appends one command
 transcript row without an extra `Status` title, and non-terminal scripted TUI
@@ -187,6 +196,11 @@ Fullscreen `/sessions`, `/resume`, `/continue`, and `/model` use bottom panes
 with title text, selected-row highlighting, footer hints, `Enter` selection,
 `Esc` close or back, arrow/Page/Home/End navigation, and scrolling. Shared
 bottom selection panes do not render subtitles.
+
+`/permissions` shows the effective approval mode, permission mode, configured
+local allow/ask/deny rules, and the project-local config path. Rule mutation is
+owned by the dedicated permissions management surface and must not be sent as a
+model prompt.
 
 `/sessions`, `/resume`, and `/continue` show date-grouped session rows sorted by
 latest persisted activity with right-aligned activity time and visible-message
@@ -371,6 +385,23 @@ auto-start behavior.
 Slash command errors are bounded user-visible text. They must not panic, hang,
 or start provider network work unless the command explicitly submits a prompt.
 
+User-configured slash aliases are loaded from effective `config.jsonc`
+`tui.slash_aliases`. Keys are concrete built-in slash input lines, including
+arguments or flags, validated by the same slash parser used for user input.
+Values must be aliases beginning with `/` and containing no whitespace. An
+alias expands to the configured concrete slash line before parsing; if the
+submitted alias has trailing text, that text is appended to the configured
+target line before parsing. Configured aliases are accepted anywhere built-in
+aliases are accepted, including scripted TUI input, but they are never emitted
+as separate command registry rows. In the fullscreen slash menu, matched
+configured aliases are displayed as alias rows so they have the same completion
+affordance as ordinary slash commands.
+
+Configured alias startup validation rejects aliases that conflict with any
+built-in canonical command, built-in alias, dynamic `/skill:` command prefix,
+obsolete command compatibility boundary, or another configured alias. Dynamic
+skill command names are not user-aliasable in v1.
+
 `/skills` lists discovered skills in deterministic precedence order. In
 fullscreen mode it appends a bounded status-style transcript block; in scripted
 mode it prints the same list deterministically.
@@ -383,6 +414,10 @@ The slash menu appears above the composer while the composer contains a slash
 command token. It shows at most 8 matched rows. Matching uses the canonical
 command label and orders exact matches first, prefix matches next, and
 subsequence fuzzy matches last while preserving menu order within each class.
+When the typed token matches a built-in alias, the canonical row is shown and
+selected using the same ordering class as the alias match. When it matches a
+user-configured alias, the alias row is shown and selected using the same
+ordering class as the alias match.
 When skill commands are enabled, discovered skills appear as dynamic
 `/skill:<name>` rows after built-in slash commands and participate in the same
 matching and Tab completion behavior.

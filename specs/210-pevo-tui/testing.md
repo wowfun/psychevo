@@ -53,6 +53,11 @@ Required parent-topic coverage:
 - Session history loading and replacement without synthetic status rows,
   preserving persisted folded reasoning as local Thinking evidence and
   persisted elapsed time in turn metadata when available.
+- Running-session switching isolates stream projection: output from the
+  previous running session must not appear in the newly displayed session,
+  switching back replays that session's live buffered events, background
+  completion must not steal `current_session`, and `/new` must remain free of
+  stale running output.
 - `--new` and fullscreen `/new` session creation/clearing behavior, including
   no transcript status row, reset of context usage state, pending images, and
   stale terminal glyphs.

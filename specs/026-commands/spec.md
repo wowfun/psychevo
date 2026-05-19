@@ -29,8 +29,18 @@ Out of scope:
 
 A command has one canonical name. Surfaces may accept hidden aliases for
 compatibility or migration, but discovery surfaces show canonical names by
-default. Aliases must not appear as independent menu rows. Help may mention
-aliases compactly on the canonical command's row.
+default. Built-in compatibility aliases must not appear as independent menu
+rows. Help may mention aliases compactly on the canonical command's row.
+
+Interactive surfaces may also allow user-configured aliases for existing
+commands. User aliases are resolved as aliases of the command's canonical
+metadata record, not as new command records. A configured alias must not
+conflict with any canonical command name, built-in alias, dynamic command
+prefix, or another configured alias; concrete products should reject such
+configuration during startup or configuration loading. Interactive discovery
+surfaces may render configured aliases as alias rows when that improves
+completion affordance, but they must still execute through the canonical
+command metadata and parser.
 
 A command metadata record should identify:
 
@@ -107,6 +117,10 @@ When aliases are useful to disclose, the same row may append:
 ```text
 aliases: <alias>, <alias>
 ```
+
+If a concrete interactive surface supports command keybindings, expanded help
+may also append compact shortcut text on the canonical command row. Shortcut
+metadata is display-only and must not create extra command rows.
 
 TUI slash help uses three user-facing groups:
 

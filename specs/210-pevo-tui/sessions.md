@@ -26,6 +26,15 @@ evidence, but only from persisted message material that is already marked as
 reasoning and never by replaying provider wire fields as visible assistant
 text.
 
+Fullscreen TUI may switch sessions while a turn is still running. Streamed
+events, status-line running state, queued input ownership, and `Esc`
+interruption are scoped to the session that owns the running turn. Events for a
+non-visible session must not append rows, thinking, tool output, errors, or
+status notices to the currently displayed transcript. Returning to a still-live
+session reloads its persisted history and replays only that session's buffered
+live events. `/new` leaves no visible session selected, so later output from a
+previous running session must not appear in the new-session transcript.
+
 Opening, resuming, selecting, or viewing a session is read-only for session
 recency. These operations must not update the session's latest-activity time,
 ended state, archive state, messages, usage rows, or evidence. Persisting new

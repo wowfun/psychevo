@@ -17,7 +17,7 @@ Out of scope:
 - tool declaration schemas, parameter names, JSON Schema shapes, Rust APIs, or handler signatures
 - provider-specific tool-call fields or wire formats
 - CLI commands, terminal rendering, interactive PTY behavior, background process management, or process registry behavior
-- approval UX, sandbox behavior, deny lists, dangerous-command policy, or concrete resource policy
+- approval UX, sandbox behavior, deny lists, dangerous-command policy, or concrete resource policy, except for surfacing permission denial as normal tool-result failure
 - binary/image reading, append/delete/rename tools, search/list tools, memory tools, skill adjunct tools, or self-evolution tools
 - storage schemas, evidence record shapes, or replay formats
 
@@ -41,7 +41,7 @@ Each `coding-core` tool result is a model-visible JSON object. This is a `110` c
 
 Each tool uses a top-level `error` field for failure explanation. A missing, null, or empty `error` means the result does not report a failure through that field. Tool-specific failure rules may also use other fields such as `exit_code` or `success`.
 
-Resource denial, resource deferral, timeout, size bound, truncation failure, abort, ambiguity, not-found, and conflict conditions must be observable in the JSON result or as before-agent-start rejection. They must not be silently hidden.
+Resource denial, resource deferral, permission denial, timeout, size bound, truncation failure, abort, ambiguity, not-found, and conflict conditions must be observable in the JSON result or as before-agent-start rejection. They must not be silently hidden.
 
 Output that may grow large must be bounded. When material is truncated, the result must make truncation observable through a stable field or a clear adjacent result field. This spec does not define concrete byte, line, or time limits.
 
@@ -133,5 +133,6 @@ When the table matches, the result remains a failed tool result but includes `ex
 - [004 Runtime Contract](../004-runtime-contract/spec.md) defines agent-invocation assembly and tool surface wiring.
 - [007 Tool Surface](../007-tool-surface/spec.md) defines agent-invocation scoped tool declarations, generation-request tool declaration snapshots, execution bindings, and toolset expansion.
 - [009 Resource Surface](../009-resource-surface/spec.md) defines resource decisions that may affect tool execution.
+- [130 Permissions](../130-permissions/spec.md) defines the first concrete tool-execution permission gate.
 - [005 Durable Evidence](../005-durable-evidence/spec.md) defines durable linkage for tool requests, outcomes, and result artifacts.
 - [055 Skills](../055-skills/spec.md) defines optional skill adjunct tools.

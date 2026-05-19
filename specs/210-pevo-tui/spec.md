@@ -17,6 +17,8 @@ stdin/stdout, it keeps the deterministic line-by-line scripted behavior.
 - `pevo tui` command spelling, startup behavior, and non-terminal fallback
 - persisted TUI-local model, variant, mode, thinking visibility, raw transcript
   visibility, and sidebar visibility
+- user-configured slash command aliases and shortcuts loaded from effective
+  `config.jsonc`
 - session resume, switching, archiving/deletion, titles, undo/redo-adjacent
   session behavior, and history loading
 - model, variant, mode, thinking visibility, raw transcript visibility, local
@@ -35,9 +37,8 @@ keeps the parent command contract and cross-cutting TUI state/session behavior.
 
 Out of scope:
 
-- plugins, user-configurable keymaps, user-configurable statusline fields, TUI
-  theme configuration, or full rich document rendering beyond bounded Markdown
-  projection
+- plugins, user-configurable statusline fields, TUI theme configuration, or
+  full rich document rendering beyond bounded Markdown projection
 - approvals, auth, provider login, or model probing
 - structured `@file` references, automatic file-content attachment, custom
   slash commands, or command-template files
@@ -74,6 +75,42 @@ positional prompt, and the fullscreen alternate screen is not used.
 under that home. `PSYCHEVO_CONFIG` and `PSYCHEVO_DB` may still override provider
 configuration and SQLite state path, but they do not bypass the home
 initialization requirement.
+
+TUI reads slash command customization from the effective `config.jsonc` using
+the same global/project merge and explicit `PSYCHEVO_CONFIG` behavior as
+provider configuration. The optional shape is:
+
+```jsonc
+{
+  "tui": {
+    "leader_key": "ctrl+x",
+    "leader_timeout_ms": 2000,
+    "slash_aliases": {
+      "/model": ["/m"],
+      "/sessions": ["/s"],
+      "/export -f json -i messages": ["/xj"]
+    },
+    "slash_keybinds": {
+      "/model": "<leader>m",
+      "/status": "ctrl+s",
+      "/variant high": "<leader>h",
+      "/copy": ["<leader>y", "ctrl+shift+c"],
+      "/usage": "none",
+      "/export -f json -i messages": "<leader>x"
+    }
+  }
+}
+```
+
+This configuration is local UI behavior only: it does not change CLI command
+spelling, persisted session content, provider payloads, or `tui-state.json`.
+`slash_aliases` keys and `slash_keybinds` keys are concrete slash input lines
+validated by the normal slash parser. Alias input expands to that concrete
+slash input before parsing; if the alias is followed by additional text, that
+text is appended to the configured target line and then parsed. Invalid alias
+or keybinding configuration rejects TUI startup with a bounded configuration
+error. Configured aliases participate in slash menu completion as alias rows,
+and configured concrete slash lines appear in `/help` `Custom commands`.
 
 ## Topic Attachments
 
