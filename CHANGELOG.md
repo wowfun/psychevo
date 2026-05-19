@@ -1,15 +1,41 @@
 # Changelog
 
+## 2026-05-20
+
+### Changed
+
+- Promoted runtime permissions to foundation `035-permissions`, archived the
+  superseded `130-permissions` topic, and cleaned up active spec links.
+- Completed the design-system spec's required scope and related-topic sections.
+
 ## 2026-05-19
+
+### Added
+
+- Added the fullscreen TUI `clarify` tool, including typed runtime request
+  events, control-handle responses, and deterministic panel captures.
+- Added composer text selection with `Ctrl+A` and mouse drag editing.
 
 ### Changed
 
 - Changed background Agent completion to use mailbox events and timeout-only
   `wait_agent` status, and removed external project comparisons from
   user-visible docs.
+- Changed `clarify` prompts to use structured question progress, inline notes,
+  and ordered answer results without model-authored question ids.
+- Improved TUI sessions, selection, Status rows, and tool evidence titles to
+  match the compact ledger design.
 
 ### Fixed
 
+- Fixed `clarify` panel navigation, inline Other answers and notes, mouse
+  selection, transcript reloads, and result rendering.
+- Fixed `last-provider-request` reconstruction so it includes `clarify` when
+  the persisted effective tool surface used it.
+- Fixed TUI session-panel wrap coverage, plan-mode validation for `clarify`,
+  interrupted reasoning metadata, and ongoing tool-failure metadata.
+- Fixed selected-text copy over SSH by using terminal-mediated clipboard
+  forwarding.
 - Fixed last-provider-request reconstruction so background subagent final
   answers appear once.
 
