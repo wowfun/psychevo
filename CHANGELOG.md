@@ -1,9 +1,34 @@
 # Changelog
 
-## 2026-05-18
+## 2026-05-19
 
 ### Changed
 
+- Changed background Agent completion to use mailbox events and timeout-only
+  `wait_agent` status, and removed external project comparisons from
+  user-visible docs.
+
+### Fixed
+
+- Fixed last-provider-request reconstruction so background subagent final
+  answers appear once.
+
+## 2026-05-18
+
+### Added
+
+- Added effective `config.jsonc` TUI slash aliases and shortcuts, including
+  completion rows and `/help` entries.
+- Added v1 runtime permissions for tool execution, including `Tool(pattern)`
+  permission rules, `default`/`acceptEdits`/`dontAsk`/`bypassPermissions`
+  modes, CLI approvals, `/permissions`, and project-local rule management.
+
+### Changed
+
+- Made agent tool policy allowlist-based, including inherited omissions,
+  empty-array disablement, agent catalog filters, skill visibility,
+  `projectInstructions`, developer/system prompt placement, and no-tools
+  prompts.
 - Moved session export prompt-prefix metadata into artifact headers,
   reconstructed last-provider-request from persisted prefix snapshots, and
   added `-f` aliases for format flags.
@@ -12,6 +37,8 @@
 
 ### Fixed
 
+- Fixed fullscreen TUI running-session switching so background agent and shell
+  output stays scoped to the visible session.
 - Fixed fullscreen TUI running status for visible parent and child sessions,
   settled agent turns, and shared ledger-row spinner state.
 - Fixed Agent transcript rows to reuse streaming placeholders, restore
