@@ -2,11 +2,28 @@
 
 ## 2026-05-20
 
+### Added
+
+- Added fullscreen TUI `/btw` side conversations with hidden temporary side
+  sessions, `/side` compatibility input, and `/refresh` cleanup.
+- Added runtime context compaction with checkpoints, TUI
+  `/compact [instructions]`, automatic compaction, and a `pevo run` overflow
+  retry.
+
 ### Changed
 
+- Changed subagent model-visible results to compact summaries while preserving
+  full runtime metadata for diagnostics, TUI, and exports.
+- Removed external reference-project names from user-visible TUI interaction
+  specs.
 - Promoted runtime permissions to foundation `035-permissions`, archived the
   superseded `130-permissions` topic, and cleaned up active spec links.
 - Completed the design-system spec's required scope and related-topic sections.
+
+### Fixed
+
+- Fixed TUI IME anchoring, running metadata visibility, and automatic
+  compaction scheduling.
 
 ## 2026-05-19
 
