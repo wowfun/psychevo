@@ -25,6 +25,33 @@ struct ConfigModelEntry {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct CompressionConfig {
+    pub(crate) enabled: bool,
+    pub(crate) auto: bool,
+    pub(crate) threshold_percent: f64,
+    pub(crate) reserve_tokens: u64,
+    pub(crate) keep_recent_tokens: u64,
+    model: ModelSelection,
+    pub(crate) model_configured: bool,
+    pub(crate) reasoning_effort: Option<String>,
+}
+
+impl Default for CompressionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            auto: true,
+            threshold_percent: 70.0,
+            reserve_tokens: 16_384,
+            keep_recent_tokens: 20_000,
+            model: ModelSelection::default(),
+            model_configured: false,
+            reasoning_effort: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct BuiltInProvider {
     id: &'static str,
     label: &'static str,
@@ -45,6 +72,12 @@ pub(crate) struct ResolvedRunProvider {
     pub(crate) reasoning_effort: Option<String>,
     pub(crate) context_limit: Option<u64>,
     pub(crate) metadata: ModelMetadata,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ResolvedCompressionConfig {
+    pub(crate) model_configured: bool,
+    pub(crate) provider: ResolvedRunProvider,
 }
 
 #[derive(Debug, Clone)]

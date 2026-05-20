@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use psychevo_agent_core::{AssistantBlock, Message, TerminalReason, now_ms};
+use psychevo_agent_core::{AssistantBlock, Message, TerminalReason, now_ms, user_text_message};
 use psychevo_ai::Outcome;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,7 @@ use crate::types::{
     TuiMessageSummary,
 };
 
-const SQLITE_SCHEMA_VERSION: i64 = 10;
+const SQLITE_SCHEMA_VERSION: i64 = 11;
 const SESSION_REVERT_METADATA_KEY: &str = "revert";
 const MESSAGE_UNDO_METADATA_KEY: &str = "undo";
 const MESSAGE_PRE_SNAPSHOT_KEY: &str = "pre_snapshot";
@@ -67,6 +67,18 @@ pub struct ContextEvidenceRecord {
     pub timestamp_ms: i64,
     pub content_text: String,
     pub metadata: Option<Value>,
+}
+
+pub struct ChildSessionSnapshotInput<'a> {
+    pub parent_session_id: &'a str,
+    pub workdir: &'a Path,
+    pub source: &'a str,
+    pub model: &'a str,
+    pub provider: &'a str,
+    pub metadata: Option<Value>,
+    pub max_context_messages: Option<usize>,
+    pub inherited_message_metadata: Value,
+    pub boundary_text: &'a str,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -127,6 +139,44 @@ pub struct AgentMailboxEventInput {
     pub metadata: Option<Value>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionCompactionInput {
+    pub session_id: String,
+    pub reason: String,
+    pub summary_text: String,
+    pub first_kept_session_seq: i64,
+    pub created_after_session_seq: i64,
+    pub tokens_before: Option<u64>,
+    pub tokens_after: Option<u64>,
+    pub summary_provider: String,
+    pub summary_model: String,
+    pub instructions: Option<String>,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionCompactionRecord {
+    pub id: i64,
+    pub session_id: String,
+    pub created_at_ms: i64,
+    pub reason: String,
+    pub summary_text: String,
+    pub first_kept_session_seq: i64,
+    pub created_after_session_seq: i64,
+    pub tokens_before: Option<u64>,
+    pub tokens_after: Option<u64>,
+    pub summary_provider: String,
+    pub summary_model: String,
+    pub instructions: Option<String>,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionMessageRecord {
+    pub session_seq: i64,
+    pub message: Message,
+}
+
 #[derive(Clone)]
 pub struct SqliteStore {
     conn: Arc<Mutex<Connection>>,
@@ -141,6 +191,7 @@ include!("store/context_evidence.rs");
 include!("store/prompt_prefix.rs");
 include!("store/agents.rs");
 include!("store/agent_mailbox.rs");
+include!("store/compactions.rs");
 include!("store/lifecycle.rs");
 include!("store/retry.rs");
 include!("store/schema_helpers.rs");

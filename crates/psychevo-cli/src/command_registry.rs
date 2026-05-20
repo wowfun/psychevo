@@ -46,7 +46,8 @@ pub(crate) enum SlashCommandAction {
     Sessions,
     Usage,
     Context,
-    ReloadContext,
+    Refresh,
+    Btw,
     ModelShow,
     VariantSet,
     ModeSet,
@@ -63,8 +64,8 @@ pub(crate) enum SlashCommandAction {
     Skills,
     Agents,
     Fork,
+    Compact,
     SkillInvoke,
-    Upcoming,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -198,19 +199,35 @@ pub(crate) const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         common: true,
     },
     SlashCommandSpec {
-        canonical: "/reload-context",
+        canonical: "/refresh",
         aliases: &[],
-        usage: "/reload-context",
-        summary: "rebuild session prompt prefix",
+        usage: "/refresh",
+        summary: "reload context and clean side sessions",
         help_detail: Some(
-            "Re-reads current local agents, skills, and AGENTS context for future turns in this session.",
+            "Re-reads current local agents, skills, and AGENTS context, then cleans orphan /btw side sessions.",
         ),
         surface: TUI_SLASH,
         group: COMMANDS,
         argument_kind: CommandArgumentKind::None,
         output_kind: CommandOutputKind::TranscriptStatusBlock,
         status: CommandStatus::Active,
-        action: SlashCommandAction::ReloadContext,
+        action: SlashCommandAction::Refresh,
+        common: true,
+    },
+    SlashCommandSpec {
+        canonical: "/btw",
+        aliases: &[],
+        usage: "/btw [prompt]",
+        summary: "open a side conversation",
+        help_detail: Some(
+            "Starts a temporary side conversation; Ctrl+C returns and deletes the side transcript.",
+        ),
+        surface: TUI_SLASH,
+        group: COMMANDS,
+        argument_kind: CommandArgumentKind::OptionalValue,
+        output_kind: CommandOutputKind::ImmediateStateChange,
+        status: CommandStatus::Active,
+        action: SlashCommandAction::Btw,
         common: true,
     },
     SlashCommandSpec {
@@ -438,17 +455,17 @@ pub(crate) const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         canonical: "/compact",
         aliases: &[],
-        usage: "/compact",
-        summary: "upcoming compaction",
+        usage: "/compact [instructions]",
+        summary: "compact context",
         help_detail: Some(
-            "Placeholder only; it reports that compaction is upcoming and makes no session changes.",
+            "Summarizes older context for future turns; optional instructions guide the summary focus.",
         ),
         surface: TUI_SLASH,
         group: COMMANDS,
-        argument_kind: CommandArgumentKind::None,
+        argument_kind: CommandArgumentKind::FreeFormTrailingText,
         output_kind: CommandOutputKind::BoundedFeedback,
-        status: CommandStatus::Upcoming,
-        action: SlashCommandAction::Upcoming,
+        status: CommandStatus::Active,
+        action: SlashCommandAction::Compact,
         common: false,
     },
     SlashCommandSpec {
@@ -664,6 +681,18 @@ mod tests {
     #[test]
     fn slash_registry_keeps_aliases_hidden_from_canonical_rows() {
         assert!(SLASH_COMMANDS.iter().any(|spec| spec.canonical == "/help"));
+        assert!(SLASH_COMMANDS.iter().any(|spec| spec.canonical == "/btw"));
+        assert!(
+            SLASH_COMMANDS
+                .iter()
+                .any(|spec| spec.canonical == "/refresh")
+        );
+        assert!(!SLASH_COMMANDS.iter().any(|spec| spec.canonical == "/side"));
+        assert!(
+            !SLASH_COMMANDS
+                .iter()
+                .any(|spec| spec.canonical == "/reload-context")
+        );
         assert!(
             SLASH_COMMANDS
                 .iter()

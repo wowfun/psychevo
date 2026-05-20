@@ -1,5 +1,5 @@
 #[test]
-fn sqlite_schema_v10_migrates_v3_state_databases() {
+fn sqlite_schema_v11_migrates_v3_state_databases() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("v3.db");
     let workdir = temp.path().join("work").to_string_lossy().to_string();
@@ -70,7 +70,7 @@ fn sqlite_schema_v10_migrates_v3_state_databases() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 10);
+    assert_eq!(user_version, 11);
     let archived_at: Option<i64> = conn
         .query_row(
             "SELECT archived_at_ms FROM sessions WHERE id = 'session-v3'",
@@ -95,6 +95,7 @@ fn sqlite_schema_v10_migrates_v3_state_databases() {
             .any(|name| name == "child_session_id")
     );
     assert!(!sqlite_columns(&conn, "agent_mailbox_events").is_empty());
+    assert!(!sqlite_columns(&conn, "session_compactions").is_empty());
     assert!(
         sqlite_columns(&conn, "context_evidence")
             .iter()
@@ -109,7 +110,7 @@ fn sqlite_schema_v10_migrates_v3_state_databases() {
 }
 
 #[test]
-fn sqlite_schema_v10_migrates_v5_state_databases() {
+fn sqlite_schema_v11_migrates_v5_state_databases() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("v5.db");
     let workdir = temp.path().join("work").to_string_lossy().to_string();
@@ -191,7 +192,7 @@ fn sqlite_schema_v10_migrates_v5_state_databases() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 10);
+    assert_eq!(user_version, 11);
     assert!(
         sqlite_columns(&conn, "context_evidence")
             .iter()
@@ -212,7 +213,7 @@ fn sqlite_schema_v10_migrates_v5_state_databases() {
 }
 
 #[test]
-fn sqlite_schema_v10_migrates_v6_state_databases() {
+fn sqlite_schema_v11_migrates_v6_state_databases() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("v6.db");
     let workdir = temp.path().join("work").to_string_lossy().to_string();
@@ -314,7 +315,7 @@ fn sqlite_schema_v10_migrates_v6_state_databases() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 10);
+    assert_eq!(user_version, 11);
     let columns = sqlite_columns(&conn, "context_evidence");
     assert!(columns.iter().any(|name| name == "provider_group"));
     assert!(columns.iter().any(|name| name == "provider_block_index"));
@@ -329,7 +330,7 @@ fn sqlite_schema_v10_migrates_v6_state_databases() {
 }
 
 #[test]
-fn sqlite_schema_v10_rejects_old_state_databases() {
+fn sqlite_schema_v11_rejects_old_state_databases() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("old.db");
     {
@@ -815,7 +816,7 @@ fn sqlite_context_evidence_cascades_with_prompt_messages() {
 }
 
 #[test]
-fn sqlite_schema_v10_stores_reasoning_only_in_message_json_and_metrics_separately() {
+fn sqlite_schema_v11_stores_reasoning_only_in_message_json_and_metrics_separately() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
@@ -904,6 +905,63 @@ fn sqlite_schema_v10_stores_reasoning_only_in_message_json_and_metrics_separatel
     assert_eq!(tui_message["content"][0]["type"], "reasoning");
     assert_eq!(tui_message["content"][0]["text"], "folded");
     assert!(tui_message["content"][0].get("provider_evidence").is_none());
+}
+
+#[test]
+fn session_compaction_checkpoint_respects_revert_boundary() {
+    let temp = tempdir().expect("temp");
+    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let session = store
+        .create_session_with_metadata(temp.path(), "run", "model", "provider", None)
+        .expect("session");
+    store
+        .append_message(&session, &psychevo_agent_core::user_text_message("one"))
+        .expect("message one");
+    store
+        .append_message(&session, &psychevo_agent_core::user_text_message("two"))
+        .expect("message two");
+    store
+        .append_message(&session, &psychevo_agent_core::user_text_message("three"))
+        .expect("message three");
+
+    let record = store
+        .append_session_compaction(SessionCompactionInput {
+            session_id: session.clone(),
+            reason: "manual".to_string(),
+            summary_text: "summary".to_string(),
+            first_kept_session_seq: 3,
+            created_after_session_seq: 3,
+            tokens_before: Some(300),
+            tokens_after: Some(120),
+            summary_provider: "provider".to_string(),
+            summary_model: "model".to_string(),
+            instructions: None,
+            metadata: None,
+        })
+        .expect("compaction");
+    assert_eq!(
+        store
+            .latest_valid_session_compaction(&session)
+            .expect("latest")
+            .map(|record| record.id),
+        Some(record.id)
+    );
+
+    store
+        .set_session_revert_state(
+            &session,
+            crate::store::SessionRevertState {
+                start_seq: 3,
+                original_snapshot: "snapshot".to_string(),
+            },
+        )
+        .expect("revert");
+    assert_eq!(
+        store
+            .latest_valid_session_compaction(&session)
+            .expect("latest after revert"),
+        None
+    );
 }
 
 #[test]

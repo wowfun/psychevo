@@ -659,6 +659,7 @@ fn permission_error(decision: &str, reason: &str, matched_rule: Option<&str>) ->
                 "matched_rule": matched_rule,
             }
         }),
+        model_content: None,
         is_error: true,
     }
 }

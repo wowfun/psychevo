@@ -72,6 +72,11 @@ enum QueuedInput {
         session_id: Option<String>,
         command: String,
     },
+    Compact {
+        session_id: Option<String>,
+        instructions: Option<String>,
+        command_echo: String,
+    },
 }
 
 fn queued_input_session_id(input: &QueuedInput) -> Option<&str> {
@@ -79,6 +84,7 @@ fn queued_input_session_id(input: &QueuedInput) -> Option<&str> {
         QueuedInput::Prompt { session_id, .. } | QueuedInput::Shell { session_id, .. } => {
             session_id.as_deref()
         }
+        QueuedInput::Compact { session_id, .. } => session_id.as_deref(),
     }
 }
 
@@ -86,6 +92,7 @@ fn queued_input_text(input: QueuedInput) -> String {
     match input {
         QueuedInput::Prompt { display_prompt, .. } => display_prompt,
         QueuedInput::Shell { command, .. } => format!("!{command}"),
+        QueuedInput::Compact { command_echo, .. } => command_echo,
     }
 }
 

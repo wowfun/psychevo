@@ -16,9 +16,12 @@ use psychevo_agent_core::{
 };
 use psychevo_ai::{AbortSignal, GenerationProvider, Outcome};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
+use crate::compaction::{
+    CompactSessionOptions, CompactionReason, compact_session, load_projected_messages,
+};
 use crate::context_usage::ContextRecorder;
 use crate::error::{Error, Result};
 use crate::events::PersistenceSink;
@@ -39,6 +42,7 @@ use crate::types::{
 };
 
 const MAX_AGENT_NAME_LEN: usize = 64;
+const SUBAGENT_TASK_LABEL_MAX_CHARS: usize = 80;
 const SUBAGENT_DEFAULT_MAX_TURNS: usize = 32;
 pub const MAX_AGENT_SPAWN_DEPTH_CAP: u8 = 3;
 
@@ -278,6 +282,8 @@ pub(crate) struct AgentToolContext {
     pub(crate) approval_mode: ApprovalMode,
     pub(crate) approval_handler: Option<Arc<dyn ApprovalHandler>>,
     pub(crate) store: SqliteStore,
+    pub(crate) db_path: PathBuf,
+    pub(crate) config_path: Option<PathBuf>,
     pub(crate) parent_session_id: String,
     pub(crate) parent_context_snapshot: Vec<Message>,
     pub(crate) catalog: AgentCatalog,
@@ -669,6 +675,40 @@ pub fn agent_status_value(
     parent_session_id: Option<&str>,
     all: bool,
 ) -> Value {
+    let records = agent_status_records(store, parent_session_id, all);
+    json!({
+        "agents": records,
+        "control": {
+            "spawning_paused": agent_spawn_paused(),
+            "max_spawn_depth_cap": MAX_AGENT_SPAWN_DEPTH_CAP,
+            "concurrency_cap": Value::Null,
+        }
+    })
+}
+
+fn agent_status_model_value(
+    store: Option<&SqliteStore>,
+    parent_session_id: Option<&str>,
+    all: bool,
+) -> Value {
+    let agents = agent_status_records(store, parent_session_id, all)
+        .iter()
+        .map(|record| subagent_summary_value(store, record, true))
+        .collect::<Vec<_>>();
+    json!({
+        "agents": agents,
+        "control": {
+            "spawning_paused": agent_spawn_paused(),
+            "max_spawn_depth_cap": MAX_AGENT_SPAWN_DEPTH_CAP,
+        }
+    })
+}
+
+fn agent_status_records(
+    store: Option<&SqliteStore>,
+    parent_session_id: Option<&str>,
+    all: bool,
+) -> Vec<AgentRunRecord> {
     let mut records = Vec::new();
     let mut scope_sessions = BTreeSet::new();
     if let Some(store) = store {
@@ -701,14 +741,7 @@ pub fn agent_status_value(
         }
     }
     records.sort_by(|left, right| right.started_at_ms.cmp(&left.started_at_ms));
-    json!({
-        "agents": records,
-        "control": {
-            "spawning_paused": agent_spawn_paused(),
-            "max_spawn_depth_cap": MAX_AGENT_SPAWN_DEPTH_CAP,
-            "concurrency_cap": Value::Null,
-        }
-    })
+    records
 }
 
 pub async fn wait_agent_id(id: &str, timeout: Duration) -> Result<Option<AgentRunRecord>> {
@@ -716,14 +749,14 @@ pub async fn wait_agent_id(id: &str, timeout: Duration) -> Result<Option<AgentRu
     loop {
         if let Some(record) = {
             let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-            find_live_record_locked(&runs, id)
+            resolve_live_record_locked(&runs, id)?
         } && agent_status_is_final(record.status)
         {
             return Ok(Some(record));
         }
         if started.elapsed() >= timeout {
             let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-            return Ok(find_live_record_locked(&runs, id));
+            return resolve_live_record_locked(&runs, id);
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -754,10 +787,10 @@ pub async fn wait_agent_mailbox(
 
 pub fn close_agent_id(id: &str, store: Option<&SqliteStore>) -> Result<Option<AgentRunRecord>> {
     let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-    let Some((live_id, previous)) = find_live_key_and_record_locked(&runs, id) else {
+    let Some((live_id, previous)) = resolve_live_key_and_record_locked(&runs, id)? else {
         drop(runs);
         if let Some(store) = store
-            && let Some(edge) = store.find_agent_edge(id)?
+            && let Some(edge) = find_agent_edge_for_target(store, id)?
         {
             let previous = agent_record_from_edge(store, edge.clone());
             store.close_agent_edge_subtree(&edge.child_session_id)?;
@@ -803,7 +836,7 @@ pub fn stop_agent_id_with_grace(
 
 fn request_agent_stop_id(id: &str) -> Result<Option<AgentRunRecord>> {
     let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-    let Some((live_id, record)) = find_live_key_and_record_locked(&runs, id) else {
+    let Some((live_id, record)) = resolve_live_key_and_record_locked(&runs, id)? else {
         return Ok(None);
     };
     if agent_status_is_final(record.status) {
@@ -819,10 +852,10 @@ fn request_agent_stop_id(id: &str) -> Result<Option<AgentRunRecord>> {
 
 fn force_stop_agent_id(id: &str, store: Option<&SqliteStore>) -> Result<Option<AgentRunRecord>> {
     let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-    let Some((live_id, previous)) = find_live_key_and_record_locked(&runs, id) else {
+    let Some((live_id, previous)) = resolve_live_key_and_record_locked(&runs, id)? else {
         drop(runs);
         if let Some(store) = store
-            && let Some(edge) = store.find_agent_edge(id)?
+            && let Some(edge) = find_agent_edge_for_target(store, id)?
         {
             let previous = agent_record_from_edge(store, edge.clone());
             store.close_agent_edge_subtree(&edge.child_session_id)?;
@@ -957,7 +990,7 @@ pub fn send_agent_message(
     store: Option<&SqliteStore>,
 ) -> Result<Option<AgentRunRecord>> {
     let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-    if let Some((live_id, record)) = find_live_key_and_record_locked(&runs, id) {
+    if let Some((live_id, record)) = resolve_live_key_and_record_locked(&runs, id)? {
         if !agent_status_is_final(record.status) {
             if let Some(state) = runs.get(&live_id)
                 && let Some(control) = &state.control
@@ -972,7 +1005,7 @@ pub fn send_agent_message(
     }
     drop(runs);
     if let Some(store) = store
-        && let Some(edge) = store.find_agent_edge(id)?
+        && let Some(edge) = find_agent_edge_for_target(store, id)?
     {
         store.set_agent_edge_status(&edge.child_session_id, AgentEdgeStatus::Open)?;
         let mut record = agent_record_from_edge(store, edge);
@@ -998,7 +1031,7 @@ async fn send_agent_message_with_context(
     }
     {
         let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-        if let Some((live_id, record)) = find_live_key_and_record_locked(&runs, target)
+        if let Some((live_id, record)) = resolve_live_key_and_record_locked(&runs, target)?
             && !agent_status_is_final(record.status)
         {
             if let Some(state) = runs.get(&live_id)
@@ -1010,7 +1043,7 @@ async fn send_agent_message_with_context(
         }
     }
 
-    let Some(edge) = context.store.find_agent_edge(target)? else {
+    let Some(edge) = find_agent_edge_for_target(&context.store, target)? else {
         return Ok(None);
     };
     let base = agent_record_from_edge(&context.store, edge.clone());
@@ -1064,7 +1097,6 @@ async fn send_agent_message_with_context(
     context
         .store
         .set_agent_edge_status(&edge.child_session_id, AgentEdgeStatus::Open)?;
-    let previous_messages = context.store.load_messages(&edge.child_session_id)?;
     let mut child_context = context;
     child_context.parent_session_id = edge.parent_session_id.clone();
     let child = ChildRun {
@@ -1082,7 +1114,7 @@ async fn send_agent_message_with_context(
         background: true,
         parent_tool_call_id: None,
         existing_child_session: Some(edge.child_session_id),
-        previous_messages_override: Some(previous_messages),
+        previous_messages_override: None,
         control_receivers,
         abort,
     };
@@ -1095,12 +1127,12 @@ async fn send_agent_message_with_context(
 pub fn resume_agent_id(id: &str, store: Option<&SqliteStore>) -> Result<Option<AgentRunRecord>> {
     if let Some(record) = {
         let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-        find_live_record_locked(&runs, id)
+        resolve_live_record_locked(&runs, id)?
     } {
         return Ok(Some(record));
     }
     if let Some(store) = store
-        && let Some(edge) = store.find_agent_edge(id)?
+        && let Some(edge) = find_agent_edge_for_target(store, id)?
     {
         store.set_agent_edge_status(&edge.child_session_id, AgentEdgeStatus::Open)?;
         let mut record = agent_record_from_edge(store, edge);
@@ -1152,6 +1184,115 @@ fn find_live_key_and_record_locked(
                 || state.record.task_name.as_deref() == Some(target)
         })
         .map(|(id, state)| (id.clone(), state.record.clone()))
+}
+
+fn resolve_live_key_and_record_locked(
+    runs: &HashMap<String, AgentRunState>,
+    target: &str,
+) -> Result<Option<(String, AgentRunRecord)>> {
+    let target = target.trim();
+    if target.is_empty() {
+        return Ok(None);
+    }
+    if let Some((id, state)) = runs.iter().find(|(id, state)| {
+        id.as_str() == target
+            || state.record.id == target
+            || state.record.child_session_id.as_deref() == Some(target)
+            || generated_task_name_matches(&state.record, target)
+    }) {
+        return Ok(Some((id.clone(), state.record.clone())));
+    }
+
+    let matches = runs
+        .iter()
+        .filter(|(_, state)| record_task_label(&state.record) == target)
+        .map(|(id, state)| (id.clone(), state.record.clone()))
+        .collect::<Vec<_>>();
+    match matches.len() {
+        0 => Ok(None),
+        1 => Ok(matches.into_iter().next()),
+        _ => Err(ambiguous_agent_task_error(target)),
+    }
+}
+
+fn resolve_live_record_locked(
+    runs: &HashMap<String, AgentRunState>,
+    target: &str,
+) -> Result<Option<AgentRunRecord>> {
+    resolve_live_key_and_record_locked(runs, target).map(|record| record.map(|(_, record)| record))
+}
+
+fn generated_task_name_matches(record: &AgentRunRecord, target: &str) -> bool {
+    record.task_name.as_deref() == Some(target) && explicit_record_task_name(record).is_none()
+}
+
+fn find_agent_edge_for_target(
+    store: &SqliteStore,
+    target: &str,
+) -> Result<Option<AgentEdgeRecord>> {
+    let target = target.trim();
+    if target.is_empty() {
+        return Ok(None);
+    }
+    let edges = store.list_agent_edges()?;
+    if let Some(edge) = edges
+        .iter()
+        .find(|edge| agent_edge_exact_target_matches(edge, target))
+    {
+        return Ok(Some(edge.clone()));
+    }
+
+    let matches = edges
+        .into_iter()
+        .filter(|edge| record_task_label(&agent_record_from_edge(store, edge.clone())) == target)
+        .collect::<Vec<_>>();
+    match matches.len() {
+        0 => Ok(None),
+        1 => Ok(matches.into_iter().next()),
+        _ => Err(ambiguous_agent_task_error(target)),
+    }
+}
+
+fn agent_edge_exact_target_matches(edge: &AgentEdgeRecord, target: &str) -> bool {
+    edge.child_session_id == target
+        || edge_agent_id(edge).is_some_and(|value| value == target)
+        || edge_generated_task_name_matches(edge, target)
+}
+
+fn edge_generated_task_name_matches(edge: &AgentEdgeRecord, target: &str) -> bool {
+    let Some(task_name) = edge_task_name(edge) else {
+        return false;
+    };
+    if task_name != target {
+        return false;
+    }
+    let id = edge_agent_id(edge).unwrap_or(edge.child_session_id.as_str());
+    let agent_name = edge_agent_name(edge).unwrap_or("agent");
+    task_name == default_task_name(agent_name, id)
+}
+
+fn edge_agent_id(edge: &AgentEdgeRecord) -> Option<&str> {
+    edge.metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("agent"))
+        .and_then(Value::as_object)
+        .and_then(|agent| agent.get("id"))
+        .and_then(Value::as_str)
+}
+
+fn edge_task_name(edge: &AgentEdgeRecord) -> Option<&str> {
+    edge.metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("agent"))
+        .and_then(Value::as_object)
+        .and_then(|agent| agent.get("task_name"))
+        .and_then(Value::as_str)
+}
+
+fn ambiguous_agent_task_error(target: &str) -> Error {
+    Error::Config(format!(
+        "multiple agents match task `{target}`; use agent_id"
+    ))
 }
 
 fn agent_record_from_edge(store: &SqliteStore, edge: AgentEdgeRecord) -> AgentRunRecord {
@@ -1244,6 +1385,181 @@ fn agent_child_session_summary_value(store: &SqliteStore, summary: &SessionSumma
         }
     }
     value
+}
+
+fn subagent_summary_value(
+    store: Option<&SqliteStore>,
+    record: &AgentRunRecord,
+    include_agent_id: bool,
+) -> Value {
+    let mut object = Map::new();
+    if include_agent_id {
+        object.insert("agent_id".to_string(), Value::from(record.id.clone()));
+    }
+    object.insert(
+        "agent_name".to_string(),
+        Value::from(record.agent_name.clone()),
+    );
+    object.insert("task".to_string(), Value::from(record_task_label(record)));
+    object.insert("status".to_string(), Value::from(record.status.as_str()));
+    if let Some(exit_reason) = record_exit_reason(record) {
+        object.insert("exit_reason".to_string(), Value::from(exit_reason));
+    }
+    if let Some(summary) = &record.final_answer {
+        object.insert("summary".to_string(), Value::from(summary.clone()));
+    }
+    if let Some(duration_ms) = record_duration_ms(record) {
+        object.insert("duration_ms".to_string(), Value::from(duration_ms));
+    }
+    if let Some(store) = store
+        && let Some(child_session_id) = record.child_session_id.as_deref()
+    {
+        if let Ok(Some(summary)) = store.session_summary(child_session_id) {
+            object.insert(
+                "tool_call_count".to_string(),
+                Value::from(summary.tool_call_count),
+            );
+            object.insert("model".to_string(), Value::from(summary.model));
+        }
+        if let Some(tokens) = child_session_tokens_value(store, child_session_id) {
+            object.insert("tokens".to_string(), tokens);
+        }
+    }
+    if let Some(error) = &record.error
+        && !error.is_empty()
+    {
+        object.insert("error".to_string(), Value::from(error.clone()));
+    }
+    Value::Object(object)
+}
+
+fn model_content_string(value: &Value) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "{\"error\":\"invalid result\"}".to_string())
+}
+
+fn record_task_label(record: &AgentRunRecord) -> String {
+    if let Some(task_name) = explicit_record_task_name(record) {
+        return collapse_and_cap_task_label(task_name);
+    }
+    first_prompt_task_line(&record.task)
+        .map(collapse_and_cap_task_label)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| collapse_and_cap_task_label(&record.agent_name))
+}
+
+fn explicit_record_task_name(record: &AgentRunRecord) -> Option<&str> {
+    let task_name = record
+        .task_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let generated = default_task_name(&record.agent_name, &record.id);
+    (task_name != generated).then_some(task_name)
+}
+
+fn first_prompt_task_line(prompt: &str) -> Option<&str> {
+    prompt.lines().map(str::trim).find(|line| !line.is_empty())
+}
+
+fn collapse_and_cap_task_label(value: &str) -> String {
+    let collapsed = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() <= SUBAGENT_TASK_LABEL_MAX_CHARS {
+        return collapsed;
+    }
+    collapsed
+        .chars()
+        .take(SUBAGENT_TASK_LABEL_MAX_CHARS)
+        .collect()
+}
+
+fn record_exit_reason(record: &AgentRunRecord) -> Option<String> {
+    if let Some(outcome) = record.outcome.as_deref().map(str::trim)
+        && !outcome.is_empty()
+    {
+        return Some(outcome.to_string());
+    }
+    match record.status {
+        AgentRunStatus::Completed => Some("completed".to_string()),
+        AgentRunStatus::Errored => Some("failed".to_string()),
+        AgentRunStatus::Interrupted => Some("interrupted".to_string()),
+        AgentRunStatus::Shutdown => Some("shutdown".to_string()),
+        AgentRunStatus::NotFound => Some("not_found".to_string()),
+        AgentRunStatus::PendingInit | AgentRunStatus::Running => None,
+    }
+}
+
+fn record_duration_ms(record: &AgentRunRecord) -> Option<u64> {
+    let ended_at_ms = record.ended_at_ms?;
+    Some(ended_at_ms.saturating_sub(record.started_at_ms).max(0) as u64)
+}
+
+fn child_session_tokens_value(store: &SqliteStore, session_id: &str) -> Option<Value> {
+    let messages = store.load_tui_message_summaries(session_id).ok()?;
+    let mut input = 0u64;
+    let mut output = 0u64;
+    let mut reasoning = 0u64;
+    let mut total = 0u64;
+    let mut has_input = false;
+    let mut has_output = false;
+    let mut has_reasoning = false;
+    let mut has_total = false;
+
+    for summary in messages {
+        if !matches!(summary.message, Message::Assistant { .. }) {
+            continue;
+        }
+        let Some(usage) = summary.usage else {
+            continue;
+        };
+        let input_value = usage_counter(&usage, &["input_tokens", "prompt_tokens", "input"]);
+        let output_value = usage_counter(&usage, &["output_tokens", "completion_tokens", "output"]);
+        let reasoning_value = usage_counter(&usage, &["reasoning_tokens", "reasoning"]);
+        if let Some(value) = input_value {
+            input = input.saturating_add(value);
+            has_input = true;
+        }
+        if let Some(value) = output_value {
+            output = output.saturating_add(value);
+            has_output = true;
+        }
+        if let Some(value) = reasoning_value {
+            reasoning = reasoning.saturating_add(value);
+            has_reasoning = true;
+        }
+        if let Some(value) = usage_counter(&usage, &["total_tokens", "total"]) {
+            total = total.saturating_add(value);
+            has_total = true;
+        } else if input_value.is_some() || output_value.is_some() || reasoning_value.is_some() {
+            total = total
+                .saturating_add(input_value.unwrap_or(0))
+                .saturating_add(output_value.unwrap_or(0))
+                .saturating_add(reasoning_value.unwrap_or(0));
+            has_total = true;
+        }
+    }
+
+    if !(has_input || has_output || has_reasoning || has_total) {
+        return None;
+    }
+    let mut object = Map::new();
+    if has_input {
+        object.insert("input".to_string(), Value::from(input));
+    }
+    if has_output {
+        object.insert("output".to_string(), Value::from(output));
+    }
+    if has_reasoning {
+        object.insert("reasoning".to_string(), Value::from(reasoning));
+    }
+    if has_total {
+        object.insert("total".to_string(), Value::from(total));
+    }
+    Some(Value::Object(object))
+}
+
+fn usage_counter(usage: &Value, keys: &[&str]) -> Option<u64> {
+    keys.iter()
+        .find_map(|key| usage.get(*key).and_then(Value::as_u64))
 }
 
 fn latest_session_assistant_usage(store: &SqliteStore, session_id: &str) -> Option<Value> {
@@ -2154,7 +2470,7 @@ impl ToolBinding for AgentTool {
                 }
             };
             match spawn_subagent(context, parsed, tool_call_id, abort).await {
-                Ok(value) => ToolOutput::ok(value),
+                Ok(output) => output,
                 Err(err) => ToolOutput::error(err.to_string()),
             }
         })
@@ -2189,7 +2505,7 @@ async fn spawn_subagent(
     args: AgentToolArgs,
     tool_call_id: String,
     abort: AbortSignal,
-) -> Result<Value> {
+) -> Result<ToolOutput> {
     if args.prompt.trim().is_empty() {
         return Err(Error::Message("Agent prompt is empty".to_string()));
     }
@@ -2257,6 +2573,7 @@ async fn spawn_subagent(
         error: None,
         effective_max_spawn_depth: Some(spawn_depth_remaining),
     };
+    let response_record = record.clone();
     let (control_handle, control_receivers) = ControlHandle::new();
     {
         let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
@@ -2297,7 +2614,7 @@ async fn spawn_subagent(
         tokio::spawn(async move {
             let _ = run_child_agent(child).await;
         });
-        Ok(json!({
+        let system_value = json!({
             "id": id,
             "agent_name": response_agent_name,
             "agent_description": response_agent_description,
@@ -2305,16 +2622,22 @@ async fn spawn_subagent(
             "status": "running",
             "background": true,
             "effective_max_spawn_depth": spawn_depth_remaining
-        }))
+        });
+        let model_value = subagent_summary_value(Some(&response_store), &response_record, true);
+        Ok(ToolOutput::ok_with_model_content(
+            system_value,
+            model_content_string(&model_value),
+        ))
     } else {
         let record = run_child_agent(child).await?;
+        let model_value = subagent_summary_value(Some(&response_store), &record, false);
         let response_child_session_id = record.child_session_id.clone();
         let child_summary = record
             .child_session_id
             .as_deref()
             .and_then(|session_id| response_store.session_summary(session_id).ok().flatten())
             .map(|summary| agent_child_session_summary_value(&response_store, &summary));
-        Ok(json!({
+        let system_value = json!({
             "id": record.id,
             "agent_name": record.agent_name,
             "agent_description": response_agent_description,
@@ -2329,7 +2652,11 @@ async fn spawn_subagent(
             "error": record.error,
             "child_session": child_summary,
             "effective_max_spawn_depth": record.effective_max_spawn_depth,
-        }))
+        });
+        Ok(ToolOutput::ok_with_model_content(
+            system_value,
+            model_content_string(&model_value),
+        ))
     }
 }
 
@@ -2506,6 +2833,27 @@ struct ChildRun {
     abort: AbortSignal,
 }
 
+async fn maybe_preflight_child_compaction(
+    context: &AgentToolContext,
+    child_session: &str,
+    child_model: &str,
+) -> Result<()> {
+    let _ = compact_session(CompactSessionOptions {
+        db_path: context.db_path.clone(),
+        workdir: context.workdir.clone(),
+        session: child_session.to_string(),
+        config_path: context.config_path.clone(),
+        model: Some(format!("{}/{}", context.model_provider, child_model)),
+        reasoning_effort: context.reasoning_effort.clone(),
+        inherited_env: Some(context.env.clone()),
+        reason: CompactionReason::AutoThreshold,
+        instructions: None,
+        force: false,
+    })
+    .await?;
+    Ok(())
+}
+
 async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     if child.abort.aborted() {
         update_run_failed(&child.id, "parent invocation aborted");
@@ -2572,13 +2920,20 @@ async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         }),
     );
 
-    let previous_messages = child.previous_messages_override.clone().unwrap_or_else(|| {
-        fork_messages(
+    if child.existing_child_session.is_some() && child.previous_messages_override.is_none() {
+        maybe_preflight_child_compaction(&child.context, &child_session, &child_model).await?;
+    }
+    let previous_messages = match child.previous_messages_override.clone() {
+        Some(messages) => messages,
+        None if child.existing_child_session.is_some() => {
+            load_projected_messages(&child.context.store, &child_session, None)?
+        }
+        None => fork_messages(
             &child.context.parent_context_snapshot,
             child.fork_context,
             child.fork_turns.as_deref(),
-        )
-    });
+        ),
+    };
     let mut tools = coding_core_tools_for_mode(&child.context.workdir, child.context.mode);
     let mut child_agent_tool_context = child.context.clone();
     child_agent_tool_context.parent_session_id = child_session.clone();
@@ -2975,7 +3330,8 @@ fn append_parent_agent_mailbox_event(
     outcome: &str,
     final_answer: &str,
 ) -> Result<()> {
-    let content = subagent_notification_content(record, outcome, final_answer);
+    let summary = subagent_summary_value(Some(store), record, false);
+    let content = subagent_notification_content(&summary);
     let payload = inter_agent_communication_payload(record, content.clone());
     let content_text = serde_json::to_string(&payload)?;
     store.append_agent_mailbox_event(AgentMailboxEventInput {
@@ -2995,6 +3351,7 @@ fn append_parent_agent_mailbox_event(
             "status": record.status,
             "outcome": outcome,
             "summary": final_answer,
+            "model_visible_summary": summary,
             "background": record.background,
             "effective_max_spawn_depth": record.effective_max_spawn_depth
         })),
@@ -3002,22 +3359,10 @@ fn append_parent_agent_mailbox_event(
     Ok(())
 }
 
-fn subagent_notification_content(
-    record: &AgentRunRecord,
-    outcome: &str,
-    final_answer: &str,
-) -> String {
+fn subagent_notification_content(summary: &Value) -> String {
     format!(
         "<subagent_notification>\n{}\n</subagent_notification>",
-        json!({
-            "agent_id": record.id,
-            "task_name": record.task_name,
-            "agent_name": record.agent_name,
-            "child_session_id": record.child_session_id,
-            "status": record.status,
-            "outcome": outcome,
-            "final_answer": final_answer,
-        })
+        summary
     )
 }
 
@@ -3148,9 +3493,11 @@ impl ToolBinding for ListAgentsTool {
     ) -> BoxFuture<'static, ToolOutput> {
         let store = self.context.store.clone();
         let parent = self.context.parent_session_id.clone();
-        Box::pin(
-            async move { ToolOutput::ok(agent_status_value(Some(&store), Some(&parent), false)) },
-        )
+        Box::pin(async move {
+            let system_value = agent_status_value(Some(&store), Some(&parent), false);
+            let model_value = agent_status_model_value(Some(&store), Some(&parent), false);
+            ToolOutput::ok_with_model_content(system_value, model_content_string(&model_value))
+        })
     }
 }
 
@@ -3284,6 +3631,7 @@ impl ToolBinding for SendMessageTool {
         abort: AbortSignal,
     ) -> BoxFuture<'static, ToolOutput> {
         let context = self.context.clone();
+        let store = context.store.clone();
         Box::pin(async move {
             let target = args
                 .get("target")
@@ -3294,7 +3642,15 @@ impl ToolBinding for SendMessageTool {
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             match send_agent_message_with_context(context, target, message, abort).await {
-                Ok(Some(record)) => ToolOutput::ok(json!({ "agent": record })),
+                Ok(Some(record)) => {
+                    let system_value = json!({ "agent": record.clone() });
+                    let model_value =
+                        json!({ "agent": subagent_summary_value(Some(&store), &record, true) });
+                    ToolOutput::ok_with_model_content(
+                        system_value,
+                        model_content_string(&model_value),
+                    )
+                }
                 Ok(None) => ToolOutput::error(format!("agent not found: {target}")),
                 Err(err) => ToolOutput::error(err.to_string()),
             }
@@ -3347,7 +3703,16 @@ impl ToolBinding for CloseAgentTool {
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             match close_agent_id(target, Some(&store)) {
-                Ok(Some(record)) => ToolOutput::ok(json!({ "previous_status": record })),
+                Ok(Some(record)) => {
+                    let system_value = json!({ "previous_status": record.clone() });
+                    let model_value = json!({
+                        "previous_status": subagent_summary_value(Some(&store), &record, true)
+                    });
+                    ToolOutput::ok_with_model_content(
+                        system_value,
+                        model_content_string(&model_value),
+                    )
+                }
                 Ok(None) => ToolOutput::error(format!("agent not found: {target}")),
                 Err(err) => ToolOutput::error(err.to_string()),
             }
@@ -3397,7 +3762,15 @@ impl ToolBinding for ResumeAgentTool {
         Box::pin(async move {
             let id = args.get("id").and_then(Value::as_str).unwrap_or_default();
             match resume_agent_id(id, Some(&store)) {
-                Ok(Some(record)) => ToolOutput::ok(json!({ "agent": record })),
+                Ok(Some(record)) => {
+                    let system_value = json!({ "agent": record.clone() });
+                    let model_value =
+                        json!({ "agent": subagent_summary_value(Some(&store), &record, true) });
+                    ToolOutput::ok_with_model_content(
+                        system_value,
+                        model_content_string(&model_value),
+                    )
+                }
                 Ok(None) => ToolOutput::error(format!("agent not found: {id}")),
                 Err(err) => ToolOutput::error(err.to_string()),
             }
@@ -3489,8 +3862,10 @@ fn now_ms() -> i64 {
 mod tests {
     use super::*;
     use futures::future::BoxFuture;
-    use psychevo_agent_core::{AssistantBlock, ToolBinding, ToolExecutionMode, ToolOutput};
-    use psychevo_ai::{AbortSignal, FakeProvider};
+    use psychevo_agent_core::{
+        AssistantBlock, ToolBinding, ToolCallBlock, ToolExecutionMode, ToolOutput,
+    };
+    use psychevo_ai::{AbortSignal, FakeProvider, RawStreamEvent};
     use tempfile::TempDir;
     use tokio::sync::watch;
 
@@ -3559,6 +3934,47 @@ mod tests {
                 home.join(".psychevo").display().to_string(),
             ),
         ])
+    }
+
+    fn test_agent_tool_context(
+        tmp: &TempDir,
+        provider: Arc<dyn GenerationProvider>,
+        store: SqliteStore,
+        db_path: PathBuf,
+        parent: String,
+        catalog: AgentCatalog,
+    ) -> AgentToolContext {
+        AgentToolContext {
+            provider,
+            model_provider: "provider".to_string(),
+            model: "model".to_string(),
+            provider_label: "provider".to_string(),
+            base_url: "http://127.0.0.1:9/v1".to_string(),
+            api_key_env: None,
+            reasoning_effort: None,
+            context_limit: None,
+            generation_metadata: json!({}),
+            workdir: tmp.path().to_path_buf(),
+            mode: RunMode::Build,
+            permission_config: PermissionConfig::default(),
+            permission_mode: PermissionMode::Default,
+            approval_mode: ApprovalMode::Manual,
+            approval_handler: None,
+            store,
+            db_path,
+            config_path: None,
+            parent_session_id: parent,
+            parent_context_snapshot: Vec::new(),
+            catalog,
+            control_handle: None,
+            stream_events: None,
+            model_metadata: ModelMetadata::default(),
+            env: BTreeMap::new(),
+            allowed_agent_names: None,
+            denied_agent_names: BTreeSet::new(),
+            required_agent_names: Vec::new(),
+            spawn_depth_remaining: None,
+        }
     }
 
     #[test]
@@ -3686,11 +4102,23 @@ Plan the work.
         let events = store.load_agent_mailbox_events(&parent).expect("events");
         assert_eq!(events.len(), 1);
         assert!(events[0].content_text.contains("mailbox final"));
+        assert!(!events[0].content_text.contains("agent_id"));
+        assert!(!events[0].content_text.contains("child_session_id"));
         assert!(
             events[0].payload["content"]
                 .as_str()
                 .expect("content")
                 .contains("<subagent_notification>")
+        );
+        let metadata = events[0].metadata.as_ref().expect("metadata");
+        assert_eq!(metadata["agent_id"], "agent-1");
+        assert_eq!(
+            metadata["child_session_id"].as_str(),
+            events[0].child_session_id.as_deref()
+        );
+        assert_eq!(
+            metadata["model_visible_summary"]["summary"],
+            "mailbox final"
         );
     }
 
@@ -3720,6 +4148,285 @@ Plan the work.
             .await
             .expect("timeout");
         assert_eq!(value["timed_out"], true);
+    }
+
+    #[test]
+    fn subagent_summary_uses_prompt_task_and_direct_child_tokens() {
+        let tmp = TempDir::new().expect("tmp");
+        let store = SqliteStore::open(&tmp.path().join("state.sqlite")).expect("store");
+        let parent = store
+            .create_session_with_metadata(tmp.path(), "run", "parent-model", "provider", None)
+            .expect("parent");
+        let child = store
+            .create_child_session_with_metadata(
+                &parent,
+                tmp.path(),
+                "agent",
+                "child-model",
+                "provider",
+                None,
+            )
+            .expect("child");
+        store
+            .append_message_with_metrics(
+                &child,
+                &Message::Assistant {
+                    content: vec![AssistantBlock::ToolCall(ToolCallBlock {
+                        id: "tool-1".to_string(),
+                        name: "read".to_string(),
+                        arguments: json!({}),
+                        arguments_json: "{}".to_string(),
+                        arguments_error: None,
+                        content_index: 0,
+                        call_index: 0,
+                    })],
+                    timestamp_ms: now_ms(),
+                    finish_reason: Some("tool_calls".to_string()),
+                    outcome: Outcome::Normal,
+                    model: Some("child-model".to_string()),
+                    provider: Some("provider".to_string()),
+                },
+                Some(json!({
+                    "input_tokens": 10,
+                    "output_tokens": 5,
+                    "reasoning_tokens": 2
+                })),
+                None,
+            )
+            .expect("assistant tool call");
+        store
+            .append_message_with_metrics(
+                &child,
+                &Message::Assistant {
+                    content: vec![AssistantBlock::Text {
+                        text: "done".to_string(),
+                    }],
+                    timestamp_ms: now_ms(),
+                    finish_reason: Some("stop".to_string()),
+                    outcome: Outcome::Normal,
+                    model: Some("child-model".to_string()),
+                    provider: Some("provider".to_string()),
+                },
+                Some(json!({
+                    "prompt_tokens": 3,
+                    "completion_tokens": 7,
+                    "total_tokens": 15
+                })),
+                None,
+            )
+            .expect("assistant final");
+
+        let id = "agent-summary-1".to_string();
+        let mut record = test_agent_run_record(parent, Some(child));
+        record.id = id.clone();
+        record.task_name = Some(default_task_name("worker", &id));
+        record.task = "  First line   with spacing  \nsecond line".to_string();
+        let value = subagent_summary_value(Some(&store), &record, false);
+
+        assert!(value.get("agent_id").is_none());
+        assert_eq!(value["agent_name"], "worker");
+        assert_eq!(value["task"], "First line with spacing");
+        assert_eq!(value["status"], "completed");
+        assert_eq!(value["exit_reason"], "normal");
+        assert_eq!(value["summary"], "mailbox final");
+        assert_eq!(value["duration_ms"], 1);
+        assert_eq!(value["tool_call_count"], 1);
+        assert_eq!(value["model"], "child-model");
+        assert_eq!(value["tokens"]["input"], 13);
+        assert_eq!(value["tokens"]["output"], 12);
+        assert_eq!(value["tokens"]["reasoning"], 2);
+        assert_eq!(value["tokens"]["total"], 32);
+        assert!(!value.to_string().contains("null"));
+    }
+
+    #[tokio::test]
+    async fn foreground_agent_tool_result_uses_compact_model_summary() {
+        let tmp = TempDir::new().expect("tmp");
+        let db_path = tmp.path().join("state.sqlite");
+        let store = SqliteStore::open(&db_path).expect("store");
+        let parent = store
+            .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+            .expect("parent");
+        let catalog = AgentCatalog {
+            agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
+            shadowed_agents: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+        let (_tx, rx) = watch::channel(false);
+        let output = spawn_subagent(
+            test_agent_tool_context(
+                &tmp,
+                Arc::new(FakeProvider::new(vec![vec![
+                    RawStreamEvent::Text("child final".to_string()),
+                    RawStreamEvent::Done(Outcome::Normal),
+                ]])),
+                store,
+                db_path,
+                parent,
+                catalog,
+            ),
+            AgentToolArgs {
+                agent_type: Some("worker".to_string()),
+                name: None,
+                prompt: "Summarize this task.\nDo not echo metadata.".to_string(),
+                task_name: None,
+                background: Some(false),
+                model: None,
+                fork_context: false,
+                fork_turns: None,
+                max_turns: Some(1),
+                max_spawn_depth: None,
+            },
+            "call".to_string(),
+            AbortSignal::new(rx),
+        )
+        .await
+        .expect("spawn");
+
+        assert!(output.json.get("child_session_id").is_some());
+        assert!(output.json.get("effective_max_spawn_depth").is_some());
+        let model_value: Value =
+            serde_json::from_str(output.model_content.as_deref().expect("model content"))
+                .expect("model json");
+        assert_eq!(model_value["agent_name"], "worker");
+        assert_eq!(model_value["task"], "Summarize this task.");
+        assert_eq!(model_value["status"], "completed");
+        assert_eq!(model_value["summary"], "child final");
+        assert!(model_value.get("agent_id").is_none());
+        assert!(model_value.get("child_session_id").is_none());
+        assert!(model_value.get("effective_max_spawn_depth").is_none());
+    }
+
+    #[tokio::test]
+    async fn list_agents_model_content_uses_compact_control_summaries() {
+        let tmp = TempDir::new().expect("tmp");
+        let db_path = tmp.path().join("state.sqlite");
+        let store = SqliteStore::open(&db_path).expect("store");
+        let parent = store
+            .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+            .expect("parent");
+        let id = format!("list-agent-{}", Uuid::now_v7());
+        {
+            let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
+            runs.insert(
+                id.clone(),
+                AgentRunState {
+                    record: AgentRunRecord {
+                        id: id.clone(),
+                        task_name: Some(default_task_name("worker", &id)),
+                        agent_name: "worker".to_string(),
+                        task: "List task\nraw prompt detail".to_string(),
+                        parent_session_id: parent.clone(),
+                        child_session_id: Some(format!("child-{id}")),
+                        role: AgentInvocationRole::Subagent,
+                        background: true,
+                        status: AgentRunStatus::Running,
+                        edge_status: Some(AgentEdgeStatus::Open),
+                        started_at_ms: now_ms(),
+                        ended_at_ms: None,
+                        outcome: None,
+                        final_answer: None,
+                        error: None,
+                        effective_max_spawn_depth: Some(0),
+                    },
+                    control: None,
+                },
+            );
+        }
+
+        let (_tx, rx) = watch::channel(false);
+        let output = ListAgentsTool::new(test_agent_tool_context(
+            &tmp,
+            Arc::new(FakeProvider::new(Vec::new())),
+            store,
+            db_path,
+            parent,
+            AgentCatalog::default(),
+        ))
+        .execute("call".to_string(), json!({}), AbortSignal::new(rx))
+        .await;
+
+        assert_eq!(output.json["agents"][0]["id"], id);
+        assert!(output.json["agents"][0].get("child_session_id").is_some());
+        let model_value: Value =
+            serde_json::from_str(output.model_content.as_deref().expect("model content"))
+                .expect("model json");
+        let agent = model_value["agents"]
+            .as_array()
+            .expect("agents")
+            .iter()
+            .find(|agent| agent["agent_id"] == id)
+            .expect("compact agent");
+        assert_eq!(agent["task"], "List task");
+        assert_eq!(agent["status"], "running");
+        assert!(agent.get("child_session_id").is_none());
+        assert!(agent.get("effective_max_spawn_depth").is_none());
+        assert!(
+            !output
+                .model_content
+                .as_deref()
+                .expect("model content")
+                .contains("raw prompt detail")
+        );
+
+        let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
+        runs.remove(&id);
+    }
+
+    #[test]
+    fn control_targets_resolve_by_model_visible_task_or_report_ambiguity() {
+        let task = format!("duplicate task {}", Uuid::now_v7());
+        let id_one = format!("target-one-{}", Uuid::now_v7());
+        let id_two = format!("target-two-{}", Uuid::now_v7());
+        {
+            let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
+            for id in [&id_one, &id_two] {
+                runs.insert(
+                    id.clone(),
+                    AgentRunState {
+                        record: AgentRunRecord {
+                            id: id.clone(),
+                            task_name: Some(default_task_name("worker", id)),
+                            agent_name: "worker".to_string(),
+                            task: task.clone(),
+                            parent_session_id: "parent".to_string(),
+                            child_session_id: Some(format!("child-{id}")),
+                            role: AgentInvocationRole::Subagent,
+                            background: true,
+                            status: AgentRunStatus::Running,
+                            edge_status: Some(AgentEdgeStatus::Open),
+                            started_at_ms: now_ms(),
+                            ended_at_ms: None,
+                            outcome: None,
+                            final_answer: None,
+                            error: None,
+                            effective_max_spawn_depth: Some(0),
+                        },
+                        control: None,
+                    },
+                );
+            }
+        }
+
+        let err = close_agent_id(&task, None).expect_err("ambiguous task");
+        assert!(err.to_string().contains("multiple agents match task"));
+        assert!(err.to_string().contains("use agent_id"));
+
+        {
+            let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
+            runs.remove(&id_two);
+        }
+        let resolved = resume_agent_id(&task, None)
+            .expect("resolve task")
+            .expect("record");
+        assert_eq!(resolved.id, id_one);
+        let resolved = resume_agent_id(&id_one, None)
+            .expect("resolve agent id")
+            .expect("record");
+        assert_eq!(resolved.id, id_one);
+
+        let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
+        runs.remove(&id_one);
     }
 
     #[test]
@@ -4076,7 +4783,8 @@ Coordinate.
             .collect::<Vec<_>>();
         assert_eq!(visible, vec!["worker", "researcher"]);
 
-        let store = SqliteStore::open(&tmp.path().join("state.sqlite")).expect("store");
+        let db_path = tmp.path().join("state.sqlite");
+        let store = SqliteStore::open(&db_path).expect("store");
         let parent = store
             .create_session_with_metadata(tmp.path(), "test", "model", "provider", None)
             .expect("parent");
@@ -4099,6 +4807,8 @@ Coordinate.
                 approval_mode: ApprovalMode::Manual,
                 approval_handler: None,
                 store,
+                db_path,
+                config_path: None,
                 parent_session_id: parent,
                 parent_context_snapshot: Vec::new(),
                 catalog,

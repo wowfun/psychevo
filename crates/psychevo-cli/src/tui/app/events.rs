@@ -14,6 +14,8 @@ impl TuiApp {
             return Ok(true);
         }
         changed |= self.drain_finished_clipboard_copies(ui);
+        changed |= self.drain_side_cleanup_task(ui).await?;
+        changed |= self.drain_compaction_task(ui).await?;
         changed |= self.drain_model_metadata_refresh(ui).await?;
         changed |= self.drain_model_catalog_fetches(ui).await?;
         changed |= ui.drain_file_search_results();
@@ -142,7 +144,7 @@ impl TuiApp {
             ui.refresh_sidebar(self);
             if restore_queued_after_interrupt {
                 ui.restore_queued_inputs_to_composer();
-            } else {
+            } else if !self.maybe_start_auto_compaction(ui)? {
                 self.start_next_queued_input(ui)?;
             }
         } else if ui.turn_outcome.is_some() && ui.deferred_stream_events.is_empty() {
@@ -326,7 +328,13 @@ impl TuiApp {
         if !event_has_session && let Some(session_id) = event_session.as_deref() {
             buffer_session_live_event(ui, session_id, event.clone());
         }
-        self.apply_fullscreen_stream_event(ui, event)
+        let previous = ui.active_event_session_id.clone();
+        if let Some(session_id) = event_session.as_deref() {
+            ui.active_event_session_id = Some(session_id.to_string());
+        }
+        let active_tool_frame_requested = self.apply_fullscreen_stream_event(ui, event);
+        ui.active_event_session_id = previous;
+        active_tool_frame_requested
     }
 
     fn apply_fullscreen_stream_event(
@@ -337,7 +345,8 @@ impl TuiApp {
         if let RunStreamEvent::Scoped { session_id, event } = event {
             return self.apply_scoped_fullscreen_stream_event(ui, &session_id, *event);
         }
-        if let Some(session_id) = stream_event_session_id(&event).map(str::to_string) {
+        let event_session_id = stream_event_session_id(&event).map(str::to_string);
+        if let Some(session_id) = event_session_id.as_deref() {
             let running_owner_missing = ui
                 .running
                 .as_ref()
@@ -345,10 +354,10 @@ impl TuiApp {
             if let Some(running) = ui.running.as_mut()
                 && running.session_id.is_none()
             {
-                running.session_id = Some(session_id.clone());
+                running.session_id = Some(session_id.to_string());
             }
             if running_owner_missing && self.current_session.is_none() {
-                self.current_session = Some(session_id.clone());
+                self.current_session = Some(session_id.to_string());
                 self.current_session_title = None;
             }
             if self
@@ -357,13 +366,14 @@ impl TuiApp {
                 .is_some_and(|current| current != session_id)
                 && !running_owner_missing
             {
-                buffer_session_live_event(ui, &session_id, event);
+                buffer_session_live_event(ui, session_id, event);
                 return false;
             }
-            if self.current_session.as_deref() == Some(session_id.as_str()) {
-                buffer_session_live_event(ui, &session_id, event.clone());
+            if self.current_session.as_deref() == Some(session_id) {
+                buffer_session_live_event(ui, session_id, event.clone());
             }
         }
+        let event_session = event_session_id.as_deref();
         if let RunStreamEvent::Event(value) = &event {
             if value.get("type").and_then(Value::as_str) == Some("context_snapshot")
                 && let Ok(snapshot) = serde_json::from_value::<ContextSnapshot>(value.clone())
@@ -372,15 +382,19 @@ impl TuiApp {
                 ui.last_context_snapshot = Some(snapshot);
             }
             let run_started = self.observe_fullscreen_value_event(ui, value);
-            let active_tool_frame_requested =
-                ui.apply_stream_event(event, self.thinking_visible, self.debug);
+            let active_tool_frame_requested = ui.apply_stream_event_for_session(
+                event,
+                self.thinking_visible,
+                self.debug,
+                event_session,
+            );
             if run_started && let Err(err) = self.start_pending_auxiliary_shells(ui) {
                 self.had_error = true;
                 ui.push_error(format!("error: {err:#}"));
             }
             return active_tool_frame_requested;
         }
-        ui.apply_stream_event(event, self.thinking_visible, self.debug)
+        ui.apply_stream_event_for_session(event, self.thinking_visible, self.debug, event_session)
     }
 
     fn apply_scoped_fullscreen_stream_event(
@@ -391,7 +405,12 @@ impl TuiApp {
     ) -> bool {
         if self.current_session.as_deref() == Some(session_id) {
             buffer_session_live_event(ui, session_id, event.clone());
-            return ui.apply_stream_event(event, self.thinking_visible, self.debug);
+            return ui.apply_stream_event_for_session(
+                event,
+                self.thinking_visible,
+                self.debug,
+                Some(session_id),
+            );
         }
         if session_live_event_ends_backlog(&event) {
             ui.session_live_event_backlog.remove(session_id);
@@ -494,10 +513,116 @@ impl TuiApp {
         ui.refresh_sidebar(self);
         if interrupted {
             ui.restore_queued_inputs_to_composer();
-        } else if let Err(err) = self.start_next_queued_input(ui) {
+        } else if let Err(err) = self.maybe_start_auto_compaction(ui).and_then(|started| {
+            if started {
+                Ok(())
+            } else {
+                self.start_next_queued_input(ui)
+            }
+        }) {
             self.had_error = true;
             ui.push_error(format!("error: {err:#}"));
         }
+    }
+
+    async fn drain_compaction_task(&mut self, ui: &mut FullscreenUi<'_>) -> Result<bool> {
+        let Some(task) = self.compaction_task.as_ref() else {
+            return Ok(false);
+        };
+        if !task.task.is_finished() {
+            return Ok(false);
+        }
+        let task = self.compaction_task.take().expect("checked task");
+        let command_echo = task.command_echo;
+        let manual = task.manual;
+        let session_id = task.session_id;
+        match task.task.await {
+            Ok(Ok(result)) => {
+                self.last_context_snapshot = None;
+                ui.last_context_snapshot = None;
+                if command_echo.is_some() || manual {
+                    ui.push_command_result(
+                        command_echo.unwrap_or_else(|| "/compact".to_string()),
+                        Some("Context Compaction"),
+                        format_compaction_result(&result, true),
+                        !result.compacted && result.message.starts_with("error:"),
+                    );
+                } else if result.compacted {
+                    ui.set_ephemeral_status(format!(
+                        "context compacted: {} -> {} tokens",
+                        result
+                            .tokens_before
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|| "?".to_string()),
+                        result
+                            .tokens_after
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|| "?".to_string())
+                    ));
+                } else {
+                    ui.clear_ephemeral_status();
+                }
+                if self.current_session.as_deref() == Some(session_id.as_str()) {
+                    self.refresh_current_session_title()?;
+                }
+            }
+            Ok(Err(err)) => {
+                self.had_error = true;
+                if let Some(command_echo) = command_echo {
+                    ui.push_command_result(command_echo, None, format!("error: {err}"), true);
+                } else {
+                    ui.set_ephemeral_error(format!("compaction failed: {err}"));
+                }
+            }
+            Err(err) if err.is_cancelled() => {}
+            Err(err) => {
+                self.had_error = true;
+                ui.set_ephemeral_error(format!("compaction failed: {err}"));
+            }
+        }
+        ui.refresh_sidebar(self);
+        self.start_next_queued_input(ui)?;
+        Ok(true)
+    }
+
+    fn maybe_start_auto_compaction(&mut self, ui: &mut FullscreenUi<'_>) -> Result<bool> {
+        if self.in_btw_side()
+            || self.current_session.is_none()
+            || ui.running.is_some()
+            || self.compaction_task.is_some()
+        {
+            return Ok(false);
+        }
+        let Some(snapshot) = ui
+            .last_context_snapshot
+            .as_ref()
+            .or(self.last_context_snapshot.as_ref())
+            .cloned()
+        else {
+            return Ok(false);
+        };
+        let session = self.current_session.clone().expect("checked session");
+        let options = AutoCompactionCheckOptions {
+            db_path: self.db_path.clone(),
+            workdir: self.workdir.clone(),
+            session,
+            config_path: self.config_path.clone(),
+            model: self.current_model.clone(),
+            reasoning_effort: self.current_variant.clone(),
+            inherited_env: Some(self.env_map.clone()),
+        };
+        if !auto_compaction_due_for_snapshot(&options, &snapshot)? {
+            return Ok(false);
+        }
+        self.start_compaction_task(
+            ui,
+            None,
+            None,
+            false,
+            CompactionReason::AutoThreshold,
+            false,
+        )?;
+        Ok(true)
     }
 
     async fn drain_finished_auxiliary_agent_tasks(

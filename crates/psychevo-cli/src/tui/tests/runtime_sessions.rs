@@ -707,6 +707,146 @@ async fn fullscreen_agent_end_releases_turn_before_auxiliary_task_finishes() {
 }
 
 #[tokio::test]
+async fn visible_live_auxiliary_turn_defers_terminal_message_meta() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let session_id = "visible-live-session".to_string();
+    app.current_session = Some(session_id.clone());
+    let mut ui = FullscreenUi::new(&app);
+    attach_background_agent_running(&mut ui, &session_id);
+    ui.running_elapsed_override = Some(Duration::from_secs(11));
+
+    ui.start_assistant();
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "run_start",
+            "session_id": session_id,
+            "provider": "xiaomi-token-plan",
+            "model": "mimo-v2-omni",
+            "mode": "default"
+        }),
+        false,
+    );
+    assert!(
+        ui.status_running_elapsed(app.current_session.as_deref())
+            .is_some()
+    );
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "final answer has arrived"}],
+                "timestamp_ms": 2,
+                "finish_reason": "stop",
+                "outcome": "normal",
+                "model": "mimo-v2-omni",
+                "provider": "xiaomi-token-plan"
+            },
+            "metadata": {
+                "elapsed_ms": 171_000,
+                "reasoning_effort": "high"
+            }
+        }),
+        false,
+    );
+
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.kind == TranscriptKind::Answer && row.text == "final answer has arrived")
+    );
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.kind != TranscriptKind::Meta),
+        "{:?}",
+        ui.transcript
+    );
+
+    for agent in &ui.auxiliary_agent_tasks {
+        agent.task.abort();
+    }
+}
+
+#[tokio::test]
+async fn live_session_history_reload_defers_latest_terminal_meta() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let session_id = store
+        .create_session_with_metadata(
+            &app.workdir,
+            "tui",
+            "mimo-v2-omni",
+            "xiaomi-token-plan",
+            None,
+        )
+        .expect("session");
+    insert_tui_message_with_metadata(
+        &app.db_path,
+        &session_id,
+        1,
+        "user",
+        "prompt",
+        serde_json::json!({
+            "role": "user",
+            "content": [{"text": "prompt"}],
+            "timestamp_ms": 1
+        }),
+        None,
+    );
+    insert_tui_message_with_metadata(
+        &app.db_path,
+        &session_id,
+        2,
+        "assistant",
+        "final answer has arrived",
+        serde_json::json!({
+            "role": "assistant",
+            "content": [{"type": "text", "text": "final answer has arrived"}],
+            "timestamp_ms": 2,
+            "finish_reason": "stop",
+            "outcome": "normal",
+            "model": "mimo-v2-omni",
+            "provider": "xiaomi-token-plan"
+        }),
+        Some(serde_json::json!({
+            "elapsed_ms": 171_000,
+            "reasoning_effort": "high"
+        })),
+    );
+    app.current_session = Some(session_id.clone());
+    let mut ui = FullscreenUi::new(&app);
+    attach_background_agent_running(&mut ui, &session_id);
+
+    app.load_current_session_history(&mut ui)
+        .expect("load history");
+
+    assert!(
+        ui.status_running_elapsed(app.current_session.as_deref())
+            .is_some()
+    );
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.kind == TranscriptKind::Answer && row.text == "final answer has arrived")
+    );
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.kind != TranscriptKind::Meta),
+        "{:?}",
+        ui.transcript
+    );
+
+    for agent in &ui.auxiliary_agent_tasks {
+        agent.task.abort();
+    }
+}
+
+#[tokio::test]
 async fn fullscreen_refreshes_title_after_detached_agent_task_finishes() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
@@ -900,6 +1040,7 @@ fn normal_turn_with_tool_failure_does_not_add_contradictory_error_row() {
 
     app.finish_streamed_agent_turn(&mut ui);
 
+    assert!(app.compaction_task.is_none());
     assert!(!app.had_error);
     assert!(
         ui.transcript
@@ -936,6 +1077,7 @@ fn streamed_budget_exhaustion_renders_specific_error_row() {
 
     app.finish_streamed_agent_turn(&mut ui);
 
+    assert!(app.compaction_task.is_none());
     assert!(app.had_error);
     assert!(ui.transcript.iter().any(
         |row| row.kind == TranscriptKind::Error && row.text.contains("model-turn limit (128)")

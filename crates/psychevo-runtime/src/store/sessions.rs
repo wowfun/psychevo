@@ -35,6 +35,39 @@ impl SqliteStore {
         )
     }
 
+    pub fn create_child_session_from_parent_snapshot(
+        &self,
+        input: ChildSessionSnapshotInput<'_>,
+    ) -> Result<String> {
+        let parent_messages = crate::context::prune_context(
+            self.load_messages(input.parent_session_id)?,
+            input.max_context_messages,
+        );
+        let child_session = self.create_child_session_with_metadata(
+            input.parent_session_id,
+            input.workdir,
+            input.source,
+            input.model,
+            input.provider,
+            input.metadata,
+        )?;
+        for message in parent_messages {
+            self.append_message_with_metrics(
+                &child_session,
+                &message,
+                None,
+                Some(input.inherited_message_metadata.clone()),
+            )?;
+        }
+        self.append_message_with_metrics(
+            &child_session,
+            &user_text_message(input.boundary_text),
+            None,
+            Some(input.inherited_message_metadata),
+        )?;
+        Ok(child_session)
+    }
+
     fn create_session_with_parent_and_metadata(
         &self,
         workdir: &Path,
@@ -261,5 +294,31 @@ impl SqliteStore {
             return Err(Error::Message(format!("session not found: {session_id}")));
         }
         Ok(())
+    }
+
+    pub fn delete_sessions_for_workdir_with_source(
+        &self,
+        workdir: &Path,
+        source: &str,
+    ) -> Result<usize> {
+        let workdir = workdir.to_string_lossy().to_string();
+        self.write_retry(|conn| {
+            let ids = {
+                let mut stmt = conn.prepare(
+                    "SELECT id FROM sessions WHERE workdir = ?1 AND source = ?2 ORDER BY id ASC",
+                )?;
+                let rows = stmt.query_map(params![&workdir, source], |row| row.get::<_, String>(0))?;
+                let mut ids = Vec::new();
+                for row in rows {
+                    ids.push(row?);
+                }
+                ids
+            };
+            for id in &ids {
+                conn.execute("DELETE FROM messages WHERE session_id = ?1", params![id])?;
+                conn.execute("DELETE FROM sessions WHERE id = ?1", params![id])?;
+            }
+            Ok(ids.len())
+        })
     }
 }

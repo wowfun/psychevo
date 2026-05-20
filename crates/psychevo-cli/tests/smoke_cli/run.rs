@@ -116,7 +116,11 @@ fn cli_run_selected_main_agent_includes_description_and_body() {
 #[test]
 fn cli_run_child_agent_session_exports_prefix_and_last_request() {
     let server = MockSseServer::start(vec![
-        sse_tool_agent_call("call_agent", "translate", "hello"),
+        sse_tool_agent_call(
+            "call_agent",
+            "translate",
+            "Translate greeting\nDo not echo raw prompt detail",
+        ),
         sse_text("child translated"),
         sse_text("parent final"),
     ]);
@@ -157,6 +161,26 @@ fn cli_run_child_agent_session_exports_prefix_and_last_request() {
     assert!(child_system
         .iter()
         .any(|message| message.contains("child agent. Return a concise final answer")));
+
+    let parent_continuation = server.request_json(2);
+    let parent_tool_result = parent_continuation["messages"]
+        .as_array()
+        .expect("parent messages")
+        .iter()
+        .find(|message| message["role"] == "tool" && message["tool_call_id"] == "call_agent")
+        .expect("Agent tool result");
+    let parent_tool_content = parent_tool_result["content"].as_str().expect("content");
+    let parent_tool_summary: Value =
+        serde_json::from_str(parent_tool_content).expect("summary json");
+    assert_eq!(parent_tool_summary["agent_name"], "translate");
+    assert_eq!(parent_tool_summary["task"], "Translate greeting");
+    assert_eq!(parent_tool_summary["status"], "completed");
+    assert_eq!(parent_tool_summary["summary"], "child translated");
+    assert!(!parent_tool_content.contains("agent_id"));
+    assert!(!parent_tool_content.contains("child_session_id"));
+    assert!(!parent_tool_content.contains("latest_usage"));
+    assert!(!parent_tool_content.contains("effective_max_spawn_depth"));
+    assert!(!parent_tool_content.contains("Do not echo raw prompt detail"));
 
     let conn = Connection::open(&db).expect("db");
     let child_session: String = conn

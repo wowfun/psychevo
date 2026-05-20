@@ -116,10 +116,8 @@ fn tool_result_message(call: ToolCallBlock, output: ToolOutput) -> Message {
     Message::ToolResult {
         tool_call_id: call.id,
         tool_name: call.name,
-        content: serde_json::to_string(&output.json)
-            .unwrap_or_else(|_| "{\"error\":\"invalid result\"}".to_string()),
+        content: output.model_content(),
         is_error: output.is_error,
         timestamp_ms: now_ms(),
     }
 }
-

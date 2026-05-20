@@ -41,6 +41,7 @@ impl ToolBinding for BashTool {
             match bash_tool_impl(workdir, args, abort).await {
                 Ok((value, is_error)) => ToolOutput {
                     json: value,
+                    model_content: None,
                     is_error,
                 },
                 Err(err) => ToolOutput::error(err.to_string()),

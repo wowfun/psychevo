@@ -19,6 +19,7 @@ use crate::types::{
 pub(crate) struct RunConfig {
     model: ModelSelection,
     provider: BTreeMap<String, ConfigProviderEntry>,
+    pub(crate) compression: CompressionConfig,
     pub(crate) permissions: PermissionConfig,
 }
 

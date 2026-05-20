@@ -17,7 +17,8 @@ pub(crate) const VARIANTS: &[&str] = &["none", "minimal", "low", "medium", "high
 const GENERAL_COMMANDS: &[&str] = &[
     "/status",
     "/context",
-    "/reload-context",
+    "/refresh",
+    "/btw",
     "/model",
     "/sessions",
     "/new",
@@ -36,7 +37,9 @@ pub(crate) enum SlashCommand {
     Sessions,
     Usage,
     Context,
-    ReloadContext,
+    Refresh,
+    ReloadContextDeprecated,
+    Btw(Option<String>),
     ModelShow,
     VariantSet(String),
     ModeSet(String),
@@ -55,6 +58,7 @@ pub(crate) enum SlashCommand {
     Skills,
     Agents,
     Fork(String),
+    Compact(Option<String>),
     SkillInvoke { name: String, args: String },
     Upcoming(String),
 }
@@ -1074,6 +1078,11 @@ fn parse_slash_command_inner(line: &str) -> Result<Option<SlashCommand>> {
             name: name.to_string(),
             args: rest.join(" "),
         }
+    } else if command == "/side" {
+        SlashCommand::Btw(parse_btw_prompt(&rest))
+    } else if command == "/reload-context" {
+        parse_no_arguments_for_usage(command, &rest)?;
+        SlashCommand::ReloadContextDeprecated
     } else {
         let Some(spec) = slash_command_spec(command) else {
             return Err(anyhow!("unknown slash command: {command}"));
@@ -1129,10 +1138,11 @@ fn parse_registered_slash_command(
             parse_no_arguments(spec, command, rest)?;
             Ok(SlashCommand::Context)
         }
-        SlashCommandAction::ReloadContext => {
+        SlashCommandAction::Refresh => {
             parse_no_arguments(spec, command, rest)?;
-            Ok(SlashCommand::ReloadContext)
+            Ok(SlashCommand::Refresh)
         }
+        SlashCommandAction::Btw => Ok(SlashCommand::Btw(parse_btw_prompt(rest))),
         SlashCommandAction::ModelShow => {
             parse_no_arguments(spec, command, rest)?;
             Ok(SlashCommand::ModelShow)
@@ -1170,15 +1180,19 @@ fn parse_registered_slash_command(
             Ok(SlashCommand::Agents)
         }
         SlashCommandAction::Fork => parse_fork_command(spec, rest),
+        SlashCommandAction::Compact => Ok(SlashCommand::Compact(parse_optional_trailing(rest))),
         SlashCommandAction::SkillInvoke => {
             unreachable!("dynamic skill commands are parsed before registry dispatch")
         }
-        SlashCommandAction::Upcoming => unreachable!("upcoming handled before action dispatch"),
     }
 }
 
 fn parse_no_arguments(spec: &SlashCommandSpec, command: &str, rest: &[&str]) -> Result<()> {
     debug_assert_eq!(spec.argument_kind, CommandArgumentKind::None);
+    parse_no_arguments_for_usage(command, rest)
+}
+
+fn parse_no_arguments_for_usage(command: &str, rest: &[&str]) -> Result<()> {
     if !rest.is_empty() {
         return Err(anyhow!("{command} does not accept arguments"));
     }
@@ -1383,6 +1397,18 @@ fn parse_fork_command(spec: &SlashCommandSpec, rest: &[&str]) -> Result<SlashCom
     Ok(SlashCommand::Fork(prompt))
 }
 
+fn parse_optional_trailing(rest: &[&str]) -> Option<String> {
+    let text = rest.join(" ");
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_string())
+}
+
+fn parse_btw_prompt(rest: &[&str]) -> Option<String> {
+    let prompt = rest.join(" ");
+    let prompt = prompt.trim();
+    (!prompt.is_empty()).then(|| prompt.to_string())
+}
+
 pub(crate) fn validate_model_spec(value: &str) -> Result<()> {
     let Some((provider, model)) = value.split_once('/') else {
         return Err(anyhow!("model must use provider/model form"));
@@ -1451,6 +1477,26 @@ mod tests {
         assert_eq!(
             parse_slash_command("/context").unwrap(),
             Some(SlashCommand::Context)
+        );
+        assert_eq!(
+            parse_slash_command("/refresh").unwrap(),
+            Some(SlashCommand::Refresh)
+        );
+        assert_eq!(
+            parse_slash_command("/reload-context").unwrap(),
+            Some(SlashCommand::ReloadContextDeprecated)
+        );
+        assert_eq!(
+            parse_slash_command("/btw").unwrap(),
+            Some(SlashCommand::Btw(None))
+        );
+        assert_eq!(
+            parse_slash_command("/btw explain this").unwrap(),
+            Some(SlashCommand::Btw(Some("explain this".to_string())))
+        );
+        assert_eq!(
+            parse_slash_command("/side explain this").unwrap(),
+            Some(SlashCommand::Btw(Some("explain this".to_string())))
         );
         assert!(
             parse_slash_command("/session list")
@@ -1886,6 +1932,10 @@ mod tests {
         assert_eq!(slash_prefix_menu_items("/stats")[0].command, "/usage");
         assert_eq!(slash_menu_items("/clear")[0].command, "/new");
         assert_eq!(slash_menu_items("/resume")[0].command, "/sessions");
+        assert_eq!(slash_menu_items("/refresh")[0].command, "/refresh");
+        assert_eq!(slash_menu_items("/btw")[0].command, "/btw");
+        assert!(slash_menu_items("/side").is_empty());
+        assert!(slash_menu_items("/reload-context").is_empty());
         assert_eq!(slash_menu_items("/session").len(), 1);
         assert_eq!(slash_menu_items("/session")[0].command, "/sessions");
         assert!(slash_menu_items("/session ").is_empty());
@@ -1921,8 +1971,18 @@ mod tests {
             parse_slash_command("/redo").unwrap(),
             Some(SlashCommand::Redo)
         );
+        assert_eq!(
+            parse_slash_command("/compact").unwrap(),
+            Some(SlashCommand::Compact(None))
+        );
+        assert_eq!(
+            parse_slash_command("/compact focus on todos").unwrap(),
+            Some(SlashCommand::Compact(Some("focus on todos".to_string())))
+        );
         assert!(parse_slash_command("/undo now").is_err());
         assert!(parse_slash_command("/redo now").is_err());
+        assert_eq!(slash_menu_items("/compact")[0].command, "/compact");
+        assert!(!slash_menu_items("/compact")[0].upcoming);
         assert_eq!(slash_menu_items("/copy")[0].command, "/copy");
         assert_eq!(slash_menu_items("/image")[0].command, "/image");
         assert_eq!(slash_menu_items("/show-raw")[0].command, "/show-raw");
@@ -1937,6 +1997,10 @@ mod tests {
         assert!(help.contains("Ctrl+B - toggle sidebar"));
         assert!(help.contains("Ctrl+O - copy latest answer as Markdown"));
         assert!(help.contains("/copy - copy latest answer as Markdown"));
+        assert!(help.contains("/refresh - reload context and clean side sessions"));
+        assert!(help.contains("/btw [prompt] - open a side conversation"));
+        assert!(!help.contains("/reload-context"));
+        assert!(!help.contains("/side"));
         assert!(help.contains("/usage - local usage and cost (aliases: /stats)"));
         assert!(help.contains("Reads persisted SQLite accounting and cost estimates"));
         assert!(

@@ -42,6 +42,7 @@ impl TuiApp {
         let mut ui = FullscreenUi::new(self);
         self.load_current_session_history(&mut ui)?;
         let mut needs_draw = true;
+        let mut next_passive_redraw = schedule_next_passive_redraw(Instant::now());
         if !initial_prompt.trim().is_empty()
             && self
                 .submit_fullscreen_text(&mut ui, initial_prompt, false)
@@ -58,8 +59,9 @@ impl TuiApp {
             if needs_draw {
                 terminal.draw(|frame| self.render_fullscreen(frame, &mut ui))?;
                 needs_draw = false;
+                next_passive_redraw = schedule_next_passive_redraw(Instant::now());
             }
-            if ui.quit_requested && ui.running.is_none() {
+            if ui.quit_requested && ui.running.is_none() && self.compaction_task.is_none() {
                 break;
             }
             if event::poll(FULLSCREEN_EVENT_POLL_INTERVAL)? {
@@ -70,9 +72,8 @@ impl TuiApp {
                 if outcome.should_quit {
                     break;
                 }
-            } else if ui.running.is_some()
-                || !ui.auxiliary_agent_tasks.is_empty()
-                || !ui.auxiliary_shell_tasks.is_empty()
+            } else if fullscreen_has_passive_motion(&ui)
+                && passive_redraw_due(Instant::now(), &mut next_passive_redraw)
             {
                 needs_draw = true;
             }
@@ -174,6 +175,10 @@ impl TuiApp {
                 break;
             }
         }
+        if let Some(task) = self.compaction_task.take() {
+            task.task.abort();
+            let _ = task.task.await;
+        }
         Ok(())
     }
 
@@ -185,6 +190,12 @@ impl TuiApp {
         if key.code == KeyCode::Char('c')
             && key.modifiers.contains(KeyModifiers::CONTROL)
             && self.copy_selected_text(ui)?
+        {
+            return Ok(false);
+        }
+        if key.code == KeyCode::Char('c')
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+            && self.handle_btw_ctrl_c(ui)?
         {
             return Ok(false);
         }
@@ -802,6 +813,7 @@ impl TuiApp {
 }
 
 const FULLSCREEN_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(16);
+const FULLSCREEN_PASSIVE_REDRAW_INTERVAL: Duration = Duration::from_millis(80);
 const MAX_READY_EVENTS_PER_FRAME: usize = 64;
 const TUI_MOUSE_CAPTURE_ENABLE_ANSI: &str = concat!(
     "\x1b[?1000h",
@@ -817,6 +829,25 @@ const TUI_MOUSE_CAPTURE_DISABLE_ANSI: &str = concat!(
     "\x1b[?1002l",
     "\x1b[?1000l"
 );
+
+fn fullscreen_has_passive_motion(ui: &FullscreenUi<'_>) -> bool {
+    ui.running.is_some()
+        || !ui.auxiliary_agent_tasks.is_empty()
+        || !ui.auxiliary_shell_tasks.is_empty()
+}
+
+fn schedule_next_passive_redraw(now: Instant) -> Instant {
+    now.checked_add(FULLSCREEN_PASSIVE_REDRAW_INTERVAL)
+        .unwrap_or(now)
+}
+
+fn passive_redraw_due(now: Instant, next_due: &mut Instant) -> bool {
+    if now < *next_due {
+        return false;
+    }
+    *next_due = schedule_next_passive_redraw(now);
+    true
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct EnableTuiMouseCapture;

@@ -313,6 +313,145 @@ async fn tool_call_pending_is_emitted_before_message_end() {
 }
 
 #[tokio::test]
+async fn tool_output_can_separate_event_json_from_model_content() {
+    #[derive(Clone)]
+    struct SequencedProvider {
+        responses: Arc<Mutex<Vec<Vec<StreamEvent>>>>,
+    }
+
+    impl GenerationProvider for SequencedProvider {
+        fn stream(
+            &self,
+            _request: GenerationRequest,
+            _abort: AbortSignal,
+        ) -> BoxFuture<'static, psychevo_ai::Result<psychevo_ai::GenerationStream>> {
+            let events = self
+                .responses
+                .lock()
+                .expect("responses")
+                .remove(0)
+                .into_iter()
+                .map(Ok);
+            Box::pin(async move {
+                let output: psychevo_ai::GenerationStream = Box::pin(stream::iter(events));
+                Ok(output)
+            })
+        }
+    }
+
+    struct SplitOutputTool;
+
+    impl ToolBinding for SplitOutputTool {
+        fn name(&self) -> &str {
+            "split_output"
+        }
+
+        fn description(&self) -> &str {
+            "Return full event JSON with compact model content."
+        }
+
+        fn parameters(&self) -> Value {
+            json!({"type": "object", "properties": {}, "additionalProperties": false})
+        }
+
+        fn execution_mode(&self) -> ToolExecutionMode {
+            ToolExecutionMode::Parallel
+        }
+
+        fn execute(
+            &self,
+            _tool_call_id: String,
+            _args: Value,
+            _abort: AbortSignal,
+        ) -> BoxFuture<'static, ToolOutput> {
+            Box::pin(async {
+                ToolOutput::ok_with_model_content(
+                    json!({
+                        "full": {
+                            "child_session_id": "child-session",
+                            "usage": {"total_tokens": 42}
+                        }
+                    }),
+                    r#"{"summary":"compact"}"#,
+                )
+            })
+        }
+    }
+
+    let provider = Arc::new(SequencedProvider {
+        responses: Arc::new(Mutex::new(vec![
+            vec![
+                StreamEvent::ToolCallStart {
+                    content_index: 0,
+                    call_index: 0,
+                    id: "call_split".to_string(),
+                    name: "split_output".to_string(),
+                },
+                StreamEvent::ToolCallDelta {
+                    content_index: 0,
+                    call_index: 0,
+                    id: Some("call_split".to_string()),
+                    name: Some("split_output".to_string()),
+                    arguments_delta: "{}".to_string(),
+                },
+                StreamEvent::ToolCallEnd {
+                    content_index: 0,
+                    call_index: 0,
+                },
+                StreamEvent::Done {
+                    outcome: Outcome::Normal,
+                    finish_reason: Some("tool_calls".to_string()),
+                },
+            ],
+            vec![
+                StreamEvent::TextDelta {
+                    text: "done".to_string(),
+                },
+                StreamEvent::Done {
+                    outcome: Outcome::Normal,
+                    finish_reason: Some("stop".to_string()),
+                },
+            ],
+        ])),
+    });
+    let sink = Arc::new(CaptureSink::default());
+    let (_, control) = ControlHandle::new();
+    let completion = run_agent_loop(
+        provider,
+        AgentLoopRequest {
+            tools: vec![Arc::new(SplitOutputTool)],
+            max_turns: 2,
+            ..request()
+        },
+        sink.clone(),
+        control,
+    )
+    .await
+    .expect("loop");
+
+    let events = sink.events.lock().expect("events");
+    assert!(events.iter().any(|event| {
+        matches!(
+            event,
+            AgentEvent::ToolExecutionEnd { result, .. }
+                if result["full"]["child_session_id"] == "child-session"
+                    && result["full"]["usage"]["total_tokens"] == 42
+        )
+    }));
+    let tool_content = completion
+        .messages
+        .iter()
+        .find_map(|message| match message {
+            Message::ToolResult { content, .. } => Some(content.as_str()),
+            _ => None,
+        })
+        .expect("tool result");
+    assert_eq!(tool_content, r#"{"summary":"compact"}"#);
+    assert!(!tool_content.contains("child_session_id"));
+    assert!(!tool_content.contains("usage"));
+}
+
+#[tokio::test]
 async fn complete_inline_think_blocks_are_folded_reasoning() {
     let provider = Arc::new(FakeProvider::new(vec![vec![
         RawStreamEvent::Text("visible <think>secret</think> done".to_string()),

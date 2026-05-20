@@ -116,6 +116,54 @@ pub(crate) fn resolve_run_provider(
     resolve_one_provider(&provider, model, reasoning_effort, options, loaded, false)
 }
 
+pub(crate) fn resolve_compression_config(
+    options: &RunOptions,
+    loaded: &LoadedRunConfig,
+    current: &ResolvedRunProvider,
+) -> Result<ResolvedCompressionConfig> {
+    let compression = &loaded.config.compression;
+    let provider = if compression.model_configured {
+        let inferred_provider = compression
+            .model
+            .id
+            .as_deref()
+            .and_then(|model| infer_provider_for_model(&loaded.config, model));
+        let provider = compression
+            .model
+            .provider
+            .clone()
+            .or(inferred_provider)
+            .unwrap_or_else(|| current.provider.clone());
+        let model = compression
+            .model
+            .id
+            .clone()
+            .unwrap_or_else(|| current.model.clone());
+        let reasoning_effort = compression
+            .reasoning_effort
+            .clone()
+            .or_else(|| compression.model.reasoning_effort.clone());
+        resolve_one_provider(
+            &provider,
+            Some(model),
+            reasoning_effort,
+            options,
+            loaded,
+            false,
+        )?
+    } else {
+        let mut provider = current.clone();
+        if let Some(reasoning_effort) = &compression.reasoning_effort {
+            provider.reasoning_effort = enabled_reasoning_effort(Some(reasoning_effort.clone()))?;
+        }
+        provider
+    };
+    Ok(ResolvedCompressionConfig {
+        model_configured: compression.model_configured,
+        provider,
+    })
+}
+
 fn model_for_provider(
     provider: &str,
     cli_model: &ModelSelection,
@@ -165,7 +213,7 @@ fn resolve_one_provider(
         .ok_or_else(|| Error::Config(format!("provider {provider} requires a model")))?;
     let model_config = config_model_entry(config_entry, &model);
     let base_url = provider_base_url(&provider, config_entry, &loaded.env)
-    .ok_or_else(|| Error::Config(format!("provider {provider} requires a base_url")))?;
+        .ok_or_else(|| Error::Config(format!("provider {provider} requires a base_url")))?;
     let metadata = resolve_model_metadata_cache_first(
         &provider,
         &model,

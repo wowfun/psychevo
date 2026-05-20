@@ -97,6 +97,12 @@ impl TuiState {
         self.push_recent_model(model);
     }
 
+    pub(crate) fn clear_model(&mut self, workdir: &str) {
+        if let Some(entry) = self.workdirs.get_mut(workdir) {
+            entry.model = None;
+        }
+    }
+
     pub(crate) fn set_variant(&mut self, workdir: &str, variant: String) {
         self.workdirs
             .entry(workdir.to_string())

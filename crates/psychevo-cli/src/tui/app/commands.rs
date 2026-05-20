@@ -20,6 +20,10 @@ impl TuiApp {
             .map(normalize_submitted_slash_echo)
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| slash_command_echo(&command));
+        if let Some(message) = self.side_command_rejection(&command) {
+            ui.push_command_result(command_echo, None, message, true);
+            return Ok(false);
+        }
         match command {
             SlashCommand::Help => {
                 ui.bottom_panel = Some(BottomPanel::Help(self.help_panel()));
@@ -67,23 +71,46 @@ impl TuiApp {
                     }
                 }
             }
-            SlashCommand::ReloadContext => match self.reload_context_for_current_session(ui) {
-                Ok(result) => {
+            SlashCommand::Refresh => {
+                if ui.status_has_running(self.current_session.as_deref()) {
                     ui.push_command_result(
                         command_echo,
                         None,
-                        format!(
-                            "reloaded context: {} v{}",
-                            result.prefix_hash, result.version
-                        ),
-                        false,
+                        "error: finish the current turn before refreshing",
+                        true,
                     );
-                    ui.refresh_sidebar(self);
+                    return Ok(false);
                 }
-                Err(err) => {
-                    ui.push_command_result(command_echo, None, format!("error: {err:#}"), true);
+                match self.reload_context_for_current_session(ui) {
+                    Ok(result) => {
+                        let scheduled = self.start_side_cleanup_task();
+                        let cleanup = if scheduled {
+                            "side cleanup scheduled"
+                        } else {
+                            "side cleanup already running"
+                        };
+                        ui.push_command_result(
+                            command_echo,
+                            None,
+                            format!(
+                                "reloaded context: {} v{}; {cleanup}",
+                                result.prefix_hash, result.version
+                            ),
+                            false,
+                        );
+                        ui.refresh_sidebar(self);
+                    }
+                    Err(err) => {
+                        ui.push_command_result(command_echo, None, format!("error: {err:#}"), true);
+                    }
                 }
-            },
+            }
+            SlashCommand::ReloadContextDeprecated => {
+                ui.push_command_result(command_echo, None, RELOAD_CONTEXT_DEPRECATED_MESSAGE, true);
+            }
+            SlashCommand::Btw(prompt) => {
+                self.start_btw_side_conversation(ui, prompt)?;
+            }
             SlashCommand::ModelShow => {
                 ui.bottom_panel = Some(BottomPanel::Models(ModelPanel::new(
                     self.model_selection_panel()?,
@@ -242,6 +269,9 @@ impl TuiApp {
                 let text = fork_prompt_marker(&prompt);
                 self.submit_fullscreen_prompt(ui, text, Vec::new())?;
             }
+            SlashCommand::Compact(instructions) => {
+                self.submit_fullscreen_compaction(ui, instructions, command_echo)?;
+            }
             SlashCommand::SkillInvoke { name, args } => {
                 let text = skill_prompt_marker(&name, &args);
                 ui.set_composer_text(&text);
@@ -318,7 +348,7 @@ impl TuiApp {
         images: Vec<PendingImageAttachment>,
     ) -> Result<()> {
         let prompt = prompt_without_image_placeholders(&display_prompt, &images);
-        if ui.running.is_some() {
+        if ui.running.is_some() || self.compaction_task.is_some() {
             ui.queued_inputs.push_back(QueuedInput::Prompt {
                 session_id: self.current_session.clone(),
                 prompt,
@@ -368,7 +398,7 @@ impl TuiApp {
     }
 
     fn start_next_queued_input(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
-        while ui.running.is_none() {
+        while ui.running.is_none() && self.compaction_task.is_none() {
             let Some(index) =
                 ui.queued_inputs
                     .iter()
@@ -388,6 +418,18 @@ impl TuiApp {
                     ..
                 } => self.start_fullscreen_turn(ui, prompt, display_prompt, images)?,
                 QueuedInput::Shell { command, .. } => self.start_fullscreen_shell(ui, command)?,
+                QueuedInput::Compact {
+                    instructions,
+                    command_echo,
+                    ..
+                } => self.start_compaction_task(
+                    ui,
+                    instructions,
+                    Some(command_echo),
+                    true,
+                    CompactionReason::Manual,
+                    true,
+                )?,
             }
         }
         Ok(())
@@ -458,7 +500,7 @@ impl TuiApp {
                 );
                 Ok(())
             }
-            SlashCommand::ReloadContext => {
+            SlashCommand::Refresh => {
                 let session = self
                     .current_session
                     .clone()
@@ -476,11 +518,24 @@ impl TuiApp {
                     notice: None,
                 })?;
                 println!(
-                    "reloaded context: {} v{}",
-                    result.prefix_hash, result.version
+                    "reloaded context: {} v{}; side cleanup deleted {}",
+                    result.prefix_hash,
+                    result.version,
+                    SqliteStore::open(&self.db_path)?.delete_sessions_for_workdir_with_source(
+                        &self.workdir,
+                        TUI_SIDE_SESSION_SOURCE,
+                    )?
                 );
                 Ok(())
             }
+            SlashCommand::ReloadContextDeprecated => {
+                println!(
+                    "{}",
+                    self.renderer.status(RELOAD_CONTEXT_DEPRECATED_MESSAGE)
+                );
+                Ok(())
+            }
+            SlashCommand::Btw(_) => Err(anyhow!("/btw is only available in fullscreen TUI")),
             SlashCommand::ModelShow => self.show_model(),
             SlashCommand::VariantSet(variant) => self.set_variant(variant),
             SlashCommand::ModeSet(mode) => self.set_mode(mode),
@@ -517,6 +572,7 @@ impl TuiApp {
                 let prompt = fork_prompt_marker(&prompt);
                 return self.submit_prompt(prompt).await.map(|_| false);
             }
+            SlashCommand::Compact(instructions) => self.run_scripted_compaction(instructions).await,
             SlashCommand::SkillInvoke { name, args } => {
                 let prompt = skill_prompt_marker(&name, &args);
                 return self.submit_prompt(prompt).await.map(|_| false);
@@ -888,7 +944,7 @@ impl TuiApp {
         display_prompt: String,
         images: Vec<PendingImageAttachment>,
     ) -> Result<()> {
-        if ui.running.is_some() {
+        if ui.running.is_some() || self.compaction_task.is_some() {
             ui.queued_inputs.push_back(QueuedInput::Prompt {
                 session_id: self.current_session.clone(),
                 prompt,
@@ -930,7 +986,7 @@ impl TuiApp {
     }
 
     fn start_fullscreen_shell(&mut self, ui: &mut FullscreenUi<'_>, command: String) -> Result<()> {
-        if ui.running.is_some() {
+        if ui.running.is_some() || self.compaction_task.is_some() {
             ui.queued_inputs.push_back(QueuedInput::Shell {
                 session_id: self.current_session.clone(),
                 command,
@@ -1019,6 +1075,101 @@ impl TuiApp {
         }
         Ok(())
     }
+
+    fn submit_fullscreen_compaction(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        instructions: Option<String>,
+        command_echo: String,
+    ) -> Result<()> {
+        if self.current_session.is_none() {
+            ui.push_command_result(command_echo, None, "error: no session context yet", true);
+            return Ok(());
+        }
+        if ui.running.is_some() || self.compaction_task.is_some() {
+            ui.queued_inputs.push_back(QueuedInput::Compact {
+                session_id: self.current_session.clone(),
+                instructions,
+                command_echo,
+            });
+            ui.set_ephemeral_status("compaction queued");
+            return Ok(());
+        }
+        self.start_compaction_task(
+            ui,
+            instructions,
+            Some(command_echo),
+            true,
+            CompactionReason::Manual,
+            true,
+        )
+    }
+
+    fn start_compaction_task(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        instructions: Option<String>,
+        command_echo: Option<String>,
+        manual: bool,
+        reason: CompactionReason,
+        force: bool,
+    ) -> Result<()> {
+        if self.compaction_task.is_some() {
+            return Ok(());
+        }
+        let Some(session_id) = self.current_session.clone() else {
+            return Ok(());
+        };
+        let options = CompactSessionOptions {
+            db_path: self.db_path.clone(),
+            workdir: self.workdir.clone(),
+            session: session_id.clone(),
+            config_path: self.config_path.clone(),
+            model: self.current_model.clone(),
+            reasoning_effort: self.current_variant.clone(),
+            inherited_env: Some(self.env_map.clone()),
+            reason,
+            instructions,
+            force,
+        };
+        let task = tokio::spawn(async move {
+            compact_session(options)
+                .await
+                .map_err(|err| format!("{err:#}"))
+        });
+        self.compaction_task = Some(CompactionTask {
+            session_id,
+            command_echo,
+            manual,
+            task,
+        });
+        ui.set_ephemeral_status("compacting context");
+        ui.refresh_sidebar(self);
+        Ok(())
+    }
+
+    async fn run_scripted_compaction(&mut self, instructions: Option<String>) -> Result<()> {
+        let session = self
+            .current_session
+            .clone()
+            .ok_or_else(|| anyhow!("no session context yet"))?;
+        let result = compact_session(CompactSessionOptions {
+            db_path: self.db_path.clone(),
+            workdir: self.workdir.clone(),
+            session,
+            config_path: self.config_path.clone(),
+            model: self.current_model.clone(),
+            reasoning_effort: self.current_variant.clone(),
+            inherited_env: Some(self.env_map.clone()),
+            reason: CompactionReason::Manual,
+            instructions,
+            force: true,
+        })
+        .await?;
+        println!("{}", format_compaction_result(&result, true));
+        self.last_context_snapshot = None;
+        Ok(())
+    }
 }
 
 fn fullscreen_context_bar_width(ui: &FullscreenUi<'_>) -> usize {
@@ -1026,6 +1177,39 @@ fn fullscreen_context_bar_width(ui: &FullscreenUi<'_>) -> usize {
         return 80;
     }
     normalize_context_bar_width(usize::from(ui.last_transcript_width).saturating_sub(8))
+}
+
+fn format_compaction_result(result: &CompactionResult, include_summary: bool) -> String {
+    if !result.compacted {
+        return format!("not compacted: {}", result.message);
+    }
+    let before = result
+        .tokens_before
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "?".to_string());
+    let after = result
+        .tokens_after
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "?".to_string());
+    let mut lines = vec![
+        format!("compacted: {before} -> {after} tokens"),
+        format!(
+            "first kept seq: {}",
+            result
+                .first_kept_session_seq
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "?".to_string())
+        ),
+    ];
+    if include_summary
+        && let Some(summary) = result.summary.as_deref()
+        && !summary.trim().is_empty()
+    {
+        lines.push(String::new());
+        lines.push("summary:".to_string());
+        lines.push(summary.trim().to_string());
+    }
+    lines.join("\n")
 }
 
 fn normalize_submitted_slash_echo(value: &str) -> String {
@@ -1041,7 +1225,12 @@ fn slash_command_echo(command: &SlashCommand) -> String {
         SlashCommand::Sessions => "/sessions".to_string(),
         SlashCommand::Usage => "/usage".to_string(),
         SlashCommand::Context => "/context".to_string(),
-        SlashCommand::ReloadContext => "/reload-context".to_string(),
+        SlashCommand::Refresh => "/refresh".to_string(),
+        SlashCommand::ReloadContextDeprecated => "/reload-context".to_string(),
+        SlashCommand::Btw(prompt) => prompt
+            .as_deref()
+            .map(|prompt| format!("/btw {}", prompt.trim()))
+            .unwrap_or_else(|| "/btw".to_string()),
         SlashCommand::ModelShow => "/model".to_string(),
         SlashCommand::VariantSet(variant) => format!("/variant {variant}"),
         SlashCommand::ModeSet(mode) => format!("/mode {mode}"),
@@ -1104,6 +1293,10 @@ fn slash_command_echo(command: &SlashCommand) -> String {
         SlashCommand::Skills => "/skills".to_string(),
         SlashCommand::Agents => "/agents".to_string(),
         SlashCommand::Fork(prompt) => format!("/fork {}", prompt.trim()),
+        SlashCommand::Compact(instructions) => instructions
+            .as_deref()
+            .map(|instructions| format!("/compact {}", instructions.trim()))
+            .unwrap_or_else(|| "/compact".to_string()),
         SlashCommand::SkillInvoke { name, args } => {
             if args.trim().is_empty() {
                 format!("/skill:{name}")

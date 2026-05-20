@@ -33,6 +33,32 @@ struct TuiApp {
     clipboard_result_rx: std::sync::mpsc::Receiver<Result<(), String>>,
     clipboard_copies_in_flight: usize,
     slash_config: EffectiveSlashConfig,
+    btw_side: Option<BtwSideState>,
+    side_cleanup_task: Option<SideCleanupTask>,
+    compaction_task: Option<CompactionTask>,
+}
+
+struct BtwSideState {
+    parent_session: String,
+    parent_session_title: Option<String>,
+    parent_model: Option<String>,
+    parent_variant: Option<String>,
+    parent_mode: RunMode,
+    parent_permission_mode: PermissionMode,
+    parent_agent: Option<String>,
+    parent_agent_explicit_default: bool,
+    side_session: String,
+}
+
+struct SideCleanupTask {
+    task: JoinHandle<std::result::Result<usize, String>>,
+}
+
+struct CompactionTask {
+    session_id: String,
+    command_echo: Option<String>,
+    manual: bool,
+    task: JoinHandle<std::result::Result<CompactionResult, String>>,
 }
 
 impl TuiApp {

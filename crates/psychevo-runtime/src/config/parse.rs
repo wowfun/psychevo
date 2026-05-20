@@ -28,9 +28,54 @@ fn parse_run_config(value: Value) -> Result<RunConfig> {
                 .insert(provider_id, parse_config_provider_entry(key, entry)?);
         }
     }
+    if let Some(compression) = object.get("compression") {
+        config.compression = parse_compression_config(compression, &configured_keys)?;
+    }
     if let Some(permissions) = object.get("permissions") {
         config.permissions = parse_permission_config(permissions)?;
     }
+    Ok(config)
+}
+
+fn parse_compression_config(
+    value: &Value,
+    configured_keys: &HashSet<String>,
+) -> Result<CompressionConfig> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| Error::Config("compression must be an object".to_string()))?;
+    let mut config = CompressionConfig::default();
+    if let Some(enabled) = optional_bool_field(object, "enabled")? {
+        config.enabled = enabled;
+    }
+    if let Some(auto) = optional_bool_field(object, "auto")? {
+        config.auto = auto;
+    }
+    if let Some(threshold) = optional_f64_field(object, "threshold_percent")? {
+        if !(0.0..=100.0).contains(&threshold) || threshold == 0.0 {
+            return Err(Error::Config(
+                "compression.threshold_percent must be greater than 0 and at most 100".to_string(),
+            ));
+        }
+        config.threshold_percent = threshold;
+    }
+    if let Some(reserve) = optional_u64_field(object, "reserve_tokens")? {
+        config.reserve_tokens = reserve;
+    }
+    if let Some(keep_recent) = optional_u64_field(object, "keep_recent_tokens")? {
+        if keep_recent == 0 {
+            return Err(Error::Config(
+                "compression.keep_recent_tokens must be greater than 0".to_string(),
+            ));
+        }
+        config.keep_recent_tokens = keep_recent;
+    }
+    if let Some(model) = object.get("model") {
+        config.model = parse_model_selection(model, configured_keys)?;
+        config.model_configured = true;
+    }
+    config.reasoning_effort =
+        validate_reasoning_effort(optional_string_field(object, "reasoning_effort")?)?;
     Ok(config)
 }
 
@@ -150,9 +195,7 @@ fn parse_config_model_entry(
     })
 }
 
-fn parse_config_model_metadata(
-    object: &serde_json::Map<String, Value>,
-) -> Result<ModelMetadata> {
+fn parse_config_model_metadata(object: &serde_json::Map<String, Value>) -> Result<ModelMetadata> {
     if object.contains_key("context_limit") {
         return Err(Error::Config(
             "context_limit is no longer supported; use limit.context".to_string(),

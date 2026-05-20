@@ -1,5 +1,6 @@
 mod accounting;
 mod agents;
+mod compaction;
 mod config;
 mod context;
 mod context_usage;
@@ -36,6 +37,10 @@ pub use agents::{
     resolve_agent_definition, resume_agent_id, send_agent_message, set_agent_spawn_paused,
     stop_agent_id_with_grace, view_agent_value, view_agent_value_with_catalog, wait_agent_id,
     wait_agent_mailbox,
+};
+pub use compaction::{
+    AutoCompactionCheckOptions, CompactSessionOptions, CompactionReason, CompactionResult,
+    auto_compaction_due_for_snapshot, compact_session,
 };
 pub use config::{
     append_local_permission_allow_rule, append_local_permission_rule, auth_status_value,
@@ -81,7 +86,10 @@ pub use skills::{
 pub use smoke::run_smoke;
 pub use stats::usage_stats;
 pub use store::{AgentEdgeRecord, AgentEdgeStatus};
-pub use store::{ContextEvidenceInput, ContextEvidenceRecord, SqliteStore};
+pub use store::{
+    ChildSessionSnapshotInput, ContextEvidenceInput, ContextEvidenceRecord, SessionCompactionInput,
+    SessionCompactionRecord, SessionMessageRecord, SqliteStore,
+};
 pub use tools::tool_names_for_mode;
 pub use types::{
     AgentSpawnOptions, AgentSpawnResult, ApprovalHandler, ApprovalMode, ClarifyAnswer,

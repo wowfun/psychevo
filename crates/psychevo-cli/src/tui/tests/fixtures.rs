@@ -12,6 +12,27 @@ fn draw_fullscreen_for_test(
     terminal.backend().buffer().clone()
 }
 
+fn draw_fullscreen_with_cursor_for_test(
+    app: &TuiApp,
+    ui: &mut FullscreenUi<'_>,
+    width: u16,
+    height: u16,
+) -> (ratatui::buffer::Buffer, (u16, u16)) {
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| app.render_fullscreen(frame, ui))
+        .expect("draw");
+    let cursor = {
+        let Position { x, y } = terminal
+            .backend_mut()
+            .get_cursor_position()
+            .expect("cursor");
+        (x, y)
+    };
+    (terminal.backend().buffer().clone(), cursor)
+}
+
 async fn drain_fullscreen_until_idle(app: &mut TuiApp, ui: &mut FullscreenUi<'_>) {
     for _ in 0..200 {
         app.drain_fullscreen_events(ui).await.expect("drain events");
@@ -77,6 +98,9 @@ fn test_app(temp: &tempfile::TempDir) -> TuiApp {
         clipboard_result_rx,
         clipboard_copies_in_flight: 0,
         slash_config: EffectiveSlashConfig::default(),
+        btw_side: None,
+        side_cleanup_task: None,
+        compaction_task: None,
     }
 }
 

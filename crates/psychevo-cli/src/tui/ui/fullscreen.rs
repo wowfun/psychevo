@@ -23,6 +23,8 @@ impl<'a> FullscreenUi<'a> {
             turn_usage: None,
             turn_metadata: None,
             turn_accounting: None,
+            turn_session_id: None,
+            active_event_session_id: None,
             turn_failures: 0,
             turn_interrupted: false,
             turn_outcome: None,
@@ -56,6 +58,7 @@ impl<'a> FullscreenUi<'a> {
             last_transcript_area: None,
             last_composer_area: None,
             last_composer_input_area: None,
+            composer_cursor_top_row: 0,
             last_status_area: None,
             last_bottom_panel_area: None,
             last_entry_areas: Vec::new(),
@@ -407,6 +410,7 @@ impl<'a> FullscreenUi<'a> {
         self.push_history_message_with_accounting(message, usage, metadata, None);
     }
 
+    #[cfg(test)]
     fn push_history_message_with_accounting(
         &mut self,
         message: &Value,
@@ -414,6 +418,22 @@ impl<'a> FullscreenUi<'a> {
         metadata: Option<&Value>,
         accounting: Option<&Value>,
     ) {
+        self.push_history_message_with_accounting_options(
+            message, usage, metadata, accounting, false,
+        );
+    }
+
+    fn push_history_message_with_accounting_options(
+        &mut self,
+        message: &Value,
+        usage: Option<&Value>,
+        metadata: Option<&Value>,
+        accounting: Option<&Value>,
+        suppress_terminal_meta: bool,
+    ) {
+        if btw_inherited_message(metadata) {
+            return;
+        }
         match message
             .get("role")
             .and_then(Value::as_str)
@@ -467,7 +487,8 @@ impl<'a> FullscreenUi<'a> {
                         self.push_history_interrupted_tool_call(call, metadata);
                     }
                 }
-                if ((has_answer && visible_answer_message_receives_meta(message))
+                if !suppress_terminal_meta
+                    && ((has_answer && visible_answer_message_receives_meta(message))
                     || (has_reasoning && reasoning_only_message_receives_meta(message)))
                     && let Some(meta) = history_meta_text(
                         message,
@@ -802,6 +823,7 @@ impl<'a> FullscreenUi<'a> {
     fn clear_composer(&mut self) {
         self.textarea = new_textarea();
         self.shell_mode = false;
+        self.composer_cursor_top_row = 0;
     }
 
     fn select_composer_all(&mut self) -> bool {
@@ -842,6 +864,7 @@ impl<'a> FullscreenUi<'a> {
         }
         self.slash_menu_selected = 0;
         self.clear_slash_menu_dismissal();
+        self.composer_cursor_top_row = 0;
     }
 
     fn composer_submission_text(&self) -> String {
@@ -1203,6 +1226,10 @@ impl<'a> FullscreenUi<'a> {
         self.last_composer_input_area = area;
     }
 
+    fn composer_terminal_cursor_position(&mut self, area: Rect) -> Option<(u16, u16)> {
+        composer_terminal_cursor_position(&self.textarea, area, &mut self.composer_cursor_top_row)
+    }
+
     fn mouse_wheel_target(&self, column: u16, row: u16) -> Option<MouseWheelTarget> {
         if self
             .last_bottom_panel_area
@@ -1273,6 +1300,8 @@ impl<'a> FullscreenUi<'a> {
         self.turn_usage = None;
         self.turn_metadata = None;
         self.turn_accounting = None;
+        self.turn_session_id = None;
+        self.active_event_session_id = None;
         self.turn_failures = 0;
         self.turn_interrupted = false;
         self.turn_outcome = None;
@@ -1291,6 +1320,10 @@ impl<'a> FullscreenUi<'a> {
             text: text.into(),
             failed: false,
         });
+    }
+
+    fn clear_ephemeral_status(&mut self) {
+        self.ephemeral_status = None;
     }
 
     fn set_ephemeral_error(&mut self, text: impl Into<String>) {
@@ -1468,6 +1501,22 @@ impl<'a> FullscreenUi<'a> {
         }
     }
 
+    fn apply_stream_event_for_session(
+        &mut self,
+        event: RunStreamEvent,
+        thinking_visible: bool,
+        debug: bool,
+        session_id: Option<&str>,
+    ) -> bool {
+        let previous = self.active_event_session_id.clone();
+        if let Some(session_id) = session_id {
+            self.active_event_session_id = Some(session_id.to_string());
+        }
+        let result = self.apply_stream_event(event, thinking_visible, debug);
+        self.active_event_session_id = previous;
+        result
+    }
+
     fn open_clarify_panel(&mut self, request: ClarifyRequestEvent) {
         self.clarify_tool_args.insert(
             request.call_id.clone(),
@@ -1495,11 +1544,9 @@ impl<'a> FullscreenUi<'a> {
     }
 
     fn value_with_cached_clarify_args(&self, value: &Value, tool_call_id: &str) -> Value {
-        let args_missing = value
-            .get("args")
-            .is_none_or(|args| {
-                args.is_null() || args.as_object().is_some_and(|obj| obj.is_empty())
-            });
+        let args_missing = value.get("args").is_none_or(|args| {
+            args.is_null() || args.as_object().is_some_and(|obj| obj.is_empty())
+        });
         if !args_missing {
             return value.clone();
         }
@@ -1522,6 +1569,10 @@ impl<'a> FullscreenUi<'a> {
             "run_start" => {
                 let now = Instant::now();
                 self.turn_started = Some(now);
+                self.turn_session_id = value
+                    .get("session_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
                 if self.visible_turn_started.is_none() {
                     self.visible_turn_started = Some(now);
                 }
@@ -1640,7 +1691,8 @@ impl<'a> FullscreenUi<'a> {
                         && let Some(args) = value.get("args")
                         && !args.is_null()
                     {
-                        self.clarify_tool_args.insert(tool_call_id.clone(), args.clone());
+                        self.clarify_tool_args
+                            .insert(tool_call_id.clone(), args.clone());
                     }
                     return false;
                 }
@@ -2008,6 +2060,8 @@ impl<'a> FullscreenUi<'a> {
         self.turn_outcome = None;
         self.turn_terminal_message = None;
         self.turn_interrupted = false;
+        self.turn_session_id = None;
+        self.active_event_session_id = None;
         self.turn_had_reasoning = false;
         self.turn_terminal_visible_answer = false;
         self.visible_turn_started = None;
@@ -2132,7 +2186,13 @@ impl<'a> FullscreenUi<'a> {
         {
             return;
         }
-        if self.running.is_some() {
+        let running_session = self
+            .active_event_session_id
+            .as_deref()
+            .or(self.turn_session_id.as_deref());
+        if self.running.is_some()
+            || running_session.is_some_and(|session_id| self.status_has_running(Some(session_id)))
+        {
             self.remove_turn_meta();
             return;
         }

@@ -1254,6 +1254,8 @@ fn reconstructed_tool_declarations(
             approval_mode: Default::default(),
             approval_handler: None,
             store: store.clone(),
+            db_path: PathBuf::new(),
+            config_path: None,
             parent_session_id: summary.id.clone(),
             parent_context_snapshot: Vec::new(),
             catalog: AgentCatalog::default(),

@@ -18,8 +18,11 @@ use crate::agents::{
     narrow_permission_mode_for_agent, resolve_agent_definition, resolve_agents_home,
     run_agent_hook_event, skill_catalog_visible_for_tools, spawn_child_agent_background,
 };
+use crate::compaction::{
+    CompactSessionOptions, CompactionReason, compact_session, is_context_overflow_error,
+    load_projected_messages,
+};
 use crate::config::{ResolvedRunProvider, load_run_config, resolve_run_provider};
-use crate::context::prune_context;
 use crate::context_usage::{
     ContextRecorder, ContextRecordingProvider, LiveContextProfile, context_counting_metadata,
 };
@@ -54,7 +57,7 @@ const DEFAULT_AGENT_MAX_TURNS: usize = 128;
 pub(crate) const SESSION_TITLE_MAX_CHARS: usize = 100;
 
 pub async fn run_live(options: RunOptions) -> Result<RunResult> {
-    run_live_internal(options, "run", &["run"], None, None).await
+    run_live_internal(options, "run", &["run"], None, None, false).await
 }
 
 pub async fn run_live_streaming(
@@ -63,7 +66,7 @@ pub async fn run_live_streaming(
     continue_sources: &[&str],
     stream: RunStreamSink,
 ) -> Result<RunResult> {
-    run_live_internal(options, source, continue_sources, Some(stream), None).await
+    run_live_internal(options, source, continue_sources, Some(stream), None, false).await
 }
 
 pub async fn run_live_streaming_controlled(
@@ -79,6 +82,7 @@ pub async fn run_live_streaming_controlled(
         continue_sources,
         Some(stream),
         Some(control),
+        false,
     )
     .await
 }
@@ -181,6 +185,8 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
             approval_mode: Default::default(),
             approval_handler: None,
             store: store.clone(),
+            db_path: options.db_path.clone(),
+            config_path: options.config_path.clone(),
             parent_session_id: summary.id.clone(),
             parent_context_snapshot: Vec::new(),
             catalog: agent_catalog.clone(),
@@ -432,6 +438,8 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         approval_mode,
         approval_handler: options.approval_handler.clone(),
         store,
+        db_path: options.db_path.clone(),
+        config_path: options.config_path.clone(),
         parent_session_id: parent_session_id.clone(),
         parent_context_snapshot: Vec::new(),
         catalog: agent_catalog,
@@ -462,6 +470,7 @@ async fn run_live_internal(
     continue_sources: &[&str],
     stream_events: Option<RunStreamSink>,
     control: Option<RunControl>,
+    overflow_retry_attempted: bool,
 ) -> Result<RunResult> {
     let workdir = canonical_workdir(&options.workdir)?;
     if options.prompt.trim().is_empty() && options.image_inputs.is_empty() {
@@ -594,11 +603,11 @@ async fn run_live_internal(
                     "api_key_env": resolved.api_key_env.clone(),
                     "reasoning_effort": resolved.reasoning_effort.clone(),
                     "context_limit": resolved.context_limit,
-                "model_metadata": resolved.metadata.public_json(),
-                "mode": options.mode.as_str(),
-                "permission_mode": permission_mode.as_str(),
-                "approval_mode": approval_mode.as_str(),
-                "selected_agent": selected_agent_summary.clone(),
+                    "model_metadata": resolved.metadata.public_json(),
+                    "mode": options.mode.as_str(),
+                    "permission_mode": permission_mode.as_str(),
+                    "approval_mode": approval_mode.as_str(),
+                    "selected_agent": selected_agent_summary.clone(),
                 })),
             )?,
             true,
@@ -606,6 +615,16 @@ async fn run_live_internal(
     };
 
     store.cleanup_reverted_messages(&session_id)?;
+    maybe_preflight_compact_session(
+        &options,
+        &workdir,
+        &session_id,
+        &resolved.provider,
+        &resolved.model,
+        &resolved.reasoning_effort,
+        &loaded.env,
+    )
+    .await?;
     let prompt_snapshot = options.snapshot_root.as_ref().and_then(|root| {
         SnapshotStore::new(root.clone(), session_id.clone(), workdir.clone())
             .track()
@@ -644,10 +663,8 @@ async fn run_live_internal(
         stream_events.as_ref(),
     );
 
-    let previous_messages = prune_context(
-        store.load_messages(&session_id)?,
-        options.max_context_messages,
-    );
+    let previous_messages =
+        load_projected_messages(&store, &session_id, options.max_context_messages)?;
     let prompt_session_seq = store.next_message_seq(&session_id)?;
     let mailbox_context_messages = store
         .deliver_pending_agent_mailbox_events_for_prompt(&session_id, prompt_session_seq)?
@@ -673,6 +690,7 @@ async fn run_live_internal(
         },
     ));
     let stream_events_after = stream_events.clone();
+    let controlled_run = control.is_some();
     let (control_handle, control_receivers, clarify_control) = match control {
         Some(control) => {
             let clarify = Some(control.handle.clarify.clone());
@@ -712,6 +730,8 @@ async fn run_live_internal(
             approval_mode,
             approval_handler: options.approval_handler.clone(),
             store: store.clone(),
+            db_path: options.db_path.clone(),
+            config_path: options.config_path.clone(),
             parent_session_id: session_id.clone(),
             parent_context_snapshot: previous_messages.clone(),
             catalog: agent_catalog.clone(),
@@ -929,8 +949,52 @@ async fn run_live_internal(
         tools,
         max_turns: DEFAULT_AGENT_MAX_TURNS,
     };
-    let completion =
-        run_agent_loop(Arc::clone(&provider), request, sink, control_receivers).await?;
+    let completion = match run_agent_loop(Arc::clone(&provider), request, sink, control_receivers)
+        .await
+    {
+        Ok(completion) => completion,
+        Err(err) => {
+            let err = Error::from(err);
+            if !overflow_retry_attempted && !controlled_run && is_context_overflow_error(&err) {
+                store.delete_messages_from_seq(&session_id, prompt_session_seq)?;
+                compact_session(CompactSessionOptions {
+                    db_path: options.db_path.clone(),
+                    workdir: workdir.clone(),
+                    session: session_id.clone(),
+                    config_path: options.config_path.clone(),
+                    model: options
+                        .model
+                        .clone()
+                        .or_else(|| Some(format!("{}/{}", resolved.provider, resolved.model))),
+                    reasoning_effort: options
+                        .reasoning_effort
+                        .clone()
+                        .or_else(|| resolved.reasoning_effort.clone()),
+                    inherited_env: Some(loaded.env.clone()),
+                    reason: CompactionReason::Overflow,
+                    instructions: Some(
+                        "Prioritize preserving the current task state before retrying an overflowed request."
+                            .to_string(),
+                    ),
+                    force: true,
+                })
+                .await?;
+                let mut retry_options = options.clone();
+                retry_options.session = Some(session_id.clone());
+                retry_options.continue_latest = false;
+                return Box::pin(run_live_internal(
+                    retry_options,
+                    source,
+                    continue_sources,
+                    stream_events_after.clone(),
+                    None,
+                    true,
+                ))
+                .await;
+            }
+            return Err(err);
+        }
+    };
     record_missed_required_agents(
         &store,
         &session_id,
@@ -1013,6 +1077,39 @@ fn selected_skills_for_run(
         .into_iter()
         .filter(|skill| seen.insert(skill.path.clone()))
         .collect()
+}
+
+async fn maybe_preflight_compact_session(
+    options: &RunOptions,
+    workdir: &std::path::Path,
+    session_id: &str,
+    provider: &str,
+    model: &str,
+    reasoning_effort: &Option<String>,
+    env: &BTreeMap<String, String>,
+) -> Result<()> {
+    let model_override = options
+        .model
+        .clone()
+        .or_else(|| Some(format!("{provider}/{model}")));
+    let result = compact_session(CompactSessionOptions {
+        db_path: options.db_path.clone(),
+        workdir: workdir.to_path_buf(),
+        session: session_id.to_string(),
+        config_path: options.config_path.clone(),
+        model: model_override,
+        reasoning_effort: options
+            .reasoning_effort
+            .clone()
+            .or_else(|| reasoning_effort.clone()),
+        inherited_env: Some(env.clone()),
+        reason: CompactionReason::AutoThreshold,
+        instructions: None,
+        force: false,
+    })
+    .await?;
+    let _ = result;
+    Ok(())
 }
 
 fn selected_agent_for_result(agent: Option<&AgentDefinition>) -> Option<SelectedAgent> {

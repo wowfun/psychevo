@@ -46,6 +46,41 @@ fn composer_cursor_from_point(
     ))
 }
 
+fn composer_terminal_cursor_position(
+    textarea: &TextArea<'_>,
+    area: Rect,
+    top_row: &mut u16,
+) -> Option<(u16, u16)> {
+    if area.width == 0 || area.height == 0 {
+        return None;
+    }
+    let cursor = textarea.screen_cursor();
+    let cursor_row = cursor.row.min(usize::from(u16::MAX)) as u16;
+    let cursor_col = cursor.col.min(usize::from(u16::MAX)) as u16;
+    *top_row = next_composer_cursor_top_row(*top_row, cursor_row, area.height);
+    let visible_row = cursor_row
+        .saturating_sub(*top_row)
+        .min(area.height.saturating_sub(1));
+    let visible_col = cursor_col.min(area.width.saturating_sub(1));
+    Some((
+        area.x.saturating_add(visible_col),
+        area.y.saturating_add(visible_row),
+    ))
+}
+
+fn next_composer_cursor_top_row(prev_top: u16, cursor_row: u16, height: u16) -> u16 {
+    if height == 0 {
+        return 0;
+    }
+    if cursor_row < prev_top {
+        cursor_row
+    } else if prev_top.saturating_add(height) <= cursor_row {
+        cursor_row.saturating_add(1).saturating_sub(height)
+    } else {
+        prev_top
+    }
+}
+
 fn composer_char_col_at_display_col(line: &str, display_col: usize) -> usize {
     let mut width = 0usize;
     for (index, ch) in line.chars().enumerate() {

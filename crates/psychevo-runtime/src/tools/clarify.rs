@@ -115,6 +115,7 @@ impl ToolBinding for ClarifyTool {
                             ToolOutput {
                                 json: serde_json::to_value(response)
                                     .unwrap_or_else(|err| json!({"error": format!("failed to serialize clarify response: {err}")})),
+                                model_content: None,
                                 is_error: false,
                             }
                         }

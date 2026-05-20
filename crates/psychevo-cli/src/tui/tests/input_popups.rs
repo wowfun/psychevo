@@ -2,6 +2,75 @@ fn composer_ctrl_a_key() -> KeyEvent {
     KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL)
 }
 
+#[test]
+fn composer_terminal_cursor_anchors_empty_input() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    let (_buffer, cursor) = draw_fullscreen_with_cursor_for_test(&app, &mut ui, 48, 10);
+    let input = ui.last_composer_input_area.expect("composer input area");
+
+    assert_eq!(cursor, (input.x, input.y));
+}
+
+#[test]
+fn composer_terminal_cursor_anchors_normal_text() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.textarea = textarea_with_text("hello");
+
+    let (_buffer, cursor) = draw_fullscreen_with_cursor_for_test(&app, &mut ui, 48, 10);
+    let input = ui.last_composer_input_area.expect("composer input area");
+
+    assert_eq!(cursor, (input.x + 5, input.y));
+}
+
+#[test]
+fn composer_terminal_cursor_anchors_shell_mode_text() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.enter_shell_mode();
+    ui.textarea = textarea_with_text("echo");
+
+    let (_buffer, cursor) = draw_fullscreen_with_cursor_for_test(&app, &mut ui, 48, 10);
+    let input = ui.last_composer_input_area.expect("composer input area");
+
+    assert_eq!(cursor, (input.x + 4, input.y));
+}
+
+#[test]
+fn composer_terminal_cursor_anchors_cjk_wide_text() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.textarea = textarea_with_text("你好x");
+
+    let (_buffer, cursor) = draw_fullscreen_with_cursor_for_test(&app, &mut ui, 48, 10);
+    let input = ui.last_composer_input_area.expect("composer input area");
+
+    assert_eq!(cursor, (input.x + 5, input.y));
+}
+
+#[test]
+fn composer_terminal_cursor_stays_anchored_with_popup_above() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.textarea = textarea_with_text("/sess");
+
+    let (_buffer, cursor) = draw_fullscreen_with_cursor_for_test(&app, &mut ui, 48, 12);
+    let input = ui.last_composer_input_area.expect("composer input area");
+
+    assert!(
+        !ui.last_slash_menu_areas.is_empty(),
+        "slash popup should be rendered above composer"
+    );
+    assert_eq!(cursor, (input.x + 5, input.y));
+}
+
 #[tokio::test]
 async fn enter_executes_first_slash_menu_suggestion() {
     let temp = tempdir().expect("temp");

@@ -22,6 +22,7 @@ impl SqliteStore {
             && user_version != 7
             && user_version != 8
             && user_version != 9
+            && user_version != 10
         {
             return Err(Error::Config(format!(
                 "state database schema version {user_version} is not supported; run `pevo init --reset-state` or set PSYCHEVO_DB to a new state database"
@@ -142,6 +143,22 @@ impl SqliteStore {
                 metadata_json TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS session_compactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                created_at_ms INTEGER NOT NULL,
+                reason TEXT NOT NULL,
+                summary_text TEXT NOT NULL,
+                first_kept_session_seq INTEGER NOT NULL,
+                created_after_session_seq INTEGER NOT NULL,
+                tokens_before INTEGER,
+                tokens_after INTEGER,
+                summary_provider TEXT NOT NULL,
+                summary_model TEXT NOT NULL,
+                instructions TEXT,
+                metadata_json TEXT
+            );
+
             CREATE INDEX IF NOT EXISTS idx_messages_session_seq
                 ON messages(session_id, session_seq);
             CREATE INDEX IF NOT EXISTS idx_context_evidence_prompt
@@ -150,6 +167,8 @@ impl SqliteStore {
                 ON agent_edges(parent_session_id, status, updated_at_ms);
             CREATE INDEX IF NOT EXISTS idx_agent_mailbox_parent_pending
                 ON agent_mailbox_events(parent_session_id, delivered_at_ms, created_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_session_compactions_latest
+                ON session_compactions(session_id, created_after_session_seq, created_at_ms);
             "#,
         )?;
         if user_version == 3 && !sqlite_column_exists(&conn, "sessions", "archived_at_ms")? {

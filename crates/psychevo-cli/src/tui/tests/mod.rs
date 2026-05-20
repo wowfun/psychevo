@@ -1,13 +1,14 @@
 use super::*;
 use psychevo_runtime::{ContextCategory, ContextScope, ContextTokenizer, ContextTotal};
-use ratatui::backend::TestBackend;
+use ratatui::backend::{Backend, TestBackend};
+use ratatui::layout::Position;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tempfile::tempdir;
 
 fn line_text(line: &Line<'_>) -> String {

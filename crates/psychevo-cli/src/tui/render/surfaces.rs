@@ -77,6 +77,11 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_>)
             },
         );
     }
+    if ui.focus == FocusMode::Composer
+        && let Some((x, y)) = ui.composer_terminal_cursor_position(input_area)
+    {
+        frame.set_cursor_position((x, y));
+    }
 }
 
 fn render_slash_menu(
@@ -279,6 +284,10 @@ fn render_status(frame: &mut Frame<'_>, area: Rect, app: &TuiApp, ui: &Fullscree
         spans.push(Span::raw("  "));
         spans.push(Span::styled("transcript", theme.accent_style()));
         spans.push(Span::styled(" · Esc", theme.dim_style()));
+    }
+    if let Some(label) = app.btw_parent_status_label(ui) {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(label, theme.accent_style()));
     }
     let auxiliary_shell_count =
         ui.auxiliary_shell_tasks.len() + ui.pending_auxiliary_shell_commands.len();

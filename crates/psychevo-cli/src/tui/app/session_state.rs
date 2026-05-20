@@ -330,7 +330,12 @@ impl TuiApp {
             return;
         };
         for event in events {
-            ui.apply_stream_event(event, self.thinking_visible, self.debug);
+            ui.apply_stream_event_for_session(
+                event,
+                self.thinking_visible,
+                self.debug,
+                Some(session_id),
+            );
         }
         ui.follow_transcript_if_needed();
     }
@@ -551,19 +556,22 @@ impl TuiApp {
             session_context_limit_with_parent_fallback(&store, session_id, metadata.as_ref())?;
         let summaries = store.load_tui_message_summaries(session_id)?;
         ui.loaded_session_message_count = summaries.len();
+        let summary_count = summaries.len();
+        let suppress_latest_terminal_meta = ui.status_has_running(Some(session_id));
         let mut history_prompts = Vec::new();
-        for summary in summaries {
+        for (index, summary) in summaries.into_iter().enumerate() {
             let value = serde_json::to_value(summary.message)?;
             if value.get("role").and_then(Value::as_str) == Some("user")
                 && let Some(text) = user_text_from_message(&value, summary.metadata.as_ref())
             {
                 history_prompts.push(text);
             }
-            ui.push_history_message_with_accounting(
+            ui.push_history_message_with_accounting_options(
                 &value,
                 summary.usage.as_ref(),
                 summary.metadata.as_ref(),
                 summary.accounting.as_ref(),
+                suppress_latest_terminal_meta && index + 1 == summary_count,
             );
         }
         let agent_catalog = self.current_agent_catalog();

@@ -55,6 +55,25 @@ fn passive_mouse_motion_does_not_request_redraw() {
 }
 
 #[test]
+fn passive_redraw_due_throttles_timeout_only_motion() {
+    let start = Instant::now();
+    let mut next_due = schedule_next_passive_redraw(start);
+
+    assert!(!passive_redraw_due(
+        start + FULLSCREEN_EVENT_POLL_INTERVAL,
+        &mut next_due
+    ));
+    assert!(passive_redraw_due(
+        start + FULLSCREEN_PASSIVE_REDRAW_INTERVAL,
+        &mut next_due
+    ));
+    assert!(!passive_redraw_due(
+        start + FULLSCREEN_PASSIVE_REDRAW_INTERVAL + FULLSCREEN_EVENT_POLL_INTERVAL,
+        &mut next_due
+    ));
+}
+
+#[test]
 fn selection_extracts_text_from_registered_screen_lines() {
     let lines = vec![
         ScreenLine {

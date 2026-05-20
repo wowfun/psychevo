@@ -19,16 +19,18 @@ use crossterm::terminal::{
 use psychevo_ai::Outcome;
 use psychevo_runtime::{
     AgentCatalog, AgentDiscoveryOptions, AgentEdgeRecord, AgentSource, AgentSpawnOptions,
-    ClarifyAnswer, ClarifyQuestion, ClarifyRequestEvent, ClarifyResolvedEvent, ClarifyResponse,
-    ClarifyResult, ConfigScope, ConfiguredModel, ContextFormatOptions, ContextOptions,
-    ContextSnapshot, CustomProviderInput, ImageInput, MAX_AGENT_SPAWN_DEPTH_CAP, ModelCatalogEntry,
-    ModelCatalogProvider, ModelMetadataCacheTarget, PermissionMode, PromptAttachmentDisplay,
-    PromptDisplayMetadata, ReloadContextOptions, RunControlHandle, RunMode, RunOptions,
-    RunStreamEvent, RunStreamSink, SessionArtifactKind, SessionExportFormat, SessionExportOptions,
-    SessionExportWriteResult, SessionSummary, SessionUndoOptions, SkillCatalog,
-    SkillDiscoveryOptions, SqliteStore, StatsOptions, TUI_DISPLAY_METADATA_KEY, TerminalReason,
-    TuiMessageSummary, USER_SHELL_METADATA_KEY, UserShellContextOptions, UserShellOptions,
-    agent_spawn_paused, agent_status_value, canonicalize_workdir, config_show_value,
+    AutoCompactionCheckOptions, ChildSessionSnapshotInput, ClarifyAnswer, ClarifyQuestion,
+    ClarifyRequestEvent, ClarifyResolvedEvent, ClarifyResponse, ClarifyResult,
+    CompactSessionOptions, CompactionReason, CompactionResult, ConfigScope, ConfiguredModel,
+    ContextFormatOptions, ContextOptions, ContextSnapshot, CustomProviderInput, ImageInput,
+    MAX_AGENT_SPAWN_DEPTH_CAP, ModelCatalogEntry, ModelCatalogProvider, ModelMetadataCacheTarget,
+    PermissionMode, PromptAttachmentDisplay, PromptDisplayMetadata, ReloadContextOptions,
+    RunControlHandle, RunMode, RunOptions, RunStreamEvent, RunStreamSink, SessionArtifactKind,
+    SessionExportFormat, SessionExportOptions, SessionExportWriteResult, SessionSummary,
+    SessionUndoOptions, SkillCatalog, SkillDiscoveryOptions, SqliteStore, StatsOptions,
+    TUI_DISPLAY_METADATA_KEY, TerminalReason, TuiMessageSummary, USER_SHELL_METADATA_KEY,
+    UserShellContextOptions, UserShellOptions, agent_spawn_paused, agent_status_value,
+    auto_compaction_due_for_snapshot, canonicalize_workdir, compact_session, config_show_value,
     configured_models, context_snapshot, create_global_custom_provider,
     custom_provider_api_key_env, default_session_export_filename, discover_agents, discover_skills,
     fetch_model_catalog, format_context_snapshot_text_with_options, format_context_total_value,
@@ -78,6 +80,9 @@ use crate::env::{
 };
 
 const TUI_SESSION_SOURCES: &[&str] = &["run", "tui"];
+const TUI_SIDE_SESSION_SOURCE: &str = "tui-side";
+const BTW_SIDE_METADATA_KEY: &str = "btw_side";
+const BTW_INHERITED_METADATA_KEY: &str = "btw_inherited";
 const USER_SHELL_HELP: &str = "shell mode: type !<command> to run a local shell command";
 const FILE_POPUP_MAX_ROWS: usize = 8;
 
@@ -172,6 +177,9 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
         clipboard_result_rx,
         clipboard_copies_in_flight: 0,
         slash_config,
+        btw_side: None,
+        side_cleanup_task: None,
+        compaction_task: None,
     };
     app.start_missing_model_metadata_cache_warmup();
     app.refresh_selected_model();
@@ -220,6 +228,7 @@ fn load_effective_tui_slash_config(
 include!("app/state.rs");
 include!("app/loop.rs");
 include!("app/bottom_panel.rs");
+include!("app/side.rs");
 include!("app/commands.rs");
 include!("app/events.rs");
 include!("app/status.rs");

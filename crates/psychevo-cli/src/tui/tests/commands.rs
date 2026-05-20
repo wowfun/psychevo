@@ -192,11 +192,7 @@ async fn configured_slash_alias_and_leader_shortcut_dispatch_commands() {
     let mut ui = FullscreenUi::new(&app);
     let matches = app.slash_menu_items("/ex");
     assert_eq!(matches[0].command, "/expr");
-    assert!(
-        matches[0]
-            .description
-            .contains("alias for /status")
-    );
+    assert!(matches[0].description.contains("alias for /status"));
 
     ui.textarea = textarea_with_text("/ex");
     app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
@@ -209,9 +205,7 @@ async fn configured_slash_alias_and_leader_shortcut_dispatch_commands() {
         .expect("alias enter");
 
     assert!(ui.transcript.iter().any(|row| {
-        row.kind == TranscriptKind::Command
-            && row.title == "/expr"
-            && row.text.contains("workdir:")
+        row.kind == TranscriptKind::Command && row.title == "/expr" && row.text.contains("workdir:")
     }));
 
     let mut ui = FullscreenUi::new(&app);
@@ -221,9 +215,12 @@ async fn configured_slash_alias_and_leader_shortcut_dispatch_commands() {
     )
     .await
     .expect("leader");
-    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE))
-        .await
-        .expect("leader command");
+    app.handle_fullscreen_key(
+        &mut ui,
+        KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE),
+    )
+    .await
+    .expect("leader command");
 
     assert!(ui.history.is_empty());
     assert!(ui.transcript.iter().any(|row| {
@@ -248,9 +245,12 @@ async fn configured_slash_shortcuts_do_not_fire_while_editing_or_in_panel() {
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("draft");
 
-    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Char('s'), KeyModifiers::ALT))
-        .await
-        .expect("shortcut while editing");
+    app.handle_fullscreen_key(
+        &mut ui,
+        KeyEvent::new(KeyCode::Char('s'), KeyModifiers::ALT),
+    )
+    .await
+    .expect("shortcut while editing");
 
     assert!(ui.transcript.is_empty());
     assert_eq!(textarea_text(&ui.textarea), "draft");
@@ -263,9 +263,12 @@ async fn configured_slash_shortcuts_do_not_fire_while_editing_or_in_panel() {
     )
     .await
     .expect("leader in panel");
-    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE))
-        .await
-        .expect("s in panel");
+    app.handle_fullscreen_key(
+        &mut ui,
+        KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE),
+    )
+    .await
+    .expect("s in panel");
 
     assert!(ui.transcript.is_empty());
     assert!(matches!(ui.bottom_panel, Some(BottomPanel::Help(_))));
@@ -552,11 +555,9 @@ async fn fullscreen_context_command_appends_compact_command_row() {
     assert_eq!(cell_count, 70);
     assert_eq!(cell_count % 5, 0);
     assert!((50..=100).contains(&cell_count));
-    assert!(
-        row.text.contains(
-            "\nB base  D developer  P project  H history  C turn  U prompt  T tools  . free\n\n"
-        )
-    );
+    assert!(row.text.contains(
+        "\nB base  D developer  P project  H history  C turn  U prompt  T tools  . free\n\n"
+    ));
     assert!(row.text.contains("\ninput_history:"));
     assert!(!row.text.contains("\nmessages:"));
     assert!(!row.text.contains("unavailable"));
@@ -605,6 +606,40 @@ async fn fullscreen_variant_and_upcoming_feedback_use_command_rows() {
             && row.title == "/compact"
             && row.text == "/compact is upcoming; no session changes made"
     }));
+}
+
+#[tokio::test]
+async fn fullscreen_compact_queues_behind_running_turn() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let session = store
+        .create_session_with_metadata(&app.workdir, "tui", "model", "mock", None)
+        .expect("session");
+    app.current_session = Some(session.clone());
+    let mut ui = FullscreenUi::new(&app);
+    attach_pending_agent_running(&mut ui);
+
+    app.handle_fullscreen_command(
+        &mut ui,
+        SlashCommand::Compact(Some("focus on todos".to_string())),
+    )
+    .await
+    .expect("compact");
+
+    assert_eq!(ui.queued_inputs.len(), 1);
+    match ui.queued_inputs.front().expect("queued") {
+        QueuedInput::Compact {
+            session_id,
+            instructions,
+            command_echo,
+        } => {
+            assert_eq!(session_id.as_deref(), Some(session.as_str()));
+            assert_eq!(instructions.as_deref(), Some("focus on todos"));
+            assert_eq!(command_echo, "/compact focus on todos");
+        }
+        other => panic!("unexpected queued input: {other:?}"),
+    }
 }
 
 #[tokio::test]
@@ -989,6 +1024,196 @@ async fn fullscreen_new_command_resets_session_without_status_row() {
         ui.transcript
             .iter()
             .all(|row| row.kind != TranscriptKind::Status)
+    );
+}
+
+#[tokio::test]
+async fn fullscreen_reload_context_points_to_refresh() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::ReloadContextDeprecated)
+        .await
+        .expect("reload deprecated");
+
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command
+            && row.title == "/reload-context"
+            && row.failed
+            && row.text.contains("use /refresh")
+    }));
+}
+
+#[tokio::test]
+async fn fullscreen_btw_opens_hidden_side_and_ctrl_c_deletes_it() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let parent = store
+        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .expect("parent");
+    insert_tui_message_with_metadata(
+        &app.db_path,
+        &parent,
+        1,
+        "user",
+        "parent prompt",
+        serde_json::json!({
+            "role": "user",
+            "content": [{"text": "parent prompt"}],
+            "timestamp_ms": 1
+        }),
+        None,
+    );
+    app.current_session = Some(parent.clone());
+    let mut ui = FullscreenUi::new(&app);
+    app.load_current_session_history(&mut ui).expect("history");
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Btw(None))
+        .await
+        .expect("btw");
+
+    let side = app
+        .btw_side
+        .as_ref()
+        .expect("side state")
+        .side_session
+        .clone();
+    assert_eq!(app.current_session.as_deref(), Some(side.as_str()));
+    assert!(ui.transcript.is_empty());
+    assert!(
+        store
+            .list_sessions_for_workdir_with_sources(&app.workdir, TUI_SESSION_SOURCES)
+            .expect("sessions")
+            .iter()
+            .all(|summary| summary.id != side)
+    );
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Refresh)
+        .await
+        .expect("refresh rejected");
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command
+            && row.title == "/refresh"
+            && row.failed
+            && row
+                .text
+                .contains("unavailable inside a /btw side conversation")
+    }));
+
+    app.handle_fullscreen_command(
+        &mut ui,
+        SlashCommand::Compact(Some("focus current task".to_string())),
+    )
+    .await
+    .expect("compact rejected");
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command
+            && row.title == "/compact focus current task"
+            && row.failed
+            && row
+                .text
+                .contains("unavailable inside a /btw side conversation")
+    }));
+
+    app.handle_fullscreen_key(
+        &mut ui,
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+    )
+    .await
+    .expect("ctrl-c");
+
+    assert_eq!(app.current_session.as_deref(), Some(parent.as_str()));
+    assert!(app.btw_side.is_none());
+    assert!(
+        SqliteStore::open(&app.db_path)
+            .expect("store")
+            .session_summary(&side)
+            .expect("summary")
+            .is_none()
+    );
+    assert!(
+        ui.ephemeral_status
+            .as_ref()
+            .is_some_and(|status| { status.text.contains("returned from /btw") })
+    );
+}
+
+#[tokio::test]
+async fn fullscreen_btw_detaches_running_parent() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let parent = store
+        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .expect("parent");
+    app.current_session = Some(parent.clone());
+    let mut ui = FullscreenUi::new(&app);
+    attach_pending_agent_running(&mut ui);
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Btw(None))
+        .await
+        .expect("btw");
+
+    assert!(ui.running.is_none());
+    assert_eq!(ui.auxiliary_agent_tasks.len(), 1);
+    assert_eq!(
+        ui.auxiliary_agent_tasks[0].session_id.as_deref(),
+        Some(parent.as_str())
+    );
+    assert!(
+        app.btw_parent_status_label(&ui)
+            .is_some_and(|label| label.contains("main running"))
+    );
+
+    for task in &ui.auxiliary_agent_tasks {
+        task.control.abort();
+    }
+}
+
+#[tokio::test]
+async fn fullscreen_refresh_cleans_orphan_side_sessions() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app_with_models(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let parent = store
+        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .expect("parent");
+    let side = store
+        .create_child_session_with_metadata(
+            &parent,
+            &app.workdir,
+            TUI_SIDE_SESSION_SOURCE,
+            "mock-model",
+            "mock",
+            Some(serde_json::json!({BTW_SIDE_METADATA_KEY: {"ephemeral": true}})),
+        )
+        .expect("side");
+    app.current_session = Some(parent);
+    let mut ui = FullscreenUi::new(&app);
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Refresh)
+        .await
+        .expect("refresh");
+    for _ in 0..10 {
+        if app.drain_side_cleanup_task(&mut ui).await.expect("drain") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    assert!(
+        SqliteStore::open(&app.db_path)
+            .expect("store")
+            .session_summary(&side)
+            .expect("summary")
+            .is_none()
+    );
+    assert!(
+        ui.ephemeral_status
+            .as_ref()
+            .is_some_and(|status| { status.text.contains("side cleanup deleted 1") })
     );
 }
 

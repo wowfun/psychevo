@@ -237,6 +237,8 @@ pub enum ToolExecutionMode {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ToolOutput {
     pub json: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_content: Option<String>,
     pub is_error: bool,
 }
 
@@ -244,15 +246,37 @@ impl ToolOutput {
     pub fn ok(json: Value) -> Self {
         Self {
             json,
+            model_content: None,
             is_error: false,
         }
+    }
+
+    pub fn ok_with_model_content(json: Value, model_content: impl Into<String>) -> Self {
+        Self {
+            json,
+            model_content: Some(model_content.into()),
+            is_error: false,
+        }
+    }
+
+    pub fn with_model_content(mut self, model_content: impl Into<String>) -> Self {
+        self.model_content = Some(model_content.into());
+        self
     }
 
     pub fn error(message: impl Into<String>) -> Self {
         Self {
             json: json!({ "error": message.into() }),
+            model_content: None,
             is_error: true,
         }
+    }
+
+    pub fn model_content(&self) -> String {
+        self.model_content.clone().unwrap_or_else(|| {
+            serde_json::to_string(&self.json)
+                .unwrap_or_else(|_| "{\"error\":\"invalid result\"}".to_string())
+        })
     }
 }
 

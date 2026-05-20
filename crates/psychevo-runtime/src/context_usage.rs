@@ -11,6 +11,7 @@ use psychevo_ai::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::compaction::load_projected_messages;
 use crate::config::selected_configured_model;
 use crate::error::{Error, Result};
 use crate::paths::canonical_workdir;
@@ -276,11 +277,19 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
         .or_else(|| {
             configured_context_limit(&options, &summary.provider, &summary.model, &workdir)
         });
-    let messages = store
+    let message_summaries = store
         .load_tui_message_summaries(&summary.id)?
         .into_iter()
         .collect::<Vec<_>>();
-    let latest_input_tokens = latest_assistant_usage_input_tokens(&messages);
+    let has_compaction = store
+        .latest_valid_session_compaction(&summary.id)?
+        .is_some();
+    let latest_input_tokens = if has_compaction {
+        None
+    } else {
+        latest_assistant_usage_input_tokens(&message_summaries)
+    };
+    let messages = load_projected_messages(&store, &summary.id, None)?;
     let env = options
         .inherited_env
         .clone()
@@ -329,7 +338,7 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
         }));
     }
     for message in &messages {
-        request_messages.push(serde_json::to_value(&message.message)?);
+        request_messages.push(serde_json::to_value(message)?);
     }
     let mut tools = coding_core_tools_for_mode(&workdir, mode);
     tools.extend(skill_tools_for_mode(skill_options, mode));
