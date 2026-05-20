@@ -61,9 +61,9 @@ Required interaction coverage:
   multi-line boundary behavior, and history search.
 - Slash menu behavior for exact, prefix, and subsequence fuzzy matching,
   default first selection, Up/Down/Home/End navigation, mouse click, prefix-only
-  Tab completion, argument placeholder hints in descriptions only, disabled
-  future entries, bounded `upcoming` feedback, and menu hiding when argument
-  text or bottom panes take over.
+  Tab completion, argument placeholder hints in descriptions only, active
+  `/compact [instructions]` parsing, and menu hiding when argument text or
+  bottom panes take over.
 - User shell escape behavior for fullscreen and scripted TUI: `!` detection
   after leading whitespace, explicit shell-mode state, `Shift+1`, shell marker,
   empty shell `Esc`/`Backspace`, pasted/raw/history `!<command>` import,
@@ -87,14 +87,30 @@ Required interaction coverage:
   `/image image.png describe` inserts placeholder plus prompt text; deleting a
   placeholder unbinds the image; `/new` clears pending images and placeholders;
   submitted image prompts preserve composer text.
-- `/status`, `/usage`/`/stats`, `/context`, `/show-thinking`, `/show-raw`,
-  `/mode`, `/variant`, `/skills`, `/skill:<name>`, `/export`, and `/share`
+- `/status`, `/usage`/`/stats`, `/context`, `/refresh`, `/btw`,
+  `/show-thinking`, `/show-raw`, `/mode`, `/variant`, `/skills`,
+  `/skill:<name>`, `/export`, and `/share`
   behavior, including parser errors, fullscreen/scripted parity, transcript
   command-row versus bottom-pane ownership, `-f` format aliases for export,
   share rejecting `-f`, and sensitive include handling.
 - `/context` command interaction: argument rejection, fullscreen command row,
   scripted output without the bar, and output limited to implemented context
   categories.
+- `/refresh` command interaction: TUI-visible replacement for
+  `/reload-context`, prompt-prefix reload result, background orphan side-session
+  cleanup status, whole-command rejection while the active thread is running,
+  rejection inside side conversations, and `/reload-context` direct-input
+  feedback pointing to `/refresh` while remaining absent from help and menu
+  discovery.
+- `/btw` side conversation interaction: parsing for `/btw`, `/btw <prompt>`,
+  and hidden `/side <prompt>`; help/menu visibility for `/btw` only; hidden
+  temporary side-session creation; inherited snapshot plus boundary
+  instructions; auto-submission of the initial prompt; parent running detachment
+  without cancellation; parent live-event buffering and replay on return;
+  parent status projection while inside the side; side-local model and
+  permission changes restoring parent settings on return; limited side slash
+  command whitelist; side transcript deletion on idle `Ctrl+C`; running side
+  turn interruption before return; and real workspace mutation persistence.
 - `/usage` and `/stats` alias behavior without provider calls.
 - `/show-thinking` and `/show-raw` toggles: default values, explicit on/off,
   persistence, immediate refresh of existing blocks, no extra status row, and

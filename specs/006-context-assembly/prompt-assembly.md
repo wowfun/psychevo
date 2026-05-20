@@ -116,7 +116,8 @@ using the current config and files. Current sessions do not automatically
 refresh when AGENTS, agent, or skill files change. The stable prefix is rebuilt
 only by:
 
-- `/reload-context`
+- TUI `/refresh`
+- non-TUI `/reload-context`
 - `pevo session reload-context <id|latest>`
 - starting a new session
 - switching the selected main agent

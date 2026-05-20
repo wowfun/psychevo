@@ -57,6 +57,12 @@ motion primitive with a deterministic static fallback for tests and reduced
 motion contexts. Time-varying motion must be included in transcript layout cache
 keys only when it changes rendered width or visible content.
 
+Timeout-only fullscreen redraws used only to advance running-state motion must
+be coalesced to a bounded passive cadence instead of firing at the input poll
+interval. Key input, paste, resize, mouse actions, and drained runtime events
+still request immediate redraws. This keeps activity motion responsive without
+disturbing terminal IME candidate windows at frame-rate cadence.
+
 Assistant visible text streams inline inside the current turn. Thinking is
 visible by default, rendered as folded/debug material under a `Thinking`
 evidence block, not as assistant transcript text. When `/show-thinking` is off, TUI

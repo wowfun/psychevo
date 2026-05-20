@@ -28,6 +28,10 @@ actual tool invocation names and useful arguments, not category verbs such as
   elapsed labels, and shared activity motion
 - fixed composer/status-line rendering, including context usage, path/branch
   display, running elapsed projection, and child-session status-line behavior
+- active editable-surface terminal cursor anchoring for IME candidate windows
+  in fullscreen terminals
+- bounded passive redraw cadence for running-state motion, while preserving
+  immediate redraws for input and runtime events
 - sidebar content and clearing behavior
 - lightweight terminal Markdown projection, raw transcript display, and
   copy-visible rendered text boundaries

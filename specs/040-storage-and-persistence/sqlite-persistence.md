@@ -30,6 +30,7 @@ The default first-slice SQLite shape contains:
 - `messages`
 - `context_evidence`
 - `agent_edges`
+- `session_compactions`
 
 The default first-slice SQLite shape does not create:
 - a separate per-invocation execution-root table
@@ -98,6 +99,40 @@ The first implementation slice stores these columns:
 - `status` text, `open` or `closed`
 - `created_at_ms` integer
 - `updated_at_ms` integer
+- `metadata_json` text nullable
+
+## Session Compactions
+
+The `session_compactions` storage shape persists completed context compaction
+checkpoints. It is context-projection state, not transcript material.
+
+Required semantics include:
+- durable relationship to one session
+- one row or equivalent durable unit per successful compaction checkpoint
+- summary text that may be projected as hidden summary context
+- session sequence boundaries for retained messages and checkpoint validity
+- reason, token estimates, summary model/provider, and optional manual
+  instruction metadata
+
+Compaction checkpoints must not delete or rewrite rows in `messages`, must not
+increment `sessions.message_count`, and must not appear in default transcript
+retrieval. Runtime may ignore checkpoints that are newer than the current
+effective undo/revert boundary.
+
+The first implementation slice stores these compaction columns:
+
+- `id` integer primary key autoincrement
+- `session_id` text foreign key
+- `created_at_ms` integer
+- `reason` text
+- `summary_text` text
+- `first_kept_session_seq` integer
+- `created_after_session_seq` integer
+- `tokens_before` integer nullable
+- `tokens_after` integer nullable
+- `summary_provider` text
+- `summary_model` text
+- `instructions` text nullable
 - `metadata_json` text nullable
 
 ## Messages
@@ -222,9 +257,13 @@ SQLite persistence should perform periodic WAL checkpoint work when supported by
 
 Storage failures that affect session or message persistence must be observable to runtime or caller-facing layers that depend on persistence.
 
-The current implementation uses `PRAGMA user_version = 8`, WAL, foreign keys,
+The current implementation uses `PRAGMA user_version = 11`, WAL, foreign keys,
 short busy timeouts, `BEGIN IMMEDIATE`, bounded jitter retry, and best-effort
 periodic `wal_checkpoint(PASSIVE)`.
+
+The version 11 slice creates `session_compactions` for completed context
+compaction checkpoints. The checkpoints affect runtime context projection but
+do not rewrite message transcript rows.
 
 The version 8 slice creates `agent_edges` for durable parent-to-child agent
 coordination. The edge tracks `open`/`closed` coordination state separately

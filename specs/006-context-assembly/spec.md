@@ -153,6 +153,8 @@ Transformation policy may depend on caller inputs, runtime configuration, provid
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines how context facts relate to other state families.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability contribution boundaries for context candidates.
 - [055 Skills](../055-skills/spec.md) defines skill package discovery and model-visible skill index semantics.
+- [130 Context Compaction](../130-context-compaction/spec.md) defines the
+  implementation policy for compacted summary context.
 - [Prompt Assembly Attachment](prompt-assembly.md) defines typed prompt slot
   ordering, prefix snapshots, provider-role fallback, and context usage
   categories.

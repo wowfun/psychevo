@@ -71,15 +71,46 @@ invocation safety policy, scoped MCP availability, and resource boundaries.
 ## Run Lifecycle And Control
 
 Foreground subagents block the tool call until completion and return the final
-summary as the tool result. The foreground final summary must not also be
-projected through the parent mailbox.
+summary as the model-visible tool result. The foreground final summary must not
+also be projected through the parent mailbox.
+
+Model-visible subagent results are compact summary JSON objects. Runtime may
+emit and persist richer metadata for system surfaces, but future model context
+receives only the compact projection unless a control handle is explicitly
+needed. The common summary projection contains:
+
+- `agent_name`
+- `task`
+- `status`
+- `exit_reason`
+- `summary`
+- `duration_ms`
+- `tool_call_count`
+- `model`
+- `tokens`
+
+`tokens` contains `input`, `output`, `reasoning`, and `total` when those values
+are available for the direct child session. Unavailable fields are omitted
+rather than serialized as `null`. Failed runs use `status`, `exit_reason`, and
+an `error` field when an error string is available; they do not expose a
+separate `error_kind`. `task` is the explicit `task_name` when supplied;
+otherwise it is the first non-empty prompt line with whitespace collapsed and a
+maximum length of 80 characters. Summary text is not hard-truncated.
+
+The full structured tool output remains available to runtime-owned system
+surfaces such as `ToolExecutionEnd` stream events, TUI rows, durable child
+session metadata, agent edges, mailbox metadata, debug output, and export
+metadata. Tool result messages persisted for future model context may store a
+smaller model-visible content string than the full structured event payload.
 
 Background subagents return a handle immediately. Completion records final
 summary and status, then writes one parent mailbox event. Runtime must not
 persist that completion as a normal parent `user` message. The mailbox payload
 uses structured inter-agent communication content containing a
-`subagent_notification` with the agent identity, status, outcome, and
-`final_answer`.
+`subagent_notification` whose content is the compact summary projection. The
+notification does not include `agent_id`; the full mailbox record and metadata
+retain identity, child-session, outcome, and operational details for system
+inspection.
 
 Interactive clients may also start a background subagent directly from a
 selected definition. That run uses fresh child context by default, records the
@@ -98,6 +129,13 @@ wait delivery drains the current pending batch; the parent model may call
 `wait_agent`, pending mailbox events remain buffered until the next parent
 model-input boundary, where they are delivered once and retained as structured
 mailbox history for subsequent requests.
+
+`list_agents`, `send_message`, `close_agent`, and `resume_agent` expose compact
+model-visible status objects. These control-related outputs include `agent_id`
+because the model may need a durable target handle. Control targets resolve by
+`agent_id` or by the model-visible `task` label. If a task label matches
+multiple agents, runtime returns an ambiguity error asking the caller to use
+`agent_id`.
 
 `close_agent` closes the target's control edge, requests shutdown for running
 work, recursively closes open descendants, and returns the previous status.
@@ -146,6 +184,10 @@ are UI-facing local records and are not human prompts.
 Child metadata records the resolved definition name, generated or provided
 `task_name`, parent session id, source/path, role, background/fork settings, and
 effective remaining spawn depth.
+
+Existing session records are not migrated. Old verbose tool results and
+mailbox records remain historical development data. New records are compact by
+construction, and old `last-provider-request` reconstruction remains unchanged.
 
 No daemon or supervisor is required in the first implementation slice. If the
 process exits while work is active, the active provider call is interrupted,

@@ -19,6 +19,8 @@ Rendering of the resulting transcript rows and panels is defined by
   queued input behavior
 - slash command registry behavior, parsing, menus, completion, and command
   feedback
+- user-visible interaction copy that describes pevo behavior directly without
+  naming external reference implementations
 - file, image, agent, and skill popup interactions
 - bottom panes for help, sessions, models, variants, usage, and agent controls
 - fullscreen mouse routing, wheel routing, app-native selection, and clipboard

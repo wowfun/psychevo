@@ -38,6 +38,11 @@ Persistent sessions do not automatically end at `agent_end`. A persistent sessio
 
 Resume of the same persistent session reopens that session, clears or updates ended state as needed, and continues appending to the same linear message history for the first implementation slice.
 
+Context compaction may add summary continuity inputs inside the same persistent
+session without ending, splitting, or rotating the session. Original finalized
+messages remain session continuity facts; the compaction checkpoint only changes
+which continuity inputs runtime projects into later model context.
+
 [010 Memory System](../010-memory-system/spec.md) defines optional reusable knowledge across sessions or future agent invocations. Memory is separate from session continuity.
 
 This spec does not define stable session lifecycle events. Starting, ending, switching, resuming, or deleting sessions belongs outside this spec unless a later spec promotes those actions into stable semantics.

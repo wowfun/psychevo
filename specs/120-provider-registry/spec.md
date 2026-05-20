@@ -103,6 +103,10 @@ Configuration may define:
 - optional model capability overrides using `reasoning`, `tool_call`,
   `temperature`, `attachment`, `structured_output`, `interleaved`, and
   `modalities.input`/`modalities.output`
+- optional top-level `compression` object for context compaction defaults:
+  `enabled`, `auto`, `threshold_percent`, `reserve_tokens`,
+  `keep_recent_tokens`, optional summary `model`, and optional
+  `reasoning_effort`
 
 The legacy model `context_limit` field is rejected. Configurations must use
 `limit.context` for context-window token limits.
@@ -138,6 +142,12 @@ configured provider.
 When `model` is an object, it may define `id`, optional `provider`, and
 optional `reasoning_effort`. The object form is equivalent to the string form
 plus explicit model-level options.
+
+When `compression.model` is present, it uses the same provider/model parsing
+rules as top-level `model`. When it is absent, runtime may use the current
+invocation model for context compaction summaries. `compression.reasoning_effort`
+uses the same valid values as model `reasoning_effort`; `none` disables the
+request field for summary generation.
 
 Configuration must not contain raw API keys. Credentials are resolved from the
 local environment map through `api_key_env` or built-in credential environment

@@ -91,6 +91,10 @@ Required rendering coverage:
   with a leading `›` prompt marker, fall back to `RGB(38,38,38)` when no
   terminal background is known, keep an empty composer to one visible row, and
   preserve full-width prompt backgrounds for wrapped/CJK rows.
+- Fullscreen composer cursor anchoring tests must assert the terminal cursor
+  position for empty input, normal text, shell mode input, CJK/wide text, and a
+  popup rendered above the composer. A focused redraw-cadence test should cover
+  any helper that throttles timeout-only passive running redraws.
 - Composer, transcript, and sidebar active text selection must share a
   reverse-video/bold highlight that remains visible on full-width user prompt
   surfaces without depending on the prompt surface background color.

@@ -16,6 +16,8 @@ The first TUI supports:
 - `/status`
 - `/usage`, `/stats`
 - `/context`
+- `/refresh`
+- `/btw [prompt]`
 - `/clear`, `/new`
 - `/sessions`, `/resume`, `/continue`
 - `/model`
@@ -37,9 +39,9 @@ The first TUI supports:
 - `/redo`
 - `/agents`
 - `/fork`
+- `/compact [instructions]`
 - `/skills`
 - `/skill:<name> [args]`
-- future disabled entries in the slash menu: `/compact`
 
 Slash command discovery is registry-backed and remains a lightweight menu above
 the composer. The slash menu stays a flat list with at most 8 rows and does
@@ -67,7 +69,7 @@ expand back to the full local result. `/help` does not accept arguments.
 
 `/help` output uses the three groups defined by [026 Commands](../026-commands/spec.md).
 `General` lists ordinary keyboard shortcuts plus common built-in commands:
-`/status`, `/context`, `/model`, `/sessions`, `/new`, `/copy`, `/undo`,
+`/status`, `/context`, `/refresh`, `/btw`, `/model`, `/sessions`, `/new`, `/copy`, `/undo`,
 `/redo`, and `/quit`. `Commands` lists all built-in slash commands in canonical registry
 order. `Custom commands` summarizes dynamic skill invocation as
 `/skill:<name> [args]` with the discovered skill count and lists each concrete
@@ -191,6 +193,62 @@ label and role count rows, while structured snapshots keep the `messages`
 category key. Non-terminal scripted TUI prints the same compact text without a
 bar or command-row wrapper. `/context` does not accept arguments and must not
 call providers.
+
+`/refresh` is the TUI-visible refresh entrypoint. It rebuilds the current
+session prompt prefix using the existing reload-context behavior and schedules a
+background cleanup of orphaned hidden `/btw` side sessions for the current
+workdir. Fullscreen TUI rejects `/refresh` as a whole while the active thread is
+running, writes one command transcript row for the context reload and scheduled
+cleanup, and reports cleanup completion through transient status text with the
+deleted side-session count. `/refresh` is disabled inside `/btw` side
+conversations. `/reload-context` is no longer exposed through TUI help, menu,
+or common command discovery; direct TUI input of `/reload-context` must produce
+bounded feedback telling users to use `/refresh`. Non-TUI session
+reload-context APIs remain available.
+
+`/compact [instructions]` manually compacts the current main-session context as
+defined by [130 Context Compaction](../130-context-compaction/spec.md). Optional
+trailing instructions guide summary focus. If a turn is running, fullscreen TUI
+queues manual compaction behind that turn and ahead of later queued prompts; it
+does not interrupt the turn. Completion reports before/after token estimates
+and a folded display-only summary row that is not a durable session message.
+Scripted TUI prints bounded compaction feedback.
+
+`/btw [prompt]` opens a temporary side conversation for local side work. `/btw`
+opens an empty side conversation; `/btw <prompt>` opens it and immediately
+submits `<prompt>` as the first side prompt. `/side` is a hidden compatibility
+alias with identical behavior and does not appear as a separate help or menu
+row. A side conversation is implemented as a hidden temporary child session that
+inherits a startup snapshot of the parent conversation and inserts hidden
+boundary instructions marking inherited history as reference-only. Later parent
+output is not merged into the side context. The side session inherits the
+current model, reasoning, mode, permissions, selected agent, skills, and tool
+surface at creation time. Tools remain available under the current permission
+policy, and explicit workspace mutations requested inside the side conversation
+are real workspace changes; deleting the side session does not revert them.
+Side-local model, reasoning, and permission changes do not affect the parent
+after return.
+
+While the user is inside a side conversation, the status area identifies it as a
+side conversation and shows parent status such as running, needs input, needs
+approval, failed, interrupted, closed, or finished. If the parent turn is
+running when `/btw` starts, fullscreen TUI detaches it into the existing
+auxiliary-running path so it continues while the side conversation is active.
+`Ctrl+C` inside an idle side conversation returns to the parent, deletes the
+hidden side session and messages, reloads the parent transcript, replays any
+buffered parent live events, and shows only transient feedback. `Ctrl+C` during
+a running side turn interrupts that side turn first; a later `Ctrl+C` returns
+to the parent. Side conversations are not workspace sandboxes: only the
+temporary session transcript is deleted.
+
+Side conversations allow only a limited slash-command set:
+`/help`, `/status`, `/context`, `/model`, `/variant`, `/mode`, `/permissions`,
+`/show-thinking`, `/show-raw`, `/copy`, `/export`, `/share`, `/quit`, `/exit`,
+and `/q`. Nested `/btw` or `/side`, `/refresh`, session navigation, `/new`,
+`/clear`, `/undo`, `/redo`, `/agents`, `/fork`, `/compact`, `/skills`, and skill
+invocation are rejected with bounded feedback. `/quit`, `/exit`, and `/q` keep
+their normal meaning of exiting the program; returning to the parent is only
+`Ctrl+C`.
 
 Fullscreen `/sessions`, `/resume`, `/continue`, and `/model` use bottom panes
 with title text, selected-row highlighting, footer hints, `Enter` selection,

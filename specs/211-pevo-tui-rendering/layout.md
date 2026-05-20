@@ -80,10 +80,12 @@ answer, terminal reasoning-only message, or terminal failure summary recreate
 metadata after active evidence settles.
 Turn metadata must also not render while the current foreground run still owns
 the bottom status-line running marker, even if a terminal assistant
-`message_end` has already arrived. Fullscreen TUI defers that metadata until
-the foreground run is released at `agent_end`/turn-finish time so the ledger
-does not show a completed provider/model summary under an active `Esc`
-interrupt hint.
+`message_end` has already arrived. This includes foreground work that has been
+detached into visible-live auxiliary agent or shell tracking while inspecting a
+parent or child session. Fullscreen TUI defers that metadata until the
+foreground run is released at `agent_end`/turn-finish time so the ledger does
+not show a completed provider/model summary under an active `Esc` interrupt
+hint.
 Turn metadata also must not remain below a currently streaming `Thinking` or
 visible assistant block. If a prior tool failure created interim turn metadata
 and the provider continues with reasoning or answer text, fullscreen TUI removes
@@ -114,6 +116,16 @@ Active text selection in the composer, transcript, and sidebar uses one shared
 high-contrast reverse-video plus bold style instead of relying on a color-only
 selection background. This keeps selection visible on prompt blocks and other
 full-width surfaces that already carry their own adaptive background.
+
+When composer focus is active and no bottom panel owns text input, fullscreen
+rendering must set the real terminal cursor to the editable textarea cursor
+inside the composer input area on every draw. The position accounts for shell
+mode prompt-marker width, empty input, CJK/wide-character display width,
+wrapped screen cursor rows, and the textarea viewport. This cursor anchoring is
+terminal-local display state for IME candidate windows; it is not persisted and
+does not change transcript content. Editable bottom-panel inputs may own and
+set the terminal cursor while focused. Non-editable transcript, sidebar,
+popup-only, and read-only panel focus leaves the terminal cursor hidden.
 
 The composer must not show the current mode in its border/title. The fixed
 status line under the composer shows mode, model, and compact context usage by
