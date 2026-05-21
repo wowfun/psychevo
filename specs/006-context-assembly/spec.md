@@ -40,6 +40,12 @@ evidence, and accounting are defined by the
 [Prompt Assembly Attachment](prompt-assembly.md). Exact prompt wording remains
 outside this spec.
 
+Runtime-owned model prompt text should be maintained as embedded template
+resources owned by the runtime implementation. Moving prompt text into template
+resources must not change the semantic ordering of prompt slots, provider-role
+fallback behavior, context category accounting, or durable evidence semantics;
+content hashes continue to describe the final rendered model-visible text.
+
 Loop-visible context is model-visible message material that uses the message semantics defined by [002 Agent Execution](../002-agent-execution/spec.md). Loop-visible context is the part of model context that belongs to the agent loop transcript.
 
 Attached context is caller-supplied or runtime-supplied facts, source material, or artifacts made model-visible by context projection. This spec does not define attachment syntax, source discovery, source trust, or source storage.

@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-05-21
+
+### Changed
+
+- Updated core tool contracts for `read`, `edit`, `write`, `exec_command`, and
+  `write_stdin`, covering pagination, patch operations, diagnostics, yielded
+  sessions, stdin/PTY, bounded output, and permission metadata.
+- Moved runtime prompt text into embedded Markdown templates without changing
+  prompt assembly semantics.
+- Removed external reference-project names from user-visible coding-core and
+  changelog wording.
+
+### Fixed
+
+- Fixed TUI rendering for yielded `exec_command` sessions and empty
+  `write_stdin` polls.
+
 ## 2026-05-20
 
 ### Added

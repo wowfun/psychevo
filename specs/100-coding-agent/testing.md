@@ -36,7 +36,7 @@ Manual real-provider smoke validation is allowed only as live opt-in validation.
 - Before-agent-start rejection when `coding-core` cannot be expanded into matching tool declarations and execution bindings.
 - Tool declaration snapshot refresh preserves the default `coding-core` declarations and bindings for ordinary coding-agent invocations.
 - Explicit specialized mode may omit some or all default `coding-core` declarations only when runtime accepts that mode.
-- Fake-provider end-to-end invocation where the model requests `read`, `edit`, `write`, and `bash`, then returns a final answer.
+- Fake-provider end-to-end invocation where the model requests `read`, `edit`, `write`, and `exec_command`, then returns a final answer.
 - Live observation shows `agent_start`, `turn_start`, `message_start`, tool execution events, message completion, turn completion, and `agent_end`.
 - Final material resolves to evidence-backed agent-invocation facts without requiring tests to inspect storage schemas.
 - Tool-result facts are linked to assistant tool requests, tool execution outcomes, and loop-visible tool-result messages.

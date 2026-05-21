@@ -15,7 +15,7 @@ semantics, persistent permission rules, and the first dangerous-action policy.
 - relationship between runtime mode, tool visibility, permission mode, and
   approval mode
 - `Tool(pattern)` permission rule language and precedence
-- hard/protected denies, protected reads, and dangerous bash policy
+- hard/protected denies, protected reads, and dangerous exec command policy
 - approval choices, session grants, persistent allow rules, and fallback
   behavior when no approval handler is available
 - observable denial, timeout, and approval failure behavior
@@ -77,18 +77,20 @@ Configuration lives under `permissions` in JSONC config:
   "permissions": {
     "approval_mode": "manual",
     "smart_model": "provider/model",
-    "allow": ["Bash(npm test *)"],
-    "ask": ["Bash(cargo publish *)"],
+    "allow_login_shell": false,
+    "allow": ["ExecCommand(npm test *)"],
+    "ask": ["ExecCommand(cargo publish *)"],
     "deny": ["Write(.env)"]
   }
 }
 ```
 
-Rules use strings of the form `Tool(pattern)`, with tool names `Bash`, `Read`,
-`Write`, and `Edit`. Filesystem patterns may be workdir-relative globs or
-canonical absolute path globs. Generated persistent rules prefer
-workdir-relative patterns. Bash rules match normalized command prefixes and may
-use `*` and `?`.
+Rules use strings of the form `Tool(pattern)`, with tool names `ExecCommand`,
+`Read`, `Write`, and `Edit`. Filesystem patterns may be workdir-relative globs
+or canonical absolute path globs. Generated persistent rules prefer
+workdir-relative patterns. Exec command rules match normalized command prefixes
+and may use `*` and `?`. Legacy `Bash(...)` rules are not interpreted by the
+provider-visible execution tool.
 
 Rule precedence is:
 
@@ -112,9 +114,11 @@ Protected reads are intentionally narrow. Internal Psychevo cache/index paths
 that could inject stale or untrusted runtime material may be denied.
 
 Ordinary workdir file reads, writes, and edits are allowed by default unless a
-rule or protected path says otherwise. Dangerous bash patterns use two tiers:
-catastrophic commands are denied; other risky commands ask in interactive
-contexts and are allowed in non-interactive contexts except under `dontAsk`.
+rule or protected path says otherwise. Dangerous exec command patterns use two
+tiers: catastrophic commands are denied; other risky commands ask in
+interactive contexts and are allowed in non-interactive contexts except under
+`dontAsk`. Shell-level background wrappers that escape session tracking are
+rejected before execution.
 
 Permission policy applies after tool visibility and before or during execution.
 A model-visible tool declaration says what the model may request, not what the

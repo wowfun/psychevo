@@ -105,7 +105,8 @@ default:
 - `read`
 - `write`
 - `edit`
-- `bash`
+- `exec_command`
+- `write_stdin`
 
 The same working-directory containment and tool JSON contracts used by
 `pevo smoke` apply to `pevo run`.

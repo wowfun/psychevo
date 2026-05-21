@@ -26,7 +26,11 @@ stdin/stdout, it keeps the deterministic line-by-line scripted behavior.
 - responsive foreground interruption and preservation of every visible
   assistant answer emitted during a multi-tool turn
 - direct user shell escapes from fullscreen and scripted input, persisted as
-  user-provided shell context without exposing `bash` as a plan-mode model tool
+  user-provided shell context without exposing `exec_command` as a plan-mode
+  model tool
+- live exec-session rendering for yielded `exec_command` processes, including
+  background output updates and interruption cleanup within the current runtime
+  process
 - shared ownership boundaries for the rendered TUI surface, interaction model,
   sessions, state, and validation
 

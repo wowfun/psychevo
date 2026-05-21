@@ -86,12 +86,12 @@ per-workdir mode. Default mode exposes the current full coding-core tools.
 
 When interactive clarify support is enabled, fullscreen TUI may also expose
 the read-only `clarify` tool in plan mode to ask bounded user questions. Plan
-mode must not expose `bash`, `write`, or `edit`. Its read-only semantics must
+mode must not expose `exec_command`, `write_stdin`, `write`, or `edit`. Its read-only semantics must
 not depend only on provider instructions.
 
 User shell escape is a user-supplied shell context action, not a model-visible
 tool. It is available in both `plan` and `default` modes and must not add
-`bash` to the agent-visible tool surface for `plan` mode. Successful, failed,
+`exec_command` or `write_stdin` to the agent-visible tool surface for `plan` mode. Successful, failed,
 non-zero, timed-out, truncated, and interrupted user shell results are persisted
 as user-role context records for subsequent provider requests when the current
 provider/model configuration can be resolved.

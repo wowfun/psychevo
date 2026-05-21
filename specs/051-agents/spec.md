@@ -161,7 +161,8 @@ Compatibility tool aliases normalize to Psychevo tool names:
 - `Read` -> `read`
 - `Grep` -> `search`
 - `Glob` -> `list`
-- `Bash` -> `bash`
+- `ExecCommand` -> `exec_command`
+- `WriteStdin` -> `write_stdin`
 - `Edit` -> `edit`
 - `Write` -> `write`
 - `Agent` and `Task` -> agent-spawn/control tools

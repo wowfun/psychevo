@@ -16,16 +16,30 @@ TUI renders runtime events into semantic ledger evidence:
   reasoning content start without label-width indentation
 - tool calls become flat tool evidence rows whose visible title starts with
   the actual tool invocation name, for example `read <path>`, `list <path>`,
-  `search <query>`, `bash <first command line>`, `write <path>`, or
+  `search <query>`, `exec_command <first command line>`, `write <path>`, or
   `edit <path>`.
-- `bash` tool titles must expose the first actual shell command from the tool
-  arguments rather than a
+- `exec_command` tool titles must expose the first actual shell command from
+  the tool arguments rather than a
   generic `command` placeholder whenever the runtime supplied it. Leading blank
   lines and full-line shell comments, including model-written planning comments
   such as `# Try webcache`, are skipped for title selection so the ledger shows
   the executable command line. Completed tool updates must preserve the command
   title captured from the start event when the end event only contains the
   result.
+- A yielded `exec_command` is not complete merely because the model-visible
+  tool invocation returned. When runtime emits `exec_session_yielded`, the
+  original `exec_command` row remains active, keeps its activity marker, and
+  continues showing elapsed time from the original start. Background
+  `exec_session_output_delta` events append output to that same row.
+  `exec_session_finished` freezes elapsed time and settles the row as completed
+  or interrupted.
+- Empty `write_stdin` polls for an associated yielded session do not create
+  primary transcript rows, including provisional rows created from streaming
+  assistant tool-call arguments before execution starts. Their model-visible
+  results are used for provider context and persisted history, while the
+  visible TUI output comes from the owning `exec_command` row. Non-empty stdin
+  writes render as compact terminal interaction evidence, not as ordinary
+  `write_stdin` tool rows.
 - before a tool completes, fullscreen TUI may project transient active evidence
   from streaming assistant tool-call blocks, runtime pending tool-call input
   events, and tool-execution start events. Active and completed rows keep the
@@ -44,8 +58,9 @@ instead of being moved into a separate generic error log. Interrupted tool
 evidence is distinct from ordinary failure evidence: a tool result with
 `outcome: "aborted"` or `error: "aborted"` renders a muted `interrupted` marker
 in the existing tool evidence row rather than a red failure body or
-`(no output)`. `bash` timeout failures must render an explicit timeout line in
-the failed `bash` row even when the command produced partial output.
+`(no output)`. `exec_command` timeout failures must render an explicit timeout
+line in the failed `exec_command` row even when the command produced partial
+output.
 When the overall turn outcome is `normal`, tool failures are summarized by the
 failed tool row and turn metadata, not by an additional red `Error` transcript
 row. A red turn-ended error row is reserved for non-normal turn outcomes, so
@@ -62,7 +77,7 @@ named pending tool-call input event as soon as a provider streams the tool name,
 before waiting for complete JSON arguments or local execution. While the model
 is still producing tool input, the transcript shows a short `preparing` body
 with the tool name if arguments are not yet complete, for example `write`,
-`read`, or `bash`. Once complete arguments are available, or once the
+`read`, or `exec_command`. Once complete arguments are available, or once the
 corresponding `tool_execution_start` arrives, the active title should update to
 the concrete path/query/command without inserting a duplicate row. Active tool
 rows match primarily by `tool_call_id`; if the id has not arrived yet,
@@ -79,7 +94,7 @@ from visible Thinking text that explicitly announces imminent tool use, such as
 `Let me write...` or `Let me run...`, because some providers stream long
 tool-input generation as reasoning before emitting the structured tool-call
 block. This provisional row uses a generic tool-name title such as `write` or
-`bash`, never a guessed path or command. Hidden thinking must not
+`exec_command`, never a guessed path or command. Hidden thinking must not
 create a provisional row from reasoning text. A concrete assistant tool-call
 block, runtime pending tool-call input event, or runtime `tool_execution_start`
 must replace the provisional row with the real active row when it arrives; if an
@@ -96,9 +111,10 @@ Transcript folding is row-level only. The renderer must not synthesize
 evidence rows are rendered through the same ledger evidence row component and
 are individually foldable when they have rendered detail text. Short rows
 default open; selecting an open foldable row shows `▾ collapse`, and collapsed
-short rows show `▸ details`. Long `bash` command titles stay single-line with
-ellipsis in the title row so elapsed time remains visible, but rows with long
-command titles can expand to show the complete wrapped command below the title.
+short rows show `▸ details`. Long `exec_command` command titles stay
+single-line with ellipsis in the title row so elapsed time remains visible, but
+rows with long command titles can expand to show the complete wrapped command
+below the title.
 Long Thinking bodies and long tool
 outputs use the same default collapse threshold: eight logical lines, 200
 display tokens, or roughly 1200 display cells. Display-token counting is a
@@ -141,6 +157,15 @@ without a write/edit tool call. Repeated message updates for the same visible
 preamble must not create additional provisional `write` rows once a concrete
 active write/edit row exists. Completion must leave exactly one completed tool
 row for the tool call and no orphan active fallback rows.
+
+History reload must rebuild yielded exec chains without requiring a DB schema
+migration. A root `exec_command` tool result with non-null `session_id` and
+null `exit_code` starts an exec session chain. Later `write_stdin` tool results
+with the same session id are merged into that root row in chunk order. If a
+later chunk contains a final `exit_code`, the row is completed with fixed
+duration; if no final chunk is present, the row renders as `last seen running`
+instead of pretending a current OS process is still attached. Empty poll calls
+remain hidden in the primary transcript during replay.
 
 Tool evidence shows elapsed execution duration on the right side of the tool
 title row. Active Thinking rows also show a right-side elapsed value while

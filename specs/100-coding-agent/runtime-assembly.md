@@ -120,7 +120,7 @@ The smoke prompt is deterministic:
 
 - omitted prompt becomes `smoke`
 - prompt text with no tool names produces a text-only assistant answer
-- prompt text containing `read`, `write`, `edit`, or `bash` selects those tools
+- prompt text containing `read`, `write`, `edit`, or `exec_command` selects those tools
   in prompt occurrence order
 - `read` selection emits two read calls to exercise parallel tool execution
 

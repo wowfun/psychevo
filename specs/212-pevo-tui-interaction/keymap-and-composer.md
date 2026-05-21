@@ -58,16 +58,16 @@ startup.
   `<command>`. Bare shell mode submission shows bounded shell-help text and
   does not execute.
 - `!<command>` runs the command locally in the selected workdir through the
-  bounded runtime shell executor. The command is not a provider-callable `bash`
-  tool, but its bounded result is persisted as model-visible user shell context
-  according to the runtime shell-context contract. Live and reloaded user shell
-  transcript rows render like user prompt rows: the command line uses the same
-  full-width prompt background, starts with `! ` followed by the user's command,
-  uses the same marker color as the shell-mode composer `!`, and omits the
-  normal tool-evidence bullet and `Ran` label. The command output
-  remains below that prompt-styled command line as bounded evidence detail. This
-  distinguishes user-submitted shell commands from model-requested bash tool
-  calls.
+  bounded runtime shell executor. The command is not a provider-callable
+  `exec_command` tool request from the model, but its bounded result is
+  persisted as model-visible user shell context according to the runtime
+  shell-context contract. Live and reloaded user shell transcript rows render
+  like user prompt rows: the command line uses the same full-width prompt
+  background, starts with `! ` followed by the user's command, uses the same
+  marker color as the shell-mode composer `!`, and omits the normal
+  tool-evidence bullet and `Ran` label. The command output remains below that
+  prompt-styled command line as bounded evidence detail. This distinguishes
+  user-submitted shell commands from model-requested `exec_command` tool calls.
 - `Up` and `Down` recall submitted composer history when the current composer
   position is at the first or last logical line respectively. History recall
   preserves the in-progress draft and restores it when the user moves past the

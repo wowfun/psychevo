@@ -68,7 +68,8 @@ Required parent-topic coverage:
 - Runtime metrics projection that can expose usage and allowlisted metadata to
   TUI without putting them in sanitized transcript messages.
 - Runtime Plan mode toolset: exposes `read`, `list`, `search`, and
-  fullscreen-interactive `clarify`; does not expose `bash`, `write`, or `edit`.
+  fullscreen-interactive `clarify`; does not expose `exec_command`,
+  `write_stdin`, `write`, or `edit`.
 - Mode instruction is sent to providers for the current turn and is not
   persisted in `messages`.
 - Local stats and accounting projection from persisted columns, including

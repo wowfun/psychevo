@@ -40,7 +40,7 @@ Required rendering coverage:
   `Tool calls` section headers, failures inside their original group, unlabeled
   answer body text, compact metadata rails, and turn metadata only after visible
   answers, terminal reasoning-only messages, or failure summaries.
-- Tool evidence titles must start with the actual tool invocation name. `bash`
+- Tool evidence titles must start with the actual tool invocation name. `exec_command`
   titles must use the first actual command line, skip leading blank/comment-only
   shell lines, and survive start-to-end updates even when end events omit
   arguments.
@@ -51,7 +51,7 @@ Required rendering coverage:
   intermediate `tool_execution_end` events and while the foreground running
   marker remains visible after terminal `message_end`, and settle into
   completed rows while preserving the visible active duration.
-- Interrupted pending rows render as muted `interrupted` evidence, aborted bash
+- Interrupted pending rows render as muted `interrupted` evidence, aborted exec command
   results render `interrupted` instead of `(no output)`, timeout failures render
   an explicit timeout line before partial output, and user-confirmed interrupts
   do not create `1 failure` metadata.
@@ -171,7 +171,7 @@ a long Markdown/table answer and a terminal reasoning-only Thinking table with
 turn metadata, scroll the transcript away from the bottom and then back down,
 capture the default collapsed Thinking/table state, then expand the Thinking
 row and capture a screenshot proving the bottom marker and metadata row are
-visible. It must also capture an interrupted foreground bash row so the settled
+visible. It must also capture an interrupted foreground exec command row so the settled
 `interrupted` marker can be visually inspected.
 
 Agent-observability VHS coverage must include a foreground clickable `Agent`

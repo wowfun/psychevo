@@ -118,7 +118,7 @@ Rows default to a short title plus the most useful detail. Long stdout, JSON,
 diffs, raw data, and repeated preparation text collapse.
 
 Tool evidence titles are tool-name first. Fullscreen ledger rows should show
-the actual invocation name, such as `read path`, `search query`, `bash command`,
+the actual invocation name, such as `read path`, `search query`, `exec_command command`,
 or `write path`, rather than category verbs such as `Exploring`, `Explored`,
 `Running`, `Ran`, `Updating`, or `Updated`. Active state is carried by the
 activity marker, elapsed time, and body suppression rules, not by changing the

@@ -16,10 +16,11 @@ independently numbered spec and does not define a stable public Rust API.
 - path containment behavior
 - default bounds and timeout values
 - edit and patch matching behavior
+- in-process exec session lifecycle events used by local UI surfaces
 
 Out of scope:
 - interactive approvals
-- background processes or PTY behavior
+- durable background processes across runtime restart
 - binary/image file reading
 - search/list tools
 
@@ -49,7 +50,11 @@ Defaults and bounds:
 
 - reads are text-only
 - output is head-truncated at 50KB or 2000 lines
-- missing files include `similar_files`, initially an empty array
+- `offset` values below 1 are normalized to 1
+- `limit` values below 1 are normalized to 1
+- `limit` values above 2000 are normalized to 2000
+- missing files include a bounded `similar_files` array when nearby candidates
+  can be found inside the working directory
 
 Successful result fields:
 
@@ -61,6 +66,13 @@ Successful result fields:
 - `hint`
 - `error`
 - `similar_files`
+- `shown_start_line`
+- `shown_end_line`
+- `next_offset`
+- `output_lines`
+- `output_bytes`
+- `truncated_by`
+- `first_line_exceeds_limit`
 
 Binary files and invalid UTF-8 return JSON errors.
 
@@ -72,13 +84,17 @@ Parameters:
 - `content`: string, required
 
 `write` creates missing parent directories when contained in the working
-directory and completely replaces the target file.
+directory and completely replaces the target UTF-8 text file. It should be
+used instead of shell redirection for complete-file writes.
 
 Successful result fields:
 
 - `path`
 - `bytes_written`
 - `dirs_created`
+- `lint`
+- `lsp_diagnostics`
+- `warning`
 - `error`
 
 ## `edit`
@@ -90,57 +106,121 @@ Parameters:
 For `replace`:
 
 - `path`: string, required
-- `edits`: non-empty array of `{ oldText, newText }`
+- `old_string`: string, required
+- `new_string`: string, required
+- `replace_all`: boolean, optional, defaults to `false`
 
-All `oldText` values are matched against the original file, not incrementally.
-Each `oldText` must occur exactly once and edits must not overlap. No-change,
-ambiguous, missing, stale, or conflicting edits return JSON errors.
+`old_string` must be non-empty and must differ from `new_string`. With
+`replace_all=false`, matching must resolve to exactly one location; ambiguous,
+missing, stale, partial-read, or conflicting edits return JSON errors or
+warnings as appropriate. With `replace_all=true`, every matched occurrence is
+replaced.
 
 Replacement matching strips an initial BOM from matching material, normalizes
 line endings to LF for matching, and writes back using the original file's
-dominant line ending.
+dominant line ending. Matching tries exact text first, then bounded fuzzy
+strategies for trimmed lines, whitespace, indentation, escaped newlines/tabs,
+trimmed boundaries, Unicode quote/dash/space normalization, anchored blocks,
+and context-aware line similarity. Fuzzy replacement must guard against
+transport escape drift and include bounded "did you mean" context when no match
+is found.
 
 For `patch`:
 
-- `patch`: string, required unified diff
+- `patch`: string, required V4A patch text
 
-Patch mode may update multiple existing files. It rejects file creation,
-deletion, rename, `/dev/null`, and paths outside the working directory. Hunks
-apply by matching old hunk content uniquely in the current file.
+Patch mode accepts V4A patch text with `*** Begin Patch`, `*** Update File`,
+`*** Add File`, `*** Delete File`, `*** Move File`, and `*** End Patch`
+markers. It may update, create, delete, or move multiple files. Runtime validates
+all operations before applying them. Update hunks apply through the same fuzzy
+matching chain used by replace mode. Paths outside the working directory are
+rejected.
 
 Successful result fields:
 
 - `success`
 - `diff`
 - `files_modified`
+- `files_created`
+- `files_deleted`
+- `files_moved`
+- `lint`
+- `lsp_diagnostics`
+- `warning`
 - `error`
 
 Diffs are unified diffs generated from original and updated text.
 
-## `bash`
+## `exec_command`
 
 Parameters:
 
-- `command`: string, required
-- `timeout`: number of seconds, optional
+- `cmd`: string, required
+- `workdir`: string, optional; relative paths resolve against the accepted
+  workdir, absolute paths must pass permission/resource gates
+- `shell`: string, optional; defaults to the user's shell
+- `tty`: boolean, optional, default `false`
+- `yield_time_ms`: integer, optional, default `10000`, clamped to
+  `250..30000`
+- `max_output_tokens`: integer, optional, default `10000`
+- `login`: boolean, optional, default `false`; requires explicit permission
+  config when true
 
-Execution uses `bash -lc` in the accepted working directory. The default
-timeout is 120 seconds; the maximum accepted timeout is 300 seconds.
+The tool runs bounded shell commands. Models should use `read`, `write`, and
+`edit` for file I/O instead of shell `cat`, redirection, or patching commands.
+If a command is still running after the yield window, the result includes a
+`session_id` and can be continued with `write_stdin`.
 
-stdout and stderr are merged into one tail-bounded `output` string. Output is
-tail-truncated at 50KB or 2000 lines. On timeout, `exit_code` is `null`.
+`tty=false` uses pipes and closes stdin. `tty=true` uses a PTY and keeps stdin
+writable. If the PTY backend is unavailable, execution falls back to pipe mode,
+keeps stdin writable, and prefixes the first output chunk with a short fallback
+notice.
 
-Successful or failed result fields:
+## `write_stdin`
 
-- `output`
+Parameters:
+
+- `session_id`: integer, required
+- `chars`: string, optional, default `""`; empty means poll
+- `yield_time_ms`: integer, optional, default `250`; non-empty input clamps to
+  `250..30000`, empty poll clamps to `5000..300000`
+- `max_output_tokens`: integer, optional, default `10000`
+
+Non-empty `chars` writes to the session stdin. Sessions started without TTY and
+without PTY fallback reject non-empty stdin writes.
+
+Both exec tools return strict result fields:
+
+- `chunk_id`
+- `wall_time_seconds`
 - `exit_code`
-- `error`
-- `exit_code_meaning`
-- `truncated`
+- `session_id`
+- `original_token_count`
+- `output`
 
-Exit code 0 is success unless another runtime boundary reports failure.
-Non-zero exit codes are failed tool results. The first explanation table covers
-exit code 1 for `grep`, `rg`, `ag`, `ack`, `diff`, `test`, and `[`.
+Normal non-zero process exits are successful tool results with `exit_code` set.
+Invocation failures are failed tool results. Output is bounded by
+`max_output_tokens`; no full-output temp path is returned.
+
+Runtime may also emit internal TUI-only lifecycle events for yielded exec
+sessions. These events never add fields to the model-visible result object:
+
+- `exec_session_yielded`: emitted when `exec_command` returns a non-null
+  `session_id` and null `exit_code`.
+- `exec_session_output_delta`: emitted from background readers as new output is
+  appended; carries `session_id`, root `tool_call_id`, `seq`, and `output`.
+- `exec_session_stdin`: emitted for non-empty stdin writes; carries
+  `session_id`, the `write_stdin` tool call id, and bounded `chars`.
+- `exec_session_finished`: emitted when the process exits or is interrupted;
+  carries `session_id`, root `tool_call_id`, `exit_code`, `elapsed_ms`, and
+  `interrupted`.
+
+Empty `write_stdin` polls remain model-visible tool calls but should not be
+rendered as separate primary transcript rows in fullscreen TUI when they can be
+associated with an existing exec session. This includes suppressing provisional
+rows created from streamed tool-call arguments before the `write_stdin` call
+executes. The associated `exec_command` row owns the visible running state and
+output.
 
 ## Related Topics
 
