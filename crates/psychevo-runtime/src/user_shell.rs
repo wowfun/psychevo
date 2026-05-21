@@ -10,7 +10,7 @@ use crate::error::{Error, Result};
 use crate::paths::canonical_workdir;
 use crate::run::SESSION_TITLE_MAX_CHARS;
 use crate::store::SqliteStore;
-use crate::tools::{default_bash_timeout_secs, run_bash_command};
+use crate::tools::{default_exec_max_output_tokens, run_exec_command_for_user_shell};
 use crate::types::{
     RunControl, RunOptions, RunStreamEvent, RunStreamSink, USER_SHELL_METADATA_KEY,
     UserShellContextOptions, UserShellOptions, UserShellResult,
@@ -45,17 +45,16 @@ pub async fn run_user_shell_command_streaming_controlled(
         "type": "tool_execution_start",
         "session_id": stream_session_id.clone(),
         "tool_call_id": tool_call_id,
-        "tool_name": "bash",
-        "args": {"command": command.clone()},
+        "tool_name": "exec_command",
+        "args": {"cmd": command.clone()},
         "started_at_ms": now_ms(),
         "source": "user_shell",
     })));
 
     let started = Instant::now();
-    let (result, is_error) = match run_bash_command(
+    let (result, is_error) = match run_exec_command_for_user_shell(
         workdir.clone(),
         command.clone(),
-        default_bash_timeout_secs(),
         control.receivers.abort_signal(),
     )
     .await
@@ -63,11 +62,13 @@ pub async fn run_user_shell_command_streaming_controlled(
         Ok((result, is_error)) => (result, is_error),
         Err(err) => (
             json!({
-                "output": "(no output)",
+                "chunk_id": 0,
+                "wall_time_seconds": started.elapsed().as_secs_f64(),
                 "exit_code": null,
+                "session_id": null,
+                "original_token_count": 0,
+                "output": "",
                 "error": err.to_string(),
-                "exit_code_meaning": null,
-                "truncated": false
             }),
             true,
         ),
@@ -86,7 +87,7 @@ pub async fn run_user_shell_command_streaming_controlled(
         "type": "tool_execution_end",
         "session_id": stream_session_id,
         "tool_call_id": tool_call_id,
-        "tool_name": "bash",
+        "tool_name": "exec_command",
         "result": result.clone(),
         "outcome": outcome.as_str(),
         "elapsed_ms": elapsed.as_millis() as u64,
@@ -238,7 +239,7 @@ fn user_shell_metadata(
             "outcome": outcome.as_str(),
             "is_error": is_error,
             "exit_code": result.get("exit_code").cloned().unwrap_or(Value::Null),
-            "truncated": result.get("truncated").and_then(Value::as_bool).unwrap_or(false),
+            "truncated": result_truncated(result),
             "duration_seconds": elapsed.as_secs_f64(),
             "elapsed_ms": elapsed.as_millis() as u64,
             "result": result,
@@ -255,7 +256,7 @@ pub(crate) fn user_shell_context_text(command: &str, result: &Value, elapsed: Du
     let truncated = result
         .get("truncated")
         .and_then(Value::as_bool)
-        .unwrap_or(false);
+        .unwrap_or_else(|| result_truncated(result));
     let error = result
         .get("error")
         .and_then(Value::as_str)
@@ -285,6 +286,13 @@ fn result_output(result: &Value) -> &str {
         .or_else(|| result.get("error").and_then(Value::as_str))
         .filter(|value| !value.is_empty())
         .unwrap_or("(no output)")
+}
+
+fn result_truncated(result: &Value) -> bool {
+    result
+        .get("original_token_count")
+        .and_then(Value::as_u64)
+        .is_some_and(|count| count as usize > default_exec_max_output_tokens())
 }
 
 fn context_scalar(value: &Value) -> String {

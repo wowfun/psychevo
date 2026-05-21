@@ -198,13 +198,13 @@ class Handler(BaseHTTPRequestHandler):
                     "finish_reason": "tool_calls"
                 }]
             }, delay=0.2)
-        elif "Interrupted bash fixture" in body:
+        elif "Interrupted exec command fixture" in body:
             self.send_event({
                 "id": "resp_tui_capture_interrupt",
                 "model": "mock-model",
                 "choices": [{
                     "delta": {
-                        "content": "Starting a bash command that should be interrupted."
+                        "content": "Starting an exec command that should be interrupted."
                     },
                     "finish_reason": None
                 }]
@@ -216,10 +216,10 @@ class Handler(BaseHTTPRequestHandler):
                     "delta": {
                         "tool_calls": [{
                             "index": 0,
-                            "id": "call_interrupted_bash",
+                            "id": "call_interrupted_exec",
                             "function": {
-                                "name": "bash",
-                                "arguments": "{\"command\":\"sleep 60\"}"
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"sleep 60\"}"
                             }
                         }]
                     },
@@ -378,7 +378,7 @@ class Handler(BaseHTTPRequestHandler):
                 "id": "resp_tui_capture_1",
                 "model": "mock-model",
                 "choices": [{
-                    "delta": {"reasoning_content": "Preparing a bash tool call."},
+                    "delta": {"reasoning_content": "Preparing an exec_command tool call."},
                     "finish_reason": None
                 }]
             }, delay=0.4)
@@ -389,10 +389,10 @@ class Handler(BaseHTTPRequestHandler):
                     "delta": {
                         "tool_calls": [{
                             "index": 0,
-                            "id": "call_bash_fixture",
+                            "id": "call_exec_fixture",
                             "function": {
-                                "name": "bash",
-                                "arguments": "{\"command\":\"sleep 2 && cat fixture.txt\"}"
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"sleep 2 && cat fixture.txt\"}"
                             }
                         }]
                     },
@@ -480,7 +480,7 @@ Screenshot $(json_quote "$out_dir/01-model-picker.png")
 Escape
 Type "Inspect the snapshot harness and read fixture.txt"
 Enter
-Wait+Screen /bash sleep 2 && cat fixture.txt/
+Wait+Screen /exec_command sleep 2 && cat fixture.txt/
 Sleep 200 ms
 Screenshot $(json_quote "$out_dir/02-running-thinking.png")
 Wait+Screen /SNAPSHOT_DEMO_FINAL/
@@ -531,14 +531,14 @@ Sleep 300 ms
 Screenshot $(json_quote "$out_dir/08-visible-write-preamble.png")
 Wait+Screen /VISIBLE_WRITE_FINAL/
 Sleep 200 ms
-Type "Interrupted bash fixture"
+Type "Interrupted exec command fixture"
 Enter
-Wait+Screen /bash sleep 60/
+Wait+Screen /exec_command sleep 60/
 Sleep 300 ms
 Escape
 Wait+Screen /interrupted/
 Sleep 300 ms
-Screenshot $(json_quote "$out_dir/09-interrupted-bash.png")
+Screenshot $(json_quote "$out_dir/09-interrupted-exec-command.png")
 Type "/new"
 Enter
 Wait+Screen /Ask pevo/
@@ -574,7 +574,7 @@ Sleep 300 ms
 Screenshot $(json_quote "$out_dir/11-agent-session-running.png")
 Sleep 5600 ms
 Alt+P
-Wait+Screen /14\.5k tokens/
+Wait+Screen /Translation complete/
 Sleep 300 ms
 Screenshot $(json_quote "$out_dir/12-agent-parent-completed.png")
 Type "/agents"
@@ -607,7 +607,7 @@ EOF
 check_demo_artifacts() {
   local out_dir="$1"
   local missing=()
-  for file in 01-model-picker.png 02-running-thinking.png 03-final-ledger.png 04-shell-mode.png 05-long-markdown-bottom-scroll.png 06-reasoning-only-collapsed.png 07-reasoning-only-bottom-scroll.png 08-visible-write-preamble.png 09-interrupted-bash.png 10-agent-tool-running.png 11-agent-session-running.png 12-agent-parent-completed.png 12-agents-running.png 13-agents-available.png 14-agent-actions.png 15-agent-run-prompt.png 16-clarify-panel.png 17-clarify-other-inline.png 18-clarify-result.png; do
+  for file in 01-model-picker.png 02-running-thinking.png 03-final-ledger.png 04-shell-mode.png 05-long-markdown-bottom-scroll.png 06-reasoning-only-collapsed.png 07-reasoning-only-bottom-scroll.png 08-visible-write-preamble.png 09-interrupted-exec-command.png 10-agent-tool-running.png 11-agent-session-running.png 12-agent-parent-completed.png 12-agents-running.png 13-agents-available.png 14-agent-actions.png 15-agent-run-prompt.png 16-clarify-panel.png 17-clarify-other-inline.png 18-clarify-result.png; do
     if [[ ! -s "$out_dir/$file" ]]; then
       missing+=("$file")
     fi

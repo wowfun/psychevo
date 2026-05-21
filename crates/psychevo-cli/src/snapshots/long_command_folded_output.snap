@@ -1,5 +1,6 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 704
 expression: combined
 ---
 fixture=long_command_folded_output
@@ -8,7 +9,7 @@ size=120x18
 --- text ---
 › Fetch comments from sqlite.
 
-• bash cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db "SELECT id || '|' || by || '|' … ▸ 6 more lines
+• exec_command cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db "SELECT id || '|' || by… ▸ 6 more lines
   └ 48070001||user1||cached comment text
     48070002||user2||cached comment text
     ... 6 more lines
@@ -28,7 +29,7 @@ mock/model  high  ~/work · main
 --- styles ---
 [dim]› [default]Fetch comments from sqlite.
 [default]
-[green]• [default]bash cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db "SELECT id || '|' || by || '|' … [dim]▸ 6 more lines[default]
+[green]• [default]exec_command cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db "SELECT id || '|' || by… [dim]▸ 6 more lines[default]
 [dim]  └ [default]48070001||user1||cached comment text
 [dim]    [default]48070002||user2||cached comment text
 [dim]    [default]... 6 more lines

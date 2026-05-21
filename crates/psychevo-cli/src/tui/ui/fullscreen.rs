@@ -13,7 +13,10 @@ impl<'a> FullscreenUi<'a> {
             deferred_stream_events: VecDeque::new(),
             history_tool_titles: BTreeMap::new(),
             history_tool_args: BTreeMap::new(),
+            live_tool_args: BTreeMap::new(),
             clarify_tool_args: BTreeMap::new(),
+            exec_session_rows: BTreeMap::new(),
+            exec_session_elapsed: BTreeMap::new(),
             shell_mode: false,
             turn_started: None,
             turn_provider: String::new(),
@@ -126,7 +129,10 @@ impl<'a> FullscreenUi<'a> {
         self.tool_rows.clear();
         self.history_tool_titles.clear();
         self.history_tool_args.clear();
+        self.live_tool_args.clear();
         self.clarify_tool_args.clear();
+        self.exec_session_rows.clear();
+        self.exec_session_elapsed.clear();
         self.scroll = 0;
         self.last_transcript_height = 0;
         self.last_transcript_width = 0;
@@ -513,8 +519,8 @@ impl<'a> FullscreenUi<'a> {
     fn push_history_user_shell(&mut self, display: UserShellDisplay) {
         let value = serde_json::json!({
             "type": "tool_execution_end",
-            "tool_name": "bash",
-            "args": {"command": display.command},
+            "tool_name": "exec_command",
+            "args": {"cmd": display.command},
             "result": display.result,
             "outcome": display.outcome,
             "source": "user_shell",
@@ -522,7 +528,7 @@ impl<'a> FullscreenUi<'a> {
         let (collapsed, full) = tool_output_text(&value);
         let mut row = TranscriptRow::with_title(
             TranscriptKind::Ran,
-            tool_title("bash", &value),
+            tool_title("exec_command", &value),
             if collapsed.is_empty() {
                 format_tool_summary(&value)
             } else {
@@ -542,6 +548,15 @@ impl<'a> FullscreenUi<'a> {
             .insert(call.id.clone(), call.completed_title.clone());
         self.history_tool_args
             .insert(call.id.clone(), call.args.clone());
+        if call.name == "write_stdin"
+            && let Some(session_id) = exec_session_id_from_args(&call.args)
+            && self.exec_session_rows.contains_key(&session_id)
+        {
+            if let Some(chars) = write_stdin_non_empty_chars(&call.args) {
+                self.push_exec_stdin_row(session_id, chars);
+            }
+            return;
+        }
         let mut row =
             TranscriptRow::with_title(evidence_kind(&call.name), call.active_title, "preparing");
         row.tool_call_id = Some(call.id.clone());
@@ -611,6 +626,9 @@ impl<'a> FullscreenUi<'a> {
             "result": result,
             "outcome": outcome
         });
+        if self.apply_history_exec_session_result(tool, tool_call_id, &value, metadata, is_error) {
+            return;
+        }
         let interrupted = tool_event_interrupted(&value);
         let clarify_no_answer = tool == "clarify" && clarify_no_answer_result(&value);
         let title = if matches!(tool, "Agent" | "clarify") {
@@ -654,6 +672,156 @@ impl<'a> FullscreenUi<'a> {
         } else {
             self.transcript.push(row);
         }
+    }
+
+    fn apply_history_exec_session_result(
+        &mut self,
+        tool: &str,
+        tool_call_id: &str,
+        value: &Value,
+        metadata: Option<&Value>,
+        is_error: bool,
+    ) -> bool {
+        if tool == "exec_command"
+            && let Some(session_id) = exec_session_id_from_result(value)
+            && exec_result_running(value)
+        {
+            let title = self
+                .history_tool_titles
+                .get(tool_call_id)
+                .cloned()
+                .unwrap_or_else(|| tool_title(tool, value));
+            let idx = self
+                .tool_rows
+                .get(&tool_id_key(tool_call_id))
+                .copied()
+                .unwrap_or_else(|| {
+                    let mut row = TranscriptRow::with_title(evidence_kind(tool), title.clone(), "");
+                    row.tool_call_id =
+                        (!tool_call_id.is_empty()).then_some(tool_call_id.to_string());
+                    row.tool_name = Some(tool.to_string());
+                    self.insert_evidence_row(row)
+                });
+            let row = &mut self.transcript[idx];
+            row.kind = evidence_kind(tool);
+            row.title = title;
+            row.tool_name = Some(tool.to_string());
+            row.tool_call_id = (!tool_call_id.is_empty()).then_some(tool_call_id.to_string());
+            row.failed = false;
+            row.interrupted = false;
+            row.tool_elapsed = metadata_elapsed_duration(metadata);
+            row.tool_started = None;
+            set_exec_row_text(row, with_exec_history_running_marker(tool_result_output(value)));
+            self.exec_session_rows.insert(session_id, idx);
+            self.exec_session_elapsed.insert(
+                session_id,
+                metadata_elapsed_duration(metadata).unwrap_or_default(),
+            );
+            self.tool_rows.retain(|_, row_index| *row_index != idx);
+            return true;
+        }
+
+        if tool != "write_stdin" || is_error {
+            return false;
+        }
+        let Some(args) = value.get("args") else {
+            return false;
+        };
+        let Some(session_id) = exec_session_id_from_args(args) else {
+            return false;
+        };
+        let Some(idx) = self.exec_session_rows.get(&session_id).copied() else {
+            return false;
+        };
+
+        let output = tool_result_output(value);
+        if !output.is_empty() {
+            self.append_exec_session_output(idx, &output);
+        }
+        if let Some(elapsed) = metadata_elapsed_duration(metadata) {
+            let total = self.exec_session_elapsed.entry(session_id).or_default();
+            *total += elapsed;
+        }
+
+        if exec_result_completed(value) {
+            let elapsed = self.exec_session_elapsed.remove(&session_id);
+            self.finish_exec_session_row(session_id, idx, elapsed, false, false);
+        } else if let Some(row) = self.transcript.get_mut(idx) {
+            let full = exec_row_full_text_without_history_marker(row);
+            set_exec_row_text(row, with_exec_history_running_marker(full));
+        }
+        true
+    }
+
+    fn append_exec_session_output(&mut self, idx: usize, output: &str) {
+        if output.is_empty() {
+            return;
+        }
+        let Some(row) = self.transcript.get_mut(idx) else {
+            return;
+        };
+        let mut full = exec_row_full_text_without_history_marker(row);
+        full.push_str(output);
+        set_exec_row_text(row, full);
+    }
+
+    fn prefix_exec_session_output_if_needed(&mut self, idx: usize, output: String) {
+        if output.is_empty() {
+            return;
+        }
+        let Some(row) = self.transcript.get_mut(idx) else {
+            return;
+        };
+        let full = exec_row_full_text_without_history_marker(row);
+        if full.is_empty() {
+            set_exec_row_text(row, output);
+        } else if !full.starts_with(&output) {
+            set_exec_row_text(row, format!("{output}{full}"));
+        }
+    }
+
+    fn finish_exec_session_row(
+        &mut self,
+        session_id: u64,
+        idx: usize,
+        elapsed: Option<Duration>,
+        interrupted: bool,
+        keep_session_mapping: bool,
+    ) {
+        let Some(row) = self.transcript.get_mut(idx) else {
+            return;
+        };
+        row.tool_elapsed = elapsed.or_else(|| row.tool_started.map(|started| started.elapsed()));
+        row.tool_started = None;
+        row.title = completed_tool_title_from_active(row.kind, &row.title);
+        row.interrupted = interrupted;
+        row.failed = false;
+        if interrupted {
+            row.text = "interrupted".to_string();
+            row.full_text = None;
+        } else {
+            let full = exec_row_full_text_without_history_marker(row);
+            set_exec_row_text(row, full);
+        }
+        let tool_call_id = row.tool_call_id.clone();
+        if !keep_session_mapping {
+            self.exec_session_rows.remove(&session_id);
+        }
+        self.exec_session_elapsed.remove(&session_id);
+        if let Some(tool_call_id) = tool_call_id {
+            self.tool_rows.remove(&tool_id_key(&tool_call_id));
+        }
+    }
+
+    fn push_exec_stdin_row(&mut self, session_id: u64, chars: &str) {
+        let mut row = TranscriptRow::with_title(
+            TranscriptKind::Ran,
+            format!("stdin {session_id}"),
+            bounded_stdin_display(chars),
+        );
+        row.tool_name = Some("write_stdin".to_string());
+        row.tool_elapsed = Some(Duration::ZERO);
+        self.insert_evidence_row(row);
     }
 
     fn reconcile_history_agent_rows(
@@ -1289,6 +1457,7 @@ impl<'a> FullscreenUi<'a> {
         self.reasoning_row = None;
         self.meta_row = None;
         self.tool_rows.clear();
+        self.live_tool_args.clear();
         self.streaming_tool_message_seq = 0;
         self.streaming_tool_message_open = false;
         self.turn_started = None;
@@ -1375,6 +1544,11 @@ impl<'a> FullscreenUi<'a> {
                 *row_index += 1;
             }
         }
+        for row_index in self.exec_session_rows.values_mut() {
+            if *row_index >= index {
+                *row_index += 1;
+            }
+        }
         index
     }
 
@@ -1389,6 +1563,13 @@ impl<'a> FullscreenUi<'a> {
         decrement_row_index(&mut self.selected_row, index);
         self.tool_rows.retain(|_, row_index| *row_index != index);
         for row_index in self.tool_rows.values_mut() {
+            if *row_index > index {
+                *row_index -= 1;
+            }
+        }
+        self.exec_session_rows
+            .retain(|_, row_index| *row_index != index);
+        for row_index in self.exec_session_rows.values_mut() {
             if *row_index > index {
                 *row_index -= 1;
             }
@@ -1675,6 +1856,95 @@ impl<'a> FullscreenUi<'a> {
                 self.apply_agent_session_start(value);
                 false
             }
+            "exec_session_yielded" => {
+                let Some(session_id) = value.get("session_id").and_then(Value::as_u64) else {
+                    return false;
+                };
+                let tool_call_id = value
+                    .get("tool_call_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let idx = self
+                    .tool_rows
+                    .get(&tool_id_key(tool_call_id))
+                    .copied()
+                    .unwrap_or_else(|| {
+                        let mut tool_value = serde_json::json!({
+                            "args": { "cmd": value.get("cmd").cloned().unwrap_or(Value::Null) }
+                        });
+                        if value.get("source").and_then(Value::as_str) == Some("user_shell")
+                            && let Some(object) = tool_value.as_object_mut()
+                        {
+                            object.insert("source".to_string(), Value::String("user_shell".to_string()));
+                        }
+                        let mut row = TranscriptRow::with_title(
+                            TranscriptKind::Ran,
+                            active_tool_title("exec_command", &tool_value),
+                            "running",
+                        );
+                        row.tool_name = Some("exec_command".to_string());
+                        row.tool_call_id =
+                            (!tool_call_id.is_empty()).then_some(tool_call_id.to_string());
+                        self.insert_evidence_row(row)
+                    });
+                let row = &mut self.transcript[idx];
+                row.kind = TranscriptKind::Ran;
+                row.tool_name = Some("exec_command".to_string());
+                row.tool_call_id = (!tool_call_id.is_empty()).then_some(tool_call_id.to_string());
+                row.failed = false;
+                row.interrupted = false;
+                row.tool_elapsed = None;
+                row.tool_started = Some(tool_started_instant(value));
+                self.exec_session_rows.insert(session_id, idx);
+                if !tool_call_id.is_empty() {
+                    self.tool_rows.insert(tool_id_key(tool_call_id), idx);
+                }
+                true
+            }
+            "exec_session_output_delta" => {
+                let Some(session_id) = value.get("session_id").and_then(Value::as_u64) else {
+                    return false;
+                };
+                let Some(output) = value.get("output").and_then(Value::as_str) else {
+                    return false;
+                };
+                let Some(idx) = self.exec_session_rows.get(&session_id).copied() else {
+                    return false;
+                };
+                self.append_exec_session_output(idx, output);
+                true
+            }
+            "exec_session_stdin" => {
+                let Some(session_id) = value.get("session_id").and_then(Value::as_u64) else {
+                    return false;
+                };
+                let Some(chars) = value.get("chars").and_then(Value::as_str) else {
+                    return false;
+                };
+                if self.exec_session_rows.contains_key(&session_id) {
+                    self.push_exec_stdin_row(session_id, chars);
+                    return true;
+                }
+                false
+            }
+            "exec_session_finished" => {
+                let Some(session_id) = value.get("session_id").and_then(Value::as_u64) else {
+                    return false;
+                };
+                let Some(idx) = self.exec_session_rows.get(&session_id).copied() else {
+                    return false;
+                };
+                let elapsed = value
+                    .get("elapsed_ms")
+                    .and_then(Value::as_u64)
+                    .map(Duration::from_millis);
+                let interrupted = value
+                    .get("interrupted")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                self.finish_exec_session_row(session_id, idx, elapsed, interrupted, !interrupted);
+                true
+            }
             "tool_execution_start" => {
                 let user_shell = value.get("source").and_then(Value::as_str) == Some("user_shell");
                 let tool = value
@@ -1686,6 +1956,12 @@ impl<'a> FullscreenUi<'a> {
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string();
+                if !tool_call_id.is_empty()
+                    && let Some(args) = value.get("args")
+                    && !args.is_null()
+                {
+                    self.live_tool_args.insert(tool_call_id.clone(), args.clone());
+                }
                 if tool == "clarify" {
                     if !tool_call_id.is_empty()
                         && let Some(args) = value.get("args")
@@ -1694,6 +1970,14 @@ impl<'a> FullscreenUi<'a> {
                         self.clarify_tool_args
                             .insert(tool_call_id.clone(), args.clone());
                     }
+                    return false;
+                }
+                if tool == "write_stdin"
+                    && let Some(args) = value.get("args")
+                    && let Some(session_id) = exec_session_id_from_args(args)
+                    && self.exec_session_rows.contains_key(&session_id)
+                {
+                    self.remove_streaming_tool_call_row(tool, &tool_call_id, None);
                     return false;
                 }
                 let id_key = (!tool_call_id.is_empty()).then(|| tool_id_key(&tool_call_id));
@@ -1765,6 +2049,74 @@ impl<'a> FullscreenUi<'a> {
                 let user_confirmed_interrupt = interrupted && self.interrupt_requested;
                 let clarify_no_answer = tool == "clarify" && clarify_no_answer_result(value);
                 let failed = outcome != "normal" && !interrupted && !clarify_no_answer;
+                if tool == "write_stdin"
+                    && let Some(args) = self
+                        .live_tool_args
+                        .remove(tool_call_id)
+                        .or_else(|| value.get("args").cloned())
+                    && let Some(session_id) = exec_session_id_from_args(&args)
+                    && let Some(idx) = self.exec_session_rows.get(&session_id).copied()
+                    && !failed
+                    && !interrupted
+                {
+                    self.remove_streaming_tool_call_row(tool, tool_call_id, None);
+                    if exec_result_completed(value) {
+                        let elapsed = self
+                            .transcript
+                            .get(idx)
+                            .and_then(|row| completed_live_tool_elapsed(row, Some(value)));
+                        self.finish_exec_session_row(session_id, idx, elapsed, false, false);
+                    }
+                    return false;
+                }
+                if tool == "exec_command"
+                    && let Some(session_id) = exec_session_id_from_result(value)
+                    && exec_result_running(value)
+                {
+                    let idx = self
+                        .tool_rows
+                        .get(&tool_id_key(tool_call_id))
+                        .copied()
+                        .or_else(|| self.exec_session_rows.get(&session_id).copied())
+                        .unwrap_or_else(|| {
+                            let mut row = TranscriptRow::with_title(
+                                evidence_kind(tool),
+                                tool_title(tool, value),
+                                String::new(),
+                            );
+                            row.tool_name = Some(tool.to_string());
+                            row.tool_call_id = (!tool_call_id.is_empty())
+                                .then_some(tool_call_id.to_string());
+                            self.insert_evidence_row(row)
+                        });
+                    let already_finished = self.transcript.get(idx).is_some_and(|row| {
+                        row.tool_started.is_none() && row.tool_elapsed.is_some()
+                    });
+                    {
+                        let row = &mut self.transcript[idx];
+                        row.kind = evidence_kind(tool);
+                        row.tool_name = Some(tool.to_string());
+                        row.title = tool_title_for_update(tool, value, &row.title);
+                        row.failed = false;
+                        row.interrupted = false;
+                        row.user_shell = user_shell;
+                        row.tool_call_id =
+                            (!tool_call_id.is_empty()).then_some(tool_call_id.to_string());
+                        if !already_finished && row.tool_started.is_none() {
+                            row.tool_started = Some(tool_started_instant(value));
+                        }
+                        if !already_finished {
+                            row.tool_elapsed = None;
+                        }
+                    }
+                    self.prefix_exec_session_output_if_needed(idx, tool_result_output(value));
+                    self.exec_session_rows.insert(session_id, idx);
+                    if !already_finished && !tool_call_id.is_empty() {
+                        self.tool_rows.insert(tool_id_key(tool_call_id), idx);
+                    }
+                    self.live_tool_args.remove(tool_call_id);
+                    return !already_finished;
+                }
                 if outcome != "normal" && !user_shell && !interrupted && !clarify_no_answer {
                     self.turn_failures += 1;
                 }
@@ -1826,6 +2178,7 @@ impl<'a> FullscreenUi<'a> {
                 if tool == "clarify" {
                     self.clarify_tool_args.remove(tool_call_id);
                 }
+                self.live_tool_args.remove(tool_call_id);
                 false
             }
             "agent_end" => {
@@ -1991,6 +2344,17 @@ impl<'a> FullscreenUi<'a> {
         if call.tool_name == "clarify" {
             return false;
         }
+        if call.tool_name == "write_stdin"
+            && let Some(session_id) = exec_session_id_from_args(&call.args)
+            && self.exec_session_rows.contains_key(&session_id)
+        {
+            self.remove_streaming_tool_call_row(
+                &call.tool_name,
+                call.id.as_deref().unwrap_or_default(),
+                Some(&call.position_key),
+            );
+            return false;
+        }
         let value = serde_json::json!({ "args": call.args });
         let id_key = call.id.as_deref().map(tool_id_key);
         let intent_key = tool_intent_key(&call.tool_name);
@@ -2046,6 +2410,41 @@ impl<'a> FullscreenUi<'a> {
         active_tool_frame_requested
     }
 
+    fn remove_streaming_tool_call_row(
+        &mut self,
+        tool_name: &str,
+        tool_call_id: &str,
+        position_key: Option<&str>,
+    ) {
+        let mut keys = Vec::new();
+        if !tool_call_id.is_empty() {
+            keys.push(tool_id_key(tool_call_id));
+        }
+        if let Some(position_key) = position_key {
+            keys.push(position_key.to_string());
+        }
+        keys.push(tool_intent_key(tool_name));
+
+        let mut index = None;
+        for key in &keys {
+            if let Some(row_index) = self.tool_rows.remove(key) {
+                index.get_or_insert(row_index);
+            }
+        }
+        let Some(index) = index else {
+            return;
+        };
+        let Some(row) = self.transcript.get(index) else {
+            return;
+        };
+        if row.tool_name.as_deref() == Some(tool_name)
+            && row.tool_started.is_some()
+            && row.tool_elapsed.is_none()
+        {
+            self.remove_transcript_row(index);
+        }
+    }
+
     fn finish_turn(&mut self) {
         self.mark_unfinished_tools_interrupted();
         if let Some(idx) = self.reasoning_row {
@@ -2055,6 +2454,7 @@ impl<'a> FullscreenUi<'a> {
         self.reasoning_row = None;
         self.meta_row = None;
         self.tool_rows.clear();
+        self.live_tool_args.clear();
         self.streaming_tool_message_open = false;
         self.deferred_stream_events.clear();
         self.turn_outcome = None;
@@ -2077,6 +2477,14 @@ impl<'a> FullscreenUi<'a> {
             let Some(row) = self.transcript.get_mut(index) else {
                 continue;
             };
+            if row.tool_name.as_deref() == Some("exec_command")
+                && row
+                    .tool_call_id
+                    .as_ref()
+                    .is_some_and(|id| self.tool_rows.contains_key(&tool_id_key(id)))
+            {
+                continue;
+            }
             let Some(started) = row.tool_started.take() else {
                 continue;
             };
@@ -2620,6 +3028,105 @@ fn agent_child_status_text(status: &str, tool_uses: i64, tokens: Option<u64>) ->
         pluralize(tool_uses, "tool use"),
         token_suffix
     )
+}
+
+fn exec_session_id_from_args(args: &Value) -> Option<u64> {
+    args.get("session_id").and_then(Value::as_u64)
+}
+
+fn exec_session_id_from_result(value: &Value) -> Option<u64> {
+    value
+        .get("result")
+        .and_then(|result| result.get("session_id"))
+        .and_then(Value::as_u64)
+}
+
+fn exec_result_running(value: &Value) -> bool {
+    exec_session_id_from_result(value).is_some()
+        && value
+            .get("result")
+            .and_then(|result| result.get("exit_code"))
+            .is_none_or(Value::is_null)
+}
+
+fn exec_result_completed(value: &Value) -> bool {
+    value
+        .get("result")
+        .and_then(|result| result.get("exit_code"))
+        .is_some_and(|exit_code| !exit_code.is_null())
+}
+
+fn tool_result_output(value: &Value) -> String {
+    value
+        .get("result")
+        .and_then(|result| result.get("output"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn write_stdin_non_empty_chars(args: &Value) -> Option<&str> {
+    args.get("chars")
+        .and_then(Value::as_str)
+        .filter(|chars| !chars.is_empty())
+}
+
+fn bounded_stdin_display(chars: &str) -> String {
+    const MAX_CHARS: usize = 4096;
+    if chars.chars().count() <= MAX_CHARS {
+        return chars.to_string();
+    }
+    let mut output = chars.chars().take(MAX_CHARS).collect::<String>();
+    output.push_str("\n... truncated");
+    output
+}
+
+fn exec_row_full_text_without_history_marker(row: &TranscriptRow) -> String {
+    let full = if row.full_text.is_some() {
+        row.full_text.clone().unwrap_or_default()
+    } else if matches!(row.text.as_str(), "running" | "preparing") {
+        String::new()
+    } else {
+        row.text.clone()
+    };
+    strip_exec_history_running_marker(full)
+}
+
+fn set_exec_row_text(row: &mut TranscriptRow, full: String) {
+    if full.is_empty() {
+        row.text.clear();
+        row.full_text = None;
+        return;
+    }
+    let (collapsed, full_text) = collapse_ledger_body(&full);
+    row.text = if collapsed.is_empty() {
+        full.clone()
+    } else {
+        collapsed
+    };
+    row.full_text = full_text;
+}
+
+fn with_exec_history_running_marker(mut full: String) -> String {
+    if full.trim().is_empty() {
+        return "last seen running".to_string();
+    }
+    if !full.ends_with('\n') {
+        full.push('\n');
+    }
+    full.push_str("last seen running");
+    full
+}
+
+fn strip_exec_history_running_marker(mut full: String) -> String {
+    if full == "last seen running" {
+        return String::new();
+    }
+    if full.ends_with("\nlast seen running") {
+        let new_len = full.len() - "\nlast seen running".len();
+        full.truncate(new_len);
+    }
+    full
 }
 
 fn clarify_request_args_value(request: &ClarifyRequestEvent) -> Value {

@@ -9,6 +9,7 @@ use crate::agents::{
     format_selected_agent_instruction,
 };
 use crate::project_instructions::ProjectInstructionFragment;
+use crate::prompt_templates;
 use crate::skills::{Skill, SkillContextFragment, format_skills_for_prompt};
 use crate::store::{ContextEvidenceInput, PromptPrefixRecord, PromptPrefixSlotRecord};
 use crate::tools::mode_instruction_for_tool_availability;
@@ -255,7 +256,7 @@ pub(crate) fn assemble_child_prompt_prefix(
             "developer_prompt",
             developer_role,
             order,
-            "You are running as a child agent. Return a concise final answer to the parent agent.",
+            prompt_templates::child_agent_control(),
         )
         .source("runtime", "child_agent_control", None),
     );
@@ -318,10 +319,7 @@ pub(crate) fn turn_required_agent_instruction(
     if required_agent_mentions.is_empty() {
         return None;
     }
-    let content = format!(
-        "The user explicitly mentioned these agents: {}. You must call the Agent tool for each named agent before giving a final answer. The full user message remains the source of intent; write the child-agent task prompt yourself.",
-        required_agent_mentions.join(", ")
-    );
+    let content = prompt_templates::required_agent_calls(&required_agent_mentions.join(", "));
     Some(turn_instruction(
         "required_agent_calls",
         "developer_prompt",
@@ -489,10 +487,7 @@ pub(crate) fn stable_hash_hex(text: &str) -> String {
 }
 
 fn format_project_instruction_prompt(fragment: &ProjectInstructionFragment) -> String {
-    format!(
-        "Project instructions below are policy context, not user task content.\n\n{}",
-        fragment.content
-    )
+    prompt_templates::project_context(&fragment.content)
 }
 
 pub(crate) fn developer_provider_role(capabilities: &ModelCapabilities) -> &'static str {

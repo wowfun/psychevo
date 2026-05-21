@@ -235,7 +235,7 @@ fn cli_smoke_preserves_deterministic_harness_flags() {
             "--workdir",
             workdir.to_str().expect("workdir"),
             "--prompt",
-            "read write edit bash",
+            "read write edit exec_command",
         ])
         .output()
         .expect("pevo smoke");

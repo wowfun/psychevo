@@ -294,7 +294,7 @@ async fn tui_snapshot_active_write_suppresses_failure_meta() {
         &serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": "call_failed",
-            "tool_name": "bash",
+            "tool_name": "exec_command",
             "result": {"output": "failed", "exit_code": 1},
             "outcome": "failed",
             "elapsed_ms": 0
@@ -343,7 +343,7 @@ async fn tui_snapshot_reasoning_suppresses_failure_meta() {
         &serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": "call_failed",
-            "tool_name": "bash",
+            "tool_name": "exec_command",
             "result": {"output": "failed", "exit_code": 1},
             "outcome": "failed",
             "elapsed_ms": 0

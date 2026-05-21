@@ -55,7 +55,7 @@ async fn smoke_tools_touch_only_smoke_files_and_resume_session() {
         db_path: db.clone(),
         workdir: workdir.clone(),
         session: None,
-        prompt: Some("please read write edit bash".to_string()),
+        prompt: Some("please read write edit exec_command".to_string()),
         max_context_messages: Some(4),
         control: SmokeControl::None,
         reset: false,

@@ -31,6 +31,9 @@ fn parse_run_config(value: Value) -> Result<RunConfig> {
     if let Some(compression) = object.get("compression") {
         config.compression = parse_compression_config(compression, &configured_keys)?;
     }
+    if let Some(lsp) = object.get("lsp") {
+        config.lsp = parse_lsp_config(lsp)?;
+    }
     if let Some(permissions) = object.get("permissions") {
         config.permissions = parse_permission_config(permissions)?;
     }
@@ -79,6 +82,41 @@ fn parse_compression_config(
     Ok(config)
 }
 
+fn parse_lsp_config(value: &Value) -> Result<LspConfig> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| Error::Config("lsp must be an object".to_string()))?;
+    let mut config = LspConfig::default();
+    if let Some(enabled) = optional_bool_field(object, "enabled")? {
+        config.enabled = enabled;
+    }
+    if let Some(wait_mode) = optional_string_field(object, "wait_mode")? {
+        if wait_mode != "document" && wait_mode != "full" {
+            return Err(Error::Config(
+                "lsp.wait_mode must be document or full".to_string(),
+            ));
+        }
+        config.wait_mode = wait_mode;
+    }
+    if let Some(wait_timeout) = optional_f64_field(object, "wait_timeout")? {
+        if wait_timeout <= 0.0 {
+            return Err(Error::Config(
+                "lsp.wait_timeout must be greater than 0".to_string(),
+            ));
+        }
+        config.wait_timeout_secs = wait_timeout;
+    }
+    if let Some(install_strategy) = optional_string_field(object, "install_strategy")? {
+        if !matches!(install_strategy.as_str(), "auto" | "manual" | "off") {
+            return Err(Error::Config(
+                "lsp.install_strategy must be auto, manual, or off".to_string(),
+            ));
+        }
+        config.install_strategy = install_strategy;
+    }
+    Ok(config)
+}
+
 fn parse_permission_config(value: &Value) -> Result<PermissionConfig> {
     let object = value
         .as_object()
@@ -104,6 +142,7 @@ fn parse_permission_config(value: &Value) -> Result<PermissionConfig> {
         approval_mode,
         permission_mode,
         smart_model: optional_string_alias_field(object, "smart_model", "smartModel")?,
+        allow_login_shell: optional_bool_field(object, "allow_login_shell")?.unwrap_or(false),
         allow: string_array_field(object, "allow", "permissions.allow")?,
         ask: string_array_field(object, "ask", "permissions.ask")?,
         deny: string_array_field(object, "deny", "permissions.deny")?,

@@ -52,6 +52,25 @@ impl Default for CompressionConfig {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct LspConfig {
+    pub(crate) enabled: bool,
+    pub(crate) wait_mode: String,
+    pub(crate) wait_timeout_secs: f64,
+    pub(crate) install_strategy: String,
+}
+
+impl Default for LspConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            wait_mode: "document".to_string(),
+            wait_timeout_secs: 5.0,
+            install_strategy: "auto".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct BuiltInProvider {
     id: &'static str,
     label: &'static str,

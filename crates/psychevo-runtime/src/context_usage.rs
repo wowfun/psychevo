@@ -16,6 +16,7 @@ use crate::config::selected_configured_model;
 use crate::error::{Error, Result};
 use crate::paths::canonical_workdir;
 use crate::project_instructions::load_project_instructions;
+use crate::prompt_templates;
 use crate::skills::{
     SkillDiscoveryOptions, discover_skills, format_skills_for_prompt, resolve_skills_home,
 };
@@ -327,10 +328,7 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
     for (index, fragment) in project_instructions.fragments.iter().enumerate() {
         request_messages.push(json!({
             "role": "system",
-            "content": format!(
-                "Project instructions below are policy context, not user task content.\n\n{}",
-                fragment.content
-            ),
+            "content": prompt_templates::project_context(&fragment.content),
             "metadata": {
                 "prompt_slot": format!("project_context:{index}"),
                 "prompt_semantic_role": "developer_prompt",

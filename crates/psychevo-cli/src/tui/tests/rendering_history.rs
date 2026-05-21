@@ -60,6 +60,376 @@ fn transcript_auto_follow_tracks_wrapped_streaming_content() {
 }
 
 #[test]
+fn yielded_exec_session_stays_active_and_merges_live_poll_output() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    ui.apply_stream_event(
+        RunStreamEvent::Event(serde_json::json!({
+            "type": "tool_execution_start",
+            "tool_call_id": "call_exec",
+            "tool_name": "exec_command",
+            "args": {"cmd": "printf start; sleep 1; printf done"},
+            "started_at_ms": 1
+        })),
+        true,
+        false,
+    );
+    ui.apply_stream_event(
+        RunStreamEvent::Event(serde_json::json!({
+            "type": "exec_session_yielded",
+            "session_id": 42,
+            "tool_call_id": "call_exec",
+            "cmd": "printf start; sleep 1; printf done",
+            "workdir": app.workdir.display().to_string(),
+            "started_at_ms": 1
+        })),
+        true,
+        false,
+    );
+    ui.apply_stream_event(
+        RunStreamEvent::Event(serde_json::json!({
+            "type": "tool_execution_end",
+            "tool_call_id": "call_exec",
+            "tool_name": "exec_command",
+            "result": {
+                "chunk_id": 0,
+                "wall_time_seconds": 0.25,
+                "exit_code": null,
+                "session_id": 42,
+                "original_token_count": 1,
+                "output": "start"
+            },
+            "outcome": "normal",
+            "elapsed_ms": 250
+        })),
+        true,
+        false,
+    );
+
+    let exec_idx = ui.exec_session_rows[&42];
+    assert!(active_tool_row(&ui.transcript[exec_idx]));
+    assert_eq!(ui.transcript[exec_idx].text, "start");
+
+    ui.apply_stream_event(
+        RunStreamEvent::Event(serde_json::json!({
+            "type": "exec_session_output_delta",
+            "session_id": 42,
+            "tool_call_id": "call_exec",
+            "seq": 1,
+            "output": "done"
+        })),
+        true,
+        false,
+    );
+    let before_poll_rows = ui.transcript.len();
+    ui.apply_stream_event(
+        RunStreamEvent::Event(serde_json::json!({
+            "type": "tool_execution_start",
+            "tool_call_id": "call_poll",
+            "tool_name": "write_stdin",
+            "args": {"session_id": 42, "chars": ""}
+        })),
+        true,
+        false,
+    );
+    ui.apply_stream_event(
+        RunStreamEvent::Event(serde_json::json!({
+            "type": "tool_execution_end",
+            "tool_call_id": "call_poll",
+            "tool_name": "write_stdin",
+            "result": {
+                "chunk_id": 1,
+                "wall_time_seconds": 5.0,
+                "exit_code": null,
+                "session_id": 42,
+                "original_token_count": 1,
+                "output": "poll-output-should-not-render"
+            },
+            "outcome": "normal",
+            "elapsed_ms": 5000
+        })),
+        true,
+        false,
+    );
+
+    assert_eq!(ui.transcript.len(), before_poll_rows);
+    assert_eq!(ui.transcript[exec_idx].text, "startdone");
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| !row.title.contains("write_stdin"))
+    );
+
+    ui.apply_stream_event(
+        RunStreamEvent::Event(serde_json::json!({
+            "type": "exec_session_finished",
+            "session_id": 42,
+            "tool_call_id": "call_exec",
+            "exit_code": 0,
+            "elapsed_ms": 1250,
+            "interrupted": false
+        })),
+        true,
+        false,
+    );
+    assert!(!active_tool_row(&ui.transcript[exec_idx]));
+    assert_eq!(
+        ui.transcript[exec_idx].tool_elapsed,
+        Some(Duration::from_millis(1250))
+    );
+}
+
+#[test]
+fn streaming_empty_write_stdin_poll_placeholder_is_hidden() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    let mut row = TranscriptRow::with_title(TranscriptKind::Ran, "exec_command long fetch", "");
+    row.tool_name = Some("exec_command".to_string());
+    row.tool_call_id = Some("call_exec".to_string());
+    row.tool_started = Some(Instant::now());
+    ui.transcript.push(row);
+    ui.exec_session_rows.insert(0, 0);
+
+    ui.apply_stream_event(
+        RunStreamEvent::Event(serde_json::json!({
+            "type": "message_update",
+            "message": {
+                "role": "assistant",
+                "content": [{
+                    "type": "tool_call",
+                    "id": "call_poll",
+                    "name": "write_stdin",
+                    "arguments_json": "{\"session_id\":0,\"yield_time_ms\":30000}",
+                    "content_index": 0,
+                    "call_index": 0
+                }]
+            }
+        })),
+        true,
+        false,
+    );
+    ui.apply_stream_event(
+        RunStreamEvent::Event(serde_json::json!({
+            "type": "tool_execution_start",
+            "tool_call_id": "call_poll",
+            "tool_name": "write_stdin",
+            "args": {"session_id": 0, "yield_time_ms": 30000}
+        })),
+        true,
+        false,
+    );
+    ui.apply_stream_event(
+        RunStreamEvent::Event(serde_json::json!({
+            "type": "tool_execution_end",
+            "tool_call_id": "call_poll",
+            "tool_name": "write_stdin",
+            "result": {
+                "chunk_id": 1,
+                "wall_time_seconds": 30.0,
+                "exit_code": null,
+                "session_id": 0,
+                "original_token_count": 0,
+                "output": ""
+            },
+            "outcome": "normal",
+            "elapsed_ms": 30000
+        })),
+        true,
+        false,
+    );
+    ui.finish_turn();
+
+    assert_eq!(ui.transcript.len(), 1);
+    assert_eq!(ui.transcript[0].tool_name.as_deref(), Some("exec_command"));
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.tool_name.as_deref() != Some("write_stdin"))
+    );
+}
+
+#[test]
+fn completed_streaming_write_stdin_poll_placeholder_is_removed() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    let mut row = TranscriptRow::with_title(TranscriptKind::Ran, "exec_command long fetch", "");
+    row.tool_name = Some("exec_command".to_string());
+    row.tool_call_id = Some("call_exec".to_string());
+    row.tool_started = Some(Instant::now());
+    ui.transcript.push(row);
+    ui.exec_session_rows.insert(0, 0);
+
+    ui.apply_stream_event(
+        RunStreamEvent::Event(serde_json::json!({
+            "type": "message_update",
+            "message": {
+                "role": "assistant",
+                "content": [{
+                    "type": "tool_call",
+                    "id": "call_poll",
+                    "name": "write_stdin",
+                    "arguments_json": "{\"session_id\":",
+                    "content_index": 0,
+                    "call_index": 0
+                }]
+            }
+        })),
+        true,
+        false,
+    );
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.tool_name.as_deref() == Some("write_stdin"))
+    );
+
+    ui.apply_stream_event(
+        RunStreamEvent::Event(serde_json::json!({
+            "type": "message_update",
+            "message": {
+                "role": "assistant",
+                "content": [{
+                    "type": "tool_call",
+                    "id": "call_poll",
+                    "name": "write_stdin",
+                    "arguments_json": "{\"session_id\":0,\"yield_time_ms\":30000}",
+                    "content_index": 0,
+                    "call_index": 0
+                }]
+            }
+        })),
+        true,
+        false,
+    );
+
+    assert_eq!(ui.transcript.len(), 1);
+    assert_eq!(ui.transcript[0].tool_name.as_deref(), Some("exec_command"));
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.tool_name.as_deref() != Some("write_stdin"))
+    );
+}
+
+#[test]
+fn non_empty_stdin_renders_as_compact_terminal_interaction() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    let mut row = TranscriptRow::with_title(TranscriptKind::Ran, "exec_command read", "");
+    row.tool_name = Some("exec_command".to_string());
+    row.tool_call_id = Some("call_exec".to_string());
+    row.tool_started = Some(Instant::now());
+    ui.transcript.push(row);
+    ui.exec_session_rows.insert(7, 0);
+
+    ui.apply_stream_event(
+        RunStreamEvent::Event(serde_json::json!({
+            "type": "exec_session_stdin",
+            "session_id": 7,
+            "tool_call_id": "call_exec",
+            "write_tool_call_id": "call_stdin",
+            "chars": "hello\n"
+        })),
+        true,
+        false,
+    );
+
+    assert_eq!(ui.transcript.len(), 2);
+    assert_eq!(ui.transcript[1].title, "stdin 7");
+    assert_eq!(ui.transcript[1].text, "hello\n");
+    assert_ne!(ui.transcript[1].title, "write_stdin 7");
+}
+
+#[test]
+fn history_replay_merges_exec_command_and_write_stdin_chunks() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    let exec_args = serde_json::json!({"cmd": "long running"});
+    ui.push_history_active_tool_call(
+        &serde_json::json!({"timestamp_ms": 1}),
+        HistoryToolCall {
+            id: "call_exec".to_string(),
+            name: "exec_command".to_string(),
+            active_title: active_tool_title(
+                "exec_command",
+                &serde_json::json!({"args": exec_args.clone()}),
+            ),
+            completed_title: tool_title(
+                "exec_command",
+                &serde_json::json!({"args": exec_args.clone()}),
+            ),
+            args: exec_args,
+        },
+    );
+    ui.push_history_tool_result(
+        &serde_json::json!({
+            "tool_name": "exec_command",
+            "tool_call_id": "call_exec",
+            "content": serde_json::to_string(&serde_json::json!({
+                "chunk_id": 0,
+                "wall_time_seconds": 0.25,
+                "exit_code": null,
+                "session_id": 99,
+                "original_token_count": 1,
+                "output": "start"
+            })).expect("json"),
+            "is_error": false
+        }),
+        Some(&serde_json::json!({"elapsed_ms": 250})),
+    );
+
+    let write_args = serde_json::json!({"session_id": 99, "chars": ""});
+    ui.push_history_active_tool_call(
+        &serde_json::json!({"timestamp_ms": 2}),
+        HistoryToolCall {
+            id: "call_poll".to_string(),
+            name: "write_stdin".to_string(),
+            active_title: active_tool_title(
+                "write_stdin",
+                &serde_json::json!({"args": write_args.clone()}),
+            ),
+            completed_title: tool_title("write_stdin", &serde_json::json!({"args": write_args.clone()})),
+            args: write_args,
+        },
+    );
+    ui.push_history_tool_result(
+        &serde_json::json!({
+            "tool_name": "write_stdin",
+            "tool_call_id": "call_poll",
+            "content": serde_json::to_string(&serde_json::json!({
+                "chunk_id": 1,
+                "wall_time_seconds": 1.0,
+                "exit_code": 0,
+                "session_id": null,
+                "original_token_count": 1,
+                "output": "done"
+            })).expect("json"),
+            "is_error": false
+        }),
+        Some(&serde_json::json!({"elapsed_ms": 1000})),
+    );
+
+    assert_eq!(ui.transcript.len(), 1);
+    assert_eq!(ui.transcript[0].text, "startdone");
+    assert_eq!(
+        ui.transcript[0].tool_elapsed,
+        Some(Duration::from_millis(1250))
+    );
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| !row.title.contains("write_stdin"))
+    );
+}
+
+#[test]
 fn transcript_viewport_excludes_bottom_border_from_scroll_height() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
@@ -357,7 +727,7 @@ fn long_read_tool_output_collapses_and_preserves_full_text() {
 fn running_tool_title_right_aligns_elapsed_duration() {
     let mut row = TranscriptRow::with_title(
         TranscriptKind::Ran,
-        "bash cargo test --workspace --all-targets",
+        "exec_command cargo test --workspace --all-targets",
         "running",
     );
     row.tool_started = Some(
@@ -368,7 +738,7 @@ fn running_tool_title_right_aligns_elapsed_duration() {
 
     let title = line_text(&tool_lines(&row, false, true, 36)[0]);
 
-    assert!(title.contains("bash cargo"));
+    assert!(title.contains("exec_command cargo"));
     assert!(!title.starts_with("• "));
     assert!(title.ends_with("0s"));
     assert_eq!(UnicodeWidthStr::width(title.as_str()), 35);
@@ -387,8 +757,8 @@ fn active_tool_rows_render_present_tense_without_redundant_body() {
         ),
         (
             TranscriptKind::Ran,
-            "bash cargo test -p psychevo-cli",
-            "bash cargo test -p psychevo-cli",
+            "exec_command cargo test -p psychevo-cli",
+            "exec_command cargo test -p psychevo-cli",
         ),
         (
             TranscriptKind::Updated,
@@ -455,7 +825,7 @@ fn completed_tool_title_uses_fixed_elapsed_duration() {
 fn narrow_tool_title_preserves_elapsed_duration() {
     let mut row = TranscriptRow::with_title(
         TranscriptKind::Ran,
-        "bash cargo test --workspace --all-targets",
+        "exec_command cargo test --workspace --all-targets",
         "",
     );
     row.tool_elapsed = Some(Duration::from_millis(12_340));
@@ -470,7 +840,7 @@ fn narrow_tool_title_preserves_elapsed_duration() {
 fn completed_tool_title_formats_elapsed_minutes() {
     let mut row = TranscriptRow::with_title(
         TranscriptKind::Ran,
-        "bash cargo test --workspace --all-targets",
+        "exec_command cargo test --workspace --all-targets",
         "",
     );
     row.tool_elapsed = Some(Duration::from_millis(140_000));
@@ -671,8 +1041,8 @@ fn failed_tool_end_does_not_create_intermediate_turn_meta() {
         &serde_json::json!({
             "type": "tool_execution_start",
             "tool_call_id": "call_sqlite",
-            "tool_name": "bash",
-            "args": {"command": "sqlite3 -json feeds.db"}
+            "tool_name": "exec_command",
+            "args": {"cmd": "sqlite3 -json feeds.db"}
         }),
         false,
     );
@@ -680,8 +1050,8 @@ fn failed_tool_end_does_not_create_intermediate_turn_meta() {
         &serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": "call_sqlite",
-            "tool_name": "bash",
-            "args": {"command": "sqlite3 -json feeds.db"},
+            "tool_name": "exec_command",
+            "args": {"cmd": "sqlite3 -json feeds.db"},
             "result": {"output": "[]", "exit_code": 1},
             "outcome": "failed"
         }),
@@ -917,9 +1287,9 @@ fn visible_write_preamble_does_not_leave_orphan_after_non_write_tool_message() {
                     {
                         "type": "tool_call",
                         "id": "call_time",
-                        "name": "bash",
-                        "arguments": {"command": "date -u +%H-%M"},
-                        "arguments_json": "{\"command\":\"date -u +%H-%M\"}",
+                        "name": "exec_command",
+                        "arguments": {"cmd": "date -u +%H-%M"},
+                        "arguments_json": "{\"cmd\":\"date -u +%H-%M\"}",
                         "arguments_error": null,
                         "content_index": 0,
                         "call_index": 0
@@ -942,7 +1312,7 @@ fn visible_write_preamble_does_not_leave_orphan_after_non_write_tool_message() {
     assert!(ui
         .transcript
         .iter()
-        .any(|row| row.title == "bash date -u +%H-%M"));
+        .any(|row| row.title == "exec_command date -u +%H-%M"));
 }
 
 #[test]
@@ -1052,7 +1422,7 @@ fn active_write_keeps_failed_tool_meta_suppressed_until_final_answer() {
         &serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": "call_failed",
-            "tool_name": "bash",
+            "tool_name": "exec_command",
             "result": {"output": "failed", "exit_code": 1},
             "outcome": "failed",
             "elapsed_ms": 0
@@ -1107,7 +1477,7 @@ fn reasoning_delta_keeps_failed_tool_meta_suppressed_while_turn_continues() {
         &serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": "call_failed",
-            "tool_name": "bash",
+            "tool_name": "exec_command",
             "result": {"output": "failed", "exit_code": 1},
             "outcome": "failed",
             "elapsed_ms": 0
@@ -1160,7 +1530,7 @@ fn aborted_reasoning_only_message_does_not_recreate_failure_meta() {
         &serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": "call_failed",
-            "tool_name": "bash",
+            "tool_name": "exec_command",
             "result": {"output": "failed", "exit_code": 1},
             "outcome": "failed",
             "elapsed_ms": 0
@@ -1382,11 +1752,11 @@ fn completed_live_tool_elapsed_keeps_visible_active_duration_for_all_tool_phases
             "search Updating",
         ),
         (
-            "bash",
-            serde_json::json!({"command": "cargo test -p psychevo-cli"}),
+            "exec_command",
+            serde_json::json!({"cmd": "cargo test -p psychevo-cli"}),
             serde_json::json!({"output": "ok"}),
             TranscriptKind::Ran,
-            "bash cargo test -p psychevo-cli",
+            "exec_command cargo test -p psychevo-cli",
         ),
         (
             "write",
@@ -1548,9 +1918,9 @@ fn sequential_streaming_tool_calls_reuse_position_without_overwriting_rows() {
                 "content": [{
                     "type": "tool_call",
                     "id": "call_first",
-                    "name": "bash",
-                    "arguments": {"command": "echo one"},
-                    "arguments_json": "{\"command\":\"echo one\"}",
+                    "name": "exec_command",
+                    "arguments": {"cmd": "echo one"},
+                    "arguments_json": "{\"cmd\":\"echo one\"}",
                     "arguments_error": null,
                     "content_index": 0,
                     "call_index": 0
@@ -1563,7 +1933,7 @@ fn sequential_streaming_tool_calls_reuse_position_without_overwriting_rows() {
         &serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": "call_first",
-            "tool_name": "bash",
+            "tool_name": "exec_command",
             "result": {"output": "one", "exit_code": 0},
             "outcome": "normal",
             "elapsed_ms": 10
@@ -1613,7 +1983,7 @@ fn sequential_streaming_tool_calls_reuse_position_without_overwriting_rows() {
         })
         .map(|row| row.title.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(titles, ["bash echo one", "write report.md"]);
+    assert_eq!(titles, ["exec_command echo one", "write report.md"]);
 }
 
 #[test]
@@ -1800,12 +2170,12 @@ fn history_aborted_tool_calls_render_interrupted_without_live_timer() {
                 {
                     "type": "tool_call",
                     "id": "call_story",
-                    "name": "bash",
+                    "name": "exec_command",
                     "arguments": {
-                        "command": "cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db \"SELECT content FROM stories WHERE id = 48074265;\" 2>&1 | head -c 3000",
+                        "cmd": "cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db \"SELECT content FROM stories WHERE id = 48074265;\" 2>&1 | head -c 3000",
                         "timeout": 10
                     },
-                    "arguments_json": "{\"command\":\"cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db \\\"SELECT content FROM stories WHERE id = 48074265;\\\" 2>&1 | head -c 3000\",\"timeout\":10}",
+                    "arguments_json": "{\"cmd\":\"cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db \\\"SELECT content FROM stories WHERE id = 48074265;\\\" 2>&1 | head -c 3000\",\"timeout\":10}",
                     "arguments_error": null,
                     "content_index": 1,
                     "call_index": 0
@@ -1828,8 +2198,8 @@ fn history_aborted_tool_calls_render_interrupted_without_live_timer() {
         .transcript
         .iter()
         .find(|row| row.kind == TranscriptKind::Ran)
-        .expect("interrupted bash row");
-    assert!(row.title.starts_with("bash cd /home/kevin/Projects/feedgarden"));
+        .expect("interrupted exec_command row");
+    assert!(row.title.starts_with("exec_command cd /home/kevin/Projects/feedgarden"));
     assert!(!row.title.starts_with("Running "));
     assert_eq!(row.text, "interrupted");
     assert!(row.interrupted);
@@ -1911,12 +2281,12 @@ fn history_aborted_tool_result_renders_interrupted_without_failure_style() {
             "content": [{
                 "type": "tool_call",
                 "id": "call_find",
-                "name": "bash",
+                "name": "exec_command",
                 "arguments": {
-                    "command": "find /home/kevin -name tmp.txt -type f",
+                    "cmd": "find /home/kevin -name tmp.txt -type f",
                     "timeout": 10
                 },
-                "arguments_json": "{\"command\":\"find /home/kevin -name tmp.txt -type f\",\"timeout\":10}",
+                "arguments_json": "{\"cmd\":\"find /home/kevin -name tmp.txt -type f\",\"timeout\":10}",
                 "arguments_error": null,
                 "content_index": 0,
                 "call_index": 0
@@ -1933,7 +2303,7 @@ fn history_aborted_tool_result_renders_interrupted_without_failure_style() {
     ui.push_history_message(
         &serde_json::json!({
             "role": "tool_result",
-            "tool_name": "bash",
+            "tool_name": "exec_command",
             "tool_call_id": "call_find",
             "content": "{\"output\":\"(no output)\",\"exit_code\":null,\"error\":\"aborted\",\"truncated\":false}",
             "is_error": true
@@ -1947,7 +2317,7 @@ fn history_aborted_tool_result_renders_interrupted_without_failure_style() {
         .iter()
         .find(|row| row.kind == TranscriptKind::Ran)
         .expect("interrupted history row");
-    assert_eq!(row.title, "bash find /home/kevin -name tmp.txt -type f");
+    assert_eq!(row.title, "exec_command find /home/kevin -name tmp.txt -type f");
     assert_eq!(row.text, "interrupted");
     assert!(row.interrupted);
     assert!(!row.failed);
@@ -1967,12 +2337,12 @@ fn history_bash_timeout_renders_timeout_before_partial_output() {
             "content": [{
                 "type": "tool_call",
                 "id": "call_fetch",
-                "name": "bash",
+                "name": "exec_command",
                 "arguments": {
-                    "command": "python scripts/fetch.py",
+                    "cmd": "python scripts/fetch.py",
                     "timeout": 120
                 },
-                "arguments_json": "{\"command\":\"python scripts/fetch.py\",\"timeout\":120}",
+                "arguments_json": "{\"cmd\":\"python scripts/fetch.py\",\"timeout\":120}",
                 "arguments_error": null,
                 "content_index": 0,
                 "call_index": 0
@@ -1989,7 +2359,7 @@ fn history_bash_timeout_renders_timeout_before_partial_output() {
     ui.push_history_message(
         &serde_json::json!({
             "role": "tool_result",
-            "tool_name": "bash",
+            "tool_name": "exec_command",
             "tool_call_id": "call_fetch",
             "content": "{\"output\":\"[fetch] 29 rows done\",\"exit_code\":null,\"error\":\"command timed out after 120 seconds\",\"truncated\":false}",
             "is_error": true
@@ -2003,7 +2373,7 @@ fn history_bash_timeout_renders_timeout_before_partial_output() {
         .iter()
         .find(|row| row.kind == TranscriptKind::Ran)
         .expect("timeout history row");
-    assert_eq!(row.title, "bash python scripts/fetch.py");
+    assert_eq!(row.title, "exec_command python scripts/fetch.py");
     assert!(row.failed);
     assert!(row.text.starts_with(
         "timeout: command timed out after 120 seconds; partial output follows\n"
@@ -2618,7 +2988,7 @@ fn visible_thinking_run_intent_creates_and_reconciles_running_command() {
     );
     assert!(ui.transcript.iter().any(|row| {
         row.kind == TranscriptKind::Ran
-            && row.title == "bash"
+            && row.title == "exec_command"
             && row.tool_started.is_some()
     }));
 
@@ -2630,9 +3000,9 @@ fn visible_thinking_run_intent_creates_and_reconciles_running_command() {
                 "content": [{
                     "type": "tool_call",
                     "id": "call_wc",
-                    "name": "bash",
-                    "arguments": {"command": "wc -c report.md"},
-                    "arguments_json": "{\"command\":\"wc -c report.md\"}",
+                    "name": "exec_command",
+                    "arguments": {"cmd": "wc -c report.md"},
+                    "arguments_json": "{\"cmd\":\"wc -c report.md\"}",
                     "arguments_error": null,
                     "content_index": 0,
                     "call_index": 0
@@ -2653,7 +3023,7 @@ fn visible_thinking_run_intent_creates_and_reconciles_running_command() {
         .filter(|row| row.kind == TranscriptKind::Ran)
         .collect::<Vec<_>>();
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].title, "bash wc -c report.md");
+    assert_eq!(rows[0].title, "exec_command wc -c report.md");
     assert_eq!(rows[0].tool_call_id.as_deref(), Some("call_wc"));
 }
 
@@ -2807,38 +3177,38 @@ fn thinking_new_paragraphs_do_not_use_label_width_indent() {
 #[test]
 fn bash_tool_title_uses_actual_first_command_line() {
     let title = tool_title(
-        "bash",
+        "exec_command",
         &serde_json::json!({
-            "args": {"command": "cargo test -p psychevo-cli\ncargo fmt"}
+            "args": {"cmd": "cargo test -p psychevo-cli\ncargo fmt"}
         }),
     );
-    assert_eq!(title, "bash cargo test -p psychevo-cli");
+    assert_eq!(title, "exec_command cargo test -p psychevo-cli");
 }
 
 #[test]
 fn bash_tool_title_skips_leading_shell_comments() {
     let title = tool_title(
-        "bash",
+        "exec_command",
         &serde_json::json!({
             "args": {
-                "command": "\n# Try webcache for the NYT article\ncurl -sL https://example.com | python3 -c 'print(1)'"
+                "cmd": "\n# Try webcache for the NYT article\ncurl -sL https://example.com | python3 -c 'print(1)'"
             }
         }),
     );
     assert_eq!(
         title,
-        "bash curl -sL https://example.com | python3 -c 'print(1)'"
+        "exec_command curl -sL https://example.com | python3 -c 'print(1)'"
     );
 
     let active = active_tool_title(
-        "bash",
+        "exec_command",
         &serde_json::json!({
             "args": {
-                "command": "  # Get all comments with full text\npython3 -c 'print(42)'"
+                "cmd": "  # Get all comments with full text\npython3 -c 'print(42)'"
             }
         }),
     );
-    assert_eq!(active, "bash python3 -c 'print(42)'");
+    assert_eq!(active, "exec_command python3 -c 'print(42)'");
 }
 
 #[test]
@@ -2851,8 +3221,8 @@ fn fullscreen_bash_title_survives_tool_end_without_args() {
         &serde_json::json!({
             "type": "tool_execution_start",
             "tool_call_id": "call_bash",
-            "tool_name": "bash",
-            "args": {"command": "cargo test -p psychevo-cli\ncargo fmt"}
+            "tool_name": "exec_command",
+            "args": {"cmd": "cargo test -p psychevo-cli\ncargo fmt"}
         }),
         false,
     );
@@ -2860,7 +3230,7 @@ fn fullscreen_bash_title_survives_tool_end_without_args() {
         &serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": "call_bash",
-            "tool_name": "bash",
+            "tool_name": "exec_command",
             "result": {"output": "ok", "exit_code": 0},
             "outcome": "normal"
         }),
@@ -2871,9 +3241,9 @@ fn fullscreen_bash_title_survives_tool_end_without_args() {
         .transcript
         .iter()
         .find(|row| row.kind == TranscriptKind::Ran)
-        .expect("bash row");
-    assert_eq!(row.title, "bash cargo test -p psychevo-cli");
-    assert_ne!(row.title, "bash command");
+        .expect("exec_command row");
+    assert_eq!(row.title, "exec_command cargo test -p psychevo-cli");
+    assert_ne!(row.title, "exec_command command");
 }
 
 #[test]
@@ -2886,11 +3256,11 @@ fn history_tool_result_reuses_persisted_bash_command_title() {
         "content": [{
             "type": "tool_call",
             "id": "call_bash",
-            "name": "bash",
+            "name": "exec_command",
             "arguments": {
-                "command": "find . -maxdepth 2\nprintf done"
+                "cmd": "find . -maxdepth 2\nprintf done"
             },
-            "arguments_json": "{\"command\":\"find . -maxdepth 2\\nprintf done\"}",
+            "arguments_json": "{\"cmd\":\"find . -maxdepth 2\\nprintf done\"}",
             "arguments_error": null,
             "content_index": 0,
             "call_index": 0
@@ -2902,7 +3272,7 @@ fn history_tool_result_reuses_persisted_bash_command_title() {
     let tool_result = serde_json::json!({
         "role": "tool_result",
         "tool_call_id": "call_bash",
-        "tool_name": "bash",
+        "tool_name": "exec_command",
         "content": "{\"output\":\"ok\"}",
         "is_error": false,
         "timestamp_ms": 2
@@ -2915,8 +3285,8 @@ fn history_tool_result_reuses_persisted_bash_command_title() {
         .transcript
         .iter()
         .find(|row| row.kind == TranscriptKind::Ran)
-        .expect("history bash row");
-    assert_eq!(row.title, "bash find . -maxdepth 2");
+        .expect("history exec_command row");
+    assert_eq!(row.title, "exec_command find . -maxdepth 2");
 }
 
 #[tokio::test]

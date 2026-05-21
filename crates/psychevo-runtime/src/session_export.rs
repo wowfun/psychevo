@@ -1217,7 +1217,11 @@ fn reconstructed_tool_declarations(
     ));
     let tools = assemble_tool_surface(ToolSurfaceAssembly {
         workdir: workdir.to_path_buf(),
+        task_id: summary.id.clone(),
         mode,
+        lsp: Default::default(),
+        allow_login_shell: false,
+        stream_events: None,
         clarify: ClarifyToolSurface::declaration_only(),
         skills: Some(SkillDiscoveryOptions {
             home: workdir.join(".psychevo"),
@@ -1250,6 +1254,7 @@ fn reconstructed_tool_declarations(
             workdir: workdir.to_path_buf(),
             mode,
             permission_config: Default::default(),
+            lsp: Default::default(),
             permission_mode: Default::default(),
             approval_mode: Default::default(),
             approval_handler: None,

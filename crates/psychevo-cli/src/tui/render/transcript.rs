@@ -1317,7 +1317,7 @@ fn tool_title_detail(row: &TranscriptRow, title: &str) -> Option<String> {
     }
     let command = title
         .trim()
-        .strip_prefix("bash ")
+        .strip_prefix("exec_command ")
         .or_else(|| title.trim().strip_prefix("Running "))
         .or_else(|| title.trim().strip_prefix("Ran "))
         .unwrap_or_else(|| title.trim());

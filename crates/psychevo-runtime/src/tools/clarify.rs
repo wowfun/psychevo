@@ -1,6 +1,7 @@
 use crate::types::{
     ClarifyControl, ClarifyQuestion, ClarifyQuestionOption, ClarifyRequestEvent,
-    ClarifyResolvedEvent, ClarifyResolvedReason, ClarifyResult, RunStreamEvent, RunStreamSink,
+    ClarifyResolvedEvent, ClarifyResolvedReason, ClarifyResult,
+    RunStreamEvent as ClarifyRunStreamEvent, RunStreamSink as ClarifyRunStreamSink,
 };
 
 #[cfg(not(test))]
@@ -16,11 +17,14 @@ fn clarify_timeout() -> Duration {
 #[derive(Clone)]
 pub(crate) struct ClarifyTool {
     control: Option<Arc<ClarifyControl>>,
-    stream: Option<RunStreamSink>,
+    stream: Option<ClarifyRunStreamSink>,
 }
 
 impl ClarifyTool {
-    pub(crate) fn new(control: Option<Arc<ClarifyControl>>, stream: Option<RunStreamSink>) -> Self {
+    pub(crate) fn new(
+        control: Option<Arc<ClarifyControl>>,
+        stream: Option<ClarifyRunStreamSink>,
+    ) -> Self {
         Self { control, stream }
     }
 }
@@ -103,7 +107,7 @@ impl ToolBinding for ClarifyTool {
             };
 
             let receiver = control.register(tool_call_id.clone());
-            stream(RunStreamEvent::ClarifyRequest(request));
+            stream(ClarifyRunStreamEvent::ClarifyRequest(request));
             let timeout = time::sleep(clarify_timeout());
             tokio::pin!(timeout);
 
@@ -145,11 +149,11 @@ impl ToolBinding for ClarifyTool {
 }
 
 fn emit_clarify_resolved(
-    stream: &RunStreamSink,
+    stream: &ClarifyRunStreamSink,
     call_id: &str,
     reason: ClarifyResolvedReason,
 ) {
-    stream(RunStreamEvent::ClarifyResolved(ClarifyResolvedEvent {
+    stream(ClarifyRunStreamEvent::ClarifyResolved(ClarifyResolvedEvent {
         call_id: call_id.to_string(),
         reason,
     }));
@@ -229,7 +233,7 @@ fn validate_option_count(count: usize) -> Result<()> {
 pub(crate) fn clarify_tool_impl(
     args: Value,
     control: Option<Arc<ClarifyControl>>,
-    stream: Option<RunStreamSink>,
+    stream: Option<ClarifyRunStreamSink>,
 ) -> BoxFuture<'static, ToolOutput> {
     ClarifyTool::new(control, stream).execute("call_clarify".to_string(), args, never_abort_signal())
 }

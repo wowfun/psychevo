@@ -22,6 +22,7 @@ use uuid::Uuid;
 use crate::compaction::{
     CompactSessionOptions, CompactionReason, compact_session, load_projected_messages,
 };
+use crate::config::LspConfig;
 use crate::context_usage::ContextRecorder;
 use crate::error::{Error, Result};
 use crate::events::PersistenceSink;
@@ -31,11 +32,12 @@ use crate::prompt_assembly::{
     PromptPrefixRecordInput, assemble_child_prompt_prefix, context_evidence_for_request,
     prompt_prefix_record, tool_declarations_hash,
 };
+use crate::prompt_templates;
 use crate::skills::resolve_skills_home;
 use crate::store::{
     AgentEdgeRecord, AgentEdgeStatus, AgentMailboxEventInput, AgentMailboxEventRecord, SqliteStore,
 };
-use crate::tools::coding_core_tools_for_mode;
+use crate::tools::{ToolRuntimeContext, coding_core_tools_for_mode_with_context};
 use crate::types::{
     ApprovalHandler, ApprovalMode, ModelMetadata, PermissionConfig, PermissionMode, RunMode,
     RunStreamEvent, RunStreamSink, SelectedAgent, SessionSummary, SmokeControl,
@@ -278,6 +280,7 @@ pub(crate) struct AgentToolContext {
     pub(crate) workdir: PathBuf,
     pub(crate) mode: RunMode,
     pub(crate) permission_config: PermissionConfig,
+    pub(crate) lsp: LspConfig,
     pub(crate) permission_mode: PermissionMode,
     pub(crate) approval_mode: ApprovalMode,
     pub(crate) approval_handler: Option<Arc<dyn ApprovalHandler>>,
@@ -513,9 +516,8 @@ pub fn format_agents_for_prompt(catalog: &[AgentDefinition]) -> String {
     if catalog.is_empty() {
         return String::new();
     }
-    let mut text = String::from(
-        "Available agents. Use the Agent tool for focused subagent work when useful. If the user addresses `@agent-name`, treat that as a request to delegate to that named agent.\n<agents>",
-    );
+    let mut text = String::from(prompt_templates::agent_catalog_intro());
+    text.push_str("\n<agents>");
     for agent in catalog {
         text.push_str("\n<agent name=\"");
         text.push_str(&agent.name);
@@ -533,20 +535,25 @@ pub(crate) fn format_selected_agent_instruction(
     agent: &AgentDefinition,
     role: AgentInvocationRole,
 ) -> String {
-    let label = match role {
-        AgentInvocationRole::Main => "Main session agent",
-        AgentInvocationRole::Subagent | AgentInvocationRole::Fork => "Child agent",
-        AgentInvocationRole::System => "System agent",
-    };
-    let mut text = format!(
-        "{label}: {}\n\nThe selected-agent purpose and instructions below define how you should handle this invocation. They take precedence over generic coding-agent behavior unless runtime mode, tool policy, safety constraints, resource gates, or direct user constraints are stricter.\n\nPurpose:\n{}",
-        agent.name, agent.description
-    );
-    if !agent.instructions.trim().is_empty() {
-        text.push_str("\n\nInstructions:\n");
-        text.push_str(agent.instructions.trim());
+    match role {
+        AgentInvocationRole::Main => prompt_templates::selected_main_agent(
+            &agent.name,
+            &agent.description,
+            &agent.instructions,
+        ),
+        AgentInvocationRole::Subagent | AgentInvocationRole::Fork => {
+            prompt_templates::selected_child_agent(
+                &agent.name,
+                &agent.description,
+                &agent.instructions,
+            )
+        }
+        AgentInvocationRole::System => prompt_templates::selected_system_agent(
+            &agent.name,
+            &agent.description,
+            &agent.instructions,
+        ),
     }
-    text
 }
 
 pub(crate) fn apply_agent_tool_policy(
@@ -1884,7 +1891,8 @@ fn known_tool_policy_name(name: &str) -> bool {
         "read"
             | "search"
             | "list"
-            | "bash"
+            | "exec_command"
+            | "write_stdin"
             | "edit"
             | "write"
             | "clarify"
@@ -2069,7 +2077,8 @@ fn normalize_tool_name(raw: String) -> String {
         "Read" | "read" => "read".to_string(),
         "Grep" | "grep" | "Search" | "search" => "search".to_string(),
         "Glob" | "glob" | "List" | "list" => "list".to_string(),
-        "Bash" | "bash" => "bash".to_string(),
+        "ExecCommand" | "exec_command" => "exec_command".to_string(),
+        "WriteStdin" | "write_stdin" => "write_stdin".to_string(),
         "Edit" | "edit" => "edit".to_string(),
         "Write" | "write" => "write".to_string(),
         "Clarify" | "clarify" => "clarify".to_string(),
@@ -2934,7 +2943,16 @@ async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
             child.fork_turns.as_deref(),
         ),
     };
-    let mut tools = coding_core_tools_for_mode(&child.context.workdir, child.context.mode);
+    let mut tools = coding_core_tools_for_mode_with_context(
+        &child.context.workdir,
+        child.context.mode,
+        ToolRuntimeContext {
+            task_id: child_session.clone(),
+            lsp: child.context.lsp.clone(),
+            allow_login_shell: child.context.permission_config.allow_login_shell,
+            stream_events: child.context.stream_events.clone(),
+        },
+    );
     let mut child_agent_tool_context = child.context.clone();
     child_agent_tool_context.parent_session_id = child_session.clone();
     child_agent_tool_context.parent_context_snapshot = previous_messages.clone();
@@ -3957,6 +3975,7 @@ mod tests {
             workdir: tmp.path().to_path_buf(),
             mode: RunMode::Build,
             permission_config: PermissionConfig::default(),
+            lsp: Default::default(),
             permission_mode: PermissionMode::Default,
             approval_mode: ApprovalMode::Manual,
             approval_handler: None,
@@ -3988,7 +4007,7 @@ name: reviewer
 description: Review code carefully
 tools: Read, Grep, Agent
 disallowedTools:
-  - Bash
+  - ExecCommand
 memory: true
 maxSpawnDepth: 1
 ---
@@ -4025,7 +4044,7 @@ Review the code.
                 .unwrap()
                 .contains("Agent")
         );
-        assert!(agent.tool_policy.denied.contains("bash"));
+        assert!(agent.tool_policy.denied.contains("exec_command"));
         assert_eq!(agent.max_spawn_depth, 1);
         assert!(
             agent
@@ -4073,7 +4092,11 @@ Plan the work.
         assert!(agent.tool_policy.denied_agents.contains("explore"));
         assert!(agent_allows_tool("read", Some(&agent), RunMode::Build));
         assert!(agent_allows_tool("Agent", Some(&agent), RunMode::Build));
-        assert!(!agent_allows_tool("bash", Some(&agent), RunMode::Build));
+        assert!(!agent_allows_tool(
+            "exec_command",
+            Some(&agent),
+            RunMode::Build
+        ));
     }
 
     #[tokio::test]
@@ -4503,7 +4526,7 @@ Plan the work.
         for name in [
             "read",
             "write",
-            "bash",
+            "exec_command",
             "Agent",
             "list_skills",
             "view_skill",
@@ -4547,7 +4570,11 @@ Plan the work.
         assert!(allow.diagnostics.is_empty());
         assert!(deny.diagnostics.is_empty());
 
-        let base_tools = vec![test_tool("read"), test_tool("bash"), test_tool("clarify")];
+        let base_tools = vec![
+            test_tool("read"),
+            test_tool("exec_command"),
+            test_tool("clarify"),
+        ];
         let allowed = apply_agent_tool_policy(base_tools.clone(), Some(&allow), RunMode::Build)
             .into_iter()
             .map(|tool| tool.name().to_string())
@@ -4558,7 +4585,7 @@ Plan the work.
             .into_iter()
             .map(|tool| tool.name().to_string())
             .collect::<Vec<_>>();
-        assert_eq!(denied, vec!["read", "bash"]);
+        assert_eq!(denied, vec!["read", "exec_command"]);
 
         let plan = apply_agent_tool_policy(base_tools, None, RunMode::Plan)
             .into_iter()
@@ -4803,6 +4830,7 @@ Coordinate.
                 workdir: tmp.path().to_path_buf(),
                 mode: RunMode::Build,
                 permission_config: PermissionConfig::default(),
+                lsp: Default::default(),
                 permission_mode: PermissionMode::Default,
                 approval_mode: ApprovalMode::Manual,
                 approval_handler: None,

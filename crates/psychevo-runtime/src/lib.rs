@@ -12,6 +12,7 @@ mod permissions;
 mod project_instructions;
 mod prompt_assembly;
 mod prompt_image;
+mod prompt_templates;
 mod run;
 mod session_export;
 mod session_lookup;
@@ -64,6 +65,7 @@ pub use prompt_image::{
     extract_image_sources_from_prompt, model_metadata_explicitly_disallows_image_input,
     prompt_starts_with_supported_image_path, resolve_image_source, split_image_source_argument,
 };
+pub use prompt_templates::side_conversation_boundary_prompt;
 pub use psychevo_agent_core::TerminalReason;
 pub use run::{
     reload_session_context, run_live, run_live_streaming, run_live_streaming_controlled,

@@ -1,0 +1,2 @@
+Manual focus instructions:
+{{ instructions }}

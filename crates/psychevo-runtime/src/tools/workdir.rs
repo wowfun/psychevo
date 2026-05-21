@@ -1,11 +1,28 @@
 #[derive(Clone)]
 pub(crate) struct WorkdirTool {
     workdir: PathBuf,
+    context: ToolRuntimeContext,
 }
 
 impl WorkdirTool {
     pub(crate) fn new(workdir: PathBuf) -> Self {
-        Self { workdir }
+        Self::with_context(workdir, ToolRuntimeContext::default())
+    }
+
+    pub(crate) fn with_context(workdir: PathBuf, context: ToolRuntimeContext) -> Self {
+        Self { workdir, context }
+    }
+
+    fn task_id(&self) -> &str {
+        &self.context.task_id
+    }
+
+    fn lsp_config(&self) -> &LspConfig {
+        &self.context.lsp
+    }
+
+    fn workdir(&self) -> &Path {
+        &self.workdir
     }
 
     fn resolve_existing(&self, raw: &str) -> Result<PathBuf> {
@@ -65,4 +82,3 @@ impl WorkdirTool {
             .replace('\\', "/")
     }
 }
-

@@ -495,7 +495,7 @@ fn usage_panel_groups_persisted_stats_rows() {
         r#"
         INSERT INTO messages (
             session_id, session_seq, role, timestamp_ms, message_json, tool_name
-        ) VALUES (?1, 2, 'tool_result', 2, '{"role":"tool_result"}', 'bash')
+        ) VALUES (?1, 2, 'tool_result', 2, '{"role":"tool_result"}', 'exec_command')
         "#,
         rusqlite::params![&session_id],
     )
@@ -519,7 +519,7 @@ fn usage_panel_groups_persisted_stats_rows() {
         panel
             .rows
             .iter()
-            .any(|row| row.group.as_deref() == Some("Top tools") && row.label == "bash")
+            .any(|row| row.group.as_deref() == Some("Top tools") && row.label == "exec_command")
     );
     assert!(panel.rows.iter().any(|row| {
         row.group.as_deref() == Some("Top sessions") && row.label == "Usage session"

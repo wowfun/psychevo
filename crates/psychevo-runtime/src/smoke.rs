@@ -213,17 +213,18 @@ fn fake_scripts_for_prompt(prompt: &str) -> Vec<Vec<RawStreamEvent>> {
                 json!({
                     "mode": "replace",
                     "path": SMOKE_SUBJECT,
-                    "edits": [{ "oldText": "original", "newText": "edited" }]
+                    "old_string": "original",
+                    "new_string": "edited"
                 }),
             );
             call_index += 1;
-        } else if tool == "bash" {
+        } else if tool == "exec_command" {
             push_tool_call(
                 &mut first,
                 call_index,
-                "bash-1",
-                "bash",
-                json!({ "command": "printf 'bash smoke\\n'", "timeout": 5 }),
+                "exec-1",
+                "exec_command",
+                json!({ "cmd": "printf 'exec smoke\\n'", "yield_time_ms": 250 }),
             );
             call_index += 1;
         }
@@ -271,7 +272,7 @@ fn push_tool_call(
 
 fn selected_tools(prompt: &str) -> Vec<&'static str> {
     let lower = prompt.to_lowercase();
-    let mut found = ["read", "write", "edit", "bash"]
+    let mut found = ["read", "write", "edit", "exec_command", "write_stdin"]
         .into_iter()
         .filter_map(|name| lower.find(name).map(|idx| (idx, name)))
         .collect::<Vec<_>>();

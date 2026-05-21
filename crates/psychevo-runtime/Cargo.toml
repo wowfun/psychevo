@@ -9,6 +9,7 @@ license.workspace = true
 futures.workspace = true
 jsonc-parser.workspace = true
 libc.workspace = true
+portable-pty.workspace = true
 psychevo-agent-core = { path = "../psychevo-agent-core" }
 psychevo-ai = { path = "../psychevo-ai" }
 reqwest.workspace = true
@@ -19,6 +20,7 @@ serde_yaml.workspace = true
 similar.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
+tiktoken.workspace = true
 tokio.workspace = true
 uuid.workspace = true
 

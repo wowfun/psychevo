@@ -75,8 +75,8 @@ fn bash_timeout_failure_shows_timeout_before_partial_output() {
         &serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": "call_fetch",
-            "tool_name": "bash",
-            "args": {"command": "python scripts/fetch.py"},
+            "tool_name": "exec_command",
+            "args": {"cmd": "python scripts/fetch.py"},
             "result": {
                 "output": "[fetch] 29 rows done\n[fetch] 1 failed",
                 "exit_code": null,
@@ -92,9 +92,9 @@ fn bash_timeout_failure_shows_timeout_before_partial_output() {
         .transcript
         .iter()
         .find(|row| row.kind == TranscriptKind::Ran)
-        .expect("bash row");
+        .expect("exec_command row");
     assert!(row.failed);
-    assert_eq!(row.title, "bash python scripts/fetch.py");
+    assert_eq!(row.title, "exec_command python scripts/fetch.py");
     assert!(row.text.starts_with(
         "timeout: command timed out after 120 seconds; partial output follows\n"
     ));
@@ -111,8 +111,8 @@ fn bash_timeout_without_output_omits_no_output_placeholder() {
         &serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": "call_sleep",
-            "tool_name": "bash",
-            "args": {"command": "sleep 60"},
+            "tool_name": "exec_command",
+            "args": {"cmd": "sleep 60"},
             "result": {
                 "output": "(no output)",
                 "exit_code": null,
@@ -128,7 +128,7 @@ fn bash_timeout_without_output_omits_no_output_placeholder() {
         .transcript
         .iter()
         .find(|row| row.kind == TranscriptKind::Ran)
-        .expect("bash row");
+        .expect("exec_command row");
     assert_eq!(row.text, "timeout: command timed out after 1 seconds");
     assert!(!row.text.contains("(no output)"));
 }
@@ -689,7 +689,7 @@ fn selected_thinking_and_tool_rows_use_single_line_focus_marker() {
         .iter()
         .map(line_text)
         .collect::<Vec<_>>();
-    assert!(tool.first().is_some_and(|line| line.starts_with("› bash ls")), "{tool:?}");
+    assert!(tool.first().is_some_and(|line| line.starts_with("› exec_command ls")), "{tool:?}");
     assert!(tool.get(1).is_some_and(|line| line.starts_with("  └ ")), "{tool:?}");
     assert!(!tool.iter().skip(1).any(|line| line.starts_with("> ")), "{tool:?}");
 }

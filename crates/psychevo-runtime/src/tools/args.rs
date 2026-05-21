@@ -24,6 +24,16 @@ fn optional_i64(args: &Value, key: &str) -> Result<Option<i64>> {
         .transpose()
 }
 
+fn optional_bool(args: &Value, key: &str) -> Result<Option<bool>> {
+    args.get(key)
+        .map(|value| {
+            value
+                .as_bool()
+                .ok_or_else(|| Error::Message(format!("{key} must be a boolean")))
+        })
+        .transpose()
+}
+
 fn bounded_limit(value: Option<i64>, default: usize, max: usize) -> Result<usize> {
     let limit = value.unwrap_or(default as i64);
     if limit < 1 {
@@ -41,14 +51,3 @@ fn truncate_match_line(line: &str) -> String {
     value.push_str("...");
     value
 }
-
-fn optional_u64(args: &Value, key: &str) -> Result<Option<u64>> {
-    args.get(key)
-        .map(|value| {
-            value
-                .as_u64()
-                .ok_or_else(|| Error::Message(format!("{key} must be an integer")))
-        })
-        .transpose()
-}
-

@@ -39,6 +39,7 @@ use crate::prompt_assembly::{
     turn_prefix_notice_instruction, turn_required_agent_instruction,
 };
 use crate::prompt_image::prompt_message_from_inputs_with_options;
+use crate::prompt_templates;
 use crate::skills::{
     SelectedSkill, SkillCatalog, SkillDiscoveryOptions, discover_skills, resolve_skills_home,
     select_explicit_skills, select_skills_for_prompt, skill_context_fragments,
@@ -46,6 +47,7 @@ use crate::skills::{
 use crate::snapshot::SnapshotStore;
 use crate::store::{PromptPrefixRecord, SqliteStore};
 use crate::tool_surface::{ClarifyToolSurface, ToolSurfaceAssembly, assemble_tool_surface};
+use crate::tools::{detach_exec_sessions_for_task, interrupt_exec_sessions_for_task};
 use crate::types::{
     AgentSpawnOptions, AgentSpawnResult, ModelMetadata, PermissionConfig, ReloadContextOptions,
     ReloadContextResult, RunControl, RunOptions, RunResult, RunStreamEvent, RunStreamSink,
@@ -181,6 +183,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
             workdir: workdir.clone(),
             mode,
             permission_config: PermissionConfig::default(),
+            lsp: Default::default(),
             permission_mode: Default::default(),
             approval_mode: Default::default(),
             approval_handler: None,
@@ -209,7 +212,11 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
     };
     let mut tools = assemble_tool_surface(ToolSurfaceAssembly {
         workdir: workdir.clone(),
+        task_id: summary.id.clone(),
         mode,
+        lsp: Default::default(),
+        allow_login_shell: false,
+        stream_events: None,
         clarify: ClarifyToolSurface::Disabled,
         skills: (!options.no_skills).then_some(skill_options),
         agents: agent_tools,
@@ -434,6 +441,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         workdir,
         mode: options.mode,
         permission_config: loaded.config.permissions.clone(),
+        lsp: loaded.config.lsp.clone(),
         permission_mode,
         approval_mode,
         approval_handler: options.approval_handler.clone(),
@@ -726,6 +734,7 @@ async fn run_live_internal(
             workdir: workdir.clone(),
             mode: options.mode,
             permission_config: loaded.config.permissions.clone(),
+            lsp: loaded.config.lsp.clone(),
             permission_mode,
             approval_mode,
             approval_handler: options.approval_handler.clone(),
@@ -754,7 +763,11 @@ async fn run_live_internal(
     };
     let mut tools = assemble_tool_surface(ToolSurfaceAssembly {
         workdir: workdir.clone(),
+        task_id: session_id.clone(),
         mode: options.mode,
+        lsp: loaded.config.lsp.clone(),
+        allow_login_shell: loaded.config.permissions.allow_login_shell,
+        stream_events: stream_events.clone(),
         clarify: if options.clarify_enabled {
             ClarifyToolSurface::enabled(clarify_control, stream_events.clone())
         } else {
@@ -992,9 +1005,15 @@ async fn run_live_internal(
                 ))
                 .await;
             }
+            interrupt_exec_sessions_for_task(&session_id);
             return Err(err);
         }
     };
+    if completion.outcome == Outcome::Aborted {
+        interrupt_exec_sessions_for_task(&session_id);
+    } else {
+        detach_exec_sessions_for_task(session_id.clone());
+    }
     record_missed_required_agents(
         &store,
         &session_id,
@@ -1398,7 +1417,7 @@ async fn generate_session_title(
         prompt_instructions: vec![PromptInstruction::inline_system(
             "session_title_instruction",
             0,
-            "Generate a concise title for this coding-agent session. Return only the title, no punctuation wrapper, no explanation. Keep it under 8 words.",
+            prompt_templates::session_title_instruction(),
         )],
         turn_prompt_instructions: Vec::new(),
         previous_messages: Vec::new(),
@@ -1428,18 +1447,15 @@ pub(crate) fn session_title_request(
     selected_skills: &[SelectedSkill],
     skill_catalog: &SkillCatalog,
 ) -> String {
-    let mut text = String::from("Title this user request.");
     let skill_lines = selected_skill_title_lines(selected_skills, skill_catalog);
-    if !skill_lines.is_empty() {
-        text.push_str(
-            "\n\nThe request includes explicit selected skills. Use their names and descriptions to infer the task; do not title the literal `$skill-name` marker.",
-        );
-        text.push_str("\n\nSelected skills:\n");
-        text.push_str(&skill_lines.join("\n"));
+    if skill_lines.is_empty() {
+        prompt_templates::session_title_request(prompt)
+    } else {
+        prompt_templates::session_title_request_with_selected_skills(
+            &skill_lines.join("\n"),
+            prompt,
+        )
     }
-    text.push_str("\n\nUser request:\n");
-    text.push_str(prompt);
-    text
 }
 
 fn selected_skill_title_lines(

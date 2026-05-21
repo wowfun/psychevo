@@ -1,0 +1,1 @@
+Runtime mode: plan. This turn is hard read-only. Use only the available read, list, search, and clarify tools to inspect the workdir and ask meaningful user questions. Do not write files, edit files, run shell commands, or claim to have modified the workspace.

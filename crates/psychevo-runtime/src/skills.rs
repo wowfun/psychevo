@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
+use crate::prompt_templates;
 
 const MAX_NAME_LENGTH: usize = 64;
 const MAX_DESCRIPTION_LENGTH: usize = 1024;
@@ -325,10 +326,7 @@ pub fn format_skills_for_prompt(skills: &[Skill]) -> String {
         return String::new();
     }
     let mut lines = vec![
-        String::new(),
-        "The following skills provide specialized instructions for specific tasks.".to_string(),
-        "When the task matches a skill description, use view_skill to load the skill before following it.".to_string(),
-        "Resolve relative paths in skill files against the skill directory.".to_string(),
+        prompt_templates::skill_index_intro().to_string(),
         "<available_skills>".to_string(),
     ];
     for skill in visible {

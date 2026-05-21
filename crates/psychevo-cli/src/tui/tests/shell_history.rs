@@ -724,7 +724,7 @@ fn tool_failure_without_answer_keeps_failure_meta() {
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_execution_end",
-            "tool_name": "bash",
+            "tool_name": "exec_command",
             "tool_call_id": "call_1",
             "outcome": "failed",
             "result": { "error": "boom" }
@@ -736,7 +736,7 @@ fn tool_failure_without_answer_keeps_failure_meta() {
         .transcript
         .iter()
         .find(|row| row.kind == TranscriptKind::Ran)
-        .expect("failed bash row");
+        .expect("failed exec_command row");
     assert!(failed_row.failed);
     assert!(!failed_row.interrupted);
     assert!(
@@ -778,9 +778,9 @@ fn interrupted_bash_tool_renders_interrupted_without_failure_meta() {
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_execution_end",
-            "tool_name": "bash",
+            "tool_name": "exec_command",
             "tool_call_id": "call_1",
-            "args": { "command": "find /home/kevin -name tmp.txt -type f" },
+            "args": { "cmd": "find /home/kevin -name tmp.txt -type f" },
             "outcome": "aborted",
             "elapsed_ms": 4_000,
             "result": {
@@ -797,8 +797,8 @@ fn interrupted_bash_tool_renders_interrupted_without_failure_meta() {
         .transcript
         .iter()
         .find(|row| row.kind == TranscriptKind::Ran)
-        .expect("interrupted bash row");
-    assert_eq!(row.title, "bash find /home/kevin -name tmp.txt -type f");
+        .expect("interrupted exec_command row");
+    assert_eq!(row.title, "exec_command find /home/kevin -name tmp.txt -type f");
     assert_eq!(row.text, "interrupted");
     assert!(row.interrupted);
     assert!(!row.failed);
@@ -888,10 +888,10 @@ fn interrupted_user_shell_renders_interrupted_marker() {
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_execution_end",
-            "tool_name": "bash",
+            "tool_name": "exec_command",
             "tool_call_id": "shell_1",
             "source": "user_shell",
-            "args": { "command": "find /home/kevin -name tmp.txt -type f" },
+            "args": { "cmd": "find /home/kevin -name tmp.txt -type f" },
             "outcome": "aborted",
             "result": {
                 "output": "(no output)",

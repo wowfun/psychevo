@@ -239,6 +239,7 @@ pub struct PermissionConfig {
     pub approval_mode: Option<ApprovalMode>,
     pub permission_mode: Option<PermissionMode>,
     pub smart_model: Option<String>,
+    pub allow_login_shell: bool,
     pub allow: Vec<String>,
     pub ask: Vec<String>,
     pub deny: Vec<String>,

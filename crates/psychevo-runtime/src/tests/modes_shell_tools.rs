@@ -9,8 +9,47 @@ fn run_mode_tool_names_enforce_plan_read_only_surface() {
     );
     assert_eq!(
         tool_names_for_mode(RunMode::Build),
-        vec!["read", "write", "edit", "bash"]
+        vec!["read", "write", "edit", "exec_command", "write_stdin"]
     );
+}
+
+#[test]
+fn exec_command_provider_schema_replaces_bash() {
+    let temp = tempdir().expect("temp");
+    let tools = crate::tools::coding_core_tools(temp.path());
+    let names = tools.iter().map(|tool| tool.name()).collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        vec!["read", "write", "edit", "exec_command", "write_stdin"]
+    );
+
+    let exec = tools
+        .iter()
+        .find(|tool| tool.name() == "exec_command")
+        .expect("exec_command");
+    assert!(
+        exec.description().contains("yield_time_ms"),
+        "{}",
+        exec.description()
+    );
+    let exec_params = exec.parameters();
+    assert_eq!(exec_params["required"], json!(["cmd"]));
+    assert!(exec_params["properties"]["cmd"]["description"].is_string());
+    assert_eq!(exec_params["properties"]["tty"]["default"], false);
+    assert_eq!(
+        exec_params["properties"]["yield_time_ms"]["default"],
+        10_000
+    );
+    assert_eq!(exec_params["properties"]["yield_time_ms"]["minimum"], 250);
+    assert_eq!(exec_params["properties"]["yield_time_ms"]["maximum"], 30_000);
+
+    let stdin = tools
+        .iter()
+        .find(|tool| tool.name() == "write_stdin")
+        .expect("write_stdin");
+    let stdin_params = stdin.parameters();
+    assert_eq!(stdin_params["required"], json!(["session_id"]));
+    assert_eq!(stdin_params["properties"]["chars"]["default"], "");
 }
 
 fn valid_clarify_args() -> Value {
@@ -339,7 +378,7 @@ async fn wait_until(
 }
 
 #[tokio::test]
-async fn user_shell_streams_bash_events_without_provider_config() {
+async fn user_shell_streams_exec_command_events_without_provider_config() {
     let temp = tempdir().expect("temp");
     let workdir = temp.path().join("work");
     fs::create_dir_all(&workdir).expect("workdir");
@@ -376,13 +415,15 @@ async fn user_shell_streams_bash_events_without_provider_config() {
         RunStreamEvent::Event(value)
             if value["type"] == "tool_execution_start"
                 && value["source"] == "user_shell"
-                && value["args"]["command"] == "printf 'shell ok\\n'"
+                && value["tool_name"] == "exec_command"
+                && value["args"]["cmd"] == "printf 'shell ok\\n'"
     ));
     assert!(matches!(
         &events[1],
         RunStreamEvent::Event(value)
             if value["type"] == "tool_execution_end"
                 && value["source"] == "user_shell"
+                && value["tool_name"] == "exec_command"
                 && value["outcome"] == "normal"
                 && value["result"]["output"] == "shell ok\n"
     ));
@@ -561,7 +602,7 @@ async fn user_shell_context_records_bounded_truncated_output() {
     .expect("user shell");
 
     assert_eq!(result.outcome, Outcome::Normal);
-    assert_eq!(result.result["truncated"], true);
+    assert!(result.result["original_token_count"].as_u64().unwrap_or_default() > 10_000);
     let context_text = result.context_text.expect("context text");
     assert!(context_text.contains("Truncated: true"));
     assert!(context_text.len() < 60_000);
@@ -569,17 +610,16 @@ async fn user_shell_context_records_bounded_truncated_output() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn bash_abort_kills_background_child_process_group() {
+async fn exec_command_abort_kills_background_child_process_group() {
     let temp = tempdir().expect("temp");
     let workdir = temp.path().join("work");
     fs::create_dir_all(&workdir).expect("workdir");
     let marker = workdir.join("bg.pid");
     let command = format!("sleep 60 & echo $! > {}; wait", shell_quote_path(&marker));
     let (handle, receivers) = psychevo_agent_core::ControlHandle::new();
-    let task = tokio::spawn(crate::tools::run_bash_command(
+    let task = tokio::spawn(crate::tools::run_exec_command_for_user_shell(
         workdir,
         command,
-        60,
         receivers.abort_signal(),
     ));
 
@@ -587,13 +627,11 @@ async fn bash_abort_kills_background_child_process_group() {
     assert!(process_exists(pid), "background child did not start");
     handle.abort();
 
-    let (result, is_error) = tokio::time::timeout(Duration::from_secs(5), task)
+    let result = tokio::time::timeout(Duration::from_secs(5), task)
         .await
         .expect("abort should settle")
-        .expect("bash task should join")
-        .expect("bash result");
-    assert!(is_error);
-    assert_eq!(result["error"], "aborted");
+        .expect("exec task should join");
+    assert!(result.expect_err("abort should fail").to_string().contains("aborted"));
     assert!(
         wait_for_process_exit(pid, Duration::from_secs(5)).await,
         "background child pid {pid} survived abort"
@@ -602,81 +640,344 @@ async fn bash_abort_kills_background_child_process_group() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn bash_timeout_kills_background_child_process_group() {
+async fn exec_command_yields_long_running_session() {
     let temp = tempdir().expect("temp");
     let workdir = temp.path().join("work");
     fs::create_dir_all(&workdir).expect("workdir");
-    let marker = workdir.join("bg.pid");
-    let command = format!("sleep 60 & echo $! > {}; wait", shell_quote_path(&marker));
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
 
-    let (result, is_error) =
-        crate::tools::run_bash_command(workdir, command, 1, receivers.abort_signal())
-            .await
-            .expect("bash result");
+    let result = crate::tools::exec_command_tool_impl(
+        workdir,
+        false,
+        json!({"cmd": "sleep 1; printf done", "yield_time_ms": 250}),
+        receivers.abort_signal(),
+    )
+    .await
+    .expect("exec result");
 
-    assert!(is_error);
-    assert_eq!(result["error"], "command timed out after 1 seconds");
-    let pid = read_pid_file(&marker);
+    assert!(result["session_id"].is_u64(), "{result}");
+    assert!(result["exit_code"].is_null(), "{result}");
+}
+
+fn run_stream_event_value(event: &crate::types::RunStreamEvent) -> Option<&Value> {
+    match event {
+        crate::types::RunStreamEvent::Event(value) => Some(value),
+        crate::types::RunStreamEvent::Scoped { event, .. } => run_stream_event_value(event),
+        _ => None,
+    }
+}
+
+fn latest_event_type(
+    events: &Arc<Mutex<Vec<crate::types::RunStreamEvent>>>,
+    event_type: &str,
+) -> Option<Value> {
+    events
+        .lock()
+        .expect("events")
+        .iter()
+        .filter_map(run_stream_event_value)
+        .find(|value| value.get("type").and_then(Value::as_str) == Some(event_type))
+        .cloned()
+}
+
+fn assert_event_type(events: &Arc<Mutex<Vec<crate::types::RunStreamEvent>>>, event_type: &str) {
     assert!(
-        wait_for_process_exit(pid, Duration::from_secs(5)).await,
-        "background child pid {pid} survived timeout"
+        latest_event_type(events, event_type).is_some(),
+        "missing event {event_type}: {:?}",
+        events.lock().expect("events")
+    );
+}
+
+async fn wait_for_event_type(
+    events: &Arc<Mutex<Vec<crate::types::RunStreamEvent>>>,
+    event_type: &str,
+) -> Value {
+    for _ in 0..100 {
+        if let Some(value) = latest_event_type(events, event_type) {
+            return value;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!(
+        "missing event {event_type}: {:?}",
+        events.lock().expect("events")
     );
 }
 
 #[cfg(unix)]
 #[tokio::test]
-async fn bash_output_collection_does_not_wait_for_open_descendant_pipes() {
+async fn exec_command_yielded_session_emits_background_lifecycle_events() {
     let temp = tempdir().expect("temp");
     let workdir = temp.path().join("work");
     fs::create_dir_all(&workdir).expect("workdir");
-    let marker = workdir.join("detached.pid");
-    let command = format!(
-        "sh -c 'trap \"\" HUP; sleep 30' & echo $! > {}; echo done",
-        shell_quote_path(&marker)
+    let events = Arc::new(Mutex::new(Vec::<crate::types::RunStreamEvent>::new()));
+    let sink_events = Arc::clone(&events);
+    let stream: crate::types::RunStreamSink = Arc::new(move |event| {
+        sink_events.lock().expect("events").push(event);
+    });
+    let tools = crate::tools::coding_core_tools_for_mode_with_context(
+        &workdir,
+        RunMode::Build,
+        crate::tools::ToolRuntimeContext {
+            task_id: "exec-lifecycle-test".to_string(),
+            lsp: crate::config::LspConfig::default(),
+            allow_login_shell: false,
+            stream_events: Some(stream),
+        },
     );
+    let exec = tools
+        .iter()
+        .find(|tool| tool.name() == "exec_command")
+        .expect("exec_command");
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
-    let started = Instant::now();
 
-    let (result, is_error) = tokio::time::timeout(
-        Duration::from_secs(5),
-        crate::tools::run_bash_command(workdir, command, 60, receivers.abort_signal()),
-    )
-    .await
-    .expect("open descendant pipes should not hang")
-    .expect("bash result");
+    let result = exec
+        .execute(
+            "call_exec_lifecycle".to_string(),
+            json!({
+                "cmd": "printf start; sleep 0.5; printf done",
+                "yield_time_ms": 250
+            }),
+            receivers.abort_signal(),
+        )
+        .await;
 
-    let pid = read_pid_file(&marker);
-    let _ = unsafe { libc::kill(pid, libc::SIGKILL) };
+    assert!(!result.is_error, "{:?}", result.json);
+    let session_id = result.json["session_id"].as_u64().expect("session id");
+    assert_eq!(result.json["exit_code"], Value::Null);
+    assert!(result.json["output"].as_str().unwrap_or_default().contains("start"));
+    assert!(result.json.get("error").is_none(), "{:?}", result.json);
+    assert_event_type(&events, "exec_session_yielded");
+    let delta = wait_for_event_type(&events, "exec_session_output_delta").await;
+    assert_eq!(delta["session_id"], session_id);
     assert!(
-        started.elapsed() < Duration::from_secs(5),
-        "output drain should have a bounded deadline"
+        delta["output"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("done"),
+        "{delta}"
     );
-    assert!(!is_error);
-    assert!(result["error"].is_null());
-    assert_eq!(result["output"], "done\n");
+    let finished = wait_for_event_type(&events, "exec_session_finished").await;
+    assert_eq!(finished["session_id"], session_id);
+    assert_eq!(finished["exit_code"], 0);
+    assert_eq!(finished["interrupted"], false);
+
+    let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+    let _ = crate::tools::write_stdin_tool_impl(
+        json!({"session_id": session_id, "yield_time_ms": 5000}),
+        receivers.abort_signal(),
+    )
+    .await;
 }
 
+#[cfg(unix)]
 #[tokio::test]
-async fn bash_stdin_is_closed_for_prompt_style_commands() {
+async fn interrupt_exec_sessions_for_task_emits_interrupted_finish() {
+    let temp = tempdir().expect("temp");
+    let workdir = temp.path().join("work");
+    fs::create_dir_all(&workdir).expect("workdir");
+    let events = Arc::new(Mutex::new(Vec::<crate::types::RunStreamEvent>::new()));
+    let sink_events = Arc::clone(&events);
+    let stream: crate::types::RunStreamSink = Arc::new(move |event| {
+        sink_events.lock().expect("events").push(event);
+    });
+    let tools = crate::tools::coding_core_tools_for_mode_with_context(
+        &workdir,
+        RunMode::Build,
+        crate::tools::ToolRuntimeContext {
+            task_id: "exec-interrupt-test".to_string(),
+            lsp: crate::config::LspConfig::default(),
+            allow_login_shell: false,
+            stream_events: Some(stream),
+        },
+    );
+    let exec = tools
+        .iter()
+        .find(|tool| tool.name() == "exec_command")
+        .expect("exec_command");
+    let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+
+    let result = exec
+        .execute(
+            "call_exec_interrupt".to_string(),
+            json!({"cmd": "sleep 30", "yield_time_ms": 250}),
+            receivers.abort_signal(),
+        )
+        .await;
+
+    assert!(!result.is_error, "{:?}", result.json);
+    let session_id = result.json["session_id"].as_u64().expect("session id");
+    crate::tools::interrupt_exec_sessions_for_task("exec-interrupt-test");
+    let finished = wait_for_event_type(&events, "exec_session_finished").await;
+    assert_eq!(finished["session_id"], session_id);
+    assert_eq!(finished["interrupted"], true);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn exec_command_rejects_shell_background_wrappers() {
     let temp = tempdir().expect("temp");
     let workdir = temp.path().join("work");
     fs::create_dir_all(&workdir).expect("workdir");
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
 
-    let (result, is_error) = crate::tools::run_bash_command(
+    let err = crate::tools::exec_command_tool_impl(
         workdir,
-        "if read line; then printf 'read:%s\\n' \"$line\"; else printf 'stdin closed\\n'; fi"
-            .to_string(),
-        5,
+        false,
+        json!({"cmd": "sleep 30 &"}),
         receivers.abort_signal(),
     )
     .await
-    .expect("bash result");
+    .expect_err("background wrapper should fail");
 
-    assert!(!is_error);
-    assert!(result["error"].is_null());
+    assert!(err.to_string().contains("background"));
+}
+
+#[tokio::test]
+async fn exec_command_pipe_stdin_is_closed_for_prompt_style_commands() {
+    let temp = tempdir().expect("temp");
+    let workdir = temp.path().join("work");
+    fs::create_dir_all(&workdir).expect("workdir");
+    let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+
+    let result = crate::tools::exec_command_tool_impl(
+        workdir,
+        false,
+        json!({
+            "cmd": "if read line; then printf 'read:%s\\n' \"$line\"; else printf 'stdin closed\\n'; fi"
+        }),
+        receivers.abort_signal(),
+    )
+    .await
+    .expect("exec result");
+
     assert_eq!(result["output"], "stdin closed\n");
+}
+
+#[tokio::test]
+async fn exec_command_nonzero_exit_is_successful_result() {
+    let temp = tempdir().expect("temp");
+    let workdir = temp.path().join("work");
+    fs::create_dir_all(&workdir).expect("workdir");
+    let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+
+    let result = crate::tools::exec_command_tool_impl(
+        workdir,
+        false,
+        json!({"cmd": "exit 7", "yield_time_ms": 250}),
+        receivers.abort_signal(),
+    )
+    .await
+    .expect("exec result");
+
+    assert_eq!(result["exit_code"], 7);
+    assert!(result.get("error").is_none(), "{result}");
+    assert!(result["session_id"].is_null(), "{result}");
+}
+
+#[tokio::test]
+async fn exec_command_token_truncates_output() {
+    let temp = tempdir().expect("temp");
+    let workdir = temp.path().join("work");
+    fs::create_dir_all(&workdir).expect("workdir");
+    let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+
+    let result = crate::tools::exec_command_tool_impl(
+        workdir,
+        false,
+        json!({
+            "cmd": "printf 'one two three four five six seven eight nine ten eleven twelve'",
+            "max_output_tokens": 5
+        }),
+        receivers.abort_signal(),
+    )
+    .await
+    .expect("exec result");
+
+    assert!(result["original_token_count"].as_u64().unwrap_or_default() > 5);
+    assert!(result["output"].as_str().unwrap_or_default().len() < 64);
+}
+
+#[tokio::test]
+async fn write_stdin_polls_and_writes_to_tty_or_fallback_session() {
+    let temp = tempdir().expect("temp");
+    let workdir = temp.path().join("work");
+    fs::create_dir_all(&workdir).expect("workdir");
+    let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+
+    let start = crate::tools::exec_command_tool_impl(
+        workdir,
+        false,
+        json!({
+            "cmd": "read line; printf 'got:%s\\n' \"$line\"",
+            "tty": true,
+            "yield_time_ms": 250
+        }),
+        receivers.abort_signal(),
+    )
+    .await
+    .expect("exec result");
+    let session_id = start["session_id"].as_u64().expect("session_id");
+
+    let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+    let result = crate::tools::write_stdin_tool_impl(
+        json!({
+            "session_id": session_id,
+            "chars": "hello\n",
+            "yield_time_ms": 250
+        }),
+        receivers.abort_signal(),
+    )
+    .await
+    .expect("stdin result");
+
+    assert!(result["output"].as_str().unwrap_or_default().contains("got:hello"));
+}
+
+#[tokio::test]
+async fn write_stdin_rejects_non_tty_pipe_session_input() {
+    let temp = tempdir().expect("temp");
+    let workdir = temp.path().join("work");
+    fs::create_dir_all(&workdir).expect("workdir");
+    let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+
+    let start = crate::tools::exec_command_tool_impl(
+        workdir,
+        false,
+        json!({"cmd": "sleep 1", "yield_time_ms": 250}),
+        receivers.abort_signal(),
+    )
+    .await
+    .expect("exec result");
+    let session_id = start["session_id"].as_u64().expect("session_id");
+
+    let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+    let err = crate::tools::write_stdin_tool_impl(
+        json!({"session_id": session_id, "chars": "hello\n"}),
+        receivers.abort_signal(),
+    )
+    .await
+    .expect_err("pipe stdin should fail");
+    assert!(err.to_string().contains("stdin is closed"));
+
+    let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+    let _ = crate::tools::write_stdin_tool_impl(
+        json!({"session_id": session_id, "chars": "", "yield_time_ms": 5000}),
+        receivers.abort_signal(),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn write_stdin_unknown_session_fails() {
+    let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+    let err = crate::tools::write_stdin_tool_impl(
+        json!({"session_id": 999_999_u64}),
+        receivers.abort_signal(),
+    )
+    .await
+    .expect_err("unknown session");
+    assert!(err.to_string().contains("unknown exec_command session_id"));
 }
 
 fn configured_user_shell_context(

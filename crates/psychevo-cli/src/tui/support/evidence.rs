@@ -1,7 +1,7 @@
 fn evidence_kind(tool: &str) -> TranscriptKind {
     match tool {
         "read" | "list" | "search" => TranscriptKind::Explored,
-        "bash" => TranscriptKind::Ran,
+        "exec_command" | "write_stdin" => TranscriptKind::Ran,
         "write" | "edit" => TranscriptKind::Updated,
         "clarify" => TranscriptKind::Status,
         _ => TranscriptKind::Status,
@@ -44,17 +44,18 @@ fn tool_title(tool: &str, value: &Value) -> String {
                 .filter(|query| !query.trim().is_empty());
             tool_name_title("search", query)
         }
-        "bash" => {
+        "exec_command" => {
             let command = args
-                .get("command")
+                .get("cmd")
                 .and_then(Value::as_str)
                 .and_then(first_shell_command_line);
             if is_user_shell_value(value) {
                 user_shell_title(command)
             } else {
-                tool_name_title("bash", command)
+                tool_name_title("exec_command", command)
             }
         }
+        "write_stdin" => session_tool_title("write_stdin", args),
         "write" | "edit" => tool_name_title(tool, path_from(args, result)),
         "Agent" => agent_tool_title(value).unwrap_or_else(|| "Agent".to_string()),
         "clarify" => clarify_tool_title(value),
@@ -91,17 +92,18 @@ fn active_tool_title(tool: &str, value: &Value) -> String {
             .and_then(Value::as_str)
             .filter(|query| !query.trim().is_empty())
             .map_or_else(|| "search".to_string(), |query| tool_name_title("search", Some(query))),
-        "bash" => {
+        "exec_command" => {
             let command = args
-                .get("command")
+                .get("cmd")
                 .and_then(Value::as_str)
                 .and_then(first_shell_command_line);
             if is_user_shell_value(value) {
                 user_shell_title(command)
             } else {
-                tool_name_title("bash", command)
+                tool_name_title("exec_command", command)
             }
         }
+        "write_stdin" => session_tool_title("write_stdin", args),
         "write" | "edit" => tool_name_title(tool, path_from_args(args)),
         "Agent" => active_agent_tool_title(value),
         "clarify" => "Questions pending".to_string(),
@@ -111,14 +113,14 @@ fn active_tool_title(tool: &str, value: &Value) -> String {
 
 fn tool_title_for_update(tool: &str, value: &Value, existing_title: &str) -> String {
     let title = tool_title(tool, value);
-    if tool == "bash" && matches!(title.as_str(), "bash" | "!") {
+    if tool == "exec_command" && matches!(title.as_str(), "exec_command" | "!") {
         let existing = tool_title_as_invocation(
             Some(tool),
             evidence_kind(tool),
             existing_title,
             is_user_shell_value(value),
         );
-        if existing != "bash" && existing != "!" {
+        if existing != "exec_command" && existing != "!" {
             return existing;
         }
     }
@@ -137,6 +139,13 @@ fn tool_name_title(tool: &str, detail: Option<&str>) -> String {
         return tool.to_string();
     };
     format!("{tool} {detail}")
+}
+
+fn session_tool_title(tool: &str, args: &Value) -> String {
+    match args.get("session_id").and_then(Value::as_u64) {
+        Some(session_id) => tool_name_title(tool, Some(&session_id.to_string())),
+        None => tool.to_string(),
+    }
 }
 
 fn user_shell_title(command: Option<&str>) -> String {
@@ -169,7 +178,7 @@ fn tool_title_as_invocation(
     if let Some(tool) = tool
         && matches!(
             tool,
-            "read" | "list" | "search" | "bash" | "write" | "edit"
+            "read" | "list" | "search" | "exec_command" | "write_stdin" | "write" | "edit"
         )
         && (title == tool || title.starts_with(&format!("{tool} ")))
     {
@@ -197,13 +206,13 @@ fn tool_title_as_invocation(
         }
         TranscriptKind::Ran => {
             if matches!(title, "Running" | "Ran" | "Running command" | "Ran command") {
-                return "bash".to_string();
+                return "exec_command".to_string();
             }
             if let Some(command) = title
                 .strip_prefix("Running ")
                 .or_else(|| title.strip_prefix("Ran "))
             {
-                return tool_name_title("bash", Some(command));
+                return tool_name_title("exec_command", Some(command));
             }
             title.to_string()
         }
@@ -270,7 +279,7 @@ fn path_from_args(args: &Value) -> Option<&str> {
 }
 
 fn tool_output_text(value: &Value) -> (String, Option<String>) {
-    if let Some(timeout) = bash_timeout_output_text(value) {
+    if let Some(timeout) = exec_timeout_output_text(value) {
         return collapse_ledger_body(&timeout);
     }
     if value.get("tool_name").and_then(Value::as_str) == Some("Agent")
@@ -684,8 +693,8 @@ fn agent_target_from_tool_event(value: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
-fn bash_timeout_output_text(value: &Value) -> Option<String> {
-    if value.get("tool_name").and_then(Value::as_str) != Some("bash") {
+fn exec_timeout_output_text(value: &Value) -> Option<String> {
+    if value.get("tool_name").and_then(Value::as_str) != Some("exec_command") {
         return None;
     }
     let result = value.get("result").unwrap_or(&Value::Null);
@@ -1000,7 +1009,7 @@ fn visible_tool_intent_from_text(text: &str) -> Option<&'static str> {
     .iter()
     .any(|needle| tail.contains(needle))
     {
-        return Some("bash");
+        return Some("exec_command");
     }
     if [
         "let me read",

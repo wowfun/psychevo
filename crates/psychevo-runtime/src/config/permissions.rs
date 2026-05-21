@@ -12,6 +12,7 @@ pub fn permission_rules_value(options: &RunOptions, scope: ConfigScope) -> Resul
             "approval_mode": config.permissions.approval_mode.map(|mode| mode.as_str()),
             "permission_mode": config.permissions.permission_mode.map(|mode| mode.as_str()),
             "smart_model": config.permissions.smart_model,
+            "allow_login_shell": config.permissions.allow_login_shell,
             "allow": config.permissions.allow,
             "ask": config.permissions.ask,
             "deny": config.permissions.deny,
@@ -168,7 +169,7 @@ mod permission_rule_tests {
             r#"{
   // local permission policy
   "permissions": {
-    "allow": ["Bash(npm test *)"]
+    "allow": ["ExecCommand(npm test *)"]
   }
 }
 "#,
@@ -176,23 +177,23 @@ mod permission_rule_tests {
         .expect("config");
 
         let duplicate =
-            append_local_permission_allow_rule(config_dir.clone(), "Bash(npm test *)")
+            append_local_permission_allow_rule(config_dir.clone(), "ExecCommand(npm test *)")
                 .expect("duplicate append");
         assert!(!duplicate.changed);
 
-        let added = append_local_permission_allow_rule(config_dir.clone(), "Bash(cargo test *)")
+        let added = append_local_permission_allow_rule(config_dir.clone(), "ExecCommand(cargo test *)")
             .expect("append");
         assert!(added.changed);
         let text = fs::read_to_string(&config_path).expect("config");
         assert!(text.contains("local permission policy"));
-        assert!(text.contains("Bash(npm test *)"));
-        assert!(text.contains("Bash(cargo test *)"));
+        assert!(text.contains("ExecCommand(npm test *)"));
+        assert!(text.contains("ExecCommand(cargo test *)"));
 
-        let removed = remove_local_permission_rule(config_dir, "allow", "Bash(cargo test *)")
+        let removed = remove_local_permission_rule(config_dir, "allow", "ExecCommand(cargo test *)")
             .expect("remove");
         assert!(removed.changed);
         let text = fs::read_to_string(config_path).expect("config");
         assert!(text.contains("local permission policy"));
-        assert!(!text.contains("Bash(cargo test *)"));
+        assert!(!text.contains("ExecCommand(cargo test *)"));
     }
 }

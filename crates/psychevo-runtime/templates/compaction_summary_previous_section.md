@@ -1,0 +1,2 @@
+Previous compaction summary:
+{{ summary }}

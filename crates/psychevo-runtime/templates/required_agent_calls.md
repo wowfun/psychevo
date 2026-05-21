@@ -1,0 +1,1 @@
+The user explicitly mentioned these agents: {{ required_agent_mentions }}. You must call the Agent tool for each named agent before giving a final answer. The full user message remains the source of intent; write the child-agent task prompt yourself.

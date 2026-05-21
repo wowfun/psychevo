@@ -48,7 +48,7 @@ fn cli_tui_bang_shell_rejects_missing_provider_config_before_execution() {
     assert!(!output.status.success());
     assert!(!marker.exists());
     let stdout = String::from_utf8(output.stdout).expect("stdout");
-    assert!(!stdout.contains("bash touch marker"), "{stdout}");
+    assert!(!stdout.contains("exec_command touch marker"), "{stdout}");
     assert!(!stdout.contains("Prompt:"), "{stdout}");
     assert!(!stdout.contains("Answer:"), "{stdout}");
 }

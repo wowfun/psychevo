@@ -673,7 +673,7 @@ fn chat_request_projects_metadata_interleaved_reasoning_for_tool_calls() {
                 {
                     "type": "tool_call",
                     "id": "call_1",
-                    "name": "bash",
+                    "name": "exec_command",
                     "arguments": { "cmd": "ls" },
                     "arguments_json": "{\"cmd\":\"ls\"}",
                     "arguments_error": null,
@@ -819,7 +819,7 @@ fn chat_request_replays_xiaomi_thinking_reasoning_for_tool_calls() {
                 {
                     "type": "tool_call",
                     "id": "call_1",
-                    "name": "bash",
+                    "name": "exec_command",
                     "arguments": { "cmd": "ls" },
                     "arguments_json": "{\"cmd\":\"ls\"}",
                     "arguments_error": null,
@@ -901,7 +901,7 @@ fn chat_request_pads_interleaved_reasoning_when_retained_reasoning_empty() {
                 {
                     "type": "tool_call",
                     "id": "call_1",
-                    "name": "bash",
+                    "name": "exec_command",
                     "arguments": { "cmd": "ls" },
                     "arguments_json": "{\"cmd\":\"ls\"}",
                     "arguments_error": null,

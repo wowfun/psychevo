@@ -1,8 +1,8 @@
 struct EditTool(WorkdirTool);
 
 impl EditTool {
-    fn new(workdir: PathBuf) -> Self {
-        Self(WorkdirTool::new(workdir))
+    fn new(workdir: PathBuf, context: ToolRuntimeContext) -> Self {
+        Self(WorkdirTool::with_context(workdir, context))
     }
 }
 
@@ -12,11 +12,42 @@ impl ToolBinding for EditTool {
     }
 
     fn description(&self) -> &str {
-        "Apply targeted replacements or a unified diff to existing text files."
+        "Apply targeted file edits inside the working directory. Use edit instead of sed/awk for replacements. Replace mode uses fuzzy matching and returns a unified diff. Patch mode accepts V4A multi-file patches with Update/Add/Delete/Move operations."
     }
 
     fn parameters(&self) -> Value {
-        json!({"type":"object","properties":{"mode":{"type":"string"},"path":{"type":"string"},"edits":{"type":"array"},"patch":{"type":"string"}}})
+        json!({
+            "type": "object",
+            "properties": {
+                "mode": {
+                    "type": "string",
+                    "enum": ["replace", "patch"],
+                    "description": "Edit mode. 'replace' uses path + old_string + new_string. 'patch' uses V4A patch content.",
+                    "default": "replace"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Required when mode='replace'. File path to edit, relative to the working directory or absolute inside it."
+                },
+                "old_string": {
+                    "type": "string",
+                    "description": "Required when mode='replace'. Text to find. Must match uniquely unless replace_all=true. Include surrounding context for safe matching."
+                },
+                "new_string": {
+                    "type": "string",
+                    "description": "Required when mode='replace'. Replacement text. Pass an empty string to delete the matched text."
+                },
+                "replace_all": {
+                    "type": "boolean",
+                    "description": "Replace every match instead of requiring a unique match.",
+                    "default": false
+                },
+                "patch": {
+                    "type": "string",
+                    "description": "Required when mode='patch'. V4A patch content, for example:\n*** Begin Patch\n*** Update File: path/to/file\n@@ context hint @@\n context line\n-removed line\n+added line\n*** End Patch"
+                }
+            }
+        })
     }
 
     fn execution_mode(&self) -> ToolExecutionMode {
@@ -34,10 +65,7 @@ impl ToolBinding for EditTool {
             if abort.aborted() {
                 return ToolOutput::error("aborted");
             }
-            match edit_tool_impl(tool, args) {
-                Ok(value) => ToolOutput::ok(value),
-                Err(err) => ToolOutput::error(err.to_string()),
-            }
+            result_output(edit_tool_impl(tool, args))
         })
     }
 }
@@ -54,131 +82,445 @@ fn edit_tool_impl(tool: WorkdirTool, args: Value) -> Result<Value> {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct ReplaceEdit {
-    #[serde(rename = "oldText")]
-    old_text: String,
-    #[serde(rename = "newText")]
-    new_text: String,
-}
-
 fn edit_replace(tool: WorkdirTool, args: Value) -> Result<Value> {
     let path = required_string(&args, "path")?;
-    let edits_value = args
-        .get("edits")
-        .ok_or_else(|| Error::Message("edits is required".to_string()))?;
-    let edits: Vec<ReplaceEdit> = serde_json::from_value(edits_value.clone())?;
-    if edits.is_empty() {
-        return Err(Error::Message("edits must not be empty".to_string()));
-    }
+    let old_string = required_string(&args, "old_string")?;
+    let new_string = required_string(&args, "new_string")?;
+    let replace_all = optional_bool(&args, "replace_all")?.unwrap_or(false);
     let target = tool.resolve_existing(path)?;
-    let original_bytes = fs::read(&target)?;
-    let original_text = String::from_utf8(original_bytes)
-        .map_err(|_| Error::Message("invalid UTF-8".to_string()))?;
-    let bom = original_text.starts_with('\u{feff}');
-    let body = original_text.trim_start_matches('\u{feff}');
-    let line_ending = dominant_line_ending(body);
-    let normalized = normalize_lf(body);
-    let mut ranges = Vec::new();
-    for edit in &edits {
-        if edit.old_text == edit.new_text {
-            return Err(Error::Message("no-change edit".to_string()));
+    let _locks = acquire_path_locks(std::slice::from_ref(&target));
+    let warning = stale_file_warning(tool.task_id(), &target);
+    let text = read_text_file(&target)?;
+    let old = normalize_lf(old_string.trim_start_matches('\u{feff}'));
+    let new = normalize_lf(new_string.trim_start_matches('\u{feff}'));
+    let outcome = match fuzzy_find_and_replace(&text.normalized, &old, &new, replace_all) {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            return Ok(json!({
+                "success": false,
+                "error": err
+            }));
         }
-        let old = normalize_lf(edit.old_text.trim_start_matches('\u{feff}'));
-        let matches = normalized.match_indices(&old).collect::<Vec<_>>();
-        if matches.is_empty() {
-            return Err(Error::Message(format!(
-                "oldText not found: {}",
-                edit.old_text
-            )));
-        }
-        if matches.len() > 1 {
-            return Err(Error::Message(format!(
-                "oldText is ambiguous: {}",
-                edit.old_text
-            )));
-        }
-        let start = matches[0].0;
-        let end = start + old.len();
-        ranges.push((start, end, normalize_lf(&edit.new_text)));
-    }
-    ranges.sort_by_key(|(start, _, _)| *start);
-    for pair in ranges.windows(2) {
-        if pair[0].1 > pair[1].0 {
-            return Err(Error::Message("edits overlap".to_string()));
-        }
-    }
-    let mut updated = String::new();
-    let mut cursor = 0usize;
-    for (start, end, replacement) in ranges {
-        updated.push_str(&normalized[cursor..start]);
-        updated.push_str(&replacement);
-        cursor = end;
-    }
-    updated.push_str(&normalized[cursor..]);
-    let diff = unified_diff(&tool.relative(&target), &normalized, &updated);
-    let restored = restore_line_endings(&updated, line_ending);
-    fs::write(
-        &target,
-        if bom {
-            format!("\u{feff}{restored}")
-        } else {
-            restored
-        },
-    )?;
-    Ok(json!({
-        "success": true,
-        "diff": diff,
-        "files_modified": [tool.relative(&target)],
-        "error": null
+    };
+    let rel = tool.relative(&target);
+    let diff = unified_diff(&rel, &text.normalized, &outcome.content);
+    let restored = restore_text_file(&text, &outcome.content);
+    let (lint, lsp) = write_edit_text(&tool, &target, &restored, Some(&text.original))?;
+    Ok(edit_success_value(EditSuccess {
+        diff,
+        files_modified: vec![rel],
+        files_created: Vec::new(),
+        files_deleted: Vec::new(),
+        files_moved: Vec::new(),
+        lint,
+        lsp_diagnostics: lsp,
+        warning,
     }))
 }
 
 fn edit_patch(tool: WorkdirTool, args: Value) -> Result<Value> {
     let patch = required_string(&args, "patch")?;
-    let files = parse_unified_patch(patch)?;
-    if files.is_empty() {
-        return Err(Error::Message("patch contains no file updates".to_string()));
-    }
-    let mut diffs = Vec::new();
-    let mut modified = Vec::new();
-    for file in files {
-        let target = tool.resolve_existing(&file.path)?;
-        let original_text = String::from_utf8(fs::read(&target)?)
-            .map_err(|_| Error::Message("invalid UTF-8".to_string()))?;
-        let bom = original_text.starts_with('\u{feff}');
-        let body = original_text.trim_start_matches('\u{feff}');
-        let line_ending = dominant_line_ending(body);
-        let mut lines = normalize_lf(body)
-            .split('\n')
-            .map(ToOwned::to_owned)
-            .collect::<Vec<_>>();
-        for hunk in file.hunks {
-            let idx = find_unique_subslice(&lines, &hunk.old_lines).ok_or_else(|| {
-                Error::Message(format!("patch hunk did not match uniquely: {}", file.path))
-            })?;
-            lines.splice(idx..idx + hunk.old_lines.len(), hunk.new_lines);
+    let operations = match parse_v4a_patch(patch) {
+        Ok(operations) => operations,
+        Err(err) => return Ok(json!({ "success": false, "error": err.to_string() })),
+    };
+    let mut lock_paths = Vec::new();
+    for op in &operations {
+        match op.kind {
+            V4aOperationKind::Add => {
+                let (target, _) = tool.resolve_write_target(&op.file_path)?;
+                lock_paths.push(target);
+            }
+            V4aOperationKind::Update | V4aOperationKind::Delete => {
+                lock_paths.push(tool.resolve_existing(&op.file_path)?);
+            }
+            V4aOperationKind::Move => {
+                lock_paths.push(tool.resolve_existing(&op.file_path)?);
+                let new_path = op
+                    .new_path
+                    .as_deref()
+                    .ok_or_else(|| Error::Message("move destination required".to_string()))?;
+                let (target, _) = tool.resolve_write_target(new_path)?;
+                lock_paths.push(target);
+            }
         }
-        let updated = lines.join("\n");
-        let original_norm = normalize_lf(body);
-        let rel = tool.relative(&target);
-        diffs.push(unified_diff(&rel, &original_norm, &updated));
-        let restored = restore_line_endings(&updated, line_ending);
-        fs::write(
-            &target,
-            if bom {
-                format!("\u{feff}{restored}")
-            } else {
-                restored
-            },
-        )?;
-        modified.push(rel);
     }
-    Ok(json!({
-        "success": true,
-        "diff": diffs.join("\n"),
-        "files_modified": modified,
-        "error": null
+    let _locks = acquire_path_locks(&lock_paths);
+    let plan = match validate_v4a_operations(&tool, &operations) {
+        Ok(plan) => plan,
+        Err(err) => {
+            return Ok(json!({
+                "success": false,
+                "error": format!("Patch validation failed (no files were modified):\n{err}")
+            }));
+        }
+    };
+    apply_v4a_plan(&tool, plan)
+}
+
+enum V4aApply {
+    Add {
+        target: PathBuf,
+        rel: String,
+        content: String,
+    },
+    Update {
+        target: PathBuf,
+        rel: String,
+        text: TextFile,
+        updated: String,
+    },
+    Delete {
+        target: PathBuf,
+        rel: String,
+        text: TextFile,
+    },
+    Move {
+        source: PathBuf,
+        dest: PathBuf,
+        source_rel: String,
+        dest_rel: String,
+    },
+}
+
+fn validate_v4a_operations(tool: &WorkdirTool, operations: &[V4aOperation]) -> Result<Vec<V4aApply>> {
+    let mut plan = Vec::new();
+    for op in operations {
+        match op.kind {
+            V4aOperationKind::Add => {
+                let (target, _) = tool.resolve_write_target(&op.file_path)?;
+                if target.exists() {
+                    return Err(Error::Message(format!(
+                        "{}: add target already exists",
+                        op.file_path
+                    )));
+                }
+                plan.push(V4aApply::Add {
+                    rel: tool.relative(&target),
+                    target,
+                    content: v4a_add_content(op),
+                });
+            }
+            V4aOperationKind::Update => {
+                let target = tool.resolve_existing(&op.file_path)?;
+                let text = read_text_file(&target)?;
+                let updated = apply_v4a_update_hunks(&text.normalized, &op.hunks)
+                    .map_err(Error::Message)?;
+                if updated == text.normalized {
+                    return Err(Error::Message(format!("{}: no-change patch", op.file_path)));
+                }
+                plan.push(V4aApply::Update {
+                    rel: tool.relative(&target),
+                    target,
+                    text,
+                    updated,
+                });
+            }
+            V4aOperationKind::Delete => {
+                let target = tool.resolve_existing(&op.file_path)?;
+                let text = read_text_file(&target)?;
+                plan.push(V4aApply::Delete {
+                    rel: tool.relative(&target),
+                    target,
+                    text,
+                });
+            }
+            V4aOperationKind::Move => {
+                let source = tool.resolve_existing(&op.file_path)?;
+                let dest = op
+                    .new_path
+                    .as_deref()
+                    .ok_or_else(|| Error::Message("move destination required".to_string()))?;
+                let (dest, _) = tool.resolve_write_target(dest)?;
+                if dest.exists() {
+                    return Err(Error::Message(format!(
+                        "{}: move destination already exists",
+                        dest.display()
+                    )));
+                }
+                plan.push(V4aApply::Move {
+                    source_rel: tool.relative(&source),
+                    dest_rel: tool.relative(&dest),
+                    source,
+                    dest,
+                });
+            }
+        }
+    }
+    Ok(plan)
+}
+
+fn apply_v4a_plan(tool: &WorkdirTool, plan: Vec<V4aApply>) -> Result<Value> {
+    let mut diffs = Vec::new();
+    let mut files_modified = Vec::new();
+    let mut files_created = Vec::new();
+    let mut files_deleted = Vec::new();
+    let mut files_moved = Vec::new();
+    let mut lint_by_file = serde_json::Map::new();
+    let mut lsp_blocks = Vec::new();
+    let warnings = plan
+        .iter()
+        .filter_map(|op| match op {
+            V4aApply::Add { target, .. } => stale_file_warning(tool.task_id(), target),
+            V4aApply::Update { target, .. } | V4aApply::Delete { target, .. } => {
+                stale_file_warning(tool.task_id(), target)
+            }
+            V4aApply::Move { source, dest, .. } => stale_file_warning(tool.task_id(), source)
+                .or_else(|| stale_file_warning(tool.task_id(), dest)),
+        })
+        .collect::<Vec<_>>();
+    for op in plan {
+        match op {
+            V4aApply::Add {
+                target,
+                rel,
+                content,
+            } => {
+                if let Some(parent) = target.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                let (lint, lsp) = write_edit_text(tool, &target, &content, None)?;
+                diffs.push(unified_diff_named("/dev/null", &format!("b/{rel}"), "", &content));
+                if let Some(lint) = lint {
+                    lint_by_file.insert(rel.clone(), lint);
+                }
+                if let Some(lsp) = lsp {
+                    lsp_blocks.push(lsp);
+                }
+                files_created.push(rel);
+            }
+            V4aApply::Update {
+                target,
+                rel,
+                text,
+                updated,
+            } => {
+                let restored = restore_text_file(&text, &updated);
+                let (lint, lsp) = write_edit_text(tool, &target, &restored, Some(&text.original))?;
+                diffs.push(unified_diff(&rel, &text.normalized, &updated));
+                if let Some(lint) = lint {
+                    lint_by_file.insert(rel.clone(), lint);
+                }
+                if let Some(lsp) = lsp {
+                    lsp_blocks.push(lsp);
+                }
+                files_modified.push(rel);
+            }
+            V4aApply::Delete { target, rel, text } => {
+                fs::remove_file(&target)?;
+                diffs.push(unified_diff_named(&format!("a/{rel}"), "/dev/null", &text.normalized, ""));
+                files_deleted.push(rel);
+            }
+            V4aApply::Move {
+                source,
+                dest,
+                source_rel,
+                dest_rel,
+            } => {
+                if let Some(parent) = dest.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::rename(&source, &dest)?;
+                note_file_write(tool.task_id(), &dest);
+                diffs.push(format!("# Moved: {source_rel} -> {dest_rel}"));
+                files_moved.push(json!({ "from": source_rel, "to": dest_rel }));
+            }
+        }
+    }
+    let lint = (!lint_by_file.is_empty()).then_some(Value::Object(lint_by_file));
+    let lsp = (!lsp_blocks.is_empty()).then(|| lsp_blocks.join("\n\n"));
+    Ok(edit_success_value(EditSuccess {
+        diff: diffs.join("\n"),
+        files_modified,
+        files_created,
+        files_deleted,
+        files_moved,
+        lint,
+        lsp_diagnostics: lsp,
+        warning: if warnings.is_empty() {
+            None
+        } else {
+            Some(warnings.join(" | "))
+        },
     }))
 }
 
+#[cfg(test)]
+mod edit_tool_tests {
+    use super::*;
+
+    fn workdir_tool(path: &Path) -> WorkdirTool {
+        WorkdirTool::with_context(
+            path.canonicalize().expect("canonical workdir"),
+            ToolRuntimeContext {
+                task_id: uuid::Uuid::now_v7().to_string(),
+                lsp: LspConfig {
+                    enabled: false,
+                    ..Default::default()
+                },
+                allow_login_shell: false,
+                stream_events: None,
+            },
+        )
+    }
+
+    #[test]
+    fn edit_tool_schema_is_hermes_style_without_legacy_edits() {
+        let tool = EditTool::new(PathBuf::from("/tmp/work"), ToolRuntimeContext::default());
+        let schema = tool.parameters();
+        assert_eq!(schema["properties"]["mode"]["enum"], json!(["replace", "patch"]));
+        assert_eq!(schema["properties"]["mode"]["default"], "replace");
+        assert!(schema["properties"].get("edits").is_none());
+        assert!(
+            schema["properties"]["patch"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("*** Begin Patch")
+        );
+    }
+
+    #[test]
+    fn edit_replace_uses_fuzzy_matching() {
+        let temp = tempfile::tempdir().expect("temp");
+        fs::write(
+            temp.path().join("main.rs"),
+            "fn main() {\n    println!(\"hi\");\n}\n",
+        )
+        .expect("seed");
+        let value = edit_tool_impl(
+            workdir_tool(temp.path()),
+            json!({
+                "mode": "replace",
+                "path": "main.rs",
+                "old_string": "println!(\"hi\");",
+                "new_string": "println!(\"bye\");"
+            }),
+        )
+        .expect("edit");
+        assert_eq!(value["success"], true);
+        assert!(
+            fs::read_to_string(temp.path().join("main.rs"))
+                .expect("file")
+                .contains("bye")
+        );
+    }
+
+    #[test]
+    fn edit_replace_reports_ambiguous_match_unless_replace_all() {
+        let temp = tempfile::tempdir().expect("temp");
+        fs::write(temp.path().join("dup.txt"), "a\na\n").expect("seed");
+        let ambiguous = edit_tool_impl(
+            workdir_tool(temp.path()),
+            json!({
+                "mode": "replace",
+                "path": "dup.txt",
+                "old_string": "a",
+                "new_string": "b"
+            }),
+        )
+        .expect("ambiguous value");
+        assert_eq!(ambiguous["success"], false);
+        assert!(ambiguous["error"].as_str().unwrap().contains("Found 2 matches"));
+
+        let replaced = edit_tool_impl(
+            workdir_tool(temp.path()),
+            json!({
+                "mode": "replace",
+                "path": "dup.txt",
+                "old_string": "a",
+                "new_string": "b",
+                "replace_all": true
+            }),
+        )
+        .expect("replace all");
+        assert_eq!(replaced["success"], true);
+        assert_eq!(
+            fs::read_to_string(temp.path().join("dup.txt")).expect("file"),
+            "b\nb\n"
+        );
+    }
+
+    #[test]
+    fn edit_replace_preserves_bom_and_crlf() {
+        let temp = tempfile::tempdir().expect("temp");
+        fs::write(temp.path().join("win.txt"), "\u{feff}one\r\ntwo\r\n").expect("seed");
+        edit_tool_impl(
+            workdir_tool(temp.path()),
+            json!({
+                "mode": "replace",
+                "path": "win.txt",
+                "old_string": "one",
+                "new_string": "uno"
+            }),
+        )
+        .expect("edit");
+        let content = fs::read_to_string(temp.path().join("win.txt")).expect("file");
+        assert!(content.starts_with('\u{feff}'));
+        assert!(content.contains("uno\r\ntwo\r\n"));
+    }
+
+    #[test]
+    fn edit_patch_applies_full_v4a_operations() {
+        let temp = tempfile::tempdir().expect("temp");
+        fs::write(temp.path().join("update.txt"), "alpha\nbeta\n").expect("update");
+        fs::write(temp.path().join("delete.txt"), "remove me\n").expect("delete");
+        fs::write(temp.path().join("move.txt"), "move me\n").expect("move");
+        let patch = r#"*** Begin Patch
+*** Update File: update.txt
+@@ beta @@
+ alpha
+-beta
++bravo
+*** Add File: add.txt
++created
++file
+*** Delete File: delete.txt
+*** Move File: move.txt -> moved.txt
+*** End Patch"#;
+        let value = edit_tool_impl(
+            workdir_tool(temp.path()),
+            json!({"mode": "patch", "patch": patch}),
+        )
+        .expect("patch");
+        assert_eq!(value["success"], true);
+        assert_eq!(
+            fs::read_to_string(temp.path().join("update.txt")).expect("update"),
+            "alpha\nbravo\n"
+        );
+        assert_eq!(
+            fs::read_to_string(temp.path().join("add.txt")).expect("add"),
+            "created\nfile"
+        );
+        assert!(!temp.path().join("delete.txt").exists());
+        assert!(!temp.path().join("move.txt").exists());
+        assert!(temp.path().join("moved.txt").exists());
+        assert_eq!(value["files_created"], json!(["add.txt"]));
+        assert_eq!(value["files_deleted"], json!(["delete.txt"]));
+        assert_eq!(value["files_moved"][0], json!({"from": "move.txt", "to": "moved.txt"}));
+    }
+
+    #[test]
+    fn edit_patch_validation_failure_does_not_partially_apply() {
+        let temp = tempfile::tempdir().expect("temp");
+        fs::write(temp.path().join("update.txt"), "alpha\nbeta\n").expect("update");
+        let patch = r#"*** Begin Patch
+*** Update File: update.txt
+@@ missing @@
+-missing
++changed
+*** Add File: add.txt
++created
+*** End Patch"#;
+        let value = edit_tool_impl(
+            workdir_tool(temp.path()),
+            json!({"mode": "patch", "patch": patch}),
+        )
+        .expect("failed value");
+        assert_eq!(value["success"], false);
+        assert_eq!(
+            fs::read_to_string(temp.path().join("update.txt")).expect("update"),
+            "alpha\nbeta\n"
+        );
+        assert!(!temp.path().join("add.txt").exists());
+    }
+}

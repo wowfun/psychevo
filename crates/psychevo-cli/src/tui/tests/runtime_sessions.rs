@@ -197,8 +197,8 @@ async fn final_message_defers_turn_meta_while_foreground_task_is_running() {
     tx.send(RunStreamEvent::Event(serde_json::json!({
         "type": "tool_execution_end",
         "tool_call_id": "call_sqlite",
-        "tool_name": "bash",
-        "args": {"command": "sqlite3 feeds.db"},
+        "tool_name": "exec_command",
+        "args": {"cmd": "sqlite3 feeds.db"},
         "result": {"output": "[]", "exit_code": 1},
         "outcome": "failed"
     })))
@@ -1022,7 +1022,7 @@ fn normal_turn_with_tool_failure_does_not_add_contradictory_error_row() {
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_execution_end",
-            "tool_name": "bash",
+            "tool_name": "exec_command",
             "tool_call_id": "call_1",
             "outcome": "failed",
             "result": { "error": "network failed" }
@@ -1492,12 +1492,12 @@ fn load_history_does_not_rehydrate_aborted_tool_calls_as_running() {
                 {
                     "type": "tool_call",
                     "id": "call_story",
-                    "name": "bash",
+                    "name": "exec_command",
                     "arguments": {
-                        "command": "cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db \"SELECT content FROM stories WHERE id = 48074265;\" 2>&1 | head -c 3000",
+                        "cmd": "cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db \"SELECT content FROM stories WHERE id = 48074265;\" 2>&1 | head -c 3000",
                         "timeout": 10
                     },
-                    "arguments_json": "{\"command\":\"cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db \\\"SELECT content FROM stories WHERE id = 48074265;\\\" 2>&1 | head -c 3000\",\"timeout\":10}",
+                    "arguments_json": "{\"cmd\":\"cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db \\\"SELECT content FROM stories WHERE id = 48074265;\\\" 2>&1 | head -c 3000\",\"timeout\":10}",
                     "arguments_error": null,
                     "content_index": 1,
                     "call_index": 0
@@ -1517,10 +1517,10 @@ fn load_history_does_not_rehydrate_aborted_tool_calls_as_running() {
         .transcript
         .iter()
         .find(|row| row.kind == TranscriptKind::Ran)
-        .expect("bash row");
+        .expect("exec_command row");
     assert!(
         row.title
-            .starts_with("bash cd /home/kevin/Projects/feedgarden")
+            .starts_with("exec_command cd /home/kevin/Projects/feedgarden")
     );
     assert!(!row.title.starts_with("Running "));
     assert_eq!(row.text, "interrupted");
@@ -1868,8 +1868,8 @@ async fn running_shell_switch_buffers_stream_until_return() {
         "type": "tool_execution_start",
         "session_id": first,
         "tool_call_id": "user_shell",
-        "tool_name": "bash",
-        "args": {"command": "printf shell-one"},
+        "tool_name": "exec_command",
+        "args": {"cmd": "printf shell-one"},
         "source": "user_shell",
     })))
     .expect("send shell start");
@@ -1877,7 +1877,7 @@ async fn running_shell_switch_buffers_stream_until_return() {
         "type": "tool_execution_end",
         "session_id": first,
         "tool_call_id": "user_shell",
-        "tool_name": "bash",
+        "tool_name": "exec_command",
         "result": {"output": "shell-one", "exit_code": 0, "truncated": false},
         "outcome": "normal",
         "source": "user_shell",

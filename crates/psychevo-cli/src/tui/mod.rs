@@ -40,8 +40,8 @@ use psychevo_runtime::{
     refresh_model_metadata_cache, reload_session_context, resolve_agent_definition,
     resolve_image_source, run_control, run_live_streaming, run_live_streaming_controlled,
     run_user_shell_command_streaming_controlled, selected_configured_model, set_agent_spawn_paused,
-    spawn_agent_background, stop_agent_id_with_grace, undo_session, usage_stats,
-    write_session_export,
+    side_conversation_boundary_prompt, spawn_agent_background, stop_agent_id_with_grace,
+    undo_session, usage_stats, write_session_export,
 };
 use ratatui::Frame;
 use ratatui::Terminal;

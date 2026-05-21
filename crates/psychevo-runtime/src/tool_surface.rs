@@ -5,8 +5,11 @@ use psychevo_agent_core::ToolBinding;
 use psychevo_ai::ToolDeclaration;
 
 use crate::agents::{AgentToolContext, agent_tools};
+use crate::config::LspConfig;
 use crate::skills::SkillDiscoveryOptions;
-use crate::tools::{clarify_tool, coding_core_tools_for_mode, skill_tools_for_mode};
+use crate::tools::{
+    ToolRuntimeContext, clarify_tool, coding_core_tools_for_mode_with_context, skill_tools_for_mode,
+};
 use crate::types::{ClarifyControl, RunMode, RunStreamSink};
 
 pub(crate) enum ClarifyToolSurface {
@@ -35,14 +38,27 @@ impl ClarifyToolSurface {
 
 pub(crate) struct ToolSurfaceAssembly {
     pub(crate) workdir: PathBuf,
+    pub(crate) task_id: String,
     pub(crate) mode: RunMode,
+    pub(crate) lsp: LspConfig,
+    pub(crate) allow_login_shell: bool,
+    pub(crate) stream_events: Option<RunStreamSink>,
     pub(crate) clarify: ClarifyToolSurface,
     pub(crate) skills: Option<SkillDiscoveryOptions>,
     pub(crate) agents: Option<AgentToolContext>,
 }
 
 pub(crate) fn assemble_tool_surface(input: ToolSurfaceAssembly) -> Vec<Arc<dyn ToolBinding>> {
-    let mut tools = coding_core_tools_for_mode(&input.workdir, input.mode);
+    let mut tools = coding_core_tools_for_mode_with_context(
+        &input.workdir,
+        input.mode,
+        ToolRuntimeContext {
+            task_id: input.task_id,
+            lsp: input.lsp.clone(),
+            allow_login_shell: input.allow_login_shell,
+            stream_events: input.stream_events.clone(),
+        },
+    );
     if let ClarifyToolSurface::Enabled { control, stream } = input.clarify {
         tools.push(clarify_tool(control, stream));
     }

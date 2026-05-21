@@ -21,6 +21,7 @@ pub(crate) struct RunConfig {
     provider: BTreeMap<String, ConfigProviderEntry>,
     pub(crate) compression: CompressionConfig,
     pub(crate) permissions: PermissionConfig,
+    pub(crate) lsp: LspConfig,
 }
 
 // Configuration internals are split by loading, parsing, resolution, and catalog concerns.

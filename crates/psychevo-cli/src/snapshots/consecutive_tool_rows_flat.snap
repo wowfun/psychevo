@@ -13,11 +13,11 @@ size=120x20
 
 • read crates/psychevo-cli/src/tui/render/transcript.rs
   └ read 240 lines
-• bash cargo test -p psychevo-cli tui::tests
+• exec_command cargo test -p psychevo-cli tui::tests
   └ ok
 • write crates/psychevo-cli/src/tui/render/transcript.rs
   └ write normal
-• bash cargo fmt
+• exec_command cargo fmt
   └ ok
 
 The tool evidence stays flat even when several tool rows arrive consecutively.
@@ -35,11 +35,11 @@ mock/model  high  ~/work · main
 [default]
 [green]• [default]read crates/psychevo-cli/src/tui/render/transcript.rs
 [dim]  └ [default]read 240 lines
-[green]• [default]bash cargo test -p psychevo-cli tui::tests
+[green]• [default]exec_command cargo test -p psychevo-cli tui::tests
 [dim]  └ [default]ok
 [green]• [default]write crates/psychevo-cli/src/tui/render/transcript.rs
 [dim]  └ [default]write normal
-[green]• [default]bash cargo fmt
+[green]• [default]exec_command cargo fmt
 [dim]  └ [default]ok
 [default]
 [default]The tool evidence stays flat even when several tool rows arrive consecutively.

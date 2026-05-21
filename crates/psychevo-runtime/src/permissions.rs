@@ -300,9 +300,10 @@ impl ToolBinding for PermissionTool {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PermissionAction {
-    Bash {
+    ExecCommand {
         command: String,
         normalized: String,
+        workdir: Option<FileTarget>,
     },
     File {
         tool: String,
@@ -316,18 +317,24 @@ struct FileTarget {
     raw: String,
     absolute: PathBuf,
     relative: String,
+    within_workdir: bool,
 }
 
 impl PermissionAction {
     fn from_tool_call(workdir: &Path, tool_name: &str, args: &Value) -> Option<Self> {
         match tool_name {
-            "bash" => args
-                .get("command")
-                .and_then(Value::as_str)
-                .map(|command| Self::Bash {
-                    command: command.to_string(),
-                    normalized: normalize_command(command),
-                }),
+            "exec_command" => {
+                args.get("cmd")
+                    .and_then(Value::as_str)
+                    .map(|command| Self::ExecCommand {
+                        command: command.to_string(),
+                        normalized: normalize_command(command),
+                        workdir: args
+                            .get("workdir")
+                            .and_then(Value::as_str)
+                            .map(|path| file_target(workdir, path)),
+                    })
+            }
             "read" => file_paths_from_args(workdir, args, &["path"]).map(|paths| Self::File {
                 tool: "read".to_string(),
                 paths,
@@ -352,8 +359,8 @@ impl PermissionAction {
 
     fn matches_rule(&self, rule: &PermissionRule) -> bool {
         match self {
-            Self::Bash { normalized, .. } => {
-                rule.tool == "bash" && wildcard_match(&rule.pattern, normalized)
+            Self::ExecCommand { normalized, .. } => {
+                rule.tool == "exec_command" && wildcard_match(&rule.pattern, normalized)
             }
             Self::File { tool, paths, .. } => {
                 rule.tool == *tool
@@ -370,7 +377,7 @@ impl PermissionAction {
 
     fn session_key(&self) -> String {
         match self {
-            Self::Bash { normalized, .. } => format!("bash:{normalized}"),
+            Self::ExecCommand { normalized, .. } => format!("exec_command:{normalized}"),
             Self::File { tool, paths, .. } => format!(
                 "{tool}:{}",
                 paths
@@ -384,13 +391,13 @@ impl PermissionAction {
 
     fn suggested_rule(&self) -> Option<String> {
         match self {
-            Self::Bash { command, .. } => Some(format!("Bash({command})")),
+            Self::ExecCommand { command, .. } => Some(format!("ExecCommand({command})")),
             Self::File { .. } => None,
         }
     }
 
     fn allow_always(&self) -> bool {
-        matches!(self, Self::Bash { .. })
+        matches!(self, Self::ExecCommand { .. })
     }
 
     fn is_safe_file_edit(&self) -> bool {
@@ -423,30 +430,32 @@ fn edit_paths_from_args(workdir: &Path, args: &Value) -> Vec<FileTarget> {
         .map(|patch| {
             patch
                 .lines()
-                .filter_map(patch_file_path)
+                .flat_map(patch_file_paths)
                 .map(|path| file_target(workdir, &path))
                 .collect()
         })
         .unwrap_or_default()
 }
 
-fn patch_file_path(line: &str) -> Option<String> {
-    let path = line
-        .strip_prefix("+++ ")
-        .or_else(|| line.strip_prefix("--- "))?;
-    let path = path.trim();
-    if path == "/dev/null" {
-        return None;
+fn patch_file_paths(line: &str) -> Vec<String> {
+    let line = line.trim();
+    for marker in [
+        "*** Update File:",
+        "*** Add File:",
+        "*** Delete File:",
+        "*** Move to:",
+    ] {
+        if let Some(path) = line.strip_prefix(marker) {
+            return vec![path.trim().to_string()];
+        }
     }
-    Some(
-        path.strip_prefix("a/")
-            .or_else(|| path.strip_prefix("b/"))
-            .unwrap_or(path)
-            .split('\t')
-            .next()
-            .unwrap_or(path)
-            .to_string(),
-    )
+    if let Some(rest) = line.strip_prefix("*** Move File:") {
+        if let Some((from, to)) = rest.split_once("->") {
+            return vec![from.trim().to_string(), to.trim().to_string()];
+        }
+        return vec![rest.trim().to_string()];
+    }
+    Vec::new()
 }
 
 fn file_target(workdir: &Path, raw: &str) -> FileTarget {
@@ -456,14 +465,15 @@ fn file_target(workdir: &Path, raw: &str) -> FileTarget {
     } else {
         lexical_normalize(&workdir.join(path))
     };
-    let relative = absolute
+    let (relative, within_workdir) = absolute
         .strip_prefix(workdir)
-        .map(|path| path.to_string_lossy().replace('\\', "/"))
-        .unwrap_or_else(|_| raw.replace('\\', "/"));
+        .map(|path| (path.to_string_lossy().replace('\\', "/"), true))
+        .unwrap_or_else(|_| (raw.replace('\\', "/"), false));
     FileTarget {
         raw: raw.to_string(),
         absolute,
         relative,
+        within_workdir,
     }
 }
 
@@ -483,7 +493,9 @@ fn lexical_normalize(path: &Path) -> PathBuf {
 
 fn hardline_deny(action: &PermissionAction) -> Option<String> {
     match action {
-        PermissionAction::Bash { normalized, .. } => hardline_bash_reason(normalized),
+        PermissionAction::ExecCommand { normalized, .. } => {
+            background_shell_reason(normalized).or_else(|| hardline_bash_reason(normalized))
+        }
         PermissionAction::File {
             paths, mutating, ..
         } => paths.iter().find_map(|target| {
@@ -498,7 +510,21 @@ fn hardline_deny(action: &PermissionAction) -> Option<String> {
 
 fn default_ask_reason(action: &PermissionAction) -> Option<String> {
     match action {
-        PermissionAction::Bash { normalized, .. } => dangerous_bash_reason(normalized),
+        PermissionAction::ExecCommand {
+            normalized,
+            workdir,
+            ..
+        } => {
+            if workdir
+                .as_ref()
+                .is_some_and(|target| !target.within_workdir)
+            {
+                return Some(
+                    "command workdir outside accepted workdir requires approval".to_string(),
+                );
+            }
+            dangerous_bash_reason(normalized)
+        }
         PermissionAction::File { .. } => None,
     }
 }
@@ -626,6 +652,25 @@ fn dangerous_bash_reason(command: &str) -> Option<String> {
     None
 }
 
+fn background_shell_reason(command: &str) -> Option<String> {
+    if command.ends_with(" &")
+        || command.contains(" & ")
+        || command.starts_with("nohup ")
+        || command.contains(" nohup ")
+        || command.starts_with("disown")
+        || command.contains("; disown")
+        || command.contains("&& disown")
+        || command.starts_with("setsid ")
+        || command.contains(" setsid ")
+    {
+        return Some(
+            "shell-level background wrappers are denied; run the foreground command and let exec_command return a session_id"
+                .to_string(),
+        );
+    }
+    None
+}
+
 fn pipe_to_shell(command: &str) -> bool {
     command.contains("| sh")
         || command.contains("| bash")
@@ -635,8 +680,8 @@ fn pipe_to_shell(command: &str) -> bool {
 
 fn action_summary(tool_name: &str, args: &Value) -> String {
     match tool_name {
-        "bash" => args
-            .get("command")
+        "exec_command" => args
+            .get("cmd")
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
@@ -676,7 +721,7 @@ fn parse_rule(raw: &str) -> Option<PermissionRule> {
     let (tool, rest) = raw.split_once('(')?;
     let pattern = rest.strip_suffix(')')?.trim();
     let tool = match tool.trim() {
-        "Bash" | "bash" => "bash",
+        "ExecCommand" | "exec_command" => "exec_command",
         "Read" | "read" => "read",
         "Write" | "write" => "write",
         "Edit" | "edit" => "edit",
@@ -690,7 +735,7 @@ fn parse_rule(raw: &str) -> Option<PermissionRule> {
 }
 
 fn normalize_rule_pattern(pattern: &str, tool: &str) -> String {
-    if tool == "bash" {
+    if tool == "exec_command" {
         normalize_command(pattern)
     } else {
         pattern.replace('\\', "/")
@@ -752,12 +797,12 @@ mod tests {
     fn hardline_denies_win_over_allow() {
         let runtime = runtime(
             PermissionConfig {
-                allow: vec!["Bash(rm -rf /)".to_string()],
+                allow: vec!["ExecCommand(rm -rf /)".to_string()],
                 ..Default::default()
             },
             PermissionMode::BypassPermissions,
         );
-        let decision = runtime.evaluate("bash", &json!({"command": "rm -rf /"}));
+        let decision = runtime.evaluate("exec_command", &json!({"cmd": "rm -rf /"}));
         assert!(matches!(decision, PermissionDecision::Deny { .. }));
     }
 
@@ -765,14 +810,14 @@ mod tests {
     fn configured_precedence_is_deny_ask_allow() {
         let runtime = runtime(
             PermissionConfig {
-                allow: vec!["Bash(cargo publish *)".to_string()],
-                ask: vec!["Bash(cargo publish *)".to_string()],
-                deny: vec!["Bash(cargo publish *)".to_string()],
+                allow: vec!["ExecCommand(cargo publish *)".to_string()],
+                ask: vec!["ExecCommand(cargo publish *)".to_string()],
+                deny: vec!["ExecCommand(cargo publish *)".to_string()],
                 ..Default::default()
             },
             PermissionMode::Default,
         );
-        let decision = runtime.evaluate("bash", &json!({"command": "cargo publish --dry-run"}));
+        let decision = runtime.evaluate("exec_command", &json!({"cmd": "cargo publish --dry-run"}));
         assert!(matches!(decision, PermissionDecision::Deny { .. }));
     }
 
@@ -800,9 +845,59 @@ mod tests {
     }
 
     #[test]
+    fn v4a_patch_paths_are_extracted_for_permissions() {
+        let runtime = runtime(
+            PermissionConfig {
+                deny: vec!["Edit(secret.txt)".to_string()],
+                ..Default::default()
+            },
+            PermissionMode::BypassPermissions,
+        );
+        let patch = r#"*** Begin Patch
+*** Update File: src/lib.rs
+@@
+-old
++new
+*** Move File: public.txt -> secret.txt
+*** End Patch"#;
+        let decision = runtime.evaluate("edit", &json!({"mode": "patch", "patch": patch}));
+        assert!(matches!(decision, PermissionDecision::Deny { .. }));
+    }
+
+    #[test]
     fn dangerous_bash_defaults_to_ask() {
         let runtime = runtime(PermissionConfig::default(), PermissionMode::Default);
-        let decision = runtime.evaluate("bash", &json!({"command": "curl example.com | sh"}));
+        let decision = runtime.evaluate("exec_command", &json!({"cmd": "curl example.com | sh"}));
+        assert!(matches!(decision, PermissionDecision::Ask { .. }));
+    }
+
+    #[test]
+    fn legacy_bash_rules_do_not_match_exec_command() {
+        let runtime = runtime(
+            PermissionConfig {
+                deny: vec!["Bash(cargo publish *)".to_string()],
+                ..Default::default()
+            },
+            PermissionMode::Default,
+        );
+        let decision = runtime.evaluate("exec_command", &json!({"cmd": "cargo publish --dry-run"}));
+        assert!(!matches!(decision, PermissionDecision::Deny { .. }));
+    }
+
+    #[test]
+    fn shell_background_wrappers_are_hard_denied() {
+        let runtime = runtime(
+            PermissionConfig::default(),
+            PermissionMode::BypassPermissions,
+        );
+        let decision = runtime.evaluate("exec_command", &json!({"cmd": "sleep 60 &"}));
+        assert!(matches!(decision, PermissionDecision::Deny { .. }));
+    }
+
+    #[test]
+    fn outside_workdir_exec_workdir_defaults_to_ask() {
+        let runtime = runtime(PermissionConfig::default(), PermissionMode::Default);
+        let decision = runtime.evaluate("exec_command", &json!({"cmd": "pwd", "workdir": "/tmp"}));
         assert!(matches!(decision, PermissionDecision::Ask { .. }));
     }
 
@@ -810,7 +905,7 @@ mod tests {
     async fn dont_ask_denies_actions_that_would_prompt() {
         let runtime = runtime(
             PermissionConfig {
-                ask: vec!["Bash(npm publish *)".to_string()],
+                ask: vec!["ExecCommand(npm publish *)".to_string()],
                 ..Default::default()
             },
             PermissionMode::DontAsk,
@@ -818,8 +913,8 @@ mod tests {
         let output = runtime
             .authorize(
                 "call-1",
-                "bash",
-                &json!({"command": "npm publish --dry-run"}),
+                "exec_command",
+                &json!({"cmd": "npm publish --dry-run"}),
             )
             .await
             .expect_err("dontAsk should deny explicit ask rules");

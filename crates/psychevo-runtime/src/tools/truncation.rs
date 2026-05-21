@@ -3,6 +3,9 @@ struct Truncated {
     content: String,
     truncated: bool,
     lines: usize,
+    bytes: usize,
+    truncated_by: Option<&'static str>,
+    first_line_exceeds_limit: bool,
 }
 
 fn truncate_head(input: &str, max_bytes: usize, max_lines: usize) -> Truncated {
@@ -10,14 +13,23 @@ fn truncate_head(input: &str, max_bytes: usize, max_lines: usize) -> Truncated {
     let mut lines = 0usize;
     let mut bytes = 0usize;
     let mut truncated = false;
+    let mut truncated_by = None;
+    let mut first_line_exceeds_limit = false;
     for (idx, line) in input.split('\n').enumerate() {
         let addition = if idx == 0 {
             line.to_string()
         } else {
             format!("\n{line}")
         };
-        if lines >= max_lines || bytes + addition.len() > max_bytes {
+        if lines >= max_lines {
             truncated = true;
+            truncated_by = Some("lines");
+            break;
+        }
+        if bytes + addition.len() > max_bytes {
+            truncated = true;
+            truncated_by = Some("bytes");
+            first_line_exceeds_limit = idx == 0 && lines == 0;
             break;
         }
         bytes += addition.len();
@@ -28,6 +40,9 @@ fn truncate_head(input: &str, max_bytes: usize, max_lines: usize) -> Truncated {
         content: out,
         truncated,
         lines,
+        bytes,
+        truncated_by,
+        first_line_exceeds_limit,
     }
 }
 
@@ -48,6 +63,17 @@ fn truncate_tail(input: &str, max_bytes: usize, max_lines: usize) -> Truncated {
         content: selected.join("\n"),
         truncated: selected.len() < all.len(),
         lines: selected.len(),
+        bytes,
+        truncated_by: if selected.len() < all.len() {
+            if selected.len() >= max_lines {
+                Some("lines")
+            } else {
+                Some("bytes")
+            }
+        } else {
+            None
+        },
+        first_line_exceeds_limit: false,
     }
 }
 

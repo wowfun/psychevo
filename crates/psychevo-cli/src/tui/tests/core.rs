@@ -84,8 +84,8 @@ fn turn_printer_preserves_bash_command_title_until_tool_end() {
             &RunStreamEvent::Event(serde_json::json!({
                 "type": "tool_execution_start",
                 "tool_call_id": "call_bash",
-                "tool_name": "bash",
-                "args": {"command": "cargo test -p psychevo-cli\ncargo fmt"}
+                "tool_name": "exec_command",
+                "args": {"cmd": "cargo test -p psychevo-cli\ncargo fmt"}
             })),
             &mut output,
         )
@@ -95,7 +95,7 @@ fn turn_printer_preserves_bash_command_title_until_tool_end() {
             &RunStreamEvent::Event(serde_json::json!({
                 "type": "tool_execution_end",
                 "tool_call_id": "call_bash",
-                "tool_name": "bash",
+                "tool_name": "exec_command",
                 "result": {"output": "ok", "exit_code": 0},
                 "outcome": "normal"
             })),
@@ -104,9 +104,9 @@ fn turn_printer_preserves_bash_command_title_until_tool_end() {
         .expect("end");
 
     let output = String::from_utf8(output).expect("utf8");
-    assert!(output.contains("bash cargo test -p psychevo-cli: running"));
-    assert!(output.contains("bash cargo test -p psychevo-cli:"));
-    assert!(!output.contains("bash command"));
+    assert!(output.contains("exec_command cargo test -p psychevo-cli: running"));
+    assert!(output.contains("exec_command cargo test -p psychevo-cli:"));
+    assert!(!output.contains("exec_command command"));
 }
 
 #[test]
@@ -199,9 +199,9 @@ fn turn_printer_scopes_reused_tool_positions_across_messages() {
                     "content": [{
                         "type": "tool_call",
                         "id": "",
-                        "name": "bash",
-                        "arguments": {"command": "echo one"},
-                        "arguments_json": "{\"command\":\"echo one\"}",
+                        "name": "exec_command",
+                        "arguments": {"cmd": "echo one"},
+                        "arguments_json": "{\"cmd\":\"echo one\"}",
                         "arguments_error": null,
                         "content_index": 0,
                         "call_index": 0
@@ -234,6 +234,6 @@ fn turn_printer_scopes_reused_tool_positions_across_messages() {
         .expect("second");
 
     let output = String::from_utf8(output).expect("utf8");
-    assert!(output.contains("bash echo one: preparing"));
+    assert!(output.contains("exec_command echo one: preparing"));
     assert!(output.contains("write report.md: preparing"));
 }

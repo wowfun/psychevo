@@ -268,11 +268,12 @@ mod tests {
     }
 
     #[test]
-    fn no_git_searches_only_workdir() {
+    fn workdir_git_root_ignores_parent_agents() {
         let temp = tempdir().expect("temp");
         let parent = temp.path().join("parent");
         let child = parent.join("child");
         fs::create_dir_all(&child).expect("dirs");
+        fs::create_dir(child.join(".git")).expect("child git");
         fs::write(parent.join("AGENTS.md"), "upstream-only").expect("parent");
         fs::write(child.join("AGENTS.md"), "child").expect("child");
 

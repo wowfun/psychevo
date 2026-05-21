@@ -147,8 +147,8 @@ fn cli_config_permissions_lists_and_removes_project_local_rules() {
         r#"{
   // project-local policy
   "permissions": {
-    "allow": ["Bash(npm test *)"],
-    "ask": ["Bash(cargo publish *)"],
+    "allow": ["ExecCommand(npm test *)"],
+    "ask": ["ExecCommand(cargo publish *)"],
     "deny": ["Write(.env)"]
   }
 }
@@ -167,8 +167,8 @@ fn cli_config_permissions_lists_and_removes_project_local_rules() {
     );
     let value: Value = serde_json::from_slice(&listed.stdout).expect("json");
     assert_eq!(value["scope"], "local");
-    assert_eq!(value["permissions"]["allow"][0], "Bash(npm test *)");
-    assert_eq!(value["permissions"]["ask"][0], "Bash(cargo publish *)");
+    assert_eq!(value["permissions"]["allow"][0], "ExecCommand(npm test *)");
+    assert_eq!(value["permissions"]["ask"][0], "ExecCommand(cargo publish *)");
     assert_eq!(value["permissions"]["deny"][0], "Write(.env)");
 
     let removed = admin_cmd(temp.path(), &psychevo_home, &workdir)
@@ -179,7 +179,7 @@ fn cli_config_permissions_lists_and_removes_project_local_rules() {
             "--kind",
             "allow",
             "--rule",
-            "Bash(npm test *)",
+            "ExecCommand(npm test *)",
             "--json",
         ])
         .output()
@@ -193,8 +193,8 @@ fn cli_config_permissions_lists_and_removes_project_local_rules() {
     assert_eq!(value["changed"], true);
     let config = std::fs::read_to_string(workdir.join(".psychevo/config.jsonc")).expect("config");
     assert!(config.contains("project-local policy"));
-    assert!(!config.contains("Bash(npm test *)"));
-    assert!(config.contains("Bash(cargo publish *)"));
+    assert!(!config.contains("ExecCommand(npm test *)"));
+    assert!(config.contains("ExecCommand(cargo publish *)"));
 }
 
 #[test]

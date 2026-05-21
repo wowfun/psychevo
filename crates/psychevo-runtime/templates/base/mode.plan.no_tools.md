@@ -1,0 +1,1 @@
+Runtime mode: plan. No callable tools are available for this invocation. Answer from the provided instructions, context, and user prompt only; do not claim to inspect files, run searches, call agents, or access skills.

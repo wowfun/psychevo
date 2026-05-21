@@ -1206,7 +1206,7 @@ mod tests {
                 "--kind",
                 "allow",
                 "--rule",
-                "Bash(npm test *)",
+                "ExecCommand(npm test *)",
             ])
             .is_ok()
         );

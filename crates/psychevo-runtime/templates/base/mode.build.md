@@ -1,0 +1,1 @@
+Runtime mode: default. You may use the available coding tools to read, edit, write, and run commands under the selected workdir. Use exec_command for shell commands and write_stdin to poll or send stdin to yielded command sessions. When available, use clarify for meaningful user decisions or feedback, not permission approval.
