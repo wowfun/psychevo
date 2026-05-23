@@ -49,14 +49,19 @@ The first TUI supports:
 - `/curator`
 - `/<skill-or-bundle> [args]`
 
-Slash command discovery is registry-backed and remains a lightweight menu above
-the composer. The slash menu stays a flat list with at most 8 rows and does
-not show group headers. Built-in compatibility aliases may match the canonical
-command row but do not appear as independent menu rows. User-configured
-aliases appear as alias rows when matched: the row label is the alias token,
-the description identifies the configured target slash line and canonical
-summary, Tab completes to the alias token, and Enter or mouse selection
-submits the alias token so normal alias expansion performs execution.
+Slash command discovery is backed by the shared runtime command catalog,
+parser, and UI-independent execution effects defined by
+[026 Commands](../026-commands/spec.md). The TUI supplies terminal capabilities
+such as picker, clipboard, renderer toggles, process exit, side conversation,
+and image attachment, then projects shared command effects into panes,
+transcript command rows, composer state, queues, and approvals. The slash menu
+stays a flat list with at most 8 rows and does not show group headers. Built-in
+compatibility aliases may match the canonical command row but do not appear as
+independent menu rows. User-configured aliases appear as alias rows when
+matched: the row label is the alias token, the description identifies the
+configured target slash line and canonical summary, Tab completes to the alias
+token, and Enter or mouse selection submits the alias token so normal alias
+expansion performs execution.
 Slash menu summaries stay compact enough for one-line discovery. Expanded
 `/help` may add short detail lines for commands whose consequences are easy to
 miss, such as local artifact writes, provider calls, session mutation, display
@@ -100,8 +105,10 @@ writes the same multi-line status text as one output block.
 
 Composer submission classifies input before slash parsing. Leading shell
 escapes keep taking precedence. Known slash commands and unknown slash-looking
-commands remain slash command input, including bounded errors such as
-`/unknown`. Ordinary prompt text is not scanned for image paths or image URLs:
+commands remain slash command input in the TUI, including bounded errors such
+as `/unknown`; ACP and messaging surfaces may choose the shared pass-through
+fallback for unknown slash-looking input. Ordinary prompt text is not scanned
+for image paths or image URLs:
 `描述这张图片的内容：img1.avif`, `/home/me/out.avif`, `@img.avif`,
 `https://example.com/image.png`, and `data:image/*;base64,...` are all prompt
 text unless they came from an existing pending image placeholder. This prevents
@@ -132,11 +139,14 @@ prompts before they start, and `edit` updates the queued prompt in place while
 its sequence is still waiting.
 
 Dynamic skill and bundle slash commands submit as prompt input when accepted
-from the slash menu, mouse selection, or a typed complete command. The composer
-must not be rewritten to a `$skill` or `$bundle` marker as the visible result of
-Enter. Internally, the submitted slash line resolves to the same explicit marker
-text used by runtime skill expansion, while fullscreen transcript/history
-display keeps the slash line the user submitted.
+from the slash menu, mouse selection, or a typed complete command. Dynamic
+commands are discovered after core commands and may be capped by non-TUI
+surfaces; the TUI menu continues to show matched dynamic commands within its
+normal row limit. The composer must not be rewritten to a `$skill` or `$bundle`
+marker as the visible result of Enter. Internally, the submitted slash line
+resolves to the same explicit marker text used by runtime skill expansion,
+while fullscreen transcript/history display keeps the slash line the user
+submitted.
 
 Image inputs are tracked as pending composer attachments bound to plain-text
 placeholders. `/image <source> [prompt]` adds one image source to the pending
@@ -294,18 +304,21 @@ with title text, selected-row highlighting, footer hints, `Enter` selection,
 bottom selection panes do not render subtitles.
 
 `/permissions` shows the effective approval mode, permission mode, configured
-local allow/ask/deny rules, and the project-local config path. Rule mutation is
-owned by the dedicated permissions management surface and must not be sent as a
-model prompt. Permission policy semantics are defined by
-[035 Permissions](../035-permissions/spec.md); this topic owns only the
-interactive projection.
+local allow/ask/deny rules, and the project-local config path. Text mutation
+forms accepted by shared non-picker surfaces are
+`/permissions allow|ask|deny <rule>` and
+`/permissions remove <allow|ask|deny> <rule>`; TUI may continue to offer richer
+picker affordances for the same policy edits. Permission policy semantics are
+defined by [035 Permissions](../035-permissions/spec.md); this topic owns only
+the interactive projection.
 
 Fullscreen `/tools` opens a searchable bottom pane of built-in and configured
 toolsets. Rows show enabled, disabled, or available status for the current
 runtime mode plus the expanded tool count. `Enter` toggles the selected toolset
-for the current mode by editing project-local `.psychevo/config.toml`; changes
-apply to future turns. The pane does not start provider calls or modify a
-running turn.
+for the current mode by editing project-local `.psychevo/config.toml`; shared
+text forms `/tools enable <toolset>` and `/tools disable <toolset>` perform the
+same current-mode mutation for non-picker surfaces. Changes apply to future
+turns. The pane does not start provider calls or modify a running turn.
 
 `/sessions`, `/resume`, and `/continue` show date-grouped session rows sorted by
 latest persisted activity with right-aligned activity time and visible-message

@@ -28,7 +28,7 @@ A caller is any product surface, library consumer, SDK, transport adapter, test 
 
 An entrypoint is a caller-facing way to invoke Psychevo. Runtime libraries are the stable substrate entrypoint. CLI is a product entrypoint category. SDK, HTTP, and other transports may exist as future entrypoint categories.
 
-Every entrypoint should route work through `psychevo-runtime` instead of reaching into lower layers. `psychevo-agent-core` owns execution semantics, and `psychevo-ai` owns provider-neutral AI protocol semantics. Interface behavior must not redefine those lower-layer contracts.
+Every entrypoint should route work through `psychevo-runtime` instead of reaching into lower layers. ACP is a concrete transport entrypoint category for editor and agent-client integrations. `psychevo-agent-core` owns execution semantics, and `psychevo-ai` owns provider-neutral AI protocol semantics. Interface behavior must not redefine those lower-layer contracts.
 
 This spec defines interface semantics, not implementation shape. Narrower interface specs may specialize product entrypoints or transport behavior while preserving this caller-facing boundary.
 
@@ -104,6 +104,11 @@ Runtime wires control signals into lower layers. Outcome semantics remain owned 
 
 Pause, resume, retry, undo, branch navigation, and checkpoint restore are out of scope for this interface baseline.
 
+ACP interfaces specialize this baseline by mapping protocol requests to runtime
+sessions, observations, control signals, permissions, auth, commands, model and
+mode controls, config controls, and capability source inputs. That protocol
+mapping is owned by [027 ACP](../027-acp/spec.md).
+
 ## Related Topics
 
 - [000 Foundation](../000-foundation/spec.md) defines the upstream project foundation and implementation-neutral principles.
@@ -118,7 +123,10 @@ Pause, resume, retry, undo, branch navigation, and checkpoint restore are out of
 - [009 Resource Surface](../009-resource-surface/spec.md) defines resource surface and resource decision semantics.
 - [010 Memory System](../010-memory-system/spec.md) defines optional memory boundaries that may provide invocation hints.
 - [025 CLI](../025-cli/spec.md) defines command-line interface foundation semantics.
+- [027 ACP](../027-acp/spec.md) defines the Agent Client Protocol boundary.
 - [200 pevo CLI](../200-pevo-cli/spec.md) defines the concrete `pevo` product CLI.
+- [230 pevo-acp](../230-pevo-acp/spec.md) defines the concrete ACP server
+  packaging for the `pevo` product.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines semantic state relationships projected through interfaces.
 - [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines persistence boundaries for evidence-backed result material.
 - [070 Experience](../070-experience/spec.md) defines cross-cutting UX and DX defaults for caller-facing and developer-facing behavior.

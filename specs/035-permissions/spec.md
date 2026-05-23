@@ -101,6 +101,12 @@ Rule precedence is:
 Project config overrides global config through the existing TOML deep merge.
 `allow always` writes only to the project-local `.psychevo/config.toml`.
 
+External capability tools may define additional rule families when the owning
+capability spec requires them. MCP startup uses `McpStartup(server)` rules.
+MCP tool calls use `Mcp(server/tool)` rules. These rules follow the same
+precedence, session grant, and persistent allow behavior as built-in tool
+rules.
+
 ## Policy
 
 Hard/protected denies cannot be bypassed by `dontAsk`, `bypassPermissions`,
@@ -188,3 +194,5 @@ action.
   and rule-management commands.
 - [212 TUI Interaction](../212-pevo-tui-interaction/spec.md) owns interactive
   mode and permissions projection.
+- [027 ACP](../027-acp/spec.md) owns ACP permission-request projection for
+  runtime asks.

@@ -94,6 +94,12 @@ precedence, approval behavior, and fallback policy.
 
 Runtime resolves optional capability targets and toolset hints from built-in, runtime-provided, or external contributions. If required capability material, working context, toolset, model, resource boundary, or evidence wiring cannot be assembled, runtime rejects the request before `agent_start`. A before-agent-start rejection is an invocation rejection, not a failed agent invocation. [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability source, contribution, activation, availability, and conflict boundaries. This spec does not define plugin manifests, extension APIs, package formats, discovery paths, hot reload, startup protocols, shutdown protocols, or healthcheck protocols.
 
+Runtime may receive interface-supplied capability sources as invocation or
+session inputs. ACP-supplied MCP servers are one such source. Runtime owns
+normalization of those sources into capability contributions, conflict-safe
+tool names, availability/degraded facts, permission wrapping, and evidence
+projection before any contributed tool reaches an agent invocation.
+
 Runtime may resolve a selected agent definition for an invocation. Agent
 definitions contribute instructions, model preferences, tool policy, hooks,
 skills, and MCP scope through runtime assembly. Child subagent runs remain
@@ -128,6 +134,10 @@ transcript messages. A caller-facing interface may choose to display token
 totals, context percentages, usage parts, or provider metadata summaries, but
 that projection must not redefine message content or provider replay semantics.
 
+Runtime also owns shared command metadata that must be projected by multiple
+interfaces. The metadata is interface-neutral and does not include concrete CLI
+parsing, terminal layout, editor protocol payloads, or WebUI rendering.
+
 ## Related Topics
 
 - [000 Foundation](../000-foundation/spec.md) defines the upstream project foundation and implementation-neutral principles.
@@ -149,3 +159,5 @@ that projection must not redefine message content or provider replay semantics.
 - [051 Agents](../051-agents/spec.md) defines selected agent definitions.
 - [051 Subagents](../051-agents/subagents.md) defines child-agent control behavior.
 - [100 Coding Agent](../100-coding-agent/spec.md) defines a built-in capability target assembled by runtime.
+- [027 ACP](../027-acp/spec.md) specializes the runtime contract for ACP
+  sessions, prompting, auth, MCP, permissions, commands, and observation.

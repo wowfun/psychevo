@@ -19,6 +19,7 @@ product-level environment variables.
 - `pevo run`
 - `pevo smoke` product positioning
 - `pevo tui` product positioning
+- `pevo acp` product positioning
 - `pevo skill` product positioning
 - local session, model, config, and auth inspection/maintenance commands
 - local session export/share artifacts
@@ -30,7 +31,7 @@ Out of scope:
 - provider transport semantics beyond explicit `/models` fetches, OAuth, or
   credential pools
 - SQLite schema details beyond product path selection
-- SDK, HTTP, or MCP transports
+- SDK, HTTP, MCP, or HTTP/WebSocket ACP transports
 
 ## Psychevo Home
 
@@ -71,6 +72,7 @@ Implemented first-slice commands:
 - `pevo run`
 - `pevo smoke`
 - `pevo tui`
+- `pevo acp`
 - `pevo skill`
 - `pevo stats`
 - `pevo context`
@@ -125,6 +127,10 @@ TUI-local debug projections such as usage parts and allowlisted provider
 metadata summaries. Debug projection does not change `pevo run --format json`,
 does not expose folded reasoning in sanitized transcript messages, and does not
 turn provider metadata into transcript content.
+
+`pevo acp` runs the ACP stdio server. It is equivalent to the
+`psychevo-acp` binary and delegates behavior to the ACP crate instead of
+implementing protocol handling in `psychevo-cli`.
 
 `pevo skill` owns the singular skill hub/config/list/view router. With no
 subcommand it shows help. `list` and `view` are read operations; `audit`
@@ -291,3 +297,5 @@ the installed binary, and optionally initializes the global Psychevo home.
   provider/model configuration and resolution.
 - [035 Permissions](../035-permissions/spec.md) defines permission rules,
   approval modes, and bypass semantics.
+- [230 pevo-acp](../230-pevo-acp/spec.md) owns the ACP server packaging behind
+  `pevo acp`.

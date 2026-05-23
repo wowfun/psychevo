@@ -104,6 +104,31 @@ Must not know:
 - UI-specific interaction mechanics
 - entry-point-specific modes that can be implemented separately
 
+`psychevo-runtime` may own shared interface-neutral command metadata when the
+metadata must be projected by multiple product surfaces, such as CLI, TUI, ACP,
+and future WebUI entrypoints. Runtime-owned command metadata describes command
+identity, argument shape, status, and output kind; concrete parsing, terminal
+rendering, editor protocol payloads, and process behavior remain owned by the
+entrypoint crates.
+
+### `psychevo-acp`
+
+Owns:
+- ACP server packaging over stdio for the first product slice
+- ACP request and notification handling according to [027 ACP](../027-acp/spec.md)
+- ACP projection of runtime sessions, observations, permissions, commands,
+  auth, model/mode choices, config options, and MCP source inputs
+- construction of runtime calls from ACP inputs
+
+Must not own:
+- agent loop behavior
+- provider protocol behavior
+- coding tool behavior
+- runtime permission policy
+- capability selection semantics
+- durable record, persistence, or replay semantics
+- CLI or TUI rendering behavior
+
 ### `psychevo-cli`
 
 Owns:
@@ -127,16 +152,19 @@ Dependencies between primary architecture components must point inward:
 
 ```text
 psychevo-cli -> psychevo-runtime -> psychevo-agent-core -> psychevo-ai
+psychevo-acp -> psychevo-runtime -> psychevo-agent-core -> psychevo-ai
 ```
 
 Allowed dependency rules:
 - `psychevo-cli` may depend on `psychevo-runtime`.
+- `psychevo-acp` may depend on `psychevo-runtime`.
 - `psychevo-runtime` may depend on `psychevo-agent-core` and `psychevo-ai`.
 - `psychevo-agent-core` may depend on `psychevo-ai`.
 - `psychevo-ai` must not depend on higher Psychevo crates.
 
 Allowed direct interaction rules:
 - `psychevo-cli` may directly interact with `psychevo-runtime` only.
+- `psychevo-acp` may directly interact with `psychevo-runtime` only.
 - `psychevo-runtime` may directly interact with `psychevo-agent-core`, `psychevo-ai`, agent-invocation scoped tool surface bindings, and runtime-owned durable records.
 - `psychevo-runtime` may resolve capability extension contributions into agent-invocation scoped selections.
 - `psychevo-runtime` may implement and assemble built-in capability modules, such as capability specs that explicitly place their implementation in runtime. Concrete capability behavior remains owned by those capability specs.
@@ -150,8 +178,8 @@ layer as long as dependency direction and transport separation remain intact.
 
 Prohibited dependency rules:
 - lower layers must not depend on higher layers
-- `psychevo-agent-core` must not depend on `psychevo-runtime` or `psychevo-cli`
-- `psychevo-runtime` must not depend on `psychevo-cli`
+- `psychevo-agent-core` must not depend on `psychevo-runtime`, `psychevo-cli`, or `psychevo-acp`
+- `psychevo-runtime` must not depend on `psychevo-cli` or `psychevo-acp`
 - business logic must not be introduced into `psychevo-cli`
 
 ## Related Topics
@@ -172,3 +200,6 @@ Prohibited dependency rules:
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability contribution boundaries resolved by runtime.
 - [051 Agents](../051-agents/spec.md) defines reusable agent definitions and selected-agent orchestration semantics.
 - [100 Coding Agent](../100-coding-agent/spec.md) defines a runtime-owned built-in capability target.
+- [027 ACP](../027-acp/spec.md) defines the Agent Client Protocol boundary.
+- [230 pevo-acp](../230-pevo-acp/spec.md) defines the concrete ACP server
+  packaging for the `pevo` product.

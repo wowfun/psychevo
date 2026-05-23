@@ -13,19 +13,31 @@ contract expectations that concrete product surfaces specialize.
 ## Scope
 
 - shared command vocabulary and metadata expectations
+- runtime-owned interface-neutral command catalog, parser, availability, and
+  UI-independent execution effects
 - command discovery and help behavior
 - canonical names, hidden aliases, and command status semantics
 - argument-shape and bounded-error conventions
-- command output-kind conventions across CLI and TUI projections
+- surface capability filtering across TUI, ACP, and future messaging adapters
+- command output-kind and execution-effect conventions across projections
 
 Out of scope:
 
 - complete product command inventories
-- concrete command handlers, flags, clap schemas, keymaps, or terminal layout
+- process flags, clap schemas, keymaps, terminal layout, editor protocol
+  payload shapes, or messaging-platform registration APIs
 - custom command-template files or external plugin command loading
 - runtime, provider, storage, session, skill, or tool semantics
 
 ## Command Contract
+
+The shared command catalog lives in `psychevo-runtime` when multiple
+entrypoints need to project the same command metadata. Runtime owns slash
+command recognition, canonical identity, alias resolution, argument parsing,
+capability requirements, active-turn availability, and UI-independent command
+effects. Product surfaces own presentation, protocol payloads, terminal panels,
+client-native attachment flows, process flags, and surface-specific state
+application.
 
 A command has one canonical name. Surfaces may accept hidden aliases for
 compatibility or migration, but discovery surfaces show canonical names by
@@ -53,6 +65,9 @@ A command metadata record should identify:
 - argument kind
 - output kind
 - status
+- required surface capabilities
+- whether the command is safe while an agent turn is active
+- optional unsupported guidance for surfaces that lack a required capability
 - optional expanded help detail for surfaces that have room to explain
   consequences, persistence, or provider/network behavior
 
@@ -74,6 +89,36 @@ Output kinds are:
 - prompt submission
 - process stdout/stderr result
 - bounded feedback
+
+Surface capabilities are descriptive gates, not permissions. They include
+picker, clipboard, renderer toggle, process exit, side conversation, image
+attachment, active-turn control, queue, session switch, local artifact write,
+config write, policy write, and skill-state write. A surface advertises a
+command only when it can satisfy the command's capability requirements and the
+command is currently available. If a user types a known command that is hidden
+only because the current surface lacks a capability, the command returns
+bounded guidance instead of silently doing nothing.
+
+Permission and approval policy remains separate from command capability
+filtering. Capability filtering decides whether a command can be represented on
+the current surface. Permission policy decides whether a selected command may
+perform the requested local write, provider call, tool use, or state mutation.
+Command-level approval is used for local artifact, config, policy, or
+skill-state writes that do not naturally pass through an existing runtime tool
+approval path.
+
+Shared slash parsing returns a command invocation with canonical metadata,
+resolved alias, raw argument text, parsed command arguments when available, and
+the original submitted line. Unknown slash-looking input is represented as a
+pass-through prompt so ACP and messaging surfaces can send it to the model when
+that surface chooses model fallback behavior. TUI may still treat unknown
+slash-looking input as a bounded local error.
+
+Shared execution returns an effect rather than directly manipulating a UI. The
+effect vocabulary includes local text, pass-through prompt, prompt submission,
+steer, queue, pending cancel, session switch, state patch, artifact result,
+unsupported guidance, and approval required. Surfaces apply these effects to
+their own transcript, panes, protocol updates, queues, or approval UI.
 
 Interactive terminal surfaces may project local slash command feedback that is
 written to the transcript as a distinct command-result transcript row. Such
@@ -129,6 +174,14 @@ TUI slash help uses three user-facing groups:
 - `Commands` for the complete built-in slash command catalog.
 - `Custom commands` for dynamic or user-provided command entries.
 
+ACP and messaging slash command discovery should project the capability-filtered
+command catalog, not the whole TUI inventory. Commands that require local TUI
+state, a terminal-only panel, renderer toggles, process exit, clipboard access,
+or client-native image attachment are not advertised to ACP unless the surface
+declares that capability. Dynamic skill and bundle commands may be appended
+after core commands with a surface-defined cap; hidden dynamic commands remain
+valid when typed if they resolve at execution time.
+
 ## Errors
 
 Command errors are bounded user-visible text. They must not panic, hang, or
@@ -146,11 +199,17 @@ Commands with required arguments reject missing or malformed input with:
 usage: <usage>
 ```
 
-Unsupported commands reject with:
+Unsupported known commands reject with bounded guidance. TUI unknown commands
+reject with:
 
 ```text
 unknown slash command: /<command>
 ```
+
+ACP and messaging surfaces may instead pass unknown slash-looking input through
+as ordinary model input. This fallback must apply only to unknown commands, not
+to known commands whose arguments are malformed or whose required capability is
+missing.
 
 Concrete surfaces may wrap these messages in their normal error presentation.
 
@@ -164,3 +223,4 @@ Concrete surfaces may wrap these messages in their normal error presentation.
   command line.
 - [212 pevo TUI Interaction](../212-pevo-tui-interaction/spec.md) defines the
   fullscreen interactive slash command surface.
+- [027 ACP](../027-acp/spec.md) defines ACP slash-command projection.

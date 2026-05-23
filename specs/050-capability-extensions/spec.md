@@ -50,6 +50,8 @@ Capability contribution categories are non-exhaustive. They may include:
 - memory candidates or memory providers
 - interface adjuncts
 - skill discovery, index, view, and management contributions
+- MCP server sources that contribute tool candidates, including ACP-supplied
+  session-scoped sources
 
 Each contribution category keeps its own source-of-truth semantics. Tool surface and toolset expansion semantics remain owned by [007 Tool Surface](../007-tool-surface/spec.md). AI protocol semantics remain owned by [003 AI Protocol](../003-ai-protocol/spec.md). Context projection remains owned by [006 Context Assembly](../006-context-assembly/spec.md). Resource gate semantics remain owned by [009 Resource Surface](../009-resource-surface/spec.md). Memory boundaries remain owned by [010 Memory System](../010-memory-system/spec.md). Skills remain owned by [055 Skills](../055-skills/spec.md). Caller-facing interface semantics remain owned by [020 Interfaces](../020-interfaces/spec.md).
 
@@ -83,6 +85,11 @@ Durable evidence and persistence remain owned by adjacent specs. [005 Durable Ev
 
 This spec does not require every discovered source, every candidate contribution, every conflict, or every availability signal to become durable.
 
+ACP-provided MCP sources are session-scoped capability sources. They must enter
+runtime contribution normalization before any MCP tool becomes model-visible or
+executable. ACP source presence does not imply trust, activation, selection, or
+permission approval.
+
 ## Related Topics
 
 - [000 Foundation](../000-foundation/spec.md) defines the upstream project foundation and implementation-neutral principles.
@@ -98,3 +105,5 @@ This spec does not require every discovered source, every candidate contribution
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines semantic state relationships.
 - [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines persistence boundaries for durable semantic facts.
 - [055 Skills](../055-skills/spec.md) defines skill packages, discovery, tools, CLI commands, scanning, and provenance.
+- [056 MCP](../056-mcp/spec.md) defines MCP source, naming, dispatch, permission, and evidence boundaries.
+- [027 ACP](../027-acp/spec.md) defines ACP-provided MCP source projection.
