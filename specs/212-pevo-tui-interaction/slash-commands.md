@@ -24,6 +24,7 @@ The first TUI supports:
 - `/clear`, `/new`
 - `/sessions`, `/resume`, `/continue`
 - `/model`
+- `/tools`
 - `/variant <none|minimal|low|medium|high|xhigh|max>`
 - `/mode <plan|default|acceptEdits|dontAsk|bypassPermissions>`
 - `/permissions`
@@ -130,6 +131,13 @@ fixed pending preview as steer text. The preview's `undo` action removes queued
 prompts before they start, and `edit` updates the queued prompt in place while
 its sequence is still waiting.
 
+Dynamic skill and bundle slash commands submit as prompt input when accepted
+from the slash menu, mouse selection, or a typed complete command. The composer
+must not be rewritten to a `$skill` or `$bundle` marker as the visible result of
+Enter. Internally, the submitted slash line resolves to the same explicit marker
+text used by runtime skill expansion, while fullscreen transcript/history
+display keeps the slash line the user submitted.
+
 Image inputs are tracked as pending composer attachments bound to plain-text
 placeholders. `/image <source> [prompt]` adds one image source to the pending
 set and rewrites the composer to include `[Image #N]` followed by `[prompt]`
@@ -148,13 +156,16 @@ allowed when at least one pending placeholder remains.
 
 Image sources may be absolute local paths, workdir-relative local paths, quoted
 paths, paths with escaped spaces, `file://` URLs, `http(s)://` URLs, or
-`data:image/*;base64,...` URLs when they are supplied through `/image` or as a
-standalone paste. Local paths must resolve to readable files with supported
-image extensions and must not exceed the configured local source size limit
-before an attachment is created. Remote URLs are not downloaded or preflighted
-locally. If selected model metadata explicitly says image input is unsupported,
-the TUI does not send structured image blocks; it degrades the submission to
-text containing the attachment source list plus the prompt with image
+`data:image/*;base64,...` URLs when they are supplied through `/image`.
+Standalone paste creates an attachment only for local sources that resolve to a
+readable image file; pasted `http(s)://` and `data:image/*` URLs remain ordinary
+composer text unless the user supplies them through `/image`. Local paths must
+resolve to readable files with supported image extensions and must not exceed
+the configured local source size limit before an attachment is created. Remote
+URLs are not downloaded or preflighted locally. If selected model metadata
+explicitly says image input is unsupported, the TUI does not send structured
+image blocks; it degrades the submission to text containing the attachment
+source list plus the prompt with image
 placeholders removed, with bounded feedback telling the user the image was
 degraded to text.
 
@@ -277,7 +288,7 @@ invocation are rejected with bounded feedback. `/quit`, `/exit`, and `/q` keep
 their normal meaning of exiting the program; returning to the parent is only
 `Ctrl+C`.
 
-Fullscreen `/sessions`, `/resume`, `/continue`, and `/model` use bottom panes
+Fullscreen `/sessions`, `/resume`, `/continue`, `/model`, and `/tools` use bottom panes
 with title text, selected-row highlighting, footer hints, `Enter` selection,
 `Esc` close or back, arrow/Page/Home/End navigation, and scrolling. Shared
 bottom selection panes do not render subtitles.
@@ -288,6 +299,13 @@ owned by the dedicated permissions management surface and must not be sent as a
 model prompt. Permission policy semantics are defined by
 [035 Permissions](../035-permissions/spec.md); this topic owns only the
 interactive projection.
+
+Fullscreen `/tools` opens a searchable bottom pane of built-in and configured
+toolsets. Rows show enabled, disabled, or available status for the current
+runtime mode plus the expanded tool count. `Enter` toggles the selected toolset
+for the current mode by editing project-local `.psychevo/config.toml`; changes
+apply to future turns. The pane does not start provider calls or modify a
+running turn.
 
 `/sessions`, `/resume`, and `/continue` show date-grouped session rows sorted by
 latest persisted activity with right-aligned activity time and visible-message

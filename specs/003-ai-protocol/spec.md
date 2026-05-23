@@ -77,6 +77,13 @@ without local prefetch. Runtime must avoid sending structured image blocks when
 model metadata explicitly rules image input out; unknown metadata may be
 forwarded for the provider to decide.
 
+Runtime-originated tool attachments may be projected into model context as
+ordinary provider-neutral user image blocks after the corresponding text tool
+result has been supplied, when the selected provider family cannot encode image
+parts directly in tool-result messages. This preserves mainstream tool-result
+ordering while still making fetched image content available to image-capable
+models.
+
 Provider adapters that inline local images should validate and bound local
 image data before provider invocation. When practical, adapters should preserve
 small mainstream image payloads and normalize oversized or less portable local

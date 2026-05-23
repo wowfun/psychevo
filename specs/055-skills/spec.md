@@ -144,8 +144,8 @@ Default mode also exposes aggregate tools:
 Plan Mode exposes `skill_hub` read-only actions only:
 `browse`, `search`, `inspect`, `list`, `check`, and `audit`. Plan-mode audit is
 read-only and does not append audit logs. Plan Mode exposes only read status for
-`skill_config`. Plan Mode remains hard read-only except for aggregate
-`view_skill` telemetry.
+`skill_config`. Plan Mode continues to withhold skill mutations except for
+aggregate `view_skill` telemetry.
 
 The old model tool names `create_skill`, `patch_skill`, `remove_skill`,
 `enable_skill`, `disable_skill`, and `install_skill` are removed.
@@ -178,9 +178,12 @@ The TUI `/skills` command is a hub dispatcher. `/skills` with no arguments
 shows a bounded hub dashboard/help block. Read subcommands include `list`,
 `browse`, `search`, `inspect`, `check`, `audit`, and `reload`. Mutating
 hub/config actions go through Psychevo permissions and remain blocked in Plan
-Mode. Dynamic TUI slash uses `/<skill-or-bundle>` names and inserts editable
-`$skill` or `$bundle` marker text instead of submitting immediately. Bundles
-and skills share marker syntax; bundles win over same-name skills.
+Mode. Dynamic TUI slash uses `/<skill-or-bundle>` names and submits the slash
+line as prompt input from Enter or mouse selection. Runtime still receives the
+equivalent explicit `$skill` or `$bundle` marker text for skill expansion, but
+the fullscreen composer is cleared and the transcript/history display keeps the
+submitted slash line. Bundles and skills share marker syntax; bundles win over
+same-name skills.
 
 TUI mutating hub, bundle, config, and curator commands go through Psychevo
 permissions.

@@ -15,9 +15,21 @@ TUI renders runtime events into semantic ledger evidence:
 - folded reasoning becomes flat `Thinking` evidence; explicit new paragraphs in
   reasoning content start without label-width indentation
 - tool calls become flat tool evidence rows whose visible title starts with
-  the actual tool invocation name, for example `read <path>`, `list <path>`,
-  `search <query>`, `exec_command <first command line>`, `write <path>`, or
-  `edit <path>`.
+  the actual tool invocation name, for example `read <path>`,
+  `exec_command <first command line>`, `write <path>`, `edit <path>`, or
+  `web_fetch <url>`. Built-in and extension tools use the same title shape;
+  unknown tools fall back to `tool_name <primary argument>` or `tool_name`
+  and must not render as a separate `Tool <name>` style.
+- tool display metadata is UI-only. Runtime may attach a display snapshot to
+  pending and execution events so TUI can choose title, summary, and detail
+  fields without hardcoding every tool name, but that metadata must not enter
+  provider-facing tool declarations, system prompts, or model-visible tool
+  results.
+- TUI prefers display snapshots when available, otherwise it uses a generic
+  presenter fallback over common argument and result fields. The fallback must
+  keep rows tool-name-first and must prefer compact summaries over large
+  content fields unless the tool display policy explicitly selects the content
+  as visible output.
 - `exec_command` tool titles must expose the first actual shell command from
   the tool arguments rather than a
   generic `command` placeholder whenever the runtime supplied it. Leading blank
@@ -131,6 +143,10 @@ budgets; if the first visible logical lines would exceed either budget, the row
 uses a bounded token/width preview instead of showing all of those lines.
 Line-count collapses show `▸ N more lines`; token- or width-only collapses
 whose omitted line count is not meaningful show `▸ more output`.
+This folding is a safety valve after the presenter has selected a visible body.
+Tools that return large content, such as fetched web pages, should display a
+compact status summary by default and keep the returned content available only
+as expandable detail.
 
 Mouse clicks on expandable rows toggle that row's details. Dragging to select
 transcript text must not toggle rows. Transcript-focus `Enter` and `Space`

@@ -41,7 +41,7 @@ Tool availability, runtime mode, permission mode, approval mode, and persistent
 policy are separate concerns.
 
 Runtime mode controls the hard ceiling for model-visible tools. `plan` remains
-a read-only runtime mode, and `default` may expose normal build tools when the
+a read-only runtime mode, and `default` may expose normal editing tools when the
 tool surface and caller entrypoint allow them. Permission policy must not expand
 the current runtime-mode ceiling.
 
@@ -83,10 +83,11 @@ deny = ["Write(.env)"]
 ```
 
 Rules use strings of the form `Tool(pattern)`, with tool names `ExecCommand`,
-`Read`, `Write`, and `Edit`. Filesystem patterns may be workdir-relative globs
-or canonical absolute path globs. Generated persistent rules prefer
-workdir-relative patterns. Exec command rules match normalized command prefixes
-and may use `*` and `?`. Legacy `Bash(...)` rules are not interpreted by the
+`Read`, `Write`, `Edit`, and `WebFetch`. Filesystem patterns may be
+workdir-relative globs or canonical absolute path globs. Generated persistent
+rules prefer workdir-relative patterns. Exec command rules match normalized
+command prefixes and may use `*` and `?`. `WebFetch` rules match the requested
+URL string with `*` and `?`. Legacy `Bash(...)` rules are not interpreted by the
 provider-visible execution tool.
 
 Rule precedence is:
@@ -116,6 +117,11 @@ tiers: catastrophic commands are denied; other risky commands ask in
 interactive contexts and are allowed in non-interactive contexts except under
 `dontAsk`. Shell-level background wrappers that escape session tracking are
 rejected before execution.
+
+`web_fetch` is read-only and allowed by default. Explicit `WebFetch` deny or
+ask rules may block or prompt for matching URLs, and `dontAsk` denies matching
+asks instead of prompting. This permission policy does not add SSRF or network
+sandbox guarantees.
 
 Permission policy applies after tool visibility and before or during execution.
 A model-visible tool declaration says what the model may request, not what the

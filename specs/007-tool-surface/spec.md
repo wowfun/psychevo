@@ -36,6 +36,12 @@ A tool declaration is a model-visible semantic capability promise. It describes 
 
 An execution binding is the runtime-supplied executable handler for a tool request. It connects a requested tool to behavior supplied by a built-in or external source. This spec does not define handler signatures, process boundaries, or implementation APIs.
 
+Tool display metadata is UI-only metadata associated with an execution binding
+or a concrete tool event. It may describe a display category, title preview
+fields, summary fields, and detail/body preferences for local renderers. Tool
+display metadata is not a model-visible tool declaration, is not prompt text,
+and must not be inserted into tool-result content sent back to the model.
+
 Runtime assembles the initial tool surface for an accepted agent invocation before model generation can request tools.
 
 Runtime must expose a tool declaration in a generation-request snapshot only when the same agent invocation has a matching execution binding for that request. Runtime may omit unavailable tools from a snapshot or from the agent-invocation scoped tool surface.
@@ -50,7 +56,7 @@ defines agent tool-policy normalization.
 
 Tool implementations may come from built-in or external sources, but source mechanics do not define the tool surface contract.
 
-The AI generation request may include a refreshable tool snapshot from the agent-invocation scoped tool surface. Tool refresh does not define a dynamic tool API, hook API, plugin API, or model-visible toolset concept. [003 AI Protocol](../003-ai-protocol/spec.md) owns provider-neutral generation request semantics and provider-facing normalization.
+The AI generation request may include a refreshable tool snapshot from the agent-invocation scoped tool surface. The model-visible snapshot contains only declaration material required by the provider-facing tool API, such as the tool name, description, and input parameters. UI-only display metadata must remain outside this generation-request tool snapshot. Tool refresh does not define a dynamic tool API, hook API, plugin API, or model-visible toolset concept. [003 AI Protocol](../003-ai-protocol/spec.md) owns provider-neutral generation request semantics and provider-facing normalization.
 
 Tool surface facts may contribute to durable evidence for agent-invocation inspection. These facts may include selected toolsets, expanded tools, declaration snapshots, refresh facts, omitted unavailable tools, execution bindings, tool requests, execution outcomes, and tool-result relationships. [005 Durable Evidence](../005-durable-evidence/spec.md) defines which relationships must be representable.
 
@@ -63,6 +69,17 @@ Toolset names are selection and configuration concepts. A toolset is not itself 
 Toolset expansion resolves selected toolsets into a finite set of tool declarations and execution bindings during accepted agent-invocation assembly. Runtime may recompute expansion before a later generation request when registry, availability, or runtime-managed selection facts change. Only expanded tool declarations may enter a model-visible tool declaration snapshot.
 
 A toolset may include other toolsets. Expansion must detect unknown includes, unavailable includes, and cycles. Those conditions must become observable as unavailable, degraded, omitted, or rejected selection facts; they must not be silently ignored.
+
+Runtime-owned toolset selection may use per-mode `enabled_toolsets` and
+`disabled_toolsets`. Disabled toolsets are applied as a subtraction step after
+enabled toolset expansion. A runtime mode may additionally impose a hard safety
+ceiling after expansion; for example Plan mode filters mutating tools even when
+configuration enables a toolset that contains them.
+
+Built-in and user-defined toolsets share the same expansion semantics. A
+user-defined toolset may include built-in or other user-defined toolsets, but it
+must not create a model-visible tool declaration unless a registered execution
+binding with that name exists.
 
 When expansion produces a tool declaration, runtime must still verify that a matching execution binding exists for the same agent invocation and for any generation-request snapshot that exposes that declaration.
 

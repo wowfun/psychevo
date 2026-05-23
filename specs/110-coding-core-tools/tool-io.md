@@ -22,11 +22,11 @@ Out of scope:
 - interactive approvals
 - durable background processes across runtime restart
 - binary/image file reading
-- search/list tools
+- dedicated search/list function tools
 
 ## Common Rules
 
-All four tools use strict required-field and type validation. Unknown input
+All coding-core tools use strict required-field and type validation. Unknown input
 fields are ignored.
 
 Path inputs may be relative or absolute. Runtime resolves them against the
@@ -168,6 +168,14 @@ Parameters:
 
 The tool runs bounded shell commands. Models should use `read`, `write`, and
 `edit` for file I/O instead of shell `cat`, redirection, or patching commands.
+For text search, models should prefer `rg`; for project file listing, models
+should prefer `rg --files`. For JSON or JSONL inspection, models may use `jq`
+when available, but runtime does not guarantee or install `jq`. Runtime ensures
+`rg` is available before an agent invocation that exposes `exec_command` starts,
+using the managed
+`$PSYCHEVO_HOME/tools/rg[.exe]` binary first, then system `PATH`, then a managed
+latest-release ripgrep install. If the managed binary is used, its tools
+directory is prepended to the subprocess `PATH`.
 If a command is still running after the yield window, the result includes a
 `session_id` and can be continued with `write_stdin`.
 
@@ -221,6 +229,40 @@ associated with an existing exec session. This includes suppressing provisional
 rows created from streamed tool-call arguments before the `write_stdin` call
 executes. The associated `exec_command` row owns the visible running state and
 output.
+
+## `web_fetch`
+
+Parameters:
+
+- `url`: string, required, must start with `http://` or `https://`
+- `format`: string, optional, one of `markdown`, `text`, or `html`, default
+  `markdown`
+- `timeout`: number, optional seconds, default `30`, clamped to `1..120`
+
+The tool uses the runtime HTTP client, follows bounded redirects, and returns a
+JSON object. Text and HTML responses are fetched up to 5MB. Model-visible
+`content` is bounded after conversion and includes `truncated`, `original_bytes`,
+and `output_bytes`.
+
+Successful text result fields:
+
+- `url`
+- `final_url`
+- `status`
+- `content_type`
+- `format`
+- `content`
+- `truncated`
+- `original_bytes`
+- `output_bytes`
+- `error`
+
+HTML responses convert to markdown for `format=markdown`, plain text for
+`format=text`, and raw HTML for `format=html`. Non-HTML text is returned as-is
+for `markdown` and `text`.
+
+Image responses return metadata and an `attachments` array with data URL image
+content. Unsupported binary responses return JSON errors instead of base64 text.
 
 ## Related Topics
 

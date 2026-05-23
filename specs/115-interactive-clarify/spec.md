@@ -49,7 +49,7 @@ permission approval flow defined by [035 Permissions](../035-permissions/spec.md
 
 ## Availability
 
-Plan and Build modes may expose `clarify`, but only for the root session and
+Plan and Default modes may expose `clarify`, but only for the root session and
 only when the caller has explicitly enabled interactive clarify support.
 Fullscreen TUI enables it in this slice. Headless runtime callers and `pevo run`
 do not expose it by default.

@@ -74,25 +74,30 @@ running turn affect the next submitted prompt.
 Runtime mode is explicit and enforceable by the tool surface.
 
 `default` is the default for `pevo run` and for `pevo tui` when TUI state has no
-per-workdir mode. Default mode exposes the current full coding-core tools.
+per-workdir mode. Default mode exposes the current full coding-core tools plus
+the default-enabled read-only `web` toolset unless configuration disables it.
 
-`plan` is hard read-only. It exposes only:
+`plan` withholds file mutation tools and exposes only:
 
 - `read`: read a file under the selected workdir
-- `list`: list files or directories under the selected workdir with limits and
-  truncation metadata
-- `search`: literal text search under the selected workdir with limits and
-  truncation metadata
+- `exec_command`: run bounded shell commands for read-only exploration
+- `write_stdin`: poll or interact with a yielded `exec_command` session
+- `web_fetch`: fetch known `http(s)` URLs when the `web` toolset is enabled
 
 When interactive clarify support is enabled, fullscreen TUI may also expose
 the read-only `clarify` tool in plan mode to ask bounded user questions. Plan
-mode must not expose `exec_command`, `write_stdin`, `write`, or `edit`. Its read-only semantics must
-not depend only on provider instructions.
+mode must not expose `write` or `edit`. Its shell read-only semantics are
+governed by mode instructions and the normal permission/resource boundary, not
+by a separate command allowlist.
+
+Fullscreen `/tools` displays and toggles per-mode toolset configuration. TUI
+toggles write only project-local `.psychevo/config.toml` and affect later
+turns, not an already running provider request.
 
 User shell escape is a user-supplied shell context action, not a model-visible
 tool. It is available in both `plan` and `default` modes and must not add
-`exec_command` or `write_stdin` to the agent-visible tool surface for `plan` mode. Successful, failed,
-non-zero, timed-out, truncated, and interrupted user shell results are persisted
+additional agent-visible tools to the Plan surface. Successful, failed, non-zero,
+timed-out, truncated, and interrupted user shell results are persisted
 as user-role context records for subsequent provider requests when the current
 provider/model configuration can be resolved.
 

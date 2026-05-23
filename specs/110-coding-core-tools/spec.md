@@ -9,6 +9,7 @@ Define the required `coding-core` toolset for the built-in coding-agent capabili
 
 - `coding-core` toolset semantics
 - core coding tools: `read`, `edit`, `write`, `exec_command`, and `write_stdin`
+- adjacent core-managed web toolset containing `web_fetch`
 - model-visible JSON result contracts for those tools
 - working-context and resource-boundary expectations for core tools
 - observable failure, truncation, timeout, abort, and conflict behavior
@@ -19,7 +20,9 @@ Out of scope:
 - CLI commands, terminal rendering, or durable process registry behavior outside
   the in-process exec session model
 - approval UX, sandbox behavior, deny lists, dangerous-command policy, or concrete resource policy, except for surfacing permission denial as normal tool-result failure
-- binary/image reading, append/delete/rename tools, search/list tools, memory tools, skill adjunct tools, or self-evolution tools
+- binary/image file reading, append/delete/rename tools, dedicated search/list
+  tools, memory tools, skill adjunct tools, web search/provider extraction
+  tools, or self-evolution tools
 - storage schemas, evidence record shapes, or replay formats
 
 ## Toolset Contract
@@ -31,16 +34,39 @@ Out of scope:
 - `exec_command`
 - `write_stdin`
 
-`coding-core` does not include search, list, grep, find, memory, skill, or
-project-discovery tools. A model may use `exec_command` for command-line search
-or listing when the runtime resource boundary allows it, but must prefer
-dedicated file tools for reads and writes. Optional skill tools are adjacent
-runtime tools defined by [055 Skills](../055-skills/spec.md), not members of
-`coding-core`.
+`coding-core` does not include dedicated search, list, grep, find, memory,
+skill, or project-discovery function tools. A model may use `exec_command` for
+command-line search or listing when the runtime resource boundary allows it, but
+must prefer dedicated file tools for reads and writes. Optional skill tools are
+adjacent runtime tools defined by [055 Skills](../055-skills/spec.md), not
+members of `coding-core`.
+
+The built-in `web` toolset is adjacent to `coding-core` and contains the
+read-only `web_fetch` tool. Default coding-agent invocations enable both
+`coding-core` and `web` unless configuration disables `web`. `web_fetch` is not
+a web search or provider-backed extraction tool; it reads a known `http(s)` URL
+through the runtime HTTP client. Runtime mode system prompts do not include
+dedicated `web_fetch` guidance; its availability and parameter contract are
+communicated through the model-visible tool declaration.
+
+When the runtime exposes a Plan-mode coding surface, its core tools are the
+non-mutating subset `read`, `exec_command`, and `write_stdin`. Plan mode does
+not expose `write` or `edit`; its read-only shell behavior is governed by mode
+instructions and the normal permission/resource boundary, not by a separate
+runtime command allowlist.
 
 Each `coding-core` tool operates through the runtime-resolved working context accepted for the coding-agent invocation. Tools must not independently choose a different project, filesystem, process environment, or resource boundary.
 
 Runtime must expose a model-visible tool declaration only when the matching execution binding is available for the same agent invocation and generation-request tool declaration snapshot. [007 Tool Surface](../007-tool-surface/spec.md) owns snapshot visibility semantics.
+
+## Toolset Management
+
+Runtime maintains a built-in tool registry and a toolset registry. A toolset may
+list tools and include other toolsets. Per-mode configuration selects enabled
+toolsets and disabled toolsets; disabled toolsets subtract from enabled
+expansion. Plan mode remains a hard read-only ceiling after expansion, so
+mutating tools are filtered even when a configured toolset includes them.
+Unknown tools, unknown includes, and cycles must be observable during assembly.
 
 ## JSON Result Contract
 
@@ -138,6 +164,17 @@ resource for the working context. It supports foreground completion, yielded
 long-running sessions, optional PTY execution, stdin-capable sessions, and
 bounded model-visible output.
 
+Before starting an agent invocation that exposes `exec_command`, runtime must
+ensure an `rg` command is available to that invocation. Resolution checks
+`$PSYCHEVO_HOME/tools/rg[.exe]` first, then the inherited system `PATH`. If both
+are missing, runtime downloads the latest GitHub ripgrep release for the current
+platform and installs it at `$PSYCHEVO_HOME/tools/rg[.exe]`. If this guarantee
+cannot be satisfied, the invocation fails before `agent_start` with a clear
+observable error. When the managed binary is selected or installed, runtime
+prepends `$PSYCHEVO_HOME/tools` to the `PATH` used by `exec_command` subprocesses.
+Prompts may guide models to use `jq` for JSON or JSONL inspection when it is
+available, but runtime does not guarantee or install `jq`.
+
 `write_stdin` polls an existing yielded session or writes text to its stdin.
 Empty `chars` is a poll. Non-empty `chars` requires a stdin-capable session.
 
@@ -187,6 +224,30 @@ stdin are failed tool results.
 `max_output_tokens` bounds the model-visible output. When output is truncated,
 `original_token_count` remains the count before truncation. The result does not
 include a full-output path.
+
+## `web_fetch`
+
+`web_fetch` fetches one fully formed `http://` or `https://` URL. Parameters are
+`url`, optional `format` (`markdown`, `text`, or `html`, default `markdown`),
+and optional `timeout` in seconds. It follows bounded redirects and reports the
+final URL.
+
+The tool is read-only and default-allowed by permission policy, while explicit
+`WebFetch(pattern)` allow/ask/deny rules may override it. It does not hard-block
+localhost or private addresses in this slice.
+
+Successful text results return stable fields including `url`, `final_url`,
+`status`, `content_type`, `format`, `content`, `truncated`, `original_bytes`,
+`output_bytes`, and `error`. HTML content is converted to markdown or text when
+requested. Output is bounded; downloads larger than the fixed fetch limit fail
+or stop before unbounded memory growth.
+
+Image responses return JSON metadata and an image attachment. Providers whose
+tool-result channel only accepts text receive the normal text tool result plus a
+runtime-originated image context message when the selected model supports image
+input; otherwise the tool result contains a visible warning. PDF, archive, and
+other unsupported binary responses return structured errors rather than base64
+text.
 
 ## Related Topics
 

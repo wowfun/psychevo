@@ -79,7 +79,10 @@ While a turn is running, fullscreen TUI auto-follows the transcript when the
 viewport is already at the bottom. Assistant streaming deltas, long generated
 answers, tool starts, and tool-result updates must be visible on the next draw
 without requiring manual scrolling. Manual transcript scrolling opts out of
-auto-follow until the user returns to the bottom or a new prompt is submitted.
+auto-follow until the user returns to the bottom or submits new composer input.
+Submitting a prompt, shell escape, slash command, or slash-menu command restores
+auto-follow and requests a bottom scroll before the next render so the newest
+submitted content or command result is visible.
 Transcript scroll math must use the actual content viewport, excluding any
 decorative transcript border rows, so the newest content is not hidden behind
 the composer or bottom status line. Scroll limits, row hit areas, prompt

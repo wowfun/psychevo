@@ -21,6 +21,7 @@ Rendering of the resulting transcript rows and panels is defined by
   prompt inputs
 - slash command registry behavior, parsing, menus, completion, and command
   feedback
+- dynamic skill and bundle slash command submission behavior
 - user-visible interaction copy that describes pevo behavior directly without
   naming external reference implementations
 - file, image, agent, and skill popup interactions

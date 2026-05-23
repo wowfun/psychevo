@@ -149,18 +149,16 @@ When both `tools` and `disallowedTools` are set, runtime removes denied tools
 first and then resolves the allowlist against the remaining pool; a tool listed
 in both is removed.
 
-`RunMode::Build` may expose mutating coding tools. `RunMode::Plan` is a hard
+`RunMode::Default` may expose mutating coding tools. `RunMode::Plan` is a hard
 read-only ceiling; agent definitions cannot expand it into mutating tools.
 `permissionMode: plan` narrows the invocation to the same read-only ceiling.
 `permissionMode: default` and `permissionMode: acceptEdits` operate only inside
 the active runtime ceiling. Dangerous or bypass-style permission modes are
 diagnosed as unsupported and do not grant broader access.
 
-Compatibility tool aliases normalize to Psychevo tool names:
+Accepted tool-name spellings normalize to Psychevo tool names:
 
 - `Read` -> `read`
-- `Grep` -> `search`
-- `Glob` -> `list`
 - `ExecCommand` -> `exec_command`
 - `WriteStdin` -> `write_stdin`
 - `Edit` -> `edit`
@@ -168,6 +166,10 @@ Compatibility tool aliases normalize to Psychevo tool names:
 - `Agent` and `Task` -> agent-spawn/control tools
 - `Skill` -> read-only skill access, including `list_skills`, `view_skill`,
   and model-visible skill catalog entries
+
+Removed coding tools such as `list`, `search`, `Grep`, and `Glob` are not
+compatibility aliases. If an agent definition names them, they remain unknown
+tool names and do not grant access to any built-in tool.
 
 Named restrictions such as `Agent(review,explore)` or `Task(review,explore)`
 are runtime-enforced and affect model-visible agent catalog projection. The

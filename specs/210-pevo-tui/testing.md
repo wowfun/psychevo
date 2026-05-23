@@ -67,9 +67,12 @@ Required parent-topic coverage:
   message events while still delivering dedicated TUI thinking events.
 - Runtime metrics projection that can expose usage and allowlisted metadata to
   TUI without putting them in sanitized transcript messages.
-- Runtime Plan mode toolset: exposes `read`, `list`, `search`, and
-  fullscreen-interactive `clarify`; does not expose `exec_command`,
-  `write_stdin`, `write`, or `edit`.
+- Runtime Plan mode toolset: exposes `read`, `exec_command`, `write_stdin`, and
+  fullscreen-interactive `clarify`; does not expose `write`, `edit`,
+  dedicated `list`, or dedicated `search`.
+- TUI tool evidence does not keep compatibility rendering for removed
+  `list` or `search` coding tools; unexpected records with those names follow
+  the generic unknown-tool rendering path.
 - Mode instruction is sent to providers for the current turn and is not
   persisted in `messages`.
 - Local stats and accounting projection from persisted columns, including

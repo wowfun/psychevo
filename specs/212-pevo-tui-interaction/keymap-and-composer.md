@@ -38,7 +38,10 @@ startup.
   message. Once confirmed, the pending preview entry is removed and the
   committed user message appears as ordinary user transcript content. During
   non-agent running work or compaction, ordinary prompt submission queues for
-  the next turn and renders in the same pending preview.
+  the next turn and renders in the same pending preview. Any submitted composer
+  input, including prompts, user shell escapes, and slash commands, restores the
+  transcript to bottom-follow mode so the newest submitted content or command
+  feedback is visible after the next render.
 - `Shift+Enter`, `Ctrl+Enter`, `Alt+Enter`, and `Ctrl+J` insert a newline.
 - `Ctrl+A` in composer focus selects all existing composer text with visible
   input-local highlighting. With that selection active, `Backspace` and

@@ -76,6 +76,7 @@ Implemented first-slice commands:
 - `pevo context`
 - `pevo session`
 - `pevo model`
+- `pevo tool`
 - `pevo config`
 - `pevo auth`
 
@@ -138,6 +139,14 @@ scanner, hub, bundle, curator, and provenance semantics belong to
 `pevo stats` owns local token and estimated-cost reporting from the SQLite
 state database. It does not contact providers, refresh catalogs, or reconcile
 provider invoices.
+
+`pevo tool` owns local tool and toolset inspection and configuration. `list`
+shows built-in and user-defined toolsets, effective mode enablement, and
+expanded tools. `show <name>` displays one tool or toolset. `enable` and
+`disable` update per-mode `tools.modes.<mode>.enabled_toolsets` or
+`disabled_toolsets`; they default to project-local `.psychevo/config.toml` and
+accept `--global` for `$PSYCHEVO_HOME/config.toml`. `create` and `remove` manage
+user-defined `[toolsets.<name>]` entries.
 
 `pevo context` owns local context-window usage inspection for one existing
 session. It does not contact providers, refresh catalogs, or persist prompt
