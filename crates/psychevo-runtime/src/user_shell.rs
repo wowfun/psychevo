@@ -157,6 +157,7 @@ fn prepare_user_shell_context(
         no_agents: true,
         no_skills: true,
         skill_inputs: Vec::new(),
+        mcp_servers: Vec::new(),
     };
     let loaded = load_run_config(&options, workdir)?;
     let resolved = resolve_run_provider(&options, &loaded)?;

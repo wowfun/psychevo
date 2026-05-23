@@ -54,6 +54,7 @@ async fn run_live_read_tool(provider: &str) {
         no_agents: false,
         no_skills: false,
         skill_inputs: Vec::new(),
+        mcp_servers: Vec::new(),
     })
     .await
     .expect("live run");

@@ -29,6 +29,7 @@ impl TuiApp {
             no_agents: self.no_agents,
             no_skills: self.no_skills,
             skill_inputs: self.skill_inputs.clone(),
+            mcp_servers: Vec::new(),
         }
     }
 

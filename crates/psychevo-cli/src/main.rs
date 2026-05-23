@@ -54,6 +54,10 @@ async fn run() -> Result<ExitCode> {
         Commands::Model(args) => run_model_command(args).await,
         Commands::Config(args) => run_config_command(args),
         Commands::Auth(args) => run_auth_command(args),
+        Commands::Acp(_args) => {
+            psychevo_acp::run_stdio(psychevo_acp::AcpOptions::from_env()).await?;
+            Ok(ExitCode::SUCCESS)
+        }
         Commands::Tui(args) => tui::run_tui_command(&args).await,
     }
 }

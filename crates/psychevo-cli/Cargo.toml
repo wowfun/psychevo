@@ -16,6 +16,7 @@ crossterm.workspace = true
 futures.workspace = true
 ignore.workspace = true
 psychevo-ai = { path = "../psychevo-ai" }
+psychevo-acp = { path = "../psychevo-acp" }
 psychevo-runtime = { path = "../psychevo-runtime" }
 pulldown-cmark.workspace = true
 ratatui.workspace = true

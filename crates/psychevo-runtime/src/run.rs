@@ -226,6 +226,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
         custom_toolsets: BTreeMap::new(),
         clarify: ClarifyToolSurface::Disabled,
         skills: (!options.no_skills).then_some(skill_options),
+        extension_tools: Vec::new(),
         agents: agent_tools,
     });
     tools = apply_agent_tool_policy(tools, selected_agent.as_ref(), mode);
@@ -328,6 +329,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         no_agents: false,
         no_skills: options.no_skills,
         skill_inputs: options.skill_inputs.clone(),
+        mcp_servers: options.mcp_servers.clone(),
     };
     let loaded = load_run_config(&run_options, &workdir)?;
     let permission_mode = options
@@ -776,6 +778,18 @@ async fn run_live_internal(
     } else {
         None
     };
+    let permission_runtime = PermissionRuntime::new(
+        workdir.clone(),
+        workdir.join(".psychevo"),
+        loaded.config.permissions.clone(),
+        permission_mode,
+        approval_mode,
+        options.approval_handler.clone(),
+    );
+    let (mcp_tools, mcp_warnings) =
+        crate::mcp::mcp_tool_bindings(&options.mcp_servers, &workdir, Some(&permission_runtime))
+            .await;
+    emit_warning_events(&mcp_warnings, &events, stream_events.as_ref());
     let mut tools = assemble_tool_surface(ToolSurfaceAssembly {
         workdir: workdir.clone(),
         task_id: session_id.clone(),
@@ -792,18 +806,11 @@ async fn run_live_internal(
             ClarifyToolSurface::Disabled
         },
         skills: (!options.no_skills || !explicit_skill_inputs.is_empty()).then_some(skill_options),
+        extension_tools: mcp_tools,
         agents: agent_tools,
     });
     tools = apply_agent_tool_policy(tools, selected_agent.as_ref(), options.mode);
     tools = apply_agent_hooks(tools, selected_agent.as_ref(), &workdir);
-    let permission_runtime = PermissionRuntime::new(
-        workdir.clone(),
-        workdir.join(".psychevo"),
-        loaded.config.permissions.clone(),
-        permission_mode,
-        approval_mode,
-        options.approval_handler.clone(),
-    );
     tools = permission_runtime.wrap_tools(tools);
     let effective_tool_names = effective_tool_names(&tools);
     let prompt_agents = if options.no_agents {
@@ -1078,6 +1085,8 @@ async fn run_live_internal(
             stream(RunStreamEvent::Event(value));
         }
     }
+    let mut warnings = project_instructions.warnings;
+    warnings.extend(mcp_warnings);
     Ok(RunResult {
         session_id,
         outcome: completion.outcome,
@@ -1096,7 +1105,7 @@ async fn run_live_internal(
         selected_skills,
         context_snapshot,
         events,
-        warnings: project_instructions.warnings,
+        warnings,
     })
 }
 

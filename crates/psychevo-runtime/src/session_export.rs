@@ -1234,6 +1234,7 @@ fn reconstructed_tool_declarations(
             explicit_inputs: Vec::new(),
             no_skills: false,
         }),
+        extension_tools: Vec::new(),
         agents: Some(AgentToolContext {
             provider,
             model_provider: summary.provider.clone(),

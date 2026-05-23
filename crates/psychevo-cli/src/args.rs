@@ -49,11 +49,19 @@ pub(crate) enum Commands {
     #[command(about = "Inspect credential status and write provider API keys")]
     Auth(AuthArgs),
     #[command(
+        about = "Run the Agent Client Protocol stdio server",
+        long_about = "Run Psychevo as an Agent Client Protocol stdio server for ACP-speaking editors and clients."
+    )]
+    Acp(AcpArgs),
+    #[command(
         about = "Open the fullscreen terminal UI",
         long_about = "Open the fullscreen terminal UI for interactive coding-agent work. In non-terminal stdin/stdout, each input line is processed deterministically as a prompt, slash command, or shell escape."
     )]
     Tui(TuiArgs),
 }
+
+#[derive(Debug, Parser)]
+pub(crate) struct AcpArgs {}
 
 #[derive(Debug, Parser)]
 pub(crate) struct InitArgs {

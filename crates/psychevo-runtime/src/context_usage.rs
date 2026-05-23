@@ -643,6 +643,7 @@ fn configured_context_limit(
         no_agents: false,
         no_skills: false,
         skill_inputs: Vec::new(),
+        mcp_servers: Vec::new(),
     };
     selected_configured_model(&run_options)
         .ok()

@@ -9,12 +9,14 @@ license.workspace = true
 base64.workspace = true
 futures.workspace = true
 html2text.workspace = true
+http.workspace = true
 libc.workspace = true
 portable-pty.workspace = true
 psychevo-agent-core = { path = "../psychevo-agent-core" }
 psychevo-ai = { path = "../psychevo-ai" }
 quick_html2md.workspace = true
 reqwest.workspace = true
+rmcp.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true

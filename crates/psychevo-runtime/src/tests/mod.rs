@@ -61,6 +61,7 @@ fn base_options(temp: &tempfile::TempDir) -> RunOptions {
         no_agents: false,
         no_skills: false,
         skill_inputs: Vec::new(),
+        mcp_servers: Vec::new(),
     }
 }
 

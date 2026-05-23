@@ -1,5 +1,6 @@
 mod accounting;
 mod agents;
+pub mod command_registry;
 mod compaction;
 mod config;
 mod context;
@@ -7,6 +8,7 @@ mod context_usage;
 mod error;
 mod events;
 mod managed_tools;
+mod mcp;
 mod messages;
 mod paths;
 mod permissions;
@@ -106,16 +108,16 @@ pub use types::{
     AgentSpawnOptions, AgentSpawnResult, ApprovalHandler, ApprovalMode, ClarifyAnswer,
     ClarifyQuestion, ClarifyQuestionOption, ClarifyRequestEvent, ClarifyResolvedEvent,
     ClarifyResolvedReason, ClarifyResponse, ClarifyResult, ConfigScope, ConfiguredModel,
-    CustomProviderInput, CustomProviderResult, ImageInput, ModelCatalogEntry, ModelCatalogProvider,
-    ModelMetadataCacheTarget, PermissionApprovalDecision, PermissionApprovalOutcome,
-    PermissionApprovalRequest, PermissionConfig, PermissionMode, PromptAttachmentDisplay,
-    PromptDisplayMetadata, ReloadContextOptions, ReloadContextResult, RunControl, RunControlHandle,
-    RunMode, RunOptions, RunResult, RunStreamEvent, RunStreamSink, RunWarning,
-    SanitizedMessageSummary, ScopedCustomProviderInput, SelectedAgent, SessionExportMessageSummary,
-    SessionRedoResult, SessionSummary, SessionUndoOptions, SessionUndoResult, SmokeControl,
-    SmokeOptions, SmokeResult, StatsOptions, TUI_DISPLAY_METADATA_KEY, TuiMessageSummary,
-    USER_SHELL_METADATA_KEY, UserShellContextOptions, UserShellOptions, UserShellResult,
-    run_control,
+    CustomProviderInput, CustomProviderResult, ImageInput, McpServerInput, McpTransportInput,
+    ModelCatalogEntry, ModelCatalogProvider, ModelMetadataCacheTarget, PermissionApprovalDecision,
+    PermissionApprovalOutcome, PermissionApprovalRequest, PermissionConfig, PermissionMode,
+    PromptAttachmentDisplay, PromptDisplayMetadata, ReloadContextOptions, ReloadContextResult,
+    RunControl, RunControlHandle, RunMode, RunOptions, RunResult, RunStreamEvent, RunStreamSink,
+    RunWarning, SanitizedMessageSummary, ScopedCustomProviderInput, SelectedAgent,
+    SessionExportMessageSummary, SessionRedoResult, SessionSummary, SessionUndoOptions,
+    SessionUndoResult, SmokeControl, SmokeOptions, SmokeResult, StatsOptions,
+    TUI_DISPLAY_METADATA_KEY, TuiMessageSummary, USER_SHELL_METADATA_KEY, UserShellContextOptions,
+    UserShellOptions, UserShellResult, run_control,
 };
 pub use undo::{redo_session, undo_session};
 pub use user_shell::run_user_shell_command_streaming_controlled;

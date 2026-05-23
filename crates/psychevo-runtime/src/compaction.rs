@@ -718,6 +718,7 @@ fn auto_compaction_check_run_options(
         no_agents: false,
         no_skills: false,
         skill_inputs: Vec::new(),
+        mcp_servers: Vec::new(),
     }
 }
 
@@ -755,6 +756,7 @@ fn compaction_run_options(
         no_agents: false,
         no_skills: false,
         skill_inputs: Vec::new(),
+        mcp_servers: Vec::new(),
     }
 }
 

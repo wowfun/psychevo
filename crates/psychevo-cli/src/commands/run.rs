@@ -99,6 +99,7 @@ async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
         no_agents: args.no_agents,
         no_skills: args.no_skills,
         skill_inputs: args.skill.clone(),
+        mcp_servers: Vec::new(),
     })
     .await?;
 

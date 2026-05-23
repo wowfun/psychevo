@@ -1164,6 +1164,10 @@ fn parse_registered_slash_command(
             parse_no_arguments(spec, command, rest)?;
             Ok(SlashCommand::Sessions)
         }
+        SlashCommandAction::Resume => {
+            parse_no_arguments_for_usage(command, rest)?;
+            Ok(SlashCommand::Sessions)
+        }
         SlashCommandAction::Usage => {
             parse_no_arguments(spec, command, rest)?;
             Ok(SlashCommand::Usage)
@@ -1181,13 +1185,13 @@ fn parse_registered_slash_command(
         SlashCommandAction::Queue => parse_required_trailing(spec, rest).map(SlashCommand::Queue),
         SlashCommandAction::Pending => parse_pending_command(spec, rest),
         SlashCommandAction::ModelShow => {
-            parse_no_arguments(spec, command, rest)?;
+            parse_no_arguments_for_usage(command, rest)?;
             Ok(SlashCommand::ModelShow)
         }
         SlashCommandAction::VariantSet => parse_variant_command(spec, rest),
         SlashCommandAction::ModeSet => parse_mode_command(spec, rest),
         SlashCommandAction::Permissions => {
-            parse_no_arguments(spec, command, rest)?;
+            parse_no_arguments_for_usage(command, rest)?;
             Ok(SlashCommand::Permissions)
         }
         SlashCommandAction::Thinking => parse_thinking_command(spec, rest),
@@ -1210,7 +1214,7 @@ fn parse_registered_slash_command(
         }
         SlashCommandAction::Skills => Ok(SlashCommand::Skills(parse_optional_trailing(rest))),
         SlashCommandAction::Tools => {
-            parse_no_arguments(spec, command, rest)?;
+            parse_no_arguments_for_usage(command, rest)?;
             Ok(SlashCommand::Tools)
         }
         SlashCommandAction::Bundles => Ok(SlashCommand::Bundles(parse_optional_trailing(rest))),
@@ -2006,7 +2010,7 @@ mod tests {
         assert_eq!(slash_menu_items("/stats")[0].command, "/usage");
         assert_eq!(slash_prefix_menu_items("/stats")[0].command, "/usage");
         assert_eq!(slash_menu_items("/clear")[0].command, "/new");
-        assert_eq!(slash_menu_items("/resume")[0].command, "/sessions");
+        assert_eq!(slash_menu_items("/resume")[0].command, "/resume");
         assert_eq!(slash_menu_items("/refresh")[0].command, "/refresh");
         assert_eq!(slash_menu_items("/btw")[0].command, "/btw");
         assert!(slash_menu_items("/side").is_empty());
@@ -2016,10 +2020,7 @@ mod tests {
         assert!(slash_menu_items("/session ").is_empty());
         assert_eq!(slash_menu_items("/model").len(), 1);
         assert_eq!(slash_menu_items("/model")[0].command, "/model");
-        assert_eq!(
-            slash_menu_items("/model")[0].description,
-            "choose or fetch model"
-        );
+        assert_eq!(slash_menu_items("/model")[0].description, "choose model");
         let mode = slash_menu_items("/mode");
         assert_eq!(mode[0].command, "/mode");
         assert_eq!(mode[0].description, "set runtime permission mode");
@@ -2077,10 +2078,11 @@ mod tests {
         assert!(!help.contains("/side"));
         assert!(help.contains("/usage - local usage and cost (aliases: /stats)"));
         assert!(help.contains("Reads persisted SQLite accounting and cost estimates"));
-        assert!(
-            help.contains("/sessions - switch or manage sessions (aliases: /resume, /continue)")
-        );
-        assert!(help.contains("archive, restore, and delete actions affect local state only"));
+        assert!(help.contains("/sessions - list sessions"));
+        assert!(help.contains("/resume [ref] - resume a previous session"));
+        assert!(help.contains("/continue [ref] - continue a previous session"));
+        assert!(help.contains("text surfaces list numbered sessions"));
+        assert!(help.contains("Text surfaces accept latest, a listed number, an id prefix"));
         assert!(help.contains(
             "/export [path] [-f|--format markdown|json] [-i|--include list] - write session export"
         ));

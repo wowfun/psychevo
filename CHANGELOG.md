@@ -4,12 +4,19 @@
 
 ### Added
 
+- Added initial ACP stdio support via `psychevo-acp` and `pevo acp`, including
+  sessions, cancellation, command projection, provider auth metadata, and
+  session-scoped MCP tools.
+- Added `027 ACP`, `056 MCP`, and `230 pevo-acp` specs for ACP protocol
+  semantics, MCP boundaries, and server packaging.
 - Added ADR 0002 for the capability extension mechanism.
 - Added `web_fetch`, `pevo tool`, and fullscreen TUI `/tools` support for
   built-in and project-local toolsets.
 
 ### Changed
 
+- Moved slash-command parsing, availability, and UI-independent effects into a
+  shared runtime command path for ACP, TUI, and future text surfaces.
 - Reworked Plan and Default tool surfaces around core shell/file tools, the
   adjacent `web` toolset, and managed `rg`/`jq` guidance.
 - Renamed the internal editable run mode from `Build` to `Default`.
@@ -19,6 +26,7 @@
 
 ### Fixed
 
+- Fixed ACP slash-command parity with capability-filtered advertisements.
 - Fixed fullscreen TUI composer, slash-command, paste, and scroll-follow edge
   cases.
 

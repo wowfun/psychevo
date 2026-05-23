@@ -49,6 +49,7 @@ pub(crate) fn base_run_options(
         no_agents: false,
         no_skills: false,
         skill_inputs: Vec::new(),
+        mcp_servers: Vec::new(),
     })
 }
 

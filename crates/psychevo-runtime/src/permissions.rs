@@ -93,6 +93,27 @@ impl PermissionRuntime {
             .collect()
     }
 
+    pub(crate) async fn authorize_mcp_startup(
+        &self,
+        server: &str,
+        transport: &str,
+    ) -> std::result::Result<(), String> {
+        let args = json!({
+            "server": server,
+            "transport": transport,
+        });
+        self.authorize(&format!("mcp_startup:{server}"), "mcp_startup", &args)
+            .await
+            .map_err(|output| {
+                output
+                    .json
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("permission denied")
+                    .to_string()
+            })
+    }
+
     async fn authorize(
         &self,
         tool_call_id: &str,
@@ -318,6 +339,14 @@ enum PermissionAction {
         tool: String,
         action: String,
     },
+    McpStartup {
+        server: String,
+        transport: String,
+    },
+    Mcp {
+        server: String,
+        tool: String,
+    },
     WebFetch {
         url: String,
     },
@@ -400,7 +429,22 @@ impl PermissionAction {
                 .map(|url| Self::WebFetch {
                     url: url.to_string(),
                 }),
-            _ => None,
+            "mcp_startup" => {
+                args.get("server")
+                    .and_then(Value::as_str)
+                    .map(|server| Self::McpStartup {
+                        server: server.to_string(),
+                        transport: args
+                            .get("transport")
+                            .and_then(Value::as_str)
+                            .unwrap_or("unknown")
+                            .to_string(),
+                    })
+            }
+            _ => crate::mcp::mcp_tool_name_parts(tool_name).map(|(server, tool)| Self::Mcp {
+                server: server.to_string(),
+                tool: tool.to_string(),
+            }),
         }
     }
 
@@ -422,6 +466,12 @@ impl PermissionAction {
             Self::Skill { tool, action } => {
                 rule.tool == *tool && wildcard_match(&rule.pattern, action)
             }
+            Self::McpStartup { server, .. } => {
+                rule.tool == "mcp_startup" && wildcard_match(&rule.pattern, server)
+            }
+            Self::Mcp { server, tool } => {
+                rule.tool == "mcp" && wildcard_match(&rule.pattern, &format!("{server}/{tool}"))
+            }
             Self::WebFetch { url } => {
                 rule.tool == "web_fetch" && wildcard_match(&rule.pattern, url)
             }
@@ -440,6 +490,8 @@ impl PermissionAction {
                     .join(",")
             ),
             Self::Skill { tool, action } => format!("{tool}:{action}"),
+            Self::McpStartup { server, .. } => format!("mcp_startup:{server}"),
+            Self::Mcp { server, tool } => format!("mcp:{server}/{tool}"),
             Self::WebFetch { url } => format!("web_fetch:{url}"),
         }
     }
@@ -451,6 +503,8 @@ impl PermissionAction {
             Self::Skill { tool, action } => {
                 Some(format!("{}({action})", permission_rule_tool(tool)))
             }
+            Self::McpStartup { server, .. } => Some(format!("McpStartup({server})")),
+            Self::Mcp { server, tool } => Some(format!("Mcp({server}/{tool})")),
             Self::WebFetch { url } => Some(format!("WebFetch({url})")),
         }
     }
@@ -458,7 +512,11 @@ impl PermissionAction {
     fn allow_always(&self) -> bool {
         matches!(
             self,
-            Self::ExecCommand { .. } | Self::Skill { .. } | Self::WebFetch { .. }
+            Self::ExecCommand { .. }
+                | Self::Skill { .. }
+                | Self::McpStartup { .. }
+                | Self::Mcp { .. }
+                | Self::WebFetch { .. }
         )
     }
 
@@ -568,6 +626,8 @@ fn hardline_deny(action: &PermissionAction) -> Option<String> {
             }
         }),
         PermissionAction::Skill { .. } => None,
+        PermissionAction::McpStartup { .. } => None,
+        PermissionAction::Mcp { .. } => None,
         PermissionAction::WebFetch { .. } => None,
     }
 }
@@ -593,6 +653,12 @@ fn default_ask_reason(action: &PermissionAction) -> Option<String> {
         PermissionAction::Skill { tool, action } => Some(format!(
             "{tool} action `{action}` changes skill configuration or files and requires approval"
         )),
+        PermissionAction::McpStartup { server, transport } => Some(format!(
+            "MCP server `{server}` startup over {transport} requires approval"
+        )),
+        PermissionAction::Mcp { server, tool } => {
+            Some(format!("MCP tool `{server}/{tool}` requires approval"))
+        }
         PermissionAction::WebFetch { .. } => None,
     }
 }
@@ -602,6 +668,8 @@ fn permission_rule_tool(tool: &str) -> &str {
         "skill_manage" => "SkillManage",
         "skill_hub" => "SkillHub",
         "skill_config" => "SkillConfig",
+        "mcp_startup" => "McpStartup",
+        "mcp" => "Mcp",
         "web_fetch" => "WebFetch",
         other => other,
     }
@@ -773,6 +841,14 @@ fn action_summary(tool_name: &str, args: &Value) -> String {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
+        "mcp_startup" => args
+            .get("server")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        _ if tool_name.starts_with("mcp__") => crate::mcp::mcp_tool_name_parts(tool_name)
+            .map(|(server, tool)| format!("{server}/{tool}"))
+            .unwrap_or_else(|| args.to_string()),
         _ => args.to_string(),
     }
 }
@@ -812,6 +888,8 @@ fn parse_rule(raw: &str) -> Option<PermissionRule> {
         "SkillManage" | "skill_manage" => "skill_manage",
         "SkillHub" | "skill_hub" => "skill_hub",
         "SkillConfig" | "skill_config" => "skill_config",
+        "McpStartup" | "mcp_startup" => "mcp_startup",
+        "Mcp" | "mcp" => "mcp",
         "WebFetch" | "web_fetch" => "web_fetch",
         _ => return None,
     };
@@ -1004,6 +1082,61 @@ mod tests {
             PermissionMode::Default,
         );
         let decision = deny_runtime.evaluate("web_fetch", &json!({"url": "https://example.com/a"}));
+        assert!(matches!(decision, PermissionDecision::Deny { .. }));
+    }
+
+    #[test]
+    fn mcp_tools_default_to_ask_and_match_rules() {
+        let default_runtime = runtime(PermissionConfig::default(), PermissionMode::Default);
+        let decision = default_runtime.evaluate("mcp__repo_tools__read_file", &json!({}));
+        assert!(matches!(decision, PermissionDecision::Ask { .. }));
+
+        let allow_runtime = runtime(
+            PermissionConfig {
+                allow: vec!["Mcp(repo_tools/read_file)".to_string()],
+                ..Default::default()
+            },
+            PermissionMode::Default,
+        );
+        let decision = allow_runtime.evaluate("mcp__repo_tools__read_file", &json!({}));
+        assert_eq!(decision, PermissionDecision::Allow);
+
+        let deny_runtime = runtime(
+            PermissionConfig {
+                deny: vec!["Mcp(repo_tools/*)".to_string()],
+                ..Default::default()
+            },
+            PermissionMode::Default,
+        );
+        let decision = deny_runtime.evaluate("mcp__repo_tools__read_file", &json!({}));
+        assert!(matches!(decision, PermissionDecision::Deny { .. }));
+    }
+
+    #[test]
+    fn mcp_startup_defaults_to_ask_and_matches_rules() {
+        let args = json!({"server": "repo_tools", "transport": "stdio"});
+        let default_runtime = runtime(PermissionConfig::default(), PermissionMode::Default);
+        let decision = default_runtime.evaluate("mcp_startup", &args);
+        assert!(matches!(decision, PermissionDecision::Ask { .. }));
+
+        let allow_runtime = runtime(
+            PermissionConfig {
+                allow: vec!["McpStartup(repo_tools)".to_string()],
+                ..Default::default()
+            },
+            PermissionMode::Default,
+        );
+        let decision = allow_runtime.evaluate("mcp_startup", &args);
+        assert_eq!(decision, PermissionDecision::Allow);
+
+        let deny_runtime = runtime(
+            PermissionConfig {
+                deny: vec!["McpStartup(repo_*)".to_string()],
+                ..Default::default()
+            },
+            PermissionMode::Default,
+        );
+        let decision = deny_runtime.evaluate("mcp_startup", &args);
         assert!(matches!(decision, PermissionDecision::Deny { .. }));
     }
 

@@ -71,6 +71,7 @@ pub struct RunOptions {
     pub no_agents: bool,
     pub no_skills: bool,
     pub skill_inputs: Vec<String>,
+    pub mcp_servers: Vec<McpServerInput>,
 }
 
 #[derive(Debug, Clone)]
@@ -91,6 +92,7 @@ pub struct AgentSpawnOptions {
     pub selected_parent_agent: Option<String>,
     pub no_skills: bool,
     pub skill_inputs: Vec<String>,
+    pub mcp_servers: Vec<McpServerInput>,
 }
 
 #[derive(Debug, Clone)]
@@ -119,6 +121,28 @@ pub struct PromptAttachmentDisplay {
 pub enum ImageInput {
     LocalPath(PathBuf),
     ImageUrl(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpServerInput {
+    pub name: String,
+    pub transport: McpTransportInput,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum McpTransportInput {
+    Stdio {
+        command: PathBuf,
+        args: Vec<String>,
+        env: BTreeMap<String, String>,
+    },
+    StreamableHttp {
+        url: String,
+        headers: BTreeMap<String, String>,
+    },
+    Unsupported {
+        kind: String,
+    },
 }
 
 impl ImageInput {

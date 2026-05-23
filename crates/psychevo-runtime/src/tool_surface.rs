@@ -49,6 +49,7 @@ pub(crate) struct ToolSurfaceAssembly {
     pub(crate) custom_toolsets: std::collections::BTreeMap<String, CustomToolsetConfig>,
     pub(crate) clarify: ClarifyToolSurface,
     pub(crate) skills: Option<SkillDiscoveryOptions>,
+    pub(crate) extension_tools: Vec<Arc<dyn ToolBinding>>,
     pub(crate) agents: Option<AgentToolContext>,
 }
 
@@ -72,6 +73,7 @@ pub(crate) fn assemble_tool_surface(input: ToolSurfaceAssembly) -> Vec<Arc<dyn T
     if let Some(skill_options) = input.skills {
         tools.extend(skill_tools_for_mode(skill_options, input.mode));
     }
+    tools.extend(input.extension_tools);
     if let Some(agent_context) = input.agents {
         tools.extend(agent_tools(agent_context));
     }

@@ -861,6 +861,7 @@ impl TuiApp {
             selected_parent_agent: self.current_agent.clone(),
             no_skills: self.no_skills,
             skill_inputs: self.skill_inputs.clone(),
+            mcp_servers: Vec::new(),
         })
         .await?;
         self.current_session = Some(result.parent_session_id);

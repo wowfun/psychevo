@@ -156,6 +156,7 @@ async fn run_agent(args: AgentRunArgs) -> Result<ExitCode> {
         no_agents: false,
         no_skills: false,
         skill_inputs: Vec::new(),
+        mcp_servers: Vec::new(),
     })
     .await?;
 

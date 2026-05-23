@@ -220,6 +220,7 @@ fn load_effective_tui_slash_config(
         no_agents: false,
         no_skills: false,
         skill_inputs: Vec::new(),
+        mcp_servers: Vec::new(),
     };
     let document = config_show_value(&options, ConfigScope::Effective)?;
     parse_effective_slash_config(&document["value"])
