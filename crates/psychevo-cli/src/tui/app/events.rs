@@ -774,6 +774,8 @@ impl TuiApp {
         let session_identity = self.session_identity_label();
         if ui.bottom_panel.is_some() {
             ui.last_slash_menu_areas.clear();
+            ui.last_pending_input_action_areas.clear();
+            ui.last_pending_input_edit_area = None;
             ui.last_file_popup_areas.clear();
             ui.last_agent_popup_areas.clear();
             ui.last_skill_popup_areas.clear();
@@ -820,6 +822,7 @@ impl TuiApp {
             return;
         }
         let composer_height = composer_height(&ui.textarea);
+        let pending_preview_height = pending_input_preview_height(ui, main.width);
         let file_popup_height = ui.file_popup_height();
         let agent_popup_height = ui.agent_popup_height();
         let skill_popup_height = ui.skill_popup_height();
@@ -862,6 +865,7 @@ impl TuiApp {
                 .direction(Direction::Vertical)
                 .constraints([
                     Constraint::Min(5),
+                    Constraint::Length(pending_preview_height),
                     Constraint::Length(composer_height),
                     Constraint::Length(1),
                 ])
@@ -872,36 +876,41 @@ impl TuiApp {
                 .constraints([
                     Constraint::Min(5),
                     Constraint::Length(popup_height),
+                    Constraint::Length(pending_preview_height),
                     Constraint::Length(composer_height),
                     Constraint::Length(1),
                 ])
                 .split(main)
         };
         if popup_height == 0 {
-            ui.set_render_areas(vertical[0], Some(vertical[1]), vertical[2], None);
-            render_transcript(frame, vertical[0], ui, session_identity.as_deref());
-            render_composer(frame, vertical[1], ui);
-            render_status(frame, vertical[2], self, ui);
-        } else if agent_popup_height > 0 {
             ui.set_render_areas(vertical[0], Some(vertical[2]), vertical[3], None);
+            render_transcript(frame, vertical[0], ui, session_identity.as_deref());
+            render_pending_input_preview(frame, vertical[1], ui);
+            render_composer(frame, vertical[2], ui);
+            render_status(frame, vertical[3], self, ui);
+        } else if agent_popup_height > 0 {
+            ui.set_render_areas(vertical[0], Some(vertical[3]), vertical[4], None);
             render_transcript(frame, vertical[0], ui, session_identity.as_deref());
             render_agent_popup(frame, vertical[1], ui);
-            render_composer(frame, vertical[2], ui);
-            render_status(frame, vertical[3], self, ui);
+            render_pending_input_preview(frame, vertical[2], ui);
+            render_composer(frame, vertical[3], ui);
+            render_status(frame, vertical[4], self, ui);
         } else if file_popup_height > 0 {
-            ui.set_render_areas(vertical[0], Some(vertical[2]), vertical[3], None);
+            ui.set_render_areas(vertical[0], Some(vertical[3]), vertical[4], None);
             render_transcript(frame, vertical[0], ui, session_identity.as_deref());
             render_file_popup(frame, vertical[1], ui);
-            render_composer(frame, vertical[2], ui);
-            render_status(frame, vertical[3], self, ui);
+            render_pending_input_preview(frame, vertical[2], ui);
+            render_composer(frame, vertical[3], ui);
+            render_status(frame, vertical[4], self, ui);
         } else if skill_popup_height > 0 {
-            ui.set_render_areas(vertical[0], Some(vertical[2]), vertical[3], None);
+            ui.set_render_areas(vertical[0], Some(vertical[3]), vertical[4], None);
             render_transcript(frame, vertical[0], ui, session_identity.as_deref());
             render_skill_popup(frame, vertical[1], ui);
-            render_composer(frame, vertical[2], ui);
-            render_status(frame, vertical[3], self, ui);
+            render_pending_input_preview(frame, vertical[2], ui);
+            render_composer(frame, vertical[3], ui);
+            render_status(frame, vertical[4], self, ui);
         } else {
-            ui.set_render_areas(vertical[0], Some(vertical[2]), vertical[3], None);
+            ui.set_render_areas(vertical[0], Some(vertical[3]), vertical[4], None);
             render_transcript(frame, vertical[0], ui, session_identity.as_deref());
             render_slash_menu(
                 frame,
@@ -910,8 +919,9 @@ impl TuiApp {
                 ui.slash_menu_selected,
                 &mut ui.last_slash_menu_areas,
             );
-            render_composer(frame, vertical[2], ui);
-            render_status(frame, vertical[3], self, ui);
+            render_pending_input_preview(frame, vertical[2], ui);
+            render_composer(frame, vertical[3], ui);
+            render_status(frame, vertical[4], self, ui);
         }
         if sidebar_visible {
             render_sidebar(frame, horizontal[1], ui);

@@ -81,6 +81,9 @@ impl<'a> FullscreenUi<'a> {
             history_index: None,
             history_draft: None,
             queued_inputs: VecDeque::new(),
+            pending_steers: VecDeque::new(),
+            pending_input_edit: None,
+            pending_input_sequence: 0,
             pending_images: Vec::new(),
             history_search: false,
             history_query: String::new(),
@@ -88,6 +91,8 @@ impl<'a> FullscreenUi<'a> {
             slash_menu_dismissed_input: None,
             pending_leader_started: None,
             last_slash_menu_areas: Vec::new(),
+            last_pending_input_action_areas: Vec::new(),
+            last_pending_input_edit_area: None,
             file_search: FileSearchState::new(),
             last_file_popup_areas: Vec::new(),
             agent_search: AgentSearchState::default(),
@@ -133,6 +138,9 @@ impl<'a> FullscreenUi<'a> {
         self.clarify_tool_args.clear();
         self.exec_session_rows.clear();
         self.exec_session_elapsed.clear();
+        self.pending_input_edit = None;
+        self.last_pending_input_action_areas.clear();
+        self.last_pending_input_edit_area = None;
         self.scroll = 0;
         self.last_transcript_height = 0;
         self.last_transcript_width = 0;
@@ -1044,6 +1052,93 @@ impl<'a> FullscreenUi<'a> {
         }
     }
 
+    fn next_pending_input_sequence(&mut self) -> u64 {
+        self.pending_input_sequence = self.pending_input_sequence.saturating_add(1);
+        self.pending_input_sequence
+    }
+
+    fn pending_input_entries(&self) -> Vec<PendingInputEntry> {
+        let mut entries = Vec::new();
+        for steer in &self.pending_steers {
+            entries.push(PendingInputEntry {
+                target: PendingInputRef::Steer(steer.id),
+                kind: PendingInputKind::Steer,
+                text: steer.display_prompt.clone(),
+                images: steer.images.clone(),
+                sequence: steer.sequence,
+            });
+        }
+        for input in &self.queued_inputs {
+            if let QueuedInput::Prompt {
+                display_prompt,
+                images,
+                sequence,
+                ..
+            } = input
+            {
+                entries.push(PendingInputEntry {
+                    target: PendingInputRef::Queue(*sequence),
+                    kind: PendingInputKind::Queue,
+                    text: display_prompt.clone(),
+                    images: images.clone(),
+                    sequence: *sequence,
+                });
+            }
+        }
+        entries.sort_by_key(|entry| entry.sequence);
+        entries
+    }
+
+    fn pending_input_entry(&self, target: PendingInputRef) -> Option<PendingInputEntry> {
+        self.pending_input_entries()
+            .into_iter()
+            .find(|entry| entry.target == target)
+    }
+
+    fn has_pending_input_preview(&self) -> bool {
+        self.pending_input_edit.is_some() || !self.pending_input_entries().is_empty()
+    }
+
+    fn start_pending_input_edit(&mut self, target: PendingInputRef) -> bool {
+        let Some(entry) = self.pending_input_entry(target) else {
+            return false;
+        };
+        self.pending_input_edit = Some(PendingInputEdit {
+            target,
+            kind: entry.kind,
+            textarea: textarea_with_text(&entry.text),
+            images: entry.images,
+            cursor_top_row: 0,
+        });
+        self.clear_slash_menu_dismissal();
+        self.close_file_popup();
+        self.close_agent_popup();
+        self.close_skill_popup();
+        true
+    }
+
+    fn cancel_pending_input_edit(&mut self) -> bool {
+        self.pending_input_edit.take().is_some()
+    }
+
+    fn pending_input_edit_text(&self) -> Option<String> {
+        self.pending_input_edit
+            .as_ref()
+            .map(|edit| textarea_text(&edit.textarea))
+    }
+
+    fn pending_input_action_hit(
+        &self,
+        column: u16,
+        row: u16,
+    ) -> Option<(PendingInputRef, PendingInputAction)> {
+        self.last_pending_input_action_areas
+            .iter()
+            .find_map(|(target, action, area)| {
+                rect_contains(*area, column, row).then_some((*target, *action))
+            })
+    }
+
     fn absorb_shell_escape_prefix(&mut self) -> bool {
         if self.shell_mode {
             return false;
@@ -1066,15 +1161,27 @@ impl<'a> FullscreenUi<'a> {
     }
 
     fn restore_queued_inputs_to_composer(&mut self) {
-        if self.queued_inputs.is_empty() {
+        if self.queued_inputs.is_empty() && self.pending_steers.is_empty() {
             return;
         }
-        let mut parts = Vec::new();
+        let mut restored = Vec::new();
+        let steers = self.pending_steers.drain(..).collect::<Vec<_>>();
+        for steer in steers {
+            restored.push((steer.sequence, steer.display_prompt, steer.images));
+        }
         for input in self.queued_inputs.drain(..) {
-            if let QueuedInput::Prompt { images, .. } = &input {
-                self.pending_images.extend(images.iter().cloned());
-            }
-            parts.push(queued_input_text(input));
+            let sequence = queued_input_sequence(&input);
+            let images = match &input {
+                QueuedInput::Prompt { images, .. } => images.clone(),
+                QueuedInput::Shell { .. } | QueuedInput::Compact { .. } => Vec::new(),
+            };
+            restored.push((sequence, queued_input_text(input), images));
+        }
+        restored.sort_by_key(|(sequence, _, _)| *sequence);
+        let mut parts = Vec::new();
+        for (_, text, images) in restored {
+            self.pending_images.extend(images);
+            parts.push(text);
         }
         let draft = self.composer_submission_text();
         if !draft.is_empty() && draft != "!" {
@@ -1086,6 +1193,7 @@ impl<'a> FullscreenUi<'a> {
         self.close_file_popup();
         self.close_agent_popup();
         self.close_skill_popup();
+        self.pending_input_edit = None;
     }
 
     fn add_pending_image(&mut self, image: ImageInput) -> String {
@@ -1452,6 +1560,39 @@ impl<'a> FullscreenUi<'a> {
         self.push_user_with_attachment_meta(text, attachment_metadata_text(images, &self.workdir));
     }
 
+    fn commit_pending_steer_from_event(&mut self, value: &Value) -> bool {
+        let Some(message) = value.get("message") else {
+            return false;
+        };
+        if message.get("role").and_then(Value::as_str) != Some("user") {
+            return false;
+        }
+        let Some(pending_id) = pending_input_id_from_message_end(value) else {
+            return false;
+        };
+        if let Some(index) = self
+            .pending_steers
+            .iter()
+            .position(|input| input.id.as_u64() == pending_id)
+        {
+            let input = self
+                .pending_steers
+                .remove(index)
+                .expect("pending steer index");
+            self.push_user_with_images(input.display_prompt, &input.images);
+        } else {
+            self.push_history_message_with_accounting_options(
+                message,
+                value.get("usage"),
+                value.get("metadata"),
+                value.get("accounting"),
+                false,
+            );
+        }
+        self.history_prompt_started_ms = message_timestamp_ms(message);
+        true
+    }
+
     fn start_assistant(&mut self) {
         self.assistant_row = None;
         self.reasoning_row = None;
@@ -1792,10 +1933,17 @@ impl<'a> FullscreenUi<'a> {
             }
             "message_update" | "message_end" => {
                 let event_type = value.get("type").and_then(Value::as_str);
+                if event_type == Some("message_end") && self.commit_pending_steer_from_event(value)
+                {
+                    return false;
+                }
                 let mut active_tool_frame_requested = false;
                 if let Some(text) =
                     assistant_text_from_event(value).filter(|text| !text.trim().is_empty())
                 {
+                    if let Some(idx) = self.reasoning_row.take() {
+                        self.finish_thinking_row(idx);
+                    }
                     let idx = self.assistant_row.unwrap_or_else(|| {
                         let idx = self.insert_answer_row(TranscriptRow::with_title(
                             TranscriptKind::Answer,

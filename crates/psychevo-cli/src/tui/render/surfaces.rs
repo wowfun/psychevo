@@ -78,10 +78,249 @@ fn render_composer(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_>)
         );
     }
     if ui.focus == FocusMode::Composer
+        && ui.pending_input_edit.is_none()
         && let Some((x, y)) = ui.composer_terminal_cursor_position(input_area)
     {
         frame.set_cursor_position((x, y));
     }
+}
+
+const PENDING_INPUT_PREVIEW_MAX_HEIGHT: u16 = 8;
+
+fn pending_input_preview_height(ui: &FullscreenUi<'_>, _width: u16) -> u16 {
+    if !ui.has_pending_input_preview() {
+        return 0;
+    }
+    let entries = ui.pending_input_entries();
+    let mut edit_rendered = false;
+    let mut height = 0u16;
+    for entry in &entries {
+        if ui
+            .pending_input_edit
+            .as_ref()
+            .is_some_and(|edit| edit.target == entry.target)
+        {
+            height = height.saturating_add(pending_input_edit_height(ui));
+            edit_rendered = true;
+        } else {
+            height = height.saturating_add(2);
+        }
+    }
+    if ui.pending_input_edit.is_some() && !edit_rendered {
+        height = height.saturating_add(pending_input_edit_height(ui));
+    }
+    height.min(PENDING_INPUT_PREVIEW_MAX_HEIGHT)
+}
+
+fn pending_input_edit_height(ui: &FullscreenUi<'_>) -> u16 {
+    ui.pending_input_edit
+        .as_ref()
+        .map(|edit| composer_height(&edit.textarea).saturating_add(2))
+        .unwrap_or(0)
+}
+
+fn render_pending_input_preview(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_>) {
+    ui.last_pending_input_action_areas.clear();
+    ui.last_pending_input_edit_area = None;
+    if area.width == 0 || area.height == 0 || !ui.has_pending_input_preview() {
+        return;
+    }
+    let theme = tui_theme();
+    frame.render_widget(Block::default(), area);
+    let entries = ui.pending_input_entries();
+    let mut y = area.y;
+    let bottom = area.y.saturating_add(area.height);
+    let mut edit_rendered = false;
+    for entry in entries {
+        if y >= bottom {
+            return;
+        }
+        if ui
+            .pending_input_edit
+            .as_ref()
+            .is_some_and(|edit| edit.target == entry.target)
+        {
+            y = render_pending_input_editor(frame, area, y, ui, entry.kind);
+            edit_rendered = true;
+        } else {
+            y = render_pending_input_entry(frame, area, y, ui, &entry, theme);
+        }
+    }
+    if y < bottom
+        && !edit_rendered
+        && let Some(kind) = ui.pending_input_edit.as_ref().map(|edit| edit.kind)
+    {
+        render_pending_input_editor(frame, area, y, ui, kind);
+    }
+}
+
+fn render_pending_input_entry(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    y: u16,
+    ui: &mut FullscreenUi<'_>,
+    entry: &PendingInputEntry,
+    theme: TuiTheme,
+) -> u16 {
+    let bottom = area.y.saturating_add(area.height);
+    let header_area = Rect {
+        x: area.x,
+        y,
+        width: area.width,
+        height: 1,
+    };
+    let action_width = UnicodeWidthStr::width("[edit] [undo]").min(usize::from(u16::MAX)) as u16;
+    let title_width = area.width.saturating_sub(action_width.saturating_add(2));
+    let title = truncate_display_width(
+        &format!("· pending {}", entry.kind.label()),
+        usize::from(title_width.max(1)),
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(title, theme.accent_style()))),
+        header_area,
+    );
+    if area.width > action_width.saturating_add(1) {
+        let edit_width = 6u16;
+        let undo_width = 6u16;
+        let undo_x = area.x.saturating_add(area.width.saturating_sub(undo_width));
+        let edit_x = undo_x.saturating_sub(edit_width.saturating_add(1));
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled("[edit]", theme.dim_style()))),
+            Rect {
+                x: edit_x,
+                y,
+                width: edit_width,
+                height: 1,
+            },
+        );
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled("[undo]", theme.dim_style()))),
+            Rect {
+                x: undo_x,
+                y,
+                width: undo_width,
+                height: 1,
+            },
+        );
+        ui.last_pending_input_action_areas.push((
+            entry.target,
+            PendingInputAction::Edit,
+            Rect {
+                x: edit_x,
+                y,
+                width: edit_width,
+                height: 1,
+            },
+        ));
+        ui.last_pending_input_action_areas.push((
+            entry.target,
+            PendingInputAction::Undo,
+            Rect {
+                x: undo_x,
+                y,
+                width: undo_width,
+                height: 1,
+            },
+        ));
+    }
+    let next_y = y.saturating_add(1);
+    if next_y < bottom {
+        let mut preview = first_pending_input_preview_line(&entry.text);
+        if !entry.images.is_empty() {
+            let suffix = format!(" · images {}", entry.images.len());
+            preview.push_str(&suffix);
+        }
+        let preview = truncate_display_width(&preview, usize::from(area.width.saturating_sub(4)));
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled("  ↳ ", theme.dim_style()),
+                Span::styled(preview, theme.dim_style()),
+            ])),
+            Rect {
+                x: area.x,
+                y: next_y,
+                width: area.width,
+                height: 1,
+            },
+        );
+    }
+    y.saturating_add(2)
+}
+
+fn render_pending_input_editor(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    y: u16,
+    ui: &mut FullscreenUi<'_>,
+    kind: PendingInputKind,
+) -> u16 {
+    let bottom = area.y.saturating_add(area.height);
+    if y >= bottom {
+        return y;
+    }
+    let theme = tui_theme();
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            format!("· editing {}", kind.label()),
+            theme.accent_style(),
+        ))),
+        Rect {
+            x: area.x,
+            y,
+            width: area.width,
+            height: 1,
+        },
+    );
+    let Some(edit) = ui.pending_input_edit.as_mut() else {
+        return y.saturating_add(1);
+    };
+    let input_y = y.saturating_add(1);
+    if input_y >= bottom {
+        return input_y;
+    }
+    let edit_height = composer_height(&edit.textarea).min(bottom.saturating_sub(input_y));
+    let input_area = Rect {
+        x: area.x.saturating_add(2),
+        y: input_y,
+        width: area.width.saturating_sub(2),
+        height: edit_height,
+    };
+    ui.last_pending_input_edit_area = Some(input_area);
+    edit.textarea.set_block(Block::default().style(theme.surface_style()));
+    edit.textarea.set_style(theme.surface_style());
+    edit.textarea.set_selection_style(text_selection_style());
+    frame.render_widget(&edit.textarea, input_area);
+    if let Some((x, y)) =
+        composer_terminal_cursor_position(&edit.textarea, input_area, &mut edit.cursor_top_row)
+    {
+        frame.set_cursor_position((x, y));
+    }
+    let hint_y = input_y.saturating_add(edit_height);
+    if hint_y < bottom {
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled("  Enter", theme.accent_style()),
+                Span::styled(" confirm · ", theme.dim_style()),
+                Span::styled("Esc", theme.accent_style()),
+                Span::styled(" cancel", theme.dim_style()),
+            ])),
+            Rect {
+                x: area.x,
+                y: hint_y,
+                width: area.width,
+                height: 1,
+            },
+        );
+    }
+    hint_y.saturating_add(1)
+}
+
+fn first_pending_input_preview_line(text: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("(empty)")
+        .to_string()
 }
 
 fn render_slash_menu(

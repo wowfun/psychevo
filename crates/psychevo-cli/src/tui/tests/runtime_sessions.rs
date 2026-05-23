@@ -966,6 +966,7 @@ async fn interrupted_turn_restores_queued_inputs_to_composer_without_autostart()
     ui.start_assistant();
     ui.turn_outcome = Some(Outcome::Aborted);
     ui.interrupt_requested = true;
+    let prompt_sequence = ui.next_pending_input_sequence();
     ui.queued_inputs.push_back(QueuedInput::Prompt {
         session_id: app.current_session.clone(),
         prompt: "queued prompt".to_string(),
@@ -974,10 +975,13 @@ async fn interrupted_turn_restores_queued_inputs_to_composer_without_autostart()
             placeholder: "[Image #1]".to_string(),
             image: ImageInput::ImageUrl("https://example.test/image.png".to_string()),
         }],
+        sequence: prompt_sequence,
     });
+    let shell_sequence = ui.next_pending_input_sequence();
     ui.queued_inputs.push_back(QueuedInput::Shell {
         session_id: app.current_session.clone(),
         command: "printf queued-shell".to_string(),
+        sequence: shell_sequence,
     });
     ui.textarea = textarea_with_text("draft");
 

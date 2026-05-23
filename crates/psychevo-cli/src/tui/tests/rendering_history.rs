@@ -1512,6 +1512,57 @@ fn reasoning_delta_keeps_failed_tool_meta_suppressed_while_turn_continues() {
 }
 
 #[test]
+fn visible_answer_update_completes_active_thinking_without_reasoning_end() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.start_assistant();
+
+    ui.apply_stream_event(
+        RunStreamEvent::ReasoningDelta {
+            text: "I have enough context and will answer now.".to_string(),
+        },
+        true,
+        false,
+    );
+
+    let thinking = ui
+        .transcript
+        .iter()
+        .position(|row| row.kind == TranscriptKind::Thinking)
+        .expect("thinking row");
+    assert!(ui.transcript[thinking].tool_started.is_some());
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_update",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "Here is the answer."}]
+            }
+        }),
+        false,
+    );
+
+    assert_eq!(ui.reasoning_row, None);
+    assert!(ui.transcript[thinking].tool_started.is_none());
+    assert!(ui.transcript[thinking].tool_elapsed.is_some());
+    let answer = ui
+        .transcript
+        .iter()
+        .position(|row| row.kind == TranscriptKind::Answer)
+        .expect("answer row");
+    assert!(thinking < answer);
+
+    let rendered = thinking_lines(&ui.transcript[thinking], false, true, 80)
+        .into_iter()
+        .next()
+        .map(|line| line_text(&line))
+        .expect("thinking row");
+    assert!(!rendered.contains("0s"), "{rendered}");
+}
+
+#[test]
 fn aborted_reasoning_only_message_does_not_recreate_failure_meta() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);

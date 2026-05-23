@@ -88,11 +88,35 @@ impl TuiApp {
         .ok()
     }
 
+    fn current_skill_bundles(&self) -> Vec<SkillBundle> {
+        if self.no_skills {
+            return Vec::new();
+        }
+        list_skill_bundles(&self.home, &self.workdir).unwrap_or_default()
+    }
+
     fn slash_items(&self) -> Vec<SlashMenuItem> {
         let mut items = configured_slash_menu_items(&self.slash_config);
+        let mut dynamic_names = BTreeSet::new();
+        for bundle in self.current_skill_bundles() {
+            let command = format!("/{}", bundle.slug);
+            dynamic_names.insert(bundle.slug.clone());
+            items.push(SlashMenuItem {
+                command: command.clone(),
+                description: bundle.description,
+                upcoming: false,
+                aliases: Vec::new(),
+                replacement: command.clone(),
+                completion: command,
+                configured_alias: false,
+            });
+        }
         if let Some(catalog) = self.current_skill_catalog() {
             for skill in catalog.skills {
-                let command = format!("/skill:{}", skill.name);
+                if dynamic_names.contains(&skill.name) {
+                    continue;
+                }
+                let command = format!("/{}", skill.name);
                 items.push(SlashMenuItem {
                     command: command.clone(),
                     description: skill.description,

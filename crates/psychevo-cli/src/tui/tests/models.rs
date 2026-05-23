@@ -129,23 +129,19 @@ fn model_info_tab_renders_selected_model_details() {
 #[test]
 fn model_info_tab_renders_cached_xiaomi_omni_capabilities() {
     let temp = tempdir().expect("temp");
-    let config_path = temp.path().join("xiaomi-omni-config.jsonc");
+    let config_path = temp.path().join("xiaomi-omni-config.toml");
     fs::write(
         &config_path,
         r#"
-        {
-          "provider": {
-            "xiaomi-token-plan": {
-              "label": "Xiaomi Token Plan",
-              "options": {
-                "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
-                "api_key_env": "XIAOMI_KEY"
-              },
-              "models": { "mimo-v2-omni": {} }
-            }
-          }
-        }
-        "#,
+[provider."xiaomi-token-plan"]
+label = "Xiaomi Token Plan"
+
+[provider."xiaomi-token-plan".options]
+base_url = "https://token-plan-cn.xiaomimimo.com/v1"
+api_key_env = "XIAOMI_KEY"
+
+[provider."xiaomi-token-plan".models."mimo-v2-omni"]
+"#,
     )
     .expect("config");
     let mut app = test_app(&temp);
@@ -230,23 +226,19 @@ async fn model_ctrl_r_refreshes_metadata_cache_and_preserves_info_state() {
         }
         "#,
     );
-    let config_path = temp.path().join("xiaomi-omni-config.jsonc");
+    let config_path = temp.path().join("xiaomi-omni-config.toml");
     fs::write(
         &config_path,
         r#"
-        {
-          "provider": {
-            "xiaomi-token-plan": {
-              "label": "Xiaomi Token Plan",
-              "options": {
-                "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
-                "api_key_env": "XIAOMI_KEY"
-              },
-              "models": { "mimo-v2-omni": {} }
-            }
-          }
-        }
-        "#,
+[provider."xiaomi-token-plan"]
+label = "Xiaomi Token Plan"
+
+[provider."xiaomi-token-plan".options]
+base_url = "https://token-plan-cn.xiaomimimo.com/v1"
+api_key_env = "XIAOMI_KEY"
+
+[provider."xiaomi-token-plan".models."mimo-v2-omni"]
+"#,
     )
     .expect("config");
     let mut app = test_app(&temp);
@@ -414,24 +406,18 @@ fn model_info_tab_action_row_shows_empty_state() {
 async fn model_fetch_all_adds_fetched_rows_and_preserves_query() {
     let temp = tempdir().expect("temp");
     let server = TuiCatalogServer::new(r#"{"data":[{"id":"remote-model"},{"id":"mock-model"}]}"#);
-    let config_path = temp.path().join("fetch-config.jsonc");
+    let config_path = temp.path().join("fetch-config.toml");
     fs::write(
         &config_path,
         format!(
-            r#"{{
-              "model": "mock/mock-model",
-              "provider": {{
-                "mock": {{
-                  "options": {{
-                    "base_url": "{}",
-                    "api_key_env": "TEST_PROVIDER_KEY"
-                  }},
-                  "models": {{
-                    "mock-model": {{}}
-                  }}
-                }}
-              }}
-            }}"#,
+            r#"model = "mock/mock-model"
+
+[provider.mock.options]
+base_url = "{}"
+api_key_env = "TEST_PROVIDER_KEY"
+
+[provider.mock.models."mock-model"]
+"#,
             server.base_url
         ),
     )
@@ -495,23 +481,17 @@ async fn model_fetch_all_adds_fetched_rows_and_preserves_query() {
 async fn model_fetch_missing_credentials_stays_in_panel() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let config_path = temp.path().join("missing-config.jsonc");
+    let config_path = temp.path().join("missing-config.toml");
     fs::write(
         &config_path,
-        r#"{
-              "model": "mock/mock-model",
-              "provider": {
-                "mock": {
-                  "options": {
-                    "base_url": "http://api.example/v1",
-                    "api_key_env": "TEST_PROVIDER_KEY"
-                  },
-                  "models": {
-                    "mock-model": {}
-                  }
-                }
-              }
-            }"#,
+        r#"model = "mock/mock-model"
+
+[provider.mock.options]
+base_url = "http://api.example/v1"
+api_key_env = "TEST_PROVIDER_KEY"
+
+[provider.mock.models."mock-model"]
+"#,
     )
     .expect("config");
     app.config_path = Some(config_path);
@@ -550,7 +530,7 @@ async fn model_add_provider_saves_global_config_fetches_and_selects_model() {
         "PSYCHEVO_HOME".to_string(),
         app.home.to_string_lossy().to_string(),
     );
-    fs::write(app.home.join("config.jsonc"), "{}\n").expect("config");
+    fs::write(app.home.join("config.toml"), "\n").expect("config");
     app.current_model = None;
     app.selected_model = None;
     let mut ui = FullscreenUi::new(&app);
@@ -583,10 +563,10 @@ async fn model_add_provider_saves_global_config_fetches_and_selects_model() {
     app.save_provider_wizard(&mut ui).expect("save provider");
     drain_catalog_until_idle(&mut app, &mut ui).await;
 
-    let config = fs::read_to_string(app.home.join("config.jsonc")).expect("config");
-    assert!(config.contains(r#""xiaomi-token-plan-cn""#));
-    assert!(config.contains(r#""label": "Xiaomi Token Plan CN""#));
-    assert!(config.contains(r#""api_key_env": "XIAOMI_TOKEN_PLAN_CN_API_KEY""#));
+    let config = fs::read_to_string(app.home.join("config.toml")).expect("config");
+    assert!(config.contains("[provider.xiaomi-token-plan-cn]"));
+    assert!(config.contains("label = \"Xiaomi Token Plan CN\""));
+    assert!(config.contains("api_key_env = \"XIAOMI_TOKEN_PLAN_CN_API_KEY\""));
     assert!(!config.contains("test-key"));
     let env = fs::read_to_string(app.home.join(".env")).expect("env");
     assert_eq!(env, "XIAOMI_TOKEN_PLAN_CN_API_KEY=test-key\n");
@@ -635,8 +615,8 @@ async fn model_add_provider_saves_global_config_fetches_and_selects_model() {
         app.state.model_for(&app.workdir_key).as_deref(),
         Some("xiaomi-token-plan-cn/remote-model")
     );
-    let config = fs::read_to_string(app.home.join("config.jsonc")).expect("config");
-    assert!(!config.contains(r#""model": "xiaomi-token-plan-cn/remote-model""#));
+    let config = fs::read_to_string(app.home.join("config.toml")).expect("config");
+    assert!(!config.contains("model = \"xiaomi-token-plan-cn/remote-model\""));
 }
 
 #[tokio::test]
@@ -647,7 +627,7 @@ async fn model_add_provider_wizard_generates_id_and_reports_validation_errors() 
         "PSYCHEVO_HOME".to_string(),
         app.home.to_string_lossy().to_string(),
     );
-    fs::write(app.home.join("config.jsonc"), "{}\n").expect("config");
+    fs::write(app.home.join("config.toml"), "\n").expect("config");
     let mut ui = FullscreenUi::new(&app);
 
     ui.bottom_panel = Some(BottomPanel::ProviderWizard(app.provider_wizard_panel()));
@@ -678,8 +658,8 @@ async fn model_add_provider_wizard_generates_id_and_reports_validation_errors() 
             .as_deref()
             .is_some_and(|notice| notice.contains("collides"))
     );
-    let config = fs::read_to_string(app.home.join("config.jsonc")).expect("config");
-    assert!(!config.contains(r#""mimo""#));
+    let config = fs::read_to_string(app.home.join("config.toml")).expect("config");
+    assert!(!config.contains("mimo"));
 }
 
 #[tokio::test]
@@ -770,17 +750,15 @@ fn model_picker_initial_focus_prefers_model_rows_before_fetch_rows() {
 
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let config_path = temp.path().join("empty-model-config.jsonc");
+    let config_path = temp.path().join("empty-model-config.toml");
     fs::write(
         &config_path,
-        r#"{
-              "provider": {
-                "mock": {
-                  "options": { "base_url": "http://127.0.0.1:9" },
-                  "models": {}
-                }
-              }
-            }"#,
+        r#"
+[provider.mock.options]
+base_url = "http://127.0.0.1:9"
+
+[provider.mock.models]
+"#,
     )
     .expect("config");
     app.config_path = Some(config_path);

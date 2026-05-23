@@ -440,6 +440,14 @@ fn message_timestamp_ms(message: &Value) -> Option<i64> {
     message.get("timestamp_ms").and_then(Value::as_i64)
 }
 
+fn pending_input_id_from_message_end(value: &Value) -> Option<u64> {
+    value
+        .get("metadata")
+        .and_then(|metadata| metadata.get("pending_input"))
+        .and_then(|pending| pending.get("id"))
+        .and_then(Value::as_u64)
+}
+
 fn outcome_from_value(value: &Value) -> Option<Outcome> {
     match value.get("outcome").and_then(Value::as_str)? {
         "normal" => Some(Outcome::Normal),

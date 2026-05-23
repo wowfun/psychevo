@@ -171,38 +171,42 @@ fn test_track_snapshot(app: &TuiApp, session_id: &str) -> String {
 }
 
 fn write_tui_model_config(temp: &tempfile::TempDir) -> PathBuf {
-    let path = temp.path().join("model-config.jsonc");
+    let path = temp.path().join("model-config.toml");
     fs::write(
         &path,
-        r#"{
-              "model": "mock/mock-model",
-              "provider": {
-                "mock": {
-                  "options": {
-                    "base_url": "http://127.0.0.1:9",
-                    "api_key_env": "TEST_PROVIDER_KEY"
-                  },
-                  "models": {
-                    "mock-model": {
-                      "limit": { "context": 128000, "input": 120000, "output": 16000 },
-                      "reasoning": true,
-                      "tool_call": true,
-                      "structured_output": true,
-                      "modalities": { "input": ["text", "image"], "output": ["text"] },
-                      "cost": {
-                        "input": 1.5,
-                        "output": 2.5,
-                        "cache_read": 0.15,
-                        "cache_write": 0.75,
-                        "context_over_200k": { "input": 3.0, "output": 5.0 },
-                        "source": "config"
-                      }
-                    },
-                    "other-model": { "reasoning_effort": "high" }
-                  }
-                }
-              }
-            }"#,
+        r#"model = "mock/mock-model"
+
+[provider.mock.options]
+base_url = "http://127.0.0.1:9"
+api_key_env = "TEST_PROVIDER_KEY"
+
+[provider.mock.models."mock-model"]
+reasoning = true
+tool_call = true
+structured_output = true
+
+[provider.mock.models."mock-model".limit]
+context = 128000
+input = 120000
+output = 16000
+
+[provider.mock.models."mock-model".modalities]
+input = ["text", "image"]
+output = ["text"]
+
+[provider.mock.models."mock-model".cost]
+input = 1.5
+output = 2.5
+cache_read = 0.15
+cache_write = 0.75
+
+[provider.mock.models."mock-model".cost.context_over_200k]
+input = 3.0
+output = 5.0
+
+[provider.mock.models."other-model"]
+reasoning_effort = "high"
+"#,
     )
     .expect("config");
     path

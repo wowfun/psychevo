@@ -67,16 +67,29 @@ enum QueuedInput {
         prompt: String,
         display_prompt: String,
         images: Vec<PendingImageAttachment>,
+        sequence: u64,
     },
     Shell {
         session_id: Option<String>,
         command: String,
+        sequence: u64,
     },
     Compact {
         session_id: Option<String>,
         instructions: Option<String>,
         command_echo: String,
+        sequence: u64,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingSteerInput {
+    id: PendingInputId,
+    session_id: Option<String>,
+    prompt: String,
+    display_prompt: String,
+    images: Vec<PendingImageAttachment>,
+    sequence: u64,
 }
 
 fn queued_input_session_id(input: &QueuedInput) -> Option<&str> {
@@ -85,6 +98,14 @@ fn queued_input_session_id(input: &QueuedInput) -> Option<&str> {
             session_id.as_deref()
         }
         QueuedInput::Compact { session_id, .. } => session_id.as_deref(),
+    }
+}
+
+fn queued_input_sequence(input: &QueuedInput) -> u64 {
+    match input {
+        QueuedInput::Prompt { sequence, .. }
+        | QueuedInput::Shell { sequence, .. }
+        | QueuedInput::Compact { sequence, .. } => *sequence,
     }
 }
 

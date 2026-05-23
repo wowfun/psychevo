@@ -892,7 +892,7 @@ async fn new_command_clears_pending_images_and_ephemeral_status() {
 }
 
 #[tokio::test]
-async fn unknown_slash_command_still_reports_bounded_error() {
+async fn unknown_dynamic_skill_reports_bounded_error() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -904,9 +904,9 @@ async fn unknown_slash_command_still_reports_bounded_error() {
     assert_eq!(ui.history.last().map(String::as_str), Some("/unknown"));
     assert!(ui.running.is_none());
     assert!(ui.transcript.iter().any(|row| {
-        row.kind == TranscriptKind::Command
+            row.kind == TranscriptKind::Command
             && row.failed
-            && row.text.contains("unknown slash command: /unknown")
+            && row.text.contains("unknown skill or bundle: unknown")
     }));
 }
 
@@ -1273,7 +1273,7 @@ async fn slash_skill_selection_inserts_marker_without_submitting() {
     let mut app = test_app(&temp);
     write_tui_skill(&app, "helper", "Helps with focused edits");
     let mut ui = FullscreenUi::new(&app);
-    ui.textarea = textarea_with_text("/skill:h");
+    ui.textarea = textarea_with_text("/helper");
 
     app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .await

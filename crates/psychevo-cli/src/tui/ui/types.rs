@@ -31,6 +31,50 @@ enum TranscriptHitTarget {
     AgentOpen(TranscriptRowId),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum PendingInputRef {
+    Steer(PendingInputId),
+    Queue(u64),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PendingInputKind {
+    Steer,
+    Queue,
+}
+
+impl PendingInputKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Steer => "steer",
+            Self::Queue => "queue",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingInputEntry {
+    target: PendingInputRef,
+    kind: PendingInputKind,
+    text: String,
+    images: Vec<PendingImageAttachment>,
+    sequence: u64,
+}
+
+struct PendingInputEdit<'a> {
+    target: PendingInputRef,
+    kind: PendingInputKind,
+    textarea: TextArea<'a>,
+    images: Vec<PendingImageAttachment>,
+    cursor_top_row: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PendingInputAction {
+    Edit,
+    Undo,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct TranscriptRenderBlock {
     index: usize,
@@ -279,6 +323,9 @@ struct FullscreenUi<'a> {
     history_index: Option<usize>,
     history_draft: Option<String>,
     queued_inputs: VecDeque<QueuedInput>,
+    pending_steers: VecDeque<PendingSteerInput>,
+    pending_input_edit: Option<PendingInputEdit<'a>>,
+    pending_input_sequence: u64,
     pending_images: Vec<PendingImageAttachment>,
     history_search: bool,
     history_query: String,
@@ -286,6 +333,8 @@ struct FullscreenUi<'a> {
     slash_menu_dismissed_input: Option<String>,
     pending_leader_started: Option<Instant>,
     last_slash_menu_areas: Vec<(usize, Rect)>,
+    last_pending_input_action_areas: Vec<(PendingInputRef, PendingInputAction, Rect)>,
+    last_pending_input_edit_area: Option<Rect>,
     file_search: FileSearchState,
     last_file_popup_areas: Vec<(usize, Rect)>,
     agent_search: AgentSearchState,

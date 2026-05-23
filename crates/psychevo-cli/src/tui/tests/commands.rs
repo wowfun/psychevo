@@ -633,6 +633,7 @@ async fn fullscreen_compact_queues_behind_running_turn() {
             session_id,
             instructions,
             command_echo,
+            ..
         } => {
             assert_eq!(session_id.as_deref(), Some(session.as_str()));
             assert_eq!(instructions.as_deref(), Some("focus on todos"));
@@ -640,6 +641,374 @@ async fn fullscreen_compact_queues_behind_running_turn() {
         }
         other => panic!("unexpected queued input: {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn running_enter_steers_without_immediate_transcript_row() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    attach_pending_agent_running(&mut ui);
+    ui.textarea = textarea_with_text("revise the current answer");
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .expect("enter");
+
+    assert_eq!(ui.pending_steers.len(), 1);
+    assert!(ui.queued_inputs.is_empty());
+    assert_eq!(textarea_text(&ui.textarea), "");
+    assert!(ui.ephemeral_status.is_none());
+    assert!(ui.transcript.iter().all(|row| row.kind != TranscriptKind::Prompt));
+    assert!(ui.transcript.iter().all(|row| {
+        !(row.kind == TranscriptKind::Status && row.title == "Pending steer")
+    }));
+
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 80, 12);
+    let text = buffer_text(&buffer);
+    assert!(text.contains("pending steer"));
+    assert!(text.contains("revise the current answer"));
+    assert!(!text.contains("steer 1"));
+    assert!(!ui.last_pending_input_action_areas.is_empty());
+
+    let pending_id = ui.pending_steers[0].id.as_u64();
+    ui.apply_stream_event_for_session(
+        RunStreamEvent::Event(serde_json::json!({
+            "type": "message_end",
+            "message": {
+                "role": "user",
+                "content": [{"text": "revise the current answer"}],
+                "timestamp_ms": 1
+            },
+            "metadata": {
+                "pending_input": {
+                    "id": pending_id,
+                    "kind": "steer"
+                }
+            }
+        })),
+        app.thinking_visible,
+        app.debug,
+        app.current_session.as_deref(),
+    );
+
+    assert!(ui.pending_steers.is_empty());
+    assert!(ui.transcript.iter().all(|row| {
+        !(row.kind == TranscriptKind::Status && row.title == "Pending steer")
+    }));
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Prompt && row.text == "revise the current answer"
+    }));
+}
+
+#[tokio::test]
+async fn pending_preview_shows_steer_and_queue_above_composer_without_status_counts() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    attach_pending_agent_running(&mut ui);
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Steer("nudge now".to_string()))
+        .await
+        .expect("steer");
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Queue("next turn".to_string()))
+        .await
+        .expect("queue");
+
+    assert_eq!(ui.pending_steers.len(), 1);
+    assert_eq!(ui.queued_inputs.len(), 1);
+
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 80, 16);
+    let text = buffer_text(&buffer);
+    assert!(text.contains("pending steer"));
+    assert!(text.contains("nudge now"));
+    assert!(text.contains("pending queue"));
+    assert!(text.contains("next turn"));
+    assert!(text.contains("[edit]"));
+    assert!(text.contains("[undo]"));
+    assert!(!text.contains("steer 1"));
+    assert!(!text.contains("queue 1"));
+
+    let composer_area = ui.last_composer_area.expect("composer area");
+    assert!(
+        ui.last_pending_input_action_areas
+            .iter()
+            .all(|(_, _, area)| area.y < composer_area.y)
+    );
+
+    ui.textarea = textarea_with_text("/");
+    let _ = draw_fullscreen_for_test(&app, &mut ui, 80, 24);
+    let slash_bottom = ui
+        .last_slash_menu_areas
+        .iter()
+        .map(|(_, area)| area.y.saturating_add(area.height))
+        .max()
+        .expect("slash menu areas");
+    let pending_top = ui
+        .last_pending_input_action_areas
+        .iter()
+        .map(|(_, _, area)| area.y)
+        .min()
+        .expect("pending action areas");
+    let composer_area = ui.last_composer_area.expect("composer area");
+    assert!(pending_top >= slash_bottom);
+    assert!(pending_top < composer_area.y);
+}
+
+#[tokio::test]
+async fn pending_preview_queue_edit_confirm_and_escape() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    attach_pending_agent_running(&mut ui);
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Queue("next turn".to_string()))
+        .await
+        .expect("queue");
+    let sequence = queued_prompt_sequence(&ui);
+    let _ = draw_fullscreen_for_test(&app, &mut ui, 80, 14);
+    let edit_area = ui
+        .last_pending_input_action_areas
+        .iter()
+        .find_map(|(target, action, area)| {
+            (*target == PendingInputRef::Queue(sequence) && *action == PendingInputAction::Edit)
+                .then_some(*area)
+        })
+        .expect("queue edit area");
+    app.handle_fullscreen_mouse(
+        &mut ui,
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: edit_area.x,
+            row: edit_area.y,
+            modifiers: KeyModifiers::NONE,
+        },
+    )
+    .await
+    .expect("click edit");
+    assert_eq!(
+        ui.pending_input_edit.as_ref().map(|edit| edit.target),
+        Some(PendingInputRef::Queue(sequence))
+    );
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 80, 14);
+    let text = buffer_text(&buffer);
+    assert!(text.contains("editing queue"));
+    assert!(text.contains("Enter confirm"));
+    assert!(text.contains("Esc cancel"));
+
+    ui.pending_input_edit
+        .as_mut()
+        .expect("edit")
+        .textarea = textarea_with_text("edited next");
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .expect("confirm edit");
+    assert!(ui.pending_input_edit.is_none());
+    match ui.queued_inputs.front().expect("queued prompt") {
+        QueuedInput::Prompt {
+            prompt,
+            display_prompt,
+            ..
+        } => {
+            assert_eq!(prompt, "edited next");
+            assert_eq!(display_prompt, "edited next");
+        }
+        other => panic!("unexpected queued input: {other:?}"),
+    }
+
+    assert!(ui.start_pending_input_edit(PendingInputRef::Queue(sequence)));
+    ui.pending_input_edit
+        .as_mut()
+        .expect("edit")
+        .textarea = textarea_with_text("discarded draft");
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .await
+        .expect("cancel edit");
+    assert!(ui.pending_input_edit.is_none());
+    match ui.queued_inputs.front().expect("queued prompt") {
+        QueuedInput::Prompt { display_prompt, .. } => {
+            assert_eq!(display_prompt, "edited next");
+        }
+        other => panic!("unexpected queued input: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn pending_preview_steer_edit_updates_before_drain() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    attach_pending_agent_running(&mut ui);
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Steer("nudge now".to_string()))
+        .await
+        .expect("steer");
+    let id = ui.pending_steers[0].id;
+    assert!(ui.start_pending_input_edit(PendingInputRef::Steer(id)));
+    ui.pending_input_edit
+        .as_mut()
+        .expect("edit")
+        .textarea = textarea_with_text("edited nudge");
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .expect("confirm edit");
+
+    assert!(ui.pending_input_edit.is_none());
+    assert_eq!(ui.pending_steers.len(), 1);
+    assert_eq!(ui.pending_steers[0].id, id);
+    assert_eq!(ui.pending_steers[0].display_prompt, "edited nudge");
+    assert_eq!(
+        ui.ephemeral_status
+            .as_ref()
+            .map(|status| status.text.as_str()),
+        Some("pending input updated")
+    );
+}
+
+#[tokio::test]
+async fn pending_preview_late_confirm_resubmits_as_new_input() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    attach_pending_agent_running(&mut ui);
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Steer("nudge now".to_string()))
+        .await
+        .expect("steer");
+    let old_id = ui.pending_steers[0].id;
+    assert!(ui.start_pending_input_edit(PendingInputRef::Steer(old_id)));
+    ui.pending_input_edit
+        .as_mut()
+        .expect("edit")
+        .textarea = textarea_with_text("late nudge");
+    assert!(
+        ui.running
+            .as_ref()
+            .expect("running")
+            .control
+            .cancel_pending_user_message(old_id)
+    );
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .expect("confirm late steer edit");
+    assert!(ui.pending_input_edit.is_none());
+    assert_eq!(ui.pending_steers.len(), 1);
+    assert_ne!(ui.pending_steers[0].id, old_id);
+    assert_eq!(ui.pending_steers[0].display_prompt, "late nudge");
+
+    let sequence = ui.next_pending_input_sequence();
+    ui.queued_inputs.push_back(QueuedInput::Prompt {
+        session_id: app.current_session.clone(),
+        prompt: "queued prompt".to_string(),
+        display_prompt: "queued prompt".to_string(),
+        images: Vec::new(),
+        sequence,
+    });
+    assert!(ui.start_pending_input_edit(PendingInputRef::Queue(sequence)));
+    ui.pending_input_edit
+        .as_mut()
+        .expect("edit")
+        .textarea = textarea_with_text("late queued prompt");
+    ui.queued_inputs.clear();
+    ui.pending_steers.clear();
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .expect("confirm late queue edit");
+    assert!(ui.queued_inputs.is_empty());
+    assert_eq!(ui.pending_steers.len(), 1);
+    assert_eq!(ui.pending_steers[0].display_prompt, "late queued prompt");
+}
+
+#[tokio::test]
+async fn pending_preview_undo_removes_steer_and_queue() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    attach_pending_agent_running(&mut ui);
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Steer("nudge now".to_string()))
+        .await
+        .expect("steer");
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Queue("next turn".to_string()))
+        .await
+        .expect("queue");
+    let steer_id = ui.pending_steers[0].id;
+    let sequence = queued_prompt_sequence(&ui);
+
+    app.handle_pending_input_action(
+        &mut ui,
+        PendingInputRef::Queue(sequence),
+        PendingInputAction::Undo,
+    )
+    .expect("undo queue");
+    assert!(ui.queued_inputs.is_empty());
+    assert_eq!(ui.pending_steers.len(), 1);
+
+    app.handle_pending_input_action(
+        &mut ui,
+        PendingInputRef::Steer(steer_id),
+        PendingInputAction::Undo,
+    )
+    .expect("undo steer");
+    assert!(ui.pending_steers.is_empty());
+    assert!(!ui.has_pending_input_preview());
+}
+
+#[tokio::test]
+async fn pending_cancel_clears_unsent_steer_and_queue() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    attach_pending_agent_running(&mut ui);
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Steer("nudge now".to_string()))
+        .await
+        .expect("steer");
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Queue("next turn".to_string()))
+        .await
+        .expect("queue");
+    app.handle_fullscreen_command(&mut ui, SlashCommand::PendingCancel)
+        .await
+        .expect("pending cancel");
+
+    assert!(ui.pending_steers.is_empty());
+    assert!(ui.queued_inputs.is_empty());
+    assert!(ui.pending_input_edit.is_none());
+    assert!(!ui.has_pending_input_preview());
+    assert!(ui.transcript.iter().all(|row| {
+        !(row.kind == TranscriptKind::Status && row.title == "Pending steer")
+    }));
+    assert_eq!(
+        ui.ephemeral_status
+            .as_ref()
+            .map(|status| status.text.as_str()),
+        Some("pending input canceled: 2")
+    );
+}
+
+fn queued_prompt_sequence(ui: &FullscreenUi<'_>) -> u64 {
+    match ui.queued_inputs.front().expect("queued prompt") {
+        QueuedInput::Prompt { sequence, .. } => *sequence,
+        other => panic!("unexpected queued input: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn explicit_steer_errors_when_idle() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Steer("too soon".to_string()))
+        .await
+        .expect("steer");
+
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command
+            && row.title == "/steer too soon"
+            && row.failed
+            && row.text.contains("/steer requires a running agent turn")
+    }));
 }
 
 #[tokio::test]
@@ -786,18 +1155,74 @@ async fn fullscreen_skills_command_lists_dynamic_entries_and_inserts_skill_marke
     )
     .expect("skill");
 
-    let matches = app.slash_menu_items("/skill:h");
+    let matches = app.slash_menu_items("/helper");
     assert_eq!(matches.len(), 1);
-    assert_eq!(matches[0].command, "/skill:helper");
+    assert_eq!(matches[0].command, "/helper");
 
     let mut ui = FullscreenUi::new(&app);
-    app.handle_fullscreen_command(&mut ui, SlashCommand::Skills)
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Skills(None))
+        .await
+        .expect("skills dashboard");
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command
+            && row.title == "/skills"
+            && row.text.contains("/skills search <query>")
+            && row.text.contains("/skills reload")
+    }));
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Skills(Some("list".to_string())))
         .await
         .expect("skills");
     assert!(ui.transcript.iter().any(|row| {
         row.kind == TranscriptKind::Command
-            && row.title == "/skills"
+            && row.title == "/skills list"
             && row.text.contains("helper: Helps with focused edits")
+    }));
+    app.handle_fullscreen_command(
+        &mut ui,
+        SlashCommand::Skills(Some("inspect helper".to_string())),
+    )
+    .await
+    .expect("skills inspect");
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command
+            && row.title == "/skills inspect helper"
+            && row.text.contains("name: helper")
+            && row.text.contains("readiness:")
+    }));
+    app.handle_fullscreen_command(
+        &mut ui,
+        SlashCommand::Skills(Some("audit helper".to_string())),
+    )
+    .await
+    .expect("skills audit");
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command
+            && row.title == "/skills audit helper"
+            && row.text.contains("helper: Safe")
+    }));
+    app.handle_fullscreen_command(
+        &mut ui,
+        SlashCommand::Skills(Some("reload".to_string())),
+    )
+    .await
+    .expect("skills reload");
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command
+            && row.title == "/skills reload"
+            && row.text.contains("reloaded skills: 1 skills")
+    }));
+    app.current_mode = RunMode::Plan;
+    app.handle_fullscreen_command(
+        &mut ui,
+        SlashCommand::Skills(Some("install ./helper".to_string())),
+    )
+    .await
+    .expect("skills install");
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command
+            && row.title == "/skills install ./helper"
+            && row.text.contains("unavailable in plan mode")
     }));
 
     app.handle_fullscreen_command(

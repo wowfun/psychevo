@@ -40,6 +40,9 @@ pub(crate) enum SlashCommand {
     Refresh,
     ReloadContextDeprecated,
     Btw(Option<String>),
+    Steer(String),
+    Queue(String),
+    PendingCancel,
     ModelShow,
     VariantSet(String),
     ModeSet(String),
@@ -55,7 +58,9 @@ pub(crate) enum SlashCommand {
     Rename(String),
     Undo,
     Redo,
-    Skills,
+    Skills(Option<String>),
+    Bundles(Option<String>),
+    Curator(Option<String>),
     Agents,
     Fork(String),
     Compact(Option<String>),
@@ -136,8 +141,9 @@ pub(crate) struct KeyChord {
 
 const DEFAULT_LEADER_KEY: &str = "ctrl+x";
 const DEFAULT_LEADER_TIMEOUT_MS: u64 = 2000;
-const DYNAMIC_SKILL_PREFIX: &str = "/skill:";
-const OBSOLETE_SLASH_COMMAND_TOKENS: &[&str] = &["/models", "/thinking", "/raw", "/session"];
+const OLD_DYNAMIC_SKILL_PREFIX: &str = "/skill:";
+const OBSOLETE_SLASH_COMMAND_TOKENS: &[&str] =
+    &["/models", "/thinking", "/raw", "/session", "/effort"];
 
 impl Default for EffectiveSlashConfig {
     fn default() -> Self {
@@ -539,8 +545,10 @@ fn validate_configured_alias(value: &str, path: &str) -> Result<String> {
     if alias.is_empty() || !alias.starts_with('/') || alias.chars().any(char::is_whitespace) {
         return Err(anyhow!("{path} must be a slash alias without whitespace"));
     }
-    if alias.starts_with(DYNAMIC_SKILL_PREFIX) {
-        return Err(anyhow!("{path} must not use the dynamic /skill: prefix"));
+    if alias.starts_with(OLD_DYNAMIC_SKILL_PREFIX) {
+        return Err(anyhow!(
+            "{path} must not use the obsolete dynamic /skill: prefix"
+        ));
     }
     Ok(alias.to_string())
 }
@@ -571,8 +579,15 @@ fn validate_configured_slash_target(value: &str, path: &str) -> Result<String> {
         return Err(anyhow!("{path} keys must be slash command lines"));
     }
     let (command, _) = split_command_token(target);
-    if command.starts_with(DYNAMIC_SKILL_PREFIX) {
-        return Err(anyhow!("{path} does not support dynamic /skill: commands"));
+    if command.starts_with(OLD_DYNAMIC_SKILL_PREFIX) {
+        return Err(anyhow!(
+            "{path} does not support obsolete dynamic /skill: commands"
+        ));
+    }
+    if slash_command_spec(command).is_none() && command != "/side" && command != "/reload-context" {
+        return Err(anyhow!(
+            "{path} target does not support dynamic skill or bundle commands"
+        ));
     }
     parse_slash_command(target)
         .map_err(|err| anyhow!("{path} target {target:?} is invalid: {err:#}"))?
@@ -770,9 +785,9 @@ fn validate_alias_conflicts(config: &EffectiveSlashConfig) -> Result<()> {
                 "slash alias conflicts with built-in command: {alias}"
             ));
         }
-        if alias.starts_with(DYNAMIC_SKILL_PREFIX) {
+        if alias.starts_with(OLD_DYNAMIC_SKILL_PREFIX) {
             return Err(anyhow!(
-                "slash alias conflicts with dynamic /skill: prefix: {alias}"
+                "slash alias conflicts with obsolete dynamic /skill: prefix: {alias}"
             ));
         }
         if !seen.insert(alias.clone()) {
@@ -847,6 +862,7 @@ fn fixed_key_chords() -> Vec<KeyChord> {
         "home",
         "end",
         "shift+1",
+        "shift+left",
         "alt+left",
         "alt+right",
         "alt+up",
@@ -1070,14 +1086,8 @@ fn parse_slash_command_inner(line: &str) -> Result<Option<SlashCommand>> {
     let mut parts = trimmed.split_whitespace();
     let command = parts.next().unwrap_or_default();
     let rest = parts.collect::<Vec<_>>();
-    let parsed = if let Some(name) = command.strip_prefix("/skill:") {
-        if name.trim().is_empty() {
-            return Err(anyhow!("usage: /skill:<name> [args]"));
-        }
-        SlashCommand::SkillInvoke {
-            name: name.to_string(),
-            args: rest.join(" "),
-        }
+    let parsed = if command.starts_with(OLD_DYNAMIC_SKILL_PREFIX) {
+        return Err(anyhow!("usage: /<skill-or-bundle> [args]"));
     } else if command == "/side" {
         SlashCommand::Btw(parse_btw_prompt(&rest))
     } else if command == "/reload-context" {
@@ -1085,11 +1095,33 @@ fn parse_slash_command_inner(line: &str) -> Result<Option<SlashCommand>> {
         SlashCommand::ReloadContextDeprecated
     } else {
         let Some(spec) = slash_command_spec(command) else {
+            if OBSOLETE_SLASH_COMMAND_TOKENS.contains(&command) {
+                return Err(anyhow!("unknown slash command: {command}"));
+            }
+            if let Some(name) = dynamic_skill_name(command) {
+                return Ok(Some(SlashCommand::SkillInvoke {
+                    name,
+                    args: rest.join(" "),
+                }));
+            }
             return Err(anyhow!("unknown slash command: {command}"));
         };
         parse_registered_slash_command(spec, command, &rest)?
     };
     Ok(Some(parsed))
+}
+
+fn dynamic_skill_name(command: &str) -> Option<String> {
+    let name = command.strip_prefix('/')?;
+    if name.is_empty()
+        || name.starts_with('-')
+        || !name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    {
+        return None;
+    }
+    Some(name.to_string())
 }
 
 fn parse_registered_slash_command(
@@ -1143,6 +1175,9 @@ fn parse_registered_slash_command(
             Ok(SlashCommand::Refresh)
         }
         SlashCommandAction::Btw => Ok(SlashCommand::Btw(parse_btw_prompt(rest))),
+        SlashCommandAction::Steer => parse_required_trailing(spec, rest).map(SlashCommand::Steer),
+        SlashCommandAction::Queue => parse_required_trailing(spec, rest).map(SlashCommand::Queue),
+        SlashCommandAction::Pending => parse_pending_command(spec, rest),
         SlashCommandAction::ModelShow => {
             parse_no_arguments(spec, command, rest)?;
             Ok(SlashCommand::ModelShow)
@@ -1171,10 +1206,9 @@ fn parse_registered_slash_command(
             parse_no_arguments(spec, command, rest)?;
             Ok(SlashCommand::Redo)
         }
-        SlashCommandAction::Skills => {
-            parse_no_arguments(spec, command, rest)?;
-            Ok(SlashCommand::Skills)
-        }
+        SlashCommandAction::Skills => Ok(SlashCommand::Skills(parse_optional_trailing(rest))),
+        SlashCommandAction::Bundles => Ok(SlashCommand::Bundles(parse_optional_trailing(rest))),
+        SlashCommandAction::Curator => Ok(SlashCommand::Curator(parse_optional_trailing(rest))),
         SlashCommandAction::Agents => {
             parse_no_arguments(spec, command, rest)?;
             Ok(SlashCommand::Agents)
@@ -1235,6 +1269,22 @@ fn parse_raw_command(spec: &SlashCommandSpec, rest: &[&str]) -> Result<SlashComm
         [] => Ok(SlashCommand::RawToggle),
         ["on"] => Ok(SlashCommand::RawSet(true)),
         ["off"] => Ok(SlashCommand::RawSet(false)),
+        _ => Err(anyhow!("usage: {}", spec.usage)),
+    }
+}
+
+fn parse_required_trailing(spec: &SlashCommandSpec, rest: &[&str]) -> Result<String> {
+    let text = rest.join(" ");
+    let text = text.trim();
+    if text.is_empty() {
+        return Err(anyhow!("usage: {}", spec.usage));
+    }
+    Ok(text.to_string())
+}
+
+fn parse_pending_command(spec: &SlashCommandSpec, rest: &[&str]) -> Result<SlashCommand> {
+    match rest {
+        ["cancel"] => Ok(SlashCommand::PendingCancel),
         _ => Err(anyhow!("usage: {}", spec.usage)),
     }
 }
@@ -1498,6 +1548,21 @@ mod tests {
             parse_slash_command("/side explain this").unwrap(),
             Some(SlashCommand::Btw(Some("explain this".to_string())))
         );
+        assert_eq!(
+            parse_slash_command("/steer revise this").unwrap(),
+            Some(SlashCommand::Steer("revise this".to_string()))
+        );
+        assert_eq!(
+            parse_slash_command("/queue after this").unwrap(),
+            Some(SlashCommand::Queue("after this".to_string()))
+        );
+        assert_eq!(
+            parse_slash_command("/pending cancel").unwrap(),
+            Some(SlashCommand::PendingCancel)
+        );
+        assert!(parse_slash_command("/steer").is_err());
+        assert!(parse_slash_command("/queue").is_err());
+        assert!(parse_slash_command("/pending").is_err());
         assert!(
             parse_slash_command("/session list")
                 .unwrap_err()
@@ -1736,17 +1801,21 @@ mod tests {
     fn parses_skills_commands() {
         assert_eq!(
             parse_slash_command("/skills").unwrap(),
-            Some(SlashCommand::Skills)
+            Some(SlashCommand::Skills(None))
         );
-        assert!(parse_slash_command("/skills now").is_err());
         assert_eq!(
-            parse_slash_command("/skill:reviewer extra context").unwrap(),
+            parse_slash_command("/skills list").unwrap(),
+            Some(SlashCommand::Skills(Some("list".to_string())))
+        );
+        assert_eq!(
+            parse_slash_command("/reviewer extra context").unwrap(),
             Some(SlashCommand::SkillInvoke {
                 name: "reviewer".to_string(),
                 args: "extra context".to_string(),
             })
         );
         assert!(parse_slash_command("/skill:").is_err());
+        assert!(parse_slash_command("/skill:reviewer").is_err());
     }
 
     #[test]
@@ -1952,7 +2021,6 @@ mod tests {
         assert_eq!(variant[0].command, "/variant");
         assert_eq!(variant[0].description, "set reasoning effort");
         let undo = slash_menu_items("/un");
-        assert_eq!(undo.len(), 1);
         assert_eq!(undo[0].command, "/undo");
         assert!(!undo[0].upcoming);
         let rename = slash_menu_items("/ren");
@@ -2011,8 +2079,10 @@ mod tests {
             "/export [path] [-f|--format markdown|json] [-i|--include list] - write session export"
         ));
         assert!(help.contains("last-provider-request can expose hidden prompts"));
-        assert!(help.contains("/skill:<name> [args] - invoke a skill (2 available)"));
-        assert!(help.contains("Inserts an explicit skill invocation"));
+        assert!(
+            help.contains("/<skill-or-bundle> [args] - insert a skill or bundle (2 available)")
+        );
+        assert!(help.contains("Inserts an explicit skill or bundle marker"));
         assert!(!help.contains("pevo run"));
 
         let empty = format_slash_help(Some(0));
@@ -2023,18 +2093,18 @@ mod tests {
     fn slash_menu_can_filter_dynamic_skill_entries() {
         let mut items = base_slash_menu_items();
         items.push(SlashMenuItem {
-            command: "/skill:reviewer".to_string(),
+            command: "/reviewer".to_string(),
             description: "Review code changes".to_string(),
             upcoming: false,
             aliases: Vec::new(),
-            replacement: "/skill:reviewer".to_string(),
-            completion: "/skill:reviewer".to_string(),
+            replacement: "/reviewer".to_string(),
+            completion: "/reviewer".to_string(),
             configured_alias: false,
         });
 
-        let matches = slash_menu_items_from("/skill:r", &items);
+        let matches = slash_menu_items_from("/rev", &items);
         assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].command, "/skill:reviewer");
+        assert_eq!(matches[0].command, "/reviewer");
         assert_eq!(matches[0].description, "Review code changes");
     }
 }

@@ -373,6 +373,9 @@ impl TuiApp {
                 _ => {}
             }
         }
+        if ui.pending_input_edit.is_some() {
+            return self.handle_pending_input_edit_key(ui, key);
+        }
         if let Some(should_quit) = self.handle_slash_shortcut_key(ui, key).await? {
             return Ok(should_quit);
         }
@@ -584,6 +587,37 @@ impl TuiApp {
         Ok(false)
     }
 
+    fn handle_pending_input_edit_key(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        key: KeyEvent,
+    ) -> Result<bool> {
+        match key.code {
+            KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if let Some(edit) = ui.pending_input_edit.as_mut() {
+                    edit.textarea.insert_newline();
+                }
+            }
+            KeyCode::Enter if is_newline_key(key) => {
+                if let Some(edit) = ui.pending_input_edit.as_mut() {
+                    edit.textarea.insert_newline();
+                }
+            }
+            KeyCode::Enter => {
+                self.confirm_pending_input_edit(ui)?;
+            }
+            KeyCode::Esc => {
+                ui.cancel_pending_input_edit();
+            }
+            _ => {
+                if let Some(edit) = ui.pending_input_edit.as_mut() {
+                    edit.textarea.input(key);
+                }
+            }
+        }
+        Ok(false)
+    }
+
     async fn handle_slash_shortcut_key(
         &mut self,
         ui: &mut FullscreenUi<'_>,
@@ -635,6 +669,7 @@ impl TuiApp {
             && ui.bottom_panel.is_none()
             && !ui.history_search
             && !ui.shell_mode
+            && ui.pending_input_edit.is_none()
             && ui.selection.anchor.is_none()
             && !ui.textarea.is_selecting()
             && !ui.agent_popup_visible()
@@ -736,6 +771,11 @@ impl TuiApp {
                             }
                         }
                     }
+                } else if let Some((target, action)) =
+                    ui.pending_input_action_hit(mouse.column, mouse.row)
+                {
+                    ui.clear_selection();
+                    self.handle_pending_input_action(ui, target, action)?;
                 } else if ui.start_composer_mouse_selection(mouse.column, mouse.row) {
                     return Ok(false);
                 } else if let Some(target) = ui.transcript_hit(mouse.column, mouse.row) {
@@ -989,7 +1029,17 @@ fn normalize_bracketed_paste_text(text: &str) -> String {
 }
 
 fn slash_skill_name(command: &str) -> Option<String> {
-    let name = command.strip_prefix("/skill:")?;
-    let name = name.split_whitespace().next().unwrap_or_default();
-    (!name.is_empty()).then(|| name.to_string())
+    let command = command.split_whitespace().next().unwrap_or_default();
+    if crate::command_registry::slash_command_spec(command).is_some() {
+        return None;
+    }
+    let name = command.strip_prefix('/')?;
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    {
+        return None;
+    }
+    Some(name.to_string())
 }

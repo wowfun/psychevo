@@ -111,6 +111,15 @@ impl TuiApp {
             SlashCommand::Btw(prompt) => {
                 self.start_btw_side_conversation(ui, prompt)?;
             }
+            SlashCommand::Steer(message) => {
+                self.submit_explicit_fullscreen_steer(ui, message, command_echo)?;
+            }
+            SlashCommand::Queue(message) => {
+                self.submit_fullscreen_queue(ui, message)?;
+            }
+            SlashCommand::PendingCancel => {
+                self.cancel_pending_fullscreen_inputs(ui);
+            }
             SlashCommand::ModelShow => {
                 ui.bottom_panel = Some(BottomPanel::Models(ModelPanel::new(
                     self.model_selection_panel()?,
@@ -259,8 +268,29 @@ impl TuiApp {
                     }
                 }
             }
-            SlashCommand::Skills => {
-                ui.push_command_result(command_echo, None, self.skills_status_text(), false);
+            SlashCommand::Skills(args) => {
+                ui.push_command_result(
+                    command_echo,
+                    None,
+                    self.skills_command_text(args.as_deref()),
+                    false,
+                );
+            }
+            SlashCommand::Bundles(args) => {
+                ui.push_command_result(
+                    command_echo,
+                    None,
+                    self.bundles_command_text(args.as_deref()),
+                    false,
+                );
+            }
+            SlashCommand::Curator(args) => {
+                ui.push_command_result(
+                    command_echo,
+                    None,
+                    self.curator_command_text(args.as_deref()),
+                    false,
+                );
             }
             SlashCommand::Agents => {
                 ui.bottom_panel = Some(BottomPanel::Agents(self.agent_panel()));
@@ -273,9 +303,17 @@ impl TuiApp {
                 self.submit_fullscreen_compaction(ui, instructions, command_echo)?;
             }
             SlashCommand::SkillInvoke { name, args } => {
-                let text = skill_prompt_marker(&name, &args);
-                ui.set_composer_text(&text);
-                self.sync_skill_popup(ui);
+                if let Some(text) = self.skill_or_bundle_marker(&name, &args) {
+                    ui.set_composer_text(&text);
+                    self.sync_skill_popup(ui);
+                } else {
+                    ui.push_command_result(
+                        command_echo,
+                        None,
+                        format!("error: unknown skill or bundle: {name}"),
+                        true,
+                    );
+                }
             }
             SlashCommand::Upcoming(command) => {
                 ui.push_command_result(
@@ -348,16 +386,349 @@ impl TuiApp {
         images: Vec<PendingImageAttachment>,
     ) -> Result<()> {
         let prompt = prompt_without_image_placeholders(&display_prompt, &images);
-        if ui.running.is_some() || self.compaction_task.is_some() {
-            ui.queued_inputs.push_back(QueuedInput::Prompt {
-                session_id: self.current_session.clone(),
-                prompt,
-                display_prompt,
-                images,
-            });
+        if self.compaction_task.is_some() {
+            self.queue_fullscreen_prompt(ui, prompt, display_prompt, images);
+            return Ok(());
+        }
+        if let Some(running) = ui.running.as_ref() {
+            if matches!(running.task, RunningTask::Agent(_)) {
+                return self.steer_fullscreen_prompt(ui, prompt, display_prompt, images);
+            }
+            self.queue_fullscreen_prompt(ui, prompt, display_prompt, images);
             return Ok(());
         }
         self.start_fullscreen_turn(ui, prompt, display_prompt, images)
+    }
+
+    fn submit_explicit_fullscreen_steer(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        message: String,
+        command_echo: String,
+    ) -> Result<()> {
+        if !ui
+            .running
+            .as_ref()
+            .is_some_and(|running| matches!(running.task, RunningTask::Agent(_)))
+        {
+            ui.push_command_result(
+                command_echo,
+                None,
+                "error: /steer requires a running agent turn",
+                true,
+            );
+            return Ok(());
+        }
+        let prompt = message.trim().to_string();
+        self.steer_fullscreen_prompt(ui, prompt.clone(), prompt, Vec::new())
+    }
+
+    fn submit_fullscreen_queue(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        message: String,
+    ) -> Result<()> {
+        let prompt = message.trim().to_string();
+        self.queue_fullscreen_prompt(ui, prompt.clone(), prompt, Vec::new());
+        self.start_next_queued_input(ui)
+    }
+
+    fn steer_fullscreen_prompt(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        prompt: String,
+        display_prompt: String,
+        images: Vec<PendingImageAttachment>,
+    ) -> Result<()> {
+        let Some(control) = ui
+            .running
+            .as_ref()
+            .filter(|running| matches!(running.task, RunningTask::Agent(_)))
+            .map(|running| running.control.clone())
+        else {
+            self.queue_fullscreen_prompt(ui, prompt, display_prompt, images);
+            return Ok(());
+        };
+        let image_inputs = images
+            .iter()
+            .map(|attachment| attachment.image.clone())
+            .collect::<Vec<_>>();
+        if self.image_submission_degrades_to_text(&prompt, &image_inputs) {
+            ui.set_ephemeral_error(
+                "selected model does not support image input; sent image source as text",
+            );
+        }
+        let metadata = self
+            .selected_model
+            .as_ref()
+            .map(|model| model.metadata.clone())
+            .unwrap_or_default();
+        let message = prompt_message_from_inputs_with_options(
+            &prompt,
+            &image_inputs,
+            &self.workdir,
+            &metadata,
+            false,
+        )?
+        .message;
+        let Some(id) = control.steer_user_message(message) else {
+            ui.set_ephemeral_error("unable to steer current turn");
+            return Ok(());
+        };
+        let session_id = ui
+            .running
+            .as_ref()
+            .and_then(|running| running.session_id.clone())
+            .or_else(|| self.current_session.clone());
+        let sequence = ui.next_pending_input_sequence();
+        ui.pending_steers.push_back(PendingSteerInput {
+            id,
+            session_id,
+            prompt,
+            display_prompt: display_prompt.clone(),
+            images,
+            sequence,
+        });
+        Ok(())
+    }
+
+    fn queue_fullscreen_prompt(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        prompt: String,
+        display_prompt: String,
+        images: Vec<PendingImageAttachment>,
+    ) {
+        let sequence = ui.next_pending_input_sequence();
+        ui.queued_inputs.push_back(QueuedInput::Prompt {
+            session_id: self.current_session.clone(),
+            prompt,
+            display_prompt,
+            images,
+            sequence,
+        });
+    }
+
+    fn queue_fullscreen_shell(&mut self, ui: &mut FullscreenUi<'_>, command: String) {
+        let sequence = ui.next_pending_input_sequence();
+        ui.queued_inputs.push_back(QueuedInput::Shell {
+            session_id: self.current_session.clone(),
+            command,
+            sequence,
+        });
+    }
+
+    fn queue_fullscreen_compaction(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        instructions: Option<String>,
+        command_echo: String,
+    ) {
+        let sequence = ui.next_pending_input_sequence();
+        ui.queued_inputs.push_back(QueuedInput::Compact {
+            session_id: self.current_session.clone(),
+            instructions,
+            command_echo,
+            sequence,
+        });
+    }
+
+    fn cancel_pending_fullscreen_inputs(&mut self, ui: &mut FullscreenUi<'_>) {
+        let control = ui.running.as_ref().map(|running| running.control.clone());
+        let mut cancelled_steers = 0usize;
+        let mut retained = VecDeque::new();
+        while let Some(input) = ui.pending_steers.pop_front() {
+            let cancelled = control
+                .as_ref()
+                .is_some_and(|control| control.cancel_pending_user_message(input.id));
+            if cancelled {
+                cancelled_steers += 1;
+            } else {
+                retained.push_back(input);
+            }
+        }
+        ui.pending_steers = retained;
+        let queued = ui.queued_inputs.len();
+        ui.queued_inputs.clear();
+        ui.pending_input_edit = None;
+        let total = cancelled_steers + queued;
+        if total == 0 {
+            ui.set_ephemeral_status("no pending input");
+        } else {
+            ui.set_ephemeral_status(format!("pending input canceled: {total}"));
+        }
+    }
+
+    fn handle_pending_input_action(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        target: PendingInputRef,
+        action: PendingInputAction,
+    ) -> Result<()> {
+        match action {
+            PendingInputAction::Edit => {
+                if !ui.start_pending_input_edit(target) {
+                    ui.set_ephemeral_error("pending input no longer editable");
+                }
+                Ok(())
+            }
+            PendingInputAction::Undo => self.undo_pending_input(ui, target),
+        }
+    }
+
+    fn undo_pending_input(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        target: PendingInputRef,
+    ) -> Result<()> {
+        match target {
+            PendingInputRef::Steer(id) => {
+                let cancelled = ui
+                    .running
+                    .as_ref()
+                    .is_some_and(|running| running.control.cancel_pending_user_message(id));
+                if !cancelled {
+                    ui.set_ephemeral_error("steer already sent");
+                    return Ok(());
+                }
+                ui.pending_steers.retain(|input| input.id != id);
+                if ui
+                    .pending_input_edit
+                    .as_ref()
+                    .is_some_and(|edit| edit.target == target)
+                {
+                    ui.pending_input_edit = None;
+                }
+                ui.set_ephemeral_status("pending input canceled");
+                Ok(())
+            }
+            PendingInputRef::Queue(sequence) => {
+                let Some(index) = ui.queued_inputs.iter().position(|input| {
+                    matches!(input, QueuedInput::Prompt { sequence: value, .. } if *value == sequence)
+                }) else {
+                    ui.set_ephemeral_error("queued input already started");
+                    return Ok(());
+                };
+                ui.queued_inputs.remove(index);
+                if ui
+                    .pending_input_edit
+                    .as_ref()
+                    .is_some_and(|edit| edit.target == target)
+                {
+                    ui.pending_input_edit = None;
+                }
+                ui.set_ephemeral_status("pending input canceled");
+                Ok(())
+            }
+        }
+    }
+
+    fn confirm_pending_input_edit(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
+        let Some(display_prompt) = ui.pending_input_edit_text() else {
+            return Ok(());
+        };
+        let images = ui
+            .pending_input_edit
+            .as_ref()
+            .map(|edit| edit.images.clone())
+            .unwrap_or_default();
+        if display_prompt.trim().is_empty() && images.is_empty() {
+            ui.set_ephemeral_error("pending input cannot be empty");
+            return Ok(());
+        }
+        let edit = ui.pending_input_edit.take().expect("pending input edit");
+        match edit.target {
+            PendingInputRef::Steer(id) => {
+                if self.update_pending_steer_input(ui, id, display_prompt.clone(), &images)? {
+                    ui.set_ephemeral_status("pending input updated");
+                    return Ok(());
+                }
+                ui.pending_steers.retain(|input| input.id != id);
+                self.submit_pending_edit_as_new(ui, display_prompt, images)
+            }
+            PendingInputRef::Queue(sequence) => {
+                if self.update_queued_prompt_input(ui, sequence, display_prompt.clone(), &images) {
+                    ui.set_ephemeral_status("pending input updated");
+                    return Ok(());
+                }
+                self.submit_pending_edit_as_new(ui, display_prompt, images)
+            }
+        }
+    }
+
+    fn update_pending_steer_input(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        id: PendingInputId,
+        display_prompt: String,
+        images: &[PendingImageAttachment],
+    ) -> Result<bool> {
+        let Some(control) = ui.running.as_ref().map(|running| running.control.clone()) else {
+            return Ok(false);
+        };
+        let prompt = prompt_without_image_placeholders(&display_prompt, images);
+        let image_inputs = images
+            .iter()
+            .map(|attachment| attachment.image.clone())
+            .collect::<Vec<_>>();
+        let metadata = self
+            .selected_model
+            .as_ref()
+            .map(|model| model.metadata.clone())
+            .unwrap_or_default();
+        let message = prompt_message_from_inputs_with_options(
+            &prompt,
+            &image_inputs,
+            &self.workdir,
+            &metadata,
+            false,
+        )?
+        .message;
+        if !control.update_pending_user_message(id, message) {
+            return Ok(false);
+        }
+        if let Some(input) = ui.pending_steers.iter_mut().find(|input| input.id == id) {
+            input.prompt = prompt;
+            input.display_prompt = display_prompt;
+            input.images = images.to_vec();
+        }
+        Ok(true)
+    }
+
+    fn update_queued_prompt_input(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        sequence: u64,
+        display_prompt: String,
+        images: &[PendingImageAttachment],
+    ) -> bool {
+        let Some(input) = ui.queued_inputs.iter_mut().find(|input| {
+            matches!(input, QueuedInput::Prompt { sequence: value, .. } if *value == sequence)
+        }) else {
+            return false;
+        };
+        let QueuedInput::Prompt {
+            prompt,
+            display_prompt: queued_display_prompt,
+            images: queued_images,
+            ..
+        } = input
+        else {
+            return false;
+        };
+        *prompt = prompt_without_image_placeholders(&display_prompt, images);
+        *queued_display_prompt = display_prompt;
+        *queued_images = images.to_vec();
+        true
+    }
+
+    fn submit_pending_edit_as_new(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        display_prompt: String,
+        images: Vec<PendingImageAttachment>,
+    ) -> Result<()> {
+        self.submit_fullscreen_prompt(ui, display_prompt, images)
     }
 
     fn submit_fullscreen_shell(
@@ -388,10 +759,7 @@ impl TuiApp {
             return self.start_auxiliary_fullscreen_shell(ui, command);
         }
         if ui.running.is_some() {
-            ui.queued_inputs.push_back(QueuedInput::Shell {
-                session_id: self.current_session.clone(),
-                command,
-            });
+            self.queue_fullscreen_shell(ui, command);
             return Ok(());
         }
         self.start_fullscreen_shell(ui, command)
@@ -536,6 +904,14 @@ impl TuiApp {
                 Ok(())
             }
             SlashCommand::Btw(_) => Err(anyhow!("/btw is only available in fullscreen TUI")),
+            SlashCommand::Steer(_) => Err(anyhow!("/steer requires a running fullscreen turn")),
+            SlashCommand::Queue(message) => {
+                return self.submit_prompt(message).await.map(|_| false);
+            }
+            SlashCommand::PendingCancel => {
+                println!("{}", self.renderer.status("no pending input"));
+                Ok(())
+            }
             SlashCommand::ModelShow => self.show_model(),
             SlashCommand::VariantSet(variant) => self.set_variant(variant),
             SlashCommand::ModeSet(mode) => self.set_mode(mode),
@@ -560,8 +936,16 @@ impl TuiApp {
             SlashCommand::Rename(title) => self.rename_session(title),
             SlashCommand::Undo => self.undo_session_print(),
             SlashCommand::Redo => self.redo_session_print(),
-            SlashCommand::Skills => {
-                println!("{}", self.skills_status_text());
+            SlashCommand::Skills(args) => {
+                println!("{}", self.skills_command_text(args.as_deref()));
+                Ok(())
+            }
+            SlashCommand::Bundles(args) => {
+                println!("{}", self.bundles_command_text(args.as_deref()));
+                Ok(())
+            }
+            SlashCommand::Curator(args) => {
+                println!("{}", self.curator_command_text(args.as_deref()));
                 Ok(())
             }
             SlashCommand::Agents => {
@@ -574,7 +958,9 @@ impl TuiApp {
             }
             SlashCommand::Compact(instructions) => self.run_scripted_compaction(instructions).await,
             SlashCommand::SkillInvoke { name, args } => {
-                let prompt = skill_prompt_marker(&name, &args);
+                let Some(prompt) = self.skill_or_bundle_marker(&name, &args) else {
+                    return Err(anyhow!("unknown skill or bundle: {name}"));
+                };
                 return self.submit_prompt(prompt).await.map(|_| false);
             }
             SlashCommand::Upcoming(command) => {
@@ -603,18 +989,361 @@ impl TuiApp {
     }
 
     fn skills_status_text(&self) -> String {
+        self.skills_rows(None, false)
+    }
+
+    fn skills_rows(&self, query: Option<&str>, include_source: bool) -> String {
         let Some(catalog) = self.current_skill_catalog() else {
             return "No skills found.".to_string();
         };
+        let query = query.map(str::trim).filter(|value| !value.is_empty());
+        let mut rows = catalog
+            .skills
+            .iter()
+            .filter(|skill| {
+                query.is_none_or(|query| {
+                    let query = query.to_ascii_lowercase();
+                    skill.name.to_ascii_lowercase().contains(&query)
+                        || skill.description.to_ascii_lowercase().contains(&query)
+                        || skill
+                            .category
+                            .as_deref()
+                            .unwrap_or_default()
+                            .to_ascii_lowercase()
+                            .contains(&query)
+                        || skill
+                            .tags
+                            .iter()
+                            .any(|tag| tag.to_ascii_lowercase().contains(&query))
+                })
+            })
+            .map(|skill| {
+                if include_source {
+                    format!(
+                        "{}: {} ({})",
+                        skill.name,
+                        skill.description,
+                        skill.source.as_str()
+                    )
+                } else {
+                    format!("{}: {}", skill.name, skill.description)
+                }
+            })
+            .collect::<Vec<_>>();
+        if rows.is_empty() {
+            return "No skills found.".to_string();
+        }
+        rows.sort();
+        rows.join("\n")
+    }
+
+    fn skills_command_text(&self, args: Option<&str>) -> String {
+        let Some(args) = args.map(str::trim).filter(|value| !value.is_empty()) else {
+            return self.skills_dashboard_text();
+        };
+        let mut parts = args.split_whitespace().collect::<Vec<_>>();
+        let action = parts.remove(0).to_ascii_lowercase();
+        match action.as_str() {
+            "help" | "--help" | "-h" => self.skills_dashboard_text(),
+            "list" => self.skills_status_text(),
+            "browse" => self.skills_rows(Some(&parts.join(" ")), true),
+            "search" => {
+                if parts.is_empty() {
+                    "usage: /skills search <query>".to_string()
+                } else {
+                    self.skills_rows(Some(&parts.join(" ")), true)
+                }
+            }
+            "inspect" => self.skills_inspect_text(&parts),
+            "check" => self.skills_check_text(),
+            "audit" => self.skills_audit_text(&parts),
+            "reload" => self.skills_reload_text(),
+            "install" | "update" | "uninstall" | "publish" | "config" => {
+                self.skills_mutation_text(action.as_str(), &parts)
+            }
+            other => format!(
+                "unknown /skills action: {other}\nSupported: list, browse, search, inspect, check, audit, reload"
+            ),
+        }
+    }
+
+    fn skills_dashboard_text(&self) -> String {
+        let skill_count = self
+            .current_skill_catalog()
+            .map(|catalog| catalog.skills.len())
+            .unwrap_or(0);
+        let bundle_count = self.current_skill_bundles().len();
+        [
+            "Skills hub".to_string(),
+            format!("installed: {skill_count} skills, {bundle_count} bundles"),
+            "/skills list - list installed skills".to_string(),
+            "/skills browse [query] - browse local hub entries".to_string(),
+            "/skills search <query> - search installed and indexed skills".to_string(),
+            "/skills inspect <name> - show local skill metadata".to_string(),
+            "/skills check - check configured hub updates".to_string(),
+            "/skills audit [name] - scan local skills".to_string(),
+            "/skills reload - refresh skill context".to_string(),
+            "/bundles - manage skill bundles".to_string(),
+            "/<skill-or-bundle> [args] - insert a marker".to_string(),
+        ]
+        .join("\n")
+    }
+
+    fn skills_inspect_text(&self, args: &[&str]) -> String {
+        let Some(name) = args.first() else {
+            return "usage: /skills inspect <name>".to_string();
+        };
+        let Some(catalog) = self.current_skill_catalog() else {
+            return "No skills found.".to_string();
+        };
+        match view_skill_value(&catalog, name, None) {
+            Ok(value) => {
+                let files = value
+                    .get("linked_files")
+                    .and_then(Value::as_array)
+                    .map(Vec::len)
+                    .unwrap_or(0);
+                let tags = value
+                    .get("tags")
+                    .and_then(Value::as_array)
+                    .map(|values| {
+                        values
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or_else(|| "-".to_string());
+                [
+                    format!("name: {}", json_string(&value, "name")),
+                    format!("description: {}", json_string(&value, "description")),
+                    format!("source: {}", json_string(&value, "source")),
+                    format!("category: {}", json_string(&value, "category")),
+                    format!("readiness: {}", json_string(&value, "readiness_status")),
+                    format!("platforms: {}", json_string_array(&value, "platforms")),
+                    format!("tags: {tags}"),
+                    format!("linked_files: {files}"),
+                    format!("path: {}", json_string(&value, "path")),
+                ]
+                .join("\n")
+            }
+            Err(err) => format!("error: {err:#}"),
+        }
+    }
+
+    fn skills_check_text(&self) -> String {
+        let skill_count = self
+            .current_skill_catalog()
+            .map(|catalog| catalog.skills.len())
+            .unwrap_or(0);
+        let bundle_count = self.current_skill_bundles().len();
+        format!(
+            "no hub update source configured\ninstalled: {skill_count} skills, {bundle_count} bundles"
+        )
+    }
+
+    fn skills_audit_text(&self, args: &[&str]) -> String {
+        let Some(catalog) = self.current_skill_catalog() else {
+            return "No skills found.".to_string();
+        };
+        if let Some(name) = args.first() {
+            let normalized = normalize_dynamic_skill_name(name);
+            let Some(skill) = catalog.skills.iter().find(|skill| {
+                skill.name == *name || normalize_dynamic_skill_name(&skill.name) == normalized
+            }) else {
+                return format!("unknown skill: {name}");
+            };
+            return match scan_skill_path(&skill.base_dir) {
+                Ok(scan) => format!(
+                    "{}: {:?} ({} findings)",
+                    skill.name,
+                    scan.verdict,
+                    scan.findings.len()
+                ),
+                Err(err) => format!("error: {err:#}"),
+            };
+        }
         if catalog.skills.is_empty() {
             return "No skills found.".to_string();
         }
         catalog
             .skills
             .iter()
-            .map(|skill| format!("{}: {}", skill.name, skill.description))
+            .map(|skill| match scan_skill_path(&skill.base_dir) {
+                Ok(scan) => format!(
+                    "{}: {:?} ({} findings)",
+                    skill.name,
+                    scan.verdict,
+                    scan.findings.len()
+                ),
+                Err(err) => format!("{}: error: {err:#}", skill.name),
+            })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    fn skills_reload_text(&self) -> String {
+        let skill_count = self
+            .current_skill_catalog()
+            .map(|catalog| catalog.skills.len())
+            .unwrap_or(0);
+        let bundle_count = self.current_skill_bundles().len();
+        format!("reloaded skills: {skill_count} skills, {bundle_count} bundles")
+    }
+
+    fn skills_mutation_text(&self, action: &str, args: &[&str]) -> String {
+        if let Err(message) = self.ensure_tui_skill_mutation_allowed(action) {
+            return message;
+        }
+        match action {
+            "install" => self.skills_install_text(args),
+            "update" => "hub update is not configured for this source".to_string(),
+            "uninstall" => self.skills_uninstall_text(args),
+            "publish" => "GitHub PR publish requires CLI authentication flow".to_string(),
+            "config" => self.skills_config_mutation_text(args),
+            _ => "unsupported skill mutation".to_string(),
+        }
+    }
+
+    fn ensure_tui_skill_mutation_allowed(&self, action: &str) -> std::result::Result<(), String> {
+        if self.current_mode == RunMode::Plan {
+            return Err(format!("/skills {action} is unavailable in plan mode"));
+        }
+        match self.current_permission_mode {
+            PermissionMode::BypassPermissions => Ok(()),
+            PermissionMode::DontAsk => Err(format!(
+                "permission denied: /skills {action} changes skill state"
+            )),
+            PermissionMode::Default | PermissionMode::AcceptEdits => Err(format!(
+                "/skills {action} changes skill state and requires approval; use /mode bypassPermissions or pevo skill {action}"
+            )),
+        }
+    }
+
+    fn skills_install_text(&self, args: &[&str]) -> String {
+        let Some(source) = args.first() else {
+            return "usage: /skills install <identifier-or-path> [--scope global|project] [--name <name>]".to_string();
+        };
+        let result = install_skill(
+            &self.home,
+            &self.workdir,
+            InstallOptions {
+                source: (*source).to_string(),
+                target: skill_scope_from_args(args),
+                name: skill_option_value(args, "--name").map(ToOwned::to_owned),
+                all: args.contains(&"--all"),
+                force: args.contains(&"--force"),
+            },
+        );
+        format_skill_mutation_result(result)
+    }
+
+    fn skills_uninstall_text(&self, args: &[&str]) -> String {
+        let Some(name) = args.first() else {
+            return "usage: /skills uninstall <name>".to_string();
+        };
+        let Some(catalog) = self.current_skill_catalog() else {
+            return "No skills found.".to_string();
+        };
+        format_skill_mutation_result(remove_skill(&catalog, &self.home, &self.workdir, name))
+    }
+
+    fn skills_config_mutation_text(&self, args: &[&str]) -> String {
+        let Some(action) = args.first() else {
+            return "usage: /skills config enable|disable|set ...".to_string();
+        };
+        match *action {
+            "enable" | "disable" => {
+                let Some(name) = args.get(1) else {
+                    return format!("usage: /skills config {action} <name> [--scope global|project]");
+                };
+                format_skill_mutation_result(set_skill_enabled(
+                    &self.home,
+                    &self.workdir,
+                    skill_scope_from_args(args),
+                    name,
+                    *action == "enable",
+                ))
+            }
+            "set" => {
+                let filtered = skill_args_without_scope(args);
+                if filtered.len() < 3 {
+                    return "usage: /skills config set skills.config.<key> <value> [--scope global|project]".to_string();
+                }
+                let value = serde_json::from_str::<Value>(filtered[2])
+                    .unwrap_or_else(|_| Value::String(filtered[2].to_string()));
+                format_skill_mutation_result(set_skill_config_value(
+                    &self.home,
+                    &self.workdir,
+                    skill_scope_from_args(args),
+                    filtered[1],
+                    value,
+                ))
+            }
+            other => format!("unknown /skills config action: {other}"),
+        }
+    }
+
+    fn bundles_command_text(&self, args: Option<&str>) -> String {
+        match args.map(str::trim).filter(|value| !value.is_empty()) {
+            None => [
+                "Skill bundles",
+                "/bundles list - list installed bundles",
+                "/<bundle> [args] - insert a bundle marker",
+            ]
+            .join("\n"),
+            Some("list") => self.bundles_status_text(),
+            Some(_) => "Supported bundle commands: /bundles, /bundles list".to_string(),
+        }
+    }
+
+    fn curator_command_text(&self, args: Option<&str>) -> String {
+        match args.map(str::trim).filter(|value| !value.is_empty()) {
+            None | Some("status") => [
+                "Skill curator",
+                "status: enabled",
+                "scope: global",
+                "automatic destructive actions: disabled",
+            ]
+            .join("\n"),
+            Some(_) => "Supported curator commands: /curator, /curator status".to_string(),
+        }
+    }
+
+    fn bundles_status_text(&self) -> String {
+        let bundles = self.current_skill_bundles();
+        if bundles.is_empty() {
+            return "No skill bundles found.".to_string();
+        }
+        bundles
+            .iter()
+            .map(|bundle| {
+                format!(
+                    "{}: {} [{}]",
+                    bundle.slug,
+                    bundle.description,
+                    bundle.skills.join(", ")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn skill_or_bundle_marker(&self, name: &str, args: &str) -> Option<String> {
+        let normalized = normalize_dynamic_skill_name(name);
+        for bundle in self.current_skill_bundles() {
+            if bundle.slug == normalized || normalize_dynamic_skill_name(&bundle.name) == normalized
+            {
+                return Some(skill_prompt_marker(&bundle.slug, args));
+            }
+        }
+        let catalog = self.current_skill_catalog()?;
+        catalog
+            .skills
+            .iter()
+            .any(|skill| skill.name == name || normalize_dynamic_skill_name(&skill.name) == normalized)
+            .then(|| skill_prompt_marker(name, args))
     }
 
     fn permissions_status_text(&self) -> Result<String> {
@@ -630,7 +1359,7 @@ impl TuiApp {
             ),
             format!(
                 "path: {}",
-                value["path"].as_str().unwrap_or(".psychevo/config.jsonc")
+                value["path"].as_str().unwrap_or(".psychevo/config.toml")
             ),
         ];
         for kind in ["allow", "ask", "deny"] {
@@ -945,12 +1674,7 @@ impl TuiApp {
         images: Vec<PendingImageAttachment>,
     ) -> Result<()> {
         if ui.running.is_some() || self.compaction_task.is_some() {
-            ui.queued_inputs.push_back(QueuedInput::Prompt {
-                session_id: self.current_session.clone(),
-                prompt,
-                display_prompt,
-                images,
-            });
+            self.queue_fullscreen_prompt(ui, prompt, display_prompt, images);
             return Ok(());
         }
         let image_inputs = images
@@ -987,10 +1711,7 @@ impl TuiApp {
 
     fn start_fullscreen_shell(&mut self, ui: &mut FullscreenUi<'_>, command: String) -> Result<()> {
         if ui.running.is_some() || self.compaction_task.is_some() {
-            ui.queued_inputs.push_back(QueuedInput::Shell {
-                session_id: self.current_session.clone(),
-                command,
-            });
+            self.queue_fullscreen_shell(ui, command);
             return Ok(());
         }
         if command.trim().is_empty() {
@@ -1087,11 +1808,7 @@ impl TuiApp {
             return Ok(());
         }
         if ui.running.is_some() || self.compaction_task.is_some() {
-            ui.queued_inputs.push_back(QueuedInput::Compact {
-                session_id: self.current_session.clone(),
-                instructions,
-                command_echo,
-            });
+            self.queue_fullscreen_compaction(ui, instructions, command_echo);
             ui.set_ephemeral_status("compaction queued");
             return Ok(());
         }
@@ -1231,6 +1948,9 @@ fn slash_command_echo(command: &SlashCommand) -> String {
             .as_deref()
             .map(|prompt| format!("/btw {}", prompt.trim()))
             .unwrap_or_else(|| "/btw".to_string()),
+        SlashCommand::Steer(message) => format!("/steer {}", message.trim()),
+        SlashCommand::Queue(message) => format!("/queue {}", message.trim()),
+        SlashCommand::PendingCancel => "/pending cancel".to_string(),
         SlashCommand::ModelShow => "/model".to_string(),
         SlashCommand::VariantSet(variant) => format!("/variant {variant}"),
         SlashCommand::ModeSet(mode) => format!("/mode {mode}"),
@@ -1290,7 +2010,18 @@ fn slash_command_echo(command: &SlashCommand) -> String {
         }
         SlashCommand::Undo => "/undo".to_string(),
         SlashCommand::Redo => "/redo".to_string(),
-        SlashCommand::Skills => "/skills".to_string(),
+        SlashCommand::Skills(args) => args
+            .as_deref()
+            .map(|args| format!("/skills {}", args.trim()))
+            .unwrap_or_else(|| "/skills".to_string()),
+        SlashCommand::Bundles(args) => args
+            .as_deref()
+            .map(|args| format!("/bundles {}", args.trim()))
+            .unwrap_or_else(|| "/bundles".to_string()),
+        SlashCommand::Curator(args) => args
+            .as_deref()
+            .map(|args| format!("/curator {}", args.trim()))
+            .unwrap_or_else(|| "/curator".to_string()),
         SlashCommand::Agents => "/agents".to_string(),
         SlashCommand::Fork(prompt) => format!("/fork {}", prompt.trim()),
         SlashCommand::Compact(instructions) => instructions
@@ -1299,9 +2030,9 @@ fn slash_command_echo(command: &SlashCommand) -> String {
             .unwrap_or_else(|| "/compact".to_string()),
         SlashCommand::SkillInvoke { name, args } => {
             if args.trim().is_empty() {
-                format!("/skill:{name}")
+                format!("/{name}")
             } else {
-                format!("/skill:{name} {}", args.trim())
+                format!("/{name} {}", args.trim())
             }
         }
         SlashCommand::Upcoming(command) => format!("/{command}"),
@@ -1314,6 +2045,85 @@ fn skill_prompt_marker(name: &str, args: &str) -> String {
     } else {
         format!("${name} {}", args.trim())
     }
+}
+
+fn json_string(value: &Value, key: &str) -> String {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("-")
+        .to_string()
+}
+
+fn json_string_array(value: &Value, key: &str) -> String {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn skill_scope_from_args(args: &[&str]) -> SkillTarget {
+    match skill_option_value(args, "--scope") {
+        Some("project") | Some("local") => SkillTarget::Project,
+        _ => SkillTarget::Global,
+    }
+}
+
+fn skill_option_value<'a>(args: &'a [&str], option: &str) -> Option<&'a str> {
+    args.windows(2)
+        .find_map(|window| (window[0] == option).then_some(window[1]))
+}
+
+fn skill_args_without_scope<'a>(args: &'a [&str]) -> Vec<&'a str> {
+    let mut filtered = Vec::new();
+    let mut skip_next = false;
+    for arg in args {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if *arg == "--scope" {
+            skip_next = true;
+            continue;
+        }
+        filtered.push(*arg);
+    }
+    filtered
+}
+
+fn format_skill_mutation_result(result: psychevo_runtime::Result<Value>) -> String {
+    match result {
+        Ok(value) => serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string()),
+        Err(err) => format!("error: {err:#}"),
+    }
+}
+
+fn normalize_dynamic_skill_name(name: &str) -> String {
+    name.chars()
+        .flat_map(char::to_lowercase)
+        .filter_map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                Some(ch)
+            } else if ch == '-' || ch == '_' || ch.is_whitespace() {
+                Some('-')
+            } else {
+                None
+            }
+        })
+        .collect::<String>()
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
 }
 
 fn fork_prompt_marker(prompt: &str) -> String {
