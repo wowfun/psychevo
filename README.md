@@ -16,7 +16,7 @@ statistics from its SQLite state.
 | Agent kernel | A Rust workspace split across AI protocol, agent loop, runtime, and CLI crates. |
 | Coding agent | `pevo run` and `pevo tui` route work through runtime-owned tools for reading, writing, editing, searching, listing, and shell commands. |
 | Terminal UI | Fullscreen `pevo tui` with sessions, transcript history, model and variant selection, tool evidence rows, stats, and local shell escapes. |
-| Providers | OpenAI Chat-compatible provider configuration with built-in provider ids, JSONC config, `.env` credentials, and model metadata enrichment. |
+| Providers | OpenAI Chat-compatible provider configuration with built-in provider ids, TOML config, `.env` credentials, and model metadata enrichment. |
 | Skills | Filesystem-backed skills that can be discovered, viewed, installed, enabled, disabled, and explicitly invoked. |
 | State | Local SQLite state for sessions, messages, usage accounting, and estimated costs. |
 | Development model | Specs are the source of truth for behavior before implementation changes land. |
@@ -68,7 +68,7 @@ Initialize the global Psychevo home:
 pevo init
 ```
 
-By default this creates `~/.psychevo/config.jsonc`, `~/.psychevo/.env`, and
+By default this creates `~/.psychevo/config.toml`, `~/.psychevo/.env`, and
 `~/.psychevo/state.db`. The starter config selects DeepSeek. Put credentials in
 the generated `.env` file, for example:
 

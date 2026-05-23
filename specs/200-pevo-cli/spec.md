@@ -41,7 +41,7 @@ cwd.
 
 The initialized home tree contains:
 
-- `config.jsonc`
+- `config.toml`
 - `.env`
 - `state.db`
 - `sessions/`
@@ -56,8 +56,12 @@ slice.
 relative paths resolve relative to the process cwd. When unset, `pevo run` uses
 `$PSYCHEVO_HOME/state.db`.
 
-`PSYCHEVO_CONFIG` may point at one JSONC config file. When set, it replaces
+`PSYCHEVO_CONFIG` may point at one TOML config file. When set, it replaces
 home and project config discovery for provider configuration.
+
+`config.jsonc` is not part of the product home layout. If a file with that name
+exists beside `config.toml`, runtime ignores it. There is no compatibility
+loader or migration subcommand for it.
 
 ## Command Families
 
@@ -121,9 +125,15 @@ metadata summaries. Debug projection does not change `pevo run --format json`,
 does not expose folded reasoning in sanitized transcript messages, and does not
 turn provider metadata into transcript content.
 
-`pevo skill` owns local skill lifecycle operations: list, view, create, patch,
-remove, enable, disable, install, and scan. Skill package, discovery, scanner,
-and provenance semantics belong to [055 Skills](../055-skills/spec.md).
+`pevo skill` owns the singular skill hub/config/list/view router. With no
+subcommand it shows help. `list` and `view` are read operations; `audit`
+absorbs the old scan behavior; `install` defaults to global scope unless
+project scope is explicit; `config` owns scoped enablement and
+`skills.config.*`; and `bundle` owns local bundle TOML. Old verb-style
+lifecycle subcommands (`create`, `patch`, `remove`, `enable`, `disable`,
+`scan`) are not the CLI contract for this topic. Skill package, discovery,
+scanner, hub, bundle, curator, and provenance semantics belong to
+[055 Skills](../055-skills/spec.md).
 
 `pevo stats` owns local token and estimated-cost reporting from the SQLite
 state database. It does not contact providers, refresh catalogs, or reconcile
@@ -229,7 +239,7 @@ are defined by [035 Permissions](../035-permissions/spec.md); this topic owns
 only the concrete `pevo` command spelling and output surface.
 
 `pevo config permissions list/remove` manages the current workdir's
-project-local `.psychevo/config.jsonc` permission rules. `allow always` approval
+project-local `.psychevo/config.toml` permission rules. `allow always` approval
 writes use the same project-local rule store.
 
 `pevo auth` owns credential status and API-key writes for configured or

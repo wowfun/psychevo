@@ -24,7 +24,7 @@ Out of scope:
 
 ## Configuration
 
-Compaction is enabled by default. The effective JSONC configuration may define:
+Compaction is enabled by default. The effective TOML configuration may define:
 
 - `compression.enabled`, default `true`
 - `compression.auto`, default `true`

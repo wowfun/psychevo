@@ -70,19 +70,16 @@ permission-mode rule set.
 
 ## Configuration
 
-Configuration lives under `permissions` in JSONC config:
+Configuration lives under `permissions` in TOML config:
 
-```jsonc
-{
-  "permissions": {
-    "approval_mode": "manual",
-    "smart_model": "provider/model",
-    "allow_login_shell": false,
-    "allow": ["ExecCommand(npm test *)"],
-    "ask": ["ExecCommand(cargo publish *)"],
-    "deny": ["Write(.env)"]
-  }
-}
+```toml
+[permissions]
+approval_mode = "manual"
+smart_model = "provider/model"
+allow_login_shell = false
+allow = ["ExecCommand(npm test *)"]
+ask = ["ExecCommand(cargo publish *)"]
+deny = ["Write(.env)"]
 ```
 
 Rules use strings of the form `Tool(pattern)`, with tool names `ExecCommand`,
@@ -100,8 +97,8 @@ Rule precedence is:
 4. configured allow
 5. default policy
 
-Project config overrides global config through the existing JSONC deep merge.
-`allow always` writes only to the project-local `.psychevo/config.jsonc`.
+Project config overrides global config through the existing TOML deep merge.
+`allow always` writes only to the project-local `.psychevo/config.toml`.
 
 ## Policy
 
@@ -164,8 +161,7 @@ action.
   session only.
 - Non-interactive runs allow prompt-level asks but deny hard/protected actions,
   except `dontAsk`, which denies actions that would otherwise prompt.
-- `allow always` writes project-local JSONC, preserves existing JSONC syntax,
-  and skips exact duplicate rules.
+- `allow always` writes project-local TOML and skips exact duplicate rules.
 - Permission validation uses deterministic local harnesses and fake or test
   providers. It must not use live providers, real API keys, network services,
   or host-global state.

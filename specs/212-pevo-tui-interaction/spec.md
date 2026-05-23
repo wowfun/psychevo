@@ -17,6 +17,8 @@ Rendering of the resulting transcript rows and panels is defined by
 
 - composer key handling, prompt submission, history recall, shell mode, and
   queued input behavior
+- fixed pending input preview behavior for unsent steer and next-turn queued
+  prompt inputs
 - slash command registry behavior, parsing, menus, completion, and command
   feedback
 - user-visible interaction copy that describes pevo behavior directly without

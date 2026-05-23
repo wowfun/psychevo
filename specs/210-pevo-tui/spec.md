@@ -18,7 +18,7 @@ stdin/stdout, it keeps the deterministic line-by-line scripted behavior.
 - persisted TUI-local model, variant, mode, thinking visibility, raw transcript
   visibility, and sidebar visibility
 - user-configured slash command aliases and shortcuts loaded from effective
-  `config.jsonc`
+  `config.toml`
 - session resume, switching, archiving/deletion, titles, running-session list
   indicators, undo/redo-adjacent session behavior, and history loading
 - model, variant, mode, thinking visibility, raw transcript visibility, local
@@ -80,30 +80,27 @@ under that home. `PSYCHEVO_CONFIG` and `PSYCHEVO_DB` may still override provider
 configuration and SQLite state path, but they do not bypass the home
 initialization requirement.
 
-TUI reads slash command customization from the effective `config.jsonc` using
+TUI reads slash command customization from the effective `config.toml` using
 the same global/project merge and explicit `PSYCHEVO_CONFIG` behavior as
 provider configuration. The optional shape is:
 
-```jsonc
-{
-  "tui": {
-    "leader_key": "ctrl+x",
-    "leader_timeout_ms": 2000,
-    "slash_aliases": {
-      "/model": ["/m"],
-      "/sessions": ["/s"],
-      "/export -f json -i messages": ["/xj"]
-    },
-    "slash_keybinds": {
-      "/model": "<leader>m",
-      "/status": "ctrl+s",
-      "/variant high": "<leader>h",
-      "/copy": ["<leader>y", "ctrl+shift+c"],
-      "/usage": "none",
-      "/export -f json -i messages": "<leader>x"
-    }
-  }
-}
+```toml
+[tui]
+leader_key = "ctrl+x"
+leader_timeout_ms = 2000
+
+[tui.slash_aliases]
+"/model" = ["/m"]
+"/sessions" = ["/s"]
+"/export -f json -i messages" = ["/xj"]
+
+[tui.slash_keybinds]
+"/model" = "<leader>m"
+"/status" = "ctrl+s"
+"/variant high" = "<leader>h"
+"/copy" = ["<leader>y", "ctrl+shift+c"]
+"/usage" = "none"
+"/export -f json -i messages" = "<leader>x"
 ```
 
 This configuration is local UI behavior only: it does not change CLI command

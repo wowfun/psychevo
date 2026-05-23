@@ -18,6 +18,9 @@ The first TUI supports:
 - `/context`
 - `/refresh`
 - `/btw [prompt]`
+- `/steer <message>`
+- `/queue <message>`
+- `/pending cancel`
 - `/clear`, `/new`
 - `/sessions`, `/resume`, `/continue`
 - `/model`
@@ -41,7 +44,9 @@ The first TUI supports:
 - `/fork`
 - `/compact [instructions]`
 - `/skills`
-- `/skill:<name> [args]`
+- `/bundles`
+- `/curator`
+- `/<skill-or-bundle> [args]`
 
 Slash command discovery is registry-backed and remains a lightweight menu above
 the composer. The slash menu stays a flat list with at most 8 rows and does
@@ -71,8 +76,8 @@ expand back to the full local result. `/help` does not accept arguments.
 `General` lists ordinary keyboard shortcuts plus common built-in commands:
 `/status`, `/context`, `/refresh`, `/btw`, `/model`, `/sessions`, `/new`, `/copy`, `/undo`,
 `/redo`, and `/quit`. `Commands` lists all built-in slash commands in canonical registry
-order. `Custom commands` summarizes dynamic skill invocation as
-`/skill:<name> [args]` with the discovered skill count and lists each concrete
+order. `Custom commands` summarizes dynamic skill and bundle invocation as
+`/<skill-or-bundle> [args]` with the discovered count and lists each concrete
 slash line configured with user aliases or shortcuts. It reports
 `No custom commands available` only when no skills and no configured slash
 targets are available.
@@ -102,6 +107,28 @@ text unless they came from an existing pending image placeholder. This prevents
 output-path prompts from being misclassified as missing input images. The only
 fullscreen attachment entrypoints are `/image <source> [prompt]` and a
 standalone paste that resolves to a readable image source.
+
+During a foreground agent turn, ordinary non-slash prompt submission is a
+steer request for the current turn. `/steer <message>` is the explicit form and
+is valid only while the foreground running item is an agent turn; when idle,
+inside non-agent work, or inside an unavailable target, it reports bounded
+feedback and does not queue implicitly. A steered input remains pending UI
+until the stream confirms the committed user message. While pending, its text is
+visible in the fixed pending preview above the composer rather than only as a
+status count. Once the stream confirms that the input was committed, the
+preview entry is removed and the message appears in history as ordinary user
+transcript content.
+
+`/queue <message>` appends a prompt to the caller-owned next-turn FIFO queue.
+When the TUI is idle, it drains immediately by starting the next turn through
+normal runtime invocation. When work is running, it waits behind earlier queued
+items. `/pending cancel` cancels all not-yet-sent steer inputs and clears all
+not-yet-started queued inputs for the current foreground surface. The status
+line does not show separate steer/queue counters; pending text visibility
+belongs to the fixed pending preview. Queued prompt text is visible in the same
+fixed pending preview as steer text. The preview's `undo` action removes queued
+prompts before they start, and `edit` updates the queued prompt in place while
+its sequence is still waiting.
 
 Image inputs are tracked as pending composer attachments bound to plain-text
 placeholders. `/image <source> [prompt]` adds one image source to the pending
@@ -313,7 +340,7 @@ built-in ids, built-in aliases, invalid ids, missing labels, missing base URLs,
 and base URLs that do not start with `http://` or `https://`.
 
 Saving a provider appends or updates only the new provider entry in global
-`$PSYCHEVO_HOME/config.jsonc`, writes raw API keys only to
+`$PSYCHEVO_HOME/config.toml`, writes raw API keys only to
 `$PSYCHEVO_HOME/.env`, refreshes the model pane, fetches the new provider
 catalog, and focuses that provider row while the fetch is pending. It does not
 edit the global default model. If TUI was started with `PSYCHEVO_CONFIG`, the
@@ -397,7 +424,7 @@ current query.
 Selecting a fetched-only model opens the existing variant pane. For such rows,
 the `Config default` variant row describes `use provider default`. Final model
 selection writes only TUI state for the current workdir and updates recent
-models. It does not edit JSONC provider configuration.
+models. It does not edit TOML provider configuration.
 
 All bottom selection panes keep `Home` and `End` as direct first/last jumps, and
 their `Up` and `Down` navigation wraps between the first and last visible rows.
@@ -445,7 +472,7 @@ auto-start behavior.
 Slash command errors are bounded user-visible text. They must not panic, hang,
 or start provider network work unless the command explicitly submits a prompt.
 
-User-configured slash aliases are loaded from effective `config.jsonc`
+User-configured slash aliases are loaded from effective `config.toml`
 `tui.slash_aliases`. Keys are concrete built-in slash input lines, including
 arguments or flags, validated by the same slash parser used for user input.
 Values must be aliases beginning with `/` and containing no whitespace. An
@@ -458,17 +485,24 @@ configured aliases are displayed as alias rows so they have the same completion
 affordance as ordinary slash commands.
 
 Configured alias startup validation rejects aliases that conflict with any
-built-in canonical command, built-in alias, dynamic `/skill:` command prefix,
+built-in canonical command, built-in alias, dynamic skill or bundle slash name,
 obsolete command compatibility boundary, or another configured alias. Dynamic
-skill command names are not user-aliasable in v1.
+skill and bundle command names are not user-aliasable in v1.
 
-`/skills` lists discovered skills in deterministic precedence order. In
-fullscreen mode it appends a bounded status-style transcript block; in scripted
-mode it prints the same list deterministically.
+`/skills` is a skill hub dispatcher. With no arguments it shows a bounded hub
+dashboard/help block; read subcommands include `list`, `browse`, `search`,
+`inspect`, `check`, `audit`, and `reload`. In fullscreen mode it appends a
+bounded status-style transcript block; in scripted mode it prints the same
+information deterministically.
 
-`/skill:<name> [args]` expands the named skill into the next prompt using the
-skill expansion contract from [055 Skills](../055-skills/spec.md). Unknown
-skills report a bounded error and do not submit a provider prompt.
+`/bundles` shows local bundle status and help, and `/curator` shows curator
+status/help. Mutating subcommands under `/skills`, `/bundles`, and `/curator`
+go through Psychevo permissions.
+
+`/<skill-or-bundle> [args]` inserts a `$skill` or `$bundle` marker into the
+composer using the expansion contract from [055 Skills](../055-skills/spec.md).
+It does not auto-submit in fullscreen mode. Unknown names report bounded error
+and do not submit a provider prompt.
 
 The slash menu appears above the composer while the composer contains a slash
 command token. It shows at most 8 matched rows. Matching uses the canonical
@@ -478,8 +512,8 @@ When the typed token matches a built-in alias, the canonical row is shown and
 selected using the same ordering class as the alias match. When it matches a
 user-configured alias, the alias row is shown and selected using the same
 ordering class as the alias match.
-When skill commands are enabled, discovered skills appear as dynamic
-`/skill:<name>` rows after built-in slash commands and participate in the same
+When skill commands are enabled, discovered skills and bundles appear as dynamic
+`/<name>` rows after built-in slash commands and participate in the same
 matching and Tab completion behavior.
 Whitespace after the command token hides the menu so argument text does not
 produce slash suggestions. Disabled future commands render with an `upcoming`

@@ -57,7 +57,10 @@ Required rendering coverage:
   do not create `1 failure` metadata.
 - Active Thinking uses shared activity motion, completed Thinking uses a stable
   bullet marker, reasoning body text uses the ordinary thinking body role, and
-  explicit reasoning paragraphs do not receive label-width indentation.
+  explicit reasoning paragraphs do not receive label-width indentation. A
+  visible assistant answer that begins before an explicit `reasoning_end` event
+  must complete the active Thinking row so the answer never streams beneath a
+  live Thinking spinner.
 - Compact duration formatting covers model metadata, tool evidence, plain
   renderer output, turn metadata, and bottom running status: whole seconds
   below one minute, `XmYYs` at one minute or more, zero-padded minute seconds,

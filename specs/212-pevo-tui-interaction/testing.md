@@ -89,7 +89,7 @@ Required interaction coverage:
   submitted image prompts preserve composer text.
 - `/status`, `/usage`/`/stats`, `/context`, `/refresh`, `/btw`,
   `/show-thinking`, `/show-raw`, `/mode`, `/variant`, `/skills`,
-  `/skill:<name>`, `/export`, and `/share`
+  `/<skill-or-bundle>`, `/export`, and `/share`
   behavior, including parser errors, fullscreen/scripted parity, transcript
   command-row versus bottom-pane ownership, `-f` format aliases for export,
   share rejecting `-f`, and sensitive include handling.
@@ -186,8 +186,16 @@ Required interaction coverage:
   bounds, UTF-8/CJK OSC52 payloads, and no fullscreen exit on copy failure.
 - Interruption and queueing: interrupted foreground turns restore queued prompt
   and shell inputs to the composer, normal completion drains queued inputs FIFO,
-  and settled interrupted transcript evidence remains distinct from ordinary
-  failure styling.
+  running prompt `Enter` steers the active agent turn without immediate
+  durable transcript insertion, pending steer and queued prompt content is
+  visible in the fixed preview above the composer while unsent, committed steer
+  inputs clear the preview entry and appear as ordinary user transcript content,
+  `/queue` drains FIFO after normal completion, `/steer` rejects idle and
+  non-agent contexts, pending preview `edit` confirms or cancels drafts with
+  `Enter`/`Esc`, pending preview `undo` cancels steer or removes queued
+  prompts, `/pending cancel` clears unsent steer and queue items, interrupted
+  foreground turns restore unsent pending inputs, and settled interrupted
+  transcript evidence remains distinct from ordinary failure styling.
 - Obsolete inputs such as `/models`, `/model set`, `/variant set`, `/mode set`,
   `/thinking`, `/session list`, `/session show`, and `/session switch` are
   unsupported and absent from the slash menu.

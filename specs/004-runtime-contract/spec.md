@@ -16,7 +16,7 @@ Define the runtime contract owned by `psychevo-runtime`.
 - agent-invocation scoped tool surface assembly
 - permission policy, permission mode, approval handler, and session grant wiring
 - capability extension resolution
-- stop, abort, and cancellation signal wiring
+- stop, abort, cancellation, and pending user-input control wiring
 - durable evidence sink wiring
 - transport-neutral runtime library boundary
 
@@ -65,7 +65,7 @@ After a session boundary exists, runtime assembles an agent invocation from call
 - generation-request tool declaration snapshots
 - capability extension selections
 - optional selected agent definition and child-agent control scope
-- stop, abort, and cancellation signals
+- stop, abort, cancellation, and pending user-input control signals
 - evidence sink
 
 Runtime resolves the model target and generation controls for an agent invocation and passes them to the AI layer. This spec does not define model catalogs, provider selection, fallback priority, or model registry behavior.
@@ -103,6 +103,16 @@ defines selected-agent semantics, and [051 Subagents](../051-agents/subagents.md
 defines child control semantics.
 
 Runtime wires stop, abort, and cancellation signals into agent execution, AI generation, tool execution bindings, and the evidence sink. Outcome semantics remain owned by [002 Agent Execution](../002-agent-execution/spec.md) and [003 AI Protocol](../003-ai-protocol/spec.md).
+
+Runtime also exposes pending user-input steering controls for active agent
+invocations. It passes steer, update, and cancel requests to agent execution
+without owning the agent-loop drain policy. When agent execution commits a
+pending steered input, runtime projects the resulting user `message_start` and
+`message_end` events like any other loop-visible user message and preserves the
+pending input identifier as observation metadata so interfaces can clear
+optimistic pending UI. Runtime does not own next-turn queue scheduling; product
+entrypoints may keep caller-owned queues and start later invocations through
+normal runtime entrypoints.
 
 Runtime connects agent-invocation assembly facts, tool declaration snapshot facts, `agent_start` and `agent_end` events, AI generation outcomes, tool outcomes, messages, resource decisions, and terminal outcomes to an evidence sink. An evidence sink is the runtime-wired destination for durable session and agent-invocation evidence. [005 Durable Evidence](../005-durable-evidence/spec.md) defines durable evidence semantics. [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines the persistence substrate boundary. This spec does not define record shape, storage format, trace format, replay semantics, or session storage format.
 

@@ -13,7 +13,7 @@ Define Psychevo's caller-facing interface layer.
 - live agent-invocation observation baseline
 - final completion baseline
 - session-start and before-agent-start rejection
-- caller-facing stop and abort control signals
+- caller-facing stop, abort, and live user-input control signals
 
 Out of scope:
 - Rust traits, structs, functions, modules, or concrete APIs
@@ -85,6 +85,20 @@ Final loop-visible artifacts, tool outcomes, AI generation outcomes, resource de
 A control signal is a caller-facing request that affects an active or pending agent invocation.
 
 Interfaces may support graceful stop and abort or cancellation. Graceful stop asks runtime to end at a supported execution boundary. Abort or cancellation asks runtime to interrupt work that can still be interrupted.
+
+Interfaces may support live user-input steering for an active agent
+invocation. A steer request asks runtime and agent execution to add a user
+message to the current invocation at the next supported generation boundary.
+Until the lower layer commits that pending input into a provider request, the
+caller-facing interface may update or cancel it. Once committed, the input is
+ordinary loop-visible user message evidence and cannot be retracted by pending
+input controls.
+
+Next-turn queueing is caller-owned scheduling, not core execution semantics. A
+queued input waits for a later invocation and only becomes execution input when
+the entrypoint drains it into runtime invocation or steering APIs. If a running
+invocation cannot accept steering, an entrypoint may degrade live input into a
+next-turn queue while preserving that distinction for the user.
 
 Runtime wires control signals into lower layers. Outcome semantics remain owned by agent execution and AI protocol specs.
 

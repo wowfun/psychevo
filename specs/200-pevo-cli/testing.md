@@ -18,9 +18,9 @@ scripts/validate.sh broad
 
 ## Init Coverage
 
-- `pevo init` creates `config.jsonc`, `.env`, `state.db`, `sessions/`, `logs/`,
+- `pevo init` creates `config.toml`, `.env`, `state.db`, `sessions/`, `logs/`,
   and `cache/` under an isolated `PSYCHEVO_HOME`.
-- Existing `config.jsonc` and `.env` are not overwritten.
+- Existing `config.toml` and `.env` are not overwritten.
 - `pevo init --reset-state` backs up `state.db`, `state.db-wal`, and
   `state.db-shm` before creating a fresh v5 state database.
 - The starter config resolves DeepSeek with `reasoning_effort = medium`.
@@ -62,9 +62,10 @@ scripts/validate.sh broad
 - `PSYCHEVO_CONFIG` replaces home/project config discovery.
 - `PSYCHEVO_CONFIG` loads config-parent `.env` then project `.env`.
 - default discovery loads home config/env then project config/env.
+- `config.jsonc` files are ignored and do not satisfy missing `config.toml`.
 - `PSYCHEVO_CONFIG_DIR` is ignored.
 - missing home config rejects before `agent_start`.
-- JSONC `reasoning_effort` uses the same validation as CLI `--variant`.
+- TOML `reasoning_effort` uses the same validation as CLI `--variant`.
 - `none` disables lower-level reasoning effort.
 - latest-session lookup filters by canonical workdir and `source = "run"`.
 - SQLite state uses `user_version = 5`; older unsupported state databases reject with an
@@ -109,7 +110,7 @@ scripts/validate.sh broad
 - Config/auth writes default to global `$PSYCHEVO_HOME`; `--local` writes the
   current workdir `.psychevo` scope.
 - `--global` and `--local` are mutually exclusive.
-- `pevo config provider add` writes provider JSONC without raw keys.
+- `pevo config provider add` writes provider TOML without raw keys.
 - `--api-key-env` records an env var name only; `--api-key-stdin` writes the
   secret to the selected `.env`.
 - `pevo auth status` and `pevo auth set --api-key-stdin` never print raw
@@ -124,9 +125,9 @@ scripts/validate.sh broad
 - `dontAsk` denies actions that would otherwise prompt unless they already
   match `permissions.allow` or a safe default.
 - `pevo config permissions list/remove` manages local allow, ask, and deny
-  rules in the current workdir's project-local `.psychevo/config.jsonc`.
-- `allow always` approval writes project-local JSONC, preserves existing JSONC
-  syntax, and skips exact duplicate rules.
+  rules in the current workdir's project-local `.psychevo/config.toml`.
+- `allow always` approval writes project-local TOML and skips exact duplicate
+  rules.
 
 ## Install Script Coverage
 

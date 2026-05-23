@@ -26,7 +26,7 @@ For this topic, the default gate is the broad deterministic validation path.
   objects, `tool_calls: null`, split tool-call id/name/arguments, and usage
   chunks.
 - Config tests cover explicit `PSYCHEVO_CONFIG`, global config, project override,
-  recursive object merge, scalar replacement, `.env` precedence, invalid JSONC,
+  recursive object merge, scalar replacement, `.env` precedence, invalid TOML,
   invalid provider entries, and raw API-key rejection.
 - Provider resolution tests cover aliases, unknown providers, auto order,
   missing credentials, missing model, multiple configured models, single

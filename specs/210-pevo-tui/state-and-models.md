@@ -45,7 +45,7 @@ that override.
 the per-workdir variant override. Bare `/variant` is not a display command and
 returns a bounded usage error. Obsolete `/variant set <value>` input is not a
 compatibility command. These TUI state changes affect later prompts in the
-current process and do not edit JSONC provider configuration.
+current process and do not edit TOML provider configuration.
 
 `/show-thinking` toggles global thinking visibility and persists it. It is a
 visibility-only control: it does not enable or disable provider reasoning, does

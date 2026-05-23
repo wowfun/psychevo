@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-05-22
+
+### Added
+
+- Added expanded skill management: aggregate tools, richer skill metadata,
+  scoped bundles, and dynamic `/<skill-or-bundle>` TUI insertion.
+- Added live steer and next-turn queue support across core, runtime, and
+  fullscreen TUI, including `/steer`, `/queue`, `/pending cancel`, and fixed
+  pending previews with edit/undo controls.
+
+### Changed
+
+- Switched user-editable config and skill bundles to TOML, with legacy config
+  and bundle formats ignored by runtime.
+- Reworked skill commands, discovery, platform gating, collisions, and scoped
+  installs around the singular `pevo skill` command family and TUI hub flows.
+
+### Fixed
+
+- Filled in missing model-visible parameter descriptions across runtime tools.
+- Fixed fullscreen TUI Thinking and pending-input rendering edge cases.
+
 ## 2026-05-21
 
 ### Changed

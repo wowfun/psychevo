@@ -38,6 +38,14 @@ A message is a loop-visible artifact with one of these kinds:
 
 Instruction context, attached context, summary context, resource facts, and other runtime-supplied inputs are not core message kinds unless a later spec promotes them into loop-visible messages.
 
+Pending external user input is caller-supplied user message material that has
+not yet been drained into the loop-visible transcript. Agent execution may
+accept, update, or cancel pending external user input until it reaches a
+generation boundary that drains the pending queue into the next provider
+request. Once drained, the input is a normal `user` message: it emits message
+events, is appended to loop context, is included in final messages, and is no
+longer cancellable through pending-input controls.
+
 A tool execution is the execution of one assistant-requested tool call through a runtime-supplied execution binding from the agent-invocation scoped tool surface. Agent execution observes the tool call, invokes the supplied binding, and records the resulting tool-result message.
 
 Tool-result material is the loop-visible result material produced by the execution binding. Agent execution preserves the tool-result material and an execution outcome summary, but it does not own capability-specific result schemas.
@@ -99,6 +107,12 @@ When one assistant message requests multiple tools, agent execution may execute 
 Regardless of scheduling, each tool execution result must remain causally associated with the assistant tool call that requested it. This spec does not define cross-tool sorting policy, batching strategy, or concurrency policy.
 
 Tool-result messages are loop-visible messages and must be ordered so the next model response can consume them as part of the loop-visible transcript.
+
+Drained external user-input messages are loop-visible messages and must be
+ordered before the assistant response that can consume them. Each drained user
+message emits `message_start` and `message_end` before the next provider
+generation that includes it. Pending inputs that are updated or canceled before
+drain emit no message events for their old or canceled content.
 
 When a runtime-supplied binding reports a tool failure as a tool result, agent execution records it as a completed tool execution with a failed outcome summary unless the agent invocation itself is stopped, failed, or aborted for another reason.
 

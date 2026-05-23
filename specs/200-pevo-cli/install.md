@@ -81,7 +81,7 @@ Tools or a compatible MinGW setup, may be required.
 After `cargo install` succeeds, the script locates `pevo` or `pevo.exe`, runs
 `pevo --help`, and by default runs `pevo init`.
 
-`pevo init` is idempotent and must not overwrite existing `config.jsonc` or
+`pevo init` is idempotent and must not overwrite existing `config.toml` or
 `.env` files. The install script must not write raw API keys.
 
 If Cargo's bin directory is not on `PATH`, the script prints an `export PATH=...`

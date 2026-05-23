@@ -30,14 +30,14 @@ user's home directory, and relative paths resolve relative to process cwd.
 
 The command creates:
 
-- `config.jsonc`
+- `config.toml`
 - `.env`
 - `state.db`
 - `sessions/`
 - `logs/`
 - `cache/`
 
-Existing `config.jsonc` and `.env` are not overwritten. Missing files or
+Existing `config.toml` and `.env` are not overwritten. Missing files or
 directories are created.
 
 `state.db` is initialized by opening it through the default SQLite store. The
@@ -46,29 +46,21 @@ command does not write session sidecar files.
 When `--reset-state` is supplied, existing `state.db`, `state.db-wal`, and
 `state.db-shm` files are moved into a timestamped backup directory under
 `backups/` before a fresh state database is created. The command still must not
-overwrite existing `config.jsonc` or `.env` files.
+overwrite existing `config.toml` or `.env` files.
 
 ## Starter Config
 
-The generated `config.jsonc` is DeepSeek-only:
+The generated `config.toml` is DeepSeek-only:
 
-```jsonc
-{
-  "model": "deepseek/deepseek-chat",
-  "provider": {
-    "deepseek": {
-      "options": {
-        "base_url": "https://api.deepseek.com/v1",
-        "api_key_env": "DEEPSEEK_API_KEY"
-      },
-      "models": {
-        "deepseek-chat": {
-          "reasoning_effort": "medium"
-        }
-      }
-    }
-  }
-}
+```toml
+model = "deepseek/deepseek-chat"
+
+[provider.deepseek.options]
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+
+[provider.deepseek.models.deepseek-chat]
+reasoning_effort = "medium"
 ```
 
 The generated `.env` is a comment-only template and must not contain raw API

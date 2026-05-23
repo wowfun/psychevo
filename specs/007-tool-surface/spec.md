@@ -102,3 +102,5 @@ A tool result artifact is loop-visible result material produced after a tool exe
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines how capability contributions may provide tool candidates before agent-invocation scoped selection.
 - [051 Agents](../051-agents/spec.md) defines selected-agent tool policy.
 - [051 Subagents](../051-agents/subagents.md) defines subagent control tools.
+- [007 Declaration Quality](declaration-quality.md) defines first-slice
+  expectations for model-visible tool declaration descriptions.

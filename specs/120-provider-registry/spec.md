@@ -14,7 +14,7 @@ provider-neutral AI protocol in [003 AI Protocol](../003-ai-protocol/spec.md).
 
 - static provider registry entries
 - user-defined Chat-compatible provider entries
-- JSONC configuration loading
+- TOML configuration loading
 - global and project configuration merge for live runs
 - `.env` credential loading
 - provider/model resolution for `pevo run`
@@ -63,12 +63,12 @@ transport.
 
 ## Configuration
 
-`pevo run` reads JSONC configuration from:
+`pevo run` reads TOML configuration from:
 
 - explicit `PSYCHEVO_CONFIG`
-- global `$PSYCHEVO_HOME/config.jsonc`
-- global `~/.psychevo/config.jsonc` when `PSYCHEVO_HOME` is unset
-- project `<workdir>/.psychevo/config.jsonc`
+- global `$PSYCHEVO_HOME/config.toml`
+- global `~/.psychevo/config.toml` when `PSYCHEVO_HOME` is unset
+- project `<workdir>/.psychevo/config.toml`
 
 When `PSYCHEVO_CONFIG` is supplied, it replaces config discovery and only that
 file is loaded as configuration. CLI model and variant overrides still have
@@ -80,9 +80,10 @@ layer value.
 
 `PSYCHEVO_CONFIG_DIR` is not read, aliased, or used as fallback.
 
-The configuration format is JSONC: JSON with comments and trailing commas.
-Unknown fields are ignored. Invalid syntax, invalid field types, or invalid
-provider entries reject before `agent_start`.
+The configuration format is TOML. Unknown fields are ignored. Invalid syntax,
+invalid field types, or invalid provider entries reject before `agent_start`.
+`config.jsonc` is not a configuration input and is ignored if present; runtime
+does not read it, parse it, or migrate it.
 
 Configuration may define:
 
@@ -113,23 +114,15 @@ The legacy model `context_limit` field is rejected. Configurations must use
 
 Example:
 
-```jsonc
-{
-  "model": "deepseek/deepseek-chat",
-  "provider": {
-    "deepseek": {
-      "options": {
-        "base_url": "https://api.deepseek.com/v1",
-        "api_key_env": "DEEPSEEK_API_KEY"
-      },
-      "models": {
-        "deepseek-chat": {
-          "reasoning_effort": "medium"
-        }
-      }
-    }
-  }
-}
+```toml
+model = "deepseek/deepseek-chat"
+
+[provider.deepseek.options]
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+
+[provider.deepseek.models.deepseek-chat]
+reasoning_effort = "medium"
 ```
 
 When `model` is a string in `provider/model` form and the prefix matches a
@@ -158,10 +151,10 @@ selection, config merge keys, or the `provider/model` model-spec form.
 
 Interactive clients and CLI config commands may create user-defined OpenAI
 Chat-compatible providers in the global config or the current workdir's local
-`.psychevo/config.jsonc`. The created provider id must be a new normalized user
+`.psychevo/config.toml`. The created provider id must be a new normalized user
 provider id and must not collide with built-in provider ids or aliases. The
 credential variable is stored in `options.api_key_env`; raw API keys must be
-written only to `.env` files, never JSONC configuration. CLI provider/auth
+written only to `.env` files, never TOML configuration. CLI provider/auth
 writes default to global scope and use `--local` for the current workdir scope.
 
 ## Environment
@@ -190,7 +183,7 @@ names are ignored.
 Provider resolution precedence is:
 
 1. CLI model and variant overrides
-2. JSONC configuration
+2. TOML configuration
 3. loaded `.env` and inherited environment
 
 The environment override variables are:
@@ -240,7 +233,7 @@ fields. Resolution order is:
 1. built-in metadata fallback table for known model families
 2. cache-first `models.dev` public registry lookup
 3. metadata present in an explicitly fetched provider `/models` response
-4. explicit per-model metadata from JSONC configuration
+4. explicit per-model metadata from TOML configuration
 5. unknown as `None`
 
 The `models.dev` cache is stored under `$PSYCHEVO_HOME/models_dev_cache.json`.

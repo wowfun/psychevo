@@ -12,7 +12,7 @@ Define fullscreen key handling, composer behavior, paste handling, mouse routing
 The fullscreen keymap is composer-first. Core editing, quit, pane, popup,
 selection, and interruption controls remain fixed so the terminal surface stays
 recoverable. Users may configure slash command shortcuts only through the
-effective `config.jsonc` `tui.slash_keybinds` map.
+effective `config.toml` `tui.slash_keybinds` map.
 
 Slash command shortcuts execute only when composer focus is active, the
 composer is empty, shell mode is inactive, no selection, popup, bottom pane, or
@@ -30,7 +30,15 @@ startup.
 
 - `Enter` submits the composer. When slash completion suggestions are visible,
   the first suggestion is selected by default and `Enter` executes that
-  suggestion directly.
+  suggestion directly. During a foreground agent turn, ordinary prompt
+  submission steers the running turn by default: the TUI sends the prompt as
+  pending user input to the active run, does not immediately append it to the
+  durable transcript, renders the pending steer content in the fixed pending
+  preview above the composer until the stream confirms the committed user
+  message. Once confirmed, the pending preview entry is removed and the
+  committed user message appears as ordinary user transcript content. During
+  non-agent running work or compaction, ordinary prompt submission queues for
+  the next turn and renders in the same pending preview.
 - `Shift+Enter`, `Ctrl+Enter`, `Alt+Enter`, and `Ctrl+J` insert a newline.
 - `Ctrl+A` in composer focus selects all existing composer text with visible
   input-local highlighting. With that selection active, `Backspace` and
@@ -93,6 +101,18 @@ startup.
   `cat src<Tab>` do not trigger shell-native completion.
 - `Shift+Tab` cycles `default -> acceptEdits -> plan -> default`. Dangerous
   bypass modes are not part of the normal cycle.
+- Pending steer and queued prompt entries are shown in a fixed
+  transcript-styled preview immediately above the composer and below any
+  slash/file/agent/skill popup. Each entry shows its kind, text preview, and
+  `edit`/`undo` actions. `undo` cancels a not-yet-committed steer or removes a
+  not-yet-started queued prompt. `edit` opens an inline composer-styled editor
+  for that entry; while editing, `Enter` confirms, `Esc` cancels only the edit
+  draft, and newline chords keep inserting newlines. Confirming a steer edit
+  updates it in place when runtime still accepts the pending id; if that id was
+  already drained, the edited text is submitted through normal current-state
+  prompt classification. Confirming a queued prompt edit updates it in place
+  when its queue sequence still exists; otherwise it is submitted through the
+  same normal current-state classification.
 - `Esc` clears active UI state before it can interrupt work: transcript/sidebar
   text selection, file and skill popups, slash menu, composer text selection,
   bottom selection panes, history search, and an empty shell-mode composer all
@@ -100,7 +120,9 @@ startup.
   interruption through runtime control. Runtime-controlled provider generation
   and foreground shell waits must wake on that signal instead of waiting for the
   next provider chunk, shell polling interval, or title-generation follow-up.
-  When idle, it performs no destructive action.
+  Pending steer or queued inputs that have not been committed are restored to
+  the composer when the foreground turn is interrupted. When idle, it performs
+  no destructive action.
 - `Ctrl+T` focuses the transcript. In transcript focus, `Up`/`Down` move the
   focused transcript row, `PageUp`/`PageDown` scroll, `Enter`/`Space` toggles
   folded evidence rows or opens clickable `Agent` rows, and `Esc` returns to

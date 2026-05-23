@@ -49,6 +49,11 @@ TUI renders runtime events into semantic ledger evidence:
   spinner/activity marker and right-side elapsed duration carry that state.
 - assistant visible output becomes unlabeled answer body text without a left
   rail
+- when visible assistant output starts after folded reasoning, fullscreen TUI
+  completes the currently active `Thinking` row before appending or updating the
+  answer row, even if the provider has not emitted an explicit `reasoning_end`
+  event. The completed `Thinking` row must stop showing the shared activity
+  marker while the answer streams.
 - turn-level metadata becomes unlabeled material directly after a visible
   answer, or after a terminal reasoning-only assistant message when no visible
   answer exists, and keeps the metadata left rail
