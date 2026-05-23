@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-05-23
+
+### Added
+
+- Added ADR 0002 for the capability extension mechanism.
+- Added `web_fetch`, `pevo tool`, and fullscreen TUI `/tools` support for
+  built-in and project-local toolsets.
+
+### Changed
+
+- Reworked Plan and Default tool surfaces around core shell/file tools, the
+  adjacent `web` toolset, and managed `rg`/`jq` guidance.
+- Renamed the internal editable run mode from `Build` to `Default`.
+- Unified TUI slash-command handling and tool evidence rendering for built-in
+  and extension tools.
+- Removed legacy `list`/`search` coding-tool surfaces and compatibility paths.
+
+### Fixed
+
+- Fixed fullscreen TUI composer, slash-command, paste, and scroll-follow edge
+  cases.
+
 ## 2026-05-22
 
 ### Added
