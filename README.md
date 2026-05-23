@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/psychevo-logo.svg" alt="Psychevo" width="160">
+</p>
+
 # Psychevo
 
 Psychevo is a public-alpha Rust agent kernel and coding CLI/TUI. The project is

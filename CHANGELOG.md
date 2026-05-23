@@ -9,6 +9,8 @@
   session-scoped MCP tools.
 - Added `027 ACP`, `056 MCP`, and `230 pevo-acp` specs for ACP protocol
   semantics, MCP boundaries, and server packaging.
+- Added the canonical Psychevo logo under `assets/` and displayed it in the
+  README.
 - Added ADR 0002 for the capability extension mechanism.
 - Added `web_fetch`, `pevo tool`, and fullscreen TUI `/tools` support for
   built-in and project-local toolsets.
