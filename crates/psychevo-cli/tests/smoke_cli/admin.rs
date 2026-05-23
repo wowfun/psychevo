@@ -69,7 +69,7 @@ fn cli_config_provider_and_auth_write_scoped_env_without_leaking_secret() {
     assert_eq!(value["wrote_api_key"], false);
 
     let local_config =
-        std::fs::read_to_string(workdir.join(".psychevo/config.jsonc")).expect("config");
+        std::fs::read_to_string(workdir.join(".psychevo/config.toml")).expect("config");
     assert!(local_config.contains("MOCK_LOCAL_KEY"));
     assert!(!local_config.contains("secret-key"));
 
@@ -126,7 +126,7 @@ fn cli_config_provider_and_auth_write_scoped_env_without_leaking_secret() {
         "stderr: {}",
         String::from_utf8_lossy(&add_global.stderr)
     );
-    assert!(psychevo_home.join("config.jsonc").exists());
+    assert!(psychevo_home.join("config.toml").exists());
     assert!(
         std::fs::read_to_string(psychevo_home.join(".env"))
             .expect("global env")
@@ -143,15 +143,13 @@ fn cli_config_permissions_lists_and_removes_project_local_rules() {
     std::fs::create_dir_all(workdir.join(".psychevo")).expect("workdir");
     init_skill_home(temp.path(), &psychevo_home);
     std::fs::write(
-        workdir.join(".psychevo/config.jsonc"),
-        r#"{
-  // project-local policy
-  "permissions": {
-    "allow": ["ExecCommand(npm test *)"],
-    "ask": ["ExecCommand(cargo publish *)"],
-    "deny": ["Write(.env)"]
-  }
-}
+        workdir.join(".psychevo/config.toml"),
+        r#"# project-local policy
+
+[permissions]
+allow = ["ExecCommand(npm test *)"]
+ask = ["ExecCommand(cargo publish *)"]
+deny = ["Write(.env)"]
 "#,
     )
     .expect("config");
@@ -191,8 +189,7 @@ fn cli_config_permissions_lists_and_removes_project_local_rules() {
     );
     let value: Value = serde_json::from_slice(&removed.stdout).expect("json");
     assert_eq!(value["changed"], true);
-    let config = std::fs::read_to_string(workdir.join(".psychevo/config.jsonc")).expect("config");
-    assert!(config.contains("project-local policy"));
+    let config = std::fs::read_to_string(workdir.join(".psychevo/config.toml")).expect("config");
     assert!(!config.contains("ExecCommand(npm test *)"));
     assert!(config.contains("ExecCommand(cargo publish *)"));
 }
@@ -588,21 +585,19 @@ fn cli_model_list_current_and_fetch_use_local_config_and_explicit_fetch_only() {
     let server = CatalogJsonServer::start(r#"{"data":[{"id":"mock-a"},{"id":"mock-b"}]}"#);
     std::fs::write(psychevo_home.join(".env"), "MOCK_KEY=test-key\n").expect("env");
     std::fs::write(
-        psychevo_home.join("config.jsonc"),
+        psychevo_home.join("config.toml"),
         format!(
-            r#"{{
-              "model": "mock/mock-a",
-              "provider": {{
-                "mock": {{
-                  "label": "Mock",
-                  "options": {{
-                    "base_url": "{}/v1",
-                    "api_key_env": "MOCK_KEY"
-                  }},
-                  "models": {{ "mock-a": {{}} }}
-                }}
-              }}
-            }}"#,
+            r#"model = "mock/mock-a"
+
+[provider.mock]
+label = "Mock"
+
+[provider.mock.options]
+base_url = "{}/v1"
+api_key_env = "MOCK_KEY"
+
+[provider.mock.models."mock-a"]
+"#,
             server.base_url
         ),
     )

@@ -233,10 +233,7 @@ fn check_lint(path: &Path, content: &str) -> Value {
             Ok(_) => lint_ok(),
             Err(err) => lint_error(err.to_string()),
         },
-        "jsonc" => match jsonc_parser::parse_to_serde_value::<Option<Value>>(
-            content,
-            &Default::default(),
-        ) {
+        "toml" => match toml::from_str::<toml::Value>(content) {
             Ok(_) => lint_ok(),
             Err(err) => lint_error(err.to_string()),
         },

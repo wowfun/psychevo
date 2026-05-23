@@ -33,7 +33,7 @@ fn cli_tui_bang_shell_rejects_missing_provider_config_before_execution() {
     let workdir = temp.path().join("work");
     std::fs::create_dir_all(&workdir).expect("workdir");
     let marker = workdir.join("marker");
-    let config = temp.path().join("missing-config.jsonc");
+    let config = temp.path().join("missing-config.toml");
 
     let output = isolated_tui_cmd(temp.path(), &home, &config, &db)
         .args([
@@ -387,6 +387,8 @@ fn cli_tui_mode_set_plan_persists_and_uses_read_only_tools() {
             "clarify",
             "list_skills",
             "view_skill",
+            "skill_hub",
+            "skill_config",
             "Agent",
             "list_agents",
             "wait_agent",

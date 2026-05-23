@@ -52,6 +52,18 @@ fn exec_command_provider_schema_replaces_bash() {
     assert_eq!(stdin_params["properties"]["chars"]["default"], "");
 }
 
+#[test]
+fn core_plan_and_clarify_tool_schemas_describe_parameters() {
+    let temp = tempdir().expect("temp");
+    let mut tools = crate::tools::coding_core_tools_for_mode(temp.path(), RunMode::Plan);
+    tools.extend(crate::tools::coding_core_tools(temp.path()));
+    tools.push(crate::tools::clarify_tool(None, None));
+
+    for tool in tools {
+        assert_schema_property_descriptions(tool.name(), &tool.parameters());
+    }
+}
+
 fn valid_clarify_args() -> Value {
     json!({
         "questions": [{
@@ -987,16 +999,11 @@ fn configured_user_shell_context(
     let home = home_dir(temp);
     fs::create_dir_all(&home).expect("home");
     fs::write(
-        home.join("config.jsonc"),
+        home.join("config.toml"),
         r#"
-        {
-          "model": "lmstudio/test-model",
-          "provider": {
-            "lmstudio": {
-              "models": { "test-model": {} }
-            }
-          }
-        }
+model = "lmstudio/test-model"
+
+[provider.lmstudio.models.test-model]
         "#,
     )
     .expect("config");

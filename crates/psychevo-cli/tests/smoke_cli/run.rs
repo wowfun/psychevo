@@ -1153,21 +1153,18 @@ fn cli_run_errors_use_selected_output_format() {
     let workdir = temp.path().join("work");
     let config_dir = temp.path().join("config");
     std::fs::create_dir_all(&config_dir).expect("config dir");
-    let config = config_dir.join("config.jsonc");
+    let config = config_dir.join("config.toml");
     std::fs::write(
         &config,
-        r#"{
-          "model": "custom/local",
-          "provider": {
-            "custom": {
-              "options": {
-                "base_url": "https://example.invalid/v1",
-                "api_key_env": "PSYCHEVO_TEST_MISSING_KEY_SHOULD_NOT_EXIST"
-              },
-              "models": { "local": {} }
-            }
-          }
-        }"#,
+        r#"
+model = "custom/local"
+
+[provider.custom.options]
+base_url = "https://example.invalid/v1"
+api_key_env = "PSYCHEVO_TEST_MISSING_KEY_SHOULD_NOT_EXIST"
+
+[provider.custom.models.local]
+"#,
     )
     .expect("config");
 
@@ -1227,7 +1224,7 @@ fn cli_run_rejects_removed_flags() {
         &["run", "--workdir", ".", "hello"],
         &["run", "--max-context-messages", "1", "hello"],
         &["run", "--verbose", "hello"],
-        &["run", "--config", "config.jsonc", "hello"],
+        &["run", "--config", "config.toml", "hello"],
     ];
     for args in cases {
         let output = pevo_cmd(temp.path())

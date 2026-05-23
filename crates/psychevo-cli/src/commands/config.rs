@@ -54,10 +54,10 @@ fn print_paths(
 ) -> Result<()> {
     let value = json!({
         "home": home,
-        "global_config": home.join("config.jsonc"),
+        "global_config": home.join("config.toml"),
         "global_env": home.join(".env"),
         "local_dir": cwd.join(".psychevo"),
-        "local_config": cwd.join(".psychevo").join("config.jsonc"),
+        "local_config": cwd.join(".psychevo").join("config.toml"),
         "local_env": cwd.join(".psychevo").join(".env"),
         "state_db": resolve_state_db(env_map, home, cwd)?,
         "explicit_config": env_path("PSYCHEVO_CONFIG", env_map, cwd)?,

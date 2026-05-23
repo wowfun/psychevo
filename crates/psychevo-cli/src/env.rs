@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, anyhow};
 
 pub(crate) fn ensure_home_initialized(home: &Path) -> Result<()> {
-    let config = home.join("config.jsonc");
+    let config = home.join("config.toml");
     if !config.exists() {
         return Err(anyhow!(
             "Psychevo home is not initialized; run `pevo init` to create {}",

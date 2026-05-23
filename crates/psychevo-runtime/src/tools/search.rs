@@ -16,7 +16,24 @@ impl ToolBinding for SearchTool {
     }
 
     fn parameters(&self) -> Value {
-        json!({"type":"object","required":["query"],"properties":{"query":{"type":"string"},"path":{"type":"string"},"limit":{"type":"integer"}}})
+        json!({
+            "type": "object",
+            "required": ["query"],
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Literal UTF-8 string to search for; regular expression syntax is not interpreted."
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Directory or file path to search under, relative to the working directory or absolute inside it. Defaults to the working directory."
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of matches to return; defaults to 100 and is capped at 1000."
+                }
+            }
+        })
     }
 
     fn execution_mode(&self) -> ToolExecutionMode {
@@ -114,4 +131,3 @@ pub(crate) fn search_tool_impl(tool: WorkdirTool, args: Value) -> Result<Value> 
         "error": null
     }))
 }
-

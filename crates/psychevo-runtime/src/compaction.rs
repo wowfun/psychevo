@@ -845,8 +845,11 @@ mod tests {
         fs::create_dir_all(&home).expect("home");
         fs::create_dir_all(&workdir).expect("workdir");
         fs::write(
-            home.join("config.jsonc"),
-            r#"{"compression":{"threshold_percent":70,"reserve_tokens":5000}}"#,
+            home.join("config.toml"),
+            r#"[compression]
+threshold_percent = 70
+reserve_tokens = 5000
+"#,
         )
         .expect("config");
         let options = auto_check_options(home.join("state.db"), workdir, home);

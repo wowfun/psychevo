@@ -12,6 +12,12 @@ pub enum Error {
     Http(#[from] reqwest::Error),
     #[error("json failed: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("yaml failed: {0}")]
+    Yaml(#[from] serde_yaml::Error),
+    #[error("toml parse failed: {0}")]
+    TomlDe(#[from] toml::de::Error),
+    #[error("toml serialize failed: {0}")]
+    TomlSer(#[from] toml::ser::Error),
     #[error("agent failed: {0}")]
     Agent(#[from] psychevo_agent_core::Error),
     #[error("config failed: {0}")]

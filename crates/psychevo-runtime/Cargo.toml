@@ -7,7 +7,6 @@ license.workspace = true
 
 [dependencies]
 futures.workspace = true
-jsonc-parser.workspace = true
 libc.workspace = true
 portable-pty.workspace = true
 psychevo-agent-core = { path = "../psychevo-agent-core" }
@@ -22,6 +21,7 @@ tempfile.workspace = true
 thiserror.workspace = true
 tiktoken.workspace = true
 tokio.workspace = true
+toml.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]

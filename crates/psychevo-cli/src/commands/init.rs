@@ -10,26 +10,18 @@ use psychevo_runtime::SqliteStore;
 use crate::args::InitArgs;
 use crate::env::{inherited_env, resolve_psychevo_home};
 
-const STARTER_CONFIG: &str = r#"{
-  "model": "deepseek/deepseek-chat",
-  "provider": {
-    "deepseek": {
-      "options": {
-        "base_url": "https://api.deepseek.com/v1",
-        "api_key_env": "DEEPSEEK_API_KEY"
-      },
-      "models": {
-        "deepseek-chat": {
-          "reasoning_effort": "medium"
-        }
-      }
-    }
-  }
-}
+const STARTER_CONFIG: &str = r#"model = "deepseek/deepseek-chat"
+
+[provider.deepseek.options]
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+
+[provider.deepseek.models.deepseek-chat]
+reasoning_effort = "medium"
 "#;
 
 const STARTER_ENV: &str = r#"# Psychevo live provider credentials.
-# Keep raw API keys here or in your shell environment, not in config.jsonc.
+# Keep raw API keys here or in your shell environment, not in config.toml.
 #
 # DEEPSEEK_API_KEY=sk-...
 "#;
@@ -38,7 +30,7 @@ pub(crate) fn run_init_command(args: InitArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
-    let config = home.join("config.jsonc");
+    let config = home.join("config.toml");
     let env_file = home.join(".env");
     let state = home.join("state.db");
     let sessions = home.join("sessions");

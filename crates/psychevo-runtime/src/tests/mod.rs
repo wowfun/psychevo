@@ -62,6 +62,14 @@ fn home_dir(temp: &tempfile::TempDir) -> PathBuf {
     temp.path().join(".psychevo")
 }
 
+fn write_config(path: impl AsRef<std::path::Path>, content: &str) -> std::io::Result<()> {
+    let mut text = content.to_string();
+    if !text.ends_with('\n') {
+        text.push('\n');
+    }
+    fs::write(path, text)
+}
+
 struct CatalogServer {
     base_url: String,
     requests: Arc<Mutex<Vec<String>>>,
@@ -122,6 +130,34 @@ fn read_http_request(stream: &mut std::net::TcpStream) -> String {
         }
     }
     String::from_utf8_lossy(&request).to_string()
+}
+
+fn assert_schema_property_descriptions(tool_name: &str, schema: &Value) {
+    let mut missing = Vec::new();
+    collect_missing_schema_descriptions(schema, tool_name.to_string(), &mut missing);
+    assert!(
+        missing.is_empty(),
+        "{tool_name} has schema properties without descriptions: {missing:?}"
+    );
+}
+
+fn collect_missing_schema_descriptions(value: &Value, path: String, missing: &mut Vec<String>) {
+    if let Some(properties) = value.get("properties").and_then(Value::as_object) {
+        for (name, property) in properties {
+            let property_path = format!("{path}.{name}");
+            let described = property
+                .get("description")
+                .and_then(Value::as_str)
+                .is_some_and(|description| !description.trim().is_empty());
+            if !described {
+                missing.push(property_path.clone());
+            }
+            collect_missing_schema_descriptions(property, property_path, missing);
+        }
+    }
+    if let Some(items) = value.get("items") {
+        collect_missing_schema_descriptions(items, format!("{path}[]"), missing);
+    }
 }
 
 // Runtime tests are split by subsystem while sharing this module's fixtures.

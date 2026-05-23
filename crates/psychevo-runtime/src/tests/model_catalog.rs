@@ -24,26 +24,22 @@ fn model_catalog_providers_resolve_auth_and_no_auth() {
     let mut options = base_options(&temp);
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
-    fs::write(
-        config_dir.join("config.jsonc"),
+    write_config(
+        config_dir.join("config.toml"),
         r#"
-            {
-              "model": "openai/gpt-4.1",
-              "provider": {
-                "openai": {
-                  "options": {
-                    "base_url": "http://api.example/v1",
-                    "api_key_env": "OPENAI_API_KEY"
-                  },
-                  "models": { "gpt-4.1": {} }
-                },
-                "lmstudio": {
-                  "options": { "base_url": "http://127.0.0.1:1234/v1" },
-                  "models": {}
-                }
-              }
-            }
-            "#,
+model = "openai/gpt-4.1"
+
+[provider.openai.options]
+base_url = "http://api.example/v1"
+api_key_env = "OPENAI_API_KEY"
+
+[provider.openai.models."gpt-4.1"]
+
+[provider.lmstudio.options]
+base_url = "http://127.0.0.1:1234/v1"
+
+[provider.lmstudio.models]
+"#,
     )
     .expect("config");
     options.inherited_env = Some(BTreeMap::from([(

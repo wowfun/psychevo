@@ -28,13 +28,13 @@ Dev home is ready at:
   $dev_home
 
 Prepare live credentials manually before running live validation:
-  $dev_home/config.jsonc
+  $dev_home/config.toml
   $dev_home/.env
 EOF
 }
 
 require_dev_home() {
-  if [[ ! -f "$dev_home/config.jsonc" || ! -f "$dev_home/.env" ]]; then
+  if [[ ! -f "$dev_home/config.toml" || ! -f "$dev_home/.env" ]]; then
     printf 'dev home is not initialized: %s\nrun: %s init\n' "$dev_home" "$0" >&2
     exit 2
   fi

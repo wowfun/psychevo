@@ -298,6 +298,209 @@ async fn injected_user_shell_context_reaches_next_provider_request() {
 }
 
 #[tokio::test]
+async fn steered_user_message_reaches_next_provider_request_and_completion() {
+    let provider = RequestRecordingProvider::new(vec![
+        vec![
+            RawStreamEvent::ToolStart {
+                content_index: 0,
+                call_index: 0,
+                id: "slow".to_string(),
+                name: "read".to_string(),
+            },
+            RawStreamEvent::ToolArgs {
+                content_index: 0,
+                call_index: 0,
+                delta: "{\"delay\":50}".to_string(),
+            },
+            RawStreamEvent::ToolEnd {
+                content_index: 0,
+                call_index: 0,
+            },
+            RawStreamEvent::Done(Outcome::Normal),
+        ],
+        vec![
+            RawStreamEvent::Text("done".to_string()),
+            RawStreamEvent::Done(Outcome::Normal),
+        ],
+    ]);
+    let requests = Arc::clone(&provider.requests);
+    let (control, receivers) = ControlHandle::new();
+    let sink = RecordingSink::default();
+    let events = Arc::clone(&sink.events);
+    let task = tokio::spawn(run_agent_loop(
+        Arc::new(provider),
+        AgentLoopRequest {
+            model_provider: "fake".to_string(),
+            model: "fake".to_string(),
+            generation_metadata: json!({}),
+            prompt_instructions: Vec::new(),
+            turn_prompt_instructions: Vec::new(),
+            previous_messages: vec![],
+            context_messages: Vec::new(),
+            prefix_contextual_user_messages: Vec::new(),
+            turn_contextual_user_messages: Vec::new(),
+            prompt_messages: vec![user_text_message("run")],
+            tools: vec![Arc::new(DelayTool)],
+            max_turns: 4,
+        },
+        Arc::new(sink),
+        receivers,
+    ));
+
+    wait_for_request_count(&requests, 1).await;
+    let pending_id = control
+        .steer_user_message(user_text_message("please adjust now"))
+        .expect("pending input id");
+    let completion = task.await.expect("join").expect("loop");
+    assert_eq!(completion.outcome, Outcome::Normal);
+    assert!(
+        completion
+            .messages
+            .iter()
+            .any(|message| serde_json::to_string(message)
+                .expect("message json")
+                .contains("please adjust now")),
+        "steered user message should be committed"
+    );
+
+    let requests = requests.lock().expect("requests");
+    assert_eq!(requests.len(), 2);
+    let second = serde_json::to_string(&requests[1].messages).expect("request json");
+    assert!(second.contains("please adjust now"));
+
+    let guard = events.lock().expect("events");
+    let committed_metadata = guard.iter().any(|event| {
+        matches!(
+            event,
+            AgentEvent::MessageEnd {
+                message: Message::User { .. },
+                metadata: Some(metadata),
+                ..
+            } if metadata["pending_input"]["id"] == pending_id.as_u64()
+                && metadata["pending_input"]["kind"] == "steer"
+        )
+    });
+    assert!(
+        committed_metadata,
+        "committed steer should carry pending input metadata"
+    );
+}
+
+#[tokio::test]
+async fn pending_steer_can_be_updated_before_drain() {
+    let provider = RequestRecordingProvider::new(tool_script());
+    let requests = Arc::clone(&provider.requests);
+    let (control, receivers) = ControlHandle::new();
+    let task = tokio::spawn(run_agent_loop(
+        Arc::new(provider),
+        AgentLoopRequest {
+            model_provider: "fake".to_string(),
+            model: "fake".to_string(),
+            generation_metadata: json!({}),
+            prompt_instructions: Vec::new(),
+            turn_prompt_instructions: Vec::new(),
+            previous_messages: vec![],
+            context_messages: Vec::new(),
+            prefix_contextual_user_messages: Vec::new(),
+            turn_contextual_user_messages: Vec::new(),
+            prompt_messages: vec![user_text_message("run")],
+            tools: vec![Arc::new(DelayTool)],
+            max_turns: 4,
+        },
+        Arc::new(RecordingSink::default()),
+        receivers,
+    ));
+
+    wait_for_request_count(&requests, 1).await;
+    let pending_id = control
+        .steer_user_message(user_text_message("original steer"))
+        .expect("pending input id");
+    assert!(control.update_pending_user_message(pending_id, user_text_message("updated steer")));
+    let completion = task.await.expect("join").expect("loop");
+    assert_eq!(completion.outcome, Outcome::Normal);
+
+    let requests = requests.lock().expect("requests");
+    assert_eq!(requests.len(), 2);
+    let second = serde_json::to_string(&requests[1].messages).expect("request json");
+    assert!(second.contains("updated steer"));
+    assert!(!second.contains("original steer"));
+}
+
+#[tokio::test]
+async fn pending_steer_can_be_cancelled_before_drain() {
+    let provider = RequestRecordingProvider::new(tool_script());
+    let requests = Arc::clone(&provider.requests);
+    let (control, receivers) = ControlHandle::new();
+    let task = tokio::spawn(run_agent_loop(
+        Arc::new(provider),
+        AgentLoopRequest {
+            model_provider: "fake".to_string(),
+            model: "fake".to_string(),
+            generation_metadata: json!({}),
+            prompt_instructions: Vec::new(),
+            turn_prompt_instructions: Vec::new(),
+            previous_messages: vec![],
+            context_messages: Vec::new(),
+            prefix_contextual_user_messages: Vec::new(),
+            turn_contextual_user_messages: Vec::new(),
+            prompt_messages: vec![user_text_message("run")],
+            tools: vec![Arc::new(DelayTool)],
+            max_turns: 4,
+        },
+        Arc::new(RecordingSink::default()),
+        receivers,
+    ));
+
+    wait_for_request_count(&requests, 1).await;
+    let pending_id = control
+        .steer_user_message(user_text_message("cancel this steer"))
+        .expect("pending input id");
+    assert!(control.cancel_pending_user_message(pending_id));
+    let completion = task.await.expect("join").expect("loop");
+    assert_eq!(completion.outcome, Outcome::Normal);
+
+    let requests = requests.lock().expect("requests");
+    assert_eq!(requests.len(), 2);
+    let second = serde_json::to_string(&requests[1].messages).expect("request json");
+    assert!(!second.contains("cancel this steer"));
+}
+
+#[tokio::test]
+async fn cancel_pending_steer_after_drain_returns_false() {
+    let provider = RequestRecordingProvider::new(tool_script());
+    let requests = Arc::clone(&provider.requests);
+    let (control, receivers) = ControlHandle::new();
+    let task = tokio::spawn(run_agent_loop(
+        Arc::new(provider),
+        AgentLoopRequest {
+            model_provider: "fake".to_string(),
+            model: "fake".to_string(),
+            generation_metadata: json!({}),
+            prompt_instructions: Vec::new(),
+            turn_prompt_instructions: Vec::new(),
+            previous_messages: vec![],
+            context_messages: Vec::new(),
+            prefix_contextual_user_messages: Vec::new(),
+            turn_contextual_user_messages: Vec::new(),
+            prompt_messages: vec![user_text_message("run")],
+            tools: vec![Arc::new(DelayTool)],
+            max_turns: 4,
+        },
+        Arc::new(RecordingSink::default()),
+        receivers,
+    ));
+
+    wait_for_request_count(&requests, 1).await;
+    let pending_id = control
+        .steer_user_message(user_text_message("already drained steer"))
+        .expect("pending input id");
+    wait_for_request_count(&requests, 2).await;
+    assert!(!control.cancel_pending_user_message(pending_id));
+    let completion = task.await.expect("join").expect("loop");
+    assert_eq!(completion.outcome, Outcome::Normal);
+}
+
+#[tokio::test]
 async fn tool_execution_events_include_timing_fields() {
     let provider = Arc::new(FakeProvider::new(vec![
         vec![

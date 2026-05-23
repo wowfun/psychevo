@@ -1,7 +1,9 @@
 use crate::skills::{
-    ScanVerdict, SkillDiscoveryOptions, SkillTarget, discover_skills, format_skills_for_prompt,
-    list_skills_value, scan_skill_path, select_explicit_skills, select_skills_for_prompt,
-    set_skill_enabled, skill_context_fragments, skill_context_messages, view_skill_value,
+    SaveSkillBundleOptions, ScanVerdict, SkillDiscoveryOptions, SkillTarget, delete_skill_bundle,
+    discover_skills, format_skills_for_prompt, list_skill_bundles, list_skills_value,
+    save_skill_bundle, scan_skill_path, select_explicit_skills, select_skills_for_prompt,
+    set_skill_config_value, set_skill_enabled, skill_context_fragments, skill_context_messages,
+    view_skill_value,
 };
 use crate::tools::skill_tools_for_mode;
 
@@ -335,6 +337,137 @@ fn view_skill_reads_linked_files_but_rejects_path_escape() {
 }
 
 #[test]
+fn view_skill_reports_hermes_metadata_and_setup_readiness() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let workdir = temp.path().join("work");
+    fs::create_dir_all(&workdir).expect("workdir");
+    fs::create_dir_all(workdir.join(".git")).expect("git marker");
+    let skill_dir = home.join("skills").join("metadata");
+    fs::create_dir_all(skill_dir.join("references")).expect("refs");
+    fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: metadata\ndescription: metadata skill\ntags: [review, rust]\nrelated: [audit]\nplatforms: [linux]\nrequired_environment_variables:\n  - name: PSYCHEVO_TEST_TOKEN_DO_NOT_SET\n    prompt: Token\nrequired_credential_files: [secrets/token.json]\nsetup: Run setup.\nallowed-tools: [read]\ncompatibility: hermes\nlicense: MIT\n---\n\nUse ${PSYCHEVO_SKILL_DIR}.\n",
+    )
+    .expect("skill");
+    fs::write(skill_dir.join("references").join("guide.md"), "guide\n").expect("guide");
+
+    let catalog = discover_skills(&skill_options(&temp, &home, &workdir)).expect("catalog");
+    let value = view_skill_value(&catalog, "metadata", None).expect("view");
+
+    assert_eq!(value["readiness_status"], "setup_needed");
+    assert_eq!(value["source"], "global");
+    assert_eq!(value["platform_status"], "supported");
+    assert_eq!(
+        value["missing_required_environment_variables"],
+        serde_json::json!(["PSYCHEVO_TEST_TOKEN_DO_NOT_SET"])
+    );
+    assert_eq!(
+        value["missing_credential_files"],
+        serde_json::json!(["secrets/token.json"])
+    );
+    assert_eq!(value["tags"], serde_json::json!(["review", "rust"]));
+    assert_eq!(value["related_skills"], serde_json::json!(["audit"]));
+    assert_eq!(value["allowed_tools"], serde_json::json!(["read"]));
+    assert_eq!(
+        value["linked_files"]["references"],
+        serde_json::json!(["references/guide.md"])
+    );
+    assert!(
+        value["content"]
+            .as_str()
+            .expect("content")
+            .contains(skill_dir.to_str().expect("skill dir"))
+    );
+}
+
+#[test]
+fn skill_name_collisions_require_explicit_resolution_for_view() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let workdir = temp.path().join("work");
+    fs::create_dir_all(&workdir).expect("workdir");
+    fs::create_dir_all(workdir.join(".git")).expect("git marker");
+
+    write_package_skill(&workdir.join(".psychevo").join("skills"), "same", "project", "project");
+    write_package_skill(&home.join("skills"), "same", "global", "global");
+
+    let catalog = discover_skills(&skill_options(&temp, &home, &workdir)).expect("catalog");
+    assert!(view_skill_value(&catalog, "same", None).is_err());
+    assert!(catalog.collisions.contains_key("same"));
+}
+
+#[test]
+fn skill_bundles_project_scope_overrides_global_and_config_set_is_namespaced() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let workdir = temp.path().join("work");
+    fs::create_dir_all(&workdir).expect("workdir");
+
+    save_skill_bundle(
+        &home,
+        &workdir,
+        SaveSkillBundleOptions {
+            target: SkillTarget::Global,
+            name: "daily".to_string(),
+            skills: vec!["global".to_string()],
+            description: Some("global bundle".to_string()),
+            instruction: None,
+            overwrite: false,
+        },
+    )
+    .expect("global bundle");
+    save_skill_bundle(
+        &home,
+        &workdir,
+        SaveSkillBundleOptions {
+            target: SkillTarget::Project,
+            name: "daily".to_string(),
+            skills: vec!["project".to_string()],
+            description: Some("project bundle".to_string()),
+            instruction: None,
+            overwrite: false,
+        },
+    )
+    .expect("project bundle");
+    fs::write(
+        home.join("skill-bundles").join("stale.yaml"),
+        "name: stale\nskills: [old]\n",
+    )
+    .expect("legacy yaml bundle");
+
+    let bundles = list_skill_bundles(&home, &workdir).expect("bundles");
+    assert_eq!(bundles.len(), 1);
+    assert_eq!(bundles[0].scope, SkillTarget::Project);
+    assert_eq!(bundles[0].skills, vec!["project"]);
+
+    let err = set_skill_config_value(
+        &home,
+        &workdir,
+        SkillTarget::Global,
+        "providers.openai",
+        serde_json::json!(true),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("skills.config.*"));
+
+    set_skill_config_value(
+        &home,
+        &workdir,
+        SkillTarget::Global,
+        "skills.config.daily.enabled",
+        serde_json::json!(true),
+    )
+    .expect("config set");
+    let config = fs::read_to_string(home.join("config.toml")).expect("config");
+    assert!(config.contains("[skills.config.daily]"));
+    assert!(config.contains("enabled = true"));
+
+    delete_skill_bundle(&home, &workdir, SkillTarget::Project, "daily").expect("delete");
+    assert_eq!(list_skill_bundles(&home, &workdir).expect("bundles")[0].scope, SkillTarget::Global);
+}
+
+#[test]
 fn skill_scanner_flags_dangerous_content() {
     let temp = tempdir().expect("temp");
     let skill_dir = temp.path().join("danger");
@@ -372,7 +505,10 @@ fn skill_tools_are_read_only_in_plan_and_mutating_in_build() {
         .iter()
         .map(|tool| tool.name().to_string())
         .collect::<Vec<_>>();
-    assert_eq!(plan, vec!["list_skills", "view_skill"]);
+    assert_eq!(
+        plan,
+        vec!["list_skills", "view_skill", "skill_hub", "skill_config"]
+    );
 
     let build = skill_tools_for_mode(options, RunMode::Build)
         .iter()
@@ -383,12 +519,25 @@ fn skill_tools_are_read_only_in_plan_and_mutating_in_build() {
         vec![
             "list_skills",
             "view_skill",
-            "create_skill",
-            "patch_skill",
-            "remove_skill",
-            "enable_skill",
-            "disable_skill",
-            "install_skill"
+            "skill_manage",
+            "skill_hub",
+            "skill_config"
         ]
     );
+}
+
+#[test]
+fn skill_tool_schemas_describe_parameters() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let workdir = temp.path().join("work");
+    fs::create_dir_all(&workdir).expect("workdir");
+    fs::create_dir_all(workdir.join(".git")).expect("git marker");
+    let options = skill_options(&temp, &home, &workdir);
+
+    for mode in [RunMode::Plan, RunMode::Build] {
+        for tool in skill_tools_for_mode(options.clone(), mode) {
+            assert_schema_property_descriptions(tool.name(), &tool.parameters());
+        }
+    }
 }

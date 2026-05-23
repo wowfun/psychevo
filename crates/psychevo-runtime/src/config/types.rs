@@ -221,7 +221,7 @@ fn load_config_value(options: &RunOptions, workdir: &Path) -> Result<LoadedConfi
     let mut sources = Vec::new();
 
     if let Some(config_path) = resolve_config_path(options, &env_map)? {
-        let loaded = load_jsonc_config_file(&config_path, true)?;
+        let loaded = load_toml_config_file(&config_path, true)?;
         deep_merge(&mut value, loaded);
         sources.push(config_path.clone());
         if let Some(parent) = config_path.parent() {
@@ -229,19 +229,19 @@ fn load_config_value(options: &RunOptions, workdir: &Path) -> Result<LoadedConfi
         }
     } else {
         let home = resolve_psychevo_home(&env_map)?;
-        let home_config = home.join("config.jsonc");
+        let home_config = home.join(CONFIG_FILE_NAME);
         if !home_config.exists() {
             return Err(Error::Config(format!(
                 "Psychevo home is not initialized; run `pevo init` to create {}",
                 home_config.display()
             )));
         }
-        let loaded = load_jsonc_config_file(&home_config, true)?;
+        let loaded = load_toml_config_file(&home_config, true)?;
         deep_merge(&mut value, loaded);
         sources.push(home_config);
         load_dotenv_file(&home.join(".env"), &mut env_map)?;
-        let project_config = project_dir.join("config.jsonc");
-        let loaded = load_jsonc_config_file(&project_config, false)?;
+        let project_config = project_dir.join(CONFIG_FILE_NAME);
+        let loaded = load_toml_config_file(&project_config, false)?;
         if project_config.exists() {
             sources.push(project_config);
         }

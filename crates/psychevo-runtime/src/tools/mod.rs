@@ -19,9 +19,9 @@ use crate::config::LspConfig;
 use crate::error::{Error, Result};
 use crate::prompt_templates;
 use crate::skills::{
-    InstallOptions, SkillDiscoveryOptions, SkillTarget, create_skill, discover_skills,
-    install_skill, list_skills_value, patch_skill, remove_skill, set_skill_enabled,
-    view_skill_value,
+    InstallOptions, ListSkillsOptions, SkillDiscoveryOptions, SkillTarget, create_skill,
+    discover_skills, install_skill, list_skills_value_with_options, patch_skill, remove_skill,
+    set_skill_config_value, set_skill_enabled, view_skill_value,
 };
 use crate::types::{RunMode, RunStreamEvent, RunStreamSink};
 
@@ -102,12 +102,12 @@ pub(crate) fn skill_tools_for_mode(
         Arc::new(ViewSkillTool::new(options.clone())),
     ];
     if mode == RunMode::Build {
-        tools.push(Arc::new(CreateSkillTool::new(options.clone())));
-        tools.push(Arc::new(PatchSkillTool::new(options.clone())));
-        tools.push(Arc::new(RemoveSkillTool::new(options.clone())));
-        tools.push(Arc::new(EnableSkillTool::new(options.clone())));
-        tools.push(Arc::new(DisableSkillTool::new(options.clone())));
-        tools.push(Arc::new(InstallSkillTool::new(options)));
+        tools.push(Arc::new(SkillManageTool::new(options.clone())));
+        tools.push(Arc::new(SkillHubTool::new(options.clone(), mode)));
+        tools.push(Arc::new(SkillConfigTool::new(options, mode)));
+    } else {
+        tools.push(Arc::new(SkillHubTool::new(options.clone(), mode)));
+        tools.push(Arc::new(SkillConfigTool::new(options, mode)));
     }
     tools
 }

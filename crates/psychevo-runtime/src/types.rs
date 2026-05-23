@@ -5,7 +5,9 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use futures::future::BoxFuture;
-use psychevo_agent_core::{ControlHandle, ControlReceivers, Message, TerminalReason};
+use psychevo_agent_core::{
+    ControlHandle, ControlReceivers, Message, PendingInputId, TerminalReason,
+};
 use psychevo_ai::Outcome;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -913,6 +915,18 @@ impl RunControlHandle {
 
     pub fn inject_user_message(&self, message: Message) -> bool {
         self.inner.inject_user_message(message)
+    }
+
+    pub fn steer_user_message(&self, message: Message) -> Option<PendingInputId> {
+        self.inner.steer_user_message(message)
+    }
+
+    pub fn update_pending_user_message(&self, id: PendingInputId, message: Message) -> bool {
+        self.inner.update_pending_user_message(id, message)
+    }
+
+    pub fn cancel_pending_user_message(&self, id: PendingInputId) -> bool {
+        self.inner.cancel_pending_user_message(id)
     }
 
     pub fn submit_clarify_result(&self, call_id: &str, result: ClarifyResult) -> bool {

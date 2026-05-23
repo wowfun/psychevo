@@ -687,28 +687,24 @@ EOF
   port="$(cat "$port_file")"
 
   PSYCHEVO_HOME="$home" "$pevo_bin" init >/dev/null
-  cat > "$home/config.jsonc" <<EOF
-{
-  "model": "mock/mock-model",
-  "provider": {
-    "mock": {
-      "options": {
-        "base_url": "http://127.0.0.1:$port/v1",
-        "api_key_env": "TEST_PROVIDER_KEY"
-      },
-      "models": {
-        "mock-model": {
-          "reasoning_effort": "high",
-          "limit": { "context": 64000 }
-        },
-        "other-model": {
-          "reasoning_effort": "medium",
-          "limit": { "context": 32000 }
-        }
-      }
-    }
-  }
-}
+  cat > "$home/config.toml" <<EOF
+model = "mock/mock-model"
+
+[provider.mock.options]
+base_url = "http://127.0.0.1:$port/v1"
+api_key_env = "TEST_PROVIDER_KEY"
+
+[provider.mock.models.mock-model]
+reasoning_effort = "high"
+
+[provider.mock.models.mock-model.limit]
+context = 64000
+
+[provider.mock.models.other-model]
+reasoning_effort = "medium"
+
+[provider.mock.models.other-model.limit]
+context = 32000
 EOF
   cat > "$home/.env" <<'EOF'
 TEST_PROVIDER_KEY=test-key
@@ -716,7 +712,7 @@ EOF
 
   local pevo_cmd
   pevo_cmd="$(shell_quote_args env -u NO_COLOR TERM=xterm-256color COLORTERM=truecolor CLICOLOR_FORCE=1 "$pevo_bin" tui --dir "$workdir" -m mock/mock-model --variant high --debug)"
-  write_tape "$tape" "$out_dir" "$home" "$home/state.db" "$workdir" "$home/config.jsonc" "$pevo_cmd"
+  write_tape "$tape" "$out_dir" "$home" "$home/state.db" "$workdir" "$home/config.toml" "$pevo_cmd"
 
   (
     cd "$repo_root"

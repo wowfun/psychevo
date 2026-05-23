@@ -189,25 +189,19 @@ fn write_run_config_with_reasoning(
     std::fs::create_dir_all(dir).expect("config dir");
     std::fs::write(dir.join(".env"), "TEST_PROVIDER_KEY=test-key\n").expect("env");
     let reasoning = reasoning_effort
-        .map(|value| format!(r#""reasoning_effort": "{value}""#))
+        .map(|value| format!("reasoning_effort = \"{value}\"\n"))
         .unwrap_or_default();
     let config = format!(
-        r#"{{
-          "model": "mock/mock-model",
-          "provider": {{
-            "mock": {{
-              "options": {{
-                "base_url": "{base_url}",
-                "api_key_env": "TEST_PROVIDER_KEY"
-              }},
-              "models": {{
-                "mock-model": {{{reasoning}}}
-              }}
-            }}
-          }}
-        }}"#
+        r#"model = "mock/mock-model"
+
+[provider.mock.options]
+base_url = "{base_url}"
+api_key_env = "TEST_PROVIDER_KEY"
+
+[provider.mock.models."mock-model"]
+{reasoning}"#
     );
-    let path = dir.join("config.jsonc");
+    let path = dir.join("config.toml");
     std::fs::write(&path, config).expect("config");
     path
 }
@@ -216,23 +210,19 @@ fn write_multi_model_config(dir: &Path, base_url: &str) -> PathBuf {
     std::fs::create_dir_all(dir).expect("config dir");
     std::fs::write(dir.join(".env"), "TEST_PROVIDER_KEY=test-key\n").expect("env");
     let config = format!(
-        r#"{{
-          "model": "mock/mock-model",
-          "provider": {{
-            "mock": {{
-              "options": {{
-                "base_url": "{base_url}",
-                "api_key_env": "TEST_PROVIDER_KEY"
-              }},
-              "models": {{
-                "mock-model": {{}},
-                "other-model": {{ "reasoning_effort": "high" }}
-              }}
-            }}
-          }}
-        }}"#
+        r#"model = "mock/mock-model"
+
+[provider.mock.options]
+base_url = "{base_url}"
+api_key_env = "TEST_PROVIDER_KEY"
+
+[provider.mock.models."mock-model"]
+
+[provider.mock.models."other-model"]
+reasoning_effort = "high"
+"#
     );
-    let path = dir.join("config.jsonc");
+    let path = dir.join("config.toml");
     std::fs::write(&path, config).expect("config");
     path
 }

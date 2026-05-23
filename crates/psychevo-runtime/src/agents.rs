@@ -1905,12 +1905,9 @@ fn known_tool_policy_name(name: &str) -> bool {
             | "resume_agent"
             | "list_skills"
             | "view_skill"
-            | "create_skill"
-            | "patch_skill"
-            | "remove_skill"
-            | "enable_skill"
-            | "disable_skill"
-            | "install_skill"
+            | "skill_manage"
+            | "skill_hub"
+            | "skill_config"
     ) || mcp_tool_server(name).is_some()
 }
 
@@ -2145,6 +2142,8 @@ fn plan_mode_tool_allowed(name: &str) -> bool {
             | "clarify"
             | "list_skills"
             | "view_skill"
+            | "skill_hub"
+            | "skill_config"
             | "Agent"
             | "list_agents"
             | "wait_agent"
@@ -2191,6 +2190,8 @@ fn agent_policy_allows_skill_catalog(agent: &AgentDefinition) -> bool {
     if agent.tool_policy.denied.contains("Skill")
         || agent.tool_policy.denied.contains("list_skills")
         || agent.tool_policy.denied.contains("view_skill")
+        || agent.tool_policy.denied.contains("skill_hub")
+        || agent.tool_policy.denied.contains("skill_config")
     {
         return false;
     }
@@ -2198,6 +2199,8 @@ fn agent_policy_allows_skill_catalog(agent: &AgentDefinition) -> bool {
         Some(allowed) => {
             allowed.contains("Skill")
                 || (allowed.contains("list_skills") && allowed.contains("view_skill"))
+                || allowed.contains("skill_hub")
+                || allowed.contains("skill_config")
         }
         None => true,
     }
@@ -2444,16 +2447,49 @@ impl ToolBinding for AgentTool {
         json!({
             "type": "object",
             "properties": {
-                "agent_type": {"type": "string", "description": "Agent definition name. Defaults to general."},
-                "name": {"type": "string", "description": "Compatibility alias for agent_type."},
-                "prompt": {"type": "string", "description": "Task for the subagent."},
-                "task_name": {"type": "string", "description": "Optional durable task name for later wait/send/close/resume."},
-                "background": {"type": "boolean", "description": "When true, return a handle immediately."},
-                "model": {"type": "string", "description": "Optional model override."},
-                "fork_context": {"type": "boolean", "description": "Include the parent context snapshot."},
-                "fork_turns": {"type": "string", "description": "none, all, or a positive integer count of recent parent messages."},
-                "max_turns": {"type": "integer", "minimum": 1},
-                "max_spawn_depth": {"type": "integer", "minimum": 0, "maximum": MAX_AGENT_SPAWN_DEPTH_CAP}
+                "agent_type": {
+                    "type": "string",
+                    "description": "Agent definition name to run. Defaults to general when omitted and no @agent mention requires a specific target."
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Compatibility alias for agent_type; calls fail if both fields are supplied with different non-empty values."
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "Complete task instructions for the child agent."
+                },
+                "task_name": {
+                    "type": "string",
+                    "description": "Optional durable task label used later by wait/send/close/resume control tools; does not select the agent definition."
+                },
+                "background": {
+                    "type": "boolean",
+                    "description": "When true, return a handle immediately and deliver completion through the parent mailbox; false waits for the child summary."
+                },
+                "model": {
+                    "type": "string",
+                    "description": "Optional model override for this child run; omitted means inherit the resolved model."
+                },
+                "fork_context": {
+                    "type": "boolean",
+                    "description": "When true, include a snapshot of parent context instead of starting with fresh child context."
+                },
+                "fork_turns": {
+                    "type": "string",
+                    "description": "Parent-context slice for fork_context: none, all, or a positive integer count of recent parent messages."
+                },
+                "max_turns": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Maximum model turns for the child run; omitted uses the agent definition or runtime default."
+                },
+                "max_spawn_depth": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": MAX_AGENT_SPAWN_DEPTH_CAP,
+                    "description": "Additional descendant spawn levels this child may create. 0 makes it a leaf; values above the runtime cap are rejected."
+                }
             },
             "required": ["prompt"],
             "additionalProperties": false
@@ -3542,7 +3578,11 @@ impl ToolBinding for WaitAgentTool {
         json!({
             "type": "object",
             "properties": {
-                "timeout_ms": {"type": "integer", "minimum": 0}
+                "timeout_ms": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Maximum time to wait for a pending or newly arriving background-agent mailbox event; defaults to 30000 milliseconds."
+                }
             },
             "additionalProperties": false
         })
@@ -3630,8 +3670,14 @@ impl ToolBinding for SendMessageTool {
         json!({
             "type": "object",
             "properties": {
-                "target": {"type": "string"},
-                "message": {"type": "string"}
+                "target": {
+                    "type": "string",
+                    "description": "Agent id or unambiguous model-visible task label identifying the child agent to message."
+                },
+                "message": {
+                    "type": "string",
+                    "description": "Message text to send as the next user turn for the target agent."
+                }
             },
             "required": ["target", "message"],
             "additionalProperties": false
@@ -3698,7 +3744,12 @@ impl ToolBinding for CloseAgentTool {
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
-            "properties": {"target": {"type": "string"}},
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "description": "Agent id or unambiguous model-visible task label identifying the child agent to close."
+                }
+            },
             "required": ["target"],
             "additionalProperties": false
         })
@@ -3760,7 +3811,12 @@ impl ToolBinding for ResumeAgentTool {
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
-            "properties": {"id": {"type": "string"}},
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Agent id or unambiguous model-visible task label identifying the closed agent to reopen."
+                }
+            },
             "required": ["id"],
             "additionalProperties": false
         })
@@ -3993,6 +4049,59 @@ mod tests {
             denied_agent_names: BTreeSet::new(),
             required_agent_names: Vec::new(),
             spawn_depth_remaining: None,
+        }
+    }
+
+    fn assert_tool_schema_descriptions(tool: &dyn ToolBinding) {
+        let mut missing = Vec::new();
+        collect_missing_schema_descriptions(
+            &tool.parameters(),
+            tool.name().to_string(),
+            &mut missing,
+        );
+        assert!(
+            missing.is_empty(),
+            "{} has schema properties without descriptions: {:?}",
+            tool.name(),
+            missing
+        );
+    }
+
+    fn collect_missing_schema_descriptions(value: &Value, path: String, missing: &mut Vec<String>) {
+        if let Some(properties) = value.get("properties").and_then(Value::as_object) {
+            for (name, property) in properties {
+                let property_path = format!("{path}.{name}");
+                let described = property
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .is_some_and(|description| !description.trim().is_empty());
+                if !described {
+                    missing.push(property_path.clone());
+                }
+                collect_missing_schema_descriptions(property, property_path, missing);
+            }
+        }
+        if let Some(items) = value.get("items") {
+            collect_missing_schema_descriptions(items, format!("{path}[]"), missing);
+        }
+    }
+
+    #[test]
+    fn agent_control_tool_schemas_describe_parameters() {
+        let tmp = TempDir::new().expect("tmp");
+        let db_path = tmp.path().join("state.sqlite");
+        let store = SqliteStore::open(&db_path).expect("store");
+        let context = test_agent_tool_context(
+            &tmp,
+            Arc::new(FakeProvider::new(Vec::new())),
+            store,
+            db_path,
+            "parent".to_string(),
+            AgentCatalog::default(),
+        );
+
+        for tool in agent_tools(context) {
+            assert_tool_schema_descriptions(tool.as_ref());
         }
     }
 
@@ -4663,6 +4772,17 @@ Plan the work.
             base_dir: PathBuf::from("/tmp/reviewer"),
             source: crate::skills::SkillSource::Project,
             disable_model_invocation: false,
+            category: None,
+            tags: Vec::new(),
+            related: Vec::new(),
+            platforms: Vec::new(),
+            required_environment_variables: Vec::new(),
+            required_credential_files: Vec::new(),
+            setup_help: None,
+            compatibility: None,
+            license: None,
+            allowed_tools: Vec::new(),
+            supported_on_current_platform: true,
         };
         let tools = apply_agent_tool_policy(
             vec![

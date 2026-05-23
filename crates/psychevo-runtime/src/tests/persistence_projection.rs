@@ -551,4 +551,27 @@ fn json_projection_hides_reasoning_unless_included() {
         }
         other => panic!("unexpected stream event: {other:?}"),
     }
+    let committed_steer = project_run_stream_event(&AgentEvent::MessageEnd {
+        message: Message::User {
+            content: vec![psychevo_agent_core::UserContentBlock::text("adjust")],
+            timestamp_ms: 2,
+        },
+        usage: None,
+        metadata: Some(json!({
+            "pending_input": {
+                "id": 7,
+                "kind": "steer"
+            }
+        })),
+    })
+    .expect("committed steer");
+    match committed_steer {
+        RunStreamEvent::Event(value) => {
+            assert_eq!(value["type"], "message_end");
+            assert_eq!(value["message"]["role"], "user");
+            assert_eq!(value["metadata"]["pending_input"]["id"], 7);
+            assert_eq!(value["metadata"]["pending_input"]["kind"], "steer");
+        }
+        other => panic!("unexpected stream event: {other:?}"),
+    }
 }

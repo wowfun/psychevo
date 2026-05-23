@@ -6,24 +6,24 @@ pub fn config_show_value(options: &RunOptions, scope: ConfigScope) -> Result<Val
     match scope {
         ConfigScope::Global => {
             let home = resolve_psychevo_home(&env_map)?;
-            let path = home.join("config.jsonc");
+            let path = home.join(CONFIG_FILE_NAME);
             Ok(config_document_value(
                 "global",
                 Some(path.clone()),
                 Vec::new(),
                 path.exists(),
-                load_jsonc_config_file(&path, false)?,
+                load_toml_config_file(&path, false)?,
             ))
         }
         ConfigScope::Local => {
             let workdir = canonical_workdir(&options.workdir)?;
-            let path = workdir.join(".psychevo").join("config.jsonc");
+            let path = workdir.join(".psychevo").join(CONFIG_FILE_NAME);
             Ok(config_document_value(
                 "local",
                 Some(path.clone()),
                 Vec::new(),
                 path.exists(),
-                load_jsonc_config_file(&path, false)?,
+                load_toml_config_file(&path, false)?,
             ))
         }
         ConfigScope::Effective => {

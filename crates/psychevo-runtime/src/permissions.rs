@@ -310,6 +310,10 @@ enum PermissionAction {
         paths: Vec<FileTarget>,
         mutating: bool,
     },
+    Skill {
+        tool: String,
+        action: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -353,6 +357,36 @@ impl PermissionAction {
                     mutating: true,
                 })
             }
+            "skill_manage" => {
+                args.get("action")
+                    .and_then(Value::as_str)
+                    .map(|action| Self::Skill {
+                        tool: "skill_manage".to_string(),
+                        action: action.to_string(),
+                    })
+            }
+            "skill_hub" => args
+                .get("action")
+                .and_then(Value::as_str)
+                .and_then(|action| {
+                    (!matches!(
+                        action,
+                        "browse" | "search" | "inspect" | "list" | "check" | "audit"
+                    ))
+                    .then(|| Self::Skill {
+                        tool: "skill_hub".to_string(),
+                        action: action.to_string(),
+                    })
+                }),
+            "skill_config" => args
+                .get("action")
+                .and_then(Value::as_str)
+                .and_then(|action| {
+                    (action != "status").then(|| Self::Skill {
+                        tool: "skill_config".to_string(),
+                        action: action.to_string(),
+                    })
+                }),
             _ => None,
         }
     }
@@ -372,6 +406,9 @@ impl PermissionAction {
                         }
                     })
             }
+            Self::Skill { tool, action } => {
+                rule.tool == *tool && wildcard_match(&rule.pattern, action)
+            }
         }
     }
 
@@ -386,6 +423,7 @@ impl PermissionAction {
                     .collect::<Vec<_>>()
                     .join(",")
             ),
+            Self::Skill { tool, action } => format!("{tool}:{action}"),
         }
     }
 
@@ -393,11 +431,14 @@ impl PermissionAction {
         match self {
             Self::ExecCommand { command, .. } => Some(format!("ExecCommand({command})")),
             Self::File { .. } => None,
+            Self::Skill { tool, action } => {
+                Some(format!("{}({action})", permission_rule_tool(tool)))
+            }
         }
     }
 
     fn allow_always(&self) -> bool {
-        matches!(self, Self::ExecCommand { .. })
+        matches!(self, Self::ExecCommand { .. } | Self::Skill { .. })
     }
 
     fn is_safe_file_edit(&self) -> bool {
@@ -505,6 +546,7 @@ fn hardline_deny(action: &PermissionAction) -> Option<String> {
                 protected_read_reason(target)
             }
         }),
+        PermissionAction::Skill { .. } => None,
     }
 }
 
@@ -526,6 +568,18 @@ fn default_ask_reason(action: &PermissionAction) -> Option<String> {
             dangerous_bash_reason(normalized)
         }
         PermissionAction::File { .. } => None,
+        PermissionAction::Skill { tool, action } => Some(format!(
+            "{tool} action `{action}` changes skill configuration or files and requires approval"
+        )),
+    }
+}
+
+fn permission_rule_tool(tool: &str) -> &str {
+    match tool {
+        "skill_manage" => "SkillManage",
+        "skill_hub" => "SkillHub",
+        "skill_config" => "SkillConfig",
+        other => other,
     }
 }
 
@@ -536,7 +590,7 @@ fn protected_write_reason(target: &FileTarget) -> Option<String> {
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("");
-    if rel == ".psychevo/config.jsonc" {
+    if rel == ".psychevo/config.toml" {
         return Some("permission configuration cannot be modified by model tools".to_string());
     }
     if file_name == ".env" {
@@ -725,6 +779,9 @@ fn parse_rule(raw: &str) -> Option<PermissionRule> {
         "Read" | "read" => "read",
         "Write" | "write" => "write",
         "Edit" | "edit" => "edit",
+        "SkillManage" | "skill_manage" => "skill_manage",
+        "SkillHub" | "skill_hub" => "skill_hub",
+        "SkillConfig" | "skill_config" => "skill_config",
         _ => return None,
     };
     Some(PermissionRule {
@@ -840,7 +897,7 @@ mod tests {
             PermissionConfig::default(),
             PermissionMode::BypassPermissions,
         );
-        let decision = runtime.evaluate("write", &json!({"path": ".psychevo/config.jsonc"}));
+        let decision = runtime.evaluate("write", &json!({"path": ".psychevo/config.toml"}));
         assert!(matches!(decision, PermissionDecision::Deny { .. }));
     }
 

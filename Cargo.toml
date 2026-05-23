@@ -21,7 +21,6 @@ crossterm = "0.29"
 futures = "0.3"
 ignore = "0.4.23"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
-jsonc-parser = { version = "0.32.3", features = ["cst", "serde"] }
 libc = "0.2.182"
 insta = "1"
 pretty_assertions = "1.4"
@@ -41,5 +40,6 @@ tempfile = "3.15"
 thiserror = "2.0"
 tiktoken = "3.1.4"
 tokio = { version = "1.42", features = ["rt-multi-thread", "macros", "sync", "process", "time", "io-util"] }
+toml = "0.8"
 unicode-width = "0.2"
 uuid = { version = "1.11", features = ["v7", "serde"] }

@@ -22,7 +22,7 @@ pub struct PromptImageExtraction {
     pub text: String,
 }
 
-pub(crate) struct PromptMessageBuild {
+pub struct PromptMessageBuild {
     pub message: Message,
 }
 
@@ -89,7 +89,7 @@ pub(crate) fn prompt_message_from_inputs(
     prompt_message_from_inputs_with_options(prompt, image_inputs, workdir, metadata, true)
 }
 
-pub(crate) fn prompt_message_from_inputs_with_options(
+pub fn prompt_message_from_inputs_with_options(
     prompt: &str,
     image_inputs: &[ImageInput],
     workdir: &Path,

@@ -1,25 +1,20 @@
 #[test]
-fn default_global_config_uses_home_psychevo_config_jsonc() {
+fn default_global_config_uses_home_psychevo_config_toml() {
     let temp = tempdir().expect("temp");
     let options = base_options(&temp);
     let global_dir = home_dir(&temp);
     fs::create_dir_all(&global_dir).expect("global dir");
-    fs::write(
-        global_dir.join("config.jsonc"),
+    write_config(
+        global_dir.join("config.toml"),
         r#"
-            {
-              "model": "deepseek/deepseek-chat",
-              "provider": {
-                "deepseek": {
-                  "options": {
-                    "base_url": "http://home.example/v1",
-                    "api_key_env": "DEEPSEEK_API_KEY"
-                  },
-                  "models": { "deepseek-chat": {} }
-                }
-              }
-            }
-            "#,
+model = "deepseek/deepseek-chat"
+
+[provider.deepseek.options]
+base_url = "http://home.example/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+
+[provider.deepseek.models."deepseek-chat"]
+"#,
     )
     .expect("global config");
     fs::write(global_dir.join(".env"), "DEEPSEEK_API_KEY=home-key\n").expect("global env");
@@ -49,22 +44,17 @@ fn psychevo_home_overrides_default_home() {
         ),
     ]));
     fs::create_dir_all(&custom_home).expect("home");
-    fs::write(
-        custom_home.join("config.jsonc"),
+    write_config(
+        custom_home.join("config.toml"),
         r#"
-            {
-              "model": "deepseek/deepseek-chat",
-              "provider": {
-                "deepseek": {
-                  "options": {
-                    "base_url": "http://custom-home.example/v1",
-                    "api_key_env": "DEEPSEEK_API_KEY"
-                  },
-                  "models": { "deepseek-chat": {} }
-                }
-              }
-            }
-            "#,
+model = "deepseek/deepseek-chat"
+
+[provider.deepseek.options]
+base_url = "http://custom-home.example/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+
+[provider.deepseek.models."deepseek-chat"]
+"#,
     )
     .expect("config");
     fs::write(custom_home.join(".env"), "DEEPSEEK_API_KEY=custom-key\n").expect("env");
@@ -84,42 +74,31 @@ fn config_merge_dotenv_precedence_and_provider_qualified_model() {
     let project_dir = options.workdir.join(".psychevo");
     fs::create_dir_all(&config_dir).expect("config dir");
     fs::create_dir_all(&project_dir).expect("project dir");
-    fs::write(
-        config_dir.join("config.jsonc"),
+    write_config(
+        config_dir.join("config.toml"),
         r#"
-            {
-              // global default
-              "model": "deepseek/deepseek-chat",
-              "provider": {
-                "deepseek": {
-                  "options": {
-                    "base_url": "http://global.example/v1",
-                    "api_key_env": "DEEPSEEK_API_KEY"
-                  },
-                  "models": {
-                    "deepseek-chat": { "reasoning_effort": "low" }
-                  }
-                }
-              }
-            }
-            "#,
+# global default
+model = "deepseek/deepseek-chat"
+
+[provider.deepseek.options]
+base_url = "http://global.example/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+
+[provider.deepseek.models."deepseek-chat"]
+reasoning_effort = "low"
+"#,
     )
     .expect("global config");
     fs::write(config_dir.join(".env"), "DEEPSEEK_API_KEY=global-key\n").expect("global env");
-    fs::write(
-        project_dir.join("config.jsonc"),
+    write_config(
+        project_dir.join("config.toml"),
         r#"
-            {
-              "provider": {
-                "deepseek": {
-                  "options": { "base_url": "http://project.example/v1" },
-                  "models": {
-                    "deepseek-chat": { "reasoning_effort": "high" }
-                  }
-                }
-              }
-            }
-            "#,
+[provider.deepseek.options]
+base_url = "http://project.example/v1"
+
+[provider.deepseek.models."deepseek-chat"]
+reasoning_effort = "high"
+"#,
     )
     .expect("project config");
     fs::write(project_dir.join(".env"), "DEEPSEEK_API_KEY='project-key'\n").expect("project env");
@@ -140,22 +119,16 @@ fn model_object_provider_and_reasoning_effort_are_resolved() {
     let options = base_options(&temp);
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
-    fs::write(
-        config_dir.join("config.jsonc"),
+    write_config(
+        config_dir.join("config.toml"),
         r#"
-            {
-              "model": {
-                "provider": "mimo",
-                "id": "mimo-v2.5",
-                "reasoning_effort": "medium"
-              },
-              "provider": {
-                "xiaomi": {
-                  "models": { "mimo-v2.5": {} }
-                }
-              }
-            }
-            "#,
+[model]
+provider = "mimo"
+id = "mimo-v2.5"
+reasoning_effort = "medium"
+
+[provider.xiaomi.models."mimo-v2.5"]
+"#,
     )
     .expect("config");
     fs::write(config_dir.join(".env"), "XIAOMI_API_KEY=xiaomi-key\n").expect("env");
@@ -175,25 +148,21 @@ fn selected_configured_model_reports_effective_reasoning_without_credentials() {
     let mut options = base_options(&temp);
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
-    fs::write(
-        config_dir.join("config.jsonc"),
+    write_config(
+        config_dir.join("config.toml"),
         r#"
-            {
-              "model": "custom/local",
-              "provider": {
-                "custom": {
-                  "options": {
-                    "base_url": "http://127.0.0.1:1234/v1",
-                    "api_key_env": "CUSTOM_KEY"
-                  },
-                  "models": {
-                    "local": { "reasoning_effort": "high" },
-                    "other": { "reasoning_effort": "low" }
-                  }
-                }
-              }
-            }
-            "#,
+model = "custom/local"
+
+[provider.custom.options]
+base_url = "http://127.0.0.1:1234/v1"
+api_key_env = "CUSTOM_KEY"
+
+[provider.custom.models.local]
+reasoning_effort = "high"
+
+[provider.custom.models.other]
+reasoning_effort = "low"
+"#,
     )
     .expect("config");
 
@@ -246,22 +215,18 @@ fn models_dev_cache_enriches_configured_model_by_base_url() {
         "#,
     )
     .expect("cache");
-    fs::write(
-        config_dir.join("config.jsonc"),
+    write_config(
+        config_dir.join("config.toml"),
         r#"
-        {
-          "provider": {
-            "xiaomi-token-plan": {
-              "label": "Xiaomi Token Plan",
-              "options": {
-                "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
-                "api_key_env": "XIAOMI_KEY"
-              },
-              "models": { "mimo-v2.5-pro": {} }
-            }
-          }
-        }
-        "#,
+[provider."xiaomi-token-plan"]
+label = "Xiaomi Token Plan"
+
+[provider."xiaomi-token-plan".options]
+base_url = "https://token-plan-cn.xiaomimimo.com/v1"
+api_key_env = "XIAOMI_KEY"
+
+[provider."xiaomi-token-plan".models."mimo-v2.5-pro"]
+"#,
     )
     .expect("config");
 
@@ -308,22 +273,18 @@ fn models_dev_cache_enriches_xiaomi_omni_capabilities_and_modalities() {
         "#,
     )
     .expect("cache");
-    fs::write(
-        config_dir.join("config.jsonc"),
+    write_config(
+        config_dir.join("config.toml"),
         r#"
-        {
-          "provider": {
-            "xiaomi-token-plan": {
-              "label": "Xiaomi Token Plan",
-              "options": {
-                "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
-                "api_key_env": "XIAOMI_KEY"
-              },
-              "models": { "mimo-v2-omni": {} }
-            }
-          }
-        }
-        "#,
+[provider."xiaomi-token-plan"]
+label = "Xiaomi Token Plan"
+
+[provider."xiaomi-token-plan".options]
+base_url = "https://token-plan-cn.xiaomimimo.com/v1"
+api_key_env = "XIAOMI_KEY"
+
+[provider."xiaomi-token-plan".models."mimo-v2-omni"]
+"#,
     )
     .expect("config");
 
@@ -475,30 +436,28 @@ fn explicit_metadata_config_override_wins_and_disables_reasoning() {
     let options = base_options(&temp);
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
-    fs::write(
-        config_dir.join("config.jsonc"),
+    write_config(
+        config_dir.join("config.toml"),
         r#"
-        {
-          "model": "deepseek/deepseek-chat",
-          "provider": {
-            "deepseek": {
-              "options": {
-                "base_url": "http://deepseek.example/v1",
-                "api_key_env": "DEEPSEEK_API_KEY"
-              },
-              "models": {
-                "deepseek-chat": {
-                  "reasoning_effort": "high",
-                  "reasoning": false,
-                  "tool_call": false,
-                  "limit": { "context": 1234, "output": 99 },
-                  "cost": { "input": 1.5, "output": 2.5 }
-                }
-              }
-            }
-          }
-        }
-        "#,
+model = "deepseek/deepseek-chat"
+
+[provider.deepseek.options]
+base_url = "http://deepseek.example/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+
+[provider.deepseek.models."deepseek-chat"]
+reasoning_effort = "high"
+reasoning = false
+tool_call = false
+
+[provider.deepseek.models."deepseek-chat".limit]
+context = 1234
+output = 99
+
+[provider.deepseek.models."deepseek-chat".cost]
+input = 1.5
+output = 2.5
+"#,
     )
     .expect("config");
     fs::write(config_dir.join(".env"), "DEEPSEEK_API_KEY=key\n").expect("env");
@@ -522,21 +481,17 @@ fn legacy_context_limit_config_field_is_rejected() {
     let options = base_options(&temp);
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
-    fs::write(
-        config_dir.join("config.jsonc"),
+    write_config(
+        config_dir.join("config.toml"),
         r#"
-        {
-          "model": "custom/local",
-          "provider": {
-            "custom": {
-              "options": { "base_url": "http://127.0.0.1:1234/v1" },
-              "models": {
-                "local": { "context_limit": 1234 }
-              }
-            }
-          }
-        }
-        "#,
+model = "custom/local"
+
+[provider.custom.options]
+base_url = "http://127.0.0.1:1234/v1"
+
+[provider.custom.models.local]
+context_limit = 1234
+"#,
     )
     .expect("config");
 
@@ -551,21 +506,15 @@ fn raw_api_keys_are_rejected() {
     let options = base_options(&temp);
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
-    fs::write(
-        config_dir.join("config.jsonc"),
+    write_config(
+        config_dir.join("config.toml"),
         r#"
-            {
-              "provider": {
-                "custom": {
-                  "options": {
-                    "base_url": "http://127.0.0.1:1234/v1",
-                    "api_key": "secret"
-                  },
-                  "models": { "local": {} }
-                }
-              }
-            }
-            "#,
+[provider.custom.options]
+base_url = "http://127.0.0.1:1234/v1"
+api_key = "secret"
+
+[provider.custom.models.local]
+"#,
     )
     .expect("config");
 
@@ -580,23 +529,20 @@ fn provider_label_is_display_only() {
     let options = base_options(&temp);
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
-    fs::write(
-        config_dir.join("config.jsonc"),
+    write_config(
+        config_dir.join("config.toml"),
         r#"
-            {
-              "model": "custom/local",
-              "provider": {
-                "custom": {
-                  "label": "Xiaomi Token Plan CN",
-                  "options": {
-                    "base_url": "http://127.0.0.1:1234/v1",
-                    "api_key_env": "CUSTOM_KEY"
-                  },
-                  "models": { "local": {} }
-                }
-              }
-            }
-            "#,
+model = "custom/local"
+
+[provider.custom]
+label = "Xiaomi Token Plan CN"
+
+[provider.custom.options]
+base_url = "http://127.0.0.1:1234/v1"
+api_key_env = "CUSTOM_KEY"
+
+[provider.custom.models.local]
+"#,
     )
     .expect("config");
     fs::write(config_dir.join(".env"), "CUSTOM_KEY=custom-key\n").expect("env");
@@ -615,12 +561,12 @@ fn create_global_custom_provider_writes_config_and_env() {
     let temp = tempdir().expect("temp");
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
-    fs::write(
-        config_dir.join("config.jsonc"),
-        r#"{
-          // keep this comment
-          "model": "deepseek/deepseek-chat"
-        }"#,
+    write_config(
+        config_dir.join("config.toml"),
+        r#"
+# keep this comment
+model = "deepseek/deepseek-chat"
+"#,
     )
     .expect("config");
 
@@ -637,11 +583,10 @@ fn create_global_custom_provider_writes_config_and_env() {
     assert_eq!(result.api_key_env, "XIAOMI_TOKEN_PLAN_CN_API_KEY");
     assert!(result.wrote_api_key);
     assert!(!result.reused_existing_api_key);
-    let config = fs::read_to_string(config_dir.join("config.jsonc")).expect("config");
-    assert!(config.contains("// keep this comment"));
-    assert!(config.contains(r#""label": "Xiaomi Token Plan CN""#));
-    assert!(config.contains(r#""base_url": "https://token-plan-cn.xiaomimimo.com/v1""#));
-    assert!(config.contains(r#""api_key_env": "XIAOMI_TOKEN_PLAN_CN_API_KEY""#));
+    let config = fs::read_to_string(config_dir.join("config.toml")).expect("config");
+    assert!(config.contains("label = \"Xiaomi Token Plan CN\""));
+    assert!(config.contains("base_url = \"https://token-plan-cn.xiaomimimo.com/v1\""));
+    assert!(config.contains("api_key_env = \"XIAOMI_TOKEN_PLAN_CN_API_KEY\""));
     assert!(!config.contains("secret-key"));
     let env = fs::read_to_string(config_dir.join(".env")).expect("env");
     assert_eq!(env, "XIAOMI_TOKEN_PLAN_CN_API_KEY=secret-key\n");
@@ -652,7 +597,7 @@ fn create_global_custom_provider_reuses_existing_env_without_overwrite() {
     let temp = tempdir().expect("temp");
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
-    fs::write(config_dir.join("config.jsonc"), "{}\n").expect("config");
+    write_config(config_dir.join("config.toml"), "\n").expect("config");
     fs::write(
         config_dir.join(".env"),
         "XIAOMI_TOKEN_PLAN_CN_API_KEY=existing-key\n",
@@ -679,9 +624,11 @@ fn create_global_custom_provider_rejects_duplicates_aliases_and_raw_keyless_crea
     let temp = tempdir().expect("temp");
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
-    fs::write(
-        config_dir.join("config.jsonc"),
-        r#"{ "provider": { "custom-one": { "models": {} } } }"#,
+    write_config(
+        config_dir.join("config.toml"),
+        r#"
+[provider."custom-one".models]
+"#,
     )
     .expect("config");
 
@@ -724,17 +671,11 @@ fn unique_model_default_and_multiple_model_rejection() {
     let options = base_options(&temp);
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
-    fs::write(
-        config_dir.join("config.jsonc"),
+    write_config(
+        config_dir.join("config.toml"),
         r#"
-            {
-              "provider": {
-                "xiaomi": {
-                  "models": { "mimo-v2.5": {} }
-                }
-              }
-            }
-            "#,
+[provider.xiaomi.models."mimo-v2.5"]
+"#,
     )
     .expect("config");
     fs::write(config_dir.join(".env"), "XIAOMI_API_KEY=xiaomi-key\n").expect("env");
@@ -746,17 +687,13 @@ fn unique_model_default_and_multiple_model_rejection() {
 
     let mut explicit_options = options.clone();
     explicit_options.model = Some("xiaomi/mimo-v2.5".to_string());
-    fs::write(
-        config_dir.join("config.jsonc"),
+    write_config(
+        config_dir.join("config.toml"),
         r#"
-            {
-              "provider": {
-                "xiaomi": {
-                  "models": { "one": {}, "two": {} }
-                }
-              }
-            }
-            "#,
+[provider.xiaomi.models.one]
+
+[provider.xiaomi.models.two]
+"#,
     )
     .expect("config");
     let loaded = load_run_config(&explicit_options, &workdir).expect("config");
@@ -771,21 +708,15 @@ fn cli_provider_qualified_model_selects_provider() {
     options.model = Some("deepseek/deepseek-chat".to_string());
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
-    fs::write(
-        config_dir.join("config.jsonc"),
+    write_config(
+        config_dir.join("config.toml"),
         r#"
-            {
-              "model": "xiaomi/mimo-v2.5",
-              "provider": {
-                "deepseek": {
-                  "models": { "deepseek-chat": {} }
-                },
-                "xiaomi": {
-                  "models": { "mimo-v2.5": {} }
-                }
-              }
-            }
-            "#,
+model = "xiaomi/mimo-v2.5"
+
+[provider.deepseek.models."deepseek-chat"]
+
+[provider.xiaomi.models."mimo-v2.5"]
+"#,
     )
     .expect("config");
     fs::write(
@@ -808,17 +739,11 @@ fn aliases_and_auto_resolution_use_local_env_map() {
     options.model = Some("qwen/qwen-test".to_string());
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
-    fs::write(
-        config_dir.join("config.jsonc"),
+    write_config(
+        config_dir.join("config.toml"),
         r#"
-            {
-              "provider": {
-                "dashscope": {
-                  "models": { "qwen-test": {} }
-                }
-              }
-            }
-            "#,
+[provider.dashscope.models."qwen-test"]
+"#,
     )
     .expect("config");
     fs::write(config_dir.join(".env"), "DASHSCOPE_API_KEY=qwen-key\n").expect("env");
@@ -840,16 +765,13 @@ fn aliases_and_auto_resolution_use_local_env_map() {
             "auto-model".to_string(),
         ),
     ]));
-    fs::write(
-        config_dir.join("config.jsonc"),
+    write_config(
+        config_dir.join("config.toml"),
         r#"
-            {
-              "provider": {
-                "openrouter": { "models": { "auto-model": {} } },
-                "deepseek": { "models": { "auto-model": {} } }
-              }
-            }
-            "#,
+[provider.openrouter.models."auto-model"]
+
+[provider.deepseek.models."auto-model"]
+"#,
     )
     .expect("config");
     fs::write(
@@ -871,33 +793,32 @@ fn explicit_config_replaces_home_and_project_config_but_loads_project_env() {
     fs::create_dir_all(&explicit_dir).expect("explicit dir");
     fs::create_dir_all(&project_dir).expect("project dir");
     fs::create_dir_all(home_dir(&temp)).expect("home dir");
-    fs::write(
-            home_dir(&temp).join("config.jsonc"),
-            r#"{ "model": "deepseek/ignored", "provider": { "deepseek": { "models": { "ignored": {} } } } }"#,
-        )
-        .expect("home config");
-    fs::write(
-        project_dir.join("config.jsonc"),
-        r#"{ "model": "deepseek/project-ignored" }"#,
+    write_config(
+        home_dir(&temp).join("config.toml"),
+        r#"
+model = "deepseek/ignored"
+
+[provider.deepseek.models.ignored]
+"#,
+    )
+    .expect("home config");
+    write_config(
+        project_dir.join("config.toml"),
+        r#"model = "deepseek/project-ignored""#,
     )
     .expect("project config");
-    let explicit = explicit_dir.join("config.jsonc");
-    fs::write(
+    let explicit = explicit_dir.join("config.toml");
+    write_config(
         &explicit,
         r#"
-            {
-              "model": "custom/local",
-              "provider": {
-                "custom": {
-                  "options": {
-                    "base_url": "http://127.0.0.1:1234/v1",
-                    "api_key_env": "CUSTOM_KEY"
-                  },
-                  "models": { "local": {} }
-                }
-              }
-            }
-            "#,
+model = "custom/local"
+
+[provider.custom.options]
+base_url = "http://127.0.0.1:1234/v1"
+api_key_env = "CUSTOM_KEY"
+
+[provider.custom.models.local]
+"#,
     )
     .expect("explicit config");
     fs::write(explicit_dir.join(".env"), "CUSTOM_KEY=explicit-key\n").expect("explicit env");
@@ -920,25 +841,26 @@ fn psychevo_config_env_is_supported_and_config_dir_is_ignored() {
     let explicit_dir = temp.path().join("explicit");
     fs::create_dir_all(&old_dir).expect("old dir");
     fs::create_dir_all(&explicit_dir).expect("explicit dir");
-    fs::write(
-        old_dir.join("config.jsonc"),
-        r#"{ "model": "deepseek/old", "provider": { "deepseek": { "models": { "old": {} } } } }"#,
+    write_config(
+        old_dir.join("config.toml"),
+        r#"
+model = "deepseek/old"
+
+[provider.deepseek.models.old]
+"#,
     )
     .expect("old config");
-    let explicit = explicit_dir.join("config.jsonc");
-    fs::write(
+    let explicit = explicit_dir.join("config.toml");
+    write_config(
         &explicit,
         r#"
-            {
-              "model": "custom/local",
-              "provider": {
-                "custom": {
-                  "options": { "base_url": "http://127.0.0.1:1234/v1" },
-                  "models": { "local": {} }
-                }
-              }
-            }
-            "#,
+model = "custom/local"
+
+[provider.custom.options]
+base_url = "http://127.0.0.1:1234/v1"
+
+[provider.custom.models.local]
+"#,
     )
     .expect("explicit config");
     options.inherited_env = Some(BTreeMap::from([
@@ -973,24 +895,51 @@ fn missing_home_config_rejects_before_agent_start() {
 }
 
 #[test]
+fn config_jsonc_without_toml_is_ignored_and_missing_home_rejects() {
+    let temp = tempdir().expect("temp");
+    let options = base_options(&temp);
+    let config_dir = home_dir(&temp);
+    fs::create_dir_all(&config_dir).expect("config dir");
+    fs::write(config_dir.join("config.jsonc"), r#"{"model":"deepseek/old"}"#).expect("jsonc");
+
+    let workdir = canonical_workdir(&options.workdir).expect("workdir");
+    let err = load_run_config(&options, &workdir).expect_err("missing toml");
+    assert!(err.to_string().contains("pevo init"));
+    assert!(err.to_string().contains("config.toml"));
+    assert!(!err.to_string().contains("config.jsonc"));
+}
+
+#[test]
+fn config_jsonc_is_ignored_when_toml_exists() {
+    let temp = tempdir().expect("temp");
+    let options = base_options(&temp);
+    let config_dir = home_dir(&temp);
+    fs::create_dir_all(&config_dir).expect("config dir");
+    fs::write(config_dir.join("config.toml"), r#"model = "deepseek/deepseek-chat""#)
+        .expect("toml config");
+    fs::write(config_dir.join("config.jsonc"), r#"{ this is not valid jsonc"#).expect("jsonc");
+
+    let workdir = canonical_workdir(&options.workdir).expect("workdir");
+    load_run_config(&options, &workdir).expect("config.jsonc ignored");
+}
+
+#[test]
 fn reasoning_effort_values_are_validated_and_none_disables() {
     let temp = tempdir().expect("temp");
     let mut options = base_options(&temp);
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
-    fs::write(
-        config_dir.join("config.jsonc"),
+    write_config(
+        config_dir.join("config.toml"),
         r#"
-            {
-              "model": "custom/local",
-              "provider": {
-                "custom": {
-                  "options": { "base_url": "http://127.0.0.1:1234/v1" },
-                  "models": { "local": { "reasoning_effort": "high" } }
-                }
-              }
-            }
-            "#,
+model = "custom/local"
+
+[provider.custom.options]
+base_url = "http://127.0.0.1:1234/v1"
+
+[provider.custom.models.local]
+reasoning_effort = "high"
+"#,
     )
     .expect("config");
 

@@ -63,10 +63,11 @@ pub use error::{Error, Result};
 pub use paths::canonicalize_workdir;
 pub use prompt_image::{
     extract_image_sources_from_prompt, model_metadata_explicitly_disallows_image_input,
-    prompt_starts_with_supported_image_path, resolve_image_source, split_image_source_argument,
+    prompt_message_from_inputs_with_options, prompt_starts_with_supported_image_path,
+    resolve_image_source, split_image_source_argument,
 };
 pub use prompt_templates::side_conversation_boundary_prompt;
-pub use psychevo_agent_core::TerminalReason;
+pub use psychevo_agent_core::{Message, PendingInputId, TerminalReason, UserContentBlock};
 pub use run::{
     reload_session_context, run_live, run_live_streaming, run_live_streaming_controlled,
     spawn_agent_background,
@@ -78,12 +79,15 @@ pub use session_export::{
 };
 pub use session_lookup::{latest_run_session_for_workdir, session_exists};
 pub use skills::{
-    InstallOptions, ScanResult, ScanVerdict, SelectedSkill, SkillCatalog, SkillDiagnostic,
-    SkillDiscoveryOptions, SkillSettings, SkillSource, SkillTarget, create_skill, discover_skills,
-    discover_skills_with_settings, expand_skill_prompt, install_skill, list_skills_value,
-    load_skill_settings, patch_skill, remove_skill, resolve_skills_home, scan_skill_path,
-    select_explicit_skills, select_skills_for_prompt, set_skill_enabled, skill_context_messages,
-    target_skills_dir, view_skill_value,
+    InstallOptions, ListSkillsOptions, SaveSkillBundleOptions, ScanResult, ScanVerdict,
+    SelectedSkill, SkillBundle, SkillCatalog, SkillDiagnostic, SkillDiscoveryOptions,
+    SkillSettings, SkillSource, SkillTarget, create_skill, delete_skill_bundle, discover_skills,
+    discover_skills_with_settings, edit_skill, expand_skill_prompt, install_skill,
+    list_skill_bundles, list_skills_value, list_skills_value_with_options, load_skill_settings,
+    patch_skill, remove_skill, remove_skill_file, resolve_skills_home, save_skill_bundle,
+    scan_skill_path, select_explicit_skills, select_skills_for_prompt, set_skill_config_value,
+    set_skill_enabled, skill_context_messages, target_skills_dir, view_skill_value,
+    write_skill_file,
 };
 pub use smoke::run_smoke;
 pub use stats::usage_stats;

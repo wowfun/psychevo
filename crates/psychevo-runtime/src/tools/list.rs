@@ -16,7 +16,19 @@ impl ToolBinding for ListTool {
     }
 
     fn parameters(&self) -> Value {
-        json!({"type":"object","properties":{"path":{"type":"string"},"limit":{"type":"integer"}}})
+        json!({
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Directory or file path to list, relative to the working directory or absolute inside it. Defaults to the working directory."
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of directory entries to return; defaults to 200 and is capped at 1000."
+                }
+            }
+        })
     }
 
     fn execution_mode(&self) -> ToolExecutionMode {
@@ -87,4 +99,3 @@ pub(crate) fn list_tool_impl(tool: WorkdirTool, args: Value) -> Result<Value> {
         "error": null
     }))
 }
-

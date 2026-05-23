@@ -2,18 +2,17 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::config::{CONFIG_FILE_NAME, load_toml_config_file, write_toml_config_file};
 use crate::error::{Error, Result};
 use crate::prompt_templates;
 
 const MAX_NAME_LENGTH: usize = 64;
 const MAX_DESCRIPTION_LENGTH: usize = 1024;
-const DISABLED_FILE: &str = ".disabled.json";
-const PROVENANCE_FILE: &str = ".provenance.json";
+const BUNDLES_DIR: &str = "skill-bundles";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Skill {
@@ -23,6 +22,17 @@ pub struct Skill {
     pub base_dir: PathBuf,
     pub source: SkillSource,
     pub disable_model_invocation: bool,
+    pub category: Option<String>,
+    pub tags: Vec<String>,
+    pub related: Vec<String>,
+    pub platforms: Vec<String>,
+    pub required_environment_variables: Vec<RequiredEnvironmentVariable>,
+    pub required_credential_files: Vec<String>,
+    pub setup_help: Option<String>,
+    pub compatibility: Option<String>,
+    pub license: Option<String>,
+    pub allowed_tools: Vec<String>,
+    pub supported_on_current_platform: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,7 +47,7 @@ pub enum SkillSource {
 }
 
 impl SkillSource {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Explicit => "explicit",
             Self::Project => "project",
@@ -83,6 +93,7 @@ impl SkillDiagnostic {
 pub struct SkillCatalog {
     pub skills: Vec<Skill>,
     pub diagnostics: Vec<SkillDiagnostic>,
+    pub collisions: BTreeMap<String, Vec<PathBuf>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -109,17 +120,45 @@ pub struct SkillDiscoveryOptions {
     pub no_skills: bool,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct SkillSettings {
     pub disabled: BTreeSet<String>,
+    pub platform_disabled: BTreeMap<String, BTreeSet<String>>,
     pub paths: Vec<PathBuf>,
     pub enable_commands: Option<bool>,
+    pub template_vars: bool,
+    pub inline_shell: bool,
+    pub inline_shell_timeout_secs: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+impl Default for SkillSettings {
+    fn default() -> Self {
+        Self {
+            disabled: BTreeSet::new(),
+            platform_disabled: BTreeMap::new(),
+            paths: Vec::new(),
+            enable_commands: None,
+            template_vars: true,
+            inline_shell: false,
+            inline_shell_timeout_secs: 10,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SkillTarget {
     Global,
     Project,
+}
+
+impl SkillTarget {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Global => "global",
+            Self::Project => "project",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -153,10 +192,38 @@ pub struct InstallOptions {
     pub force: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct SaveSkillBundleOptions {
+    pub target: SkillTarget,
+    pub name: String,
+    pub skills: Vec<String>,
+    pub description: Option<String>,
+    pub instruction: Option<String>,
+    pub overwrite: bool,
+}
+
 #[derive(Debug, Deserialize, Default)]
 struct SkillFrontmatter {
     name: Option<String>,
     description: Option<String>,
+    license: Option<String>,
+    compatibility: Option<String>,
+    metadata: Option<Value>,
+    tags: Option<Value>,
+    related: Option<Value>,
+    #[serde(rename = "related_skills")]
+    related_skills: Option<Value>,
+    platforms: Option<Value>,
+    prerequisites: Option<Value>,
+    setup: Option<Value>,
+    #[serde(rename = "required_environment_variables")]
+    required_environment_variables: Option<Value>,
+    #[serde(rename = "required_credential_files")]
+    required_credential_files: Option<Value>,
+    #[serde(rename = "allowed-tools")]
+    allowed_tools_hyphen: Option<Value>,
+    #[serde(rename = "allowed_tools")]
+    allowed_tools_underscore: Option<Value>,
     #[serde(rename = "disable-model-invocation")]
     disable_model_invocation: Option<bool>,
 }
@@ -164,8 +231,36 @@ struct SkillFrontmatter {
 #[derive(Debug, Deserialize, Default)]
 struct RawSkillSettings {
     disabled: Option<Vec<String>>,
+    platform_disabled: Option<BTreeMap<String, Vec<String>>>,
     paths: Option<Vec<String>>,
     enable_commands: Option<bool>,
+    template_vars: Option<bool>,
+    inline_shell: Option<bool>,
+    inline_shell_timeout: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RequiredEnvironmentVariable {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub help: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub required_for: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub optional: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SkillBundle {
+    pub name: String,
+    pub slug: String,
+    pub description: String,
+    pub skills: Vec<String>,
+    pub instruction: Option<String>,
+    pub path: PathBuf,
+    pub scope: SkillTarget,
 }
 
 pub fn load_skill_settings(
@@ -177,12 +272,15 @@ pub fn load_skill_settings(
     let mut merged = json!({});
     let env_config_path = env_path("PSYCHEVO_CONFIG", env);
     if let Some(config_path) = config_path.or(env_config_path.as_deref()) {
-        deep_merge(&mut merged, load_jsonc(config_path, true)?);
+        deep_merge(&mut merged, load_toml_config_file(config_path, true)?);
     } else {
-        deep_merge(&mut merged, load_jsonc(&home.join("config.jsonc"), false)?);
         deep_merge(
             &mut merged,
-            load_jsonc(&workdir.join(".psychevo").join("config.jsonc"), false)?,
+            load_toml_config_file(&home.join(CONFIG_FILE_NAME), false)?,
+        );
+        deep_merge(
+            &mut merged,
+            load_toml_config_file(&workdir.join(".psychevo").join(CONFIG_FILE_NAME), false)?,
         );
     }
     parse_skill_settings(&merged, home, workdir, env)
@@ -202,7 +300,7 @@ pub fn resolve_skills_home(env: &BTreeMap<String, String>, workdir: &Path) -> Re
 
 fn parse_skill_settings(
     value: &Value,
-    home: &Path,
+    _home: &Path,
     workdir: &Path,
     env: &BTreeMap<String, String>,
 ) -> Result<SkillSettings> {
@@ -216,20 +314,44 @@ fn parse_skill_settings(
                 settings.disabled.insert(name.to_string());
             }
         }
+        for (platform, names) in raw.platform_disabled.unwrap_or_default() {
+            let disabled = names
+                .into_iter()
+                .map(|name| name.trim().to_string())
+                .filter(|name| !name.is_empty())
+                .collect::<BTreeSet<_>>();
+            if !disabled.is_empty() {
+                settings.platform_disabled.insert(platform, disabled);
+            }
+        }
+        let platform = active_skill_platform(env);
+        if let Some(disabled) = settings.platform_disabled.get(platform) {
+            settings.disabled.extend(disabled.iter().cloned());
+        }
         for raw_path in raw.paths.unwrap_or_default() {
             settings
                 .paths
                 .push(resolve_configured_path(&raw_path, workdir, env)?);
         }
         settings.enable_commands = raw.enable_commands;
+        if let Some(value) = raw.template_vars {
+            settings.template_vars = value;
+        }
+        if let Some(value) = raw.inline_shell {
+            settings.inline_shell = value;
+        }
+        if let Some(value) = raw.inline_shell_timeout {
+            settings.inline_shell_timeout_secs = value.max(1);
+        }
     }
-    settings
-        .disabled
-        .extend(read_disabled_names(&home.join("skills"))?);
-    settings.disabled.extend(read_disabled_names(
-        &workdir.join(".psychevo").join("skills"),
-    )?);
     Ok(settings)
+}
+
+fn active_skill_platform(env: &BTreeMap<String, String>) -> &str {
+    env.get("PSYCHEVO_PLATFORM")
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("run")
 }
 
 pub fn discover_skills(options: &SkillDiscoveryOptions) -> Result<SkillCatalog> {
@@ -320,7 +442,7 @@ pub fn discover_skills_with_settings(
 pub fn format_skills_for_prompt(skills: &[Skill]) -> String {
     let visible = skills
         .iter()
-        .filter(|skill| !skill.disable_model_invocation)
+        .filter(|skill| !skill.disable_model_invocation && skill.supported_on_current_platform)
         .collect::<Vec<_>>();
     if visible.is_empty() {
         return String::new();
@@ -347,24 +469,119 @@ pub fn format_skills_for_prompt(skills: &[Skill]) -> String {
 }
 
 pub fn list_skills_value(catalog: &SkillCatalog, include_hidden: bool) -> Value {
+    list_skills_value_with_options(
+        catalog,
+        &ListSkillsOptions {
+            include_hidden,
+            ..ListSkillsOptions::default()
+        },
+    )
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ListSkillsOptions {
+    pub include_hidden: bool,
+    pub detail: bool,
+    pub category: Option<String>,
+    pub source: Option<String>,
+    pub enabled_only: bool,
+    pub platform: Option<String>,
+    pub tag: Option<String>,
+    pub readiness: Option<String>,
+    pub sort: Option<String>,
+}
+
+pub fn list_skills_value_with_options(
+    catalog: &SkillCatalog,
+    options: &ListSkillsOptions,
+) -> Value {
     let skills = catalog
         .skills
         .iter()
-        .filter(|skill| include_hidden || !skill.disable_model_invocation)
+        .filter(|skill| options.include_hidden || !skill.disable_model_invocation)
+        .filter(|skill| {
+            options
+                .category
+                .as_ref()
+                .is_none_or(|category| skill.category.as_deref() == Some(category.as_str()))
+        })
+        .filter(|skill| {
+            options
+                .source
+                .as_ref()
+                .is_none_or(|source| skill.source.as_str() == source)
+        })
+        .filter(|skill| {
+            !options.enabled_only
+                || (!skill.disable_model_invocation && skill.supported_on_current_platform)
+        })
+        .filter(|skill| {
+            options.platform.as_ref().is_none_or(|platform| {
+                platform.eq_ignore_ascii_case("all")
+                    || skill
+                        .platforms
+                        .iter()
+                        .any(|candidate| candidate.eq_ignore_ascii_case(platform))
+                    || skill.platforms.is_empty() && platform.eq_ignore_ascii_case("current")
+            })
+        })
+        .filter(|skill| {
+            options
+                .tag
+                .as_ref()
+                .is_none_or(|tag| skill.tags.iter().any(|candidate| candidate == tag))
+        })
+        .filter(|skill| {
+            options
+                .readiness
+                .as_ref()
+                .is_none_or(|readiness| skill_readiness_status(skill) == readiness.as_str())
+        })
         .map(|skill| {
-            json!({
+            let mut value = json!({
                 "name": skill.name,
                 "description": skill.description,
                 "location": skill.file_path,
                 "source": skill.source.as_str(),
+                "category": skill.category,
+                "readiness_status": skill_readiness_status(skill),
                 "disable_model_invocation": skill.disable_model_invocation,
-            })
+            });
+            if options.detail
+                && let Some(object) = value.as_object_mut()
+            {
+                object.insert("skill_dir".to_string(), json!(skill.base_dir));
+                object.insert("tags".to_string(), json!(skill.tags));
+                object.insert("related_skills".to_string(), json!(skill.related));
+                object.insert("platforms".to_string(), json!(skill.platforms));
+                object.insert(
+                    "supported_on_current_platform".to_string(),
+                    json!(skill.supported_on_current_platform),
+                );
+                object.insert(
+                    "required_environment_variables".to_string(),
+                    json!(skill.required_environment_variables),
+                );
+                object.insert(
+                    "missing_required_environment_variables".to_string(),
+                    json!(missing_required_env_names(skill, None)),
+                );
+                object.insert(
+                    "missing_credential_files".to_string(),
+                    json!(missing_credential_files(skill)),
+                );
+                object.insert("compatibility".to_string(), json!(skill.compatibility));
+                object.insert("license".to_string(), json!(skill.license));
+                object.insert("allowed_tools".to_string(), json!(skill.allowed_tools));
+            }
+            value
         })
         .collect::<Vec<_>>();
     json!({
         "success": true,
         "skills": skills,
         "diagnostics": catalog.diagnostics,
+        "collisions": catalog.collisions,
         "count": skills.len(),
     })
 }
@@ -375,8 +592,32 @@ pub fn view_skill_value(
     file_path: Option<&str>,
 ) -> Result<Value> {
     let skill = find_skill(catalog, name)?;
+    if !skill.supported_on_current_platform && file_path.is_none() {
+        return Ok(json!({
+            "success": false,
+            "name": skill.name,
+            "error": format!("skill '{}' is not supported on this platform", skill.name),
+            "readiness_status": "unsupported",
+            "platforms": skill.platforms,
+        }));
+    }
     let target = match file_path {
-        Some(file_path) => resolve_skill_relative_path(skill, file_path)?,
+        Some(file_path) => match resolve_skill_relative_path(skill, file_path) {
+            Ok(path) => path,
+            Err(err) => {
+                if err.to_string().contains("No such file") || err.to_string().contains("not found")
+                {
+                    return Ok(json!({
+                        "success": false,
+                        "name": skill.name,
+                        "file": file_path,
+                        "error": format!("skill file not found: {file_path}"),
+                        "available_files": available_files(&skill.base_dir),
+                    }));
+                }
+                return Err(err);
+            }
+        },
         None => skill.file_path.clone(),
     };
     let bytes = fs::read(&target)?;
@@ -391,9 +632,22 @@ pub fn view_skill_value(
             "content": format!("[Binary file: {}, size: {} bytes]", target.display(), bytes.len()),
         }));
     }
-    let text = String::from_utf8(bytes).map_err(|_| Error::Message("invalid UTF-8".to_string()))?;
+    let text = match String::from_utf8(bytes) {
+        Ok(text) => text,
+        Err(err) => {
+            return Ok(json!({
+                "success": true,
+                "name": skill.name,
+                "file": file_path,
+                "path": target,
+                "is_binary": true,
+                "size": err.as_bytes().len(),
+                "content": format!("[Non-UTF-8 file: {}, size: {} bytes]", target.display(), err.as_bytes().len()),
+            }));
+        }
+    };
     let content = if file_path.is_none() {
-        strip_frontmatter(&text).trim().to_string()
+        preprocess_skill_content(strip_frontmatter(&text).trim(), &skill.base_dir, None, None)
     } else {
         text
     };
@@ -404,9 +658,110 @@ pub fn view_skill_value(
         "path": target,
         "skill_dir": skill.base_dir,
         "description": skill.description,
+        "source": skill.source.as_str(),
+        "category": skill.category,
+        "tags": skill.tags,
+        "related_skills": skill.related,
+        "platforms": skill.platforms,
+        "platform_status": if skill.supported_on_current_platform { "supported" } else { "unsupported" },
+        "required_environment_variables": skill.required_environment_variables,
+        "missing_required_environment_variables": missing_required_env_names(skill, None),
+        "missing_credential_files": missing_credential_files(skill),
+        "setup_needed": skill_readiness_status(skill) == "setup_needed",
+        "readiness_status": skill_readiness_status(skill),
+        "setup_help": skill.setup_help,
+        "compatibility": skill.compatibility,
+        "license": skill.license,
+        "allowed_tools": skill.allowed_tools,
         "content": content,
         "linked_files": linked_files(&skill.base_dir),
     }))
+}
+
+fn skill_readiness_status(skill: &Skill) -> &'static str {
+    if !skill.supported_on_current_platform {
+        "unsupported"
+    } else if !missing_required_env_names(skill, None).is_empty()
+        || !missing_credential_files(skill).is_empty()
+    {
+        "setup_needed"
+    } else {
+        "available"
+    }
+}
+
+fn missing_required_env_names(
+    skill: &Skill,
+    env_snapshot: Option<&BTreeMap<String, String>>,
+) -> Vec<String> {
+    let process_env;
+    let env = if let Some(env) = env_snapshot {
+        env
+    } else {
+        process_env = load_home_env_from_skill(skill);
+        &process_env
+    };
+    skill
+        .required_environment_variables
+        .iter()
+        .filter(|entry| !entry.optional)
+        .filter(|entry| {
+            env.get(&entry.name)
+                .map(|value| value.trim().is_empty())
+                .unwrap_or_else(|| {
+                    std::env::var(&entry.name).map_or(true, |value| value.is_empty())
+                })
+        })
+        .map(|entry| entry.name.clone())
+        .collect()
+}
+
+fn load_home_env_from_skill(skill: &Skill) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    let mut current = Some(skill.base_dir.as_path());
+    while let Some(path) = current {
+        let env_path = path.join(".env");
+        if env_path.exists() {
+            load_env_file(&env_path, &mut out);
+            break;
+        }
+        current = path.parent();
+    }
+    out
+}
+
+fn load_env_file(path: &Path, out: &mut BTreeMap<String, String>) {
+    let Ok(text) = fs::read_to_string(path) else {
+        return;
+    };
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some((key, value)) = line.split_once('=') {
+            let key = key.trim();
+            if valid_env_name(key) {
+                out.insert(
+                    key.to_string(),
+                    value
+                        .trim()
+                        .trim_matches('"')
+                        .trim_matches('\'')
+                        .to_string(),
+                );
+            }
+        }
+    }
+}
+
+fn missing_credential_files(skill: &Skill) -> Vec<String> {
+    skill
+        .required_credential_files
+        .iter()
+        .filter(|path| !Path::new(path).exists())
+        .cloned()
+        .collect()
 }
 
 pub fn expand_skill_prompt(catalog: &SkillCatalog, name: &str, args: &str) -> Result<String> {
@@ -567,6 +922,56 @@ pub fn patch_skill(
     Ok(json!({"success": true, "name": skill.name, "path": skill.file_path}))
 }
 
+pub fn edit_skill(
+    catalog: &SkillCatalog,
+    home: &Path,
+    workdir: &Path,
+    name: &str,
+    content: &str,
+) -> Result<Value> {
+    let skill = find_skill(catalog, name)?;
+    ensure_mutable_skill(skill, home, workdir)?;
+    fs::write(&skill.file_path, content)?;
+    Ok(json!({"success": true, "name": skill.name, "path": skill.file_path}))
+}
+
+pub fn write_skill_file(
+    catalog: &SkillCatalog,
+    home: &Path,
+    workdir: &Path,
+    name: &str,
+    file_path: &str,
+    content: &str,
+) -> Result<Value> {
+    let skill = find_skill(catalog, name)?;
+    ensure_mutable_skill(skill, home, workdir)?;
+    let target = resolve_skill_write_path(skill, file_path)?;
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&target, content)?;
+    Ok(json!({"success": true, "name": skill.name, "path": target}))
+}
+
+pub fn remove_skill_file(
+    catalog: &SkillCatalog,
+    home: &Path,
+    workdir: &Path,
+    name: &str,
+    file_path: &str,
+) -> Result<Value> {
+    let skill = find_skill(catalog, name)?;
+    ensure_mutable_skill(skill, home, workdir)?;
+    let target = resolve_skill_relative_path(skill, file_path)?;
+    if target == skill.file_path {
+        return Err(Error::Message(
+            "remove_file cannot remove SKILL.md; use delete".to_string(),
+        ));
+    }
+    fs::remove_file(&target)?;
+    Ok(json!({"success": true, "name": skill.name, "path": target}))
+}
+
 pub fn remove_skill(
     catalog: &SkillCatalog,
     home: &Path,
@@ -590,16 +995,139 @@ pub fn set_skill_enabled(
     name: &str,
     enabled: bool,
 ) -> Result<Value> {
-    let root = target_skills_dir(home, workdir, target);
-    fs::create_dir_all(&root)?;
-    let mut disabled = read_disabled_names(&root)?;
-    if enabled {
-        disabled.remove(name);
-    } else {
-        disabled.insert(name.to_string());
+    let config_path = match target {
+        SkillTarget::Global => home.join(CONFIG_FILE_NAME),
+        SkillTarget::Project => workdir.join(".psychevo").join(CONFIG_FILE_NAME),
+    };
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)?;
     }
-    write_disabled_names(&root, &disabled)?;
-    Ok(json!({"success": true, "name": name, "enabled": enabled, "path": root.join(DISABLED_FILE)}))
+    let mut value = load_toml_config_file(&config_path, false)?;
+    ensure_object(&mut value);
+    let disabled = skills_disabled_array_mut(&mut value)?;
+    if enabled {
+        disabled.retain(|value| value.as_str() != Some(name));
+    } else if !disabled.iter().any(|value| value.as_str() == Some(name)) {
+        disabled.push(Value::String(name.to_string()));
+    }
+    disabled.sort_by(|left, right| left.as_str().cmp(&right.as_str()));
+    write_toml_config_file(&config_path, &value)?;
+    Ok(
+        json!({"success": true, "name": name, "enabled": enabled, "scope": target.as_str(), "path": config_path}),
+    )
+}
+
+pub fn set_skill_config_value(
+    home: &Path,
+    workdir: &Path,
+    target: SkillTarget,
+    key: &str,
+    new_value: Value,
+) -> Result<Value> {
+    let suffix = key.strip_prefix("skills.config.").ok_or_else(|| {
+        Error::Message("skill config writes must use a skills.config.* key".to_string())
+    })?;
+    let segments = suffix
+        .split('.')
+        .map(str::trim)
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    if segments.is_empty()
+        || segments
+            .iter()
+            .any(|segment| !valid_config_key_segment(segment))
+    {
+        return Err(Error::Message(
+            "skills.config.* key contains an invalid segment".to_string(),
+        ));
+    }
+
+    let config_path = match target {
+        SkillTarget::Global => home.join(CONFIG_FILE_NAME),
+        SkillTarget::Project => workdir.join(".psychevo").join(CONFIG_FILE_NAME),
+    };
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut value = load_toml_config_file(&config_path, false)?;
+    ensure_object(&mut value);
+    set_nested_skill_config_value(&mut value, &segments, new_value)?;
+    write_toml_config_file(&config_path, &value)?;
+    Ok(json!({"success": true, "key": key, "scope": target.as_str(), "path": config_path}))
+}
+
+fn ensure_object(value: &mut Value) {
+    if !value.is_object() {
+        *value = json!({});
+    }
+}
+
+fn valid_config_key_segment(segment: &str) -> bool {
+    segment
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.')
+}
+
+fn set_nested_skill_config_value(
+    value: &mut Value,
+    segments: &[&str],
+    new_value: Value,
+) -> Result<()> {
+    ensure_object(value);
+    let root = value
+        .as_object_mut()
+        .ok_or_else(|| Error::Message("config root is not an object".to_string()))?;
+    let skills = root
+        .entry("skills".to_string())
+        .or_insert_with(|| json!({}));
+    ensure_object(skills);
+    let skills = skills
+        .as_object_mut()
+        .ok_or_else(|| Error::Message("skills config is not an object".to_string()))?;
+    let config = skills
+        .entry("config".to_string())
+        .or_insert_with(|| json!({}));
+    ensure_object(config);
+
+    let mut current = config;
+    for segment in &segments[..segments.len().saturating_sub(1)] {
+        ensure_object(current);
+        let object = current
+            .as_object_mut()
+            .ok_or_else(|| Error::Message("skills.config path is not an object".to_string()))?;
+        current = object
+            .entry((*segment).to_string())
+            .or_insert_with(|| json!({}));
+    }
+    ensure_object(current);
+    let object = current
+        .as_object_mut()
+        .ok_or_else(|| Error::Message("skills.config path is not an object".to_string()))?;
+    object.insert(segments[segments.len() - 1].to_string(), new_value);
+    Ok(())
+}
+
+fn skills_disabled_array_mut(value: &mut Value) -> Result<&mut Vec<Value>> {
+    ensure_object(value);
+    let root = value
+        .as_object_mut()
+        .ok_or_else(|| Error::Message("config root is not an object".to_string()))?;
+    let skills = root
+        .entry("skills".to_string())
+        .or_insert_with(|| json!({}));
+    ensure_object(skills);
+    let skills = skills
+        .as_object_mut()
+        .ok_or_else(|| Error::Message("skills config is not an object".to_string()))?;
+    let disabled = skills
+        .entry("disabled".to_string())
+        .or_insert_with(|| Value::Array(Vec::new()));
+    if !disabled.is_array() {
+        *disabled = Value::Array(Vec::new());
+    }
+    disabled
+        .as_array_mut()
+        .ok_or_else(|| Error::Message("skills.disabled is not an array".to_string()))
 }
 
 pub fn scan_skill_path(path: &Path) -> Result<ScanResult> {
@@ -695,13 +1223,6 @@ pub fn install_skill(home: &Path, workdir: &Path, options: InstallOptions) -> Re
                 fs::copy(&skill.file_path, &target)?;
                 target
             };
-        write_provenance(
-            &target_root,
-            &skill.name,
-            &options.source,
-            scan.verdict.clone(),
-            &skill.name,
-        )?;
         installed.push(json!({
             "name": skill.name,
             "path": target,
@@ -716,6 +1237,198 @@ pub fn target_skills_dir(home: &Path, workdir: &Path, target: SkillTarget) -> Pa
         SkillTarget::Global => home.join("skills"),
         SkillTarget::Project => workdir.join(".psychevo").join("skills"),
     }
+}
+
+pub fn list_skill_bundles(home: &Path, workdir: &Path) -> Result<Vec<SkillBundle>> {
+    let mut out = Vec::new();
+    let mut seen = BTreeSet::new();
+    for (scope, root) in [
+        (SkillTarget::Project, project_bundles_dir(workdir)),
+        (SkillTarget::Global, home.join(BUNDLES_DIR)),
+    ] {
+        if !root.is_dir() {
+            continue;
+        }
+        let mut entries = fs::read_dir(&root)?.collect::<std::result::Result<Vec<_>, _>>()?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let path = entry.path();
+            let ext = path.extension().and_then(|value| value.to_str());
+            if !matches!(ext, Some("toml")) {
+                continue;
+            }
+            if let Some(bundle) = load_bundle_file(&path, scope)?
+                && seen.insert(bundle.slug.clone())
+            {
+                out.push(bundle);
+            }
+        }
+    }
+    out.sort_by(|left, right| left.slug.cmp(&right.slug));
+    Ok(out)
+}
+
+pub fn save_skill_bundle(
+    home: &Path,
+    workdir: &Path,
+    options: SaveSkillBundleOptions,
+) -> Result<Value> {
+    let slug = slugify(&options.name);
+    if slug.is_empty() {
+        return Err(Error::Message(
+            "bundle name normalizes to empty".to_string(),
+        ));
+    }
+    let skills = options
+        .skills
+        .into_iter()
+        .map(|skill| skill.trim().to_string())
+        .filter(|skill| !skill.is_empty())
+        .collect::<Vec<_>>();
+    if skills.is_empty() {
+        return Err(Error::Message(
+            "bundle must reference at least one skill".to_string(),
+        ));
+    }
+    let root = bundles_dir(home, workdir, options.target);
+    fs::create_dir_all(&root)?;
+    let path = root.join(format!("{slug}.toml"));
+    if path.exists() && !options.overwrite {
+        return Err(Error::Message(format!(
+            "bundle already exists: {}",
+            path.display()
+        )));
+    }
+    let mut object = serde_json::Map::new();
+    object.insert("name".to_string(), Value::String(options.name.clone()));
+    if let Some(description) = options.description.filter(|value| !value.trim().is_empty()) {
+        object.insert("description".to_string(), Value::String(description));
+    }
+    object.insert(
+        "skills".to_string(),
+        Value::Array(
+            skills
+                .iter()
+                .map(|skill| Value::String(skill.clone()))
+                .collect(),
+        ),
+    );
+    if let Some(instruction) = options.instruction.filter(|value| !value.trim().is_empty()) {
+        object.insert("instruction".to_string(), Value::String(instruction));
+    }
+    write_toml_config_file(&path, &Value::Object(object))?;
+    Ok(
+        json!({"success": true, "name": options.name, "slug": slug, "scope": options.target.as_str(), "path": path}),
+    )
+}
+
+pub fn delete_skill_bundle(
+    home: &Path,
+    workdir: &Path,
+    target: SkillTarget,
+    name: &str,
+) -> Result<Value> {
+    let slug = slugify(name);
+    let path = bundles_dir(home, workdir, target).join(format!("{slug}.toml"));
+    if !path.exists() {
+        return Err(Error::Message(format!("bundle not found: {name}")));
+    }
+    fs::remove_file(&path)?;
+    Ok(json!({"success": true, "name": name, "scope": target.as_str(), "path": path}))
+}
+
+fn project_bundles_dir(workdir: &Path) -> PathBuf {
+    workdir.join(".psychevo").join(BUNDLES_DIR)
+}
+
+fn bundles_dir(home: &Path, workdir: &Path, target: SkillTarget) -> PathBuf {
+    match target {
+        SkillTarget::Global => home.join(BUNDLES_DIR),
+        SkillTarget::Project => project_bundles_dir(workdir),
+    }
+}
+
+fn load_bundle_file(path: &Path, scope: SkillTarget) -> Result<Option<SkillBundle>> {
+    let raw = fs::read_to_string(path)?;
+    let parsed: toml::Value =
+        toml::from_str(&raw).map_err(|err| Error::Config(format!("{}: {err}", path.display())))?;
+    let value = serde_json::to_value(parsed)?;
+    let Some(object) = value.as_object() else {
+        return Ok(None);
+    };
+    let name = object
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            path.file_stem()
+                .and_then(|value| value.to_str())
+                .map(ToOwned::to_owned)
+        })
+        .unwrap_or_else(|| "bundle".to_string());
+    let skills = object
+        .get("skills")
+        .map(string_values_from_value)
+        .unwrap_or_default();
+    if skills.is_empty() {
+        return Ok(None);
+    }
+    let slug = slugify(&name);
+    if slug.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(SkillBundle {
+        description: object
+            .get("description")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| format!("Load {} skills as a bundle", skills.len())),
+        instruction: object
+            .get("instruction")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned),
+        name,
+        slug,
+        skills,
+        path: path.to_path_buf(),
+        scope,
+    }))
+}
+
+fn slugify(name: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for ch in name.chars().flat_map(char::to_lowercase) {
+        let next = if ch.is_ascii_alphanumeric() {
+            Some(ch)
+        } else if ch == '-' || ch == '_' || ch.is_whitespace() {
+            Some('-')
+        } else {
+            None
+        };
+        let Some(ch) = next else {
+            continue;
+        };
+        if ch == '-' {
+            if !last_dash && !out.is_empty() {
+                out.push(ch);
+                last_dash = true;
+            }
+        } else {
+            out.push(ch);
+            last_dash = false;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    out
 }
 
 fn add_path_skills(
@@ -856,6 +1569,40 @@ fn load_skill_file(
             Some(file.to_path_buf()),
         ));
     }
+    let metadata = frontmatter.metadata.clone().unwrap_or(Value::Null);
+    let tags = merge_string_values(
+        frontmatter.tags.as_ref(),
+        metadata_pointer(&metadata, "/hermes/tags"),
+    );
+    let related = merge_string_values(
+        frontmatter
+            .related
+            .as_ref()
+            .or(frontmatter.related_skills.as_ref()),
+        metadata_pointer(&metadata, "/hermes/related_skills"),
+    );
+    let platforms = string_values(frontmatter.platforms.as_ref());
+    let supported_on_current_platform = skill_matches_current_os(&platforms);
+    let legacy_env_vars = frontmatter
+        .prerequisites
+        .as_ref()
+        .and_then(|value| value.get("env_vars"))
+        .map(string_values_from_value)
+        .unwrap_or_default();
+    let setup_help = setup_help(frontmatter.setup.as_ref());
+    let required_environment_variables = required_environment_variables(
+        frontmatter.required_environment_variables.as_ref(),
+        frontmatter.setup.as_ref(),
+        &legacy_env_vars,
+    );
+    let required_credential_files = string_values(frontmatter.required_credential_files.as_ref());
+    let allowed_tools = merge_string_values(
+        frontmatter
+            .allowed_tools_hyphen
+            .as_ref()
+            .or(frontmatter.allowed_tools_underscore.as_ref()),
+        None,
+    );
     Ok(Some(Skill {
         name,
         description,
@@ -863,6 +1610,17 @@ fn load_skill_file(
         base_dir,
         source,
         disable_model_invocation: frontmatter.disable_model_invocation.unwrap_or(false),
+        category: None,
+        tags,
+        related,
+        platforms,
+        required_environment_variables,
+        required_credential_files,
+        setup_help,
+        compatibility: frontmatter.compatibility,
+        license: frontmatter.license,
+        allowed_tools,
+        supported_on_current_platform,
     }))
 }
 
@@ -892,6 +1650,11 @@ fn add_skill(
             winner,
             &skill.file_path,
         ));
+        let entry = catalog
+            .collisions
+            .entry(skill.name.clone())
+            .or_insert_with(|| vec![winner.clone()]);
+        entry.push(skill.file_path.clone());
         return;
     }
     seen.insert(skill.name.clone(), skill.file_path.clone());
@@ -939,7 +1702,13 @@ fn select_skills<'a>(
         if exact_input && !validate_name(name, name).is_empty() {
             continue;
         }
-        if let Some(skill) = catalog.skills.iter().find(|skill| skill.name == name)
+        if catalog.collisions.contains_key(name) {
+            continue;
+        }
+        if let Some(skill) = catalog
+            .skills
+            .iter()
+            .find(|skill| skill.name == name && skill.supported_on_current_platform)
             && seen.insert(skill.file_path.clone())
         {
             selected.push(selected_skill(skill));
@@ -994,6 +1763,234 @@ fn parse_frontmatter(
     Ok((frontmatter, body))
 }
 
+fn metadata_pointer<'a>(metadata: &'a Value, pointer: &str) -> Option<&'a Value> {
+    metadata.pointer(pointer)
+}
+
+fn merge_string_values(primary: Option<&Value>, secondary: Option<&Value>) -> Vec<String> {
+    let mut out = string_values(primary);
+    let mut seen = out.iter().cloned().collect::<BTreeSet<_>>();
+    for value in string_values(secondary) {
+        if seen.insert(value.clone()) {
+            out.push(value);
+        }
+    }
+    out
+}
+
+fn string_values(value: Option<&Value>) -> Vec<String> {
+    value.map(string_values_from_value).unwrap_or_default()
+}
+
+fn string_values_from_value(value: &Value) -> Vec<String> {
+    match value {
+        Value::String(value) => value
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .collect(),
+        Value::Array(values) => values
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn setup_help(setup: Option<&Value>) -> Option<String> {
+    setup
+        .and_then(Value::as_object)
+        .and_then(|object| object.get("help"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn required_environment_variables(
+    raw: Option<&Value>,
+    setup: Option<&Value>,
+    legacy_env_vars: &[String],
+) -> Vec<RequiredEnvironmentVariable> {
+    let mut out = Vec::new();
+    let mut seen = BTreeSet::new();
+    let setup_help_text = setup_help(setup);
+    append_required_env_values(raw, &mut out, &mut seen, setup_help_text.as_deref());
+    if let Some(setup) = setup.and_then(Value::as_object)
+        && let Some(collect) = setup.get("collect_secrets")
+    {
+        let values = match collect {
+            Value::Array(values) => values.clone(),
+            Value::Object(_) => vec![collect.clone()],
+            _ => Vec::new(),
+        };
+        for value in values {
+            if let Some(object) = value.as_object() {
+                let name = object
+                    .get("env_var")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty());
+                if let Some(name) = name {
+                    let prompt = object
+                        .get("prompt")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(ToOwned::to_owned);
+                    let help = object
+                        .get("provider_url")
+                        .or_else(|| object.get("url"))
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(ToOwned::to_owned)
+                        .or_else(|| setup_help_text.clone());
+                    append_required_env(
+                        RequiredEnvironmentVariable {
+                            name: name.to_string(),
+                            prompt,
+                            help,
+                            required_for: None,
+                            optional: false,
+                        },
+                        &mut out,
+                        &mut seen,
+                    );
+                }
+            }
+        }
+    }
+    for name in legacy_env_vars {
+        append_required_env(
+            RequiredEnvironmentVariable {
+                name: name.clone(),
+                prompt: None,
+                help: setup_help_text.clone(),
+                required_for: None,
+                optional: false,
+            },
+            &mut out,
+            &mut seen,
+        );
+    }
+    out
+}
+
+fn append_required_env_values(
+    raw: Option<&Value>,
+    out: &mut Vec<RequiredEnvironmentVariable>,
+    seen: &mut BTreeSet<String>,
+    setup_help: Option<&str>,
+) {
+    let Some(raw) = raw else {
+        return;
+    };
+    let values = match raw {
+        Value::Array(values) => values.clone(),
+        Value::Object(_) | Value::String(_) => vec![raw.clone()],
+        _ => Vec::new(),
+    };
+    for value in values {
+        match value {
+            Value::String(name) => append_required_env(
+                RequiredEnvironmentVariable {
+                    name,
+                    prompt: None,
+                    help: setup_help.map(ToOwned::to_owned),
+                    required_for: None,
+                    optional: false,
+                },
+                out,
+                seen,
+            ),
+            Value::Object(object) => {
+                let name = object
+                    .get("name")
+                    .or_else(|| object.get("env_var"))
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty());
+                if let Some(name) = name {
+                    append_required_env(
+                        RequiredEnvironmentVariable {
+                            name: name.to_string(),
+                            prompt: object
+                                .get("prompt")
+                                .and_then(Value::as_str)
+                                .map(str::trim)
+                                .filter(|value| !value.is_empty())
+                                .map(ToOwned::to_owned),
+                            help: object
+                                .get("help")
+                                .or_else(|| object.get("provider_url"))
+                                .or_else(|| object.get("url"))
+                                .and_then(Value::as_str)
+                                .map(str::trim)
+                                .filter(|value| !value.is_empty())
+                                .map(ToOwned::to_owned)
+                                .or_else(|| setup_help.map(ToOwned::to_owned)),
+                            required_for: object
+                                .get("required_for")
+                                .and_then(Value::as_str)
+                                .map(str::trim)
+                                .filter(|value| !value.is_empty())
+                                .map(ToOwned::to_owned),
+                            optional: object
+                                .get("optional")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(false),
+                        },
+                        out,
+                        seen,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn append_required_env(
+    env: RequiredEnvironmentVariable,
+    out: &mut Vec<RequiredEnvironmentVariable>,
+    seen: &mut BTreeSet<String>,
+) {
+    if env.name.is_empty() || !valid_env_name(&env.name) || !seen.insert(env.name.clone()) {
+        return;
+    }
+    out.push(env);
+}
+
+fn valid_env_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn skill_matches_current_os(platforms: &[String]) -> bool {
+    if platforms.is_empty() {
+        return true;
+    }
+    let current = if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "windows") {
+        "windows"
+    } else {
+        "linux"
+    };
+    platforms
+        .iter()
+        .any(|platform| platform.eq_ignore_ascii_case(current))
+}
+
 fn strip_frontmatter(content: &str) -> &str {
     if !content.starts_with("---") {
         return content;
@@ -1004,6 +2001,95 @@ fn strip_frontmatter(content: &str) -> &str {
     };
     let body_start = 3 + end + "\n---".len();
     normalized[body_start..].trim_start_matches(['\n', '\r'])
+}
+
+fn preprocess_skill_content(
+    content: &str,
+    skill_dir: &Path,
+    session_id: Option<&str>,
+    settings: Option<&SkillSettings>,
+) -> String {
+    let default_settings;
+    let settings = if let Some(settings) = settings {
+        settings
+    } else {
+        default_settings = SkillSettings::default();
+        &default_settings
+    };
+    let mut out = content.to_string();
+    if settings.template_vars {
+        let skill_dir = skill_dir.display().to_string();
+        out = out
+            .replace("${PSYCHEVO_SKILL_DIR}", &skill_dir)
+            .replace("${HERMES_SKILL_DIR}", &skill_dir);
+        if let Some(session_id) = session_id {
+            out = out
+                .replace("${PSYCHEVO_SESSION_ID}", session_id)
+                .replace("${HERMES_SESSION_ID}", session_id);
+        }
+    }
+    if settings.inline_shell {
+        out = expand_inline_shell(&out, skill_dir, settings.inline_shell_timeout_secs);
+    }
+    out
+}
+
+fn expand_inline_shell(content: &str, skill_dir: &Path, timeout_secs: u64) -> String {
+    let mut out = String::new();
+    let mut rest = content;
+    while let Some(start) = rest.find("!`") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        let Some(end) = after.find('`') else {
+            out.push_str(&rest[start..]);
+            return out;
+        };
+        let command = after[..end].trim();
+        if command.contains('\n') || command.is_empty() {
+            out.push_str("");
+        } else {
+            out.push_str(&run_inline_shell(command, skill_dir, timeout_secs));
+        }
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+fn run_inline_shell(command: &str, skill_dir: &Path, timeout_secs: u64) -> String {
+    let output = Command::new("bash")
+        .arg("-c")
+        .arg(command)
+        .current_dir(skill_dir)
+        .output();
+    match output {
+        Ok(output) => {
+            let mut text = if output.stdout.is_empty() {
+                String::from_utf8_lossy(&output.stderr)
+                    .trim_end()
+                    .to_string()
+            } else {
+                String::from_utf8_lossy(&output.stdout)
+                    .trim_end()
+                    .to_string()
+            };
+            if text.len() > 4000 {
+                text.truncate(4000);
+                text.push_str("...[truncated]");
+            }
+            text
+        }
+        Err(err) => format!("[inline-shell error after {timeout_secs}s: {err}]"),
+    }
+}
+
+fn available_files(base_dir: &Path) -> Vec<String> {
+    let mut files = Vec::new();
+    for dir in ["references", "scripts", "assets", "templates"] {
+        files.extend(collect_relative_files(base_dir, &base_dir.join(dir)).unwrap_or_default());
+    }
+    files.sort();
+    files
 }
 
 fn validate_name(name: &str, parent: &str) -> Vec<String> {
@@ -1051,6 +2137,17 @@ fn truncate_description(description: &str) -> String {
 }
 
 fn find_skill<'a>(catalog: &'a SkillCatalog, name: &str) -> Result<&'a Skill> {
+    if let Some(matches) = catalog.collisions.get(name) {
+        return Err(Error::Message(format!(
+            "ambiguous skill name {name}: {} matching skills ({})",
+            matches.len(),
+            matches
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    }
     catalog
         .skills
         .iter()
@@ -1078,6 +2175,34 @@ fn resolve_skill_relative_path(skill: &Skill, raw: &str) -> Result<PathBuf> {
         ));
     }
     Ok(canonical_target)
+}
+
+fn resolve_skill_write_path(skill: &Skill, raw: &str) -> Result<PathBuf> {
+    let rel = Path::new(raw);
+    if rel.is_absolute()
+        || rel
+            .components()
+            .any(|component| matches!(component, Component::ParentDir))
+    {
+        return Err(Error::Message(
+            "skill file path must stay inside the skill directory".to_string(),
+        ));
+    }
+    let first = rel
+        .components()
+        .next()
+        .and_then(|component| match component {
+            Component::Normal(value) => value.to_str(),
+            _ => None,
+        })
+        .unwrap_or_default();
+    if !["references", "scripts", "assets", "templates"].contains(&first) {
+        return Err(Error::Message(
+            "supporting skill files must be under references/, scripts/, assets/, or templates/"
+                .to_string(),
+        ));
+    }
+    Ok(skill.base_dir.join(rel))
 }
 
 fn linked_files(base_dir: &Path) -> Value {
@@ -1155,69 +2280,6 @@ fn escape_xml(value: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
-}
-
-fn read_disabled_names(root: &Path) -> Result<BTreeSet<String>> {
-    let path = root.join(DISABLED_FILE);
-    if !path.exists() {
-        return Ok(BTreeSet::new());
-    }
-    let value: Value = serde_json::from_str(&fs::read_to_string(path)?)?;
-    Ok(value
-        .get("disabled")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(ToOwned::to_owned)
-        .collect())
-}
-
-fn write_disabled_names(root: &Path, disabled: &BTreeSet<String>) -> Result<()> {
-    fs::write(
-        root.join(DISABLED_FILE),
-        serde_json::to_string_pretty(&json!({ "disabled": disabled }))?,
-    )?;
-    Ok(())
-}
-
-fn write_provenance(
-    target_root: &Path,
-    name: &str,
-    source: &str,
-    verdict: ScanVerdict,
-    original_name: &str,
-) -> Result<()> {
-    let path = target_root.join(PROVENANCE_FILE);
-    let mut value = if path.exists() {
-        serde_json::from_str::<Value>(&fs::read_to_string(&path)?)?
-    } else {
-        json!({})
-    };
-    let object = value
-        .as_object_mut()
-        .ok_or_else(|| Error::Message("provenance sidecar is not an object".to_string()))?;
-    object.insert(
-        name.to_string(),
-        json!({
-            "source": source,
-            "source_type": if is_probable_git_source(source) { "git" } else { "local" },
-            "installed_at_ms": now_ms(),
-            "scanner_verdict": verdict,
-            "original_skill_name": original_name,
-        }),
-    );
-    fs::write(path, serde_json::to_string_pretty(&value)?)?;
-    Ok(())
-}
-
-fn now_ms() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
 }
 
 fn scan_text(text: &str, file: &Path, findings: &mut Vec<ScanFinding>) {
@@ -1382,15 +2444,6 @@ fn looks_like_existing_path(input: &str, workdir: &Path, env: &BTreeMap<String, 
         .is_some()
 }
 
-fn is_probable_git_source(source: &str) -> bool {
-    source.starts_with("http://")
-        || source.starts_with("https://")
-        || source.starts_with("file://")
-        || source.starts_with("ssh://")
-        || source.starts_with("git@")
-        || source.ends_with(".git")
-}
-
 fn resolve_configured_path(
     raw: &str,
     workdir: &Path,
@@ -1424,22 +2477,6 @@ fn env_path(name: &str, env: &BTreeMap<String, String>) -> Option<PathBuf> {
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-}
-
-fn load_jsonc(path: &Path, required: bool) -> Result<Value> {
-    if !path.exists() {
-        if required {
-            return Err(Error::Config(format!(
-                "config file not found: {}",
-                path.display()
-            )));
-        }
-        return Ok(json!({}));
-    }
-    let text = fs::read_to_string(path)?;
-    let parsed: Option<Value> = jsonc_parser::parse_to_serde_value(&text, &Default::default())
-        .map_err(|err| Error::Config(format!("{}: {err}", path.display())))?;
-    Ok(parsed.unwrap_or_else(|| json!({})))
 }
 
 fn deep_merge(base: &mut Value, overlay: Value) {

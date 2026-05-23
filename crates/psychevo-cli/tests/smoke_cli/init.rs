@@ -131,16 +131,16 @@ fn cli_init_creates_home_tree_and_is_idempotent() {
     );
     let stdout = String::from_utf8(output.stdout).expect("stdout");
     assert!(stdout.contains(&format!("home: {}", home.display())));
-    assert!(home.join("config.jsonc").exists());
+    assert!(home.join("config.toml").exists());
     assert!(home.join(".env").exists());
     assert!(home.join("state.db").exists());
     assert!(home.join("sessions").is_dir());
     assert!(home.join("logs").is_dir());
     assert!(home.join("cache").is_dir());
 
-    let config = std::fs::read_to_string(home.join("config.jsonc")).expect("config");
-    assert!(config.contains("\"model\": \"deepseek/deepseek-chat\""));
-    assert!(config.contains("\"api_key_env\": \"DEEPSEEK_API_KEY\""));
+    let config = std::fs::read_to_string(home.join("config.toml")).expect("config");
+    assert!(config.contains("model = \"deepseek/deepseek-chat\""));
+    assert!(config.contains("api_key_env = \"DEEPSEEK_API_KEY\""));
     let env_template = std::fs::read_to_string(home.join(".env")).expect("env");
     assert!(env_template.contains("DEEPSEEK_API_KEY=sk-..."));
     assert!(!stdout.contains("sk-"));
@@ -151,7 +151,7 @@ fn cli_init_creates_home_tree_and_is_idempotent() {
         .expect("user_version");
     assert_eq!(user_version, 11);
 
-    std::fs::write(home.join("config.jsonc"), "custom config").expect("custom config");
+    std::fs::write(home.join("config.toml"), "custom config").expect("custom config");
     std::fs::write(home.join(".env"), "CUSTOM=1\n").expect("custom env");
     let rerun = pevo_cmd(temp.path())
         .env("PSYCHEVO_HOME", &home)
@@ -160,7 +160,7 @@ fn cli_init_creates_home_tree_and_is_idempotent() {
         .expect("pevo init rerun");
     assert!(rerun.status.success());
     assert_eq!(
-        std::fs::read_to_string(home.join("config.jsonc")).expect("config"),
+        std::fs::read_to_string(home.join("config.toml")).expect("config"),
         "custom config"
     );
     assert_eq!(

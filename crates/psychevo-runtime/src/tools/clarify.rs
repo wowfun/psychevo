@@ -45,10 +45,12 @@ impl ToolBinding for ClarifyTool {
             "properties": {
                 "questions": {
                     "type": "array",
+                    "description": "One to three user-facing questions to ask before continuing; each question must include two or three concrete options.",
                     "minItems": 1,
                     "maxItems": 3,
                     "items": {
                         "type": "object",
+                        "description": "A single clarification question and its selectable options.",
                         "additionalProperties": false,
                         "properties": {
                             "question": {
@@ -57,14 +59,22 @@ impl ToolBinding for ClarifyTool {
                             },
                             "options": {
                                 "type": "array",
+                                "description": "Two or three concrete choices for this question. The client also offers an Other/freeform path.",
                                 "minItems": 2,
                                 "maxItems": 3,
                                 "items": {
                                     "type": "object",
+                                    "description": "A selectable answer option.",
                                     "additionalProperties": false,
                                     "properties": {
-                                        "label": { "type": "string" },
-                                        "description": { "type": "string" }
+                                        "label": {
+                                            "type": "string",
+                                            "description": "Short option label shown to the user. Put the recommended choice first and include '(Recommended)' in its label when applicable."
+                                        },
+                                        "description": {
+                                            "type": "string",
+                                            "description": "One-sentence explanation of the impact or tradeoff for choosing this option."
+                                        }
                                     },
                                     "required": ["label", "description"]
                                 }

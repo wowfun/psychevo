@@ -54,7 +54,9 @@ fn home_path(env_map: &BTreeMap<String, String>) -> Result<PathBuf> {
         .ok_or_else(|| Error::Config("HOME is required to expand ~".to_string()))
 }
 
-fn load_jsonc_config_file(path: &Path, required: bool) -> Result<Value> {
+pub(crate) const CONFIG_FILE_NAME: &str = "config.toml";
+
+pub(crate) fn load_toml_config_file(path: &Path, required: bool) -> Result<Value> {
     if !path.exists() {
         if required {
             return Err(Error::Config(format!(
@@ -65,16 +67,74 @@ fn load_jsonc_config_file(path: &Path, required: bool) -> Result<Value> {
         return Ok(json!({}));
     }
     let text = fs::read_to_string(path)?;
-    let parsed: Option<Value> = jsonc_parser::parse_to_serde_value(&text, &Default::default())
-        .map_err(|err| Error::Config(format!("{}: {err}", path.display())))?;
-    let value = parsed.unwrap_or_else(|| json!({}));
+    let parsed: toml::Value =
+        toml::from_str(&text).map_err(|err| Error::Config(format!("{}: {err}", path.display())))?;
+    let value = serde_json::to_value(parsed)?;
     if !value.is_object() {
         return Err(Error::Config(format!(
-            "{} must contain a JSON object",
+            "{} must contain a TOML table",
             path.display()
         )));
     }
     Ok(value)
+}
+
+pub(crate) fn write_toml_config_file(path: &Path, value: &Value) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, toml_config_string(value)?)?;
+    Ok(())
+}
+
+fn toml_config_string(value: &Value) -> Result<String> {
+    let toml_value = json_to_toml_value(value)?;
+    let mut text = toml::to_string_pretty(&toml_value)?;
+    if !text.ends_with('\n') {
+        text.push('\n');
+    }
+    Ok(text)
+}
+
+fn json_to_toml_value(value: &Value) -> Result<toml::Value> {
+    match value {
+        Value::Null => Err(Error::Config(
+            "TOML config does not support null values".to_string(),
+        )),
+        Value::Bool(value) => Ok(toml::Value::Boolean(*value)),
+        Value::Number(value) => {
+            if let Some(value) = value.as_i64() {
+                Ok(toml::Value::Integer(value))
+            } else if let Some(value) = value.as_u64() {
+                let value = i64::try_from(value).map_err(|_| {
+                    Error::Config("TOML config integer exceeds i64".to_string())
+                })?;
+                Ok(toml::Value::Integer(value))
+            } else if let Some(value) = value.as_f64() {
+                Ok(toml::Value::Float(value))
+            } else {
+                Err(Error::Config(
+                    "TOML config number is not representable".to_string(),
+                ))
+            }
+        }
+        Value::String(value) => Ok(toml::Value::String(value.clone())),
+        Value::Array(values) => values
+            .iter()
+            .map(json_to_toml_value)
+            .collect::<Result<Vec<_>>>()
+            .map(toml::Value::Array),
+        Value::Object(values) => {
+            let mut table = toml::map::Map::new();
+            for (key, value) in values {
+                if value.is_null() {
+                    continue;
+                }
+                table.insert(key.clone(), json_to_toml_value(value)?);
+            }
+            Ok(toml::Value::Table(table))
+        }
+    }
 }
 
 fn deep_merge(base: &mut Value, overlay: Value) {
@@ -130,4 +190,3 @@ fn strip_env_quotes(value: &str) -> &str {
         value
     }
 }
-

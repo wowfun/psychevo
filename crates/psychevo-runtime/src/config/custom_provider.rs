@@ -1,5 +1,3 @@
-use jsonc_parser::ParseOptions;
-use jsonc_parser::cst::{CstInputValue, CstRootNode};
 use std::io::Write;
 
 pub fn custom_provider_api_key_env(provider_id: &str) -> String {
@@ -72,15 +70,10 @@ pub fn create_scoped_custom_provider(
 
     let config_dir = input.config_dir;
     fs::create_dir_all(&config_dir)?;
-    let config_path = config_dir.join("config.jsonc");
+    let config_path = config_dir.join(CONFIG_FILE_NAME);
     let env_path = config_dir.join(".env");
-    let config_text = if config_path.exists() {
-        fs::read_to_string(&config_path)?
-    } else {
-        "{}\n".to_string()
-    };
-    let parsed = load_jsonc_config_file(&config_path, false)?;
-    let existing = parse_run_config(parsed)?;
+    let mut parsed = load_toml_config_file(&config_path, false)?;
+    let existing = parse_run_config(parsed.clone())?;
     if existing.provider.contains_key(&provider_id) {
         return Err(Error::Config(format!(
             "provider {provider_id} already exists"
@@ -98,7 +91,7 @@ pub fn create_scoped_custom_provider(
 
     write_provider_config(
         &config_path,
-        &config_text,
+        &mut parsed,
         &provider_id,
         &label,
         &base_url,
@@ -188,42 +181,41 @@ fn valid_provider_id(provider_id: &str) -> bool {
 
 fn write_provider_config(
     path: &Path,
-    text: &str,
+    value: &mut Value,
     provider_id: &str,
     label: &str,
     base_url: &str,
     api_key_env: &str,
 ) -> Result<()> {
-    let text = if text.trim().is_empty() { "{}\n" } else { text };
-    let root = CstRootNode::parse(text, &ParseOptions::default())
-        .map_err(|err| Error::Config(format!("{}: {err}", path.display())))?;
-    let root_object = root.object_value_or_set();
-    let providers = root_object.object_value_or_set("provider");
-    providers.append(
-        provider_id,
-        CstInputValue::Object(vec![
-            (
-                "label".to_string(),
-                CstInputValue::String(label.to_string()),
-            ),
-            (
-                "options".to_string(),
-                CstInputValue::Object(vec![
-                    (
-                        "base_url".to_string(),
-                        CstInputValue::String(base_url.to_string()),
-                    ),
-                    (
-                        "api_key_env".to_string(),
-                        CstInputValue::String(api_key_env.to_string()),
-                    ),
-                ]),
-            ),
-            ("models".to_string(), CstInputValue::Object(Vec::new())),
-        ]),
+    ensure_json_object(value);
+    let root = value
+        .as_object_mut()
+        .ok_or_else(|| Error::Config("config root must be an object".to_string()))?;
+    let providers = root
+        .entry("provider".to_string())
+        .or_insert_with(|| json!({}));
+    ensure_json_object(providers);
+    let providers = providers
+        .as_object_mut()
+        .ok_or_else(|| Error::Config("provider must be an object".to_string()))?;
+    providers.insert(
+        provider_id.to_string(),
+        json!({
+            "label": label,
+            "options": {
+                "base_url": base_url,
+                "api_key_env": api_key_env,
+            },
+            "models": {},
+        }),
     );
-    fs::write(path, ensure_trailing_newline(root.to_string()))?;
-    Ok(())
+    write_toml_config_file(path, value)
+}
+
+fn ensure_json_object(value: &mut Value) {
+    if !value.is_object() {
+        *value = json!({});
+    }
 }
 
 fn append_dotenv_value(path: &Path, key: &str, value: &str) -> Result<()> {
@@ -270,11 +262,4 @@ fn set_dotenv_value(path: &Path, key: &str, value: &str) -> Result<bool> {
     out.push('\n');
     fs::write(path, out)?;
     Ok(replaced)
-}
-
-fn ensure_trailing_newline(mut text: String) -> String {
-    if !text.ends_with('\n') {
-        text.push('\n');
-    }
-    text
 }

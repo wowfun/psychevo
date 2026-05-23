@@ -30,27 +30,17 @@ fn write_cli_skill(root: &Path, name: &str, description: &str, body: &str) {
 }
 
 #[test]
-fn cli_skill_create_list_view_disable_and_json() {
+fn cli_skill_list_view_config_and_json() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let workdir = temp.path().join("work");
     std::fs::create_dir_all(&workdir).expect("workdir");
     init_skill_home(temp.path(), &psychevo_home);
-
-    let create = skill_cmd(temp.path(), &psychevo_home, &workdir)
-        .args([
-            "skill",
-            "create",
-            "reviewer",
-            "--description",
-            "Review code changes",
-        ])
-        .output()
-        .expect("pevo skill create");
-    assert!(
-        create.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&create.stderr)
+    write_cli_skill(
+        &psychevo_home.join("skills"),
+        "reviewer",
+        "Review code changes",
+        "Review body.",
     );
 
     let list = skill_cmd(temp.path(), &psychevo_home, &workdir)
@@ -78,13 +68,13 @@ fn cli_skill_create_list_view_disable_and_json() {
     );
     assert_eq!(
         String::from_utf8(view.stdout).expect("stdout"),
-        "# reviewer\n"
+        "Review body.\n"
     );
 
     let disable = skill_cmd(temp.path(), &psychevo_home, &workdir)
-        .args(["skill", "disable", "reviewer"])
+        .args(["skill", "config", "disable", "reviewer"])
         .output()
-        .expect("pevo skill disable");
+        .expect("pevo skill config disable");
     assert!(
         disable.status.success(),
         "stderr: {}",
@@ -124,6 +114,25 @@ fn cli_skill_create_list_view_disable_and_json() {
                 .expect("message")
                 .contains("skill disabled: reviewer"))
     );
+
+    let set_config = skill_cmd(temp.path(), &psychevo_home, &workdir)
+        .args([
+            "skill",
+            "config",
+            "set",
+            "skills.config.reviewer.mode",
+            "\"strict\"",
+            "--json",
+        ])
+        .output()
+        .expect("pevo skill config set");
+    assert!(
+        set_config.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&set_config.stderr)
+    );
+    let config = std::fs::read_to_string(psychevo_home.join("config.toml")).expect("config");
+    assert!(config.contains("mode = \"strict\""));
 }
 
 #[test]
@@ -153,7 +162,7 @@ fn cli_skill_install_local_scope_and_scan_dangerous() {
             "skill",
             "install",
             source.to_str().expect("source"),
-            "--local",
+            "--project",
         ])
         .output()
         .expect("pevo skill install");
@@ -177,24 +186,46 @@ fn cli_skill_install_local_scope_and_scan_dangerous() {
     assert_eq!(value["skills"][0]["name"], "imported");
     assert_eq!(value["skills"][0]["source"], "project");
 
-    let scan = skill_cmd(temp.path(), &psychevo_home, &workdir)
-        .args(["skill", "scan", dangerous.to_str().expect("dangerous")])
+    let bundle = skill_cmd(temp.path(), &psychevo_home, &workdir)
+        .args([
+            "skill",
+            "bundle",
+            "create",
+            "review-flow",
+            "--skill",
+            "imported",
+            "--project",
+            "--json",
+        ])
         .output()
-        .expect("pevo skill scan");
+        .expect("pevo skill bundle create");
+    assert!(
+        bundle.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&bundle.stderr)
+    );
+    let bundle_value: Value = serde_json::from_slice(&bundle.stdout).expect("bundle json");
+    assert_eq!(bundle_value["slug"], "review-flow");
+    assert!(workdir.join(".psychevo/skill-bundles/review-flow.toml").exists());
+
+    let scan = skill_cmd(temp.path(), &psychevo_home, &workdir)
+        .args(["skill", "audit", dangerous.to_str().expect("dangerous"), "--json"])
+        .output()
+        .expect("pevo skill audit");
     assert!(
         scan.status.success(),
         "stderr: {}",
         String::from_utf8_lossy(&scan.stderr)
     );
     let value: Value = serde_json::from_slice(&scan.stdout).expect("json");
-    assert_eq!(value["verdict"], "dangerous");
+    assert_eq!(value["scan"]["verdict"], "dangerous");
 
     let blocked = skill_cmd(temp.path(), &psychevo_home, &workdir)
         .args([
             "skill",
             "install",
             dangerous.to_str().expect("dangerous"),
-            "--local",
+            "--project",
         ])
         .output()
         .expect("pevo skill install dangerous");
@@ -266,11 +297,5 @@ fn cli_skill_install_git_from_local_repo() {
         String::from_utf8_lossy(&install.stderr)
     );
     assert!(psychevo_home.join("skills/git-skill/SKILL.md").exists());
-    let provenance: Value = serde_json::from_str(
-        &std::fs::read_to_string(psychevo_home.join("skills/.provenance.json"))
-            .expect("provenance"),
-    )
-    .expect("provenance json");
-    assert_eq!(provenance["git-skill"]["source_type"], "git");
-    assert_eq!(provenance["git-skill"]["original_skill_name"], "git-skill");
+    assert!(!psychevo_home.join("skills/.provenance.json").exists());
 }

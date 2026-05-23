@@ -50,7 +50,8 @@ pub async fn run_agent_loop(
         )
         .await?;
     }
-    drain_external_user_messages(&mut control, &mut context);
+    drain_external_user_messages(&mut control, &mut context, &mut new_messages, &sink, true)
+        .await?;
 
     loop {
         if turn_index >= request.max_turns {
@@ -108,7 +109,8 @@ pub async fn run_agent_loop(
             });
         }
 
-        drain_external_user_messages(&mut control, &mut context);
+        drain_external_user_messages(&mut control, &mut context, &mut new_messages, &sink, true)
+            .await?;
 
         let assistant = stream_assistant(
             Arc::clone(&provider),
@@ -122,7 +124,9 @@ pub async fn run_agent_loop(
         let assistant_outcome = assistant_outcome(&assistant);
         context.push(assistant.clone());
         new_messages.push(assistant.clone());
-        let injected_after_generation = drain_external_user_messages(&mut control, &mut context);
+        let injected_after_generation =
+            drain_external_user_messages(&mut control, &mut context, &mut new_messages, &sink, false)
+                .await?;
 
         if assistant_outcome != Outcome::Normal {
             emit(
@@ -179,8 +183,15 @@ pub async fn run_agent_loop(
                 .await?;
             }
         }
-        let injected_after_tools =
-            injected_after_generation || drain_external_user_messages(&mut control, &mut context);
+        let injected_after_tools = injected_after_generation
+            || drain_external_user_messages(
+                &mut control,
+                &mut context,
+                &mut new_messages,
+                &sink,
+                true,
+            )
+            .await?;
 
         let terminal = if control.abort_requested() {
             Some(Outcome::Aborted)
@@ -230,12 +241,43 @@ pub async fn run_agent_loop(
     }
 }
 
-fn drain_external_user_messages(
+async fn drain_external_user_messages(
     control: &mut ControlReceivers,
     context: &mut Vec<Message>,
-) -> bool {
+    new_messages: &mut Vec<Message>,
+    sink: &Arc<dyn EventSink>,
+    include_pending: bool,
+) -> Result<bool> {
     let messages = control.drain_injected_messages();
-    let had_messages = !messages.is_empty();
+    let mut had_messages = !messages.is_empty();
     context.extend(messages);
-    had_messages
+    if include_pending {
+        for (id, message) in control.drain_pending_user_messages() {
+            had_messages = true;
+            context.push(message.clone());
+            new_messages.push(message.clone());
+            emit(
+                sink,
+                AgentEvent::MessageStart {
+                    message: message.clone(),
+                },
+            )
+            .await?;
+            emit(
+                sink,
+                AgentEvent::MessageEnd {
+                    message,
+                    usage: None,
+                    metadata: Some(json!({
+                        "pending_input": {
+                            "id": id.as_u64(),
+                            "kind": "steer",
+                        }
+                    })),
+                },
+            )
+            .await?;
+        }
+    }
+    Ok(had_messages)
 }
