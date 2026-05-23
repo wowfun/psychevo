@@ -701,6 +701,10 @@ enum BottomSelectionValue {
     FetchProvider(String),
     ProviderInfo(String),
     StatsRow(String),
+    Toolset {
+        name: String,
+        enabled: bool,
+    },
     Model {
         model: Box<ConfiguredModel>,
         source: ModelRowSource,
@@ -734,6 +738,7 @@ enum BottomPanel {
     AgentEditor(AgentEditorPanel),
     Models(ModelPanel),
     Stats(BottomSelectionPanel),
+    Tools(BottomSelectionPanel),
     ProviderWizard(ProviderWizardPanel),
     Clarify(ClarifyPanel),
     Variants {
@@ -1501,6 +1506,7 @@ impl BottomSelectionValue {
                 }
             }
             BottomSelectionValue::StatsRow(key) => format!("stats:{key}"),
+            BottomSelectionValue::Toolset { name, .. } => format!("toolset:{name}"),
             BottomSelectionValue::Model { model, .. } => {
                 format!("model:{}", format_model_spec(model))
             }
@@ -1517,7 +1523,9 @@ impl BottomSelectionValue {
 impl BottomPanel {
     fn selection(&self) -> &BottomSelectionPanel {
         match self {
-            BottomPanel::Sessions(panel) | BottomPanel::Stats(panel) => panel,
+            BottomPanel::Sessions(panel) | BottomPanel::Stats(panel) | BottomPanel::Tools(panel) => {
+                panel
+            }
             BottomPanel::Agents(panel) => match panel.tab {
                 AgentTab::Running => &panel.running,
                 AgentTab::Available => &panel.available,
@@ -1542,7 +1550,9 @@ impl BottomPanel {
 
     fn selection_mut(&mut self) -> &mut BottomSelectionPanel {
         match self {
-            BottomPanel::Sessions(panel) | BottomPanel::Stats(panel) => panel,
+            BottomPanel::Sessions(panel) | BottomPanel::Stats(panel) | BottomPanel::Tools(panel) => {
+                panel
+            }
             BottomPanel::Agents(panel) => match panel.tab {
                 AgentTab::Running => &mut panel.running,
                 AgentTab::Available => &mut panel.available,
@@ -1579,6 +1589,7 @@ impl BottomPanel {
             | BottomPanel::AgentEditor(_)
             | BottomPanel::Models(_)
             | BottomPanel::Stats(_)
+            | BottomPanel::Tools(_)
             | BottomPanel::ProviderWizard(_)
             | BottomPanel::Clarify(_)
             | BottomPanel::Variants { .. } => None,

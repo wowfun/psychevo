@@ -20,6 +20,9 @@ impl TuiApp {
             .map(normalize_submitted_slash_echo)
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| slash_command_echo(&command));
+        if submitted.is_some() {
+            ui.scroll_to_bottom();
+        }
         if let Some(message) = self.side_command_rejection(&command) {
             ui.push_command_result(command_echo, None, message, true);
             return Ok(false);
@@ -276,6 +279,9 @@ impl TuiApp {
                     false,
                 );
             }
+            SlashCommand::Tools => {
+                ui.bottom_panel = Some(BottomPanel::Tools(self.toolsets_panel()?));
+            }
             SlashCommand::Bundles(args) => {
                 ui.push_command_result(
                     command_echo,
@@ -304,8 +310,12 @@ impl TuiApp {
             }
             SlashCommand::SkillInvoke { name, args } => {
                 if let Some(text) = self.skill_or_bundle_marker(&name, &args) {
-                    ui.set_composer_text(&text);
-                    self.sync_skill_popup(ui);
+                    self.submit_fullscreen_prompt_with_display(
+                        ui,
+                        text,
+                        command_echo,
+                        Vec::new(),
+                    )?;
                 } else {
                     ui.push_command_result(
                         command_echo,
@@ -333,6 +343,7 @@ impl TuiApp {
         text: String,
         record_history: bool,
     ) -> Result<bool> {
+        ui.scroll_to_bottom();
         if let Some(shell) = parse_shell_escape_input(&text) {
             if record_history {
                 ui.push_submitted_history(shell.history_text.clone());
@@ -386,6 +397,16 @@ impl TuiApp {
         images: Vec<PendingImageAttachment>,
     ) -> Result<()> {
         let prompt = prompt_without_image_placeholders(&display_prompt, &images);
+        self.submit_fullscreen_prompt_with_display(ui, prompt, display_prompt, images)
+    }
+
+    fn submit_fullscreen_prompt_with_display(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        prompt: String,
+        display_prompt: String,
+        images: Vec<PendingImageAttachment>,
+    ) -> Result<()> {
         if self.compaction_task.is_some() {
             self.queue_fullscreen_prompt(ui, prompt, display_prompt, images);
             return Ok(());
@@ -940,6 +961,10 @@ impl TuiApp {
                 println!("{}", self.skills_command_text(args.as_deref()));
                 Ok(())
             }
+            SlashCommand::Tools => {
+                println!("{}", self.toolsets_status_text()?);
+                Ok(())
+            }
             SlashCommand::Bundles(args) => {
                 println!("{}", self.bundles_command_text(args.as_deref()));
                 Ok(())
@@ -1084,7 +1109,7 @@ impl TuiApp {
             "/skills audit [name] - scan local skills".to_string(),
             "/skills reload - refresh skill context".to_string(),
             "/bundles - manage skill bundles".to_string(),
-            "/<skill-or-bundle> [args] - insert a marker".to_string(),
+            "/<skill-or-bundle> [args] - submit with a skill or bundle".to_string(),
         ]
         .join("\n")
     }
@@ -1290,7 +1315,7 @@ impl TuiApp {
             None => [
                 "Skill bundles",
                 "/bundles list - list installed bundles",
-                "/<bundle> [args] - insert a bundle marker",
+                "/<bundle> [args] - submit with a bundle",
             ]
             .join("\n"),
             Some("list") => self.bundles_status_text(),
@@ -2014,6 +2039,7 @@ fn slash_command_echo(command: &SlashCommand) -> String {
             .as_deref()
             .map(|args| format!("/skills {}", args.trim()))
             .unwrap_or_else(|| "/skills".to_string()),
+        SlashCommand::Tools => "/tools".to_string(),
         SlashCommand::Bundles(args) => args
             .as_deref()
             .map(|args| format!("/bundles {}", args.trim()))

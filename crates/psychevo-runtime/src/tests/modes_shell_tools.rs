@@ -1,15 +1,70 @@
 #[test]
 fn run_mode_tool_names_enforce_plan_read_only_surface() {
-    assert_eq!(RunMode::Build.as_str(), "default");
-    assert_eq!(RunMode::parse("default"), Some(RunMode::Build));
+    assert_eq!(RunMode::Default.as_str(), "default");
+    assert_eq!(RunMode::parse("default"), Some(RunMode::Default));
     assert_eq!(RunMode::parse("build"), None);
+    let plan = tool_names_for_mode(RunMode::Plan);
+    let default = tool_names_for_mode(RunMode::Default);
+    assert_eq!(plan, vec!["read", "exec_command", "write_stdin", "web_fetch"]);
     assert_eq!(
-        tool_names_for_mode(RunMode::Plan),
-        vec!["read", "list", "search"]
+        default,
+        vec!["read", "write", "edit", "exec_command", "write_stdin", "web_fetch"]
     );
-    assert_eq!(
-        tool_names_for_mode(RunMode::Build),
-        vec!["read", "write", "edit", "exec_command", "write_stdin"]
+    assert!(plan.iter().all(|name| default.contains(name)));
+    assert!(!plan.contains(&"list"));
+    assert!(!plan.contains(&"search"));
+    assert!(!default.contains(&"list"));
+    assert!(!default.contains(&"search"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn exec_command_prepends_managed_tool_path() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = tempdir().expect("temp");
+    let workdir = temp.path().join("work");
+    let tools_dir = temp.path().join("tools");
+    fs::create_dir_all(&workdir).expect("workdir");
+    fs::create_dir_all(&tools_dir).expect("tools");
+    let rg = tools_dir.join("rg");
+    fs::write(&rg, "#!/bin/sh\nprintf 'managed-rg\\n'\n").expect("fake rg");
+    let mut permissions = fs::metadata(&rg).expect("metadata").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&rg, permissions).expect("chmod");
+    let tools = crate::tools::coding_core_tools_for_mode_with_context(
+        &workdir,
+        RunMode::Default,
+        crate::tools::ToolRuntimeContext {
+            task_id: "exec-path-test".to_string(),
+            lsp: crate::config::LspConfig::default(),
+            allow_login_shell: false,
+            stream_events: None,
+            path_prefixes: vec![tools_dir],
+        },
+    );
+    let exec = tools
+        .iter()
+        .find(|tool| tool.name() == "exec_command")
+        .expect("exec_command");
+    let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+
+    let result = exec
+        .execute(
+            "call_exec_path".to_string(),
+            json!({"cmd": "rg --version", "yield_time_ms": 250}),
+            receivers.abort_signal(),
+        )
+        .await;
+
+    assert!(!result.is_error, "{:?}", result.json);
+    assert!(
+        result.json["output"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("managed-rg"),
+        "{:?}",
+        result.json
     );
 }
 
@@ -20,7 +75,7 @@ fn exec_command_provider_schema_replaces_bash() {
     let names = tools.iter().map(|tool| tool.name()).collect::<Vec<_>>();
     assert_eq!(
         names,
-        vec!["read", "write", "edit", "exec_command", "write_stdin"]
+        vec!["read", "write", "edit", "exec_command", "write_stdin", "web_fetch"]
     );
 
     let exec = tools
@@ -50,6 +105,58 @@ fn exec_command_provider_schema_replaces_bash() {
     let stdin_params = stdin.parameters();
     assert_eq!(stdin_params["required"], json!(["session_id"]));
     assert_eq!(stdin_params["properties"]["chars"]["default"], "");
+
+    let web_fetch = tools
+        .iter()
+        .find(|tool| tool.name() == "web_fetch")
+        .expect("web_fetch");
+    assert!(
+        web_fetch.description().contains("not a web search tool"),
+        "{}",
+        web_fetch.description()
+    );
+}
+
+#[test]
+fn toolset_config_controls_effective_core_tools() {
+    let mut selection = crate::config::ToolSelectionConfig::default();
+    selection.modes.insert(
+        "plan".to_string(),
+        crate::config::ToolModeConfig {
+            enabled_toolsets: None,
+            disabled_toolsets: vec!["web".to_string()],
+        },
+    );
+    let names = crate::tools::effective_tool_names_for_mode_with_config(
+        RunMode::Plan,
+        &selection,
+        &BTreeMap::new(),
+    );
+    assert_eq!(names, vec!["read", "exec_command", "write_stdin"]);
+
+    let mut custom = BTreeMap::new();
+    custom.insert(
+        "writer".to_string(),
+        crate::config::CustomToolsetConfig {
+            description: None,
+            tools: vec!["write".to_string(), "web_fetch".to_string()],
+            includes: Vec::new(),
+        },
+    );
+    let mut selection = crate::config::ToolSelectionConfig::default();
+    selection.modes.insert(
+        "plan".to_string(),
+        crate::config::ToolModeConfig {
+            enabled_toolsets: Some(vec!["writer".to_string()]),
+            disabled_toolsets: Vec::new(),
+        },
+    );
+    let names = crate::tools::effective_tool_names_for_mode_with_config(
+        RunMode::Plan,
+        &selection,
+        &custom,
+    );
+    assert_eq!(names, vec!["web_fetch"]);
 }
 
 #[test]
@@ -563,7 +670,7 @@ async fn user_shell_context_missing_config_rejects_before_execution() {
         config_path: None,
         model: None,
         reasoning_effort: None,
-        mode: RunMode::Build,
+        mode: RunMode::Default,
         inherited_env: Some(BTreeMap::from([(
             "HOME".to_string(),
             temp.path().to_string_lossy().to_string(),
@@ -729,12 +836,13 @@ async fn exec_command_yielded_session_emits_background_lifecycle_events() {
     });
     let tools = crate::tools::coding_core_tools_for_mode_with_context(
         &workdir,
-        RunMode::Build,
+        RunMode::Default,
         crate::tools::ToolRuntimeContext {
             task_id: "exec-lifecycle-test".to_string(),
             lsp: crate::config::LspConfig::default(),
             allow_login_shell: false,
             stream_events: Some(stream),
+            path_prefixes: Vec::new(),
         },
     );
     let exec = tools
@@ -795,12 +903,13 @@ async fn interrupt_exec_sessions_for_task_emits_interrupted_finish() {
     });
     let tools = crate::tools::coding_core_tools_for_mode_with_context(
         &workdir,
-        RunMode::Build,
+        RunMode::Default,
         crate::tools::ToolRuntimeContext {
             task_id: "exec-interrupt-test".to_string(),
             lsp: crate::config::LspConfig::default(),
             allow_login_shell: false,
             stream_events: Some(stream),
+            path_prefixes: Vec::new(),
         },
     );
     let exec = tools
@@ -1016,7 +1125,7 @@ model = "lmstudio/test-model"
         config_path: None,
         model: None,
         reasoning_effort: None,
-        mode: RunMode::Build,
+        mode: RunMode::Default,
         inherited_env: Some(BTreeMap::from([
             (
                 "HOME".to_string(),
@@ -1078,28 +1187,4 @@ async fn wait_for_process_exit(pid: i32, timeout: Duration) -> bool {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     false
-}
-
-#[test]
-fn plan_list_and_search_tools_are_read_only_and_bounded() {
-    let temp = tempdir().expect("temp");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(workdir.join("src")).expect("dirs");
-    fs::write(workdir.join("src/lib.rs"), "alpha\nneedle one\n").expect("file");
-    fs::write(workdir.join("README.md"), "needle two\n").expect("file");
-    let tool = WorkdirTool::new(workdir.canonicalize().expect("canonical"));
-
-    let listed = list_tool_impl(tool.clone(), json!({"path":".","limit":1})).expect("list");
-    assert_eq!(listed["entries"].as_array().expect("entries").len(), 1);
-    assert_eq!(listed["truncated"], true);
-
-    let searched =
-        search_tool_impl(tool, json!({"query":"needle","path":".","limit":10})).expect("search");
-    let matches = searched["matches"].as_array().expect("matches");
-    assert_eq!(matches.len(), 2);
-    assert!(
-        matches
-            .iter()
-            .all(|entry| entry["line"].as_str().unwrap().contains("needle"))
-    );
 }

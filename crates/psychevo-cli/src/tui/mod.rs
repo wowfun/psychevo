@@ -29,12 +29,12 @@ use psychevo_runtime::{
     RunStreamEvent, RunStreamSink, SessionArtifactKind, SessionExportFormat, SessionExportOptions,
     SessionExportWriteResult, SessionSummary, SessionUndoOptions, SkillBundle, SkillCatalog,
     SkillDiscoveryOptions, SkillTarget, SqliteStore, StatsOptions, TUI_DISPLAY_METADATA_KEY,
-    TerminalReason, TuiMessageSummary, USER_SHELL_METADATA_KEY, UserShellContextOptions,
-    UserShellOptions, agent_spawn_paused, agent_status_value, auto_compaction_due_for_snapshot,
-    canonicalize_workdir, compact_session, config_show_value, configured_models, context_snapshot,
-    create_global_custom_provider, custom_provider_api_key_env, default_session_export_filename,
-    discover_agents, discover_skills, fetch_model_catalog,
-    format_context_snapshot_text_with_options, format_context_total_value,
+    TerminalReason, ToolDisplayBodyPolicy, ToolDisplayCategory, ToolDisplaySpec, TuiMessageSummary,
+    USER_SHELL_METADATA_KEY, UserShellContextOptions, UserShellOptions, agent_spawn_paused,
+    agent_status_value, auto_compaction_due_for_snapshot, canonicalize_workdir, compact_session,
+    config_show_value, configured_models, context_snapshot, create_global_custom_provider,
+    custom_provider_api_key_env, default_session_export_filename, discover_agents, discover_skills,
+    fetch_model_catalog, format_context_snapshot_text_with_options, format_context_total_value,
     format_context_total_value_parts, install_skill, list_skill_bundles, model_catalog_providers,
     model_metadata_explicitly_disallows_image_input, normalize_context_bar_width,
     permission_rules_value, prompt_message_from_inputs_with_options,
@@ -42,9 +42,9 @@ use psychevo_runtime::{
     reload_session_context, remove_skill, resolve_agent_definition, resolve_image_source,
     run_control, run_live_streaming, run_live_streaming_controlled,
     run_user_shell_command_streaming_controlled, scan_skill_path, selected_configured_model,
-    set_agent_spawn_paused, set_skill_config_value, set_skill_enabled,
+    set_agent_spawn_paused, set_local_toolset_enabled, set_skill_config_value, set_skill_enabled,
     side_conversation_boundary_prompt, spawn_agent_background, stop_agent_id_with_grace,
-    undo_session, usage_stats, view_skill_value, write_session_export,
+    toolsets_value, undo_session, usage_stats, view_skill_value, write_session_export,
 };
 use ratatui::Frame;
 use ratatui::Terminal;
@@ -66,9 +66,7 @@ mod state;
 #[cfg(test)]
 mod tests;
 
-use self::plain::{
-    TuiRenderer, assistant_text_from_event, format_session_line, format_tool_summary,
-};
+use self::plain::{TuiRenderer, assistant_text_from_event, format_session_line};
 use self::slash::{
     EffectiveSlashConfig, SlashCommand, SlashHelpSections, SlashMenuItem, SlashShortcutMatch,
     VARIANTS, configured_slash_menu_items, format_slash_help_with_config,
@@ -212,7 +210,7 @@ fn load_effective_tui_slash_config(
         model: None,
         reasoning_effort: None,
         include_reasoning: false,
-        mode: RunMode::Build,
+        mode: RunMode::Default,
         permission_mode: None,
         approval_mode: None,
         approval_handler: None,

@@ -22,6 +22,7 @@ fn pevo_cmd(home: &Path) -> Command {
 }
 
 fn isolated_run_cmd(home: &Path, config: &Path, db: &Path) -> Command {
+    seed_managed_rg(&home.join(".psychevo"));
     let mut command = pevo_cmd(home);
     command
         .env("PSYCHEVO_CONFIG", config)
@@ -47,7 +48,23 @@ fn init_tui_home(test_home: &Path) -> PathBuf {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    seed_managed_rg(&psychevo_home);
     psychevo_home
+}
+
+fn seed_managed_rg(psychevo_home: &Path) {
+    let tools = psychevo_home.join("tools");
+    std::fs::create_dir_all(&tools).expect("tools");
+    let rg = tools.join(if cfg!(windows) { "rg.exe" } else { "rg" });
+    std::fs::write(&rg, "#!/bin/sh\nprintf 'test rg\\n'\n").expect("rg");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut permissions = std::fs::metadata(&rg).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&rg, permissions).expect("chmod");
+    }
 }
 
 struct MockSseServer {

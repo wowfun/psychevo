@@ -389,6 +389,65 @@ impl TuiApp {
         Ok(BottomSelectionPanel::new("Usage", "", "No usage yet", rows))
     }
 
+    fn toolsets_panel(&self) -> Result<BottomSelectionPanel> {
+        let value = toolsets_value(&self.run_options(String::new()), ConfigScope::Effective)?;
+        let mode_key = self.current_mode.as_str();
+        let mode = &value["modes"][mode_key];
+        let enabled_toolsets = mode["enabled_toolsets"]
+            .as_array()
+            .map(|items| string_values(items))
+            .unwrap_or_else(|| {
+                value["default_enabled_toolsets"]
+                    .as_array()
+                    .map(|items| string_values(items))
+                    .unwrap_or_default()
+            });
+        let disabled_toolsets = mode["disabled_toolsets"]
+            .as_array()
+            .map(|items| string_values(items))
+            .unwrap_or_default();
+        let mut rows = Vec::new();
+        for row in value["toolsets"].as_array().cloned().unwrap_or_default() {
+            let Some(name) = row["name"].as_str() else {
+                continue;
+            };
+            let enabled = enabled_toolsets.iter().any(|item| item == name)
+                && !disabled_toolsets.iter().any(|item| item == name);
+            let source = row["source"].as_str().unwrap_or("-");
+            let tools = json_array_strings(&row["tools"]).join(", ");
+            let includes = json_array_strings(&row["includes"]).join(", ");
+            let description = row["description"].as_str().unwrap_or("").to_string();
+            let detail = if includes.is_empty() {
+                format!("{source}  tools: {tools}")
+            } else {
+                format!("{source}  includes: {includes}  tools: {tools}")
+            };
+            rows.push(BottomSelectionRow {
+                label: name.to_string(),
+                description: Some(description.clone()),
+                detail: Some(detail.clone()),
+                group: Some(if enabled { "Enabled" } else { "Disabled" }.to_string()),
+                search_text: format!("{name} {description} {detail}"),
+                is_current: enabled,
+                is_default: false,
+                style: BottomRowStyle::Normal,
+                footer: Some("Enter toggle".to_string()),
+                value: BottomSelectionValue::Toolset {
+                    name: name.to_string(),
+                    enabled,
+                },
+            });
+        }
+        let mut panel = BottomSelectionPanel::new(
+            &format!("Toolsets ({mode_key})"),
+            "",
+            "No toolsets configured",
+            rows,
+        );
+        panel.footer = "Enter toggle  Esc close  Type search".to_string();
+        Ok(panel)
+    }
+
     fn model_selection_panel(&mut self) -> Result<BottomSelectionPanel> {
         self.sync_model_catalog_providers()?;
         let current = self.model_display_value();
@@ -873,6 +932,18 @@ fn stats_row(
         footer: None,
         value: BottomSelectionValue::StatsRow(key.into()),
     }
+}
+
+fn string_values(values: &[Value]) -> Vec<String> {
+    values
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect()
+}
+
+fn json_array_strings(value: &Value) -> Vec<String> {
+    value.as_array().map(|values| string_values(values)).unwrap_or_default()
 }
 
 fn agent_definition_row(

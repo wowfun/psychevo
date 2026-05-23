@@ -10,3 +10,4 @@ pub(crate) mod session;
 pub(crate) mod skills;
 pub(crate) mod smoke;
 pub(crate) mod stats;
+pub(crate) mod tool;

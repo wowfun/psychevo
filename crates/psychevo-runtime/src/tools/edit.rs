@@ -360,6 +360,7 @@ mod edit_tool_tests {
                 },
                 allow_login_shell: false,
                 stream_events: None,
+                path_prefixes: Vec::new(),
             },
         )
     }

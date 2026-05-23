@@ -27,7 +27,7 @@ impl ToolBinding for ExecCommandTool {
     }
 
     fn description(&self) -> &str {
-        "Run a bounded shell command in the working directory. Prefer read/write/edit for file I/O instead of shell cat/head/tail/sed or redirection. Commands that keep running return a session_id after yield_time_ms; use write_stdin with empty chars to poll or non-empty chars to send stdin."
+        "Run a bounded shell command in the working directory. Prefer read/write/edit for file I/O instead of shell cat/head/tail/sed or redirection. Prefer rg for text search and rg --files for project file listing. Commands that keep running return a session_id after yield_time_ms; use write_stdin with empty chars to poll or non-empty chars to send stdin."
     }
 
     fn parameters(&self) -> Value {
@@ -174,6 +174,7 @@ pub(crate) async fn exec_command_tool_impl(
             lsp: LspConfig::default(),
             allow_login_shell,
             stream_events: None,
+            path_prefixes: Vec::new(),
         },
         "exec_command".to_string(),
         args,
@@ -219,6 +220,7 @@ async fn exec_command_tool_impl_with_context(
         shell,
         login,
         tty,
+        path_prefixes: context.path_prefixes.clone(),
     };
     let session = spawn_exec_session(
         invocation,
@@ -293,6 +295,7 @@ pub(crate) async fn run_exec_command_for_user_shell(
         shell: default_shell(),
         login: false,
         tty: false,
+        path_prefixes: Vec::new(),
     };
     let session = spawn_exec_session(
         invocation,
@@ -346,6 +349,7 @@ struct ExecInvocation {
     shell: String,
     login: bool,
     tty: bool,
+    path_prefixes: Vec<PathBuf>,
 }
 
 #[derive(Default)]
@@ -620,6 +624,9 @@ fn spawn_pipe_session(
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if let Some(path) = subprocess_path(&invocation.path_prefixes)? {
+        command.env("PATH", path);
+    }
     configure_process_group(&mut command);
     let mut child = command.spawn()?;
     let stdin = if stdin_allowed {
@@ -674,6 +681,9 @@ fn spawn_pty_session(
     let mut command = portable_pty::CommandBuilder::new(&invocation.shell);
     command.args(shell_args(invocation.login, &invocation.cmd));
     command.cwd(invocation.workdir.as_os_str());
+    if let Some(path) = subprocess_path(&invocation.path_prefixes)? {
+        command.env("PATH", path);
+    }
     let child = pair
         .slave
         .spawn_command(command)
@@ -1049,6 +1059,19 @@ fn shell_args(login: bool, command: &str) -> Vec<String> {
             command.to_string(),
         ]
     }
+}
+
+fn subprocess_path(path_prefixes: &[PathBuf]) -> Result<Option<std::ffi::OsString>> {
+    if path_prefixes.is_empty() {
+        return Ok(None);
+    }
+    let mut paths = path_prefixes.to_vec();
+    if let Some(current) = env::var_os("PATH") {
+        paths.extend(env::split_paths(&current));
+    }
+    env::join_paths(paths)
+        .map(Some)
+        .map_err(|err| Error::Message(format!("failed to build subprocess PATH: {err}")))
 }
 
 fn clamp_yield_ms(value: Option<i64>, default: u64, min: u64, max: u64) -> u64 {

@@ -70,6 +70,24 @@ impl Default for LspConfig {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ToolSelectionConfig {
+    pub(crate) modes: BTreeMap<String, ToolModeConfig>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ToolModeConfig {
+    pub(crate) enabled_toolsets: Option<Vec<String>>,
+    pub(crate) disabled_toolsets: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CustomToolsetConfig {
+    pub(crate) description: Option<String>,
+    pub(crate) tools: Vec<String>,
+    pub(crate) includes: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 struct BuiltInProvider {
     id: &'static str,

@@ -78,7 +78,7 @@ fn test_app(temp: &tempfile::TempDir) -> TuiApp {
         current_model: Some("mock/model".to_string()),
         current_variant: Some("high".to_string()),
         selected_model: None,
-        current_mode: RunMode::Build,
+        current_mode: RunMode::Default,
         current_permission_mode: PermissionMode::Default,
         startup_agent: None,
         current_agent: None,

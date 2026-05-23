@@ -22,6 +22,37 @@ async fn mode_slash_command_requires_value() {
 }
 
 #[tokio::test]
+async fn submitted_slash_command_restores_bottom_follow_after_manual_scroll() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    for index in 0..18 {
+        ui.transcript.push(TranscriptRow::simple(
+            TranscriptKind::Answer,
+            format!("prior line {index}"),
+        ));
+    }
+    let _ = draw_fullscreen_for_test(&app, &mut ui, 80, 10);
+    assert_eq!(ui.scroll, ui.max_transcript_scroll());
+    assert!(ui.scroll > 0);
+
+    ui.scroll_transcript(-6);
+    assert!(!ui.auto_follow_transcript);
+    ui.textarea = textarea_with_text("/status");
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .expect("enter");
+    let _ = draw_fullscreen_for_test(&app, &mut ui, 80, 10);
+
+    assert!(ui.auto_follow_transcript);
+    assert_eq!(ui.scroll, ui.max_transcript_scroll());
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command && row.title == "/status"
+    }));
+}
+
+#[tokio::test]
 async fn mode_slash_command_sets_mode_with_direct_value() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
@@ -1143,9 +1174,9 @@ async fn fullscreen_export_and_share_write_artifacts() {
 }
 
 #[tokio::test]
-async fn fullscreen_skills_command_lists_dynamic_entries_and_inserts_skill_marker() {
+async fn fullscreen_skills_command_lists_dynamic_entries_and_submits_dynamic_slash() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app_with_models(&temp);
     fs::create_dir_all(app.workdir.join(".git")).expect("git marker");
     let skill_dir = app.home.join("skills").join("helper");
     fs::create_dir_all(&skill_dir).expect("skill dir");
@@ -1234,10 +1265,59 @@ async fn fullscreen_skills_command_lists_dynamic_entries_and_inserts_skill_marke
     )
     .await
     .expect("skill invoke");
+    assert!(ui.running.is_some());
+    assert_eq!(textarea_text(&ui.textarea), "");
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Prompt && row.text == "/helper apply it to src/lib.rs"
+    }));
+    if let Some(running) = ui.running.take() {
+        running.control.abort();
+        if let RunningTask::Agent(task) = running.task {
+            let _ = task.await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn enter_on_dynamic_slash_menu_item_submits_without_skill_marker_rewrite() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app_with_models(&temp);
+    fs::create_dir_all(app.workdir.join(".git")).expect("git marker");
+    let skill_dir = app.home.join("skills").join("helper");
+    fs::create_dir_all(&skill_dir).expect("skill dir");
+    fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: helper\ndescription: Helps with focused edits\n---\n\nFollow the helper workflow.\n",
+    )
+    .expect("skill");
+    let mut ui = FullscreenUi::new(&app);
+    ui.textarea = textarea_with_text("/helper");
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .expect("enter");
+
+    assert_eq!(ui.history.last().map(String::as_str), Some("/helper"));
     assert_eq!(
         textarea_text(&ui.textarea),
-        "$helper apply it to src/lib.rs"
+        "",
+        "dynamic slash selection must not leave a $skill marker in the composer"
     );
+    assert!(ui.running.is_some());
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Prompt && row.text == "/helper"
+    }));
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| !(row.kind == TranscriptKind::Prompt && row.text.starts_with("$helper")))
+    );
+    if let Some(running) = ui.running.take() {
+        running.control.abort();
+        if let RunningTask::Agent(task) = running.task {
+            let _ = task.await;
+        }
+    }
 }
 
 fn test_context_snapshot() -> ContextSnapshot {

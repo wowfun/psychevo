@@ -70,55 +70,6 @@ pub(crate) fn assistant_text_from_event(value: &Value) -> Option<String> {
     Some(text)
 }
 
-pub(crate) fn format_tool_summary(value: &Value) -> String {
-    let tool = value
-        .get("tool_name")
-        .and_then(Value::as_str)
-        .unwrap_or("tool");
-    let outcome = value
-        .get("outcome")
-        .and_then(Value::as_str)
-        .unwrap_or("normal");
-    let result = value.get("result").unwrap_or(&Value::Null);
-    let summary = summarize_result(result);
-    if summary.is_empty() {
-        format!("{tool} {outcome}")
-    } else {
-        format!("{tool} {outcome}: {summary}")
-    }
-}
-
-fn summarize_result(value: &Value) -> String {
-    if let Some(error) = value.get("error").and_then(Value::as_str) {
-        return truncate_inline(error, 140);
-    }
-    for key in [
-        "path",
-        "files_modified",
-        "bytes_written",
-        "exit_code",
-        "truncated",
-    ] {
-        if let Some(value) = value.get(key) {
-            return truncate_inline(&format!("{key}={}", compact_json(value)), 140);
-        }
-    }
-    if let Some(content) = value.get("content").and_then(Value::as_str) {
-        return truncate_inline(content, 140);
-    }
-    if let Some(output) = value.get("output").and_then(Value::as_str) {
-        return truncate_inline(output, 140);
-    }
-    String::new()
-}
-
-fn compact_json(value: &Value) -> String {
-    match value {
-        Value::String(value) => value.clone(),
-        other => serde_json::to_string(other).unwrap_or_else(|_| "null".to_string()),
-    }
-}
-
 pub(crate) fn format_session_line(
     id: &str,
     source: &str,
@@ -128,19 +79,6 @@ pub(crate) fn format_session_line(
 ) -> String {
     let short = &id[..id.len().min(8)];
     format!("{short} {source} {provider}/{model} messages={messages}")
-}
-
-fn truncate_inline(input: &str, max_chars: usize) -> String {
-    let normalized = input.split_whitespace().collect::<Vec<_>>().join(" ");
-    if normalized.chars().count() <= max_chars {
-        return normalized;
-    }
-    let mut out = normalized
-        .chars()
-        .take(max_chars.saturating_sub(3))
-        .collect::<String>();
-    out.push_str("...");
-    out
 }
 
 #[cfg(test)]

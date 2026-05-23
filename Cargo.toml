@@ -19,12 +19,14 @@ bytes = "1.9"
 clap = { version = "4.5", features = ["derive"] }
 crossterm = "0.29"
 futures = "0.3"
+html2text = "0.17.1"
 ignore = "0.4.23"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
 libc = "0.2.182"
 insta = "1"
 pretty_assertions = "1.4"
 portable-pty = "0.9.0"
+quick_html2md = "0.2.1"
 pulldown-cmark = "0.10"
 regex-lite = "0.1.8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }

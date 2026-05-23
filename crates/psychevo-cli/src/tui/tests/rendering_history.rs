@@ -1796,13 +1796,6 @@ fn completed_live_tool_elapsed_keeps_visible_active_duration_for_all_tool_phases
             "read Cargo.toml",
         ),
         (
-            "search",
-            serde_json::json!({"query": "Updating"}),
-            serde_json::json!({"query": "Updating", "matches": []}),
-            TranscriptKind::Explored,
-            "search Updating",
-        ),
-        (
             "exec_command",
             serde_json::json!({"cmd": "cargo test -p psychevo-cli"}),
             serde_json::json!({"output": "ok"}),
@@ -1873,6 +1866,132 @@ fn completed_live_tool_elapsed_keeps_visible_active_duration_for_all_tool_phases
 }
 
 #[test]
+fn extension_tool_records_render_with_generic_tool_style() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+
+    for (tool, args, expected_title) in [
+        ("custom_list", serde_json::json!({"path": "src"}), "custom_list src"),
+        (
+            "custom_search",
+            serde_json::json!({"query": "needle"}),
+            "custom_search needle",
+        ),
+    ] {
+        let mut ui = FullscreenUi::new(&app);
+        ui.apply_value_event(
+            &serde_json::json!({
+                "type": "tool_execution_start",
+                "tool_call_id": format!("call_{tool}"),
+                "tool_name": tool,
+                "args": args
+            }),
+            false,
+        );
+
+        let row = ui.transcript.iter().find(|row| row.tool_name.as_deref() == Some(tool)).expect("active row");
+        assert_eq!(row.kind, TranscriptKind::Ran, "{tool}");
+        assert_eq!(row.title, expected_title);
+
+        ui.apply_value_event(
+            &serde_json::json!({
+                "type": "tool_execution_end",
+                "tool_call_id": format!("call_{tool}"),
+                "tool_name": tool,
+                "result": {"query": "needle", "matches": []},
+                "outcome": "normal",
+                "elapsed_ms": 1
+            }),
+            false,
+        );
+
+        let row = ui.transcript.iter().find(|row| row.tool_name.as_deref() == Some(tool)).expect("completed row");
+        assert_eq!(row.kind, TranscriptKind::Ran, "{tool}");
+        assert_eq!(row.title, expected_title);
+        assert!(!row.title.starts_with("Tool "), "{tool}");
+    }
+}
+
+#[test]
+fn web_fetch_result_defaults_to_summary_with_content_as_detail() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_execution_end",
+            "tool_call_id": "call_fetch",
+            "tool_name": "web_fetch",
+            "args": {"url": "https://example.test/docs"},
+            "result": {
+                "url": "https://example.test/docs",
+                "final_url": "https://example.test/docs",
+                "status": 200,
+                "content_type": "text/html",
+                "content": "first fetched line\nsecond fetched line\nthird fetched line",
+                "original_bytes": 1200,
+                "output_bytes": 80,
+                "truncated": false
+            },
+            "outcome": "normal",
+            "elapsed_ms": 12
+        }),
+        false,
+    );
+
+    let row = ui
+        .transcript
+        .iter()
+        .find(|row| row.tool_name.as_deref() == Some("web_fetch"))
+        .expect("web_fetch row");
+    assert_eq!(row.kind, TranscriptKind::Explored);
+    assert_eq!(row.title, "web_fetch https://example.test/docs");
+    assert!(row.text.contains("web_fetch normal: status=200"), "{}", row.text);
+    assert!(!row.text.contains("first fetched line"), "{}", row.text);
+    assert!(
+        row.full_text
+            .as_deref()
+            .is_some_and(|full| full.contains("first fetched line")),
+        "{row:?}"
+    );
+}
+
+#[test]
+fn tool_display_snapshot_controls_extension_tool_projection() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    let display = serde_json::json!({
+        "category": "update",
+        "title_arg_keys": ["target"],
+        "title_result_keys": ["target"],
+        "summary_keys": ["status"],
+        "body_keys": ["content"],
+        "body_policy": "summary"
+    });
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_execution_start",
+            "tool_call_id": "call_custom",
+            "tool_name": "custom_publish",
+            "args": {"target": "draft.md"},
+            "display": display
+        }),
+        false,
+    );
+
+    let row = ui
+        .transcript
+        .iter()
+        .find(|row| row.tool_name.as_deref() == Some("custom_publish"))
+        .expect("custom row");
+    assert_eq!(row.kind, TranscriptKind::Updated);
+    assert_eq!(row.title, "custom_publish draft.md");
+}
+
+#[test]
 fn interrupted_pending_tool_row_stops_timer_as_interrupted() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
@@ -1933,10 +2052,10 @@ fn parallel_streaming_tool_calls_create_independent_active_rows() {
                     },
                     {
                         "type": "tool_call",
-                        "id": "call_search",
-                        "name": "search",
-                        "arguments": {"query": "format_duration"},
-                        "arguments_json": "{\"query\":\"format_duration\"}",
+                        "id": "call_exec",
+                        "name": "exec_command",
+                        "arguments": {"cmd": "rg format_duration"},
+                        "arguments_json": "{\"cmd\":\"rg format_duration\"}",
                         "arguments_error": null,
                         "content_index": 1,
                         "call_index": 0
@@ -1952,7 +2071,7 @@ fn parallel_streaming_tool_calls_create_independent_active_rows() {
         .iter()
         .map(|row| row.title.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(titles, ["read Cargo.toml", "search format_duration"]);
+    assert_eq!(titles, ["read Cargo.toml", "exec_command rg format_duration"]);
 }
 
 #[test]

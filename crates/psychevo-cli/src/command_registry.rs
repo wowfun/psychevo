@@ -65,6 +65,7 @@ pub(crate) enum SlashCommandAction {
     Undo,
     Redo,
     Skills,
+    Tools,
     Bundles,
     Curator,
     Agents,
@@ -472,6 +473,20 @@ pub(crate) const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         common: false,
     },
     SlashCommandSpec {
+        canonical: "/tools",
+        aliases: &[],
+        usage: "/tools",
+        summary: "toolsets",
+        help_detail: Some("Opens local toolset status for the current mode."),
+        surface: TUI_SLASH,
+        group: COMMANDS,
+        argument_kind: CommandArgumentKind::None,
+        output_kind: CommandOutputKind::BottomSelectionPane,
+        status: CommandStatus::Active,
+        action: SlashCommandAction::Tools,
+        common: false,
+    },
+    SlashCommandSpec {
         canonical: "/bundles",
         aliases: &[],
         usage: "/bundles [list]",
@@ -599,9 +614,9 @@ pub(crate) const CUSTOM_SKILL_COMMAND: SlashCommandSpec = SlashCommandSpec {
     canonical: "/<skill-or-bundle>",
     aliases: &[],
     usage: "/<skill-or-bundle> [args]",
-    summary: "insert a skill or bundle",
+    summary: "submit a skill or bundle",
     help_detail: Some(
-        "Inserts an explicit skill or bundle marker with optional args into the composer.",
+        "Submits the slash line while using the equivalent explicit skill or bundle marker for runtime expansion.",
     ),
     surface: TUI_SLASH,
     group: CommandGroup::CustomCommands,
@@ -673,6 +688,17 @@ pub(crate) const CLI_COMMANDS: &[CliCommandSpec] = &[
         aliases: &[],
         usage: "pevo skill <command>",
         summary: "manage local skills",
+        surface: PEVO_CLI,
+        group: COMMANDS,
+        argument_kind: CommandArgumentKind::RequiredValue,
+        output_kind: CommandOutputKind::ProcessResult,
+        status: CommandStatus::Active,
+    },
+    CliCommandSpec {
+        canonical: "tool",
+        aliases: &["tools"],
+        usage: "pevo tool <command>",
+        summary: "manage local toolsets",
         surface: PEVO_CLI,
         group: COMMANDS,
         argument_kind: CommandArgumentKind::RequiredValue,
@@ -795,8 +821,8 @@ mod tests {
         assert_eq!(
             names,
             [
-                "init", "run", "smoke", "tui", "agent", "skill", "session", "model", "config",
-                "auth", "stats", "context",
+                "init", "run", "smoke", "tui", "agent", "skill", "tool", "session", "model",
+                "config", "auth", "stats", "context",
             ]
         );
         assert!(

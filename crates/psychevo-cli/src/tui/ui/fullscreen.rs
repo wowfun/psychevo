@@ -2136,7 +2136,7 @@ impl<'a> FullscreenUi<'a> {
                     .or_else(|| self.matching_agent_placeholder_index(tool, value, &tool_call_id))
                     .unwrap_or_else(|| {
                         let mut row = TranscriptRow::with_title(
-                            evidence_kind(tool),
+                            evidence_kind_for_value(tool, value),
                             active_tool_title(tool, value),
                             "running",
                         );
@@ -2148,7 +2148,7 @@ impl<'a> FullscreenUi<'a> {
                     });
                 self.remove_turn_meta();
                 let row = &mut self.transcript[idx];
-                row.kind = evidence_kind(tool);
+                row.kind = evidence_kind_for_value(tool, value);
                 row.tool_name = Some(tool.to_string());
                 row.title = active_tool_title(tool, value);
                 if tool == "Agent" {
@@ -2228,7 +2228,7 @@ impl<'a> FullscreenUi<'a> {
                         .or_else(|| self.exec_session_rows.get(&session_id).copied())
                         .unwrap_or_else(|| {
                             let mut row = TranscriptRow::with_title(
-                                evidence_kind(tool),
+                                evidence_kind_for_value(tool, value),
                                 tool_title(tool, value),
                                 String::new(),
                             );
@@ -2242,7 +2242,7 @@ impl<'a> FullscreenUi<'a> {
                     });
                     {
                         let row = &mut self.transcript[idx];
-                        row.kind = evidence_kind(tool);
+                        row.kind = evidence_kind_for_value(tool, value);
                         row.tool_name = Some(tool.to_string());
                         row.title = tool_title_for_update(tool, value, &row.title);
                         row.failed = false;
@@ -2277,7 +2277,7 @@ impl<'a> FullscreenUi<'a> {
                     .copied()
                     .unwrap_or_else(|| {
                         let mut row = TranscriptRow::with_title(
-                            evidence_kind(tool),
+                            evidence_kind_for_value(tool, value),
                             tool_title(tool, value),
                             String::new(),
                         );
@@ -2285,7 +2285,7 @@ impl<'a> FullscreenUi<'a> {
                         self.insert_evidence_row(row)
                     });
                 let row = &mut self.transcript[idx];
-                row.kind = evidence_kind(tool);
+                row.kind = evidence_kind_for_value(tool, value);
                 row.tool_name = Some(tool.to_string());
                 row.title = tool_title_for_update(tool, value, &row.title);
                 row.failed = failed;
@@ -2503,7 +2503,15 @@ impl<'a> FullscreenUi<'a> {
             );
             return false;
         }
-        let value = serde_json::json!({ "args": call.args });
+        let mut value = serde_json::json!({ "args": call.args });
+        if let Some(display) = &call.display
+            && let Some(object) = value.as_object_mut()
+        {
+            object.insert(
+                "display".to_string(),
+                serde_json::to_value(display).unwrap_or(Value::Null),
+            );
+        }
         let id_key = call.id.as_deref().map(tool_id_key);
         let intent_key = tool_intent_key(&call.tool_name);
         let idx = id_key
@@ -2523,7 +2531,7 @@ impl<'a> FullscreenUi<'a> {
         let idx = if let Some(idx) = idx {
             self.tool_rows.remove(&intent_key);
             let row = &mut self.transcript[idx];
-            row.kind = evidence_kind(&call.tool_name);
+            row.kind = evidence_kind_for_value(&call.tool_name, &value);
             row.tool_name = Some(call.tool_name.clone());
             row.title = active_tool_title(&call.tool_name, &value);
             if row.text.is_empty() {
@@ -2539,7 +2547,7 @@ impl<'a> FullscreenUi<'a> {
             idx
         } else {
             let mut row = TranscriptRow::with_title(
-                evidence_kind(&call.tool_name),
+                evidence_kind_for_value(&call.tool_name, &value),
                 active_tool_title(&call.tool_name, &value),
                 "preparing",
             );

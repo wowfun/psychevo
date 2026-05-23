@@ -28,6 +28,7 @@ use crate::context_usage::{
 };
 use crate::error::{Error, Result};
 use crate::events::PersistenceSink;
+use crate::managed_tools::ensure_rg;
 use crate::messages::assistant_text;
 use crate::paths::canonical_workdir;
 use crate::permissions::PermissionRuntime;
@@ -197,6 +198,9 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
             stream_events: None,
             model_metadata: model_metadata.clone(),
             env: env.clone(),
+            path_prefixes: Vec::new(),
+            tool_selection: Default::default(),
+            custom_toolsets: BTreeMap::new(),
             allowed_agent_names: selected_agent
                 .as_ref()
                 .and_then(|agent| agent.tool_policy.allowed_agents.clone()),
@@ -217,6 +221,9 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
         lsp: Default::default(),
         allow_login_shell: false,
         stream_events: None,
+        path_prefixes: Vec::new(),
+        tool_selection: Default::default(),
+        custom_toolsets: BTreeMap::new(),
         clarify: ClarifyToolSurface::Disabled,
         skills: (!options.no_skills).then_some(skill_options),
         agents: agent_tools,
@@ -395,6 +402,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         resolved_options.reasoning_effort = Some(effort);
     }
     let resolved = resolve_run_provider(&resolved_options, &loaded)?;
+    let managed_tools = ensure_rg(&loaded.env).await?;
     let store = SqliteStore::open(&options.db_path)?;
     let selected_parent_summary = selected_agent_for_result(selected_parent_agent.as_ref());
     let parent_session_id = if let Some(session_id) = options.parent_session.clone() {
@@ -455,6 +463,9 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         stream_events: None,
         model_metadata: resolved.metadata,
         env: loaded.env,
+        path_prefixes: managed_tools.path_prefixes,
+        tool_selection: loaded.config.tools.clone(),
+        custom_toolsets: loaded.config.toolsets.clone(),
         allowed_agent_names: selected_parent_agent
             .as_ref()
             .and_then(|agent| agent.tool_policy.allowed_agents.clone()),
@@ -535,6 +546,7 @@ async fn run_live_internal(
         resolved_options.reasoning_effort = Some(effort);
     }
     let resolved = resolve_run_provider(&resolved_options, &loaded)?;
+    let managed_tools = ensure_rg(&loaded.env).await?;
     let skills_home = resolve_skills_home(&loaded.env, &workdir)?;
     let mut explicit_skill_inputs = options.skill_inputs.clone();
     if let Some(agent) = &selected_agent {
@@ -748,6 +760,9 @@ async fn run_live_internal(
             stream_events: stream_events.clone(),
             model_metadata: resolved.metadata.clone(),
             env: loaded.env.clone(),
+            path_prefixes: managed_tools.path_prefixes.clone(),
+            tool_selection: loaded.config.tools.clone(),
+            custom_toolsets: loaded.config.toolsets.clone(),
             allowed_agent_names: selected_agent
                 .as_ref()
                 .and_then(|agent| agent.tool_policy.allowed_agents.clone()),
@@ -768,6 +783,9 @@ async fn run_live_internal(
         lsp: loaded.config.lsp.clone(),
         allow_login_shell: loaded.config.permissions.allow_login_shell,
         stream_events: stream_events.clone(),
+        path_prefixes: managed_tools.path_prefixes.clone(),
+        tool_selection: loaded.config.tools.clone(),
+        custom_toolsets: loaded.config.toolsets.clone(),
         clarify: if options.clarify_enabled {
             ClarifyToolSurface::enabled(clarify_control, stream_events.clone())
         } else {

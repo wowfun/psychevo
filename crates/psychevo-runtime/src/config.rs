@@ -12,7 +12,7 @@ use crate::types::{
     ApprovalMode, ConfigScope, ConfiguredModel, CustomProviderInput, CustomProviderResult,
     ModelCapabilities, ModelCatalogEntry, ModelCatalogProvider, ModelCost, ModelCostTier,
     ModelLimits, ModelMetadata, ModelMetadataCacheTarget, PermissionConfig, PermissionMode,
-    RunOptions, ScopedCustomProviderInput,
+    RunMode, RunOptions, ScopedCustomProviderInput,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -22,6 +22,8 @@ pub(crate) struct RunConfig {
     pub(crate) compression: CompressionConfig,
     pub(crate) permissions: PermissionConfig,
     pub(crate) lsp: LspConfig,
+    pub(crate) tools: ToolSelectionConfig,
+    pub(crate) toolsets: BTreeMap<String, CustomToolsetConfig>,
 }
 
 // Configuration internals are split by loading, parsing, resolution, and catalog concerns.
@@ -35,3 +37,4 @@ include!("config/models.rs");
 include!("config/custom_provider.rs");
 include!("config/cli_views.rs");
 include!("config/permissions.rs");
+include!("config/toolsets.rs");

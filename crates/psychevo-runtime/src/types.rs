@@ -171,7 +171,7 @@ pub enum ConfigScope {
 pub enum RunMode {
     Plan,
     #[default]
-    Build,
+    Default,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -313,14 +313,14 @@ impl RunMode {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Plan => "plan",
-            Self::Build => "default",
+            Self::Default => "default",
         }
     }
 
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "plan" => Some(Self::Plan),
-            "default" => Some(Self::Build),
+            "default" => Some(Self::Default),
             _ => None,
         }
     }

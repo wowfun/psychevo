@@ -234,12 +234,146 @@ pub enum ToolExecutionMode {
     Sequential,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolDisplayCategory {
+    Explore,
+    Run,
+    Update,
+    Status,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolDisplayBodyPolicy {
+    Summary,
+    Body,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ToolDisplaySpec {
+    pub category: ToolDisplayCategory,
+    pub title_arg_keys: Vec<String>,
+    pub title_result_keys: Vec<String>,
+    pub summary_keys: Vec<String>,
+    pub body_keys: Vec<String>,
+    pub body_policy: ToolDisplayBodyPolicy,
+}
+
+impl ToolDisplaySpec {
+    pub fn for_name(name: &str) -> Self {
+        match name {
+            "read" => Self::explore(),
+            "exec_command" | "write_stdin" => Self::run(),
+            "write" | "edit" => Self::update(),
+            "clarify" => Self::status(),
+            "web_fetch" => Self::web_fetch(),
+            _ => Self::generic(),
+        }
+    }
+
+    pub fn generic() -> Self {
+        Self {
+            category: ToolDisplayCategory::Run,
+            title_arg_keys: string_keys(["path", "cmd", "url", "query", "name", "session_id"]),
+            title_result_keys: string_keys(["path", "url", "final_url", "name", "session_id"]),
+            summary_keys: string_keys([
+                "error",
+                "summary",
+                "status",
+                "path",
+                "files_modified",
+                "bytes_written",
+                "exit_code",
+                "truncated",
+                "url",
+                "final_url",
+                "content_type",
+                "output_bytes",
+                "original_bytes",
+            ]),
+            body_keys: string_keys(["content", "output", "diff"]),
+            body_policy: ToolDisplayBodyPolicy::Summary,
+        }
+    }
+
+    pub fn explore() -> Self {
+        Self {
+            category: ToolDisplayCategory::Explore,
+            body_policy: ToolDisplayBodyPolicy::Body,
+            body_keys: string_keys(["content", "output", "error"]),
+            ..Self::generic()
+        }
+    }
+
+    pub fn run() -> Self {
+        Self {
+            category: ToolDisplayCategory::Run,
+            title_arg_keys: string_keys(["cmd", "session_id", "path", "url", "query", "name"]),
+            body_policy: ToolDisplayBodyPolicy::Body,
+            body_keys: string_keys(["output", "content", "error"]),
+            ..Self::generic()
+        }
+    }
+
+    pub fn update() -> Self {
+        Self {
+            category: ToolDisplayCategory::Update,
+            body_policy: ToolDisplayBodyPolicy::Body,
+            body_keys: string_keys(["diff", "output", "error"]),
+            ..Self::generic()
+        }
+    }
+
+    pub fn status() -> Self {
+        Self {
+            category: ToolDisplayCategory::Status,
+            ..Self::generic()
+        }
+    }
+
+    pub fn web_fetch() -> Self {
+        Self {
+            category: ToolDisplayCategory::Explore,
+            title_arg_keys: string_keys(["url"]),
+            title_result_keys: string_keys(["final_url", "url"]),
+            summary_keys: string_keys([
+                "error",
+                "status",
+                "final_url",
+                "content_type",
+                "output_bytes",
+                "original_bytes",
+                "truncated",
+            ]),
+            body_keys: string_keys(["content"]),
+            body_policy: ToolDisplayBodyPolicy::Summary,
+        }
+    }
+}
+
+fn string_keys(keys: impl IntoIterator<Item = &'static str>) -> Vec<String> {
+    keys.into_iter().map(str::to_string).collect()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ToolOutput {
     pub json: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_content: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<ToolAttachment>,
     pub is_error: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ToolAttachment {
+    ImageUrl {
+        url: String,
+        mime_type: String,
+        source_url: Option<String>,
+    },
 }
 
 impl ToolOutput {
@@ -247,6 +381,7 @@ impl ToolOutput {
         Self {
             json,
             model_content: None,
+            attachments: Vec::new(),
             is_error: false,
         }
     }
@@ -255,6 +390,7 @@ impl ToolOutput {
         Self {
             json,
             model_content: Some(model_content.into()),
+            attachments: Vec::new(),
             is_error: false,
         }
     }
@@ -264,10 +400,16 @@ impl ToolOutput {
         self
     }
 
+    pub fn with_attachment(mut self, attachment: ToolAttachment) -> Self {
+        self.attachments.push(attachment);
+        self
+    }
+
     pub fn error(message: impl Into<String>) -> Self {
         Self {
             json: json!({ "error": message.into() }),
             model_content: None,
+            attachments: Vec::new(),
             is_error: true,
         }
     }
@@ -285,6 +427,9 @@ pub trait ToolBinding: Send + Sync {
     fn description(&self) -> &str;
     fn parameters(&self) -> Value;
     fn execution_mode(&self) -> ToolExecutionMode;
+    fn display_spec(&self) -> ToolDisplaySpec {
+        ToolDisplaySpec::for_name(self.name())
+    }
     fn execute(
         &self,
         tool_call_id: String,

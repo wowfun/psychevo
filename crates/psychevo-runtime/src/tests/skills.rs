@@ -493,7 +493,7 @@ fn skill_scanner_flags_dangerous_content() {
 }
 
 #[test]
-fn skill_tools_are_read_only_in_plan_and_mutating_in_build() {
+fn skill_tools_are_read_only_in_plan_and_mutating_in_default() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let workdir = temp.path().join("work");
@@ -510,12 +510,12 @@ fn skill_tools_are_read_only_in_plan_and_mutating_in_build() {
         vec!["list_skills", "view_skill", "skill_hub", "skill_config"]
     );
 
-    let build = skill_tools_for_mode(options, RunMode::Build)
+    let default = skill_tools_for_mode(options, RunMode::Default)
         .iter()
         .map(|tool| tool.name().to_string())
         .collect::<Vec<_>>();
     assert_eq!(
-        build,
+        default,
         vec![
             "list_skills",
             "view_skill",
@@ -535,7 +535,7 @@ fn skill_tool_schemas_describe_parameters() {
     fs::create_dir_all(workdir.join(".git")).expect("git marker");
     let options = skill_options(&temp, &home, &workdir);
 
-    for mode in [RunMode::Plan, RunMode::Build] {
+    for mode in [RunMode::Plan, RunMode::Default] {
         for tool in skill_tools_for_mode(options.clone(), mode) {
             assert_schema_property_descriptions(tool.name(), &tool.parameters());
         }

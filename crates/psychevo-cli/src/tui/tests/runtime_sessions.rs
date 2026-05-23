@@ -48,7 +48,7 @@ async fn tab_completes_slash_command_without_switching_mode() {
         .expect("tab");
 
     assert_eq!(textarea_text(&ui.textarea), "/rename");
-    assert_eq!(app.current_mode, RunMode::Build);
+    assert_eq!(app.current_mode, RunMode::Default);
 }
 
 #[tokio::test]
@@ -64,7 +64,7 @@ async fn shift_tab_cycles_mode_without_status_row() {
     .await
     .expect("shift tab");
 
-    assert_eq!(app.current_mode, RunMode::Build);
+    assert_eq!(app.current_mode, RunMode::Default);
     assert_eq!(app.current_permission_mode, PermissionMode::AcceptEdits);
     assert!(
         !ui.transcript

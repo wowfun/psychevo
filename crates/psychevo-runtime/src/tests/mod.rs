@@ -17,16 +17,16 @@ use crate::events::{PersistenceSink, project_agent_event, project_run_stream_eve
 use crate::paths::canonical_workdir;
 use crate::run::{SESSION_TITLE_MAX_CHARS, ensure_new_tui_session_title};
 use crate::snapshot::SnapshotStore;
-use crate::tools::{WorkdirTool, list_tool_impl, search_tool_impl};
 use crate::types::{MessageAccounting, ModelCost, ModelCostTier, ModelMetadata, SelectedAgent};
 use pretty_assertions::assert_eq;
-use psychevo_agent_core::{AgentEvent, AssistantBlock, EventSink, Message};
+use psychevo_agent_core::{AgentEvent, AssistantBlock, EventSink, Message, ToolDisplaySpec};
 use psychevo_ai::{FakeProvider, Outcome, RawStreamEvent};
 use rusqlite::Connection;
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
 fn base_options(temp: &tempfile::TempDir) -> RunOptions {
+    seed_managed_rg(&home_dir(temp));
     RunOptions {
         db_path: temp.path().join("state.db"),
         workdir: temp.path().join("work"),
@@ -42,15 +42,21 @@ fn base_options(temp: &tempfile::TempDir) -> RunOptions {
         model: None,
         reasoning_effort: None,
         include_reasoning: false,
-        mode: RunMode::Build,
+        mode: RunMode::Default,
         permission_mode: None,
         approval_mode: None,
         approval_handler: None,
         clarify_enabled: false,
-        inherited_env: Some(BTreeMap::from([(
-            "HOME".to_string(),
-            temp.path().to_string_lossy().to_string(),
-        )])),
+        inherited_env: Some(BTreeMap::from([
+            (
+                "HOME".to_string(),
+                temp.path().to_string_lossy().to_string(),
+            ),
+            (
+                "PSYCHEVO_HOME".to_string(),
+                home_dir(temp).to_string_lossy().to_string(),
+            ),
+        ])),
         agent: None,
         no_agents: false,
         no_skills: false,
@@ -60,6 +66,21 @@ fn base_options(temp: &tempfile::TempDir) -> RunOptions {
 
 fn home_dir(temp: &tempfile::TempDir) -> PathBuf {
     temp.path().join(".psychevo")
+}
+
+fn seed_managed_rg(psychevo_home: &std::path::Path) {
+    let tools = psychevo_home.join("tools");
+    fs::create_dir_all(&tools).expect("tools");
+    let rg = tools.join(if cfg!(windows) { "rg.exe" } else { "rg" });
+    fs::write(&rg, "#!/bin/sh\nprintf 'test rg\\n'\n").expect("rg");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut permissions = fs::metadata(&rg).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&rg, permissions).expect("chmod");
+    }
 }
 
 fn write_config(path: impl AsRef<std::path::Path>, content: &str) -> std::io::Result<()> {

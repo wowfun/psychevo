@@ -137,9 +137,10 @@ impl TuiApp {
                 let source = pasted.trim();
                 if !source.is_empty()
                     && !pasted.contains('\n')
-                    && let Ok(image) = resolve_image_source(source, &self.workdir)
+                    && let Ok(ImageInput::LocalPath(path)) =
+                        resolve_image_source(source, &self.workdir)
                 {
-                    let placeholder = ui.add_pending_image(image);
+                    let placeholder = ui.add_pending_image(ImageInput::LocalPath(path));
                     ui.textarea.insert_str(&placeholder);
                     ui.textarea.insert_str(" ");
                 } else {
@@ -488,12 +489,6 @@ impl TuiApp {
                         ui.slash_menu_selected,
                         &self.slash_items(),
                     ) {
-                        if let Some(name) = slash_skill_name(&command) {
-                            ui.insert_skill_marker(&name);
-                            self.sync_agent_popup(ui);
-                            self.sync_skill_popup(ui);
-                            return Ok(false);
-                        }
                         command
                     } else {
                         line.clone()
@@ -737,11 +732,6 @@ impl TuiApp {
                         ui.slash_menu_selected,
                         &self.slash_items(),
                     ) {
-                        if let Some(name) = slash_skill_name(&command) {
-                            ui.insert_skill_marker(&name);
-                            self.sync_skill_popup(ui);
-                            return Ok(false);
-                        }
                         let submitted = command;
                         ui.clear_composer();
                         ui.slash_menu_selected = 0;
@@ -1026,20 +1016,4 @@ fn scroll_bottom_panel(panel: &mut BottomPanel, amount: isize) {
 
 fn normalize_bracketed_paste_text(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n")
-}
-
-fn slash_skill_name(command: &str) -> Option<String> {
-    let command = command.split_whitespace().next().unwrap_or_default();
-    if crate::command_registry::slash_command_spec(command).is_some() {
-        return None;
-    }
-    let name = command.strip_prefix('/')?;
-    if name.is_empty()
-        || !name
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
-    {
-        return None;
-    }
-    Some(name.to_string())
 }

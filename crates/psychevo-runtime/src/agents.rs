@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 
 use futures::future::BoxFuture;
 use psychevo_agent_core::{
-    AgentLoopRequest, AssistantBlock, ControlHandle, Message, ToolBinding, ToolExecutionMode,
-    ToolOutput, user_text_message,
+    AgentLoopRequest, AssistantBlock, ControlHandle, Message, ToolBinding, ToolDisplaySpec,
+    ToolExecutionMode, ToolOutput, user_text_message,
 };
 use psychevo_ai::{AbortSignal, GenerationProvider, Outcome};
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,7 @@ use uuid::Uuid;
 use crate::compaction::{
     CompactSessionOptions, CompactionReason, compact_session, load_projected_messages,
 };
-use crate::config::LspConfig;
+use crate::config::{CustomToolsetConfig, LspConfig, ToolSelectionConfig};
 use crate::context_usage::ContextRecorder;
 use crate::error::{Error, Result};
 use crate::events::PersistenceSink;
@@ -37,7 +37,7 @@ use crate::skills::resolve_skills_home;
 use crate::store::{
     AgentEdgeRecord, AgentEdgeStatus, AgentMailboxEventInput, AgentMailboxEventRecord, SqliteStore,
 };
-use crate::tools::{ToolRuntimeContext, coding_core_tools_for_mode_with_context};
+use crate::tools::{ToolRuntimeContext, coding_core_tools_for_mode_with_selection};
 use crate::types::{
     ApprovalHandler, ApprovalMode, ModelMetadata, PermissionConfig, PermissionMode, RunMode,
     RunStreamEvent, RunStreamSink, SelectedAgent, SessionSummary, SmokeControl,
@@ -294,6 +294,9 @@ pub(crate) struct AgentToolContext {
     pub(crate) stream_events: Option<RunStreamSink>,
     pub(crate) model_metadata: ModelMetadata,
     pub(crate) env: BTreeMap<String, String>,
+    pub(crate) path_prefixes: Vec<PathBuf>,
+    pub(crate) tool_selection: ToolSelectionConfig,
+    pub(crate) custom_toolsets: BTreeMap<String, CustomToolsetConfig>,
     pub(crate) allowed_agent_names: Option<BTreeSet<String>>,
     pub(crate) denied_agent_names: BTreeSet<String>,
     pub(crate) required_agent_names: Vec<String>,
@@ -1876,7 +1879,7 @@ fn tool_policy_diagnostics(
         if !known_tool_policy_name(tool) {
             diagnostics.push(AgentDiagnostic::warning(
                 format!(
-                    "agent tool `{tool}` is not a known built-in tool; preserving it for compatibility"
+                    "agent tool `{tool}` is not a known built-in tool and will not match a built-in tool"
                 ),
                 path.clone(),
             ));
@@ -1889,8 +1892,6 @@ fn known_tool_policy_name(name: &str) -> bool {
     matches!(
         name,
         "read"
-            | "search"
-            | "list"
             | "exec_command"
             | "write_stdin"
             | "edit"
@@ -2072,8 +2073,6 @@ fn parse_string_vec(value: Option<&Value>) -> Vec<String> {
 fn normalize_tool_name(raw: String) -> String {
     match raw.trim() {
         "Read" | "read" => "read".to_string(),
-        "Grep" | "grep" | "Search" | "search" => "search".to_string(),
-        "Glob" | "glob" | "List" | "list" => "list".to_string(),
         "ExecCommand" | "exec_command" => "exec_command".to_string(),
         "WriteStdin" | "write_stdin" => "write_stdin".to_string(),
         "Edit" | "edit" => "edit".to_string(),
@@ -2137,8 +2136,8 @@ fn plan_mode_tool_allowed(name: &str) -> bool {
     matches!(
         name,
         "read"
-            | "list"
-            | "search"
+            | "exec_command"
+            | "write_stdin"
             | "clarify"
             | "list_skills"
             | "view_skill"
@@ -2311,14 +2310,22 @@ fn built_in_agents() -> Vec<AgentDefinition> {
         built_in_agent(
             "plan-research",
             "Read-only planning and research subagent.",
-            "You are a read-only planning subagent. Inspect context and produce a concrete plan. Do not modify files or run mutating commands.",
-            Some(["read", "list", "search"].into_iter().collect()),
+            "You are a read-only planning subagent. Inspect context and produce a concrete plan. Use shell commands only for read-only exploration. Do not modify files or run mutating commands.",
+            Some(
+                ["read", "exec_command", "write_stdin"]
+                    .into_iter()
+                    .collect(),
+            ),
         ),
         built_in_agent(
             "explore",
             "Read-only codebase exploration subagent.",
-            "You are a read-only explorer. Answer specific codebase questions with file references and avoid broad refactors.",
-            Some(["read", "list", "search"].into_iter().collect()),
+            "You are a read-only explorer. Answer specific codebase questions with file references, use shell commands only for read-only exploration, and avoid broad refactors.",
+            Some(
+                ["read", "exec_command", "write_stdin"]
+                    .into_iter()
+                    .collect(),
+            ),
         ),
     ]
 }
@@ -2389,6 +2396,10 @@ impl ToolBinding for HookedTool {
 
     fn execution_mode(&self) -> ToolExecutionMode {
         self.inner.execution_mode()
+    }
+
+    fn display_spec(&self) -> ToolDisplaySpec {
+        self.inner.display_spec()
     }
 
     fn execute(
@@ -2979,7 +2990,7 @@ async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
             child.fork_turns.as_deref(),
         ),
     };
-    let mut tools = coding_core_tools_for_mode_with_context(
+    let mut tools = coding_core_tools_for_mode_with_selection(
         &child.context.workdir,
         child.context.mode,
         ToolRuntimeContext {
@@ -2987,7 +2998,10 @@ async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
             lsp: child.context.lsp.clone(),
             allow_login_shell: child.context.permission_config.allow_login_shell,
             stream_events: child.context.stream_events.clone(),
+            path_prefixes: child.context.path_prefixes.clone(),
         },
+        &child.context.tool_selection,
+        &child.context.custom_toolsets,
     );
     let mut child_agent_tool_context = child.context.clone();
     child_agent_tool_context.parent_session_id = child_session.clone();
@@ -4029,7 +4043,7 @@ mod tests {
             context_limit: None,
             generation_metadata: json!({}),
             workdir: tmp.path().to_path_buf(),
-            mode: RunMode::Build,
+            mode: RunMode::Default,
             permission_config: PermissionConfig::default(),
             lsp: Default::default(),
             permission_mode: PermissionMode::Default,
@@ -4045,6 +4059,9 @@ mod tests {
             stream_events: None,
             model_metadata: ModelMetadata::default(),
             env: BTreeMap::new(),
+            path_prefixes: Vec::new(),
+            tool_selection: Default::default(),
+            custom_toolsets: BTreeMap::new(),
             allowed_agent_names: None,
             denied_agent_names: BTreeSet::new(),
             required_agent_names: Vec::new(),
@@ -4114,7 +4131,7 @@ mod tests {
             r#"---
 name: reviewer
 description: Review code carefully
-tools: Read, Grep, Agent
+tools: Read, ExecCommand, Agent
 disallowedTools:
   - ExecCommand
 memory: true
@@ -4143,7 +4160,7 @@ Review the code.
                 .allowed
                 .as_ref()
                 .unwrap()
-                .contains("search")
+                .contains("exec_command")
         );
         assert!(
             agent
@@ -4160,6 +4177,38 @@ Review the code.
                 .diagnostics
                 .iter()
                 .any(|diagnostic| diagnostic.message.contains("memory"))
+        );
+    }
+
+    #[test]
+    fn removed_list_search_tool_names_are_not_aliases() {
+        let tmp = TempDir::new().expect("tmp");
+        let path = tmp.path().join("legacy-tools.md");
+        fs::write(
+            &path,
+            r#"---
+description: Legacy tools
+tools: Search, List, Grep, Glob
+---
+Use removed tools.
+"#,
+        )
+        .expect("write");
+
+        let agent = parse_agent_file(&path, AgentSource::Explicit).expect("agent");
+        let allowed = agent.tool_policy.allowed.as_ref().expect("allowed");
+        assert!(allowed.contains("Search"));
+        assert!(allowed.contains("List"));
+        assert!(allowed.contains("Grep"));
+        assert!(allowed.contains("Glob"));
+        assert!(!allowed.contains("exec_command"));
+        assert_eq!(
+            agent
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.message.contains("not a known built-in tool"))
+                .count(),
+            4
         );
     }
 
@@ -4199,12 +4248,12 @@ Plan the work.
                 .contains("review")
         );
         assert!(agent.tool_policy.denied_agents.contains("explore"));
-        assert!(agent_allows_tool("read", Some(&agent), RunMode::Build));
-        assert!(agent_allows_tool("Agent", Some(&agent), RunMode::Build));
+        assert!(agent_allows_tool("read", Some(&agent), RunMode::Default));
+        assert!(agent_allows_tool("Agent", Some(&agent), RunMode::Default));
         assert!(!agent_allows_tool(
             "exec_command",
             Some(&agent),
-            RunMode::Build
+            RunMode::Default
         ));
     }
 
@@ -4630,7 +4679,7 @@ Plan the work.
             parse_agent_file(&empty_string_path, AgentSource::Explicit).expect("empty string");
 
         assert_eq!(inherit.tool_policy.allowed, None);
-        assert!(agent_allows_tool("read", Some(&inherit), RunMode::Build));
+        assert!(agent_allows_tool("read", Some(&inherit), RunMode::Default));
         assert_eq!(empty.tool_policy.allowed, Some(BTreeSet::new()));
         for name in [
             "read",
@@ -4641,7 +4690,7 @@ Plan the work.
             "view_skill",
         ] {
             assert!(
-                !agent_allows_tool(name, Some(&empty), RunMode::Build),
+                !agent_allows_tool(name, Some(&empty), RunMode::Default),
                 "{name} should be blocked"
             );
         }
@@ -4649,7 +4698,7 @@ Plan the work.
         assert!(agent_allows_tool(
             "read",
             Some(&empty_string),
-            RunMode::Build
+            RunMode::Default
         ));
     }
 
@@ -4684,13 +4733,13 @@ Plan the work.
             test_tool("exec_command"),
             test_tool("clarify"),
         ];
-        let allowed = apply_agent_tool_policy(base_tools.clone(), Some(&allow), RunMode::Build)
+        let allowed = apply_agent_tool_policy(base_tools.clone(), Some(&allow), RunMode::Default)
             .into_iter()
             .map(|tool| tool.name().to_string())
             .collect::<Vec<_>>();
         assert_eq!(allowed, vec!["clarify"]);
 
-        let denied = apply_agent_tool_policy(base_tools.clone(), Some(&deny), RunMode::Build)
+        let denied = apply_agent_tool_policy(base_tools.clone(), Some(&deny), RunMode::Default)
             .into_iter()
             .map(|tool| tool.name().to_string())
             .collect::<Vec<_>>();
@@ -4700,7 +4749,7 @@ Plan the work.
             .into_iter()
             .map(|tool| tool.name().to_string())
             .collect::<Vec<_>>();
-        assert_eq!(plan, vec!["read", "clarify"]);
+        assert_eq!(plan, vec!["read", "exec_command", "clarify"]);
     }
 
     #[test]
@@ -4791,7 +4840,7 @@ Plan the work.
                 test_tool("view_skill"),
             ],
             Some(&agent),
-            RunMode::Build,
+            RunMode::Default,
         );
 
         let prompt_agents = agent_catalog_for_prompt(&[worker], Some(&agent), &tools);
@@ -4801,7 +4850,7 @@ Plan the work.
             Vec::new()
         };
         let assembly = crate::prompt_assembly::assemble_main_prompt_prefix(
-            RunMode::Build,
+            RunMode::Default,
             Some(&agent),
             &prompt_agents,
             &prompt_skills,
@@ -4851,7 +4900,7 @@ Plan the work.
             ..Default::default()
         };
         let developer_assembly = crate::prompt_assembly::assemble_main_prompt_prefix(
-            RunMode::Build,
+            RunMode::Default,
             None,
             &[],
             &[],
@@ -4878,7 +4927,7 @@ Plan the work.
         );
 
         let fallback_assembly = crate::prompt_assembly::assemble_main_prompt_prefix(
-            RunMode::Build,
+            RunMode::Default,
             None,
             &[],
             &[],
@@ -4922,7 +4971,7 @@ Coordinate.
         let tools = apply_agent_tool_policy(
             vec![test_tool("Agent"), test_tool("list_agents")],
             Some(&coordinator),
-            RunMode::Build,
+            RunMode::Default,
         );
         let visible = agent_catalog_for_prompt(&catalog.agents, Some(&coordinator), &tools)
             .into_iter()
@@ -4948,7 +4997,7 @@ Coordinate.
                 context_limit: None,
                 generation_metadata: json!({}),
                 workdir: tmp.path().to_path_buf(),
-                mode: RunMode::Build,
+                mode: RunMode::Default,
                 permission_config: PermissionConfig::default(),
                 lsp: Default::default(),
                 permission_mode: PermissionMode::Default,
@@ -4964,6 +5013,9 @@ Coordinate.
                 stream_events: None,
                 model_metadata: ModelMetadata::default(),
                 env: BTreeMap::new(),
+                path_prefixes: Vec::new(),
+                tool_selection: Default::default(),
+                custom_toolsets: BTreeMap::new(),
                 allowed_agent_names: coordinator.tool_policy.allowed_agents.clone(),
                 denied_agent_names: coordinator.tool_policy.denied_agents.clone(),
                 required_agent_names: Vec::new(),
@@ -5012,14 +5064,14 @@ Coordinate.
             test_tool("view_skill"),
             test_tool("create_skill"),
         ];
-        let allowed = apply_agent_tool_policy(skill_tools.clone(), Some(&allow), RunMode::Build)
+        let allowed = apply_agent_tool_policy(skill_tools.clone(), Some(&allow), RunMode::Default)
             .into_iter()
             .map(|tool| tool.name().to_string())
             .collect::<Vec<_>>();
         assert_eq!(allowed, vec!["list_skills", "view_skill"]);
         assert!(agent_policy_allows_skill_catalog(&allow));
 
-        let denied = apply_agent_tool_policy(skill_tools, Some(&deny), RunMode::Build)
+        let denied = apply_agent_tool_policy(skill_tools, Some(&deny), RunMode::Default)
             .into_iter()
             .map(|tool| tool.name().to_string())
             .collect::<Vec<_>>();
@@ -5370,12 +5422,12 @@ Coordinate.
         assert!(agent_allows_tool(
             "mcp:repo:read",
             Some(&agent),
-            RunMode::Build
+            RunMode::Default
         ));
         assert!(!agent_allows_tool(
             "mcp:other:read",
             Some(&agent),
-            RunMode::Build
+            RunMode::Default
         ));
     }
 }

@@ -5,6 +5,7 @@ pub(crate) struct WorkdirTool {
 }
 
 impl WorkdirTool {
+    #[cfg(test)]
     pub(crate) fn new(workdir: PathBuf) -> Self {
         Self::with_context(workdir, ToolRuntimeContext::default())
     }

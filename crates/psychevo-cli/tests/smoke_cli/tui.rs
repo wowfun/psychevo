@@ -382,8 +382,8 @@ fn cli_tui_mode_set_plan_persists_and_uses_read_only_tools() {
         tool_names,
         vec![
             "read",
-            "list",
-            "search",
+            "exec_command",
+            "write_stdin",
             "clarify",
             "list_skills",
             "view_skill",
@@ -402,7 +402,7 @@ fn cli_tui_mode_set_plan_persists_and_uses_read_only_tools() {
         request["messages"][0]["content"]
             .as_str()
             .expect("system")
-            .contains("hard read-only")
+            .contains("read-only")
     );
 
     let state = std::fs::read_to_string(home.join("tui-state.json")).expect("state");

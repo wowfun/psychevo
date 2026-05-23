@@ -162,7 +162,7 @@ impl TurnPrinter {
                     .and_then(|tool_call_id| self.tool_titles.get(tool_call_id))
                     .map(String::as_str)
                     .unwrap_or("");
-                let title = match evidence_kind(tool) {
+                let title = match evidence_kind_for_value(tool, value) {
                     TranscriptKind::Explored | TranscriptKind::Ran | TranscriptKind::Updated => {
                         tool_title_for_update(tool, value, existing_title)
                     }

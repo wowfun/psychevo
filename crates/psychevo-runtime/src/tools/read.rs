@@ -65,6 +65,7 @@ fn read_tool_output(tool: WorkdirTool, args: Value) -> ToolOutput {
         Ok(value) if value_reports_error(&value) => ToolOutput {
             json: value,
             model_content: None,
+            attachments: Vec::new(),
             is_error: true,
         },
         Ok(value) => ToolOutput::ok(value),

@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-const BASE_MODE_BUILD: &str = include_str!("../templates/base/mode.build.md");
+const BASE_MODE_DEFAULT: &str = include_str!("../templates/base/mode.default.md");
 const BASE_MODE_PLAN: &str = include_str!("../templates/base/mode.plan.md");
-const BASE_MODE_BUILD_NO_TOOLS: &str = include_str!("../templates/base/mode.build.no_tools.md");
+const BASE_MODE_DEFAULT_NO_TOOLS: &str = include_str!("../templates/base/mode.default.no_tools.md");
 const BASE_MODE_PLAN_NO_TOOLS: &str = include_str!("../templates/base/mode.plan.no_tools.md");
 const SELECTED_MAIN_AGENT: &str = include_str!("../templates/selected_main_agent.md");
 const SELECTED_MAIN_AGENT_WITH_INSTRUCTIONS: &str =
@@ -31,16 +31,16 @@ const COMPACTION_SUMMARY_PREVIOUS_SECTION: &str =
 const COMPACTION_SUMMARY_PREFIX: &str = include_str!("../templates/compaction_summary_prefix.md");
 const SIDE_BOUNDARY: &str = include_str!("../templates/side_boundary.md");
 
-pub(crate) fn base_mode_build() -> &'static str {
-    template_text(BASE_MODE_BUILD)
+pub(crate) fn base_mode_default() -> &'static str {
+    template_text(BASE_MODE_DEFAULT)
 }
 
 pub(crate) fn base_mode_plan() -> &'static str {
     template_text(BASE_MODE_PLAN)
 }
 
-pub(crate) fn base_mode_build_no_tools() -> &'static str {
-    template_text(BASE_MODE_BUILD_NO_TOOLS)
+pub(crate) fn base_mode_default_no_tools() -> &'static str {
+    template_text(BASE_MODE_DEFAULT_NO_TOOLS)
 }
 
 pub(crate) fn base_mode_plan_no_tools() -> &'static str {

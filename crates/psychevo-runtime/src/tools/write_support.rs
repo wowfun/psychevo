@@ -97,6 +97,7 @@ fn result_output(result: Result<Value>) -> ToolOutput {
         Ok(value) if value_reports_error(&value) => ToolOutput {
             json: value,
             model_content: None,
+            attachments: Vec::new(),
             is_error: true,
         },
         Ok(value) => ToolOutput::ok(value),

@@ -380,6 +380,26 @@ impl TuiApp {
                 ui.set_bottom_panel_notice(message);
             }
             Some(BottomSelectionValue::StatsRow(_)) => {}
+            Some(BottomSelectionValue::Toolset { name, enabled }) => {
+                if self.config_path.is_some() {
+                    ui.set_bottom_panel_notice(
+                        "cannot change toolsets while PSYCHEVO_CONFIG is active",
+                    );
+                    return Ok(());
+                }
+                set_local_toolset_enabled(
+                    self.workdir.join(".psychevo"),
+                    self.current_mode,
+                    &name,
+                    !enabled,
+                )?;
+                ui.bottom_panel = Some(BottomPanel::Tools(self.toolsets_panel()?));
+                ui.set_bottom_panel_notice(format!(
+                    "{} toolset `{name}` for {} mode",
+                    if enabled { "disabled" } else { "enabled" },
+                    self.current_mode.as_str()
+                ));
+            }
             Some(BottomSelectionValue::Model { model, source }) => {
                 self.model_catalog.abort_unfinished();
                 if let Some(BottomPanel::Models(models)) = ui.bottom_panel.take() {

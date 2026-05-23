@@ -21,6 +21,7 @@ use commands::session::run_session_command;
 use commands::skills::run_skills_command;
 use commands::smoke::run_smoke_command;
 use commands::stats::run_stats_command;
+use commands::tool::run_tool_command;
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -44,6 +45,7 @@ async fn run() -> Result<ExitCode> {
         Commands::Init(args) => run_init_command(args),
         Commands::Agent(args) => run_agent_command(args).await,
         Commands::Skill(args) => run_skills_command(args),
+        Commands::Tool(args) => run_tool_command(args),
         Commands::Smoke(args) => run_smoke_command(args).await,
         Commands::Run(args) => run_run_command(args).await,
         Commands::Stats(args) => run_stats_command(args),

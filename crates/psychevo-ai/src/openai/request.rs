@@ -427,7 +427,7 @@ fn translate_message(
     match message.get("role").and_then(Value::as_str) {
         Some("system") => system_messages(message),
         Some("developer") => developer_messages(message, metadata),
-        Some("user") => user_messages(message),
+        Some("user") => user_messages(message, metadata),
         Some("assistant") => assistant_messages(message, target, metadata, base_url),
         Some("tool_result") => tool_result_messages(message),
         _ => Vec::new(),
@@ -459,7 +459,7 @@ fn system_messages(message: &Value) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-fn user_messages(message: &Value) -> Vec<Value> {
+fn user_messages(message: &Value, metadata: &Value) -> Vec<Value> {
     let Some(content) = message.get("content") else {
         return Vec::new();
     };
@@ -470,6 +470,29 @@ fn user_messages(message: &Value) -> Vec<Value> {
         return Vec::new();
     };
     if blocks.iter().any(is_image_block) {
+        if capability_is_false(metadata, "attachment") {
+            let text = blocks
+                .iter()
+                .filter_map(|block| {
+                    block
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                        .or_else(|| {
+                            is_image_block(block).then(|| {
+                                "[image attachment omitted: selected model metadata disables image input]"
+                                    .to_string()
+                            })
+                        })
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            return if text.trim().is_empty() {
+                Vec::new()
+            } else {
+                vec![json!({ "role": "user", "content": text })]
+            };
+        }
         let parts = user_content_parts(blocks);
         if parts.is_empty() {
             Vec::new()

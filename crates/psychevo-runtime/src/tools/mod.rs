@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -8,14 +8,14 @@ use std::time::{Duration, Instant, SystemTime};
 use std::{env, thread};
 
 use futures::future::BoxFuture;
-use psychevo_agent_core::{ToolBinding, ToolExecutionMode, ToolOutput};
+use psychevo_agent_core::{ToolAttachment, ToolBinding, ToolExecutionMode, ToolOutput};
 use psychevo_ai::AbortSignal;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use similar::TextDiff;
 use tokio::time;
 
-use crate::config::LspConfig;
+use crate::config::{CustomToolsetConfig, LspConfig, ToolSelectionConfig};
 use crate::error::{Error, Result};
 use crate::prompt_templates;
 use crate::skills::{
@@ -51,6 +51,7 @@ pub(crate) struct ToolRuntimeContext {
     pub(crate) lsp: LspConfig,
     pub(crate) allow_login_shell: bool,
     pub(crate) stream_events: Option<RunStreamSink>,
+    pub(crate) path_prefixes: Vec<PathBuf>,
 }
 
 impl Default for ToolRuntimeContext {
@@ -60,12 +61,13 @@ impl Default for ToolRuntimeContext {
             lsp: LspConfig::default(),
             allow_login_shell: false,
             stream_events: None,
+            path_prefixes: Vec::new(),
         }
     }
 }
 
 pub(crate) fn coding_core_tools(workdir: &Path) -> Vec<Arc<dyn ToolBinding>> {
-    coding_core_tools_for_mode(workdir, RunMode::Build)
+    coding_core_tools_for_mode(workdir, RunMode::Default)
 }
 
 pub(crate) fn coding_core_tools_for_mode(
@@ -80,10 +82,26 @@ pub(crate) fn coding_core_tools_for_mode_with_context(
     mode: RunMode,
     context: ToolRuntimeContext,
 ) -> Vec<Arc<dyn ToolBinding>> {
-    match mode {
-        RunMode::Plan => read_only_plan_tools(workdir, context),
-        RunMode::Build => full_build_tools(workdir, context),
-    }
+    coding_core_tools_for_mode_with_selection(
+        workdir,
+        mode,
+        context,
+        &ToolSelectionConfig::default(),
+        &BTreeMap::new(),
+    )
+}
+
+pub(crate) fn coding_core_tools_for_mode_with_selection(
+    workdir: &Path,
+    mode: RunMode,
+    context: ToolRuntimeContext,
+    selection: &ToolSelectionConfig,
+    custom_toolsets: &BTreeMap<String, CustomToolsetConfig>,
+) -> Vec<Arc<dyn ToolBinding>> {
+    effective_tool_names_for_mode_with_config(mode, selection, custom_toolsets)
+        .into_iter()
+        .filter_map(|name| tool_by_name(&name, workdir, context.clone()))
+        .collect()
 }
 
 pub(crate) fn clarify_tool(
@@ -101,7 +119,7 @@ pub(crate) fn skill_tools_for_mode(
         Arc::new(ListSkillsTool::new(options.clone())),
         Arc::new(ViewSkillTool::new(options.clone())),
     ];
-    if mode == RunMode::Build {
+    if mode == RunMode::Default {
         tools.push(Arc::new(SkillManageTool::new(options.clone())));
         tools.push(Arc::new(SkillHubTool::new(options.clone(), mode)));
         tools.push(Arc::new(SkillConfigTool::new(options, mode)));
@@ -112,34 +130,183 @@ pub(crate) fn skill_tools_for_mode(
     tools
 }
 
-fn full_build_tools(workdir: &Path, context: ToolRuntimeContext) -> Vec<Arc<dyn ToolBinding>> {
-    vec![
-        Arc::new(ReadTool::new(workdir.to_path_buf(), context.clone())),
-        Arc::new(WriteTool::new(workdir.to_path_buf(), context.clone())),
-        Arc::new(EditTool::new(workdir.to_path_buf(), context.clone())),
-        Arc::new(ExecCommandTool::new(workdir.to_path_buf(), context.clone())),
-        Arc::new(WriteStdinTool::new()),
-    ]
-}
-
-fn read_only_plan_tools(workdir: &Path, context: ToolRuntimeContext) -> Vec<Arc<dyn ToolBinding>> {
-    vec![
-        Arc::new(ReadTool::new(workdir.to_path_buf(), context)),
-        Arc::new(ListTool::new(workdir.to_path_buf())),
-        Arc::new(SearchTool::new(workdir.to_path_buf())),
-    ]
-}
-
 pub fn tool_names_for_mode(mode: RunMode) -> Vec<&'static str> {
     match mode {
-        RunMode::Plan => vec!["read", "list", "search"],
-        RunMode::Build => vec!["read", "write", "edit", "exec_command", "write_stdin"],
+        RunMode::Plan => vec!["read", "exec_command", "write_stdin", "web_fetch"],
+        RunMode::Default => vec![
+            "read",
+            "write",
+            "edit",
+            "exec_command",
+            "write_stdin",
+            "web_fetch",
+        ],
+    }
+}
+
+pub(crate) fn effective_tool_names_for_mode_with_config(
+    mode: RunMode,
+    selection: &ToolSelectionConfig,
+    custom_toolsets: &BTreeMap<String, CustomToolsetConfig>,
+) -> Vec<String> {
+    let mode_config = selection.modes.get(mode.as_str());
+    let mut toolsets = mode_config
+        .and_then(|config| config.enabled_toolsets.clone())
+        .unwrap_or_else(|| {
+            DEFAULT_ENABLED_TOOLSETS
+                .iter()
+                .map(|name| name.to_string())
+                .collect()
+        });
+    let disabled = mode_config
+        .map(|config| {
+            config
+                .disabled_toolsets
+                .iter()
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default();
+    toolsets.retain(|toolset| !disabled.contains(toolset.as_str()));
+
+    let mut out = Vec::new();
+    let mut seen_tools = HashSet::new();
+    let mut visiting = BTreeSet::new();
+    for toolset in toolsets {
+        collect_toolset_tools(
+            &toolset,
+            mode,
+            custom_toolsets,
+            &disabled,
+            &mut out,
+            &mut seen_tools,
+            &mut visiting,
+        );
+    }
+    out
+}
+
+pub(crate) fn builtin_toolset_names() -> &'static [&'static str] {
+    &["coding-core", "web"]
+}
+
+pub(crate) fn default_enabled_toolsets() -> &'static [&'static str] {
+    &DEFAULT_ENABLED_TOOLSETS
+}
+
+pub(crate) fn builtin_toolset_description(name: &str) -> Option<&'static str> {
+    match name {
+        "coding-core" => {
+            Some("Local coding tools for reading files, editing files, and running shell commands.")
+        }
+        "web" => Some("Read-only URL fetch tools for known web resources."),
+        _ => None,
+    }
+}
+
+pub(crate) fn builtin_toolset_tools(name: &str) -> Option<&'static [&'static str]> {
+    match name {
+        "coding-core" => Some(&["read", "write", "edit", "exec_command", "write_stdin"]),
+        "web" => Some(&["web_fetch"]),
+        _ => None,
+    }
+}
+
+pub(crate) fn tool_allowed_in_mode(name: &str, mode: RunMode) -> bool {
+    match mode {
+        RunMode::Plan => matches!(name, "read" | "exec_command" | "write_stdin" | "web_fetch"),
+        RunMode::Default => matches!(
+            name,
+            "read" | "write" | "edit" | "exec_command" | "write_stdin" | "web_fetch"
+        ),
+    }
+}
+
+pub(crate) fn known_tool_name(name: &str) -> bool {
+    matches!(
+        name,
+        "read" | "write" | "edit" | "exec_command" | "write_stdin" | "web_fetch"
+    )
+}
+
+const DEFAULT_ENABLED_TOOLSETS: [&str; 2] = ["coding-core", "web"];
+
+fn collect_toolset_tools(
+    name: &str,
+    mode: RunMode,
+    custom_toolsets: &BTreeMap<String, CustomToolsetConfig>,
+    disabled_toolsets: &BTreeSet<&str>,
+    out: &mut Vec<String>,
+    seen_tools: &mut HashSet<String>,
+    visiting: &mut BTreeSet<String>,
+) {
+    if disabled_toolsets.contains(name) {
+        return;
+    }
+    if !visiting.insert(name.to_string()) {
+        return;
+    }
+
+    if let Some(tools) = builtin_toolset_tools(name) {
+        for tool in tools {
+            push_tool_name(tool, mode, out, seen_tools);
+        }
+    } else if let Some(toolset) = custom_toolsets.get(name) {
+        for include in &toolset.includes {
+            collect_toolset_tools(
+                include,
+                mode,
+                custom_toolsets,
+                disabled_toolsets,
+                out,
+                seen_tools,
+                visiting,
+            );
+        }
+        for tool in &toolset.tools {
+            push_tool_name(tool, mode, out, seen_tools);
+        }
+    }
+
+    visiting.remove(name);
+}
+
+fn push_tool_name(
+    name: &str,
+    mode: RunMode,
+    out: &mut Vec<String>,
+    seen_tools: &mut HashSet<String>,
+) {
+    if known_tool_name(name)
+        && tool_allowed_in_mode(name, mode)
+        && seen_tools.insert(name.to_string())
+    {
+        out.push(name.to_string());
+    }
+}
+
+fn tool_by_name(
+    name: &str,
+    workdir: &Path,
+    context: ToolRuntimeContext,
+) -> Option<Arc<dyn ToolBinding>> {
+    match name {
+        "read" => Some(Arc::new(ReadTool::new(workdir.to_path_buf(), context))),
+        "write" => Some(Arc::new(WriteTool::new(workdir.to_path_buf(), context))),
+        "edit" => Some(Arc::new(EditTool::new(workdir.to_path_buf(), context))),
+        "exec_command" => Some(Arc::new(ExecCommandTool::new(
+            workdir.to_path_buf(),
+            context,
+        ))),
+        "write_stdin" => Some(Arc::new(WriteStdinTool::new())),
+        "web_fetch" => Some(Arc::new(WebFetchTool::new())),
+        _ => None,
     }
 }
 
 pub(crate) fn mode_instruction(mode: RunMode) -> &'static str {
     match mode {
-        RunMode::Build => prompt_templates::base_mode_build(),
+        RunMode::Default => prompt_templates::base_mode_default(),
         RunMode::Plan => prompt_templates::base_mode_plan(),
     }
 }
@@ -152,7 +319,7 @@ pub(crate) fn mode_instruction_for_tool_availability(
         return mode_instruction(mode);
     }
     match mode {
-        RunMode::Build => prompt_templates::base_mode_build_no_tools(),
+        RunMode::Default => prompt_templates::base_mode_default_no_tools(),
         RunMode::Plan => prompt_templates::base_mode_plan_no_tools(),
     }
 }
@@ -162,8 +329,6 @@ include!("workdir.rs");
 include!("file_state.rs");
 include!("write_support.rs");
 include!("read.rs");
-include!("list.rs");
-include!("search.rs");
 include!("write.rs");
 include!("edit.rs");
 include!("exec_command.rs");
@@ -171,3 +336,4 @@ include!("clarify.rs");
 include!("skills.rs");
 include!("args.rs");
 include!("truncation.rs");
+include!("web_fetch.rs");

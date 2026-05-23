@@ -37,7 +37,87 @@ fn parse_run_config(value: Value) -> Result<RunConfig> {
     if let Some(permissions) = object.get("permissions") {
         config.permissions = parse_permission_config(permissions)?;
     }
+    if let Some(tools) = object.get("tools") {
+        config.tools = parse_tool_selection_config(tools)?;
+    }
+    if let Some(toolsets) = object.get("toolsets") {
+        config.toolsets = parse_custom_toolsets(toolsets)?;
+    }
     Ok(config)
+}
+
+fn parse_tool_selection_config(value: &Value) -> Result<ToolSelectionConfig> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| Error::Config("tools must be an object".to_string()))?;
+    let mut config = ToolSelectionConfig::default();
+    if let Some(modes) = object.get("modes") {
+        let modes = modes
+            .as_object()
+            .ok_or_else(|| Error::Config("tools.modes must be an object".to_string()))?;
+        for (mode, value) in modes {
+            if !matches!(mode.as_str(), "plan" | "default") {
+                return Err(Error::Config(format!(
+                    "tools.modes.{mode} must be plan or default"
+                )));
+            }
+            config
+                .modes
+                .insert(mode.clone(), parse_tool_mode_config(mode, value)?);
+        }
+    }
+    Ok(config)
+}
+
+fn parse_tool_mode_config(mode: &str, value: &Value) -> Result<ToolModeConfig> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| Error::Config(format!("tools.modes.{mode} must be an object")))?;
+    Ok(ToolModeConfig {
+        enabled_toolsets: object
+            .get("enabled_toolsets")
+            .map(|_| string_array_field(object, "enabled_toolsets", "enabled_toolsets"))
+            .transpose()?,
+        disabled_toolsets: string_array_field(object, "disabled_toolsets", "disabled_toolsets")?,
+    })
+}
+
+fn parse_custom_toolsets(value: &Value) -> Result<BTreeMap<String, CustomToolsetConfig>> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| Error::Config("toolsets must be an object".to_string()))?;
+    let mut out = BTreeMap::new();
+    for (name, value) in object {
+        validate_toolset_name(name)?;
+        let toolset = value
+            .as_object()
+            .ok_or_else(|| Error::Config(format!("toolsets.{name} must be an object")))?;
+        out.insert(
+            name.clone(),
+            CustomToolsetConfig {
+                description: optional_string_field(toolset, "description")?,
+                tools: string_array_field(toolset, "tools", &format!("toolsets.{name}.tools"))?,
+                includes: string_array_field(
+                    toolset,
+                    "includes",
+                    &format!("toolsets.{name}.includes"),
+                )?,
+            },
+        );
+    }
+    Ok(out)
+}
+
+fn validate_toolset_name(name: &str) -> Result<()> {
+    let valid = !name.trim().is_empty()
+        && name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'));
+    if valid {
+        Ok(())
+    } else {
+        Err(Error::Config(format!("invalid toolset name: {name}")))
+    }
 }
 
 fn parse_compression_config(

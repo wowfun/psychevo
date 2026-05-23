@@ -4,6 +4,15 @@ async fn emit(sink: &Arc<dyn EventSink>, event: AgentEvent) -> Result<()> {
         .map_err(|err| Error::EventSink(err.to_string()))
 }
 
+fn display_spec_for_tool(request: &AgentLoopRequest, name: &str) -> ToolDisplaySpec {
+    request
+        .tools
+        .iter()
+        .find(|tool| tool.name() == name)
+        .map(|tool| tool.display_spec())
+        .unwrap_or_else(|| ToolDisplaySpec::for_name(name))
+}
+
 async fn stream_assistant(
     provider: Arc<dyn GenerationProvider>,
     request: &AgentLoopRequest,
@@ -150,10 +159,11 @@ async fn stream_assistant(
                     &sink,
                     AgentEvent::ToolCallPending {
                         tool_call_id: pending_id,
-                        tool_name: pending_name,
+                        tool_name: pending_name.clone(),
                         arguments_json: String::new(),
                         content_index,
                         call_index,
+                        display: Some(display_spec_for_tool(request, &pending_name)),
                     },
                 )
                 .await?;
@@ -191,6 +201,7 @@ async fn stream_assistant(
                             arguments_json: builder.arguments_json.clone(),
                             content_index: builder.content_index,
                             call_index: builder.call_index,
+                            display: Some(display_spec_for_tool(request, &builder.name)),
                         },
                     )
                     .await?;

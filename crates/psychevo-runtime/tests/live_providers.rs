@@ -44,7 +44,7 @@ async fn run_live_read_tool(provider: &str) {
         model: None,
         reasoning_effort: None,
         include_reasoning: true,
-        mode: psychevo_runtime::RunMode::Build,
+        mode: psychevo_runtime::RunMode::Default,
         permission_mode: None,
         approval_mode: None,
         approval_handler: None,

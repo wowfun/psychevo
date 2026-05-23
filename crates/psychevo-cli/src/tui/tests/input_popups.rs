@@ -599,6 +599,24 @@ async fn standalone_pasted_image_source_adds_pending_attachment() {
 }
 
 #[tokio::test]
+async fn standalone_pasted_url_remains_text() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    let pasted = "https://example.com/token-plan/mimo-v2.5-pro";
+
+    let outcome = app
+        .handle_fullscreen_event(&mut ui, CrosstermEvent::Paste(pasted.to_string()))
+        .await
+        .expect("paste");
+
+    assert!(outcome.needs_draw);
+    assert_eq!(textarea_text(&ui.textarea), pasted);
+    assert!(ui.pending_images.is_empty());
+    assert!(ui.ephemeral_status.is_none());
+}
+
+#[tokio::test]
 async fn pasted_prompt_with_embedded_image_path_remains_text() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
@@ -1268,7 +1286,7 @@ async fn skill_popup_esc_dismisses_until_token_changes() {
 }
 
 #[tokio::test]
-async fn slash_skill_selection_inserts_marker_without_submitting() {
+async fn slash_skill_selection_submits_without_marker_rewrite() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     write_tui_skill(&app, "helper", "Helps with focused edits");
@@ -1279,9 +1297,20 @@ async fn slash_skill_selection_inserts_marker_without_submitting() {
         .await
         .expect("enter");
 
-    assert_eq!(textarea_text(&ui.textarea), "$helper ");
-    assert!(ui.history.is_empty());
-    assert!(ui.running.is_none());
+    assert_eq!(textarea_text(&ui.textarea), "");
+    assert_eq!(ui.history.last().map(String::as_str), Some("/helper"));
+    assert!(ui.running.is_some());
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.kind == TranscriptKind::Prompt && row.text == "/helper")
+    );
+    if let Some(running) = ui.running.take() {
+        running.control.abort();
+        if let RunningTask::Agent(task) = running.task {
+            let _ = task.await;
+        }
+    }
 }
 
 #[tokio::test]

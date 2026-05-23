@@ -40,12 +40,16 @@ pub enum AgentEvent {
         arguments_json: String,
         content_index: usize,
         call_index: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        display: Option<ToolDisplaySpec>,
     },
     ToolExecutionStart {
         tool_call_id: String,
         tool_name: String,
         args: Value,
         started_at_ms: i64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        display: Option<ToolDisplaySpec>,
     },
     ToolExecutionUpdate {
         tool_call_id: String,
@@ -58,6 +62,8 @@ pub enum AgentEvent {
         result: Value,
         outcome: Outcome,
         elapsed_ms: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        display: Option<ToolDisplaySpec>,
     },
 }
 

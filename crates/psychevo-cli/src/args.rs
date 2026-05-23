@@ -24,6 +24,8 @@ pub(crate) enum Commands {
     Agent(AgentArgs),
     #[command(about = "List, view, create, install, and toggle local skills")]
     Skill(SkillsArgs),
+    #[command(about = "List and configure local toolsets")]
+    Tool(ToolArgs),
     #[command(
         about = "Run deterministic fake-provider smoke behavior",
         long_about = "Run deterministic fake-provider smoke behavior for development and validation. This command uses explicit local db/workdir paths and does not contact live providers."
@@ -636,6 +638,84 @@ pub(crate) struct TuiArgs {
 }
 
 #[derive(Debug, Parser)]
+pub(crate) struct ToolArgs {
+    #[command(subcommand)]
+    pub(crate) command: Option<ToolCommand>,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum ToolCommand {
+    #[command(about = "List effective toolsets and tools")]
+    List(ToolListArgs),
+    #[command(about = "Show one toolset")]
+    Show(ToolShowArgs),
+    #[command(about = "Enable a toolset for one mode")]
+    Enable(ToolModeMutationArgs),
+    #[command(about = "Disable a toolset for one mode")]
+    Disable(ToolModeMutationArgs),
+    #[command(about = "Create or overwrite a project-local custom toolset")]
+    Create(ToolCreateArgs),
+    #[command(about = "Remove a project-local custom toolset")]
+    Remove(ToolRemoveArgs),
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct ToolListArgs {
+    #[arg(long, help = "Emit structured JSON instead of human text")]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct ToolShowArgs {
+    #[arg(value_name = "NAME", help = "Toolset name")]
+    pub(crate) name: String,
+    #[arg(long, help = "Emit structured JSON instead of human text")]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct ToolModeMutationArgs {
+    #[arg(value_name = "NAME", help = "Toolset name")]
+    pub(crate) name: String,
+    #[arg(long, value_enum, default_value_t = ToolModeArg::Default, help = "Mode to change: default or plan")]
+    pub(crate) mode: ToolModeArg,
+    #[arg(long, help = "Emit structured JSON instead of human text")]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct ToolCreateArgs {
+    #[arg(value_name = "NAME", help = "Custom toolset name")]
+    pub(crate) name: String,
+    #[arg(long, value_name = "TEXT", help = "Toolset description")]
+    pub(crate) description: Option<String>,
+    #[arg(
+        long = "tool",
+        value_name = "TOOL",
+        help = "Tool name to include; repeatable"
+    )]
+    pub(crate) tools: Vec<String>,
+    #[arg(
+        long = "include",
+        value_name = "TOOLSET",
+        help = "Toolset to include; repeatable"
+    )]
+    pub(crate) includes: Vec<String>,
+    #[arg(long, help = "Overwrite an existing custom toolset")]
+    pub(crate) force: bool,
+    #[arg(long, help = "Emit structured JSON instead of human text")]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct ToolRemoveArgs {
+    #[arg(value_name = "NAME", help = "Custom toolset name")]
+    pub(crate) name: String,
+    #[arg(long, help = "Emit structured JSON instead of human text")]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Parser)]
 pub(crate) struct AgentArgs {
     #[command(subcommand)]
     pub(crate) command: AgentCommand,
@@ -1179,6 +1259,12 @@ pub(crate) enum PermissionRuleKindArg {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum ToolModeArg {
+    Plan,
+    Default,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 #[value(rename_all = "kebab-case")]
 pub(crate) enum RunFormatArg {
     Default,
@@ -1220,7 +1306,7 @@ impl PermissionModeArg {
     pub(crate) fn run_mode(self) -> RunMode {
         match self {
             Self::Plan => RunMode::Plan,
-            _ => RunMode::Build,
+            _ => RunMode::Default,
         }
     }
 
@@ -1230,6 +1316,15 @@ impl PermissionModeArg {
             Self::AcceptEdits => PermissionMode::AcceptEdits,
             Self::DontAsk => PermissionMode::DontAsk,
             Self::BypassPermissions => PermissionMode::BypassPermissions,
+        }
+    }
+}
+
+impl ToolModeArg {
+    pub(crate) fn run_mode(self) -> RunMode {
+        match self {
+            Self::Plan => RunMode::Plan,
+            Self::Default => RunMode::Default,
         }
     }
 }

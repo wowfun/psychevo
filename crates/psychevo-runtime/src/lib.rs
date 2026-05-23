@@ -6,6 +6,7 @@ mod context;
 mod context_usage;
 mod error;
 mod events;
+mod managed_tools;
 mod messages;
 mod paths;
 mod permissions;
@@ -44,12 +45,13 @@ pub use compaction::{
     auto_compaction_due_for_snapshot, compact_session,
 };
 pub use config::{
-    append_local_permission_allow_rule, append_local_permission_rule, auth_status_value,
-    config_provider_list_value, config_show_value, configured_models,
-    create_global_custom_provider, create_scoped_custom_provider, custom_provider_api_key_env,
-    fetch_model_catalog, model_catalog_endpoint, model_catalog_providers, permission_rules_value,
-    refresh_model_metadata_cache, remove_local_permission_rule, selected_configured_model,
-    set_provider_api_key,
+    ToolsetMutationResult, append_local_permission_allow_rule, append_local_permission_rule,
+    auth_status_value, config_provider_list_value, config_show_value, configured_models,
+    create_global_custom_provider, create_local_toolset, create_scoped_custom_provider,
+    custom_provider_api_key_env, fetch_model_catalog, model_catalog_endpoint,
+    model_catalog_providers, permission_rules_value, refresh_model_metadata_cache,
+    remove_local_permission_rule, remove_local_toolset, selected_configured_model,
+    set_local_toolset_enabled, set_provider_api_key, toolsets_value,
 };
 pub use context::prune_context;
 pub use context_usage::{
@@ -67,7 +69,10 @@ pub use prompt_image::{
     resolve_image_source, split_image_source_argument,
 };
 pub use prompt_templates::side_conversation_boundary_prompt;
-pub use psychevo_agent_core::{Message, PendingInputId, TerminalReason, UserContentBlock};
+pub use psychevo_agent_core::{
+    Message, PendingInputId, TerminalReason, ToolDisplayBodyPolicy, ToolDisplayCategory,
+    ToolDisplaySpec, UserContentBlock,
+};
 pub use run::{
     reload_session_context, run_live, run_live_streaming, run_live_streaming_controlled,
     spawn_agent_background,

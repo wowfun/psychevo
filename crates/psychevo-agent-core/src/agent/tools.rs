@@ -61,10 +61,15 @@ async fn execute_tool_batch(
         outputs
     };
 
-    Ok(outputs
-        .into_iter()
-        .map(|(call, output)| tool_result_message(call, output))
-        .collect())
+    let now = now_ms();
+    let mut result_messages = Vec::new();
+    let mut attachment_messages = Vec::new();
+    for (call, output) in outputs {
+        attachment_messages.extend(tool_attachment_messages(&call, &output, now));
+        result_messages.push(tool_result_message(call, output));
+    }
+    result_messages.extend(attachment_messages);
+    Ok(result_messages)
 }
 
 async fn execute_one_tool(
@@ -75,6 +80,11 @@ async fn execute_one_tool(
 ) -> Result<(ToolCallBlock, ToolOutput)> {
     let started_at_ms = now_ms();
     let started = Instant::now();
+    let tool = tools.iter().find(|tool| tool.name() == call.name).cloned();
+    let display = tool
+        .as_ref()
+        .map(|tool| tool.display_spec())
+        .unwrap_or_else(|| ToolDisplaySpec::for_name(&call.name));
     emit(
         &sink,
         AgentEvent::ToolExecutionStart {
@@ -82,12 +92,13 @@ async fn execute_one_tool(
             tool_name: call.name.clone(),
             args: call.arguments.clone(),
             started_at_ms,
+            display: Some(display.clone()),
         },
     )
     .await?;
     let output = if let Some(err) = &call.arguments_error {
         ToolOutput::error(format!("invalid tool arguments JSON: {err}"))
-    } else if let Some(tool) = tools.iter().find(|tool| tool.name() == call.name) {
+    } else if let Some(tool) = tool {
         tool.execute(call.id.clone(), call.arguments.clone(), abort)
             .await
     } else {
@@ -106,6 +117,7 @@ async fn execute_one_tool(
             result: output.json.clone(),
             outcome,
             elapsed_ms: duration_ms_u64(started.elapsed()),
+            display: Some(display),
         },
     )
     .await?;
@@ -120,4 +132,31 @@ fn tool_result_message(call: ToolCallBlock, output: ToolOutput) -> Message {
         is_error: output.is_error,
         timestamp_ms: now_ms(),
     }
+}
+
+fn tool_attachment_messages(call: &ToolCallBlock, output: &ToolOutput, timestamp_ms: i64) -> Vec<Message> {
+    output
+        .attachments
+        .iter()
+        .map(|attachment| match attachment {
+            ToolAttachment::ImageUrl {
+                url,
+                mime_type,
+                source_url,
+            } => Message::User {
+                content: vec![
+                    UserContentBlock::text(format!(
+                        "Image attachment from tool `{}`{} ({mime_type}):",
+                        call.name,
+                        source_url
+                            .as_deref()
+                            .map(|url| format!(" at {url}"))
+                            .unwrap_or_default()
+                    )),
+                    UserContentBlock::image_url(url.clone()),
+                ],
+                timestamp_ms,
+            },
+        })
+        .collect()
 }

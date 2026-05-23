@@ -130,6 +130,7 @@ impl ToolBinding for ClarifyTool {
                                 json: serde_json::to_value(response)
                                     .unwrap_or_else(|err| json!({"error": format!("failed to serialize clarify response: {err}")})),
                                 model_content: None,
+                                attachments: Vec::new(),
                                 is_error: false,
                             }
                         }

@@ -68,7 +68,7 @@ async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
     };
     let run_mode = mode_arg
         .map(PermissionModeArg::run_mode)
-        .unwrap_or(RunMode::Build);
+        .unwrap_or(RunMode::Default);
     let permission_mode = mode_arg
         .map(PermissionModeArg::permission_mode)
         .filter(|mode| *mode != PermissionMode::Default);

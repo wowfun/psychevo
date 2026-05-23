@@ -20,6 +20,7 @@ const GENERAL_COMMANDS: &[&str] = &[
     "/refresh",
     "/btw",
     "/model",
+    "/tools",
     "/sessions",
     "/new",
     "/copy",
@@ -59,6 +60,7 @@ pub(crate) enum SlashCommand {
     Undo,
     Redo,
     Skills(Option<String>),
+    Tools,
     Bundles(Option<String>),
     Curator(Option<String>),
     Agents,
@@ -1207,6 +1209,10 @@ fn parse_registered_slash_command(
             Ok(SlashCommand::Redo)
         }
         SlashCommandAction::Skills => Ok(SlashCommand::Skills(parse_optional_trailing(rest))),
+        SlashCommandAction::Tools => {
+            parse_no_arguments(spec, command, rest)?;
+            Ok(SlashCommand::Tools)
+        }
         SlashCommandAction::Bundles => Ok(SlashCommand::Bundles(parse_optional_trailing(rest))),
         SlashCommandAction::Curator => Ok(SlashCommand::Curator(parse_optional_trailing(rest))),
         SlashCommandAction::Agents => {
@@ -2080,9 +2086,11 @@ mod tests {
         ));
         assert!(help.contains("last-provider-request can expose hidden prompts"));
         assert!(
-            help.contains("/<skill-or-bundle> [args] - insert a skill or bundle (2 available)")
+            help.contains("/<skill-or-bundle> [args] - submit a skill or bundle (2 available)")
         );
-        assert!(help.contains("Inserts an explicit skill or bundle marker"));
+        assert!(help.contains(
+            "Submits the slash line while using the equivalent explicit skill or bundle marker"
+        ));
         assert!(!help.contains("pevo run"));
 
         let empty = format_slash_help(Some(0));

@@ -339,6 +339,7 @@ async fn persistence_sink_persists_tool_elapsed_metadata() {
         result: json!({"content":"done"}),
         outcome: Outcome::Normal,
         elapsed_ms: 321,
+        display: None,
     })
     .await
     .expect("tool end");
@@ -521,6 +522,7 @@ fn json_projection_hides_reasoning_unless_included() {
                 arguments_json: String::new(),
                 content_index: 0,
                 call_index: 0,
+                display: None,
             },
             false,
         )
@@ -532,6 +534,7 @@ fn json_projection_hides_reasoning_unless_included() {
         arguments_json: "{\"path\":\"report.md\"".to_string(),
         content_index: 0,
         call_index: 0,
+        display: Some(ToolDisplaySpec::for_name("write")),
     })
     .expect("pending");
     match pending {
@@ -539,6 +542,7 @@ fn json_projection_hides_reasoning_unless_included() {
             assert_eq!(value["type"], "tool_call_pending");
             assert_eq!(value["tool_name"], "write");
             assert_eq!(value["arguments_json"], "{\"path\":\"report.md\"");
+            assert_eq!(value["display"]["category"], "update");
         }
         other => panic!("unexpected pending event: {other:?}"),
     }

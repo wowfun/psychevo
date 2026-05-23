@@ -505,7 +505,7 @@ fn render_status(frame: &mut Frame<'_>, area: Rect, app: &TuiApp, ui: &Fullscree
     let model = app.model_display_value();
     let variant = app.variant_display_value();
     let mut spans = Vec::new();
-    if app.current_mode != RunMode::Build {
+    if app.current_mode != RunMode::Default {
         spans.push(Span::styled(
             app.current_mode.as_str().to_string(),
             theme.accent_style(),

@@ -74,6 +74,70 @@ fn request() -> AgentLoopRequest {
     }
 }
 
+struct DisplayOnlyTool;
+
+impl ToolBinding for DisplayOnlyTool {
+    fn name(&self) -> &str {
+        "display_only"
+    }
+
+    fn description(&self) -> &str {
+        "A test tool with UI-only display metadata."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({"type": "object", "properties": {}, "additionalProperties": false})
+    }
+
+    fn execution_mode(&self) -> ToolExecutionMode {
+        ToolExecutionMode::Parallel
+    }
+
+    fn display_spec(&self) -> ToolDisplaySpec {
+        ToolDisplaySpec {
+            category: ToolDisplayCategory::Update,
+            title_arg_keys: vec!["target".to_string()],
+            title_result_keys: vec!["target".to_string()],
+            summary_keys: vec!["status".to_string()],
+            body_keys: vec!["content".to_string()],
+            body_policy: ToolDisplayBodyPolicy::Summary,
+        }
+    }
+
+    fn execute(
+        &self,
+        _tool_call_id: String,
+        _args: Value,
+        _abort: AbortSignal,
+    ) -> BoxFuture<'static, ToolOutput> {
+        Box::pin(async { ToolOutput::ok(json!({"status": "ok"})) })
+    }
+}
+
+#[tokio::test]
+async fn tool_display_spec_is_not_model_visible_declaration() {
+    let provider = RequestCaptureProvider::default();
+    let requests = Arc::clone(&provider.requests);
+    let (_, control) = ControlHandle::new();
+    let mut request = request();
+    request.tools = vec![Arc::new(DisplayOnlyTool)];
+
+    run_agent_loop(
+        Arc::new(provider),
+        request,
+        Arc::new(NoopEventSink),
+        control,
+    )
+    .await
+    .expect("loop");
+
+    let requests = requests.lock().expect("requests");
+    let tool = requests[0].tools.first().expect("tool declaration");
+    let value = serde_json::to_value(tool).expect("tool declaration json");
+    assert_eq!(value["name"], "display_only");
+    assert!(value.get("display").is_none(), "{value}");
+}
+
 #[tokio::test]
 async fn prefix_contextual_user_messages_are_inserted_before_history() {
     let provider = RequestCaptureProvider::default();
@@ -308,6 +372,13 @@ async fn tool_call_pending_is_emitted_before_message_end() {
             event,
             AgentEvent::ToolCallPending { arguments_json, .. }
                 if arguments_json == "{\"path\":\"report.md\""
+        )
+    }));
+    assert!(events.iter().any(|event| {
+        matches!(
+            event,
+            AgentEvent::ToolCallPending { display: Some(display), .. }
+                if display.category == ToolDisplayCategory::Update
         )
     }));
 }

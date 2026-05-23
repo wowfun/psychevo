@@ -633,7 +633,7 @@ fn configured_context_limit(
         model: Some(format!("{provider}/{model}")),
         reasoning_effort: None,
         include_reasoning: false,
-        mode: RunMode::Build,
+        mode: RunMode::Default,
         permission_mode: None,
         approval_mode: None,
         approval_handler: None,

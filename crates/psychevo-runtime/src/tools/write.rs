@@ -91,6 +91,7 @@ mod write_tool_tests {
                 },
                 allow_login_shell: false,
                 stream_events: None,
+                path_prefixes: Vec::new(),
             },
         )
     }
@@ -106,6 +107,7 @@ mod write_tool_tests {
                 },
                 allow_login_shell: false,
                 stream_events: None,
+                path_prefixes: Vec::new(),
             },
         )
     }

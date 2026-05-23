@@ -241,6 +241,7 @@ fn side_command_allowed(command: &SlashCommand) -> bool {
             | SlashCommand::VariantSet(_)
             | SlashCommand::ModeSet(_)
             | SlashCommand::Permissions
+            | SlashCommand::Tools
             | SlashCommand::ThinkingToggle
             | SlashCommand::ThinkingSet(_)
             | SlashCommand::RawToggle

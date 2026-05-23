@@ -1,10 +1,17 @@
 fn evidence_kind(tool: &str) -> TranscriptKind {
-    match tool {
-        "read" | "list" | "search" => TranscriptKind::Explored,
-        "exec_command" | "write_stdin" => TranscriptKind::Ran,
-        "write" | "edit" => TranscriptKind::Updated,
-        "clarify" => TranscriptKind::Status,
-        _ => TranscriptKind::Status,
+    evidence_kind_from_display(&ToolDisplaySpec::for_name(tool))
+}
+
+fn evidence_kind_for_value(tool: &str, value: &Value) -> TranscriptKind {
+    evidence_kind_from_display(&tool_display_spec(tool, value))
+}
+
+fn evidence_kind_from_display(display: &ToolDisplaySpec) -> TranscriptKind {
+    match display.category {
+        ToolDisplayCategory::Explore => TranscriptKind::Explored,
+        ToolDisplayCategory::Run => TranscriptKind::Ran,
+        ToolDisplayCategory::Update => TranscriptKind::Updated,
+        ToolDisplayCategory::Status => TranscriptKind::Status,
     }
 }
 
@@ -32,35 +39,26 @@ fn completed_tool_title_from_active(kind: TranscriptKind, title: &str) -> String
 }
 
 fn tool_title(tool: &str, value: &Value) -> String {
+    if tool == "Agent" {
+        return agent_tool_title(value).unwrap_or_else(|| "Agent".to_string());
+    }
+    if tool == "clarify" {
+        return clarify_tool_title(value);
+    }
+    if is_user_shell_value(value) {
+        let command = value
+            .get("args")
+            .and_then(|args| args.get("cmd"))
+            .and_then(Value::as_str)
+            .and_then(first_shell_command_line);
+        return user_shell_title(command);
+    }
     let args = value.get("args").unwrap_or(&Value::Null);
     let result = value.get("result").unwrap_or(&Value::Null);
-    match tool {
-        "read" | "list" => tool_name_title(tool, path_from(args, result)),
-        "search" => {
-            let query = args
-                .get("query")
-                .and_then(Value::as_str)
-                .or_else(|| result.get("query").and_then(Value::as_str))
-                .filter(|query| !query.trim().is_empty());
-            tool_name_title("search", query)
-        }
-        "exec_command" => {
-            let command = args
-                .get("cmd")
-                .and_then(Value::as_str)
-                .and_then(first_shell_command_line);
-            if is_user_shell_value(value) {
-                user_shell_title(command)
-            } else {
-                tool_name_title("exec_command", command)
-            }
-        }
-        "write_stdin" => session_tool_title("write_stdin", args),
-        "write" | "edit" => tool_name_title(tool, path_from(args, result)),
-        "Agent" => agent_tool_title(value).unwrap_or_else(|| "Agent".to_string()),
-        "clarify" => clarify_tool_title(value),
-        other => format!("Tool {other}"),
-    }
+    let display = tool_display_spec(tool, value);
+    let detail = title_detail_from_keys(&display.title_arg_keys, args)
+        .or_else(|| title_detail_from_keys(&display.title_result_keys, result));
+    tool_name_title(tool, detail.as_deref())
 }
 
 fn clarify_no_answer_result(value: &Value) -> bool {
@@ -84,31 +82,26 @@ fn clarify_no_answer_result(value: &Value) -> bool {
 }
 
 fn active_tool_title(tool: &str, value: &Value) -> String {
-    let args = value.get("args").unwrap_or(&Value::Null);
-    match tool {
-        "read" | "list" => tool_name_title(tool, path_from_args(args)),
-        "search" => args
-            .get("query")
-            .and_then(Value::as_str)
-            .filter(|query| !query.trim().is_empty())
-            .map_or_else(|| "search".to_string(), |query| tool_name_title("search", Some(query))),
-        "exec_command" => {
-            let command = args
-                .get("cmd")
-                .and_then(Value::as_str)
-                .and_then(first_shell_command_line);
-            if is_user_shell_value(value) {
-                user_shell_title(command)
-            } else {
-                tool_name_title("exec_command", command)
-            }
-        }
-        "write_stdin" => session_tool_title("write_stdin", args),
-        "write" | "edit" => tool_name_title(tool, path_from_args(args)),
-        "Agent" => active_agent_tool_title(value),
-        "clarify" => "Questions pending".to_string(),
-        other => format!("Tool {other}"),
+    if tool == "Agent" {
+        return active_agent_tool_title(value);
     }
+    if tool == "clarify" {
+        return "Questions pending".to_string();
+    }
+    if is_user_shell_value(value) {
+        let command = value
+            .get("args")
+            .and_then(|args| args.get("cmd"))
+            .and_then(Value::as_str)
+            .and_then(first_shell_command_line);
+        return user_shell_title(command);
+    }
+    let args = value.get("args").unwrap_or(&Value::Null);
+    let display = tool_display_spec(tool, value);
+    tool_name_title(
+        tool,
+        title_detail_from_keys(&display.title_arg_keys, args).as_deref(),
+    )
 }
 
 fn tool_title_for_update(tool: &str, value: &Value, existing_title: &str) -> String {
@@ -116,7 +109,7 @@ fn tool_title_for_update(tool: &str, value: &Value, existing_title: &str) -> Str
     if tool == "exec_command" && matches!(title.as_str(), "exec_command" | "!") {
         let existing = tool_title_as_invocation(
             Some(tool),
-            evidence_kind(tool),
+            evidence_kind_for_value(tool, value),
             existing_title,
             is_user_shell_value(value),
         );
@@ -124,14 +117,48 @@ fn tool_title_for_update(tool: &str, value: &Value, existing_title: &str) -> Str
             return existing;
         }
     }
-    if matches!(tool, "write" | "edit") && title == tool {
-        let existing =
-            tool_title_as_invocation(Some(tool), evidence_kind(tool), existing_title, false);
-        if existing != tool {
+    if title == tool {
+        let existing = tool_title_as_invocation(
+            Some(tool),
+            evidence_kind_for_value(tool, value),
+            existing_title,
+            false,
+        );
+        if existing != tool && !existing.starts_with("Tool ") {
             return existing;
         }
     }
     title
+}
+
+fn tool_display_spec(tool: &str, value: &Value) -> ToolDisplaySpec {
+    value
+        .get("display")
+        .cloned()
+        .and_then(|value| serde_json::from_value(value).ok())
+        .unwrap_or_else(|| ToolDisplaySpec::for_name(tool))
+}
+
+fn title_detail_from_keys(keys: &[String], source: &Value) -> Option<String> {
+    for key in keys {
+        let Some(value) = source.get(key) else {
+            continue;
+        };
+        if value.is_null() {
+            continue;
+        }
+        if key == "cmd" {
+            if let Some(command) = value.as_str().and_then(first_shell_command_line) {
+                return Some(command.to_string());
+            }
+            continue;
+        }
+        if let Some(detail) = display_value_inline(value).filter(|value| !value.trim().is_empty())
+        {
+            return Some(detail);
+        }
+    }
+    None
 }
 
 fn tool_name_title(tool: &str, detail: Option<&str>) -> String {
@@ -139,13 +166,6 @@ fn tool_name_title(tool: &str, detail: Option<&str>) -> String {
         return tool.to_string();
     };
     format!("{tool} {detail}")
-}
-
-fn session_tool_title(tool: &str, args: &Value) -> String {
-    match args.get("session_id").and_then(Value::as_u64) {
-        Some(session_id) => tool_name_title(tool, Some(&session_id.to_string())),
-        None => tool.to_string(),
-    }
 }
 
 fn user_shell_title(command: Option<&str>) -> String {
@@ -176,10 +196,6 @@ fn tool_title_as_invocation(
         return legacy_user_shell_title(title);
     }
     if let Some(tool) = tool
-        && matches!(
-            tool,
-            "read" | "list" | "search" | "exec_command" | "write_stdin" | "write" | "edit"
-        )
         && (title == tool || title.starts_with(&format!("{tool} ")))
     {
         return title.to_string();
@@ -189,12 +205,6 @@ fn tool_title_as_invocation(
             let tool = tool.unwrap_or("read");
             if matches!(title, "Exploring" | "Explored") {
                 return tool.to_string();
-            }
-            if let Some(query) = title
-                .strip_prefix("Exploring search ")
-                .or_else(|| title.strip_prefix("Explored search "))
-            {
-                return tool_name_title("search", Some(query));
             }
             if let Some(rest) = title
                 .strip_prefix("Exploring ")
@@ -268,16 +278,6 @@ fn first_shell_command_line(text: &str) -> Option<&str> {
     first_non_empty
 }
 
-fn path_from<'a>(args: &'a Value, result: &'a Value) -> Option<&'a str> {
-    args.get("path")
-        .and_then(Value::as_str)
-        .or_else(|| result.get("path").and_then(Value::as_str))
-}
-
-fn path_from_args(args: &Value) -> Option<&str> {
-    args.get("path").and_then(Value::as_str)
-}
-
 fn tool_output_text(value: &Value) -> (String, Option<String>) {
     if let Some(timeout) = exec_timeout_output_text(value) {
         return collapse_ledger_body(&timeout);
@@ -290,16 +290,128 @@ fn tool_output_text(value: &Value) -> (String, Option<String>) {
     if value.get("tool_name").and_then(Value::as_str) == Some("clarify") {
         return (clarify_tool_output_text(value), None);
     }
-    let result = value.get("result").unwrap_or(&Value::Null);
-    let full = result
-        .get("content")
+    let tool = value
+        .get("tool_name")
         .and_then(Value::as_str)
-        .or_else(|| result.get("output").and_then(Value::as_str))
-        .or_else(|| result.get("diff").and_then(Value::as_str))
-        .or_else(|| result.get("error").and_then(Value::as_str))
-        .map(str::to_string)
-        .unwrap_or_else(|| format_tool_summary(value));
-    collapse_ledger_body(&full)
+        .unwrap_or("tool");
+    let display = tool_display_spec(tool, value);
+    let result = value.get("result").unwrap_or(&Value::Null);
+    if let Some(error) = result.get("error").and_then(Value::as_str) {
+        return collapse_ledger_body(error);
+    }
+    if display.body_policy == ToolDisplayBodyPolicy::Body
+        && let Some(body) = body_text_from_keys(&display.body_keys, result)
+    {
+        return collapse_ledger_body(&body);
+    }
+    let summary = format_tool_summary(value);
+    let detail = body_text_from_keys(&display.body_keys, result);
+    match detail {
+        Some(detail) if detail != summary => (summary.clone(), Some(format!("{summary}\n\n{detail}"))),
+        _ => (summary, None),
+    }
+}
+
+fn format_tool_summary(value: &Value) -> String {
+    let tool = value
+        .get("tool_name")
+        .and_then(Value::as_str)
+        .unwrap_or("tool");
+    let outcome = value
+        .get("outcome")
+        .and_then(Value::as_str)
+        .unwrap_or("normal");
+    let result = value.get("result").unwrap_or(&Value::Null);
+    let display = tool_display_spec(tool, value);
+    let summary = summarize_tool_result(&display, result);
+    if summary.is_empty() {
+        format!("{tool} {outcome}")
+    } else {
+        format!("{tool} {outcome}: {summary}")
+    }
+}
+
+fn summarize_tool_result(display: &ToolDisplaySpec, result: &Value) -> String {
+    if let Some(error) = result.get("error").and_then(Value::as_str) {
+        return truncate_inline(error, 140);
+    }
+    let mut parts = Vec::new();
+    for key in &display.summary_keys {
+        let Some(value) = result.get(key) else {
+            continue;
+        };
+        if value.is_null() {
+            continue;
+        }
+        let Some(display) = display_value_inline(value) else {
+            continue;
+        };
+        if display.trim().is_empty() {
+            continue;
+        }
+        parts.push(format!("{key}={}", truncate_inline(&display, 60)));
+        if parts.len() >= 4 {
+            break;
+        }
+    }
+    truncate_inline(&parts.join(" "), 180)
+}
+
+fn body_text_from_keys(keys: &[String], result: &Value) -> Option<String> {
+    let mut bodies = Vec::new();
+    for key in keys {
+        let Some(value) = result.get(key) else {
+            continue;
+        };
+        let Some(text) = display_value_block(value).filter(|value| !value.trim().is_empty()) else {
+            continue;
+        };
+        bodies.push((key.as_str(), text));
+    }
+    match bodies.as_slice() {
+        [] => None,
+        [(_, text)] => Some(text.clone()),
+        many => Some(
+            many.iter()
+                .map(|(key, text)| format!("{key}:\n{text}"))
+                .collect::<Vec<_>>()
+                .join("\n\n"),
+        ),
+    }
+}
+
+fn display_value_inline(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) => Some(value.split_whitespace().collect::<Vec<_>>().join(" ")),
+        Value::Number(_) | Value::Bool(_) => Some(value.to_string()),
+        Value::Array(items) if items.is_empty() => None,
+        Value::Object(items) if items.is_empty() => None,
+        other => serde_json::to_string(other).ok(),
+    }
+}
+
+fn display_value_block(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) => Some(value.clone()),
+        Value::Array(items) if items.is_empty() => None,
+        Value::Object(items) if items.is_empty() => None,
+        other => serde_json::to_string_pretty(other)
+            .or_else(|_| serde_json::to_string(other))
+            .ok(),
+    }
+}
+
+fn truncate_inline(input: &str, max_chars: usize) -> String {
+    let normalized = input.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.chars().count() <= max_chars {
+        return normalized;
+    }
+    let mut out = normalized
+        .chars()
+        .take(max_chars.saturating_sub(3))
+        .collect::<String>();
+    out.push_str("...");
+    out
 }
 
 fn clarify_tool_title(value: &Value) -> String {
@@ -841,6 +953,7 @@ struct StreamingToolCall {
     position_key: String,
     tool_name: String,
     args: Value,
+    display: Option<ToolDisplaySpec>,
 }
 
 fn streaming_tool_calls_from_event(value: &Value) -> Vec<StreamingToolCall> {
@@ -897,6 +1010,10 @@ fn streaming_tool_call_from_pending_event(value: &Value) -> Option<StreamingTool
         position_key: tool_position_key(content_index, call_index),
         tool_name,
         args,
+        display: value
+            .get("display")
+            .cloned()
+            .and_then(|value| serde_json::from_value(value).ok()),
     })
 }
 
@@ -932,6 +1049,7 @@ fn streaming_tool_call_from_block(block: &Value) -> Option<StreamingToolCall> {
         position_key: tool_position_key(content_index, call_index),
         tool_name,
         args,
+        display: None,
     })
 }
 
@@ -1037,7 +1155,7 @@ fn visible_tool_intent_from_text(text: &str) -> Option<&'static str> {
     .iter()
     .any(|needle| tail.contains(needle))
     {
-        return Some("search");
+        return Some("exec_command");
     }
     None
 }

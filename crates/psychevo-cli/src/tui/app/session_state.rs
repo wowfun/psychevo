@@ -399,11 +399,11 @@ impl TuiApp {
     fn set_mode_no_print(&mut self, mode: &str) -> Result<()> {
         let (run_mode, permission_mode) = match mode {
             "plan" => (RunMode::Plan, PermissionMode::Default),
-            "default" => (RunMode::Build, PermissionMode::Default),
-            "acceptEdits" | "accept-edits" => (RunMode::Build, PermissionMode::AcceptEdits),
-            "dontAsk" | "dont-ask" => (RunMode::Build, PermissionMode::DontAsk),
+            "default" => (RunMode::Default, PermissionMode::Default),
+            "acceptEdits" | "accept-edits" => (RunMode::Default, PermissionMode::AcceptEdits),
+            "dontAsk" | "dont-ask" => (RunMode::Default, PermissionMode::DontAsk),
             "bypassPermissions" | "bypass-permissions" => {
-                (RunMode::Build, PermissionMode::BypassPermissions)
+                (RunMode::Default, PermissionMode::BypassPermissions)
             }
             _ => {
                 return Err(anyhow!(
@@ -493,8 +493,8 @@ impl TuiApp {
 
     fn cycle_mode(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
         let next = match (self.current_mode, self.current_permission_mode) {
-            (RunMode::Build, PermissionMode::Default) => "acceptEdits",
-            (RunMode::Build, PermissionMode::AcceptEdits) => "plan",
+            (RunMode::Default, PermissionMode::Default) => "acceptEdits",
+            (RunMode::Default, PermissionMode::AcceptEdits) => "plan",
             (RunMode::Plan, _) => "default",
             _ => "default",
         };

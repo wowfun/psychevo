@@ -69,6 +69,31 @@ impl TuiApp {
         Ok(())
     }
 
+    fn toolsets_status_text(&self) -> Result<String> {
+        let value = toolsets_value(&self.run_options(String::new()), ConfigScope::Effective)?;
+        let mode_key = self.current_mode.as_str();
+        let tools = value["modes"][mode_key]["effective_tools"]
+            .as_array()
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .unwrap_or_default();
+        let mut lines = vec![format!("mode: {mode_key}"), format!("tools: {tools}")];
+        for row in value["toolsets"].as_array().cloned().unwrap_or_default() {
+            lines.push(format!(
+                "- {} ({}) {}",
+                row["name"].as_str().unwrap_or("-"),
+                row["source"].as_str().unwrap_or("-"),
+                row["description"].as_str().unwrap_or("")
+            ));
+        }
+        Ok(lines.join("\n"))
+    }
+
     fn set_variant(&mut self, variant: String) -> Result<()> {
         self.set_variant_no_print(variant.clone())?;
         println!("{}", self.renderer.status(&format!("variant: {variant}")));

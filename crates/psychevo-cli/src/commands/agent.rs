@@ -146,7 +146,7 @@ async fn run_agent(args: AgentRunArgs) -> Result<ExitCode> {
         model: args.model.clone(),
         reasoning_effort: args.variant.map(|variant| variant.as_str().to_string()),
         include_reasoning: false,
-        mode: RunMode::Build,
+        mode: RunMode::Default,
         permission_mode: None,
         approval_mode: None,
         approval_handler: None,

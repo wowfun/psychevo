@@ -195,6 +195,112 @@ deny = ["Write(.env)"]
 }
 
 #[test]
+fn cli_tool_commands_list_and_toggle_project_toolsets() {
+    let temp = tempdir().expect("temp");
+    let psychevo_home = temp.path().join("psychevo-home");
+    let workdir = temp.path().join("work");
+    std::fs::create_dir_all(&workdir).expect("workdir");
+    init_skill_home(temp.path(), &psychevo_home);
+
+    let listed = admin_cmd(temp.path(), &psychevo_home, &workdir)
+        .args(["tool", "list", "--json"])
+        .output()
+        .expect("tool list");
+    assert!(
+        listed.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    let value: Value = serde_json::from_slice(&listed.stdout).expect("json");
+    assert_eq!(value["toolsets"][0]["name"], "coding-core");
+    assert!(
+        value["modes"]["plan"]["effective_tools"]
+            .as_array()
+            .expect("plan tools")
+            .iter()
+            .any(|tool| tool.as_str() == Some("web_fetch"))
+    );
+
+    let disabled = admin_cmd(temp.path(), &psychevo_home, &workdir)
+        .args(["tool", "disable", "web", "--mode", "plan", "--json"])
+        .output()
+        .expect("tool disable");
+    assert!(
+        disabled.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&disabled.stderr)
+    );
+    let value: Value = serde_json::from_slice(&disabled.stdout).expect("json");
+    assert_eq!(value["changed"], true);
+
+    let listed = admin_cmd(temp.path(), &psychevo_home, &workdir)
+        .args(["tool", "list", "--json"])
+        .output()
+        .expect("tool list");
+    let value: Value = serde_json::from_slice(&listed.stdout).expect("json");
+    assert!(
+        !value["modes"]["plan"]["effective_tools"]
+            .as_array()
+            .expect("plan tools")
+            .iter()
+            .any(|tool| tool.as_str() == Some("web_fetch"))
+    );
+
+    let created = admin_cmd(temp.path(), &psychevo_home, &workdir)
+        .args([
+            "tool",
+            "create",
+            "docs",
+            "--tool",
+            "web_fetch",
+            "--description",
+            "Docs URLs",
+            "--json",
+        ])
+        .output()
+        .expect("tool create");
+    assert!(
+        created.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+
+    let enabled = admin_cmd(temp.path(), &psychevo_home, &workdir)
+        .args(["tool", "enable", "docs", "--mode", "plan", "--json"])
+        .output()
+        .expect("tool enable");
+    assert!(
+        enabled.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&enabled.stderr)
+    );
+    let listed = admin_cmd(temp.path(), &psychevo_home, &workdir)
+        .args(["tool", "list", "--json"])
+        .output()
+        .expect("tool list");
+    let value: Value = serde_json::from_slice(&listed.stdout).expect("json");
+    assert!(
+        value["modes"]["plan"]["effective_tools"]
+            .as_array()
+            .expect("plan tools")
+            .iter()
+            .any(|tool| tool.as_str() == Some("web_fetch"))
+    );
+
+    let removed = admin_cmd(temp.path(), &psychevo_home, &workdir)
+        .args(["tool", "remove", "docs", "--json"])
+        .output()
+        .expect("tool remove");
+    assert!(
+        removed.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&removed.stderr)
+    );
+    let config = std::fs::read_to_string(workdir.join(".psychevo/config.toml")).expect("config");
+    assert!(!config.contains("[toolsets.docs]"));
+}
+
+#[test]
 fn cli_session_commands_manage_active_and_archived_sessions() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");

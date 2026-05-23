@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::future::BoxFuture;
-use psychevo_agent_core::{ToolBinding, ToolExecutionMode, ToolOutput};
+use psychevo_agent_core::{ToolBinding, ToolDisplaySpec, ToolExecutionMode, ToolOutput};
 use psychevo_ai::AbortSignal;
 use serde_json::{Value, json};
 use tokio::time;
@@ -281,6 +281,10 @@ impl ToolBinding for PermissionTool {
         self.tool.execution_mode()
     }
 
+    fn display_spec(&self) -> ToolDisplaySpec {
+        self.tool.display_spec()
+    }
+
     fn execute(
         &self,
         tool_call_id: String,
@@ -313,6 +317,9 @@ enum PermissionAction {
     Skill {
         tool: String,
         action: String,
+    },
+    WebFetch {
+        url: String,
     },
 }
 
@@ -387,6 +394,12 @@ impl PermissionAction {
                         action: action.to_string(),
                     })
                 }),
+            "web_fetch" => args
+                .get("url")
+                .and_then(Value::as_str)
+                .map(|url| Self::WebFetch {
+                    url: url.to_string(),
+                }),
             _ => None,
         }
     }
@@ -409,6 +422,9 @@ impl PermissionAction {
             Self::Skill { tool, action } => {
                 rule.tool == *tool && wildcard_match(&rule.pattern, action)
             }
+            Self::WebFetch { url } => {
+                rule.tool == "web_fetch" && wildcard_match(&rule.pattern, url)
+            }
         }
     }
 
@@ -424,6 +440,7 @@ impl PermissionAction {
                     .join(",")
             ),
             Self::Skill { tool, action } => format!("{tool}:{action}"),
+            Self::WebFetch { url } => format!("web_fetch:{url}"),
         }
     }
 
@@ -434,11 +451,15 @@ impl PermissionAction {
             Self::Skill { tool, action } => {
                 Some(format!("{}({action})", permission_rule_tool(tool)))
             }
+            Self::WebFetch { url } => Some(format!("WebFetch({url})")),
         }
     }
 
     fn allow_always(&self) -> bool {
-        matches!(self, Self::ExecCommand { .. } | Self::Skill { .. })
+        matches!(
+            self,
+            Self::ExecCommand { .. } | Self::Skill { .. } | Self::WebFetch { .. }
+        )
     }
 
     fn is_safe_file_edit(&self) -> bool {
@@ -547,6 +568,7 @@ fn hardline_deny(action: &PermissionAction) -> Option<String> {
             }
         }),
         PermissionAction::Skill { .. } => None,
+        PermissionAction::WebFetch { .. } => None,
     }
 }
 
@@ -571,6 +593,7 @@ fn default_ask_reason(action: &PermissionAction) -> Option<String> {
         PermissionAction::Skill { tool, action } => Some(format!(
             "{tool} action `{action}` changes skill configuration or files and requires approval"
         )),
+        PermissionAction::WebFetch { .. } => None,
     }
 }
 
@@ -579,6 +602,7 @@ fn permission_rule_tool(tool: &str) -> &str {
         "skill_manage" => "SkillManage",
         "skill_hub" => "SkillHub",
         "skill_config" => "SkillConfig",
+        "web_fetch" => "WebFetch",
         other => other,
     }
 }
@@ -744,6 +768,11 @@ fn action_summary(tool_name: &str, args: &Value) -> String {
             .and_then(Value::as_str)
             .unwrap_or("(patch)")
             .to_string(),
+        "web_fetch" => args
+            .get("url")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
         _ => args.to_string(),
     }
 }
@@ -759,6 +788,7 @@ fn permission_error(decision: &str, reason: &str, matched_rule: Option<&str>) ->
             }
         }),
         model_content: None,
+        attachments: Vec::new(),
         is_error: true,
     }
 }
@@ -782,6 +812,7 @@ fn parse_rule(raw: &str) -> Option<PermissionRule> {
         "SkillManage" | "skill_manage" => "skill_manage",
         "SkillHub" | "skill_hub" => "skill_hub",
         "SkillConfig" | "skill_config" => "skill_config",
+        "WebFetch" | "web_fetch" => "web_fetch",
         _ => return None,
     };
     Some(PermissionRule {
@@ -956,6 +987,24 @@ mod tests {
         let runtime = runtime(PermissionConfig::default(), PermissionMode::Default);
         let decision = runtime.evaluate("exec_command", &json!({"cmd": "pwd", "workdir": "/tmp"}));
         assert!(matches!(decision, PermissionDecision::Ask { .. }));
+    }
+
+    #[test]
+    fn web_fetch_defaults_to_allow_but_rules_match_urls() {
+        let default_runtime = runtime(PermissionConfig::default(), PermissionMode::Default);
+        let decision =
+            default_runtime.evaluate("web_fetch", &json!({"url": "https://example.com/a"}));
+        assert_eq!(decision, PermissionDecision::Allow);
+
+        let deny_runtime = runtime(
+            PermissionConfig {
+                deny: vec!["WebFetch(https://example.com/*)".to_string()],
+                ..Default::default()
+            },
+            PermissionMode::Default,
+        );
+        let decision = deny_runtime.evaluate("web_fetch", &json!({"url": "https://example.com/a"}));
+        assert!(matches!(decision, PermissionDecision::Deny { .. }));
     }
 
     #[tokio::test]

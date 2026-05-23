@@ -371,14 +371,23 @@ fn project_run_stream_event_with_accounting(
             arguments_json,
             content_index,
             call_index,
-        } => Some(RunStreamEvent::Event(json!({
-            "type": "tool_call_pending",
-            "tool_call_id": tool_call_id,
-            "tool_name": tool_name,
-            "arguments_json": arguments_json,
-            "content_index": content_index,
-            "call_index": call_index,
-        }))),
+            display,
+        } => {
+            let mut value = json!({
+                "type": "tool_call_pending",
+                "tool_call_id": tool_call_id,
+                "tool_name": tool_name,
+                "arguments_json": arguments_json,
+                "content_index": content_index,
+                "call_index": call_index,
+            });
+            if let Some(display) = display
+                && let Some(object) = value.as_object_mut()
+            {
+                object.insert("display".to_string(), serde_json::to_value(display).ok()?);
+            }
+            Some(RunStreamEvent::Event(value))
+        }
         AgentEvent::MessageEnd {
             message,
             usage,
