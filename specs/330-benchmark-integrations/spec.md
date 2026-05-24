@@ -33,6 +33,19 @@ Official benchmark integrations may delegate setup or scoring to official
 harnesses. Delegated output becomes canonical only after import into
 `psychevo-eval` result documents.
 
+## Dataset Inventory
+
+The user-level persistent evaluation store may keep local dataset inventory records under
+`datasets/<dataset-id>/dataset.toml`. A dataset record describes the benchmark
+kind, source, referenced or linked payload, loader, split, sample limit, cache
+key, license, tags, and notes. Inventory records are local metadata; they do
+not imply that official data has been downloaded or that a live benchmark
+adapter is available.
+
+The first dataset import path registers local payloads by reference or link to
+avoid duplicating large data. Listing and dashboard views should report whether
+the referenced payload is currently present.
+
 ## Attachments
 
 - [Local](local.md) defines local suite/task directory behavior.

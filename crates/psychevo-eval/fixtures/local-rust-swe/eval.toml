@@ -1,4 +1,3 @@
 schema_version = 1
 name = "local-rust-swe"
-output_root = "target/peval/runs"
 allow_live = true

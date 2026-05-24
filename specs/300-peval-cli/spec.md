@@ -39,10 +39,24 @@ to small samples or explicit task limits for official or expensive benchmarks.
 
 ## Artifact Layout
 
-Run artifacts default to a project-local `target/peval/runs/<run-id>` location
-unless the user supplies an output path. Shared caches, official dataset
-caches, and Python sidecar caches live outside per-run artifacts in a user cache
-location.
+Run artifacts default to
+`<peval-root>/<namespace>/<run-id>`, where `<namespace>` comes from
+`eval.toml` `output_root` or defaults to `runs/<project-slug>`. Callers may
+select the store with `--root <dir>` or `PEVAL_ROOT`; otherwise `peval` reads
+`$PSYCHEVO_HOME/peval.toml`, created by `peval init`. Without an initialized
+config or explicit root, store-backed commands fail with a diagnostic that
+names `peval init`.
+
+`--output-root <dir>` keeps its per-run meaning and writes `<dir>/<run-id>`
+without registering that run in the store index or dashboard. All explicit CLI
+paths resolve relative to process cwd; manifest paths keep their manifest-owned
+resolution rules.
+
+The persistent store may contain `index.json`, namespace-level `latest.json`,
+`dashboard.html`, run reports, and `datasets/<dataset-id>/dataset.toml`
+inventory records. Shared caches, official dataset caches, and Python sidecar
+caches live outside per-run artifacts unless a later spec promotes them into
+the store.
 
 The CLI must report the run artifact root in successful human output and in
 machine output.

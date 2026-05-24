@@ -29,15 +29,15 @@ fi
 
 if cargo test --quiet >"$postcheck_stdout" 2>"$postcheck_stderr"; then
     echo "pevo exited with status $pevo_status, but post-run cargo test passed" >&2
-    echo "--- pevo stdout tail ---"
-    tail -80 "$stdout_log" || true
+    echo "--- pevo stdout tail ---" >&2
+    tail -80 "$stdout_log" >&2 || true
     echo "--- pevo stderr tail ---" >&2
     tail -80 "$stderr_log" >&2 || true
     exit 0
 fi
 
-echo "--- pevo stdout tail ---"
-tail -80 "$stdout_log" || true
+echo "--- pevo stdout tail ---" >&2
+tail -80 "$stdout_log" >&2 || true
 echo "--- pevo stderr tail ---" >&2
 tail -80 "$stderr_log" >&2 || true
 cat "$postcheck_stderr" >&2 || true

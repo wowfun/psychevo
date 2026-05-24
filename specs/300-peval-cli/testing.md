@@ -32,6 +32,13 @@ Report tests should assert structured report data, redaction behavior, and
 presence of local artifact links. They should avoid brittle snapshots of full
 HTML when structured comparison can cover the same behavior.
 
+Persistent-store tests should verify `peval init`, `$PSYCHEVO_HOME/peval.toml`
+root loading, `--root`, `PEVAL_ROOT`, explicit `--output-root` bypass behavior,
+safe store-relative manifest namespaces, index fallback scanning, config-scoped
+and global `latest` filtering, config-free run/dataset listing, dataset
+import/listing, and static dashboard generation without embedding raw
+trajectory or log bodies.
+
 ## Validation
 
 The default project validation path must not require Python sidecar

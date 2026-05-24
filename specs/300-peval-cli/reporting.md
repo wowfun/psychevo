@@ -52,6 +52,24 @@ Replay output is generated from stored trajectory events and case artifacts.
 It may summarize command, agent, scorer, and diagnostic events, but it does not
 re-run any part of the case.
 
+For the Psychevo adapter, replay input includes the `pevo run --format json`
+observation stream captured during the run. Report and dashboard surfaces may
+link to that local trajectory, but they must not inline the raw observation
+stream by default.
+
+## Static Dashboard
+
+The persistent store may include a static HTML dashboard and per-run HTML
+reports. The dashboard is a local review surface: it shows recent runs,
+dataset inventory, latest shortcuts, pass/fail counts, and local artifact
+links. It may use inline CSS and small inline JavaScript for filtering,
+sorting, expansion, comparison selection, and dataset/run linking.
+
+Dashboard pages do not inline raw trajectories, prompts, model outputs, tool
+outputs, or full logs by default. They may expose abnormal cases through
+filters and short structured summaries while linking to canonical artifacts
+for detailed inspection.
+
 ## Related Topics
 
 - [090 Artifacts](../090-evaluation/artifacts.md)

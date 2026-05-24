@@ -65,13 +65,29 @@ caller requested a strict fail-fast mode.
 ## Artifacts
 
 Each run writes a structured summary, per-case results, trajectory artifacts,
-and diagnostic logs under the selected output root. Derived reports are
+and diagnostic logs under the selected artifact root. Derived reports are
 generated from those artifacts rather than from live agent state.
 
-The default CLI-selected output root is
-`target/peval/runs/<run-id>` below the evaluation project root. The run id is
-generated when omitted and can be supplied explicitly by callers. Persisted
-artifacts include `schema_version`; the first implementation rejects
+Adapters that execute a candidate through a structured observation interface
+must preserve the candidate's emitted observation events in the case
+trajectory. Process exit status alone is not enough for replay or failure
+diagnosis when the candidate can report turns, messages, model calls, and tool
+executions.
+
+The CLI-selected evaluation store root is user-level state. It is supplied
+explicitly, read from `PEVAL_ROOT`, or read from user-level `peval.toml` after
+initialization. Run artifacts default to
+`<store-root>/<namespace>/<run-id>`, where the namespace comes from the
+evaluation config's store-relative `output_root` or defaults to
+`runs/<project-slug>`. An explicit per-run output root is an escape hatch and
+writes `<output-root>/<run-id>` without registering the run in the persistent
+store.
+
+The store may maintain `index.json`, namespace-level `latest.json`, and static
+dashboard artifacts. These indexes are derived from run summaries; readers
+must fall back to scanning run summaries when an index cannot be read. The run
+id is generated when omitted and can be supplied explicitly by callers.
+Persisted artifacts include `schema_version`; the first implementation rejects
 unsupported versions instead of migrating them.
 
 Compare and replay flows are artifact-only. Compare reads stored summaries and

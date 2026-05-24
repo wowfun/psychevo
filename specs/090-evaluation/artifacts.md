@@ -47,6 +47,13 @@ candidate identity, task identity, and event kind. When an adapter cannot
 provide full detail, it should emit a lossy event or collector diagnostic
 instead of fabricating precise behavior.
 
+When an evaluated agent exposes its own structured observation stream, the
+evaluation trajectory should retain those source events as local trajectory
+events instead of collapsing them into a single process-finished marker. Raw
+source events may contain prompts, model output, tool arguments, and tool
+results, so they are local diagnostic artifacts and remain behind the report
+privacy boundary.
+
 ## Privacy
 
 Local run artifacts may retain raw prompts, model outputs, tool outputs, and
@@ -67,6 +74,25 @@ logs remain on disk.
 
 Domain-specific code patches, screenshots, or final workspaces are not
 foundation artifacts. A domain spec must opt into storing them.
+
+## Persistent Store
+
+Evaluation implementations may provide a user-level persistent store for run
+artifacts, dataset inventories, indexes, and derived dashboards. Store indexes
+are convenience artifacts; structured run summaries and case results remain the
+source of truth. Readers should recover by scanning run summaries when an index
+is missing or malformed.
+
+Evaluation configs may map their results into a store-relative namespace such
+as `runs/<project-slug>`. Store-relative namespaces must not escape the store
+root. Explicit external output roots are per-run escape hatches, not persistent
+store locations.
+
+Static dashboards may summarize run, case, and dataset metadata and link to
+local artifacts. They must not inline raw trajectory, prompt, model output,
+tool output, scorer log, or environment log bodies by default. Interactive
+filtering over already-rendered summaries is allowed when the same privacy
+boundary is preserved.
 
 ## Related Topics
 

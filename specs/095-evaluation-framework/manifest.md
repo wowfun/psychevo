@@ -34,8 +34,11 @@ versions before matrix expansion.
 
 The first implementation uses a Cargo-like directory project rooted at
 `eval.toml`. The root manifest contains project defaults, the schema version,
-the default output root, and the live-execution gate. `allow_live` defaults to
-`false` when omitted.
+the store-relative output namespace, and the live-execution gate. `allow_live`
+defaults to `false` when omitted. When `output_root` is present, it is a
+store-relative namespace for this evaluation config's run artifacts, not an
+absolute artifact root and not a replacement for the user-level evaluation
+store root.
 
 Project-relative manifests are organized as:
 

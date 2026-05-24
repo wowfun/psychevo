@@ -2,9 +2,11 @@
 
 ## 2026-05-24
 
-- Added the evaluation specs and first `psychevo-eval`/`peval` slice, including
-  local Rust SWE-style fixtures, reports, compare/replay, and bounded live
-  Psychevo smoke validation.
+- Added the first `psychevo-eval`/`peval` slice and unified evaluation
+  workbench: `peval init`, `$PSYCHEVO_HOME/peval.toml`, `--config/-c`,
+  `--root`/`PEVAL_ROOT`, run indexes, latest selectors, dataset inventory,
+  static dashboards, live `pevo run --format json` trajectory capture, and
+  bounded fake/live smoke validation.
 - Added ACP setup docs, testing specs for clarify/compaction/ACP packaging, and
   a README refresh for the current CLI/TUI/ACP surfaces.
 - Cleaned active spec attachment links, retired archived 130-permissions docs,
