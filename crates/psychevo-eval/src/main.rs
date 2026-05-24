@@ -1,6 +1,6 @@
 use std::process::ExitCode;
 
-fn main() -> ExitCode {
+pub(crate) fn main() -> ExitCode {
     let outcome = psychevo_eval::run_cli_from(std::env::args_os());
     if !outcome.stdout.is_empty() {
         print!("{}", outcome.stdout);

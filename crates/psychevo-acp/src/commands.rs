@@ -1,0 +1,852 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
+impl PsychevoAcpAgent {
+    pub(crate) async fn request_command_approval(
+        &self,
+        session_id: &SessionId,
+        cx: &ConnectionTo<Client>,
+        command: &str,
+        reason: &str,
+    ) -> bool {
+        let tool_call = ToolCallUpdate::new(
+            format!("slash_command_{}", Uuid::now_v7()),
+            ToolCallUpdateFields::new()
+                .title(format!("Command: {command}"))
+                .status(ToolCallStatus::Pending)
+                .raw_input(json!({
+                    "command": command,
+                    "reason": reason,
+                })),
+        );
+        let options = vec![
+            PermissionOption::new("allow_once", "Allow once", PermissionOptionKind::AllowOnce),
+            PermissionOption::new("deny", "Deny", PermissionOptionKind::RejectOnce),
+        ];
+        match cx
+            .send_request(RequestPermissionRequest::new(
+                session_id.clone(),
+                tool_call,
+                options,
+            ))
+            .block_task()
+            .await
+        {
+            Ok(response) => matches!(
+                response.outcome,
+                RequestPermissionOutcome::Selected(selected)
+                    if selected.option_id.to_string() == "allow_once"
+            ),
+            Err(_) => false,
+        }
+    }
+
+    pub(crate) async fn skills_command_text(
+        &self,
+        session_id: &SessionId,
+        session: &AcpSession,
+        args: Option<&str>,
+        cx: &ConnectionTo<Client>,
+    ) -> Result<String, Error> {
+        let Some(args) = args.map(str::trim).filter(|value| !value.is_empty()) else {
+            return self.skills_dashboard_text(session);
+        };
+        let mut parts = args.split_whitespace().collect::<Vec<_>>();
+        let action = parts.remove(0).to_ascii_lowercase();
+        match action.as_str() {
+            "help" | "--help" | "-h" => self.skills_dashboard_text(session),
+            "list" => self.skills_list_text(session, None),
+            "browse" | "search" => self.skills_list_text(session, Some(&parts.join(" "))),
+            "inspect" => self.skills_inspect_text(session, parts.first().copied()),
+            "check" => Ok(self.skills_check_text(session)),
+            "audit" => self.skills_audit_text(session, &parts),
+            "reload" => Ok(self.skills_reload_text(session)),
+            "install" | "uninstall" | "config" => {
+                if !self
+                    .request_command_approval(session_id, cx, "/skills", "change local skill state")
+                    .await
+                {
+                    return Ok("permission denied".to_string());
+                }
+                self.skills_mutation_text(session, action.as_str(), &parts)
+            }
+            _ => Ok(format!(
+                "unknown /skills action: {action}\nSupported: list, browse, search, inspect, check, audit, reload"
+            )),
+        }
+    }
+
+    pub(crate) fn skills_dashboard_text(&self, session: &AcpSession) -> Result<String, Error> {
+        let catalog = self.skill_catalog(session)?;
+        let bundles = list_skill_bundles(&self.options.home, &session.cwd).unwrap_or_default();
+        Ok([
+            "Skills hub".to_string(),
+            format!(
+                "installed: {} skills, {} bundles",
+                catalog.skills.len(),
+                bundles.len()
+            ),
+            "/skills list - list installed skills".to_string(),
+            "/skills search <query> - search installed skills".to_string(),
+            "/skills inspect <name> - show local skill metadata".to_string(),
+            "/skills check - check configured hub updates".to_string(),
+            "/skills audit [name] - scan local skills".to_string(),
+            "/skills reload - refresh skill context".to_string(),
+            "/skills install <identifier-or-path> [--scope global|project] [--name <name>]"
+                .to_string(),
+            "/skills uninstall <name>".to_string(),
+            "/skills config enable|disable <name> [--scope global|project]".to_string(),
+        ]
+        .join("\n"))
+    }
+
+    pub(crate) fn skills_list_text(
+        &self,
+        session: &AcpSession,
+        query: Option<&str>,
+    ) -> Result<String, Error> {
+        let catalog = self.skill_catalog(session)?;
+        let query = query.map(str::trim).filter(|value| !value.is_empty());
+        let mut rows = catalog
+            .skills
+            .iter()
+            .filter(|skill| {
+                query.is_none_or(|query| {
+                    let query = query.to_ascii_lowercase();
+                    skill.name.to_ascii_lowercase().contains(&query)
+                        || skill.description.to_ascii_lowercase().contains(&query)
+                })
+            })
+            .map(|skill| format!("{}: {}", skill.name, skill.description))
+            .collect::<Vec<_>>();
+        rows.sort();
+        if rows.is_empty() {
+            Ok("No skills found.".to_string())
+        } else {
+            Ok(rows.join("\n"))
+        }
+    }
+
+    pub(crate) fn skills_inspect_text(
+        &self,
+        session: &AcpSession,
+        name: Option<&str>,
+    ) -> Result<String, Error> {
+        let Some(name) = name else {
+            return Ok("usage: /skills inspect <name>".to_string());
+        };
+        let catalog = self.skill_catalog(session)?;
+        let Some(skill) = catalog.skills.iter().find(|skill| {
+            skill.name == name
+                || psychevo_runtime::command_registry::normalize_dynamic_skill_name(&skill.name)
+                    == psychevo_runtime::command_registry::normalize_dynamic_skill_name(name)
+        }) else {
+            return Ok(format!("skill not found: {name}"));
+        };
+        Ok(format!(
+            "{}\n{}\npath: {}",
+            skill.name,
+            skill.description,
+            skill.file_path.display()
+        ))
+    }
+
+    pub(crate) fn skills_check_text(&self, session: &AcpSession) -> String {
+        let skill_count = self
+            .skill_catalog(session)
+            .map(|catalog| catalog.skills.len())
+            .unwrap_or(0);
+        let bundle_count = list_skill_bundles(&self.options.home, &session.cwd)
+            .map(|bundles| bundles.len())
+            .unwrap_or(0);
+        format!(
+            "no hub update source configured\ninstalled: {skill_count} skills, {bundle_count} bundles"
+        )
+    }
+
+    pub(crate) fn skills_audit_text(
+        &self,
+        session: &AcpSession,
+        args: &[&str],
+    ) -> Result<String, Error> {
+        let catalog = self.skill_catalog(session)?;
+        if let Some(name) = args.first() {
+            let normalized = psychevo_runtime::command_registry::normalize_dynamic_skill_name(name);
+            let Some(skill) = catalog.skills.iter().find(|skill| {
+                skill.name == *name
+                    || psychevo_runtime::command_registry::normalize_dynamic_skill_name(&skill.name)
+                        == normalized
+            }) else {
+                return Ok(format!("unknown skill: {name}"));
+            };
+            return scan_skill_path(&skill.base_dir)
+                .map(|scan| {
+                    format!(
+                        "{}: {:?} ({} findings)",
+                        skill.name,
+                        scan.verdict,
+                        scan.findings.len()
+                    )
+                })
+                .map_err(acp_internal_error);
+        }
+        if catalog.skills.is_empty() {
+            return Ok("No skills found.".to_string());
+        }
+        Ok(catalog
+            .skills
+            .iter()
+            .map(|skill| match scan_skill_path(&skill.base_dir) {
+                Ok(scan) => format!(
+                    "{}: {:?} ({} findings)",
+                    skill.name,
+                    scan.verdict,
+                    scan.findings.len()
+                ),
+                Err(err) => format!("{}: error: {err:#}", skill.name),
+            })
+            .collect::<Vec<_>>()
+            .join("\n"))
+    }
+
+    pub(crate) fn skills_reload_text(&self, session: &AcpSession) -> String {
+        let skill_count = self
+            .skill_catalog(session)
+            .map(|catalog| catalog.skills.len())
+            .unwrap_or(0);
+        let bundle_count = list_skill_bundles(&self.options.home, &session.cwd)
+            .map(|bundles| bundles.len())
+            .unwrap_or(0);
+        format!("reloaded skills: {skill_count} skills, {bundle_count} bundles")
+    }
+
+    pub(crate) fn skills_mutation_text(
+        &self,
+        session: &AcpSession,
+        action: &str,
+        args: &[&str],
+    ) -> Result<String, Error> {
+        match action {
+            "install" => {
+                let Some(source) = args.first() else {
+                    return Ok("usage: /skills install <identifier-or-path> [--scope global|project] [--name <name>]".to_string());
+                };
+                let value = install_skill(
+                    &self.options.home,
+                    &session.cwd,
+                    InstallOptions {
+                        source: (*source).to_string(),
+                        target: skill_scope_from_args(args),
+                        name: skill_option_value(args, "--name").map(ToOwned::to_owned),
+                        all: args.contains(&"--all"),
+                        force: args.contains(&"--force"),
+                    },
+                )
+                .map_err(acp_internal_error)?;
+                serde_json::to_string_pretty(&value).map_err(acp_internal_error)
+            }
+            "uninstall" => {
+                let Some(name) = args.first() else {
+                    return Ok("usage: /skills uninstall <name>".to_string());
+                };
+                let catalog = self.skill_catalog(session)?;
+                let value = remove_skill(&catalog, &self.options.home, &session.cwd, name)
+                    .map_err(acp_internal_error)?;
+                serde_json::to_string_pretty(&value).map_err(acp_internal_error)
+            }
+            "config" => self.skills_config_mutation_text(session, args),
+            _ => Ok("unsupported skill mutation".to_string()),
+        }
+    }
+
+    pub(crate) fn skills_config_mutation_text(
+        &self,
+        session: &AcpSession,
+        args: &[&str],
+    ) -> Result<String, Error> {
+        let Some(action) = args.first() else {
+            return Ok("usage: /skills config enable|disable|set ...".to_string());
+        };
+        match *action {
+            "enable" | "disable" => {
+                let Some(name) = args.get(1) else {
+                    return Ok(format!(
+                        "usage: /skills config {action} <name> [--scope global|project]"
+                    ));
+                };
+                let value = set_skill_enabled(
+                    &self.options.home,
+                    &session.cwd,
+                    skill_scope_from_args(args),
+                    name,
+                    *action == "enable",
+                )
+                .map_err(acp_internal_error)?;
+                serde_json::to_string_pretty(&value).map_err(acp_internal_error)
+            }
+            "set" => {
+                let filtered = skill_args_without_scope(args);
+                if filtered.len() < 3 {
+                    return Ok("usage: /skills config set skills.config.<key> <value> [--scope global|project]".to_string());
+                }
+                let value = serde_json::from_str::<Value>(filtered[2])
+                    .unwrap_or_else(|_| Value::String(filtered[2].to_string()));
+                let value = set_skill_config_value(
+                    &self.options.home,
+                    &session.cwd,
+                    skill_scope_from_args(args),
+                    filtered[1],
+                    value,
+                )
+                .map_err(acp_internal_error)?;
+                serde_json::to_string_pretty(&value).map_err(acp_internal_error)
+            }
+            other => Ok(format!("unknown /skills config action: {other}")),
+        }
+    }
+
+    pub(crate) fn skill_catalog(
+        &self,
+        session: &AcpSession,
+    ) -> Result<psychevo_runtime::SkillCatalog, Error> {
+        discover_skills(&SkillDiscoveryOptions {
+            home: self.options.home.clone(),
+            workdir: session.cwd.clone(),
+            config_path: self.options.config_path.clone(),
+            env: self.options.inherited_env.clone(),
+            explicit_inputs: Vec::new(),
+            no_skills: false,
+        })
+        .map_err(acp_internal_error)
+    }
+
+    pub(crate) fn bundles_command_text(
+        &self,
+        session: &AcpSession,
+        args: Option<&str>,
+    ) -> Result<String, Error> {
+        match args.map(str::trim).filter(|value| !value.is_empty()) {
+            None | Some("list") => {
+                let bundles = list_skill_bundles(&self.options.home, &session.cwd)
+                    .map_err(acp_internal_error)?;
+                if bundles.is_empty() {
+                    return Ok("No skill bundles found.".to_string());
+                }
+                Ok(bundles
+                    .into_iter()
+                    .map(|bundle| {
+                        format!(
+                            "{}: {} [{}]",
+                            bundle.slug,
+                            bundle.description,
+                            bundle.skills.join(", ")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"))
+            }
+            Some(_) => Ok("Supported bundle commands: /bundles, /bundles list".to_string()),
+        }
+    }
+
+    pub(crate) fn curator_command_text(&self, args: Option<&str>) -> String {
+        match args.map(str::trim).filter(|value| !value.is_empty()) {
+            None | Some("status") => [
+                "Skill curator",
+                "status: enabled",
+                "scope: global",
+                "automatic destructive actions: disabled",
+            ]
+            .join("\n"),
+            Some(_) => "Supported curator commands: /curator, /curator status".to_string(),
+        }
+    }
+
+    pub(crate) fn write_artifact_text(
+        &self,
+        session: &AcpSession,
+        artifact_kind: SessionArtifactKind,
+        args: Option<&str>,
+    ) -> Result<String, Error> {
+        let Some(runtime_session_id) = session.runtime_session_id.as_deref() else {
+            return Ok("no runtime session yet".to_string());
+        };
+        let parsed = parse_artifact_args(args.unwrap_or(""), artifact_kind)
+            .map_err(|message| Error::invalid_params().data(message))?;
+        let format = parsed.format.unwrap_or(SessionExportFormat::Markdown);
+        let include = parsed
+            .include
+            .unwrap_or_else(|| SessionExportIncludeSet::default_for(artifact_kind));
+        let path = parsed.path.unwrap_or_else(|| {
+            session.cwd.join(default_session_export_filename(
+                runtime_session_id,
+                format,
+                artifact_kind,
+            ))
+        });
+        let path = if path.is_absolute() {
+            path
+        } else {
+            session.cwd.join(path)
+        };
+        let store = self.state.store().clone();
+        let result = psychevo_runtime::write_session_export(
+            &store,
+            runtime_session_id,
+            &path,
+            SessionExportOptions {
+                format,
+                include,
+                artifact_kind,
+            },
+        )
+        .map_err(acp_internal_error)?;
+        Ok(format!(
+            "{}: {} ({} bytes)",
+            artifact_kind.as_str(),
+            result.path.display(),
+            result.bytes
+        ))
+    }
+
+    pub(crate) fn auth_methods(&self) -> Vec<AuthMethod> {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let options = RunOptions {
+            state: self.state.clone(),
+            workdir: cwd,
+            snapshot_root: None,
+            session: None,
+            continue_latest: false,
+            prompt: String::new(),
+            image_inputs: Vec::new(),
+            extract_prompt_image_sources: false,
+            prompt_display: None,
+            max_context_messages: None,
+            config_path: self.options.config_path.clone(),
+            model: None,
+            reasoning_effort: None,
+            include_reasoning: false,
+            mode: RunMode::Default,
+            permission_mode: None,
+            approval_mode: None,
+            approval_handler: None,
+            clarify_enabled: false,
+            inherited_env: Some(self.options.inherited_env.clone()),
+            agent: None,
+            no_agents: false,
+            no_skills: false,
+            skill_inputs: Vec::new(),
+            mcp_servers: Vec::new(),
+        };
+        model_catalog_providers(&options)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|provider| provider.api_key_env)
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .map(|env_name| {
+                AuthMethod::EnvVar(AuthMethodEnvVar::new(
+                    format!("env:{env_name}"),
+                    env_name.clone(),
+                    vec![AuthEnvVar::new(env_name.clone()).label(env_name)],
+                ))
+            })
+            .collect()
+    }
+}
+
+pub(crate) enum SlashPromptAction {
+    NotSlashOrPassThrough,
+    Handled(PromptResponse),
+    RunPrompt(String),
+}
+
+pub(crate) const ACP_COMMAND_ADVERTISEMENT_LIMIT: usize = 100;
+
+pub(crate) fn acp_command_capabilities()
+-> &'static [psychevo_runtime::command_registry::CommandCapability] {
+    use psychevo_runtime::command_registry::CommandCapability;
+    &[
+        CommandCapability::ActiveTurnControl,
+        CommandCapability::Queue,
+        CommandCapability::SessionSwitch,
+        CommandCapability::ArtifactWrite,
+        CommandCapability::ConfigWrite,
+        CommandCapability::PolicyWrite,
+        CommandCapability::SkillStateWrite,
+    ]
+}
+
+pub(crate) fn send_slash_text(
+    cx: &ConnectionTo<Client>,
+    session_id: &SessionId,
+    text: impl Into<String>,
+) -> SlashPromptAction {
+    send_session_update(
+        cx,
+        session_id.clone(),
+        SessionUpdate::AgentMessageChunk(ContentChunk::new(text.into().into())),
+    );
+    SlashPromptAction::Handled(PromptResponse::new(StopReason::EndTurn))
+}
+
+pub(crate) fn user_text_message(text: &str) -> Message {
+    Message::User {
+        content: vec![UserContentBlock::text(text)],
+        timestamp_ms: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64,
+    }
+}
+
+pub(crate) fn resolve_session_reference(
+    reference: &str,
+    sessions: &[SessionSummary],
+) -> Option<SessionSummary> {
+    if sessions.is_empty() {
+        return None;
+    }
+    if reference.is_empty() || reference == "latest" {
+        return sessions.first().cloned();
+    }
+    if let Ok(index) = reference.parse::<usize>()
+        && index > 0
+    {
+        return sessions.get(index - 1).cloned();
+    }
+    let id_matches = sessions
+        .iter()
+        .filter(|summary| summary.id.starts_with(reference))
+        .cloned()
+        .collect::<Vec<_>>();
+    if id_matches.len() == 1 {
+        return id_matches.into_iter().next();
+    }
+    let title_matches = sessions
+        .iter()
+        .filter(|summary| summary.title.as_deref() == Some(reference))
+        .cloned()
+        .collect::<Vec<_>>();
+    (title_matches.len() == 1)
+        .then(|| title_matches.into_iter().next())
+        .flatten()
+}
+
+pub(crate) fn ambiguous_session_matches(
+    reference: &str,
+    sessions: &[SessionSummary],
+) -> Vec<SessionSummary> {
+    if reference.is_empty() || reference == "latest" {
+        return Vec::new();
+    }
+    let id_matches = sessions
+        .iter()
+        .filter(|summary| summary.id.starts_with(reference))
+        .cloned()
+        .collect::<Vec<_>>();
+    if id_matches.len() > 1 {
+        return id_matches;
+    }
+    let title_matches = sessions
+        .iter()
+        .filter(|summary| summary.title.as_deref() == Some(reference))
+        .cloned()
+        .collect::<Vec<_>>();
+    if title_matches.len() > 1 {
+        title_matches
+    } else {
+        Vec::new()
+    }
+}
+
+pub(crate) fn reasoning_effort_value(value: &str) -> Option<String> {
+    (value != "none").then(|| value.to_string())
+}
+
+pub(crate) fn available_commands_from(
+    available: psychevo_runtime::command_registry::AvailableSlashCommands,
+) -> Vec<AvailableCommand> {
+    available
+        .commands
+        .into_iter()
+        .map(|command| {
+            let description = if command.aliases.is_empty() {
+                command.summary
+            } else {
+                format!(
+                    "{} (aliases: {})",
+                    command.summary,
+                    command.aliases.join(", ")
+                )
+            };
+            let input = match command.argument_kind {
+                psychevo_runtime::command_registry::CommandArgumentKind::None => None,
+                _ => Some(AvailableCommandInput::Unstructured(
+                    UnstructuredCommandInput::new(command.usage),
+                )),
+            };
+            AvailableCommand::new(command.name, description).input(input)
+        })
+        .collect()
+}
+
+pub(crate) fn available_command_lines_from(commands: Vec<AvailableCommand>) -> Vec<String> {
+    commands
+        .into_iter()
+        .map(|command| {
+            let input_hint = command
+                .input
+                .as_ref()
+                .map(|input| match input {
+                    AvailableCommandInput::Unstructured(input) => input.hint.clone(),
+                    _ => String::new(),
+                })
+                .unwrap_or_default();
+            let display = if input_hint.starts_with('/') {
+                input_hint
+            } else if input_hint.is_empty() {
+                format!("/{}", command.name)
+            } else {
+                format!("/{} {}", command.name, input_hint)
+            };
+            format!("- {display} - {}", command.description)
+        })
+        .collect()
+}
+
+pub(crate) struct ParsedArtifactArgs {
+    pub(crate) path: Option<PathBuf>,
+    pub(crate) format: Option<SessionExportFormat>,
+    pub(crate) include: Option<SessionExportIncludeSet>,
+}
+
+pub(crate) fn parse_artifact_args(
+    args: &str,
+    artifact_kind: SessionArtifactKind,
+) -> std::result::Result<ParsedArtifactArgs, String> {
+    let tokens = args.split_whitespace().collect::<Vec<_>>();
+    let mut path = None;
+    let mut format = None;
+    let mut include = None;
+    let mut index = 0usize;
+    while index < tokens.len() {
+        match tokens[index] {
+            "--format" | "-f" if artifact_kind == SessionArtifactKind::Export => {
+                index += 1;
+                let Some(value) = tokens.get(index) else {
+                    return Err(
+                        "usage: /export [path] [-f|--format markdown|json] [-i|--include list]"
+                            .to_string(),
+                    );
+                };
+                format = Some(parse_export_format(value)?);
+            }
+            value
+                if artifact_kind == SessionArtifactKind::Export
+                    && value.starts_with("--format=") =>
+            {
+                format = Some(parse_export_format(value.trim_start_matches("--format="))?);
+            }
+            "--include" | "-i" => {
+                index += 1;
+                let Some(value) = tokens.get(index) else {
+                    return Err("usage: /export|/share [path] [-i|--include list]".to_string());
+                };
+                include = Some(
+                    SessionExportIncludeSet::parse(value, artifact_kind)
+                        .map_err(|err| err.to_string())?,
+                );
+            }
+            value if value.starts_with("--include=") => {
+                include = Some(
+                    SessionExportIncludeSet::parse(
+                        value.trim_start_matches("--include="),
+                        artifact_kind,
+                    )
+                    .map_err(|err| err.to_string())?,
+                );
+            }
+            value if value.starts_with('-') => {
+                return Err(format!("unsupported option: {value}"));
+            }
+            value => {
+                if path.is_some() {
+                    return Err("only one output path is supported".to_string());
+                }
+                path = Some(PathBuf::from(value));
+            }
+        }
+        index += 1;
+    }
+    Ok(ParsedArtifactArgs {
+        path,
+        format,
+        include,
+    })
+}
+
+pub(crate) fn parse_export_format(value: &str) -> std::result::Result<SessionExportFormat, String> {
+    match value {
+        "markdown" | "md" => Ok(SessionExportFormat::Markdown),
+        "json" => Ok(SessionExportFormat::Json),
+        _ => Err("format must be markdown or json".to_string()),
+    }
+}
+
+pub(crate) fn skill_scope_from_args(args: &[&str]) -> SkillTarget {
+    match skill_option_value(args, "--scope") {
+        Some("project") | Some("local") => SkillTarget::Project,
+        _ => SkillTarget::Global,
+    }
+}
+
+pub(crate) fn skill_option_value<'a>(args: &'a [&str], option: &str) -> Option<&'a str> {
+    args.windows(2)
+        .find_map(|window| (window[0] == option).then_some(window[1]))
+}
+
+pub(crate) fn skill_args_without_scope<'a>(args: &'a [&str]) -> Vec<&'a str> {
+    let mut filtered = Vec::new();
+    let mut skip_next = false;
+    for arg in args {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if *arg == "--scope" {
+            skip_next = true;
+            continue;
+        }
+        filtered.push(*arg);
+    }
+    filtered
+}
+
+#[derive(Clone)]
+pub(crate) struct AcpApprovalHandler {
+    pub(crate) session_id: SessionId,
+    pub(crate) cx: ConnectionTo<Client>,
+}
+
+impl fmt::Debug for AcpApprovalHandler {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AcpApprovalHandler")
+            .field("session_id", &self.session_id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ApprovalHandler for AcpApprovalHandler {
+    fn request_permission(
+        &self,
+        request: PermissionApprovalRequest,
+    ) -> BoxFuture<'static, PermissionApprovalDecision> {
+        let session_id = self.session_id.clone();
+        let cx = self.cx.clone();
+        Box::pin(async move {
+            let tool_call = ToolCallUpdate::new(
+                request.tool_call_id.clone(),
+                ToolCallUpdateFields::new()
+                    .title(format!("Permission: {}", request.tool_name))
+                    .status(ToolCallStatus::Pending)
+                    .raw_input(json!({
+                        "summary": request.summary,
+                        "reason": request.reason,
+                        "matched_rule": request.matched_rule,
+                        "suggested_rule": request.suggested_rule,
+                    })),
+            );
+            let mut options = vec![
+                PermissionOption::new("allow_once", "Allow once", PermissionOptionKind::AllowOnce),
+                PermissionOption::new(
+                    "allow_session",
+                    "Allow for session",
+                    PermissionOptionKind::AllowAlways,
+                ),
+                PermissionOption::new("deny", "Deny", PermissionOptionKind::RejectOnce),
+            ];
+            if request.allow_always {
+                options.insert(
+                    2,
+                    PermissionOption::new(
+                        "allow_always",
+                        "Allow always",
+                        PermissionOptionKind::AllowAlways,
+                    ),
+                );
+            }
+            match cx
+                .send_request(RequestPermissionRequest::new(
+                    session_id, tool_call, options,
+                ))
+                .block_task()
+                .await
+            {
+                Ok(response) => match response.outcome {
+                    RequestPermissionOutcome::Cancelled => PermissionApprovalDecision::deny(),
+                    RequestPermissionOutcome::Selected(selected) => {
+                        match selected.option_id.to_string().as_str() {
+                            "allow_once" => PermissionApprovalDecision::allow_once(),
+                            "allow_session" => PermissionApprovalDecision::allow_session(),
+                            "allow_always" => PermissionApprovalDecision::allow_always(),
+                            _ => PermissionApprovalDecision::deny(),
+                        }
+                    }
+                    _ => PermissionApprovalDecision::deny(),
+                },
+                Err(_) => PermissionApprovalDecision::deny(),
+            }
+        })
+    }
+}
+
+pub(crate) fn send_session_setup_updates(
+    cx: &ConnectionTo<Client>,
+    session_id: SessionId,
+    mode: RunMode,
+    commands: Vec<AvailableCommand>,
+) {
+    send_session_update(
+        cx,
+        session_id.clone(),
+        SessionUpdate::CurrentModeUpdate(CurrentModeUpdate::new(mode.as_str())),
+    );
+    send_session_update(
+        cx,
+        session_id.clone(),
+        SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(session_config_options(mode))),
+    );
+    send_session_update(
+        cx,
+        session_id,
+        SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(commands)),
+    );
+}
+
+pub(crate) fn send_session_update(
+    cx: &ConnectionTo<Client>,
+    session_id: SessionId,
+    update: SessionUpdate,
+) {
+    let _ = cx.send_notification(SessionNotification::new(session_id, update));
+}
+
+pub(crate) fn send_run_stream_update(
+    cx: &ConnectionTo<Client>,
+    session_id: &SessionId,
+    event: RunStreamEvent,
+) {
+    match event {
+        RunStreamEvent::ReasoningDelta { text } => send_session_update(
+            cx,
+            session_id.clone(),
+            SessionUpdate::AgentThoughtChunk(ContentChunk::new(text.into())),
+        ),
+        RunStreamEvent::Event(value) => send_runtime_event_update(cx, session_id, value),
+        RunStreamEvent::Scoped { event, .. } => send_run_stream_update(cx, session_id, *event),
+        RunStreamEvent::ReasoningEnd
+        | RunStreamEvent::ClarifyRequest(_)
+        | RunStreamEvent::ClarifyResolved(_) => {}
+    }
+}

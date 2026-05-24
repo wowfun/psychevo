@@ -3,7 +3,7 @@ pub fn add(left: i32, right: i32) -> i32 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::add;
 
     #[test]

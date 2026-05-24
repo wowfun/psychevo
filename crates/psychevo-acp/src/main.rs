@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 
 #[tokio::main]
-async fn main() -> ExitCode {
+pub(crate) async fn main() -> ExitCode {
     match psychevo_acp::run_stdio(psychevo_acp::AcpOptions::from_env()).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
