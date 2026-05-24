@@ -8,7 +8,6 @@ use crate::types::StatsOptions;
 
 pub fn usage_stats(options: StatsOptions) -> Result<Value> {
     let workdir = canonical_workdir(&options.workdir)?;
-    let conn = Connection::open(&options.db_path)?;
     let cutoff_ms = options
         .days
         .map(|days| now_ms().saturating_sub(days as i64 * 86_400_000));
@@ -17,30 +16,32 @@ pub fn usage_stats(options: StatsOptions) -> Result<Value> {
         cutoff_ms,
         limit: options.limit.max(1),
     };
-    let totals = totals(&conn, &scope)?;
-    let provider_models = provider_models(&conn, &scope)?;
-    let top_tools = top_tools(&conn, &scope)?;
-    let top_sessions = top_sessions(&conn, &scope)?;
-    Ok(json!({
-        "scope": {
-            "all": options.all,
-            "workdir": scope.workdir,
-            "days": options.days,
-        },
-        "totals": totals,
-        "provider_models": provider_models,
-        "top_tools": top_tools,
-        "top_sessions": top_sessions,
-    }))
+    options.state.store().with_conn(|conn| {
+        let totals = totals(conn, &scope)?;
+        let provider_models = provider_models(conn, &scope)?;
+        let top_tools = top_tools(conn, &scope)?;
+        let top_sessions = top_sessions(conn, &scope)?;
+        Ok(json!({
+            "scope": {
+                "all": options.all,
+                "workdir": scope.workdir,
+                "days": options.days,
+            },
+            "totals": totals,
+            "provider_models": provider_models,
+            "top_tools": top_tools,
+            "top_sessions": top_sessions,
+        }))
+    })
 }
 
-struct StatsScope {
-    workdir: Option<String>,
-    cutoff_ms: Option<i64>,
-    limit: usize,
+pub(crate) struct StatsScope {
+    pub(crate) workdir: Option<String>,
+    pub(crate) cutoff_ms: Option<i64>,
+    pub(crate) limit: usize,
 }
 
-fn totals(conn: &Connection, scope: &StatsScope) -> Result<Value> {
+pub(crate) fn totals(conn: &Connection, scope: &StatsScope) -> Result<Value> {
     let mut stmt = conn.prepare(&format!(
         r#"
         SELECT
@@ -82,7 +83,7 @@ fn totals(conn: &Connection, scope: &StatsScope) -> Result<Value> {
     Ok(values)
 }
 
-fn provider_models(conn: &Connection, scope: &StatsScope) -> Result<Value> {
+pub(crate) fn provider_models(conn: &Connection, scope: &StatsScope) -> Result<Value> {
     let mut stmt = conn.prepare(&format!(
         r#"
         SELECT
@@ -117,7 +118,7 @@ fn provider_models(conn: &Connection, scope: &StatsScope) -> Result<Value> {
     collect_json_rows(rows)
 }
 
-fn top_tools(conn: &Connection, scope: &StatsScope) -> Result<Value> {
+pub(crate) fn top_tools(conn: &Connection, scope: &StatsScope) -> Result<Value> {
     let mut stmt = conn.prepare(&format!(
         r#"
         SELECT m.tool_name, COUNT(*)
@@ -144,7 +145,7 @@ fn top_tools(conn: &Connection, scope: &StatsScope) -> Result<Value> {
     collect_json_rows(rows)
 }
 
-fn top_sessions(conn: &Connection, scope: &StatsScope) -> Result<Value> {
+pub(crate) fn top_sessions(conn: &Connection, scope: &StatsScope) -> Result<Value> {
     let mut stmt = conn.prepare(&format!(
         r#"
         SELECT
@@ -185,7 +186,7 @@ fn top_sessions(conn: &Connection, scope: &StatsScope) -> Result<Value> {
     collect_json_rows(rows)
 }
 
-fn scope_where_clause(scope: &StatsScope) -> &'static str {
+pub(crate) fn scope_where_clause(scope: &StatsScope) -> &'static str {
     match (scope.workdir.is_some(), scope.cutoff_ms.is_some()) {
         (false, false) => "WHERE 1 = 1",
         (true, false) => "WHERE s.workdir = ?1",
@@ -194,7 +195,7 @@ fn scope_where_clause(scope: &StatsScope) -> &'static str {
     }
 }
 
-fn scope_params(scope: &StatsScope) -> Vec<SqlValue> {
+pub(crate) fn scope_params(scope: &StatsScope) -> Vec<SqlValue> {
     let mut values = Vec::new();
     if let Some(workdir) = &scope.workdir {
         values.push(SqlValue::Text(workdir.clone()));
@@ -205,7 +206,7 @@ fn scope_params(scope: &StatsScope) -> Vec<SqlValue> {
     values
 }
 
-fn collect_json_rows<F>(rows: rusqlite::MappedRows<'_, F>) -> Result<Value>
+pub(crate) fn collect_json_rows<F>(rows: rusqlite::MappedRows<'_, F>) -> Result<Value>
 where
     F: FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<Value>,
 {

@@ -1,34 +1,38 @@
-use super::*;
-use std::collections::BTreeMap;
-use std::fs;
-use std::io::{Read, Write};
-use std::net::TcpListener;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::{Duration, Instant};
+pub(crate) use super::*;
+pub(crate) use std::collections::BTreeMap;
+pub(crate) use std::fs;
+pub(crate) use std::io::{Read, Write};
+pub(crate) use std::net::TcpListener;
+pub(crate) use std::path::PathBuf;
+pub(crate) use std::sync::{Arc, Mutex};
+pub(crate) use std::thread;
+pub(crate) use std::time::{Duration, Instant};
 
-use crate::config::{
+pub(crate) use crate::config::{
     ResolvedRunProvider, create_global_custom_provider, custom_provider_api_key_env,
     fetch_model_catalog_with_client, load_run_config, model_catalog_endpoint,
-    model_catalog_providers, resolve_run_provider,
+    model_catalog_providers, resolve_run_provider, set_default_model,
+    set_default_model_with_reasoning,
 };
-use crate::events::{PersistenceSink, project_agent_event, project_run_stream_event};
-use crate::paths::canonical_workdir;
-use crate::run::{SESSION_TITLE_MAX_CHARS, ensure_new_tui_session_title};
-use crate::snapshot::SnapshotStore;
-use crate::types::{MessageAccounting, ModelCost, ModelCostTier, ModelMetadata, SelectedAgent};
-use pretty_assertions::assert_eq;
-use psychevo_agent_core::{AgentEvent, AssistantBlock, EventSink, Message, ToolDisplaySpec};
-use psychevo_ai::{FakeProvider, Outcome, RawStreamEvent};
-use rusqlite::Connection;
-use serde_json::{Value, json};
-use tempfile::tempdir;
+pub(crate) use crate::events::{PersistenceSink, project_agent_event, project_run_stream_event};
+pub(crate) use crate::paths::canonical_workdir;
+pub(crate) use crate::run::{SESSION_TITLE_MAX_CHARS, ensure_new_tui_session_title};
+pub(crate) use crate::snapshot::SnapshotStore;
+pub(crate) use crate::types::{
+    MessageAccounting, ModelCost, ModelCostTier, ModelMetadata, SelectedAgent,
+};
+pub(crate) use psychevo_agent_core::{
+    AgentEvent, AssistantBlock, EventSink, Message, ToolDisplaySpec,
+};
+pub(crate) use psychevo_ai::{FakeProvider, Outcome, RawStreamEvent};
+pub(crate) use rusqlite::Connection;
+pub(crate) use serde_json::{Value, json};
+pub(crate) use tempfile::tempdir;
 
-fn base_options(temp: &tempfile::TempDir) -> RunOptions {
+pub(crate) fn base_options(temp: &tempfile::TempDir) -> RunOptions {
     seed_managed_rg(&home_dir(temp));
     RunOptions {
-        db_path: temp.path().join("state.db"),
+        state: StateRuntime::open(temp.path().join("state.db")).expect("state runtime"),
         workdir: temp.path().join("work"),
         snapshot_root: Some(temp.path().join("snapshots")),
         session: None,
@@ -65,18 +69,18 @@ fn base_options(temp: &tempfile::TempDir) -> RunOptions {
     }
 }
 
-fn home_dir(temp: &tempfile::TempDir) -> PathBuf {
+pub(crate) fn home_dir(temp: &tempfile::TempDir) -> PathBuf {
     temp.path().join(".psychevo")
 }
 
-fn seed_managed_rg(psychevo_home: &std::path::Path) {
+pub(crate) fn seed_managed_rg(psychevo_home: &std::path::Path) {
     let tools = psychevo_home.join("tools");
     fs::create_dir_all(&tools).expect("tools");
     let rg = tools.join(if cfg!(windows) { "rg.exe" } else { "rg" });
     fs::write(&rg, "#!/bin/sh\nprintf 'test rg\\n'\n").expect("rg");
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
+        pub(crate) use std::os::unix::fs::PermissionsExt;
 
         let mut permissions = fs::metadata(&rg).expect("metadata").permissions();
         permissions.set_mode(0o755);
@@ -84,7 +88,10 @@ fn seed_managed_rg(psychevo_home: &std::path::Path) {
     }
 }
 
-fn write_config(path: impl AsRef<std::path::Path>, content: &str) -> std::io::Result<()> {
+pub(crate) fn write_config(
+    path: impl AsRef<std::path::Path>,
+    content: &str,
+) -> std::io::Result<()> {
     let mut text = content.to_string();
     if !text.ends_with('\n') {
         text.push('\n');
@@ -92,17 +99,17 @@ fn write_config(path: impl AsRef<std::path::Path>, content: &str) -> std::io::Re
     fs::write(path, text)
 }
 
-struct CatalogServer {
-    base_url: String,
-    requests: Arc<Mutex<Vec<String>>>,
+pub(crate) struct CatalogServer {
+    pub(crate) base_url: String,
+    pub(crate) requests: Arc<Mutex<Vec<String>>>,
 }
 
 impl CatalogServer {
-    fn new(body: &'static str) -> Self {
+    pub(crate) fn new(body: &'static str) -> Self {
         Self::with_delay(body, Duration::ZERO)
     }
 
-    fn with_delay(body: &'static str, delay: Duration) -> Self {
+    pub(crate) fn with_delay(body: &'static str, delay: Duration) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         let addr = listener.local_addr().expect("addr");
         let requests = Arc::new(Mutex::new(Vec::new()));
@@ -128,7 +135,7 @@ impl CatalogServer {
         }
     }
 
-    fn request(&self) -> String {
+    pub(crate) fn request(&self) -> String {
         self.requests
             .lock()
             .expect("requests")
@@ -138,7 +145,7 @@ impl CatalogServer {
     }
 }
 
-fn read_http_request(stream: &mut std::net::TcpStream) -> String {
+pub(crate) fn read_http_request(stream: &mut std::net::TcpStream) -> String {
     let mut request = Vec::new();
     let mut buf = [0; 1024];
     loop {
@@ -154,7 +161,7 @@ fn read_http_request(stream: &mut std::net::TcpStream) -> String {
     String::from_utf8_lossy(&request).to_string()
 }
 
-fn assert_schema_property_descriptions(tool_name: &str, schema: &Value) {
+pub(crate) fn assert_schema_property_descriptions(tool_name: &str, schema: &Value) {
     let mut missing = Vec::new();
     collect_missing_schema_descriptions(schema, tool_name.to_string(), &mut missing);
     assert!(
@@ -163,7 +170,11 @@ fn assert_schema_property_descriptions(tool_name: &str, schema: &Value) {
     );
 }
 
-fn collect_missing_schema_descriptions(value: &Value, path: String, missing: &mut Vec<String>) {
+pub(crate) fn collect_missing_schema_descriptions(
+    value: &Value,
+    path: String,
+    missing: &mut Vec<String>,
+) {
     if let Some(properties) = value.get("properties").and_then(Value::as_object) {
         for (name, property) in properties {
             let property_path = format!("{path}.{name}");
@@ -183,11 +194,20 @@ fn collect_missing_schema_descriptions(value: &Value, path: String, missing: &mu
 }
 
 // Runtime tests are split by subsystem while sharing this module's fixtures.
-include!("modes_shell_tools.rs");
-include!("model_catalog.rs");
-include!("config.rs");
-include!("sessions_titles.rs");
-include!("skills.rs");
-include!("undo.rs");
-include!("sqlite.rs");
-include!("persistence_projection.rs");
+#[path = "config.rs"]
+pub(crate) mod config;
+#[path = "model_catalog.rs"]
+pub(crate) mod model_catalog;
+#[path = "modes_shell_tools.rs"]
+pub(crate) mod modes_shell_tools;
+#[path = "sessions_titles.rs"]
+pub(crate) mod sessions_titles;
+pub(crate) use sessions_titles::{assistant_message, user_message};
+#[path = "persistence_projection.rs"]
+pub(crate) mod persistence_projection;
+#[path = "skills.rs"]
+pub(crate) mod skills;
+#[path = "sqlite.rs"]
+pub(crate) mod sqlite;
+#[path = "undo.rs"]
+pub(crate) mod undo;

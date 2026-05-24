@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 use crate::types::{
     ClarifyControl, ClarifyQuestion, ClarifyQuestionOption, ClarifyRequestEvent,
     ClarifyResolvedEvent, ClarifyResolvedReason, ClarifyResult,
@@ -5,19 +7,19 @@ use crate::types::{
 };
 
 #[cfg(not(test))]
-fn clarify_timeout() -> Duration {
+pub(crate) fn clarify_timeout() -> Duration {
     Duration::from_secs(600)
 }
 
 #[cfg(test)]
-fn clarify_timeout() -> Duration {
+pub(crate) fn clarify_timeout() -> Duration {
     Duration::from_millis(500)
 }
 
 #[derive(Clone)]
 pub(crate) struct ClarifyTool {
-    control: Option<Arc<ClarifyControl>>,
-    stream: Option<ClarifyRunStreamSink>,
+    pub(crate) control: Option<Arc<ClarifyControl>>,
+    pub(crate) stream: Option<ClarifyRunStreamSink>,
 }
 
 impl ClarifyTool {
@@ -106,14 +108,10 @@ impl ToolBinding for ClarifyTool {
                 Err(err) => return ToolOutput::error(err.to_string()),
             };
             let Some(control) = control else {
-                return ToolOutput::error(
-                    "clarify is not available in this execution context",
-                );
+                return ToolOutput::error("clarify is not available in this execution context");
             };
             let Some(stream) = stream else {
-                return ToolOutput::error(
-                    "clarify is not available in this execution context",
-                );
+                return ToolOutput::error("clarify is not available in this execution context");
             };
 
             let receiver = control.register(tool_call_id.clone());
@@ -159,38 +157,40 @@ impl ToolBinding for ClarifyTool {
     }
 }
 
-fn emit_clarify_resolved(
+pub(crate) fn emit_clarify_resolved(
     stream: &ClarifyRunStreamSink,
     call_id: &str,
     reason: ClarifyResolvedReason,
 ) {
-    stream(ClarifyRunStreamEvent::ClarifyResolved(ClarifyResolvedEvent {
-        call_id: call_id.to_string(),
-        reason,
-    }));
+    stream(ClarifyRunStreamEvent::ClarifyResolved(
+        ClarifyResolvedEvent {
+            call_id: call_id.to_string(),
+            reason,
+        },
+    ));
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ClarifyArgs {
-    questions: Vec<RawClarifyQuestion>,
+pub(crate) struct ClarifyArgs {
+    pub(crate) questions: Vec<RawClarifyQuestion>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RawClarifyQuestion {
-    question: String,
-    options: Vec<RawClarifyQuestionOption>,
+pub(crate) struct RawClarifyQuestion {
+    pub(crate) question: String,
+    pub(crate) options: Vec<RawClarifyQuestionOption>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RawClarifyQuestionOption {
-    label: String,
-    description: String,
+pub(crate) struct RawClarifyQuestionOption {
+    pub(crate) label: String,
+    pub(crate) description: String,
 }
 
-fn parse_clarify_request(call_id: String, args: Value) -> Result<ClarifyRequestEvent> {
+pub(crate) fn parse_clarify_request(call_id: String, args: Value) -> Result<ClarifyRequestEvent> {
     let args: ClarifyArgs = serde_json::from_value(args)
         .map_err(|err| Error::Message(format!("invalid clarify arguments: {err}")))?;
     validate_question_count(args.questions.len())?;
@@ -198,7 +198,9 @@ fn parse_clarify_request(call_id: String, args: Value) -> Result<ClarifyRequestE
     for raw in args.questions {
         let question = raw.question.trim().to_string();
         if question.is_empty() {
-            return Err(Error::Message("clarify question text is required".to_string()));
+            return Err(Error::Message(
+                "clarify question text is required".to_string(),
+            ));
         }
         validate_option_count(raw.options.len())?;
         let mut options = Vec::with_capacity(raw.options.len());
@@ -212,15 +214,12 @@ fn parse_clarify_request(call_id: String, args: Value) -> Result<ClarifyRequestE
             }
             options.push(ClarifyQuestionOption { label, description });
         }
-        questions.push(ClarifyQuestion {
-            question,
-            options,
-        });
+        questions.push(ClarifyQuestion { question, options });
     }
     Ok(ClarifyRequestEvent { call_id, questions })
 }
 
-fn validate_question_count(count: usize) -> Result<()> {
+pub(crate) fn validate_question_count(count: usize) -> Result<()> {
     if (1..=3).contains(&count) {
         Ok(())
     } else {
@@ -230,7 +229,7 @@ fn validate_question_count(count: usize) -> Result<()> {
     }
 }
 
-fn validate_option_count(count: usize) -> Result<()> {
+pub(crate) fn validate_option_count(count: usize) -> Result<()> {
     if (2..=3).contains(&count) {
         Ok(())
     } else {
@@ -246,11 +245,15 @@ pub(crate) fn clarify_tool_impl(
     control: Option<Arc<ClarifyControl>>,
     stream: Option<ClarifyRunStreamSink>,
 ) -> BoxFuture<'static, ToolOutput> {
-    ClarifyTool::new(control, stream).execute("call_clarify".to_string(), args, never_abort_signal())
+    ClarifyTool::new(control, stream).execute(
+        "call_clarify".to_string(),
+        args,
+        never_abort_signal(),
+    )
 }
 
 #[cfg(test)]
-fn never_abort_signal() -> AbortSignal {
+pub(crate) fn never_abort_signal() -> AbortSignal {
     let (_tx, rx) = tokio::sync::watch::channel(false);
     AbortSignal::new(rx)
 }

@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolsetMutationResult {
     pub config_path: PathBuf,
@@ -178,9 +180,7 @@ pub fn remove_local_toolset(config_dir: PathBuf, name: &str) -> Result<ToolsetMu
     let config_path = config_dir.join(CONFIG_FILE_NAME);
     let mut parsed = load_toml_config_file(&config_path, false)?;
     let mut changed = false;
-    if let Some(toolsets) = parsed
-        .get_mut("toolsets")
-        .and_then(Value::as_object_mut)
+    if let Some(toolsets) = parsed.get_mut("toolsets").and_then(Value::as_object_mut)
         && toolsets.remove(&name).is_some()
     {
         changed = true;
@@ -199,7 +199,7 @@ pub fn remove_local_toolset(config_dir: PathBuf, name: &str) -> Result<ToolsetMu
     })
 }
 
-fn normalize_toolset_name(name: &str) -> Result<String> {
+pub(crate) fn normalize_toolset_name(name: &str) -> Result<String> {
     let name = name.trim();
     let valid = !name.is_empty()
         && name
@@ -212,7 +212,7 @@ fn normalize_toolset_name(name: &str) -> Result<String> {
     }
 }
 
-fn validate_toolset_entries(entries: &[String], label: &str) -> Result<()> {
+pub(crate) fn validate_toolset_entries(entries: &[String], label: &str) -> Result<()> {
     for entry in entries {
         if entry.trim().is_empty() {
             return Err(Error::Config(format!("toolset {label} must not be empty")));
@@ -221,7 +221,7 @@ fn validate_toolset_entries(entries: &[String], label: &str) -> Result<()> {
     Ok(())
 }
 
-fn mode_toolset_array_mut<'a>(
+pub(crate) fn mode_toolset_array_mut<'a>(
     value: &'a mut Value,
     mode: &str,
     key: &str,
@@ -235,7 +235,9 @@ fn mode_toolset_array_mut<'a>(
     let tools = tools
         .as_object_mut()
         .ok_or_else(|| Error::Config("tools must be an object".to_string()))?;
-    let modes = tools.entry("modes".to_string()).or_insert_with(|| json!({}));
+    let modes = tools
+        .entry("modes".to_string())
+        .or_insert_with(|| json!({}));
     ensure_json_object(modes);
     let modes = modes
         .as_object_mut()
@@ -253,7 +255,7 @@ fn mode_toolset_array_mut<'a>(
         .ok_or_else(|| Error::Config(format!("tools.modes.{mode}.{key} must be an array")))
 }
 
-fn remove_mode_toolset_entry(
+pub(crate) fn remove_mode_toolset_entry(
     value: &mut Value,
     mode: &str,
     key: &str,
@@ -278,7 +280,7 @@ fn remove_mode_toolset_entry(
     Ok(values.len() != before)
 }
 
-fn push_unique_string(values: &mut Vec<Value>, name: &str) {
+pub(crate) fn push_unique_string(values: &mut Vec<Value>, name: &str) {
     if !values.iter().any(|value| value.as_str() == Some(name)) {
         values.push(Value::String(name.to_string()));
     }

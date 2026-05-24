@@ -16,9 +16,9 @@ use crate::types::{
     UserShellContextOptions, UserShellOptions, UserShellResult,
 };
 
-struct PreparedUserShellContext {
-    store: SqliteStore,
-    session_id: String,
+pub(crate) struct PreparedUserShellContext {
+    pub(crate) store: SqliteStore,
+    pub(crate) session_id: String,
 }
 
 pub async fn run_user_shell_command_streaming_controlled(
@@ -127,13 +127,13 @@ pub async fn run_user_shell_command_streaming_controlled(
     })
 }
 
-fn prepare_user_shell_context(
+pub(crate) fn prepare_user_shell_context(
     context: &UserShellContextOptions,
     workdir: &Path,
     command: &str,
 ) -> Result<PreparedUserShellContext> {
     let options = RunOptions {
-        db_path: context.db_path.clone(),
+        state: context.state.clone(),
         workdir: workdir.to_path_buf(),
         snapshot_root: None,
         session: context.session.clone(),
@@ -161,7 +161,7 @@ fn prepare_user_shell_context(
     };
     let loaded = load_run_config(&options, workdir)?;
     let resolved = resolve_run_provider(&options, &loaded)?;
-    let store = SqliteStore::open(&context.db_path)?;
+    let store = context.state.store().clone();
     let continue_sources = context
         .continue_sources
         .iter()
@@ -223,7 +223,7 @@ fn prepare_user_shell_context(
     Ok(PreparedUserShellContext { store, session_id })
 }
 
-fn user_shell_metadata(
+pub(crate) fn user_shell_metadata(
     command: &str,
     workdir: &Path,
     outcome: Outcome,
@@ -279,7 +279,7 @@ pub(crate) fn user_shell_context_text(command: &str, result: &Value, elapsed: Du
     )
 }
 
-fn result_output(result: &Value) -> &str {
+pub(crate) fn result_output(result: &Value) -> &str {
     result
         .get("output")
         .and_then(Value::as_str)
@@ -289,14 +289,14 @@ fn result_output(result: &Value) -> &str {
         .unwrap_or("(no output)")
 }
 
-fn result_truncated(result: &Value) -> bool {
+pub(crate) fn result_truncated(result: &Value) -> bool {
     result
         .get("original_token_count")
         .and_then(Value::as_u64)
         .is_some_and(|count| count as usize > default_exec_max_output_tokens())
 }
 
-fn context_scalar(value: &Value) -> String {
+pub(crate) fn context_scalar(value: &Value) -> String {
     match value {
         Value::Null => "null".to_string(),
         Value::Bool(value) => value.to_string(),
@@ -306,7 +306,7 @@ fn context_scalar(value: &Value) -> String {
     }
 }
 
-fn deterministic_shell_session_title(command: &str) -> String {
+pub(crate) fn deterministic_shell_session_title(command: &str) -> String {
     let first_line = command
         .lines()
         .map(str::trim)
@@ -315,21 +315,21 @@ fn deterministic_shell_session_title(command: &str) -> String {
     truncate_chars(&format!("Shell: {first_line}"), SESSION_TITLE_MAX_CHARS)
 }
 
-fn truncate_chars(value: &str, max_chars: usize) -> String {
+pub(crate) fn truncate_chars(value: &str, max_chars: usize) -> String {
     if value.chars().count() <= max_chars {
         return value.to_string();
     }
     value.chars().take(max_chars).collect()
 }
 
-fn escape_xml_text(value: &str) -> String {
+pub(crate) fn escape_xml_text(value: &str) -> String {
     value
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as i64)

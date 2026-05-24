@@ -1,28 +1,48 @@
-use std::collections::{BTreeMap, VecDeque};
-use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+pub(crate) use std::collections::{BTreeMap, VecDeque};
+pub(crate) use std::pin::Pin;
+pub(crate) use std::sync::{Arc, Mutex};
 
-use futures::StreamExt;
-use futures::future::BoxFuture;
-use futures::stream::{self, BoxStream};
-use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
-use thiserror::Error;
-use tokio::sync::watch;
+pub(crate) use futures::StreamExt;
+pub(crate) use futures::future::BoxFuture;
+pub(crate) use futures::stream::{self, BoxStream};
+pub(crate) use serde::{Deserialize, Serialize};
+pub(crate) use serde_json::{Value, json};
+pub(crate) use thiserror::Error;
+pub(crate) use tokio::sync::watch;
 
 pub type Result<T> = std::result::Result<T, Error>;
 pub type GenerationStream = BoxStream<'static, Result<StreamEvent>>;
 
 // Public crate surface is assembled from focused implementation files.
-include!("types.rs");
-include!("metadata.rs");
-include!("control.rs");
-include!("openai/provider.rs");
-include!("openai/request.rs");
-include!("stream/sse.rs");
-include!("stream/chat_chunks.rs");
-include!("stream/raw.rs");
-include!("fake.rs");
+#[path = "types.rs"]
+pub(crate) mod types;
+pub use types::*;
+#[path = "metadata.rs"]
+pub(crate) mod metadata;
+pub use metadata::*;
+#[path = "control.rs"]
+pub(crate) mod control;
+pub use control::*;
+#[path = "openai/provider.rs"]
+pub(crate) mod openai_provider;
+pub use openai_provider::*;
+#[path = "openai/request.rs"]
+pub(crate) mod openai_request;
+pub use openai_request::*;
+#[path = "stream/sse.rs"]
+pub(crate) mod stream_sse;
+#[allow(unused_imports)]
+use stream_sse::*;
+#[path = "stream/chat_chunks.rs"]
+pub(crate) mod stream_chat_chunks;
+#[allow(unused_imports)]
+use stream_chat_chunks::*;
+#[path = "stream/raw.rs"]
+pub(crate) mod stream_raw;
+pub use stream_raw::*;
+#[path = "fake.rs"]
+pub(crate) mod fake;
+pub use fake::*;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

@@ -1,14 +1,14 @@
-use std::collections::{BTreeMap, BTreeSet, HashSet};
-use std::env;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::time::Duration;
+pub(crate) use std::collections::{BTreeMap, BTreeSet, HashSet};
+pub(crate) use std::env;
+pub(crate) use std::fs;
+pub(crate) use std::path::{Path, PathBuf};
+pub(crate) use std::time::Duration;
 
-use serde_json::{Value, json};
+pub(crate) use serde_json::{Value, json};
 
-use crate::error::{Error, Result};
-use crate::paths::canonical_workdir;
-use crate::types::{
+pub(crate) use crate::error::{Error, Result};
+pub(crate) use crate::paths::canonical_workdir;
+pub(crate) use crate::types::{
     ApprovalMode, ConfigScope, ConfiguredModel, CustomProviderInput, CustomProviderResult,
     ModelCapabilities, ModelCatalogEntry, ModelCatalogProvider, ModelCost, ModelCostTier,
     ModelLimits, ModelMetadata, ModelMetadataCacheTarget, PermissionConfig, PermissionMode,
@@ -17,8 +17,8 @@ use crate::types::{
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct RunConfig {
-    model: ModelSelection,
-    provider: BTreeMap<String, ConfigProviderEntry>,
+    pub(crate) model: ModelSelection,
+    pub(crate) provider: BTreeMap<String, ConfigProviderEntry>,
     pub(crate) compression: CompressionConfig,
     pub(crate) permissions: PermissionConfig,
     pub(crate) lsp: LspConfig,
@@ -27,14 +27,44 @@ pub(crate) struct RunConfig {
 }
 
 // Configuration internals are split by loading, parsing, resolution, and catalog concerns.
-include!("config/types.rs");
-include!("config/file_env.rs");
-include!("config/parse.rs");
-include!("config/model_metadata.rs");
-include!("config/resolution.rs");
-include!("config/catalog_helpers.rs");
-include!("config/models.rs");
-include!("config/custom_provider.rs");
-include!("config/cli_views.rs");
-include!("config/permissions.rs");
-include!("config/toolsets.rs");
+#[path = "config/types.rs"]
+pub(crate) mod config_types;
+#[allow(unused_imports)]
+pub(crate) use config_types::*;
+#[path = "config/file_env.rs"]
+pub(crate) mod config_file_env;
+#[allow(unused_imports)]
+pub(crate) use config_file_env::*;
+#[path = "config/parse.rs"]
+pub(crate) mod config_parse;
+#[allow(unused_imports)]
+use config_parse::*;
+#[path = "config/model_metadata.rs"]
+pub(crate) mod config_model_metadata;
+pub use config_model_metadata::*;
+#[path = "config/resolution.rs"]
+pub(crate) mod config_resolution;
+#[allow(unused_imports)]
+pub(crate) use config_resolution::*;
+#[path = "config/catalog_helpers.rs"]
+pub(crate) mod config_catalog_helpers;
+#[allow(unused_imports)]
+use config_catalog_helpers::*;
+#[path = "config/models.rs"]
+pub(crate) mod config_models;
+pub use config_models::*;
+#[path = "config/custom_provider.rs"]
+pub(crate) mod config_custom_provider;
+pub use config_custom_provider::*;
+#[path = "config/default_model.rs"]
+pub(crate) mod config_default_model;
+pub use config_default_model::*;
+#[path = "config/cli_views.rs"]
+pub(crate) mod config_cli_views;
+pub use config_cli_views::*;
+#[path = "config/permissions.rs"]
+pub(crate) mod config_permissions;
+pub use config_permissions::*;
+#[path = "config/toolsets.rs"]
+pub(crate) mod config_toolsets;
+pub use config_toolsets::*;

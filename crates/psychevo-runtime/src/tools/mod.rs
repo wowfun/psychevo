@@ -1,45 +1,45 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::fs;
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
-use std::process::Stdio;
-use std::sync::{Arc, Condvar, LazyLock, Mutex};
-use std::time::{Duration, Instant, SystemTime};
-use std::{env, thread};
+pub(crate) use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+pub(crate) use std::fs;
+pub(crate) use std::io::{Read, Write};
+pub(crate) use std::path::{Path, PathBuf};
+pub(crate) use std::process::Stdio;
+pub(crate) use std::sync::{Arc, Condvar, LazyLock, Mutex};
+pub(crate) use std::time::{Duration, Instant, SystemTime};
+pub(crate) use std::{env, thread};
 
-use futures::future::BoxFuture;
-use psychevo_agent_core::{ToolAttachment, ToolBinding, ToolExecutionMode, ToolOutput};
-use psychevo_ai::AbortSignal;
-use serde::Deserialize;
-use serde_json::{Value, json};
-use similar::TextDiff;
-use tokio::time;
+pub(crate) use futures::future::BoxFuture;
+pub(crate) use psychevo_agent_core::{ToolAttachment, ToolBinding, ToolExecutionMode, ToolOutput};
+pub(crate) use psychevo_ai::AbortSignal;
+pub(crate) use serde::Deserialize;
+pub(crate) use serde_json::{Value, json};
+pub(crate) use similar::TextDiff;
+pub(crate) use tokio::time;
 
-use crate::config::{CustomToolsetConfig, LspConfig, ToolSelectionConfig};
-use crate::error::{Error, Result};
-use crate::prompt_templates;
-use crate::skills::{
+pub(crate) use crate::config::{CustomToolsetConfig, LspConfig, ToolSelectionConfig};
+pub(crate) use crate::error::{Error, Result};
+pub(crate) use crate::prompt_templates;
+pub(crate) use crate::skills::{
     InstallOptions, ListSkillsOptions, SkillDiscoveryOptions, SkillTarget, create_skill,
     discover_skills, install_skill, list_skills_value_with_options, patch_skill, remove_skill,
     set_skill_config_value, set_skill_enabled, view_skill_value,
 };
-use crate::types::{RunMode, RunStreamEvent, RunStreamSink};
+pub(crate) use crate::types::{RunMode, RunStreamEvent, RunStreamSink};
 
-const READ_MAX_BYTES: usize = 50 * 1024;
-const READ_MAX_LINES: usize = 2000;
-const EXEC_DEFAULT_YIELD_TIME_MS: u64 = 10_000;
-const WRITE_STDIN_DEFAULT_YIELD_TIME_MS: u64 = 250;
-const EXEC_MIN_YIELD_TIME_MS: u64 = 250;
-const EXEC_MAX_YIELD_TIME_MS: u64 = 30_000;
-const EMPTY_POLL_MIN_YIELD_TIME_MS: u64 = 5_000;
-const EMPTY_POLL_MAX_YIELD_TIME_MS: u64 = 300_000;
-const DEFAULT_MAX_OUTPUT_TOKENS: usize = 10_000;
-const MAX_EXEC_SESSIONS: usize = 64;
+pub(crate) const READ_MAX_BYTES: usize = 50 * 1024;
+pub(crate) const READ_MAX_LINES: usize = 2000;
+pub(crate) const EXEC_DEFAULT_YIELD_TIME_MS: u64 = 10_000;
+pub(crate) const WRITE_STDIN_DEFAULT_YIELD_TIME_MS: u64 = 250;
+pub(crate) const EXEC_MIN_YIELD_TIME_MS: u64 = 250;
+pub(crate) const EXEC_MAX_YIELD_TIME_MS: u64 = 30_000;
+pub(crate) const EMPTY_POLL_MIN_YIELD_TIME_MS: u64 = 5_000;
+pub(crate) const EMPTY_POLL_MAX_YIELD_TIME_MS: u64 = 300_000;
+pub(crate) const DEFAULT_MAX_OUTPUT_TOKENS: usize = 10_000;
+pub(crate) const MAX_EXEC_SESSIONS: usize = 64;
 #[cfg(test)]
-const EXEC_DETACHED_SESSION_TTL: Duration = Duration::from_millis(50);
+pub(crate) const EXEC_DETACHED_SESSION_TTL: Duration = Duration::from_millis(50);
 #[cfg(not(test))]
-const EXEC_DETACHED_SESSION_TTL: Duration = Duration::from_secs(10);
-const EXEC_STDIN_EVENT_MAX_CHARS: usize = 4096;
+pub(crate) const EXEC_DETACHED_SESSION_TTL: Duration = Duration::from_secs(10);
+pub(crate) const EXEC_STDIN_EVENT_MAX_CHARS: usize = 4096;
 
 pub(crate) fn default_exec_max_output_tokens() -> usize {
     DEFAULT_MAX_OUTPUT_TOKENS
@@ -229,9 +229,9 @@ pub(crate) fn known_tool_name(name: &str) -> bool {
     )
 }
 
-const DEFAULT_ENABLED_TOOLSETS: [&str; 2] = ["coding-core", "web"];
+pub(crate) const DEFAULT_ENABLED_TOOLSETS: [&str; 2] = ["coding-core", "web"];
 
-fn collect_toolset_tools(
+pub(crate) fn collect_toolset_tools(
     name: &str,
     mode: RunMode,
     custom_toolsets: &BTreeMap<String, CustomToolsetConfig>,
@@ -271,7 +271,7 @@ fn collect_toolset_tools(
     visiting.remove(name);
 }
 
-fn push_tool_name(
+pub(crate) fn push_tool_name(
     name: &str,
     mode: RunMode,
     out: &mut Vec<String>,
@@ -285,7 +285,7 @@ fn push_tool_name(
     }
 }
 
-fn tool_by_name(
+pub(crate) fn tool_by_name(
     name: &str,
     workdir: &Path,
     context: ToolRuntimeContext,
@@ -325,15 +325,51 @@ pub(crate) fn mode_instruction_for_tool_availability(
 }
 
 // Tool implementations are split by tool family and included in this module.
-include!("workdir.rs");
-include!("file_state.rs");
-include!("write_support.rs");
-include!("read.rs");
-include!("write.rs");
-include!("edit.rs");
-include!("exec_command.rs");
-include!("clarify.rs");
-include!("skills.rs");
-include!("args.rs");
-include!("truncation.rs");
-include!("web_fetch.rs");
+#[path = "workdir.rs"]
+pub(crate) mod workdir;
+#[allow(unused_imports)]
+pub(crate) use workdir::*;
+#[path = "file_state.rs"]
+pub(crate) mod file_state;
+#[allow(unused_imports)]
+pub(crate) use file_state::*;
+#[path = "write_support.rs"]
+pub(crate) mod write_support;
+#[allow(unused_imports)]
+pub(crate) use write_support::*;
+#[path = "read.rs"]
+pub(crate) mod read;
+#[allow(unused_imports)]
+pub(crate) use read::*;
+#[path = "write.rs"]
+pub(crate) mod write;
+#[allow(unused_imports)]
+pub(crate) use write::*;
+#[path = "edit.rs"]
+pub(crate) mod edit;
+#[allow(unused_imports)]
+pub(crate) use edit::*;
+#[path = "exec_command.rs"]
+pub(crate) mod exec_command;
+#[allow(unused_imports)]
+pub(crate) use exec_command::*;
+#[path = "clarify.rs"]
+pub(crate) mod clarify;
+#[allow(unused_imports)]
+pub(crate) use clarify::*;
+#[path = "skills.rs"]
+pub(crate) mod skills;
+#[allow(unused_imports)]
+pub(crate) use skills::*;
+#[path = "args.rs"]
+pub(crate) mod args;
+#[allow(unused_imports)]
+pub(crate) use args::*;
+#[path = "truncation.rs"]
+pub(crate) mod truncation;
+#[allow(unused_imports)]
+pub(crate) use truncation::*;
+#[path = "web_fetch.rs"]
+pub(crate) mod web_fetch;
+#[allow(unused_imports)]
+pub(crate) use web_fetch::*;

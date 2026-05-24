@@ -1,4 +1,6 @@
-fn sqlite_table_exists(conn: &Connection, table: &str) -> rusqlite::Result<bool> {
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) fn sqlite_table_exists(conn: &Connection, table: &str) -> rusqlite::Result<bool> {
     conn.query_row(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1",
         params![table],
@@ -8,7 +10,18 @@ fn sqlite_table_exists(conn: &Connection, table: &str) -> rusqlite::Result<bool>
     .map(|value| value.is_some())
 }
 
-fn sqlite_column_exists(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<bool> {
+impl SqliteStore {
+    pub(crate) fn with_conn<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
+        f(&conn)
+    }
+}
+
+pub(crate) fn sqlite_column_exists(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+) -> rusqlite::Result<bool> {
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
     let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
     for row in rows {
@@ -19,12 +32,14 @@ fn sqlite_column_exists(conn: &Connection, table: &str, column: &str) -> rusqlit
     Ok(false)
 }
 
-fn is_busy(err: &rusqlite::Error) -> bool {
+pub(crate) fn is_busy(err: &rusqlite::Error) -> bool {
     let msg = err.to_string().to_lowercase();
     msg.contains("busy") || msg.contains("locked")
 }
 
-fn session_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionSummary> {
+pub(crate) fn session_summary_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<SessionSummary> {
     Ok(SessionSummary {
         id: row.get(0)?,
         source: row.get(1)?,
@@ -42,11 +57,10 @@ fn session_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session
     })
 }
 
-fn next_session_seq(conn: &Connection, session_id: &str) -> rusqlite::Result<i64> {
+pub(crate) fn next_session_seq(conn: &Connection, session_id: &str) -> rusqlite::Result<i64> {
     conn.query_row(
         "SELECT COALESCE(MAX(session_seq), 0) + 1 FROM messages WHERE session_id = ?1",
         params![session_id],
         |row| row.get(0),
     )
 }
-

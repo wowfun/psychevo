@@ -1,37 +1,40 @@
-mod accounting;
-mod agents;
+#![allow(clippy::module_inception)]
+
+pub(crate) mod accounting;
+pub(crate) mod agents;
 pub mod command_registry;
-mod compaction;
-mod config;
-mod context;
-mod context_usage;
-mod error;
-mod events;
-mod managed_tools;
-mod mcp;
-mod messages;
-mod paths;
-mod permissions;
-mod project_instructions;
-mod prompt_assembly;
-mod prompt_image;
-mod prompt_templates;
-mod run;
-mod session_export;
-mod session_lookup;
-mod skills;
-mod smoke;
-mod snapshot;
-mod stats;
-mod store;
-mod tool_surface;
-mod tools;
-mod types;
-mod undo;
-mod user_shell;
+pub(crate) mod compaction;
+pub(crate) mod config;
+pub(crate) mod context;
+pub(crate) mod context_usage;
+pub(crate) mod error;
+pub(crate) mod events;
+pub(crate) mod managed_tools;
+pub(crate) mod mcp;
+pub(crate) mod messages;
+pub(crate) mod paths;
+pub(crate) mod permissions;
+pub(crate) mod project_instructions;
+pub(crate) mod prompt_assembly;
+pub(crate) mod prompt_image;
+pub(crate) mod prompt_templates;
+pub(crate) mod run;
+pub(crate) mod session_export;
+pub(crate) mod session_lookup;
+pub(crate) mod skills;
+pub(crate) mod smoke;
+pub(crate) mod snapshot;
+pub(crate) mod state_runtime;
+pub(crate) mod stats;
+pub(crate) mod store;
+pub(crate) mod tool_surface;
+pub(crate) mod tools;
+pub(crate) mod types;
+pub(crate) mod undo;
+pub(crate) mod user_shell;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 pub use agents::{
     AgentCatalog, AgentControl, AgentDefinition, AgentDiagnostic, AgentDiscoveryOptions,
@@ -53,7 +56,8 @@ pub use config::{
     custom_provider_api_key_env, fetch_model_catalog, model_catalog_endpoint,
     model_catalog_providers, permission_rules_value, refresh_model_metadata_cache,
     remove_local_permission_rule, remove_local_toolset, selected_configured_model,
-    set_local_toolset_enabled, set_provider_api_key, toolsets_value,
+    set_default_model, set_default_model_with_reasoning, set_local_toolset_enabled,
+    set_provider_api_key, toolsets_value,
 };
 pub use context::prune_context;
 pub use context_usage::{
@@ -91,12 +95,13 @@ pub use skills::{
     SkillSettings, SkillSource, SkillTarget, create_skill, delete_skill_bundle, discover_skills,
     discover_skills_with_settings, edit_skill, expand_skill_prompt, install_skill,
     list_skill_bundles, list_skills_value, list_skills_value_with_options, load_skill_settings,
-    patch_skill, remove_skill, remove_skill_file, resolve_skills_home, save_skill_bundle,
-    scan_skill_path, select_explicit_skills, select_skills_for_prompt, set_skill_config_value,
-    set_skill_enabled, skill_context_messages, target_skills_dir, view_skill_value,
-    write_skill_file,
+    patch_skill, remove_installed_skill, remove_skill, remove_skill_file, resolve_skills_home,
+    save_skill_bundle, scan_skill_path, select_explicit_skills, select_skills_for_prompt,
+    set_skill_config_value, set_skill_enabled, skill_context_messages, target_skills_dir,
+    view_skill_value, write_skill_file,
 };
 pub use smoke::run_smoke;
+pub use state_runtime::StateRuntime;
 pub use stats::usage_stats;
 pub use store::{AgentEdgeRecord, AgentEdgeStatus};
 pub use store::{

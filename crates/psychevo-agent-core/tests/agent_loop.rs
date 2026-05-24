@@ -15,9 +15,9 @@ use psychevo_ai::{
 use serde_json::{Value, json};
 
 #[derive(Clone, Default)]
-struct RecordingSink {
-    events: Arc<Mutex<Vec<AgentEvent>>>,
-    fail_on_message_end: bool,
+pub(crate) struct RecordingSink {
+    pub(crate) events: Arc<Mutex<Vec<AgentEvent>>>,
+    pub(crate) fail_on_message_end: bool,
 }
 
 impl EventSink for RecordingSink {
@@ -34,7 +34,7 @@ impl EventSink for RecordingSink {
     }
 }
 
-struct DelayTool;
+pub(crate) struct DelayTool;
 
 impl ToolBinding for DelayTool {
     fn name(&self) -> &str {
@@ -67,7 +67,7 @@ impl ToolBinding for DelayTool {
     }
 }
 
-struct SequentialDelayTool;
+pub(crate) struct SequentialDelayTool;
 
 impl ToolBinding for SequentialDelayTool {
     fn name(&self) -> &str {
@@ -97,13 +97,13 @@ impl ToolBinding for SequentialDelayTool {
 }
 
 #[derive(Clone)]
-struct RequestRecordingProvider {
-    scripts: Arc<Mutex<VecDeque<Vec<RawStreamEvent>>>>,
-    requests: Arc<Mutex<Vec<GenerationRequest>>>,
+pub(crate) struct RequestRecordingProvider {
+    pub(crate) scripts: Arc<Mutex<VecDeque<Vec<RawStreamEvent>>>>,
+    pub(crate) requests: Arc<Mutex<Vec<GenerationRequest>>>,
 }
 
 impl RequestRecordingProvider {
-    fn new(scripts: Vec<Vec<RawStreamEvent>>) -> Self {
+    pub(crate) fn new(scripts: Vec<Vec<RawStreamEvent>>) -> Self {
         Self {
             scripts: Arc::new(Mutex::new(scripts.into())),
             requests: Arc::new(Mutex::new(Vec::new())),
@@ -141,7 +141,7 @@ impl GenerationProvider for RequestRecordingProvider {
     }
 }
 
-fn raw_stream_event_to_stream_event(event: RawStreamEvent) -> StreamEvent {
+pub(crate) fn raw_stream_event_to_stream_event(event: RawStreamEvent) -> StreamEvent {
     match event {
         RawStreamEvent::Text(text) => StreamEvent::TextDelta { text },
         RawStreamEvent::Reasoning(text) => StreamEvent::ReasoningDelta {
@@ -184,7 +184,7 @@ fn raw_stream_event_to_stream_event(event: RawStreamEvent) -> StreamEvent {
     }
 }
 
-fn tool_script() -> Vec<Vec<RawStreamEvent>> {
+pub(crate) fn tool_script() -> Vec<Vec<RawStreamEvent>> {
     vec![
         vec![
             RawStreamEvent::ToolStart {
@@ -227,7 +227,7 @@ fn tool_script() -> Vec<Vec<RawStreamEvent>> {
 }
 
 #[tokio::test]
-async fn injected_user_shell_context_reaches_next_provider_request() {
+pub(crate) async fn injected_user_shell_context_reaches_next_provider_request() {
     let provider = RequestRecordingProvider::new(vec![
         vec![
             RawStreamEvent::ToolStart {
@@ -298,7 +298,7 @@ async fn injected_user_shell_context_reaches_next_provider_request() {
 }
 
 #[tokio::test]
-async fn steered_user_message_reaches_next_provider_request_and_completion() {
+pub(crate) async fn steered_user_message_reaches_next_provider_request_and_completion() {
     let provider = RequestRecordingProvider::new(vec![
         vec![
             RawStreamEvent::ToolStart {
@@ -387,7 +387,7 @@ async fn steered_user_message_reaches_next_provider_request_and_completion() {
 }
 
 #[tokio::test]
-async fn pending_steer_can_be_updated_before_drain() {
+pub(crate) async fn pending_steer_can_be_updated_before_drain() {
     let provider = RequestRecordingProvider::new(tool_script());
     let requests = Arc::clone(&provider.requests);
     let (control, receivers) = ControlHandle::new();
@@ -427,7 +427,7 @@ async fn pending_steer_can_be_updated_before_drain() {
 }
 
 #[tokio::test]
-async fn pending_steer_can_be_cancelled_before_drain() {
+pub(crate) async fn pending_steer_can_be_cancelled_before_drain() {
     let provider = RequestRecordingProvider::new(tool_script());
     let requests = Arc::clone(&provider.requests);
     let (control, receivers) = ControlHandle::new();
@@ -466,7 +466,7 @@ async fn pending_steer_can_be_cancelled_before_drain() {
 }
 
 #[tokio::test]
-async fn cancel_pending_steer_after_drain_returns_false() {
+pub(crate) async fn cancel_pending_steer_after_drain_returns_false() {
     let provider = RequestRecordingProvider::new(tool_script());
     let requests = Arc::clone(&provider.requests);
     let (control, receivers) = ControlHandle::new();
@@ -501,7 +501,7 @@ async fn cancel_pending_steer_after_drain_returns_false() {
 }
 
 #[tokio::test]
-async fn tool_execution_events_include_timing_fields() {
+pub(crate) async fn tool_execution_events_include_timing_fields() {
     let provider = Arc::new(FakeProvider::new(vec![
         vec![
             RawStreamEvent::ToolStart {
@@ -578,7 +578,10 @@ async fn tool_execution_events_include_timing_fields() {
     assert!(elapsed_ms > 0);
 }
 
-async fn wait_for_request_count(requests: &Arc<Mutex<Vec<GenerationRequest>>>, expected: usize) {
+pub(crate) async fn wait_for_request_count(
+    requests: &Arc<Mutex<Vec<GenerationRequest>>>,
+    expected: usize,
+) {
     for _ in 0..200 {
         if requests.lock().expect("requests").len() >= expected {
             return;
@@ -589,7 +592,7 @@ async fn wait_for_request_count(requests: &Arc<Mutex<Vec<GenerationRequest>>>, e
 }
 
 #[tokio::test]
-async fn sequential_tool_elapsed_excludes_queue_time() {
+pub(crate) async fn sequential_tool_elapsed_excludes_queue_time() {
     let provider = Arc::new(FakeProvider::new(tool_script()));
     let sink = RecordingSink::default();
     let events = Arc::clone(&sink.events);
@@ -636,7 +639,7 @@ async fn sequential_tool_elapsed_excludes_queue_time() {
 }
 
 #[tokio::test]
-async fn parallel_tool_end_can_finish_before_source_ordered_tool_results() {
+pub(crate) async fn parallel_tool_end_can_finish_before_source_ordered_tool_results() {
     let provider = Arc::new(FakeProvider::new(tool_script()));
     let sink = RecordingSink::default();
     let events = Arc::clone(&sink.events);
@@ -686,7 +689,7 @@ async fn parallel_tool_end_can_finish_before_source_ordered_tool_results() {
 }
 
 #[tokio::test]
-async fn invalid_tool_json_becomes_error_tool_result() {
+pub(crate) async fn invalid_tool_json_becomes_error_tool_result() {
     let provider = Arc::new(FakeProvider::new(vec![
         vec![
             RawStreamEvent::ToolStart {
@@ -747,7 +750,7 @@ async fn invalid_tool_json_becomes_error_tool_result() {
 }
 
 #[tokio::test]
-async fn max_turn_budget_exhaustion_reports_terminal_reason() {
+pub(crate) async fn max_turn_budget_exhaustion_reports_terminal_reason() {
     let provider = Arc::new(FakeProvider::new(vec![vec![
         RawStreamEvent::ToolStart {
             content_index: 0,
@@ -812,7 +815,7 @@ async fn max_turn_budget_exhaustion_reports_terminal_reason() {
 }
 
 #[tokio::test]
-async fn graceful_stop_finishes_current_turn() {
+pub(crate) async fn graceful_stop_finishes_current_turn() {
     let provider = Arc::new(FakeProvider::new(vec![vec![
         RawStreamEvent::Text("one turn".to_string()),
         RawStreamEvent::Done(Outcome::Normal),
@@ -844,7 +847,7 @@ async fn graceful_stop_finishes_current_turn() {
 }
 
 #[tokio::test]
-async fn abort_before_generation_returns_aborted() {
+pub(crate) async fn abort_before_generation_returns_aborted() {
     let provider = Arc::new(FakeProvider::new(vec![vec![
         RawStreamEvent::Text("unused".to_string()),
         RawStreamEvent::Done(Outcome::Normal),
@@ -877,7 +880,7 @@ async fn abort_before_generation_returns_aborted() {
 }
 
 #[tokio::test]
-async fn event_sink_failure_fails_invocation() {
+pub(crate) async fn event_sink_failure_fails_invocation() {
     let provider = Arc::new(FakeProvider::new(vec![vec![
         RawStreamEvent::Text("hello".to_string()),
         RawStreamEvent::Done(Outcome::Normal),

@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 pub fn normalize_usage(usage: &Value) -> Option<Value> {
     let object = usage.as_object()?;
     let mut out = serde_json::Map::new();
@@ -80,7 +82,7 @@ pub fn allowlisted_provider_metadata(metadata: &Value) -> Option<Value> {
     (!out.is_empty()).then_some(Value::Object(out))
 }
 
-fn copy_number_field(
+pub(crate) fn copy_number_field(
     object: &serde_json::Map<String, Value>,
     out: &mut serde_json::Map<String, Value>,
     candidates: &[&str],
@@ -93,7 +95,7 @@ fn copy_number_field(
     }
 }
 
-fn first_nested_number(value: &Value, paths: &[&[&str]]) -> Option<Value> {
+pub(crate) fn first_nested_number(value: &Value, paths: &[&[&str]]) -> Option<Value> {
     paths.iter().find_map(|path| {
         let mut current = value;
         for key in *path {
@@ -103,7 +105,7 @@ fn first_nested_number(value: &Value, paths: &[&[&str]]) -> Option<Value> {
     })
 }
 
-fn is_safe_metadata_value(value: &Value) -> bool {
+pub(crate) fn is_safe_metadata_value(value: &Value) -> bool {
     matches!(
         value,
         Value::String(_) | Value::Number(_) | Value::Bool(_) | Value::Null

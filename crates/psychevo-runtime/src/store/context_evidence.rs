@@ -1,10 +1,12 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 impl SqliteStore {
     pub fn load_context_evidence(
         &self,
         session_id: &str,
         prompt_session_seq: i64,
     ) -> Result<Vec<ContextEvidenceRecord>> {
-        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let mut stmt = conn.prepare(
             r#"
             SELECT id, session_id, prompt_session_seq, context_seq, role,
@@ -74,19 +76,19 @@ impl SqliteStore {
 }
 
 #[derive(Debug)]
-struct PreparedContextEvidence {
-    role: String,
-    source_kind: String,
-    source_name: Option<String>,
-    source_path: Option<String>,
-    provider_group: Option<String>,
-    provider_block_index: Option<i64>,
-    context_kind: Option<String>,
-    content_text: String,
-    metadata_json: Option<String>,
+pub(crate) struct PreparedContextEvidence {
+    pub(crate) role: String,
+    pub(crate) source_kind: String,
+    pub(crate) source_name: Option<String>,
+    pub(crate) source_path: Option<String>,
+    pub(crate) provider_group: Option<String>,
+    pub(crate) provider_block_index: Option<i64>,
+    pub(crate) context_kind: Option<String>,
+    pub(crate) content_text: String,
+    pub(crate) metadata_json: Option<String>,
 }
 
-fn prepare_context_evidence(
+pub(crate) fn prepare_context_evidence(
     evidence: &[ContextEvidenceInput],
 ) -> Result<Vec<PreparedContextEvidence>> {
     evidence
@@ -107,7 +109,7 @@ fn prepare_context_evidence(
         .collect()
 }
 
-fn insert_context_evidence_rows(
+pub(crate) fn insert_context_evidence_rows(
     conn: &Connection,
     session_id: &str,
     prompt_session_seq: i64,

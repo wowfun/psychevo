@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 impl SqliteStore {
     pub fn append_session_compaction(
         &self,
@@ -45,7 +47,7 @@ impl SqliteStore {
             .session_revert_state(session_id)?
             .map(|revert| revert.start_seq)
             .unwrap_or(i64::MAX);
-        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let mut stmt = conn.prepare(
             r#"
             SELECT id, session_id, created_at_ms, reason, summary_text,
@@ -68,7 +70,7 @@ impl SqliteStore {
             .session_revert_state(session_id)?
             .map(|revert| revert.start_seq)
             .unwrap_or(i64::MAX);
-        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let mut stmt = conn.prepare(
             r#"
             SELECT session_seq, message_json
@@ -117,8 +119,8 @@ impl SqliteStore {
         })
     }
 
-    fn session_compaction(&self, id: i64) -> Result<Option<SessionCompactionRecord>> {
-        let conn = self.conn.lock().expect("sqlite lock poisoned");
+    pub(crate) fn session_compaction(&self, id: i64) -> Result<Option<SessionCompactionRecord>> {
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         conn.query_row(
             r#"
             SELECT id, session_id, created_at_ms, reason, summary_text,
@@ -136,7 +138,9 @@ impl SqliteStore {
     }
 }
 
-fn compaction_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionCompactionRecord> {
+pub(crate) fn compaction_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<SessionCompactionRecord> {
     let metadata_json = row.get::<_, Option<String>>(12)?;
     let metadata = parse_optional_json(metadata_json).map_err(json_result_to_sql)?;
     Ok(SessionCompactionRecord {
@@ -156,6 +160,6 @@ fn compaction_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionCompa
     })
 }
 
-fn json_result_to_sql(err: Error) -> rusqlite::Error {
+pub(crate) fn json_result_to_sql(err: Error) -> rusqlite::Error {
     rusqlite::Error::ToSqlConversionFailure(Box::new(err))
 }

@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct PendingInputId(u64);
 
@@ -8,30 +10,30 @@ impl PendingInputId {
 }
 
 #[derive(Debug)]
-struct PendingUserInput {
-    id: PendingInputId,
-    message: Message,
+pub(crate) struct PendingUserInput {
+    pub(crate) id: PendingInputId,
+    pub(crate) message: Message,
 }
 
 #[derive(Debug, Default)]
-struct PendingUserInputs {
-    next_id: u64,
-    inputs: VecDeque<PendingUserInput>,
+pub(crate) struct PendingUserInputs {
+    pub(crate) next_id: u64,
+    pub(crate) inputs: VecDeque<PendingUserInput>,
 }
 
 #[derive(Clone)]
 pub struct ControlHandle {
-    stop_tx: watch::Sender<bool>,
-    abort_tx: watch::Sender<bool>,
-    injection_tx: mpsc::UnboundedSender<Message>,
-    pending_user_inputs: Arc<Mutex<PendingUserInputs>>,
+    pub(crate) stop_tx: watch::Sender<bool>,
+    pub(crate) abort_tx: watch::Sender<bool>,
+    pub(crate) injection_tx: mpsc::UnboundedSender<Message>,
+    pub(crate) pending_user_inputs: Arc<Mutex<PendingUserInputs>>,
 }
 
 pub struct ControlReceivers {
-    stop_rx: watch::Receiver<bool>,
-    abort_rx: watch::Receiver<bool>,
-    injection_rx: mpsc::UnboundedReceiver<Message>,
-    pending_user_inputs: Arc<Mutex<PendingUserInputs>>,
+    pub(crate) stop_rx: watch::Receiver<bool>,
+    pub(crate) abort_rx: watch::Receiver<bool>,
+    pub(crate) injection_rx: mpsc::UnboundedReceiver<Message>,
+    pub(crate) pending_user_inputs: Arc<Mutex<PendingUserInputs>>,
 }
 
 impl ControlHandle {
@@ -106,11 +108,11 @@ impl ControlHandle {
 }
 
 impl ControlReceivers {
-    fn stop_requested(&self) -> bool {
+    pub(crate) fn stop_requested(&self) -> bool {
         *self.stop_rx.borrow()
     }
 
-    fn abort_requested(&self) -> bool {
+    pub(crate) fn abort_requested(&self) -> bool {
         *self.abort_rx.borrow()
     }
 

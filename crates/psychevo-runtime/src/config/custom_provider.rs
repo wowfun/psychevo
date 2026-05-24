@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 use std::io::Write;
 
 pub fn custom_provider_api_key_env(provider_id: &str) -> String {
@@ -158,7 +160,7 @@ pub fn set_provider_api_key(
     }))
 }
 
-fn validate_custom_provider_id(provider_id: &str) -> Result<()> {
+pub(crate) fn validate_custom_provider_id(provider_id: &str) -> Result<()> {
     if !valid_provider_id(provider_id) {
         return Err(Error::Config(
             "provider id must use lowercase letters, numbers, hyphens, or underscores".to_string(),
@@ -173,13 +175,13 @@ fn validate_custom_provider_id(provider_id: &str) -> Result<()> {
     Ok(())
 }
 
-fn valid_provider_id(provider_id: &str) -> bool {
+pub(crate) fn valid_provider_id(provider_id: &str) -> bool {
     let mut chars = provider_id.chars();
     matches!(chars.next(), Some('a'..='z' | '0'..='9'))
         && chars.all(|ch| matches!(ch, 'a'..='z' | '0'..='9' | '-' | '_'))
 }
 
-fn write_provider_config(
+pub(crate) fn write_provider_config(
     path: &Path,
     value: &mut Value,
     provider_id: &str,
@@ -212,13 +214,13 @@ fn write_provider_config(
     write_toml_config_file(path, value)
 }
 
-fn ensure_json_object(value: &mut Value) {
+pub(crate) fn ensure_json_object(value: &mut Value) {
     if !value.is_object() {
         *value = json!({});
     }
 }
 
-fn append_dotenv_value(path: &Path, key: &str, value: &str) -> Result<()> {
+pub(crate) fn append_dotenv_value(path: &Path, key: &str, value: &str) -> Result<()> {
     let existing = fs::read_to_string(path).unwrap_or_default();
     let mut out = String::new();
     if !existing.is_empty() && !existing.ends_with('\n') {
@@ -236,7 +238,7 @@ fn append_dotenv_value(path: &Path, key: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-fn set_dotenv_value(path: &Path, key: &str, value: &str) -> Result<bool> {
+pub(crate) fn set_dotenv_value(path: &Path, key: &str, value: &str) -> Result<bool> {
     let existing = fs::read_to_string(path).unwrap_or_default();
     let mut replaced = false;
     let mut lines = Vec::new();

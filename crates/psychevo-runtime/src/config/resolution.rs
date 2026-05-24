@@ -1,4 +1,6 @@
-fn model_selection_from_raw(
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) fn model_selection_from_raw(
     raw: &str,
     configured_keys: &HashSet<String>,
     provider_override: Option<String>,
@@ -22,7 +24,7 @@ fn model_selection_from_raw(
     selection
 }
 
-fn parse_model_override(raw: Option<&String>) -> Result<ModelSelection> {
+pub(crate) fn parse_model_override(raw: Option<&String>) -> Result<ModelSelection> {
     let Some(raw) = raw else {
         return Ok(ModelSelection::default());
     };
@@ -164,7 +166,7 @@ pub(crate) fn resolve_compression_config(
     })
 }
 
-fn model_for_provider(
+pub(crate) fn model_for_provider(
     provider: &str,
     cli_model: &ModelSelection,
     config_model: &ModelSelection,
@@ -193,7 +195,7 @@ fn model_for_provider(
     (model, reasoning_effort)
 }
 
-fn resolve_one_provider(
+pub(crate) fn resolve_one_provider(
     provider: &str,
     explicit_model: Option<String>,
     explicit_reasoning_effort: Option<String>,

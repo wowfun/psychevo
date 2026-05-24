@@ -1,6 +1,8 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 impl SqliteStore {
     pub fn session_revert_state(&self, session_id: &str) -> Result<Option<SessionRevertState>> {
-        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let metadata_json = conn
             .query_row(
                 "SELECT metadata_json FROM sessions WHERE id = ?1",
@@ -73,7 +75,7 @@ impl SqliteStore {
     }
 
     pub fn messages_from_count(&self, session_id: &str, start_seq: i64) -> Result<usize> {
-        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM messages WHERE session_id = ?1 AND session_seq >= ?2",
             params![session_id, start_seq],
@@ -121,5 +123,4 @@ impl SqliteStore {
             Ok(removed)
         })
     }
-
 }

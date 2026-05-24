@@ -181,7 +181,7 @@ impl EventSink for PersistenceSink {
     }
 }
 
-fn message_accounting_for_event(
+pub(crate) fn message_accounting_for_event(
     event: &AgentEvent,
     model_metadata: &ModelMetadata,
 ) -> Option<MessageAccounting> {
@@ -195,7 +195,7 @@ fn message_accounting_for_event(
     }
 }
 
-fn annotate_sink_event(
+pub(crate) fn annotate_sink_event(
     event: AgentEvent,
     elapsed: Duration,
     tool_elapsed_ms: &Arc<Mutex<BTreeMap<String, u64>>>,
@@ -235,7 +235,7 @@ fn annotate_sink_event(
     }
 }
 
-fn add_selected_agent_metadata(
+pub(crate) fn add_selected_agent_metadata(
     metadata: Option<Value>,
     selected_agent: Option<&SelectedAgent>,
 ) -> Option<Value> {
@@ -255,7 +255,7 @@ fn add_selected_agent_metadata(
     Some(Value::Object(object))
 }
 
-fn prompt_user_metadata(
+pub(crate) fn prompt_user_metadata(
     snapshot: Option<String>,
     prompt_display: Option<&PromptDisplayMetadata>,
     prompt_prefix_metadata: Option<Value>,
@@ -288,7 +288,7 @@ pub(crate) fn project_agent_event(event: &AgentEvent, include_reasoning: bool) -
     project_agent_event_with_accounting(event, include_reasoning, None)
 }
 
-fn project_agent_event_with_accounting(
+pub(crate) fn project_agent_event_with_accounting(
     event: &AgentEvent,
     include_reasoning: bool,
     accounting: Option<&MessageAccounting>,
@@ -356,7 +356,7 @@ pub(crate) fn project_run_stream_event(event: &AgentEvent) -> Option<RunStreamEv
     project_run_stream_event_with_accounting(event, None)
 }
 
-fn project_run_stream_event_with_accounting(
+pub(crate) fn project_run_stream_event_with_accounting(
     event: &AgentEvent,
     accounting: Option<&MessageAccounting>,
 ) -> Option<RunStreamEvent> {

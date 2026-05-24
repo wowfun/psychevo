@@ -1,6 +1,8 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[derive(Clone)]
 pub struct FakeProvider {
-    scripts: Arc<Mutex<VecDeque<Vec<RawStreamEvent>>>>,
+    pub(crate) scripts: Arc<Mutex<VecDeque<Vec<RawStreamEvent>>>>,
 }
 
 impl FakeProvider {
@@ -37,4 +39,3 @@ impl GenerationProvider for FakeProvider {
         })
     }
 }
-

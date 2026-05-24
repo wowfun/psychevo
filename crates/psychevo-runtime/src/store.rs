@@ -1,29 +1,32 @@
-use std::collections::BTreeSet;
-use std::fs;
-use std::path::Path;
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
+pub(crate) use std::collections::BTreeSet;
+pub(crate) use std::fs;
+pub(crate) use std::path::Path;
+pub(crate) use std::sync::atomic::{AtomicUsize, Ordering};
+pub(crate) use std::sync::{Arc, Mutex};
+pub(crate) use std::thread;
+pub(crate) use std::time::Duration;
 
-use psychevo_agent_core::{AssistantBlock, Message, TerminalReason, now_ms, user_text_message};
-use psychevo_ai::Outcome;
-use rusqlite::{Connection, OptionalExtension, params};
-use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
-use uuid::Uuid;
+pub(crate) use psychevo_agent_core::{
+    AssistantBlock, Message, TerminalReason, now_ms, user_text_message,
+};
+pub(crate) use psychevo_ai::Outcome;
+pub(crate) use rusqlite::{Connection, OptionalExtension, params};
+pub(crate) use serde::{Deserialize, Serialize};
+pub(crate) use serde_json::{Map, Value, json};
+pub(crate) use uuid::Uuid;
 
-use crate::error::{Error, Result};
-use crate::messages::{sanitize_message_for_output, sanitize_message_for_tui_history};
-use crate::run::normalize_session_title;
-use crate::types::{
+pub(crate) use crate::error::{Error, Result};
+pub(crate) use crate::messages::{sanitize_message_for_output, sanitize_message_for_tui_history};
+pub(crate) use crate::run::normalize_session_title;
+pub(crate) use crate::types::{
     MessageAccounting, SanitizedMessageSummary, SessionExportMessageSummary, SessionSummary,
     TuiMessageSummary,
 };
 
-const SQLITE_SCHEMA_VERSION: i64 = 11;
-const SESSION_REVERT_METADATA_KEY: &str = "revert";
-const MESSAGE_UNDO_METADATA_KEY: &str = "undo";
-const MESSAGE_PRE_SNAPSHOT_KEY: &str = "pre_snapshot";
+pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 11;
+pub(crate) const SESSION_REVERT_METADATA_KEY: &str = "revert";
+pub(crate) const MESSAGE_UNDO_METADATA_KEY: &str = "undo";
+pub(crate) const MESSAGE_PRE_SNAPSHOT_KEY: &str = "pre_snapshot";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionRevertState {
@@ -179,22 +182,71 @@ pub struct SessionMessageRecord {
 
 #[derive(Clone)]
 pub struct SqliteStore {
-    conn: Arc<Mutex<Connection>>,
+    pub(crate) inner: Arc<SqliteStoreInner>,
+}
+
+pub(crate) struct SqliteStoreInner {
+    pub(crate) conn: Mutex<Connection>,
+    pub(crate) successful_writes: AtomicUsize,
 }
 
 // Store internals are split by schema, session, message, undo, and row-helper concerns.
-include!("store/schema.rs");
-include!("store/sessions.rs");
-include!("store/undo_state.rs");
-include!("store/messages.rs");
-include!("store/context_evidence.rs");
-include!("store/prompt_prefix.rs");
-include!("store/agents.rs");
-include!("store/agent_mailbox.rs");
-include!("store/compactions.rs");
-include!("store/lifecycle.rs");
-include!("store/retry.rs");
-include!("store/schema_helpers.rs");
-include!("store/message_fields.rs");
-include!("store/metadata.rs");
-include!("store/undo_helpers.rs");
+#[path = "store/schema.rs"]
+pub(crate) mod store_schema;
+#[allow(unused_imports)]
+use store_schema::*;
+#[path = "store/sessions.rs"]
+pub(crate) mod store_sessions;
+#[allow(unused_imports)]
+use store_sessions::*;
+#[path = "store/undo_state.rs"]
+pub(crate) mod store_undo_state;
+#[allow(unused_imports)]
+use store_undo_state::*;
+#[path = "store/messages.rs"]
+pub(crate) mod store_messages;
+#[allow(unused_imports)]
+use store_messages::*;
+#[path = "store/context_evidence.rs"]
+pub(crate) mod store_context_evidence;
+#[allow(unused_imports)]
+use store_context_evidence::*;
+#[path = "store/prompt_prefix.rs"]
+pub(crate) mod store_prompt_prefix;
+#[allow(unused_imports)]
+use store_prompt_prefix::*;
+#[path = "store/agents.rs"]
+pub(crate) mod store_agents;
+pub use store_agents::*;
+#[path = "store/agent_mailbox.rs"]
+pub(crate) mod store_agent_mailbox;
+#[allow(unused_imports)]
+use store_agent_mailbox::*;
+#[path = "store/compactions.rs"]
+pub(crate) mod store_compactions;
+#[allow(unused_imports)]
+use store_compactions::*;
+#[path = "store/lifecycle.rs"]
+pub(crate) mod store_lifecycle;
+#[allow(unused_imports)]
+use store_lifecycle::*;
+#[path = "store/retry.rs"]
+pub(crate) mod store_retry;
+#[allow(unused_imports)]
+use store_retry::*;
+#[path = "store/schema_helpers.rs"]
+pub(crate) mod store_schema_helpers;
+#[allow(unused_imports)]
+use store_schema_helpers::*;
+#[path = "store/message_fields.rs"]
+pub(crate) mod store_message_fields;
+#[allow(unused_imports)]
+use store_message_fields::*;
+#[path = "store/metadata.rs"]
+pub(crate) mod store_metadata;
+#[allow(unused_imports)]
+use store_metadata::*;
+#[path = "store/undo_helpers.rs"]
+pub(crate) mod store_undo_helpers;
+#[allow(unused_imports)]
+use store_undo_helpers::*;

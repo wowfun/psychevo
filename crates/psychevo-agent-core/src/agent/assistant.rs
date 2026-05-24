@@ -1,14 +1,19 @@
-struct AssistantBuildState<'a> {
-    text: &'a str,
-    reasoning: &'a str,
-    reasoning_provider_evidence: Option<Value>,
-    tool_builders: &'a BTreeMap<(usize, usize), ToolCallBuilder>,
-    timestamp_ms: i64,
-    finish_reason: Option<String>,
-    outcome: Outcome,
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) struct AssistantBuildState<'a> {
+    pub(crate) text: &'a str,
+    pub(crate) reasoning: &'a str,
+    pub(crate) reasoning_provider_evidence: Option<Value>,
+    pub(crate) tool_builders: &'a BTreeMap<(usize, usize), ToolCallBuilder>,
+    pub(crate) timestamp_ms: i64,
+    pub(crate) finish_reason: Option<String>,
+    pub(crate) outcome: Outcome,
 }
 
-fn build_assistant_message(state: AssistantBuildState<'_>, request: &AgentLoopRequest) -> Message {
+pub(crate) fn build_assistant_message(
+    state: AssistantBuildState<'_>,
+    request: &AgentLoopRequest,
+) -> Message {
     let mut content = Vec::new();
     if !state.reasoning.is_empty() || state.reasoning_provider_evidence.is_some() {
         content.push(AssistantBlock::Reasoning {
@@ -47,7 +52,7 @@ fn build_assistant_message(state: AssistantBuildState<'_>, request: &AgentLoopRe
     }
 }
 
-fn split_inline_think_blocks(input: &str, streaming: bool) -> (String, String) {
+pub(crate) fn split_inline_think_blocks(input: &str, streaming: bool) -> (String, String) {
     let mut visible = String::new();
     let mut reasoning = Vec::new();
     let mut cursor = 0usize;
@@ -73,7 +78,7 @@ fn split_inline_think_blocks(input: &str, streaming: bool) -> (String, String) {
     (visible, reasoning.join("\n\n"))
 }
 
-fn combine_reasoning(provider_reasoning: &str, inline_reasoning: &str) -> String {
+pub(crate) fn combine_reasoning(provider_reasoning: &str, inline_reasoning: &str) -> String {
     match (
         provider_reasoning.trim().is_empty(),
         inline_reasoning.trim().is_empty(),
@@ -85,14 +90,14 @@ fn combine_reasoning(provider_reasoning: &str, inline_reasoning: &str) -> String
     }
 }
 
-fn collect_reasoning_details(details: &mut Vec<Value>, value: Value) {
+pub(crate) fn collect_reasoning_details(details: &mut Vec<Value>, value: Value) {
     match value {
         Value::Array(values) => details.extend(values),
         other => details.push(other),
     }
 }
 
-fn merge_object(target: &mut Option<Value>, value: Option<Value>) {
+pub(crate) fn merge_object(target: &mut Option<Value>, value: Option<Value>) {
     let Some(Value::Object(next)) = value else {
         return;
     };
@@ -104,15 +109,15 @@ fn merge_object(target: &mut Option<Value>, value: Option<Value>) {
     }
 }
 
-fn reasoning_provider_evidence(details: &[Value]) -> Option<Value> {
+pub(crate) fn reasoning_provider_evidence(details: &[Value]) -> Option<Value> {
     (!details.is_empty()).then(|| json!({ "reasoning_details": details }))
 }
 
-fn visible_assistant_changed(previous: &Message, current: &Message) -> bool {
+pub(crate) fn visible_assistant_changed(previous: &Message, current: &Message) -> bool {
     visible_assistant_blocks(previous) != visible_assistant_blocks(current)
 }
 
-fn visible_assistant_blocks(message: &Message) -> Vec<AssistantBlock> {
+pub(crate) fn visible_assistant_blocks(message: &Message) -> Vec<AssistantBlock> {
     let Message::Assistant { content, .. } = message else {
         return Vec::new();
     };
@@ -122,4 +127,3 @@ fn visible_assistant_blocks(message: &Message) -> Vec<AssistantBlock> {
         .cloned()
         .collect()
 }
-

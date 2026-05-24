@@ -1,23 +1,27 @@
 use std::path::Path;
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{OptionalExtension, params};
 
 use crate::error::Result;
-use crate::store::SqliteStore;
+use crate::state_runtime::StateRuntime;
 
-pub fn session_exists(db_path: &Path, session_id: &str) -> Result<bool> {
-    let conn = Connection::open(db_path)?;
-    let found = conn
-        .query_row(
-            "SELECT 1 FROM sessions WHERE id = ?1",
-            params![session_id],
-            |_| Ok(()),
-        )
-        .optional()?
-        .is_some();
-    Ok(found)
+pub fn session_exists(state: &StateRuntime, session_id: &str) -> Result<bool> {
+    state.store().with_conn(|conn| {
+        let found = conn
+            .query_row(
+                "SELECT 1 FROM sessions WHERE id = ?1",
+                params![session_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        Ok(found)
+    })
 }
 
-pub fn latest_run_session_for_workdir(db_path: &Path, workdir: &Path) -> Result<Option<String>> {
-    SqliteStore::open(db_path)?.latest_run_session_for_workdir(workdir)
+pub fn latest_run_session_for_workdir(
+    state: &StateRuntime,
+    workdir: &Path,
+) -> Result<Option<String>> {
+    state.store().latest_run_session_for_workdir(workdir)
 }

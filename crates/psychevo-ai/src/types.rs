@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("fake provider script exhausted")]
@@ -92,4 +94,3 @@ pub enum StreamEvent {
         finish_reason: Option<String>,
     },
 }
-

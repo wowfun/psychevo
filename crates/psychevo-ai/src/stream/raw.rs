@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[derive(Debug, Clone)]
 pub enum RawStreamEvent {
     Text(String),
@@ -21,7 +23,7 @@ pub enum RawStreamEvent {
 }
 
 impl RawStreamEvent {
-    fn normalize(self) -> StreamEvent {
+    pub(crate) fn normalize(self) -> StreamEvent {
         match self {
             Self::Text(text) => StreamEvent::TextDelta { text },
             Self::Reasoning(text) => StreamEvent::ReasoningDelta {
@@ -64,4 +66,3 @@ impl RawStreamEvent {
         }
     }
 }
-

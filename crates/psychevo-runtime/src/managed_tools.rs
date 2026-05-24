@@ -11,7 +11,7 @@ use serde::Deserialize;
 
 use crate::error::{Error, Result};
 
-const RIPGREP_LATEST_RELEASE_URL: &str =
+pub(crate) const RIPGREP_LATEST_RELEASE_URL: &str =
     "https://api.github.com/repos/BurntSushi/ripgrep/releases/latest";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -58,20 +58,20 @@ where
     Ok(managed_paths(tools_dir))
 }
 
-fn managed_paths(tools_dir: PathBuf) -> ManagedToolPaths {
+pub(crate) fn managed_paths(tools_dir: PathBuf) -> ManagedToolPaths {
     ManagedToolPaths {
         path_prefixes: vec![tools_dir],
     }
 }
 
-fn env_path_value(env_map: &BTreeMap<String, String>) -> Option<OsString> {
+pub(crate) fn env_path_value(env_map: &BTreeMap<String, String>) -> Option<OsString> {
     env_map
         .get("PATH")
         .map(OsString::from)
         .or_else(|| env::var_os("PATH"))
 }
 
-fn find_on_path(name: &str, path: Option<OsString>) -> Option<PathBuf> {
+pub(crate) fn find_on_path(name: &str, path: Option<OsString>) -> Option<PathBuf> {
     let path = path?;
     for dir in env::split_paths(&path) {
         let candidate = dir.join(name);
@@ -89,7 +89,7 @@ fn find_on_path(name: &str, path: Option<OsString>) -> Option<PathBuf> {
     None
 }
 
-fn resolve_psychevo_home(env_map: &BTreeMap<String, String>) -> Result<PathBuf> {
+pub(crate) fn resolve_psychevo_home(env_map: &BTreeMap<String, String>) -> Result<PathBuf> {
     let raw = env_map
         .get("PSYCHEVO_HOME")
         .map(|value| value.trim())
@@ -98,7 +98,10 @@ fn resolve_psychevo_home(env_map: &BTreeMap<String, String>) -> Result<PathBuf> 
     resolve_configured_path(raw, env_map)
 }
 
-fn resolve_configured_path(raw: &str, env_map: &BTreeMap<String, String>) -> Result<PathBuf> {
+pub(crate) fn resolve_configured_path(
+    raw: &str,
+    env_map: &BTreeMap<String, String>,
+) -> Result<PathBuf> {
     let path = if raw == "~" {
         home_path(env_map)?
     } else if let Some(rest) = raw.strip_prefix("~/") {
@@ -113,7 +116,7 @@ fn resolve_configured_path(raw: &str, env_map: &BTreeMap<String, String>) -> Res
     })
 }
 
-fn home_path(env_map: &BTreeMap<String, String>) -> Result<PathBuf> {
+pub(crate) fn home_path(env_map: &BTreeMap<String, String>) -> Result<PathBuf> {
     env_map
         .get("HOME")
         .map(|value| value.trim())
@@ -122,7 +125,7 @@ fn home_path(env_map: &BTreeMap<String, String>) -> Result<PathBuf> {
         .ok_or_else(|| Error::Config("HOME is required to expand ~".to_string()))
 }
 
-async fn download_latest_rg(tools_dir: &Path) -> Result<()> {
+pub(crate) async fn download_latest_rg(tools_dir: &Path) -> Result<()> {
     let client = reqwest::Client::builder()
         .user_agent("psychevo-runtime")
         .build()?;
@@ -170,11 +173,11 @@ async fn download_latest_rg(tools_dir: &Path) -> Result<()> {
 }
 
 #[derive(Deserialize)]
-struct GithubRelease {
-    tag_name: String,
+pub(crate) struct GithubRelease {
+    pub(crate) tag_name: String,
 }
 
-fn ripgrep_asset_name(version: &str) -> Result<String> {
+pub(crate) fn ripgrep_asset_name(version: &str) -> Result<String> {
     let arch = match env::consts::ARCH {
         "aarch64" => "aarch64",
         "x86_64" => "x86_64",
@@ -199,7 +202,7 @@ fn ripgrep_asset_name(version: &str) -> Result<String> {
     }
 }
 
-fn extract_archive(archive_path: &Path, extract_dir: &Path) -> Result<()> {
+pub(crate) fn extract_archive(archive_path: &Path, extract_dir: &Path) -> Result<()> {
     let status = Command::new("tar")
         .arg("-xf")
         .arg(archive_path)
@@ -215,7 +218,7 @@ fn extract_archive(archive_path: &Path, extract_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn find_extracted_rg(root: &Path) -> Result<PathBuf> {
+pub(crate) fn find_extracted_rg(root: &Path) -> Result<PathBuf> {
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
         for entry in fs::read_dir(&dir)? {
@@ -235,11 +238,11 @@ fn find_extracted_rg(root: &Path) -> Result<PathBuf> {
     ))
 }
 
-fn rg_executable_name() -> &'static str {
+pub(crate) fn rg_executable_name() -> &'static str {
     if cfg!(windows) { "rg.exe" } else { "rg" }
 }
 
-fn is_executable_file(path: &Path) -> bool {
+pub(crate) fn is_executable_file(path: &Path) -> bool {
     if !path.is_file() {
         return false;
     }
@@ -257,7 +260,7 @@ fn is_executable_file(path: &Path) -> bool {
     }
 }
 
-fn make_executable(path: &Path) -> Result<()> {
+pub(crate) fn make_executable(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -269,7 +272,7 @@ fn make_executable(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn install_id() -> String {
+pub(crate) fn install_id() -> String {
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis())
@@ -278,8 +281,8 @@ fn install_id() -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) mod tests {
+    pub(crate) use super::*;
     use std::sync::{
         Arc,
         atomic::{AtomicBool, Ordering},

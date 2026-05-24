@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 impl SqliteStore {
     pub fn open(path: &Path) -> Result<Self> {
         if path != Path::new(":memory:")
@@ -205,7 +207,10 @@ impl SqliteStore {
         }
         conn.pragma_update(None, "user_version", SQLITE_SCHEMA_VERSION)?;
         Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
+            inner: Arc::new(SqliteStoreInner {
+                conn: Mutex::new(conn),
+                successful_writes: AtomicUsize::new(0),
+            }),
         })
     }
 }

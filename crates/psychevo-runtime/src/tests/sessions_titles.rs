@@ -1,5 +1,7 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[test]
-fn latest_run_session_filters_source_and_workdir() {
+pub(crate) fn latest_run_session_filters_source_and_workdir() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
@@ -19,7 +21,8 @@ fn latest_run_session_filters_source_and_workdir() {
         .append_message(&first, &user_message("real activity", 1))
         .expect("activity");
 
-    let latest = latest_run_session_for_workdir(&db, &workdir)
+    let state = StateRuntime::from_store(db, store.clone());
+    let latest = latest_run_session_for_workdir(&state, &workdir)
         .expect("latest")
         .expect("session");
     assert_eq!(latest, first);
@@ -29,7 +32,7 @@ fn latest_run_session_filters_source_and_workdir() {
 }
 
 #[test]
-fn session_title_setter_normalizes_and_bounds_title() {
+pub(crate) fn session_title_setter_normalizes_and_bounds_title() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
@@ -52,7 +55,7 @@ fn session_title_setter_normalizes_and_bounds_title() {
 }
 
 #[tokio::test]
-async fn new_tui_session_title_uses_model_generated_title_without_messages() {
+pub(crate) async fn new_tui_session_title_uses_model_generated_title_without_messages() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
@@ -88,7 +91,7 @@ async fn new_tui_session_title_uses_model_generated_title_without_messages() {
 }
 
 #[tokio::test]
-async fn new_tui_session_title_falls_back_when_model_title_fails() {
+pub(crate) async fn new_tui_session_title_falls_back_when_model_title_fails() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
@@ -122,7 +125,7 @@ async fn new_tui_session_title_falls_back_when_model_title_fails() {
 }
 
 #[tokio::test]
-async fn new_tui_session_title_fallback_uses_selected_skill_for_marker_prompt() {
+pub(crate) async fn new_tui_session_title_fallback_uses_selected_skill_for_marker_prompt() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
@@ -154,7 +157,7 @@ async fn new_tui_session_title_fallback_uses_selected_skill_for_marker_prompt() 
 }
 
 #[test]
-fn session_title_request_includes_selected_skill_context() {
+pub(crate) fn session_title_request_includes_selected_skill_context() {
     let temp = tempdir().expect("temp");
     let (catalog, selected) = title_skill_catalog(temp.path());
 
@@ -166,7 +169,7 @@ fn session_title_request_includes_selected_skill_context() {
 }
 
 #[test]
-fn session_title_fallback_removes_selected_skill_markers() {
+pub(crate) fn session_title_fallback_removes_selected_skill_markers() {
     let selected = vec![crate::skills::SelectedSkill {
         name: "reviewer".to_string(),
         path: PathBuf::from("/tmp/reviewer/SKILL.md"),
@@ -178,7 +181,12 @@ fn session_title_fallback_removes_selected_skill_markers() {
     );
 }
 
-fn title_skill_catalog(root: &std::path::Path) -> (crate::skills::SkillCatalog, Vec<crate::skills::SelectedSkill>) {
+pub(crate) fn title_skill_catalog(
+    root: &std::path::Path,
+) -> (
+    crate::skills::SkillCatalog,
+    Vec<crate::skills::SelectedSkill>,
+) {
     let path = root.join("x-daily").join("SKILL.md");
     let skill = crate::skills::Skill {
         name: "x-daily".to_string(),
@@ -213,7 +221,7 @@ fn title_skill_catalog(root: &std::path::Path) -> (crate::skills::SkillCatalog, 
     )
 }
 
-fn resolved_title_provider() -> ResolvedRunProvider {
+pub(crate) fn resolved_title_provider() -> ResolvedRunProvider {
     ResolvedRunProvider {
         provider: "fake".to_string(),
         display_label: "Fake".to_string(),
@@ -227,14 +235,14 @@ fn resolved_title_provider() -> ResolvedRunProvider {
     }
 }
 
-fn user_message(text: &str, timestamp_ms: i64) -> Message {
+pub(crate) fn user_message(text: &str, timestamp_ms: i64) -> Message {
     Message::User {
         content: vec![psychevo_agent_core::UserContentBlock::text(text)],
         timestamp_ms,
     }
 }
 
-fn assistant_message(text: &str, timestamp_ms: i64) -> Message {
+pub(crate) fn assistant_message(text: &str, timestamp_ms: i64) -> Message {
     Message::Assistant {
         content: vec![AssistantBlock::Text {
             text: text.to_string(),

@@ -1,27 +1,29 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[derive(Debug, Clone, Default)]
-struct ModelSelection {
-    id: Option<String>,
-    provider: Option<String>,
-    reasoning_effort: Option<String>,
+pub(crate) struct ModelSelection {
+    pub(crate) id: Option<String>,
+    pub(crate) provider: Option<String>,
+    pub(crate) reasoning_effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
-struct ConfigProviderEntry {
-    label: Option<String>,
-    options: ConfigProviderOptions,
-    models: BTreeMap<String, ConfigModelEntry>,
+pub(crate) struct ConfigProviderEntry {
+    pub(crate) label: Option<String>,
+    pub(crate) options: ConfigProviderOptions,
+    pub(crate) models: BTreeMap<String, ConfigModelEntry>,
 }
 
 #[derive(Debug, Clone, Default)]
-struct ConfigProviderOptions {
-    base_url: Option<String>,
-    api_key_env: Option<String>,
+pub(crate) struct ConfigProviderOptions {
+    pub(crate) base_url: Option<String>,
+    pub(crate) api_key_env: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
-struct ConfigModelEntry {
-    reasoning_effort: Option<String>,
-    metadata: ModelMetadata,
+pub(crate) struct ConfigModelEntry {
+    pub(crate) reasoning_effort: Option<String>,
+    pub(crate) metadata: ModelMetadata,
 }
 
 #[derive(Debug, Clone)]
@@ -31,7 +33,7 @@ pub(crate) struct CompressionConfig {
     pub(crate) threshold_percent: f64,
     pub(crate) reserve_tokens: u64,
     pub(crate) keep_recent_tokens: u64,
-    model: ModelSelection,
+    pub(crate) model: ModelSelection,
     pub(crate) model_configured: bool,
     pub(crate) reasoning_effort: Option<String>,
 }
@@ -89,13 +91,13 @@ pub(crate) struct CustomToolsetConfig {
 }
 
 #[derive(Debug, Clone)]
-struct BuiltInProvider {
-    id: &'static str,
-    label: &'static str,
-    base_url: Option<&'static str>,
-    api_key_envs: &'static [&'static str],
-    base_url_env: Option<&'static str>,
-    allow_no_auth: bool,
+pub(crate) struct BuiltInProvider {
+    pub(crate) id: &'static str,
+    pub(crate) label: &'static str,
+    pub(crate) base_url: Option<&'static str>,
+    pub(crate) api_key_envs: &'static [&'static str],
+    pub(crate) base_url_env: Option<&'static str>,
+    pub(crate) allow_no_auth: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -124,13 +126,13 @@ pub(crate) struct LoadedRunConfig {
 }
 
 #[derive(Debug, Clone)]
-struct LoadedConfigValue {
-    value: Value,
-    env: BTreeMap<String, String>,
-    sources: Vec<PathBuf>,
+pub(crate) struct LoadedConfigValue {
+    pub(crate) value: Value,
+    pub(crate) env: BTreeMap<String, String>,
+    pub(crate) sources: Vec<PathBuf>,
 }
 
-const AUTO_PROVIDER_ORDER: &[&str] = &[
+pub(crate) const AUTO_PROVIDER_ORDER: &[&str] = &[
     "openrouter",
     "openai",
     "xai",
@@ -142,11 +144,11 @@ const AUTO_PROVIDER_ORDER: &[&str] = &[
     "custom",
 ];
 
-const REASONING_EFFORT_VALUES: &[&str] =
+pub(crate) const REASONING_EFFORT_VALUES: &[&str] =
     &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
-const MODEL_CATALOG_TIMEOUT: Duration = Duration::from_secs(5);
+pub(crate) const MODEL_CATALOG_TIMEOUT: Duration = Duration::from_secs(5);
 
-const BUILT_IN_PROVIDERS: &[BuiltInProvider] = &[
+pub(crate) const BUILT_IN_PROVIDERS: &[BuiltInProvider] = &[
     BuiltInProvider {
         id: "openrouter",
         label: "OpenRouter",
@@ -229,7 +231,7 @@ pub(crate) fn load_run_config(options: &RunOptions, workdir: &Path) -> Result<Lo
     })
 }
 
-fn load_config_value(options: &RunOptions, workdir: &Path) -> Result<LoadedConfigValue> {
+pub(crate) fn load_config_value(options: &RunOptions, workdir: &Path) -> Result<LoadedConfigValue> {
     let mut env_map = options
         .inherited_env
         .clone()

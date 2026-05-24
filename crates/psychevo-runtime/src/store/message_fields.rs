@@ -1,19 +1,21 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[derive(Debug)]
-struct MessageFields {
-    role: String,
-    timestamp_ms: i64,
-    content_text: Option<String>,
-    tool_call_id: Option<String>,
-    tool_name: Option<String>,
-    tool_calls_json: Option<String>,
-    finish_reason: Option<String>,
-    outcome: Option<String>,
-    model: Option<String>,
-    provider: Option<String>,
-    tool_call_count: i64,
+pub(crate) struct MessageFields {
+    pub(crate) role: String,
+    pub(crate) timestamp_ms: i64,
+    pub(crate) content_text: Option<String>,
+    pub(crate) tool_call_id: Option<String>,
+    pub(crate) tool_name: Option<String>,
+    pub(crate) tool_calls_json: Option<String>,
+    pub(crate) finish_reason: Option<String>,
+    pub(crate) outcome: Option<String>,
+    pub(crate) model: Option<String>,
+    pub(crate) provider: Option<String>,
+    pub(crate) tool_call_count: i64,
 }
 
-fn message_fields(message: &Message) -> Result<MessageFields> {
+pub(crate) fn message_fields(message: &Message) -> Result<MessageFields> {
     match message {
         Message::User {
             content,
@@ -94,7 +96,7 @@ fn message_fields(message: &Message) -> Result<MessageFields> {
     }
 }
 
-fn user_content_text(content: &[psychevo_agent_core::UserContentBlock]) -> String {
+pub(crate) fn user_content_text(content: &[psychevo_agent_core::UserContentBlock]) -> String {
     let mut image_index = 0usize;
     content
         .iter()
@@ -110,7 +112,7 @@ fn user_content_text(content: &[psychevo_agent_core::UserContentBlock]) -> Strin
         .join("\n")
 }
 
-fn optional_json_string(value: &Option<Value>) -> Result<Option<String>> {
+pub(crate) fn optional_json_string(value: &Option<Value>) -> Result<Option<String>> {
     value
         .as_ref()
         .map(serde_json::to_string)
@@ -118,7 +120,7 @@ fn optional_json_string(value: &Option<Value>) -> Result<Option<String>> {
         .map_err(Into::into)
 }
 
-fn parse_optional_json(value: Option<String>) -> Result<Option<Value>> {
+pub(crate) fn parse_optional_json(value: Option<String>) -> Result<Option<Value>> {
     value
         .map(|value| serde_json::from_str(&value))
         .transpose()

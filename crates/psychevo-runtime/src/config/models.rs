@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 pub fn configured_models(options: &RunOptions) -> Result<Vec<ConfiguredModel>> {
     let workdir = canonical_workdir(&options.workdir)?;
     let loaded = load_run_config(options, &workdir)?;
@@ -42,10 +44,7 @@ pub fn configured_models(options: &RunOptions) -> Result<Vec<ConfiguredModel>> {
         };
         rows.push(ConfiguredModel {
             provider: provider.clone(),
-            provider_label: provider_label(
-                &provider,
-                loaded.config.provider.get(&provider),
-            ),
+            provider_label: provider_label(&provider, loaded.config.provider.get(&provider)),
             model,
             reasoning_effort,
             context_limit: metadata.context_limit(),
@@ -55,12 +54,7 @@ pub fn configured_models(options: &RunOptions) -> Result<Vec<ConfiguredModel>> {
 
     for (provider, entry) in &loaded.config.provider {
         for (model, config) in &entry.models {
-            push_model(
-                provider,
-                model,
-                config.reasoning_effort.clone(),
-                &mut rows,
-            );
+            push_model(provider, model, config.reasoning_effort.clone(), &mut rows);
         }
     }
 
@@ -252,7 +246,7 @@ pub fn selected_configured_model(options: &RunOptions) -> Result<Option<Configur
     selected_configured_model_for_provider(&provider, &cli_model, &env_model, options, &loaded)
 }
 
-fn selected_configured_model_for_provider(
+pub(crate) fn selected_configured_model_for_provider(
     provider: &str,
     cli_model: &ModelSelection,
     env_model: &ModelSelection,
@@ -306,7 +300,7 @@ fn selected_configured_model_for_provider(
     }))
 }
 
-fn provider_label(provider: &str, config_entry: Option<&ConfigProviderEntry>) -> String {
+pub(crate) fn provider_label(provider: &str, config_entry: Option<&ConfigProviderEntry>) -> String {
     if let Some(label) = config_entry.and_then(|entry| entry.label.clone()) {
         return label;
     }
@@ -315,14 +309,14 @@ fn provider_label(provider: &str, config_entry: Option<&ConfigProviderEntry>) ->
         .unwrap_or_else(|| provider.to_string())
 }
 
-fn env_value(env_map: &BTreeMap<String, String>, key: &str) -> Option<String> {
+pub(crate) fn env_value(env_map: &BTreeMap<String, String>, key: &str) -> Option<String> {
     env_map
         .get(key)
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
 }
 
-fn is_loopback_base_url(base_url: &str) -> bool {
+pub(crate) fn is_loopback_base_url(base_url: &str) -> bool {
     let value = base_url.to_lowercase();
     value.contains("://localhost")
         || value.contains("://127.0.0.1")

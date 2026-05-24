@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 impl SqliteStore {
     pub fn append_agent_mailbox_event(&self, input: AgentMailboxEventInput) -> Result<i64> {
         let now = now_ms();
@@ -30,7 +32,7 @@ impl SqliteStore {
     }
 
     pub fn next_message_seq(&self, session_id: &str) -> Result<i64> {
-        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let count: i64 = conn.query_row(
             "SELECT message_count FROM sessions WHERE id = ?1",
             params![session_id],
@@ -40,7 +42,7 @@ impl SqliteStore {
     }
 
     pub fn has_pending_agent_mailbox_events(&self, parent_session_id: &str) -> Result<bool> {
-        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let found = conn
             .query_row(
                 r#"
@@ -107,12 +109,12 @@ impl SqliteStore {
         &self,
         parent_session_id: &str,
     ) -> Result<Vec<AgentMailboxEventRecord>> {
-        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         query_agent_mailbox_events_sql(&conn, parent_session_id).map_err(Into::into)
     }
 }
 
-fn query_agent_mailbox_events_sql(
+pub(crate) fn query_agent_mailbox_events_sql(
     conn: &Connection,
     parent_session_id: &str,
 ) -> rusqlite::Result<Vec<AgentMailboxEventRecord>> {
@@ -135,7 +137,7 @@ fn query_agent_mailbox_events_sql(
     Ok(records)
 }
 
-fn agent_mailbox_event_from_row(
+pub(crate) fn agent_mailbox_event_from_row(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<AgentMailboxEventRecord> {
     let payload_json: String = row.get(12)?;

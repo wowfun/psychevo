@@ -1,10 +1,12 @@
-fn required_string<'a>(args: &'a Value, key: &str) -> Result<&'a str> {
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) fn required_string<'a>(args: &'a Value, key: &str) -> Result<&'a str> {
     args.get(key)
         .and_then(Value::as_str)
         .ok_or_else(|| Error::Message(format!("{key} must be a string")))
 }
 
-fn optional_string<'a>(args: &'a Value, key: &str) -> Result<Option<&'a str>> {
+pub(crate) fn optional_string<'a>(args: &'a Value, key: &str) -> Result<Option<&'a str>> {
     args.get(key)
         .map(|value| {
             value
@@ -14,7 +16,7 @@ fn optional_string<'a>(args: &'a Value, key: &str) -> Result<Option<&'a str>> {
         .transpose()
 }
 
-fn optional_i64(args: &Value, key: &str) -> Result<Option<i64>> {
+pub(crate) fn optional_i64(args: &Value, key: &str) -> Result<Option<i64>> {
     args.get(key)
         .map(|value| {
             value
@@ -24,7 +26,7 @@ fn optional_i64(args: &Value, key: &str) -> Result<Option<i64>> {
         .transpose()
 }
 
-fn optional_bool(args: &Value, key: &str) -> Result<Option<bool>> {
+pub(crate) fn optional_bool(args: &Value, key: &str) -> Result<Option<bool>> {
     args.get(key)
         .map(|value| {
             value

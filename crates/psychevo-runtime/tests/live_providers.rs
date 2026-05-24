@@ -1,15 +1,15 @@
 use std::env;
 
 use psychevo_ai::Outcome;
-use psychevo_runtime::{RunOptions, run_live};
+use psychevo_runtime::{RunOptions, StateRuntime, run_live};
 use rusqlite::Connection;
 use tempfile::tempdir;
 
-fn live_config_available() -> bool {
+pub(crate) fn live_config_available() -> bool {
     env::var_os("PSYCHEVO_CONFIG").is_some() || env::var_os("PSYCHEVO_HOME").is_some()
 }
 
-async fn run_live_read_tool(provider: &str) {
+pub(crate) async fn run_live_read_tool(provider: &str) {
     if !live_config_available() {
         eprintln!("skipping live {provider}: PSYCHEVO_CONFIG or PSYCHEVO_HOME is not set");
         return;
@@ -29,7 +29,7 @@ async fn run_live_read_tool(provider: &str) {
         provider.to_string(),
     );
     let result = run_live(RunOptions {
-        db_path: db.clone(),
+        state: StateRuntime::open(&db).expect("state runtime"),
         workdir: workdir.clone(),
         snapshot_root: Some(temp.path().join("snapshots")),
         session: None,
@@ -76,12 +76,12 @@ async fn run_live_read_tool(provider: &str) {
 
 #[tokio::test]
 #[ignore = "live provider opt-in"]
-async fn live_deepseek_read_tool() {
+pub(crate) async fn live_deepseek_read_tool() {
     run_live_read_tool("deepseek").await;
 }
 
 #[tokio::test]
 #[ignore = "live provider opt-in"]
-async fn live_xiaomi_read_tool() {
+pub(crate) async fn live_xiaomi_read_tool() {
     run_live_read_tool("xiaomi").await;
 }

@@ -175,7 +175,7 @@ pub fn extract_image_sources_from_prompt(
     })
 }
 
-fn validate_local_image_path(path: &Path) -> Result<()> {
+pub(crate) fn validate_local_image_path(path: &Path) -> Result<()> {
     let metadata = fs::metadata(path).map_err(|err| {
         if err.kind() == std::io::ErrorKind::NotFound {
             Error::Message(format!("image path does not exist: {}", path.display()))
@@ -202,14 +202,14 @@ fn validate_local_image_path(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn source_is_supported_leading_image_prompt(source: &str) -> bool {
+pub(crate) fn source_is_supported_leading_image_prompt(source: &str) -> bool {
     is_remote_image_url(source)
         || is_data_image_url(source)
         || (source.starts_with("file://") && supported_image_extension(source))
         || (supported_image_extension(source) && !looks_like_prose_prefixed_path(source))
 }
 
-fn source_is_supported_embedded_image_prompt(source: &str) -> bool {
+pub(crate) fn source_is_supported_embedded_image_prompt(source: &str) -> bool {
     is_remote_image_url(source)
         || is_data_image_url(source)
         || (source.starts_with("file://") && supported_image_extension(source))
@@ -218,7 +218,7 @@ fn source_is_supported_embedded_image_prompt(source: &str) -> bool {
             && !looks_like_prose_prefixed_path(source))
 }
 
-fn resolve_prompt_path(token: &str, workdir: Option<&Path>) -> PathBuf {
+pub(crate) fn resolve_prompt_path(token: &str, workdir: Option<&Path>) -> PathBuf {
     let value = file_url_path(token).unwrap_or_else(|| expand_home_path(token));
     let path = PathBuf::from(value);
     if path.is_absolute() {
@@ -228,7 +228,7 @@ fn resolve_prompt_path(token: &str, workdir: Option<&Path>) -> PathBuf {
     }
 }
 
-fn expand_home_path(value: &str) -> String {
+pub(crate) fn expand_home_path(value: &str) -> String {
     if let Some(rest) = value.strip_prefix("~/")
         && let Some(home) = std::env::var_os("HOME")
     {
@@ -237,7 +237,7 @@ fn expand_home_path(value: &str) -> String {
     value.to_string()
 }
 
-fn supported_image_extension(value: &str) -> bool {
+pub(crate) fn supported_image_extension(value: &str) -> bool {
     let value = file_url_path(value).unwrap_or_else(|| value.to_string());
     let Some(extension) = Path::new(&value)
         .extension()
@@ -251,15 +251,15 @@ fn supported_image_extension(value: &str) -> bool {
     )
 }
 
-fn is_remote_image_url(value: &str) -> bool {
+pub(crate) fn is_remote_image_url(value: &str) -> bool {
     value.starts_with("http://") || value.starts_with("https://")
 }
 
-fn is_data_image_url(value: &str) -> bool {
+pub(crate) fn is_data_image_url(value: &str) -> bool {
     value.starts_with("data:image/") && value.contains(";base64,")
 }
 
-fn file_url_path(value: &str) -> Option<String> {
+pub(crate) fn file_url_path(value: &str) -> Option<String> {
     let rest = value.strip_prefix("file://")?;
     let path = if let Some(path) = rest.strip_prefix("localhost/") {
         format!("/{path}")
@@ -271,7 +271,7 @@ fn file_url_path(value: &str) -> Option<String> {
     Some(percent_decode_lossy(&path))
 }
 
-fn percent_decode_lossy(value: &str) -> String {
+pub(crate) fn percent_decode_lossy(value: &str) -> String {
     let bytes = value.as_bytes();
     let mut output = Vec::with_capacity(bytes.len());
     let mut index = 0;
@@ -291,7 +291,7 @@ fn percent_decode_lossy(value: &str) -> String {
     String::from_utf8_lossy(&output).into_owned()
 }
 
-fn hex_value(byte: u8) -> Option<u8> {
+pub(crate) fn hex_value(byte: u8) -> Option<u8> {
     match byte {
         b'0'..=b'9' => Some(byte - b'0'),
         b'a'..=b'f' => Some(byte - b'a' + 10),
@@ -301,13 +301,13 @@ fn hex_value(byte: u8) -> Option<u8> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct PromptToken {
-    value: String,
-    start: usize,
-    end: usize,
+pub(crate) struct PromptToken {
+    pub(crate) value: String,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
 }
 
-fn parse_leading_source_token(prompt: &str) -> Option<PromptToken> {
+pub(crate) fn parse_leading_source_token(prompt: &str) -> Option<PromptToken> {
     let start = prompt
         .char_indices()
         .find_map(|(index, ch)| (!ch.is_whitespace()).then_some(index))?;
@@ -320,7 +320,7 @@ fn parse_leading_source_token(prompt: &str) -> Option<PromptToken> {
     parse_unquoted_token(prompt, start)
 }
 
-fn parse_quoted_token(prompt: &str, start: usize, quote: char) -> Option<PromptToken> {
+pub(crate) fn parse_quoted_token(prompt: &str, start: usize, quote: char) -> Option<PromptToken> {
     let mut value = String::new();
     let mut escaped = false;
     let rest = &prompt[start + quote.len_utf8()..];
@@ -346,7 +346,7 @@ fn parse_quoted_token(prompt: &str, start: usize, quote: char) -> Option<PromptT
     None
 }
 
-fn parse_unquoted_token(prompt: &str, start: usize) -> Option<PromptToken> {
+pub(crate) fn parse_unquoted_token(prompt: &str, start: usize) -> Option<PromptToken> {
     let rest = &prompt[start..];
     let mut value = String::new();
     let mut escaped = false;
@@ -377,13 +377,13 @@ fn parse_unquoted_token(prompt: &str, start: usize) -> Option<PromptToken> {
 }
 
 #[derive(Debug)]
-struct ImageSourceSpan {
-    start: usize,
-    end: usize,
-    image: ImageInput,
+pub(crate) struct ImageSourceSpan {
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+    pub(crate) image: ImageInput,
 }
 
-fn image_source_spans(prompt: &str, workdir: &Path) -> Result<Vec<ImageSourceSpan>> {
+pub(crate) fn image_source_spans(prompt: &str, workdir: &Path) -> Result<Vec<ImageSourceSpan>> {
     let mut spans = Vec::new();
     let mut cursor = 0usize;
     let first_non_whitespace = prompt
@@ -432,12 +432,12 @@ fn image_source_spans(prompt: &str, workdir: &Path) -> Result<Vec<ImageSourceSpa
     Ok(spans)
 }
 
-fn looks_like_prose_prefixed_path(source: &str) -> bool {
+pub(crate) fn looks_like_prose_prefixed_path(source: &str) -> bool {
     source.find(":/").is_some_and(|index| index > 1)
         || source.find("：/").is_some_and(|index| index > 0)
 }
 
-fn normalize_prompt_text_after_image_extraction(text: &str) -> String {
+pub(crate) fn normalize_prompt_text_after_image_extraction(text: &str) -> String {
     text.lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
@@ -445,7 +445,7 @@ fn normalize_prompt_text_after_image_extraction(text: &str) -> String {
         .join("\n")
 }
 
-fn strip_wrapping_quotes(value: &str) -> &str {
+pub(crate) fn strip_wrapping_quotes(value: &str) -> &str {
     if value.len() >= 2 {
         let bytes = value.as_bytes();
         if matches!(
@@ -459,8 +459,8 @@ fn strip_wrapping_quotes(value: &str) -> &str {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) mod tests {
+    pub(crate) use super::*;
     use crate::types::{ModelCapabilities, ModelMetadata};
 
     #[test]

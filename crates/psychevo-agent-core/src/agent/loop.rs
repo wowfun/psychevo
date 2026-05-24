@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 pub async fn run_agent_loop(
     provider: Arc<dyn GenerationProvider>,
     request: AgentLoopRequest,
@@ -124,9 +126,14 @@ pub async fn run_agent_loop(
         let assistant_outcome = assistant_outcome(&assistant);
         context.push(assistant.clone());
         new_messages.push(assistant.clone());
-        let injected_after_generation =
-            drain_external_user_messages(&mut control, &mut context, &mut new_messages, &sink, false)
-                .await?;
+        let injected_after_generation = drain_external_user_messages(
+            &mut control,
+            &mut context,
+            &mut new_messages,
+            &sink,
+            false,
+        )
+        .await?;
 
         if assistant_outcome != Outcome::Normal {
             emit(
@@ -241,7 +248,7 @@ pub async fn run_agent_loop(
     }
 }
 
-async fn drain_external_user_messages(
+pub(crate) async fn drain_external_user_messages(
     control: &mut ControlReceivers,
     context: &mut Vec<Message>,
     new_messages: &mut Vec<Message>,

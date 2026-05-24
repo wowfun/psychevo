@@ -1,0 +1,719 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
+
+#[derive(Clone)]
+pub(crate) struct PermissionRuntime {
+    pub(crate) inner: Arc<PermissionRuntimeInner>,
+}
+
+pub(crate) struct PermissionRuntimeInner {
+    pub(crate) workdir: PathBuf,
+    pub(crate) project_config_dir: PathBuf,
+    pub(crate) mode: PermissionMode,
+    pub(crate) approval_mode: ApprovalMode,
+    pub(crate) smart_model: Option<String>,
+    pub(crate) allow: Vec<PermissionRule>,
+    pub(crate) ask: Vec<PermissionRule>,
+    pub(crate) deny: Vec<PermissionRule>,
+    pub(crate) session_grants: Mutex<HashSet<String>>,
+    pub(crate) approval_handler: Option<Arc<dyn crate::types::ApprovalHandler>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PermissionRule {
+    pub(crate) raw: String,
+    pub(crate) tool: String,
+    pub(crate) pattern: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PermissionDecision {
+    Allow,
+    Ask {
+        reason: String,
+        matched_rule: Option<String>,
+        suggested_rule: Option<String>,
+        allow_always: bool,
+        session_key: String,
+    },
+    Deny {
+        reason: String,
+        matched_rule: Option<String>,
+    },
+}
+
+impl PermissionRuntime {
+    pub(crate) fn new(
+        workdir: PathBuf,
+        project_config_dir: PathBuf,
+        config: PermissionConfig,
+        mode: PermissionMode,
+        approval_mode: ApprovalMode,
+        approval_handler: Option<Arc<dyn crate::types::ApprovalHandler>>,
+    ) -> Self {
+        Self {
+            inner: Arc::new(PermissionRuntimeInner {
+                workdir,
+                project_config_dir,
+                mode,
+                approval_mode,
+                smart_model: config.smart_model,
+                allow: parse_rules(config.allow),
+                ask: parse_rules(config.ask),
+                deny: parse_rules(config.deny),
+                session_grants: Mutex::new(HashSet::new()),
+                approval_handler,
+            }),
+        }
+    }
+
+    pub(crate) fn wrap_tools(&self, tools: Vec<Arc<dyn ToolBinding>>) -> Vec<Arc<dyn ToolBinding>> {
+        tools
+            .into_iter()
+            .map(|tool| {
+                Arc::new(PermissionTool {
+                    tool,
+                    runtime: self.clone(),
+                }) as Arc<dyn ToolBinding>
+            })
+            .collect()
+    }
+
+    pub(crate) async fn authorize_mcp_startup(
+        &self,
+        server: &str,
+        transport: &str,
+    ) -> std::result::Result<(), String> {
+        let args = json!({
+            "server": server,
+            "transport": transport,
+        });
+        self.authorize(&format!("mcp_startup:{server}"), "mcp_startup", &args)
+            .await
+            .map_err(|output| {
+                output
+                    .json
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("permission denied")
+                    .to_string()
+            })
+    }
+
+    pub(crate) async fn authorize(
+        &self,
+        tool_call_id: &str,
+        tool_name: &str,
+        args: &Value,
+    ) -> std::result::Result<(), ToolOutput> {
+        match self.evaluate(tool_name, args) {
+            PermissionDecision::Allow => Ok(()),
+            PermissionDecision::Deny {
+                reason,
+                matched_rule,
+            } => Err(permission_error("denied", &reason, matched_rule.as_deref())),
+            PermissionDecision::Ask {
+                reason,
+                matched_rule,
+                suggested_rule,
+                allow_always,
+                session_key,
+            } => {
+                if self.inner.mode.bypasses_prompt_asks() {
+                    return Ok(());
+                }
+                if self.inner.mode == PermissionMode::DontAsk {
+                    return Err(permission_error(
+                        "denied",
+                        &format!("permission prompt suppressed by dontAsk: {reason}"),
+                        matched_rule.as_deref(),
+                    ));
+                }
+                if self.inner.approval_handler.is_none()
+                    || matches!(self.inner.approval_mode, ApprovalMode::Smart)
+                        && self.inner.approval_handler.is_none()
+                {
+                    return Ok(());
+                }
+                let Some(handler) = &self.inner.approval_handler else {
+                    return Ok(());
+                };
+                let timeout_secs = handler.timeout_secs();
+                let request = PermissionApprovalRequest {
+                    tool_call_id: tool_call_id.to_string(),
+                    tool_name: tool_name.to_string(),
+                    summary: action_summary(tool_name, args),
+                    reason: if self.inner.approval_mode == ApprovalMode::Smart {
+                        match &self.inner.smart_model {
+                            Some(model) => format!("{reason} (smart reviewer configured: {model})"),
+                            None => reason.clone(),
+                        }
+                    } else {
+                        reason.clone()
+                    },
+                    matched_rule: matched_rule.clone(),
+                    suggested_rule: suggested_rule.clone(),
+                    allow_always,
+                    timeout_secs,
+                };
+                let decision = time::timeout(
+                    Duration::from_secs(timeout_secs),
+                    handler.request_permission(request),
+                )
+                .await
+                .unwrap_or_else(|_| crate::types::PermissionApprovalDecision::deny());
+                match decision.outcome {
+                    PermissionApprovalOutcome::AllowOnce => Ok(()),
+                    PermissionApprovalOutcome::AllowSession => {
+                        self.remember_session_grant(session_key);
+                        Ok(())
+                    }
+                    PermissionApprovalOutcome::AllowAlways => {
+                        self.remember_session_grant(session_key);
+                        if allow_always && let Some(rule) = suggested_rule {
+                            let _ = append_local_permission_allow_rule(
+                                self.inner.project_config_dir.clone(),
+                                &rule,
+                            );
+                        }
+                        Ok(())
+                    }
+                    PermissionApprovalOutcome::Deny => {
+                        Err(permission_error("denied", &reason, matched_rule.as_deref()))
+                    }
+                }
+            }
+        }
+    }
+
+    pub(crate) fn remember_session_grant(&self, key: String) {
+        if let Ok(mut grants) = self.inner.session_grants.lock() {
+            grants.insert(key);
+        }
+    }
+
+    pub(crate) fn has_session_grant(&self, key: &str) -> bool {
+        self.inner
+            .session_grants
+            .lock()
+            .is_ok_and(|grants| grants.contains(key))
+    }
+
+    pub(crate) fn evaluate(&self, tool_name: &str, args: &Value) -> PermissionDecision {
+        let action = PermissionAction::from_tool_call(&self.inner.workdir, tool_name, args);
+        let Some(action) = action else {
+            return PermissionDecision::Allow;
+        };
+
+        if let Some(reason) = hardline_deny(&action) {
+            return PermissionDecision::Deny {
+                reason,
+                matched_rule: None,
+            };
+        }
+
+        if let Some(rule) = self.matching_rule(&self.inner.deny, &action) {
+            return PermissionDecision::Deny {
+                reason: format!("blocked by permissions.deny rule `{}`", rule.raw),
+                matched_rule: Some(rule.raw.clone()),
+            };
+        }
+
+        let session_key = action.session_key();
+        if self.has_session_grant(&session_key) {
+            return PermissionDecision::Allow;
+        }
+
+        if let Some(rule) = self.matching_rule(&self.inner.ask, &action) {
+            if self.inner.mode == PermissionMode::AcceptEdits && action.is_safe_file_edit() {
+                return PermissionDecision::Allow;
+            }
+            return PermissionDecision::Ask {
+                reason: format!("permissions.ask rule `{}` matched", rule.raw),
+                matched_rule: Some(rule.raw.clone()),
+                suggested_rule: action.suggested_rule(),
+                allow_always: action.allow_always(),
+                session_key,
+            };
+        }
+
+        if let Some(_rule) = self.matching_rule(&self.inner.allow, &action) {
+            return PermissionDecision::Allow;
+        }
+
+        if let Some(reason) = default_ask_reason(&action) {
+            if self.inner.mode == PermissionMode::AcceptEdits && action.is_safe_file_edit() {
+                return PermissionDecision::Allow;
+            }
+            return PermissionDecision::Ask {
+                reason,
+                matched_rule: None,
+                suggested_rule: action.suggested_rule(),
+                allow_always: action.allow_always(),
+                session_key,
+            };
+        }
+
+        PermissionDecision::Allow
+    }
+
+    pub(crate) fn matching_rule<'a>(
+        &'a self,
+        rules: &'a [PermissionRule],
+        action: &PermissionAction,
+    ) -> Option<&'a PermissionRule> {
+        rules.iter().find(|rule| action.matches_rule(rule))
+    }
+}
+
+pub(crate) struct PermissionTool {
+    pub(crate) tool: Arc<dyn ToolBinding>,
+    pub(crate) runtime: PermissionRuntime,
+}
+
+impl ToolBinding for PermissionTool {
+    fn name(&self) -> &str {
+        self.tool.name()
+    }
+
+    fn description(&self) -> &str {
+        self.tool.description()
+    }
+
+    fn parameters(&self) -> Value {
+        self.tool.parameters()
+    }
+
+    fn execution_mode(&self) -> ToolExecutionMode {
+        self.tool.execution_mode()
+    }
+
+    fn display_spec(&self) -> ToolDisplaySpec {
+        self.tool.display_spec()
+    }
+
+    fn execute(
+        &self,
+        tool_call_id: String,
+        args: Value,
+        abort: AbortSignal,
+    ) -> BoxFuture<'static, ToolOutput> {
+        let runtime = self.runtime.clone();
+        let tool = Arc::clone(&self.tool);
+        Box::pin(async move {
+            if let Err(output) = runtime.authorize(&tool_call_id, tool.name(), &args).await {
+                return output;
+            }
+            tool.execute(tool_call_id, args, abort).await
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PermissionAction {
+    ExecCommand {
+        command: String,
+        normalized: String,
+        workdir: Option<FileTarget>,
+    },
+    File {
+        tool: String,
+        paths: Vec<FileTarget>,
+        mutating: bool,
+    },
+    Skill {
+        tool: String,
+        action: String,
+    },
+    McpStartup {
+        server: String,
+        transport: String,
+    },
+    Mcp {
+        server: String,
+        tool: String,
+    },
+    WebFetch {
+        url: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FileTarget {
+    pub(crate) raw: String,
+    pub(crate) absolute: PathBuf,
+    pub(crate) relative: String,
+    pub(crate) within_workdir: bool,
+}
+
+impl PermissionAction {
+    pub(crate) fn from_tool_call(workdir: &Path, tool_name: &str, args: &Value) -> Option<Self> {
+        match tool_name {
+            "exec_command" => {
+                args.get("cmd")
+                    .and_then(Value::as_str)
+                    .map(|command| Self::ExecCommand {
+                        command: command.to_string(),
+                        normalized: normalize_command(command),
+                        workdir: args
+                            .get("workdir")
+                            .and_then(Value::as_str)
+                            .map(|path| file_target(workdir, path)),
+                    })
+            }
+            "read" => file_paths_from_args(workdir, args, &["path"]).map(|paths| Self::File {
+                tool: "read".to_string(),
+                paths,
+                mutating: false,
+            }),
+            "write" => file_paths_from_args(workdir, args, &["path"]).map(|paths| Self::File {
+                tool: "write".to_string(),
+                paths,
+                mutating: true,
+            }),
+            "edit" => {
+                let paths = edit_paths_from_args(workdir, args);
+                (!paths.is_empty()).then(|| Self::File {
+                    tool: "edit".to_string(),
+                    paths,
+                    mutating: true,
+                })
+            }
+            "skill_manage" => {
+                args.get("action")
+                    .and_then(Value::as_str)
+                    .map(|action| Self::Skill {
+                        tool: "skill_manage".to_string(),
+                        action: action.to_string(),
+                    })
+            }
+            "skill_hub" => args
+                .get("action")
+                .and_then(Value::as_str)
+                .and_then(|action| {
+                    (!matches!(
+                        action,
+                        "browse" | "search" | "inspect" | "list" | "check" | "audit"
+                    ))
+                    .then(|| Self::Skill {
+                        tool: "skill_hub".to_string(),
+                        action: action.to_string(),
+                    })
+                }),
+            "skill_config" => args
+                .get("action")
+                .and_then(Value::as_str)
+                .and_then(|action| {
+                    (action != "status").then(|| Self::Skill {
+                        tool: "skill_config".to_string(),
+                        action: action.to_string(),
+                    })
+                }),
+            "web_fetch" => args
+                .get("url")
+                .and_then(Value::as_str)
+                .map(|url| Self::WebFetch {
+                    url: url.to_string(),
+                }),
+            "mcp_startup" => {
+                args.get("server")
+                    .and_then(Value::as_str)
+                    .map(|server| Self::McpStartup {
+                        server: server.to_string(),
+                        transport: args
+                            .get("transport")
+                            .and_then(Value::as_str)
+                            .unwrap_or("unknown")
+                            .to_string(),
+                    })
+            }
+            _ => crate::mcp::mcp_tool_name_parts(tool_name).map(|(server, tool)| Self::Mcp {
+                server: server.to_string(),
+                tool: tool.to_string(),
+            }),
+        }
+    }
+
+    pub(crate) fn matches_rule(&self, rule: &PermissionRule) -> bool {
+        match self {
+            Self::ExecCommand { normalized, .. } => {
+                rule.tool == "exec_command" && wildcard_match(&rule.pattern, normalized)
+            }
+            Self::File { tool, paths, .. } => {
+                rule.tool == *tool
+                    && paths.iter().any(|target| {
+                        if Path::new(&rule.pattern).is_absolute() {
+                            wildcard_match(&rule.pattern, &target.absolute.to_string_lossy())
+                        } else {
+                            wildcard_match(&rule.pattern, &target.relative)
+                        }
+                    })
+            }
+            Self::Skill { tool, action } => {
+                rule.tool == *tool && wildcard_match(&rule.pattern, action)
+            }
+            Self::McpStartup { server, .. } => {
+                rule.tool == "mcp_startup" && wildcard_match(&rule.pattern, server)
+            }
+            Self::Mcp { server, tool } => {
+                rule.tool == "mcp" && wildcard_match(&rule.pattern, &format!("{server}/{tool}"))
+            }
+            Self::WebFetch { url } => {
+                rule.tool == "web_fetch" && wildcard_match(&rule.pattern, url)
+            }
+        }
+    }
+
+    pub(crate) fn session_key(&self) -> String {
+        match self {
+            Self::ExecCommand { normalized, .. } => format!("exec_command:{normalized}"),
+            Self::File { tool, paths, .. } => format!(
+                "{tool}:{}",
+                paths
+                    .iter()
+                    .map(|target| target.relative.clone())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+            Self::Skill { tool, action } => format!("{tool}:{action}"),
+            Self::McpStartup { server, .. } => format!("mcp_startup:{server}"),
+            Self::Mcp { server, tool } => format!("mcp:{server}/{tool}"),
+            Self::WebFetch { url } => format!("web_fetch:{url}"),
+        }
+    }
+
+    pub(crate) fn suggested_rule(&self) -> Option<String> {
+        match self {
+            Self::ExecCommand { command, .. } => Some(format!("ExecCommand({command})")),
+            Self::File { .. } => None,
+            Self::Skill { tool, action } => {
+                Some(format!("{}({action})", permission_rule_tool(tool)))
+            }
+            Self::McpStartup { server, .. } => Some(format!("McpStartup({server})")),
+            Self::Mcp { server, tool } => Some(format!("Mcp({server}/{tool})")),
+            Self::WebFetch { url } => Some(format!("WebFetch({url})")),
+        }
+    }
+
+    pub(crate) fn allow_always(&self) -> bool {
+        matches!(
+            self,
+            Self::ExecCommand { .. }
+                | Self::Skill { .. }
+                | Self::McpStartup { .. }
+                | Self::Mcp { .. }
+                | Self::WebFetch { .. }
+        )
+    }
+
+    pub(crate) fn is_safe_file_edit(&self) -> bool {
+        matches!(
+            self,
+            Self::File {
+                mutating: true,
+                paths,
+                ..
+            } if paths.iter().all(|path| protected_write_reason(path).is_none())
+        )
+    }
+}
+
+pub(crate) fn file_paths_from_args(
+    workdir: &Path,
+    args: &Value,
+    keys: &[&str],
+) -> Option<Vec<FileTarget>> {
+    let paths = keys
+        .iter()
+        .filter_map(|key| args.get(*key).and_then(Value::as_str))
+        .map(|path| file_target(workdir, path))
+        .collect::<Vec<_>>();
+    (!paths.is_empty()).then_some(paths)
+}
+
+pub(crate) fn edit_paths_from_args(workdir: &Path, args: &Value) -> Vec<FileTarget> {
+    if let Some(paths) = file_paths_from_args(workdir, args, &["path"]) {
+        return paths;
+    }
+    args.get("patch")
+        .and_then(Value::as_str)
+        .map(|patch| {
+            patch
+                .lines()
+                .flat_map(patch_file_paths)
+                .map(|path| file_target(workdir, &path))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub(crate) fn patch_file_paths(line: &str) -> Vec<String> {
+    let line = line.trim();
+    for marker in [
+        "*** Update File:",
+        "*** Add File:",
+        "*** Delete File:",
+        "*** Move to:",
+    ] {
+        if let Some(path) = line.strip_prefix(marker) {
+            return vec![path.trim().to_string()];
+        }
+    }
+    if let Some(rest) = line.strip_prefix("*** Move File:") {
+        if let Some((from, to)) = rest.split_once("->") {
+            return vec![from.trim().to_string(), to.trim().to_string()];
+        }
+        return vec![rest.trim().to_string()];
+    }
+    Vec::new()
+}
+
+pub(crate) fn file_target(workdir: &Path, raw: &str) -> FileTarget {
+    let path = Path::new(raw);
+    let absolute = if path.is_absolute() {
+        lexical_normalize(path)
+    } else {
+        lexical_normalize(&workdir.join(path))
+    };
+    let (relative, within_workdir) = absolute
+        .strip_prefix(workdir)
+        .map(|path| (path.to_string_lossy().replace('\\', "/"), true))
+        .unwrap_or_else(|_| (raw.replace('\\', "/"), false));
+    FileTarget {
+        raw: raw.to_string(),
+        absolute,
+        relative,
+        within_workdir,
+    }
+}
+
+pub(crate) fn lexical_normalize(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+pub(crate) fn hardline_deny(action: &PermissionAction) -> Option<String> {
+    match action {
+        PermissionAction::ExecCommand { normalized, .. } => {
+            background_shell_reason(normalized).or_else(|| hardline_bash_reason(normalized))
+        }
+        PermissionAction::File {
+            paths, mutating, ..
+        } => paths.iter().find_map(|target| {
+            if *mutating {
+                protected_write_reason(target)
+            } else {
+                protected_read_reason(target)
+            }
+        }),
+        PermissionAction::Skill { .. } => None,
+        PermissionAction::McpStartup { .. } => None,
+        PermissionAction::Mcp { .. } => None,
+        PermissionAction::WebFetch { .. } => None,
+    }
+}
+
+pub(crate) fn default_ask_reason(action: &PermissionAction) -> Option<String> {
+    match action {
+        PermissionAction::ExecCommand {
+            normalized,
+            workdir,
+            ..
+        } => {
+            if workdir
+                .as_ref()
+                .is_some_and(|target| !target.within_workdir)
+            {
+                return Some(
+                    "command workdir outside accepted workdir requires approval".to_string(),
+                );
+            }
+            dangerous_bash_reason(normalized)
+        }
+        PermissionAction::File { .. } => None,
+        PermissionAction::Skill { tool, action } => Some(format!(
+            "{tool} action `{action}` changes skill configuration or files and requires approval"
+        )),
+        PermissionAction::McpStartup { server, transport } => Some(format!(
+            "MCP server `{server}` startup over {transport} requires approval"
+        )),
+        PermissionAction::Mcp { server, tool } => {
+            Some(format!("MCP tool `{server}/{tool}` requires approval"))
+        }
+        PermissionAction::WebFetch { .. } => None,
+    }
+}
+
+pub(crate) fn permission_rule_tool(tool: &str) -> &str {
+    match tool {
+        "skill_manage" => "SkillManage",
+        "skill_hub" => "SkillHub",
+        "skill_config" => "SkillConfig",
+        "mcp_startup" => "McpStartup",
+        "mcp" => "Mcp",
+        "web_fetch" => "WebFetch",
+        other => other,
+    }
+}
+
+pub(crate) fn protected_write_reason(target: &FileTarget) -> Option<String> {
+    let rel = target.relative.as_str();
+    let rel_lower = rel.to_ascii_lowercase();
+    let file_name = Path::new(rel)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("");
+    if rel == ".psychevo/config.toml" {
+        return Some("permission configuration cannot be modified by model tools".to_string());
+    }
+    if file_name == ".env" {
+        return Some("protected credential file write denied".to_string());
+    }
+    let protected_files = [
+        ".bashrc",
+        ".zshrc",
+        ".profile",
+        ".bash_profile",
+        ".zprofile",
+        ".netrc",
+        ".pgpass",
+        ".npmrc",
+        ".pypirc",
+    ];
+    if protected_files.contains(&file_name) {
+        return Some(format!("protected file write denied: {file_name}"));
+    }
+    let protected_dirs = [
+        ".ssh/",
+        ".aws/",
+        ".gnupg/",
+        ".kube/",
+        ".docker/",
+        ".azure/",
+        ".config/gh/",
+    ];
+    if protected_dirs
+        .iter()
+        .any(|prefix| rel_lower == prefix.trim_end_matches('/') || rel_lower.starts_with(prefix))
+    {
+        return Some("protected credential directory write denied".to_string());
+    }
+    None
+}
+
+pub(crate) fn protected_read_reason(target: &FileTarget) -> Option<String> {
+    let rel = target.relative.to_ascii_lowercase();
+    if rel.starts_with(".psychevo/skills/.hub/") || rel.starts_with(".psychevo/cache/") {
+        return Some("internal Psychevo cache files cannot be read directly".to_string());
+    }
+    None
+}

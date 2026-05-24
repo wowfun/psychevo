@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentEdgeStatus {
@@ -13,7 +15,7 @@ impl AgentEdgeStatus {
         }
     }
 
-    fn parse(value: &str) -> Self {
+    pub(crate) fn parse(value: &str) -> Self {
         match value {
             "closed" => Self::Closed,
             _ => Self::Open,
@@ -120,8 +122,11 @@ impl SqliteStore {
         Ok(())
     }
 
-    fn query_agent_edges(&self, parent_session_id: Option<&str>) -> Result<Vec<AgentEdgeRecord>> {
-        let conn = self.conn.lock().expect("sqlite lock poisoned");
+    pub(crate) fn query_agent_edges(
+        &self,
+        parent_session_id: Option<&str>,
+    ) -> Result<Vec<AgentEdgeRecord>> {
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let sql = match parent_session_id {
             Some(_) => {
                 r#"
@@ -161,7 +166,7 @@ impl SqliteStore {
     }
 }
 
-fn agent_edge_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentEdgeRecord> {
+pub(crate) fn agent_edge_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentEdgeRecord> {
     let status: String = row.get(2)?;
     let metadata_json: Option<String> = row.get(5)?;
     Ok(AgentEdgeRecord {
@@ -176,7 +181,7 @@ fn agent_edge_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentEdgeRec
     })
 }
 
-fn agent_edge_metadata_matches(edge: &AgentEdgeRecord, target: &str) -> bool {
+pub(crate) fn agent_edge_metadata_matches(edge: &AgentEdgeRecord, target: &str) -> bool {
     let Some(metadata) = edge.metadata.as_ref().and_then(Value::as_object) else {
         return false;
     };

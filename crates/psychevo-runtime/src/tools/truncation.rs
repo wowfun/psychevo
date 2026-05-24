@@ -1,14 +1,16 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[derive(Debug)]
-struct Truncated {
-    content: String,
-    truncated: bool,
-    lines: usize,
-    bytes: usize,
-    truncated_by: Option<&'static str>,
-    first_line_exceeds_limit: bool,
+pub(crate) struct Truncated {
+    pub(crate) content: String,
+    pub(crate) truncated: bool,
+    pub(crate) lines: usize,
+    pub(crate) bytes: usize,
+    pub(crate) truncated_by: Option<&'static str>,
+    pub(crate) first_line_exceeds_limit: bool,
 }
 
-fn truncate_head(input: &str, max_bytes: usize, max_lines: usize) -> Truncated {
+pub(crate) fn truncate_head(input: &str, max_bytes: usize, max_lines: usize) -> Truncated {
     let mut out = String::new();
     let mut lines = 0usize;
     let mut bytes = 0usize;
@@ -46,7 +48,7 @@ fn truncate_head(input: &str, max_bytes: usize, max_lines: usize) -> Truncated {
     }
 }
 
-fn truncate_tail(input: &str, max_bytes: usize, max_lines: usize) -> Truncated {
+pub(crate) fn truncate_tail(input: &str, max_bytes: usize, max_lines: usize) -> Truncated {
     let all = input.split('\n').collect::<Vec<_>>();
     let mut selected = Vec::new();
     let mut bytes = 0usize;
@@ -77,7 +79,7 @@ fn truncate_tail(input: &str, max_bytes: usize, max_lines: usize) -> Truncated {
     }
 }
 
-fn dominant_line_ending(text: &str) -> &'static str {
+pub(crate) fn dominant_line_ending(text: &str) -> &'static str {
     let crlf = text.matches("\r\n").count();
     let lf = text.matches('\n').count();
     if crlf > 0 && crlf >= lf.saturating_sub(crlf) {
@@ -87,11 +89,11 @@ fn dominant_line_ending(text: &str) -> &'static str {
     }
 }
 
-fn normalize_lf(text: &str) -> String {
+pub(crate) fn normalize_lf(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
-fn restore_line_endings(text: &str, line_ending: &str) -> String {
+pub(crate) fn restore_line_endings(text: &str, line_ending: &str) -> String {
     if line_ending == "\n" {
         text.to_string()
     } else {
@@ -99,7 +101,7 @@ fn restore_line_endings(text: &str, line_ending: &str) -> String {
     }
 }
 
-fn unified_diff(path: &str, old: &str, new: &str) -> String {
+pub(crate) fn unified_diff(path: &str, old: &str, new: &str) -> String {
     TextDiff::from_lines(old, new)
         .unified_diff()
         .header(&format!("a/{path}"), &format!("b/{path}"))

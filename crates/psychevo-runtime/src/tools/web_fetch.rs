@@ -1,15 +1,17 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use futures::StreamExt;
 
-const WEB_FETCH_MAX_BYTES: usize = 5 * 1024 * 1024;
-const WEB_FETCH_MAX_OUTPUT_BYTES: usize = 128 * 1024;
-const WEB_FETCH_DEFAULT_TIMEOUT_SECS: u64 = 30;
-const WEB_FETCH_MAX_TIMEOUT_SECS: u64 = 120;
+pub(crate) const WEB_FETCH_MAX_BYTES: usize = 5 * 1024 * 1024;
+pub(crate) const WEB_FETCH_MAX_OUTPUT_BYTES: usize = 128 * 1024;
+pub(crate) const WEB_FETCH_DEFAULT_TIMEOUT_SECS: u64 = 30;
+pub(crate) const WEB_FETCH_MAX_TIMEOUT_SECS: u64 = 120;
 
-struct WebFetchTool;
+pub(crate) struct WebFetchTool;
 
 impl WebFetchTool {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self
     }
 }
@@ -67,14 +69,15 @@ impl ToolBinding for WebFetchTool {
     }
 }
 
-async fn web_fetch_tool_impl(args: Value, abort: AbortSignal) -> Result<ToolOutput> {
+pub(crate) async fn web_fetch_tool_impl(args: Value, abort: AbortSignal) -> Result<ToolOutput> {
     let url = web_fetch_required_string(&args, "url")?;
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err(Error::Message(
             "url must start with http:// or https://".to_string(),
         ));
     }
-    let format = web_fetch_optional_string(&args, "format")?.unwrap_or_else(|| "markdown".to_string());
+    let format =
+        web_fetch_optional_string(&args, "format")?.unwrap_or_else(|| "markdown".to_string());
     if !matches!(format.as_str(), "markdown" | "text" | "html") {
         return Err(Error::Message(
             "format must be markdown, text, or html".to_string(),
@@ -196,7 +199,10 @@ async fn web_fetch_tool_impl(args: Value, abort: AbortSignal) -> Result<ToolOutp
     Ok(ToolOutput::ok(json))
 }
 
-async fn read_limited_response(response: reqwest::Response, abort: AbortSignal) -> Result<Vec<u8>> {
+pub(crate) async fn read_limited_response(
+    response: reqwest::Response,
+    abort: AbortSignal,
+) -> Result<Vec<u8>> {
     let mut stream = response.bytes_stream();
     let mut out = Vec::new();
     let mut abort_for_stream = abort;
@@ -219,7 +225,7 @@ async fn read_limited_response(response: reqwest::Response, abort: AbortSignal) 
     Ok(out)
 }
 
-fn web_fetch_required_string(args: &Value, key: &str) -> Result<String> {
+pub(crate) fn web_fetch_required_string(args: &Value, key: &str) -> Result<String> {
     args.get(key)
         .and_then(Value::as_str)
         .map(str::trim)
@@ -228,7 +234,7 @@ fn web_fetch_required_string(args: &Value, key: &str) -> Result<String> {
         .ok_or_else(|| Error::Message(format!("{key} is required")))
 }
 
-fn web_fetch_optional_string(args: &Value, key: &str) -> Result<Option<String>> {
+pub(crate) fn web_fetch_optional_string(args: &Value, key: &str) -> Result<Option<String>> {
     args.get(key)
         .map(|value| {
             value
@@ -241,18 +247,18 @@ fn web_fetch_optional_string(args: &Value, key: &str) -> Result<Option<String>> 
         .transpose()
 }
 
-fn is_html_mime(mime: &str) -> bool {
+pub(crate) fn is_html_mime(mime: &str) -> bool {
     matches!(mime, "text/html" | "application/xhtml+xml")
 }
 
-fn is_image_mime(mime: &str) -> bool {
+pub(crate) fn is_image_mime(mime: &str) -> bool {
     matches!(
         mime,
         "image/png" | "image/jpeg" | "image/webp" | "image/gif" | "image/bmp" | "image/avif"
     )
 }
 
-fn is_textual_mime(mime: &str) -> bool {
+pub(crate) fn is_textual_mime(mime: &str) -> bool {
     mime.is_empty()
         || mime.starts_with("text/")
         || matches!(
@@ -268,7 +274,7 @@ fn is_textual_mime(mime: &str) -> bool {
         || mime.ends_with("+xml")
 }
 
-fn truncate_utf8_bytes(input: &str, max_bytes: usize) -> (String, bool) {
+pub(crate) fn truncate_utf8_bytes(input: &str, max_bytes: usize) -> (String, bool) {
     if input.len() <= max_bytes {
         return (input.to_string(), false);
     }
@@ -280,8 +286,8 @@ fn truncate_utf8_bytes(input: &str, max_bytes: usize) -> (String, bool) {
 }
 
 #[cfg(test)]
-mod web_fetch_tests {
-    use super::*;
+pub(crate) mod web_fetch_tests {
+    pub(crate) use super::*;
 
     #[test]
     fn truncation_preserves_utf8_boundaries() {

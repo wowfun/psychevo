@@ -1,16 +1,18 @@
-struct AppendMessageParams<'a> {
-    session_id: &'a str,
-    message: &'a Message,
-    usage: Option<Value>,
-    metadata: Option<Value>,
-    accounting: Option<MessageAccounting>,
-    context_evidence: &'a [ContextEvidenceInput],
-    content_text_override: Option<String>,
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) struct AppendMessageParams<'a> {
+    pub(crate) session_id: &'a str,
+    pub(crate) message: &'a Message,
+    pub(crate) usage: Option<Value>,
+    pub(crate) metadata: Option<Value>,
+    pub(crate) accounting: Option<MessageAccounting>,
+    pub(crate) context_evidence: &'a [ContextEvidenceInput],
+    pub(crate) content_text_override: Option<String>,
 }
 
 impl SqliteStore {
     pub fn resume_session(&self, session_id: &str) -> Result<()> {
-        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let exists = conn
             .query_row(
                 "SELECT 1 FROM sessions WHERE id = ?1",
@@ -25,7 +27,7 @@ impl SqliteStore {
     }
 
     pub fn load_messages(&self, session_id: &str) -> Result<Vec<Message>> {
-        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let mut stmt = conn.prepare(
             "SELECT message_json FROM messages WHERE session_id = ?1 ORDER BY session_seq ASC",
         )?;
@@ -49,7 +51,7 @@ impl SqliteStore {
         &self,
         session_id: &str,
     ) -> Result<Vec<SanitizedMessageSummary>> {
-        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let mut stmt = conn.prepare(
             r#"
             SELECT message_json, usage_json, metadata_json
@@ -88,7 +90,7 @@ impl SqliteStore {
             .session_revert_state(session_id)?
             .map(|revert| revert.start_seq)
             .unwrap_or(i64::MAX);
-        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let mut stmt = conn.prepare(
             r#"
             SELECT session_seq, message_json, usage_json, metadata_json
@@ -123,7 +125,7 @@ impl SqliteStore {
             .session_revert_state(session_id)?
             .map(|revert| revert.start_seq)
             .unwrap_or(i64::MAX);
-        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let mut stmt = conn.prepare(
             r#"
             SELECT message_json, usage_json, metadata_json,
@@ -252,7 +254,7 @@ impl SqliteStore {
         .map(|_| ())
     }
 
-    fn append_message_with_metrics_accounting_and_context_evidence(
+    pub(crate) fn append_message_with_metrics_accounting_and_context_evidence(
         &self,
         params: AppendMessageParams<'_>,
     ) -> Result<i64> {
@@ -365,18 +367,32 @@ impl SqliteStore {
             Ok(seq)
         })
     }
-
 }
 
-fn accounting_json_from_row(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<Option<Value>> {
+pub(crate) fn accounting_json_from_row(
+    row: &rusqlite::Row<'_>,
+    offset: usize,
+) -> rusqlite::Result<Option<Value>> {
     let accounting = MessageAccounting {
         context_input_tokens: row.get::<_, Option<i64>>(offset)?.map(|value| value as u64),
-        billable_input_tokens: row.get::<_, Option<i64>>(offset + 1)?.map(|value| value as u64),
-        billable_output_tokens: row.get::<_, Option<i64>>(offset + 2)?.map(|value| value as u64),
-        reasoning_tokens: row.get::<_, Option<i64>>(offset + 3)?.map(|value| value as u64),
-        cache_read_tokens: row.get::<_, Option<i64>>(offset + 4)?.map(|value| value as u64),
-        cache_write_tokens: row.get::<_, Option<i64>>(offset + 5)?.map(|value| value as u64),
-        reported_total_tokens: row.get::<_, Option<i64>>(offset + 6)?.map(|value| value as u64),
+        billable_input_tokens: row
+            .get::<_, Option<i64>>(offset + 1)?
+            .map(|value| value as u64),
+        billable_output_tokens: row
+            .get::<_, Option<i64>>(offset + 2)?
+            .map(|value| value as u64),
+        reasoning_tokens: row
+            .get::<_, Option<i64>>(offset + 3)?
+            .map(|value| value as u64),
+        cache_read_tokens: row
+            .get::<_, Option<i64>>(offset + 4)?
+            .map(|value| value as u64),
+        cache_write_tokens: row
+            .get::<_, Option<i64>>(offset + 5)?
+            .map(|value| value as u64),
+        reported_total_tokens: row
+            .get::<_, Option<i64>>(offset + 6)?
+            .map(|value| value as u64),
         estimated_cost_nanodollars: row.get(offset + 7)?,
         pricing_source: row.get(offset + 8)?,
         pricing_tier: row.get(offset + 9)?,

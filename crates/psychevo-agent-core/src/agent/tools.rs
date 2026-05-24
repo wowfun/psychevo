@@ -1,20 +1,22 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[derive(Debug, Clone)]
-struct ToolCallBuilder {
-    id: String,
-    name: String,
-    arguments_json: String,
-    content_index: usize,
-    call_index: usize,
+pub(crate) struct ToolCallBuilder {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) arguments_json: String,
+    pub(crate) content_index: usize,
+    pub(crate) call_index: usize,
 }
 
-fn assistant_outcome(message: &Message) -> Outcome {
+pub(crate) fn assistant_outcome(message: &Message) -> Outcome {
     match message {
         Message::Assistant { outcome, .. } => *outcome,
         _ => Outcome::Failed,
     }
 }
 
-fn assistant_tool_calls(message: &Message) -> Vec<ToolCallBlock> {
+pub(crate) fn assistant_tool_calls(message: &Message) -> Vec<ToolCallBlock> {
     let Message::Assistant { content, .. } = message else {
         return Vec::new();
     };
@@ -27,7 +29,7 @@ fn assistant_tool_calls(message: &Message) -> Vec<ToolCallBlock> {
         .collect()
 }
 
-async fn execute_tool_batch(
+pub(crate) async fn execute_tool_batch(
     tools: &[Arc<dyn ToolBinding>],
     tool_calls: &[ToolCallBlock],
     sink: Arc<dyn EventSink>,
@@ -72,7 +74,7 @@ async fn execute_tool_batch(
     Ok(result_messages)
 }
 
-async fn execute_one_tool(
+pub(crate) async fn execute_one_tool(
     tools: &[Arc<dyn ToolBinding>],
     call: ToolCallBlock,
     sink: Arc<dyn EventSink>,
@@ -124,7 +126,7 @@ async fn execute_one_tool(
     Ok((call, output))
 }
 
-fn tool_result_message(call: ToolCallBlock, output: ToolOutput) -> Message {
+pub(crate) fn tool_result_message(call: ToolCallBlock, output: ToolOutput) -> Message {
     Message::ToolResult {
         tool_call_id: call.id,
         tool_name: call.name,
@@ -134,7 +136,11 @@ fn tool_result_message(call: ToolCallBlock, output: ToolOutput) -> Message {
     }
 }
 
-fn tool_attachment_messages(call: &ToolCallBlock, output: &ToolOutput, timestamp_ms: i64) -> Vec<Message> {
+pub(crate) fn tool_attachment_messages(
+    call: &ToolCallBlock,
+    output: &ToolOutput,
+    timestamp_ms: i64,
+) -> Vec<Message> {
     output
         .attachments
         .iter()

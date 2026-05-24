@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 pub fn permission_rules_value(options: &RunOptions, scope: ConfigScope) -> Result<Value> {
     let document = config_show_value(options, scope)?;
     let value = document.get("value").cloned().unwrap_or_else(|| json!({}));
@@ -43,7 +45,10 @@ pub fn append_local_permission_rule(
     fs::create_dir_all(&config_dir)?;
     let config_path = config_dir.join(CONFIG_FILE_NAME);
     let mut parsed = load_toml_config_file(&config_path, false)?;
-    if permission_rule_values(&parsed, kind).iter().any(|entry| entry == &rule) {
+    if permission_rule_values(&parsed, kind)
+        .iter()
+        .any(|entry| entry == &rule)
+    {
         return Ok(PermissionRuleMutationResult {
             config_path,
             kind: kind.to_string(),
@@ -95,7 +100,7 @@ pub fn remove_local_permission_rule(
     })
 }
 
-fn permission_rule_values(value: &Value, kind: &str) -> Vec<String> {
+pub(crate) fn permission_rule_values(value: &Value, kind: &str) -> Vec<String> {
     value
         .get("permissions")
         .and_then(Value::as_object)
@@ -113,7 +118,7 @@ fn permission_rule_values(value: &Value, kind: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn validate_permission_rule_kind(kind: &str) -> Result<&'static str> {
+pub(crate) fn validate_permission_rule_kind(kind: &str) -> Result<&'static str> {
     match kind {
         "allow" => Ok("allow"),
         "ask" => Ok("ask"),
@@ -124,15 +129,20 @@ fn validate_permission_rule_kind(kind: &str) -> Result<&'static str> {
     }
 }
 
-fn normalize_permission_rule(rule: &str) -> Result<String> {
+pub(crate) fn normalize_permission_rule(rule: &str) -> Result<String> {
     let rule = rule.trim();
     if rule.is_empty() {
-        return Err(Error::Config("permission rule must not be empty".to_string()));
+        return Err(Error::Config(
+            "permission rule must not be empty".to_string(),
+        ));
     }
     Ok(rule.to_string())
 }
 
-fn permission_array_mut<'a>(value: &'a mut Value, kind: &str) -> Result<&'a mut Vec<Value>> {
+pub(crate) fn permission_array_mut<'a>(
+    value: &'a mut Value,
+    kind: &str,
+) -> Result<&'a mut Vec<Value>> {
     if !value.is_object() {
         *value = json!({});
     }
@@ -157,8 +167,8 @@ fn permission_array_mut<'a>(value: &'a mut Value, kind: &str) -> Result<&'a mut 
 }
 
 #[cfg(test)]
-mod permission_rule_tests {
-    use super::*;
+pub(crate) mod permission_rule_tests {
+    pub(crate) use super::*;
 
     #[test]
     fn permission_rule_mutations_write_toml_and_skip_duplicates() {
@@ -179,15 +189,17 @@ allow = ["ExecCommand(npm test *)"]
                 .expect("duplicate append");
         assert!(!duplicate.changed);
 
-        let added = append_local_permission_allow_rule(config_dir.clone(), "ExecCommand(cargo test *)")
-            .expect("append");
+        let added =
+            append_local_permission_allow_rule(config_dir.clone(), "ExecCommand(cargo test *)")
+                .expect("append");
         assert!(added.changed);
         let text = fs::read_to_string(&config_path).expect("config");
         assert!(text.contains("ExecCommand(npm test *)"));
         assert!(text.contains("ExecCommand(cargo test *)"));
 
-        let removed = remove_local_permission_rule(config_dir, "allow", "ExecCommand(cargo test *)")
-            .expect("remove");
+        let removed =
+            remove_local_permission_rule(config_dir, "allow", "ExecCommand(cargo test *)")
+                .expect("remove");
         assert!(removed.changed);
         let text = fs::read_to_string(config_path).expect("config");
         assert!(!text.contains("ExecCommand(cargo test *)"));

@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 impl SqliteStore {
     pub fn finish_session(
         &self,
@@ -38,8 +40,12 @@ impl SqliteStore {
         })
     }
 
-    fn user_target_before(&self, session_id: &str, boundary: i64) -> Result<Option<UndoTarget>> {
-        let conn = self.conn.lock().expect("sqlite lock poisoned");
+    pub(crate) fn user_target_before(
+        &self,
+        session_id: &str,
+        boundary: i64,
+    ) -> Result<Option<UndoTarget>> {
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let mut stmt = conn.prepare(
             r#"
             SELECT session_seq, message_json, content_text, metadata_json
@@ -54,8 +60,12 @@ impl SqliteStore {
             .map_err(Into::into)
     }
 
-    fn user_target_after(&self, session_id: &str, boundary: i64) -> Result<Option<UndoTarget>> {
-        let conn = self.conn.lock().expect("sqlite lock poisoned");
+    pub(crate) fn user_target_after(
+        &self,
+        session_id: &str,
+        boundary: i64,
+    ) -> Result<Option<UndoTarget>> {
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let mut stmt = conn.prepare(
             r#"
             SELECT session_seq, message_json, content_text, metadata_json
@@ -69,5 +79,4 @@ impl SqliteStore {
             .optional()
             .map_err(Into::into)
     }
-
 }

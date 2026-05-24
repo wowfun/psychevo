@@ -1,4 +1,9 @@
-fn session_metadata_json(conn: &Connection, session_id: &str) -> rusqlite::Result<Option<String>> {
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) fn session_metadata_json(
+    conn: &Connection,
+    session_id: &str,
+) -> rusqlite::Result<Option<String>> {
     conn.query_row(
         "SELECT metadata_json FROM sessions WHERE id = ?1",
         params![session_id],
@@ -6,7 +11,7 @@ fn session_metadata_json(conn: &Connection, session_id: &str) -> rusqlite::Resul
     )
 }
 
-fn metadata_object(value: Option<&str>) -> Result<Map<String, Value>> {
+pub(crate) fn metadata_object(value: Option<&str>) -> Result<Map<String, Value>> {
     let Some(value) = value else {
         return Ok(Map::new());
     };
@@ -14,7 +19,7 @@ fn metadata_object(value: Option<&str>) -> Result<Map<String, Value>> {
     Ok(parsed.as_object().cloned().unwrap_or_default())
 }
 
-fn metadata_object_sql(value: Option<&str>) -> rusqlite::Result<Map<String, Value>> {
+pub(crate) fn metadata_object_sql(value: Option<&str>) -> rusqlite::Result<Map<String, Value>> {
     let Some(value) = value else {
         return Ok(Map::new());
     };
@@ -22,27 +27,29 @@ fn metadata_object_sql(value: Option<&str>) -> rusqlite::Result<Map<String, Valu
     Ok(parsed.as_object().cloned().unwrap_or_default())
 }
 
-fn metadata_json_sql(metadata: Map<String, Value>) -> rusqlite::Result<Option<String>> {
+pub(crate) fn metadata_json_sql(metadata: Map<String, Value>) -> rusqlite::Result<Option<String>> {
     (!metadata.is_empty())
         .then(|| serde_json::to_string(&Value::Object(metadata)).map_err(json_to_sql))
         .transpose()
 }
 
-fn json_to_sql(err: serde_json::Error) -> rusqlite::Error {
+pub(crate) fn json_to_sql(err: serde_json::Error) -> rusqlite::Error {
     rusqlite::Error::ToSqlConversionFailure(Box::new(err))
 }
 
-fn parse_session_revert(value: Option<&str>) -> Result<Option<SessionRevertState>> {
+pub(crate) fn parse_session_revert(value: Option<&str>) -> Result<Option<SessionRevertState>> {
     let metadata = metadata_object(value)?;
     parse_session_revert_from_metadata(&metadata).map_err(Into::into)
 }
 
-fn parse_session_revert_sql(value: Option<&str>) -> rusqlite::Result<Option<SessionRevertState>> {
+pub(crate) fn parse_session_revert_sql(
+    value: Option<&str>,
+) -> rusqlite::Result<Option<SessionRevertState>> {
     let metadata = metadata_object_sql(value)?;
     parse_session_revert_from_metadata(&metadata)
 }
 
-fn parse_session_revert_from_metadata(
+pub(crate) fn parse_session_revert_from_metadata(
     metadata: &Map<String, Value>,
 ) -> rusqlite::Result<Option<SessionRevertState>> {
     let Some(revert) = metadata
@@ -67,4 +74,3 @@ fn parse_session_revert_from_metadata(
         original_snapshot,
     }))
 }
-

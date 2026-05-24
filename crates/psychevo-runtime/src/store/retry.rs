@@ -1,8 +1,13 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 impl SqliteStore {
-    fn write_retry<T>(&self, mut f: impl FnMut(&Connection) -> rusqlite::Result<T>) -> Result<T> {
+    pub(crate) fn write_retry<T>(
+        &self,
+        mut f: impl FnMut(&Connection) -> rusqlite::Result<T>,
+    ) -> Result<T> {
         let mut last = None;
         for attempt in 0..8 {
-            let conn = self.conn.lock().expect("sqlite lock poisoned");
+            let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
             let tx_result = (|| {
                 conn.execute_batch("BEGIN IMMEDIATE")?;
                 match f(&conn) {
@@ -19,8 +24,10 @@ impl SqliteStore {
             drop(conn);
             match tx_result {
                 Ok(value) => {
-                    if attempt % 4 == 0
-                        && let Ok(conn) = self.conn.lock()
+                    let successful_writes =
+                        self.inner.successful_writes.fetch_add(1, Ordering::Relaxed) + 1;
+                    if should_checkpoint(successful_writes)
+                        && let Ok(conn) = self.inner.conn.lock()
                     {
                         let _ = conn.pragma_update(None, "wal_checkpoint", "PASSIVE");
                     }
@@ -36,5 +43,26 @@ impl SqliteStore {
         Err(last
             .unwrap_or(rusqlite::Error::ExecuteReturnedResults)
             .into())
+    }
+}
+
+pub(crate) const WAL_CHECKPOINT_EVERY_WRITES: usize = 50;
+
+pub(crate) fn should_checkpoint(successful_writes: usize) -> bool {
+    successful_writes != 0 && successful_writes.is_multiple_of(WAL_CHECKPOINT_EVERY_WRITES)
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    pub(crate) use super::*;
+
+    #[test]
+    fn checkpoint_cadence_is_every_50_successful_writes() {
+        assert!(!should_checkpoint(0));
+        assert!(!should_checkpoint(1));
+        assert!(!should_checkpoint(49));
+        assert!(should_checkpoint(50));
+        assert!(!should_checkpoint(51));
+        assert!(should_checkpoint(100));
     }
 }

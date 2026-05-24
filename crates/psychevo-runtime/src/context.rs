@@ -30,7 +30,7 @@ pub fn prune_context(messages: Vec<Message>, max_context_messages: Option<usize>
     messages[start..].to_vec()
 }
 
-fn missing_tool_call_ids(messages: &[Message]) -> HashSet<String> {
+pub(crate) fn missing_tool_call_ids(messages: &[Message]) -> HashSet<String> {
     let mut calls = HashSet::new();
     let mut results = HashSet::new();
     for message in messages {
@@ -51,7 +51,7 @@ fn missing_tool_call_ids(messages: &[Message]) -> HashSet<String> {
     results.difference(&calls).cloned().collect()
 }
 
-fn assistant_contains_any_tool_id(message: &Message, ids: &HashSet<String>) -> bool {
+pub(crate) fn assistant_contains_any_tool_id(message: &Message, ids: &HashSet<String>) -> bool {
     let Message::Assistant { content, .. } = message else {
         return false;
     };

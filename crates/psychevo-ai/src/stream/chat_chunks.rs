@@ -1,29 +1,31 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[derive(Debug, Deserialize)]
-struct ChatCompletionChunk {
-    id: Option<String>,
-    model: Option<String>,
+pub(crate) struct ChatCompletionChunk {
+    pub(crate) id: Option<String>,
+    pub(crate) model: Option<String>,
     #[serde(default)]
-    choices: Vec<ChatChoice>,
-    usage: Option<Value>,
+    pub(crate) choices: Vec<ChatChoice>,
+    pub(crate) usage: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
-struct ChatChoice {
-    delta: ChatDelta,
-    finish_reason: Option<String>,
+pub(crate) struct ChatChoice {
+    pub(crate) delta: ChatDelta,
+    pub(crate) finish_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-struct ChatDelta {
-    content: Option<String>,
-    reasoning: Option<String>,
-    reasoning_content: Option<String>,
-    reasoning_details: Option<Value>,
+pub(crate) struct ChatDelta {
+    pub(crate) content: Option<String>,
+    pub(crate) reasoning: Option<String>,
+    pub(crate) reasoning_content: Option<String>,
+    pub(crate) reasoning_details: Option<Value>,
     #[serde(default, deserialize_with = "null_as_empty_vec")]
-    tool_calls: Vec<ChatDeltaToolCall>,
+    pub(crate) tool_calls: Vec<ChatDeltaToolCall>,
 }
 
-fn null_as_empty_vec<'de, D, T>(deserializer: D) -> std::result::Result<Vec<T>, D::Error>
+pub(crate) fn null_as_empty_vec<'de, D, T>(deserializer: D) -> std::result::Result<Vec<T>, D::Error>
 where
     D: serde::Deserializer<'de>,
     T: serde::Deserialize<'de>,
@@ -32,35 +34,35 @@ where
 }
 
 #[derive(Debug, Deserialize)]
-struct ChatDeltaToolCall {
-    index: usize,
-    id: Option<String>,
-    function: Option<ChatDeltaFunction>,
+pub(crate) struct ChatDeltaToolCall {
+    pub(crate) index: usize,
+    pub(crate) id: Option<String>,
+    pub(crate) function: Option<ChatDeltaFunction>,
 }
 
 #[derive(Debug, Deserialize)]
-struct ChatDeltaFunction {
-    name: Option<String>,
-    arguments: Option<String>,
+pub(crate) struct ChatDeltaFunction {
+    pub(crate) name: Option<String>,
+    pub(crate) arguments: Option<String>,
 }
 
 #[derive(Debug)]
-struct ChatChunkNormalizer {
-    model: String,
-    tool_calls: BTreeMap<usize, NormalizedToolCallState>,
-    finish_reason: Option<String>,
+pub(crate) struct ChatChunkNormalizer {
+    pub(crate) model: String,
+    pub(crate) tool_calls: BTreeMap<usize, NormalizedToolCallState>,
+    pub(crate) finish_reason: Option<String>,
 }
 
 #[derive(Debug, Default)]
-struct NormalizedToolCallState {
-    id: String,
-    name: String,
-    started: bool,
-    ended: bool,
+pub(crate) struct NormalizedToolCallState {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) started: bool,
+    pub(crate) ended: bool,
 }
 
 impl ChatChunkNormalizer {
-    fn new(model: String) -> Self {
+    pub(crate) fn new(model: String) -> Self {
         Self {
             model,
             tool_calls: BTreeMap::new(),
@@ -68,7 +70,7 @@ impl ChatChunkNormalizer {
         }
     }
 
-    fn ingest(&mut self, chunk: ChatCompletionChunk) -> Result<Vec<StreamEvent>> {
+    pub(crate) fn ingest(&mut self, chunk: ChatCompletionChunk) -> Result<Vec<StreamEvent>> {
         let mut output = Vec::new();
         if let Some(usage) = chunk.usage {
             output.push(StreamEvent::Usage { usage });
@@ -147,7 +149,7 @@ impl ChatChunkNormalizer {
         Ok(output)
     }
 
-    fn finish(&mut self) -> Vec<StreamEvent> {
+    pub(crate) fn finish(&mut self) -> Vec<StreamEvent> {
         let mut output = self.end_started_tool_calls();
         output.push(StreamEvent::Done {
             outcome: Outcome::Normal,
@@ -156,7 +158,7 @@ impl ChatChunkNormalizer {
         output
     }
 
-    fn end_started_tool_calls(&mut self) -> Vec<StreamEvent> {
+    pub(crate) fn end_started_tool_calls(&mut self) -> Vec<StreamEvent> {
         let mut output = Vec::new();
         for (index, state) in &mut self.tool_calls {
             if state.started && !state.ended {
@@ -170,4 +172,3 @@ impl ChatChunkNormalizer {
         output
     }
 }
-

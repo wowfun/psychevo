@@ -1,5 +1,7 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[test]
-fn undo_redo_restore_git_snapshots_and_visible_message_ranges() {
+pub(crate) fn undo_redo_restore_git_snapshots_and_visible_message_ranges() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = temp.path().join("work");
@@ -58,7 +60,7 @@ fn undo_redo_restore_git_snapshots_and_visible_message_ranges() {
         .expect("assistant second");
 
     let options = SessionUndoOptions {
-        db_path: db.clone(),
+        state: StateRuntime::open(&db).expect("state runtime"),
         workdir: workdir.clone(),
         snapshot_root: temp.path().join("snapshots"),
         session_id: session_id.clone(),
@@ -115,7 +117,7 @@ fn undo_redo_restore_git_snapshots_and_visible_message_ranges() {
 }
 
 #[test]
-fn cleanup_reverted_messages_deletes_hidden_range() {
+pub(crate) fn cleanup_reverted_messages_deletes_hidden_range() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = temp.path().join("work");
@@ -173,7 +175,7 @@ fn cleanup_reverted_messages_deletes_hidden_range() {
         .expect("assistant second");
 
     undo_session(SessionUndoOptions {
-        db_path: db.clone(),
+        state: StateRuntime::open(&db).expect("state runtime"),
         workdir,
         snapshot_root: temp.path().join("snapshots"),
         session_id: session_id.clone(),
@@ -199,7 +201,7 @@ fn cleanup_reverted_messages_deletes_hidden_range() {
 }
 
 #[test]
-fn undo_redo_error_paths_do_not_mutate_revert_state() {
+pub(crate) fn undo_redo_error_paths_do_not_mutate_revert_state() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = temp.path().join("work");
@@ -209,7 +211,7 @@ fn undo_redo_error_paths_do_not_mutate_revert_state() {
         .create_session_with_metadata(&workdir, "tui", "model", "provider", None)
         .expect("session");
     let options = SessionUndoOptions {
-        db_path: db.clone(),
+        state: StateRuntime::open(&db).expect("state runtime"),
         workdir: workdir.clone(),
         snapshot_root: temp.path().join("snapshots"),
         session_id: session_id.clone(),
@@ -233,4 +235,3 @@ fn undo_redo_error_paths_do_not_mutate_revert_state() {
     );
     assert_eq!(store.load_messages(&session_id).expect("messages").len(), 1);
 }
-

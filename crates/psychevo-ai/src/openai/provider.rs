@@ -1,9 +1,11 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[derive(Debug, Clone)]
 pub struct OpenAiChatProvider {
-    client: reqwest::Client,
-    base_url: String,
-    api_key: String,
-    provider_name: String,
+    pub(crate) client: reqwest::Client,
+    pub(crate) base_url: String,
+    pub(crate) api_key: String,
+    pub(crate) provider_name: String,
 }
 
 impl OpenAiChatProvider {
@@ -168,7 +170,7 @@ impl GenerationProvider for OpenAiChatProvider {
     }
 }
 
-fn aborted_generation_stream() -> GenerationStream {
+pub(crate) fn aborted_generation_stream() -> GenerationStream {
     let events = vec![Ok(StreamEvent::Done {
         outcome: Outcome::Aborted,
         finish_reason: Some("aborted".to_string()),
@@ -176,13 +178,13 @@ fn aborted_generation_stream() -> GenerationStream {
     Box::pin(stream::iter(events)) as Pin<Box<_>>
 }
 
-struct OpenAiChatStreamState {
-    bytes: Pin<
+pub(crate) struct OpenAiChatStreamState {
+    pub(crate) bytes: Pin<
         Box<dyn futures::Stream<Item = std::result::Result<bytes::Bytes, reqwest::Error>> + Send>,
     >,
-    parser: SseParser,
-    normalizer: ChatChunkNormalizer,
-    pending: VecDeque<Result<StreamEvent>>,
-    done: bool,
-    abort: AbortSignal,
+    pub(crate) parser: SseParser,
+    pub(crate) normalizer: ChatChunkNormalizer,
+    pub(crate) pending: VecDeque<Result<StreamEvent>>,
+    pub(crate) done: bool,
+    pub(crate) abort: AbortSignal,
 }

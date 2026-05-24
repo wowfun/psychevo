@@ -1,7 +1,9 @@
-struct EditTool(WorkdirTool);
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) struct EditTool(WorkdirTool);
 
 impl EditTool {
-    fn new(workdir: PathBuf, context: ToolRuntimeContext) -> Self {
+    pub(crate) fn new(workdir: PathBuf, context: ToolRuntimeContext) -> Self {
         Self(WorkdirTool::with_context(workdir, context))
     }
 }
@@ -70,7 +72,7 @@ impl ToolBinding for EditTool {
     }
 }
 
-fn edit_tool_impl(tool: WorkdirTool, args: Value) -> Result<Value> {
+pub(crate) fn edit_tool_impl(tool: WorkdirTool, args: Value) -> Result<Value> {
     let mode = args
         .get("mode")
         .and_then(Value::as_str)
@@ -82,7 +84,7 @@ fn edit_tool_impl(tool: WorkdirTool, args: Value) -> Result<Value> {
     }
 }
 
-fn edit_replace(tool: WorkdirTool, args: Value) -> Result<Value> {
+pub(crate) fn edit_replace(tool: WorkdirTool, args: Value) -> Result<Value> {
     let path = required_string(&args, "path")?;
     let old_string = required_string(&args, "old_string")?;
     let new_string = required_string(&args, "new_string")?;
@@ -118,7 +120,7 @@ fn edit_replace(tool: WorkdirTool, args: Value) -> Result<Value> {
     }))
 }
 
-fn edit_patch(tool: WorkdirTool, args: Value) -> Result<Value> {
+pub(crate) fn edit_patch(tool: WorkdirTool, args: Value) -> Result<Value> {
     let patch = required_string(&args, "patch")?;
     let operations = match parse_v4a_patch(patch) {
         Ok(operations) => operations,
@@ -158,7 +160,7 @@ fn edit_patch(tool: WorkdirTool, args: Value) -> Result<Value> {
     apply_v4a_plan(&tool, plan)
 }
 
-enum V4aApply {
+pub(crate) enum V4aApply {
     Add {
         target: PathBuf,
         rel: String,
@@ -183,7 +185,10 @@ enum V4aApply {
     },
 }
 
-fn validate_v4a_operations(tool: &WorkdirTool, operations: &[V4aOperation]) -> Result<Vec<V4aApply>> {
+pub(crate) fn validate_v4a_operations(
+    tool: &WorkdirTool,
+    operations: &[V4aOperation],
+) -> Result<Vec<V4aApply>> {
     let mut plan = Vec::new();
     for op in operations {
         match op.kind {
@@ -204,8 +209,8 @@ fn validate_v4a_operations(tool: &WorkdirTool, operations: &[V4aOperation]) -> R
             V4aOperationKind::Update => {
                 let target = tool.resolve_existing(&op.file_path)?;
                 let text = read_text_file(&target)?;
-                let updated = apply_v4a_update_hunks(&text.normalized, &op.hunks)
-                    .map_err(Error::Message)?;
+                let updated =
+                    apply_v4a_update_hunks(&text.normalized, &op.hunks).map_err(Error::Message)?;
                 if updated == text.normalized {
                     return Err(Error::Message(format!("{}: no-change patch", op.file_path)));
                 }
@@ -250,7 +255,7 @@ fn validate_v4a_operations(tool: &WorkdirTool, operations: &[V4aOperation]) -> R
     Ok(plan)
 }
 
-fn apply_v4a_plan(tool: &WorkdirTool, plan: Vec<V4aApply>) -> Result<Value> {
+pub(crate) fn apply_v4a_plan(tool: &WorkdirTool, plan: Vec<V4aApply>) -> Result<Value> {
     let mut diffs = Vec::new();
     let mut files_modified = Vec::new();
     let mut files_created = Vec::new();
@@ -280,7 +285,12 @@ fn apply_v4a_plan(tool: &WorkdirTool, plan: Vec<V4aApply>) -> Result<Value> {
                     fs::create_dir_all(parent)?;
                 }
                 let (lint, lsp) = write_edit_text(tool, &target, &content, None)?;
-                diffs.push(unified_diff_named("/dev/null", &format!("b/{rel}"), "", &content));
+                diffs.push(unified_diff_named(
+                    "/dev/null",
+                    &format!("b/{rel}"),
+                    "",
+                    &content,
+                ));
                 if let Some(lint) = lint {
                     lint_by_file.insert(rel.clone(), lint);
                 }
@@ -308,7 +318,12 @@ fn apply_v4a_plan(tool: &WorkdirTool, plan: Vec<V4aApply>) -> Result<Value> {
             }
             V4aApply::Delete { target, rel, text } => {
                 fs::remove_file(&target)?;
-                diffs.push(unified_diff_named(&format!("a/{rel}"), "/dev/null", &text.normalized, ""));
+                diffs.push(unified_diff_named(
+                    &format!("a/{rel}"),
+                    "/dev/null",
+                    &text.normalized,
+                    "",
+                ));
                 files_deleted.push(rel);
             }
             V4aApply::Move {
@@ -346,8 +361,8 @@ fn apply_v4a_plan(tool: &WorkdirTool, plan: Vec<V4aApply>) -> Result<Value> {
 }
 
 #[cfg(test)]
-mod edit_tool_tests {
-    use super::*;
+pub(crate) mod edit_tool_tests {
+    pub(crate) use super::*;
 
     fn workdir_tool(path: &Path) -> WorkdirTool {
         WorkdirTool::with_context(
@@ -369,7 +384,10 @@ mod edit_tool_tests {
     fn edit_tool_schema_is_hermes_style_without_legacy_edits() {
         let tool = EditTool::new(PathBuf::from("/tmp/work"), ToolRuntimeContext::default());
         let schema = tool.parameters();
-        assert_eq!(schema["properties"]["mode"]["enum"], json!(["replace", "patch"]));
+        assert_eq!(
+            schema["properties"]["mode"]["enum"],
+            json!(["replace", "patch"])
+        );
         assert_eq!(schema["properties"]["mode"]["default"], "replace");
         assert!(schema["properties"].get("edits").is_none());
         assert!(
@@ -421,7 +439,12 @@ mod edit_tool_tests {
         )
         .expect("ambiguous value");
         assert_eq!(ambiguous["success"], false);
-        assert!(ambiguous["error"].as_str().unwrap().contains("Found 2 matches"));
+        assert!(
+            ambiguous["error"]
+                .as_str()
+                .unwrap()
+                .contains("Found 2 matches")
+        );
 
         let replaced = edit_tool_impl(
             workdir_tool(temp.path()),
@@ -497,7 +520,10 @@ mod edit_tool_tests {
         assert!(temp.path().join("moved.txt").exists());
         assert_eq!(value["files_created"], json!(["add.txt"]));
         assert_eq!(value["files_deleted"], json!(["delete.txt"]));
-        assert_eq!(value["files_moved"][0], json!({"from": "move.txt", "to": "moved.txt"}));
+        assert_eq!(
+            value["files_moved"][0],
+            json!({"from": "move.txt", "to": "moved.txt"})
+        );
     }
 
     #[test]

@@ -1,35 +1,43 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-const BASE_MODE_DEFAULT: &str = include_str!("../templates/base/mode.default.md");
-const BASE_MODE_PLAN: &str = include_str!("../templates/base/mode.plan.md");
-const BASE_MODE_DEFAULT_NO_TOOLS: &str = include_str!("../templates/base/mode.default.no_tools.md");
-const BASE_MODE_PLAN_NO_TOOLS: &str = include_str!("../templates/base/mode.plan.no_tools.md");
-const SELECTED_MAIN_AGENT: &str = include_str!("../templates/selected_main_agent.md");
-const SELECTED_MAIN_AGENT_WITH_INSTRUCTIONS: &str =
+pub(crate) const BASE_MODE_DEFAULT: &str = include_str!("../templates/base/mode.default.md");
+pub(crate) const BASE_MODE_PLAN: &str = include_str!("../templates/base/mode.plan.md");
+pub(crate) const BASE_MODE_DEFAULT_NO_TOOLS: &str =
+    include_str!("../templates/base/mode.default.no_tools.md");
+pub(crate) const BASE_MODE_PLAN_NO_TOOLS: &str =
+    include_str!("../templates/base/mode.plan.no_tools.md");
+pub(crate) const SELECTED_MAIN_AGENT: &str = include_str!("../templates/selected_main_agent.md");
+pub(crate) const SELECTED_MAIN_AGENT_WITH_INSTRUCTIONS: &str =
     include_str!("../templates/selected_main_agent.with_instructions.md");
-const SELECTED_CHILD_AGENT: &str = include_str!("../templates/selected_child_agent.md");
-const SELECTED_CHILD_AGENT_WITH_INSTRUCTIONS: &str =
+pub(crate) const SELECTED_CHILD_AGENT: &str = include_str!("../templates/selected_child_agent.md");
+pub(crate) const SELECTED_CHILD_AGENT_WITH_INSTRUCTIONS: &str =
     include_str!("../templates/selected_child_agent.with_instructions.md");
-const SELECTED_SYSTEM_AGENT: &str = include_str!("../templates/selected_system_agent.md");
-const SELECTED_SYSTEM_AGENT_WITH_INSTRUCTIONS: &str =
+pub(crate) const SELECTED_SYSTEM_AGENT: &str =
+    include_str!("../templates/selected_system_agent.md");
+pub(crate) const SELECTED_SYSTEM_AGENT_WITH_INSTRUCTIONS: &str =
     include_str!("../templates/selected_system_agent.with_instructions.md");
-const CHILD_AGENT_CONTROL: &str = include_str!("../templates/child_agent_control.md");
-const AGENT_CATALOG: &str = include_str!("../templates/agent_catalog.md");
-const SKILL_INDEX: &str = include_str!("../templates/skill_index.md");
-const PROJECT_CONTEXT: &str = include_str!("../templates/project_context.md");
-const REQUIRED_AGENT_CALLS: &str = include_str!("../templates/required_agent_calls.md");
-const SESSION_TITLE_INSTRUCTION: &str = include_str!("../templates/session_title_instruction.md");
-const SESSION_TITLE_REQUEST: &str = include_str!("../templates/session_title_request.md");
-const SESSION_TITLE_REQUEST_SELECTED_SKILLS: &str =
+pub(crate) const CHILD_AGENT_CONTROL: &str = include_str!("../templates/child_agent_control.md");
+pub(crate) const AGENT_CATALOG: &str = include_str!("../templates/agent_catalog.md");
+pub(crate) const SKILL_INDEX: &str = include_str!("../templates/skill_index.md");
+pub(crate) const PROJECT_CONTEXT: &str = include_str!("../templates/project_context.md");
+pub(crate) const REQUIRED_AGENT_CALLS: &str = include_str!("../templates/required_agent_calls.md");
+pub(crate) const SESSION_TITLE_INSTRUCTION: &str =
+    include_str!("../templates/session_title_instruction.md");
+pub(crate) const SESSION_TITLE_REQUEST: &str =
+    include_str!("../templates/session_title_request.md");
+pub(crate) const SESSION_TITLE_REQUEST_SELECTED_SKILLS: &str =
     include_str!("../templates/session_title_request.selected_skills.md");
-const COMPACTION_SUMMARY_SYSTEM: &str = include_str!("../templates/compaction_summary_system.md");
-const COMPACTION_SUMMARY_USER: &str = include_str!("../templates/compaction_summary_user.md");
-const COMPACTION_SUMMARY_MANUAL_FOCUS_SECTION: &str =
+pub(crate) const COMPACTION_SUMMARY_SYSTEM: &str =
+    include_str!("../templates/compaction_summary_system.md");
+pub(crate) const COMPACTION_SUMMARY_USER: &str =
+    include_str!("../templates/compaction_summary_user.md");
+pub(crate) const COMPACTION_SUMMARY_MANUAL_FOCUS_SECTION: &str =
     include_str!("../templates/compaction_summary_manual_focus_section.md");
-const COMPACTION_SUMMARY_PREVIOUS_SECTION: &str =
+pub(crate) const COMPACTION_SUMMARY_PREVIOUS_SECTION: &str =
     include_str!("../templates/compaction_summary_previous_section.md");
-const COMPACTION_SUMMARY_PREFIX: &str = include_str!("../templates/compaction_summary_prefix.md");
-const SIDE_BOUNDARY: &str = include_str!("../templates/side_boundary.md");
+pub(crate) const COMPACTION_SUMMARY_PREFIX: &str =
+    include_str!("../templates/compaction_summary_prefix.md");
+pub(crate) const SIDE_BOUNDARY: &str = include_str!("../templates/side_boundary.md");
 
 pub(crate) fn base_mode_default() -> &'static str {
     template_text(BASE_MODE_DEFAULT)
@@ -162,7 +170,7 @@ pub fn side_conversation_boundary_prompt() -> &'static str {
     template_text(SIDE_BOUNDARY)
 }
 
-fn selected_agent(
+pub(crate) fn selected_agent(
     plain_template: &'static str,
     with_instructions_template: &'static str,
     name: &str,
@@ -187,7 +195,7 @@ fn selected_agent(
     }
 }
 
-fn render(source: &'static str, variables: &[(&str, &str)]) -> String {
+pub(crate) fn render(source: &'static str, variables: &[(&str, &str)]) -> String {
     let source = template_text(source);
     let segments = parse_template(source);
     let values = variable_map(variables);
@@ -224,7 +232,7 @@ fn render(source: &'static str, variables: &[(&str, &str)]) -> String {
     rendered
 }
 
-fn template_text(source: &'static str) -> &'static str {
+pub(crate) fn template_text(source: &'static str) -> &'static str {
     let mut end = source.len();
     while end > 0 {
         let byte = source.as_bytes()[end - 1];
@@ -238,12 +246,12 @@ fn template_text(source: &'static str) -> &'static str {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Segment {
+pub(crate) enum Segment {
     Literal(String),
     Placeholder(String),
 }
 
-fn parse_template(source: &str) -> Vec<Segment> {
+pub(crate) fn parse_template(source: &str) -> Vec<Segment> {
     let mut segments = Vec::new();
     let mut literal_start = 0usize;
     let mut cursor = 0usize;
@@ -284,7 +292,7 @@ fn parse_template(source: &str) -> Vec<Segment> {
     segments
 }
 
-fn parse_placeholder(source: &str, start: usize) -> (String, usize) {
+pub(crate) fn parse_placeholder(source: &str, start: usize) -> (String, usize) {
     let content_start = start + 2;
     let Some(relative_end) = source[content_start..].find("}}") else {
         panic!("template placeholder starting at byte {start} is missing `}}`");
@@ -303,7 +311,7 @@ fn parse_placeholder(source: &str, start: usize) -> (String, usize) {
     (name.to_string(), content_end + 2)
 }
 
-fn push_literal(segments: &mut Vec<Segment>, literal: &str) {
+pub(crate) fn push_literal(segments: &mut Vec<Segment>, literal: &str) {
     if literal.is_empty() {
         return;
     }
@@ -314,7 +322,7 @@ fn push_literal(segments: &mut Vec<Segment>, literal: &str) {
     }
 }
 
-fn variable_map<'a>(variables: &'a [(&'a str, &'a str)]) -> BTreeMap<&'a str, &'a str> {
+pub(crate) fn variable_map<'a>(variables: &'a [(&'a str, &'a str)]) -> BTreeMap<&'a str, &'a str> {
     let mut values = BTreeMap::new();
     for (name, value) in variables {
         assert!(
@@ -326,7 +334,7 @@ fn variable_map<'a>(variables: &'a [(&'a str, &'a str)]) -> BTreeMap<&'a str, &'
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::{render, template_text};
 
     #[test]

@@ -1,6 +1,8 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[derive(Clone)]
 pub struct AbortSignal {
-    rx: watch::Receiver<bool>,
+    pub(crate) rx: watch::Receiver<bool>,
 }
 
 impl AbortSignal {

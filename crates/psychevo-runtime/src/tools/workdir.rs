@@ -1,7 +1,9 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[derive(Clone)]
 pub(crate) struct WorkdirTool {
-    workdir: PathBuf,
-    context: ToolRuntimeContext,
+    pub(crate) workdir: PathBuf,
+    pub(crate) context: ToolRuntimeContext,
 }
 
 impl WorkdirTool {
@@ -14,26 +16,26 @@ impl WorkdirTool {
         Self { workdir, context }
     }
 
-    fn task_id(&self) -> &str {
+    pub(crate) fn task_id(&self) -> &str {
         &self.context.task_id
     }
 
-    fn lsp_config(&self) -> &LspConfig {
+    pub(crate) fn lsp_config(&self) -> &LspConfig {
         &self.context.lsp
     }
 
-    fn workdir(&self) -> &Path {
+    pub(crate) fn workdir(&self) -> &Path {
         &self.workdir
     }
 
-    fn resolve_existing(&self, raw: &str) -> Result<PathBuf> {
+    pub(crate) fn resolve_existing(&self, raw: &str) -> Result<PathBuf> {
         let target = self.resolve_raw(raw);
         let canonical = target.canonicalize()?;
         self.ensure_contained(&canonical)?;
         Ok(canonical)
     }
 
-    fn resolve_write_target(&self, raw: &str) -> Result<(PathBuf, bool)> {
+    pub(crate) fn resolve_write_target(&self, raw: &str) -> Result<(PathBuf, bool)> {
         let target = self.resolve_raw(raw);
         if target.exists() {
             let canonical = target.canonicalize()?;
@@ -56,7 +58,7 @@ impl WorkdirTool {
         Ok((target, dirs_created))
     }
 
-    fn resolve_raw(&self, raw: &str) -> PathBuf {
+    pub(crate) fn resolve_raw(&self, raw: &str) -> PathBuf {
         let path = Path::new(raw);
         if path.is_absolute() {
             path.to_path_buf()
@@ -65,7 +67,7 @@ impl WorkdirTool {
         }
     }
 
-    fn ensure_contained(&self, path: &Path) -> Result<()> {
+    pub(crate) fn ensure_contained(&self, path: &Path) -> Result<()> {
         if path == self.workdir || path.starts_with(&self.workdir) {
             Ok(())
         } else {
@@ -76,7 +78,7 @@ impl WorkdirTool {
         }
     }
 
-    fn relative(&self, path: &Path) -> String {
+    pub(crate) fn relative(&self, path: &Path) -> String {
         path.strip_prefix(&self.workdir)
             .unwrap_or(path)
             .to_string_lossy()

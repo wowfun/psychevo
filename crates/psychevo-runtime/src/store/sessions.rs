@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 impl SqliteStore {
     pub fn create_session(&self, workdir: &Path) -> Result<String> {
         self.create_session_with_metadata(workdir, "smoke", "fake-coding-model", "fake", None)
@@ -68,7 +70,7 @@ impl SqliteStore {
         Ok(child_session)
     }
 
-    fn create_session_with_parent_and_metadata(
+    pub(crate) fn create_session_with_parent_and_metadata(
         &self,
         workdir: &Path,
         source: &str,
@@ -143,13 +145,13 @@ impl SqliteStore {
         self.list_sessions_for_workdir_with_sources_and_archive(&workdir, sources, true)
     }
 
-    fn list_sessions_for_workdir_with_sources_and_archive(
+    pub(crate) fn list_sessions_for_workdir_with_sources_and_archive(
         &self,
         workdir: &str,
         sources: &[&str],
         archived: bool,
     ) -> Result<Vec<SessionSummary>> {
-        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let mut stmt = conn.prepare(
             r#"
             SELECT id, source, workdir, model, provider, started_at_ms,
@@ -174,7 +176,7 @@ impl SqliteStore {
     }
 
     pub fn session_summary(&self, session_id: &str) -> Result<Option<SessionSummary>> {
-        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         Ok(conn
             .query_row(
                 r#"
@@ -191,7 +193,7 @@ impl SqliteStore {
     }
 
     pub fn session_metadata(&self, session_id: &str) -> Result<Option<Value>> {
-        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let metadata = conn
             .query_row(
                 "SELECT metadata_json FROM sessions WHERE id = ?1",
@@ -307,7 +309,8 @@ impl SqliteStore {
                 let mut stmt = conn.prepare(
                     "SELECT id FROM sessions WHERE workdir = ?1 AND source = ?2 ORDER BY id ASC",
                 )?;
-                let rows = stmt.query_map(params![&workdir, source], |row| row.get::<_, String>(0))?;
+                let rows =
+                    stmt.query_map(params![&workdir, source], |row| row.get::<_, String>(0))?;
                 let mut ids = Vec::new();
                 for row in rows {
                     ids.push(row?);

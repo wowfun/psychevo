@@ -113,7 +113,7 @@ pub(crate) async fn mcp_tool_bindings(
     (tools, warnings)
 }
 
-fn mcp_transport_kind(transport: &McpTransportInput) -> &'static str {
+pub(crate) fn mcp_transport_kind(transport: &McpTransportInput) -> &'static str {
     match transport {
         McpTransportInput::Stdio { .. } => "stdio",
         McpTransportInput::StreamableHttp { .. } => "streamable_http",
@@ -130,7 +130,7 @@ pub(crate) fn normalize_mcp_server_name(name: &str) -> String {
     sanitize_mcp_identifier(name, "server")
 }
 
-fn mcp_tool_visible_name(server_name: &str, tool_name: &str) -> String {
+pub(crate) fn mcp_tool_visible_name(server_name: &str, tool_name: &str) -> String {
     format!(
         "mcp__{}__{}",
         sanitize_mcp_identifier(server_name, "server"),
@@ -138,7 +138,7 @@ fn mcp_tool_visible_name(server_name: &str, tool_name: &str) -> String {
     )
 }
 
-fn sanitize_mcp_identifier(value: &str, fallback: &str) -> String {
+pub(crate) fn sanitize_mcp_identifier(value: &str, fallback: &str) -> String {
     let mut out = String::new();
     let mut previous_underscore = false;
     for ch in value.chars() {
@@ -165,7 +165,7 @@ fn sanitize_mcp_identifier(value: &str, fallback: &str) -> String {
     }
 }
 
-async fn connect_mcp_server(
+pub(crate) async fn connect_mcp_server(
     input: &McpServerInput,
     workdir: &Path,
 ) -> Result<RunningService<RoleClient, ()>, String> {
@@ -194,7 +194,7 @@ async fn connect_mcp_server(
     }
 }
 
-fn mcp_tool_description(
+pub(crate) fn mcp_tool_description(
     server_name: &str,
     raw_tool_name: &str,
     title: Option<&str>,
@@ -213,7 +213,7 @@ fn mcp_tool_description(
     out
 }
 
-fn mcp_warning(message: String) -> RunWarning {
+pub(crate) fn mcp_warning(message: String) -> RunWarning {
     RunWarning {
         kind: "mcp".to_string(),
         message,
@@ -222,18 +222,18 @@ fn mcp_warning(message: String) -> RunWarning {
     }
 }
 
-struct McpConnection {
-    peer: Peer<RoleClient>,
-    _service: Mutex<RunningService<RoleClient, ()>>,
+pub(crate) struct McpConnection {
+    pub(crate) peer: Peer<RoleClient>,
+    pub(crate) _service: Mutex<RunningService<RoleClient, ()>>,
 }
 
-struct McpToolBinding {
-    visible_name: String,
-    server_name: String,
-    raw_tool_name: String,
-    description: String,
-    parameters: Value,
-    connection: Arc<McpConnection>,
+pub(crate) struct McpToolBinding {
+    pub(crate) visible_name: String,
+    pub(crate) server_name: String,
+    pub(crate) raw_tool_name: String,
+    pub(crate) description: String,
+    pub(crate) parameters: Value,
+    pub(crate) connection: Arc<McpConnection>,
 }
 
 impl ToolBinding for McpToolBinding {
@@ -310,7 +310,11 @@ impl ToolBinding for McpToolBinding {
     }
 }
 
-fn mcp_tool_output(server_name: &str, raw_tool_name: &str, result: CallToolResult) -> ToolOutput {
+pub(crate) fn mcp_tool_output(
+    server_name: &str,
+    raw_tool_name: &str,
+    result: CallToolResult,
+) -> ToolOutput {
     let is_error = result.is_error.unwrap_or(false);
     let text_content = result
         .content
@@ -341,8 +345,8 @@ fn mcp_tool_output(server_name: &str, raw_tool_name: &str, result: CallToolResul
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) mod tests {
+    pub(crate) use super::*;
 
     #[test]
     fn normalizes_mcp_names_for_model_visible_tools() {

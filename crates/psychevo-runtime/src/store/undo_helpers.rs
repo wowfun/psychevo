@@ -1,4 +1,6 @@
-fn undo_target_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<UndoTarget> {
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) fn undo_target_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<UndoTarget> {
     let seq = row.get::<_, i64>(0)?;
     let message_json = row.get::<_, String>(1)?;
     let content_text = row.get::<_, Option<String>>(2)?;
@@ -13,7 +15,7 @@ fn undo_target_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<UndoTarget>
     })
 }
 
-fn undo_snapshot_from_metadata(value: Option<&str>) -> Option<String> {
+pub(crate) fn undo_snapshot_from_metadata(value: Option<&str>) -> Option<String> {
     let metadata = metadata_object(value).ok()?;
     metadata
         .get(MESSAGE_UNDO_METADATA_KEY)
@@ -24,7 +26,7 @@ fn undo_snapshot_from_metadata(value: Option<&str>) -> Option<String> {
         .filter(|value| !value.trim().is_empty())
 }
 
-fn user_prompt_from_message_json(value: &str) -> Option<String> {
+pub(crate) fn user_prompt_from_message_json(value: &str) -> Option<String> {
     let message = serde_json::from_str::<Message>(value).ok()?;
     let Message::User { content, .. } = message else {
         return None;
@@ -32,7 +34,10 @@ fn user_prompt_from_message_json(value: &str) -> Option<String> {
     Some(user_content_text(&content))
 }
 
-fn session_tool_call_count(conn: &Connection, session_id: &str) -> rusqlite::Result<i64> {
+pub(crate) fn session_tool_call_count(
+    conn: &Connection,
+    session_id: &str,
+) -> rusqlite::Result<i64> {
     let mut stmt =
         conn.prepare("SELECT tool_calls_json FROM messages WHERE session_id = ?1 AND tool_calls_json IS NOT NULL")?;
     let rows = stmt.query_map(params![session_id], |row| row.get::<_, String>(0))?;

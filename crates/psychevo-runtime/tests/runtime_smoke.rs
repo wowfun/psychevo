@@ -1,16 +1,17 @@
 use pretty_assertions::assert_eq;
 use psychevo_ai::Outcome;
-use psychevo_runtime::{SmokeControl, SmokeOptions, prune_context, run_smoke};
+use psychevo_runtime::{SmokeControl, SmokeOptions, StateRuntime, prune_context, run_smoke};
 use rusqlite::Connection;
 use tempfile::tempdir;
 
 #[tokio::test]
-async fn smoke_text_only_persists_session_and_messages() {
+pub(crate) async fn smoke_text_only_persists_session_and_messages() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = temp.path().join("work");
+    let state = StateRuntime::open(&db).expect("state runtime");
     let result = run_smoke(SmokeOptions {
-        db_path: db.clone(),
+        state,
         workdir: workdir.clone(),
         session: None,
         prompt: None,
@@ -47,12 +48,13 @@ async fn smoke_text_only_persists_session_and_messages() {
 }
 
 #[tokio::test]
-async fn smoke_tools_touch_only_smoke_files_and_resume_session() {
+pub(crate) async fn smoke_tools_touch_only_smoke_files_and_resume_session() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = temp.path().join("work");
+    let state = StateRuntime::open(&db).expect("state runtime");
     let first = run_smoke(SmokeOptions {
-        db_path: db.clone(),
+        state: state.clone(),
         workdir: workdir.clone(),
         session: None,
         prompt: Some("please read write edit exec_command".to_string()),
@@ -74,7 +76,7 @@ async fn smoke_tools_touch_only_smoke_files_and_resume_session() {
     );
 
     let second = run_smoke(SmokeOptions {
-        db_path: db.clone(),
+        state,
         workdir: workdir.clone(),
         session: Some(first.session_id.clone()),
         prompt: Some("plain followup".to_string()),
@@ -99,12 +101,13 @@ async fn smoke_tools_touch_only_smoke_files_and_resume_session() {
 }
 
 #[tokio::test]
-async fn reset_uses_manifest_and_preserves_unknown_files() {
+pub(crate) async fn reset_uses_manifest_and_preserves_unknown_files() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = temp.path().join("work");
+    let state = StateRuntime::open(&db).expect("state runtime");
     run_smoke(SmokeOptions {
-        db_path: db.clone(),
+        state: state.clone(),
         workdir: workdir.clone(),
         session: None,
         prompt: Some("write".to_string()),
@@ -117,7 +120,7 @@ async fn reset_uses_manifest_and_preserves_unknown_files() {
     let unknown = workdir.join(".psychevo-smoke/unknown.txt");
     std::fs::write(&unknown, "keep").expect("unknown");
     run_smoke(SmokeOptions {
-        db_path: db,
+        state,
         workdir: workdir.clone(),
         session: None,
         prompt: None,
@@ -132,7 +135,7 @@ async fn reset_uses_manifest_and_preserves_unknown_files() {
 }
 
 #[test]
-fn context_pruning_extends_to_preserve_tool_pairing() {
+pub(crate) fn context_pruning_extends_to_preserve_tool_pairing() {
     let assistant = psychevo_agent_core::Message::Assistant {
         content: vec![psychevo_agent_core::AssistantBlock::ToolCall(
             psychevo_agent_core::ToolCallBlock {
@@ -170,10 +173,11 @@ fn context_pruning_extends_to_preserve_tool_pairing() {
 }
 
 #[tokio::test]
-async fn smoke_control_modes_return_expected_outcomes() {
+pub(crate) async fn smoke_control_modes_return_expected_outcomes() {
     let temp = tempdir().expect("temp");
+    let stop_db = temp.path().join("stop.db");
     let stop = run_smoke(SmokeOptions {
-        db_path: temp.path().join("stop.db"),
+        state: StateRuntime::open(&stop_db).expect("state runtime"),
         workdir: temp.path().join("stop-work"),
         session: None,
         prompt: Some("read write".to_string()),
@@ -185,8 +189,9 @@ async fn smoke_control_modes_return_expected_outcomes() {
     .expect("stop");
     assert_eq!(stop.outcome, Outcome::Stopped);
 
+    let abort_db = temp.path().join("abort.db");
     let abort = run_smoke(SmokeOptions {
-        db_path: temp.path().join("abort.db"),
+        state: StateRuntime::open(&abort_db).expect("state runtime"),
         workdir: temp.path().join("abort-work"),
         session: None,
         prompt: Some("read".to_string()),

@@ -1,24 +1,26 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[derive(Clone)]
-struct ReadStamp {
-    mtime: Option<SystemTime>,
-    seq: u64,
-    partial: bool,
+pub(crate) struct ReadStamp {
+    pub(crate) mtime: Option<SystemTime>,
+    pub(crate) seq: u64,
+    pub(crate) partial: bool,
 }
 
-struct FileState {
-    reads: HashMap<String, HashMap<PathBuf, ReadStamp>>,
-    last_writer: HashMap<PathBuf, (String, u64)>,
-    seq: u64,
+pub(crate) struct FileState {
+    pub(crate) reads: HashMap<String, HashMap<PathBuf, ReadStamp>>,
+    pub(crate) last_writer: HashMap<PathBuf, (String, u64)>,
+    pub(crate) seq: u64,
 }
 
 impl FileState {
-    fn next_seq(&mut self) -> u64 {
+    pub(crate) fn next_seq(&mut self) -> u64 {
         self.seq = self.seq.saturating_add(1);
         self.seq
     }
 }
 
-static FILE_STATE: LazyLock<Mutex<FileState>> = LazyLock::new(|| {
+pub(crate) static FILE_STATE: LazyLock<Mutex<FileState>> = LazyLock::new(|| {
     Mutex::new(FileState {
         reads: HashMap::new(),
         last_writer: HashMap::new(),
@@ -26,11 +28,11 @@ static FILE_STATE: LazyLock<Mutex<FileState>> = LazyLock::new(|| {
     })
 });
 
-static PATH_LOCKS: LazyLock<(Mutex<HashSet<PathBuf>>, Condvar)> =
+pub(crate) static PATH_LOCKS: LazyLock<(Mutex<HashSet<PathBuf>>, Condvar)> =
     LazyLock::new(|| (Mutex::new(HashSet::new()), Condvar::new()));
 
 pub(crate) struct FilePathLocks {
-    paths: Vec<PathBuf>,
+    pub(crate) paths: Vec<PathBuf>,
 }
 
 impl Drop for FilePathLocks {
@@ -163,11 +165,13 @@ pub(crate) fn stale_file_warning(task_id: &str, path: &Path) -> Option<String> {
     ))
 }
 
-fn fs_mtime(path: &Path) -> Option<SystemTime> {
-    std::fs::metadata(path).and_then(|metadata| metadata.modified()).ok()
+pub(crate) fn fs_mtime(path: &Path) -> Option<SystemTime> {
+    std::fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
 }
 
-fn cap_map<V>(map: &mut HashMap<PathBuf, V>, max_len: usize) {
+pub(crate) fn cap_map<V>(map: &mut HashMap<PathBuf, V>, max_len: usize) {
     while map.len() > max_len {
         let Some(key) = map.keys().next().cloned() else {
             break;

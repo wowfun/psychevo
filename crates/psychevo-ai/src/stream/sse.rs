@@ -1,16 +1,18 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[derive(Debug)]
-struct SseParser {
-    buffer: Vec<u8>,
-    current_event: SseEvent,
-    saw_data: bool,
-    bom_checked: bool,
-    done_seen: bool,
+pub(crate) struct SseParser {
+    pub(crate) buffer: Vec<u8>,
+    pub(crate) current_event: SseEvent,
+    pub(crate) saw_data: bool,
+    pub(crate) bom_checked: bool,
+    pub(crate) done_seen: bool,
 }
 
 #[derive(Debug)]
-struct SseEvent {
-    event: String,
-    data: String,
+pub(crate) struct SseEvent {
+    pub(crate) event: String,
+    pub(crate) data: String,
 }
 
 impl Default for SseEvent {
@@ -23,7 +25,7 @@ impl Default for SseEvent {
 }
 
 impl SseParser {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             buffer: Vec::new(),
             current_event: SseEvent::default(),
@@ -33,14 +35,14 @@ impl SseParser {
         }
     }
 
-    fn push(&mut self, chunk: &[u8]) -> Result<Vec<ChatCompletionChunk>> {
+    pub(crate) fn push(&mut self, chunk: &[u8]) -> Result<Vec<ChatCompletionChunk>> {
         self.buffer.extend_from_slice(chunk);
         let mut events = Vec::new();
         self.drain_complete_lines(false, &mut events)?;
         Ok(events)
     }
 
-    fn finish(&mut self) -> Result<Vec<ChatCompletionChunk>> {
+    pub(crate) fn finish(&mut self) -> Result<Vec<ChatCompletionChunk>> {
         let mut events = Vec::new();
         self.drain_complete_lines(true, &mut events)?;
         if self.saw_data {
@@ -49,11 +51,11 @@ impl SseParser {
         Ok(events)
     }
 
-    fn done_seen(&self) -> bool {
+    pub(crate) fn done_seen(&self) -> bool {
         self.done_seen
     }
 
-    fn drain_complete_lines(
+    pub(crate) fn drain_complete_lines(
         &mut self,
         finish: bool,
         events: &mut Vec<ChatCompletionChunk>,
@@ -75,7 +77,7 @@ impl SseParser {
         Ok(())
     }
 
-    fn strip_bom_if_ready(&mut self, finish: bool) -> bool {
+    pub(crate) fn strip_bom_if_ready(&mut self, finish: bool) -> bool {
         if self.bom_checked {
             return true;
         }
@@ -94,7 +96,11 @@ impl SseParser {
         true
     }
 
-    fn process_line(&mut self, line: &str, events: &mut Vec<ChatCompletionChunk>) -> Result<()> {
+    pub(crate) fn process_line(
+        &mut self,
+        line: &str,
+        events: &mut Vec<ChatCompletionChunk>,
+    ) -> Result<()> {
         if line.is_empty() {
             if self.saw_data {
                 self.dispatch_current(events)?;
@@ -123,7 +129,7 @@ impl SseParser {
         Ok(())
     }
 
-    fn dispatch_current(&mut self, events: &mut Vec<ChatCompletionChunk>) -> Result<()> {
+    pub(crate) fn dispatch_current(&mut self, events: &mut Vec<ChatCompletionChunk>) -> Result<()> {
         let data = self.current_event.data.trim();
         if data.is_empty() {
             return Ok(());
@@ -146,7 +152,7 @@ impl SseParser {
     }
 }
 
-fn next_sse_line(buffer: &[u8], finish: bool) -> Option<(usize, usize)> {
+pub(crate) fn next_sse_line(buffer: &[u8], finish: bool) -> Option<(usize, usize)> {
     let pos = buffer
         .iter()
         .position(|byte| *byte == b'\n' || *byte == b'\r');

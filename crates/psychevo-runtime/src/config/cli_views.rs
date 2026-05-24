@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 pub fn config_show_value(options: &RunOptions, scope: ConfigScope) -> Result<Value> {
     let env_map = options
         .inherited_env
@@ -130,7 +132,7 @@ pub fn auth_status_value(options: &RunOptions, provider: Option<&str>) -> Result
     Ok(json!({ "providers": rows }))
 }
 
-fn config_document_value(
+pub(crate) fn config_document_value(
     scope: &str,
     path: Option<PathBuf>,
     sources: Vec<PathBuf>,
@@ -147,7 +149,7 @@ fn config_document_value(
     })
 }
 
-fn redact_sensitive_config(value: &mut Value) {
+pub(crate) fn redact_sensitive_config(value: &mut Value) {
     match value {
         Value::Object(object) => {
             for (key, value) in object {

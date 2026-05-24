@@ -6,9 +6,9 @@ use crate::error::{Error, Result};
 
 #[derive(Debug, Clone)]
 pub(crate) struct SnapshotStore {
-    root: PathBuf,
-    session_id: String,
-    workdir: PathBuf,
+    pub(crate) root: PathBuf,
+    pub(crate) session_id: String,
+    pub(crate) workdir: PathBuf,
 }
 
 impl SnapshotStore {
@@ -83,11 +83,11 @@ impl SnapshotStore {
         Ok(())
     }
 
-    fn git_dir(&self) -> PathBuf {
+    pub(crate) fn git_dir(&self) -> PathBuf {
         self.root.join("sessions").join(&self.session_id)
     }
 
-    fn is_git_worktree(&self) -> bool {
+    pub(crate) fn is_git_worktree(&self) -> bool {
         Command::new("git")
             .arg("-C")
             .arg(&self.workdir)
@@ -99,7 +99,7 @@ impl SnapshotStore {
             .unwrap_or(false)
     }
 
-    fn ensure_initialized(&self) -> Result<()> {
+    pub(crate) fn ensure_initialized(&self) -> Result<()> {
         let git_dir = self.git_dir();
         fs::create_dir_all(&git_dir)?;
         if git_dir.join("HEAD").exists() {
@@ -130,7 +130,7 @@ impl SnapshotStore {
         Ok(())
     }
 
-    fn git_snapshot<const N: usize>(&self, args: [&str; N]) -> Result<Output> {
+    pub(crate) fn git_snapshot<const N: usize>(&self, args: [&str; N]) -> Result<Output> {
         Ok(Command::new("git")
             .arg("--git-dir")
             .arg(self.git_dir())
@@ -141,7 +141,7 @@ impl SnapshotStore {
     }
 }
 
-fn remove_worktree_path(path: &Path) -> Result<()> {
+pub(crate) fn remove_worktree_path(path: &Path) -> Result<()> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),

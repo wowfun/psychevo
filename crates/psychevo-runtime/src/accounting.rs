@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use crate::types::{MessageAccounting, ModelCost, ModelCostTier, ModelMetadata};
 
-const CONTEXT_OVER_200K_THRESHOLD: u64 = 200_000;
+pub(crate) const CONTEXT_OVER_200K_THRESHOLD: u64 = 200_000;
 
 pub(crate) fn account_usage(
     usage: Option<&Value>,
@@ -74,7 +74,7 @@ pub(crate) fn account_usage(
     Some(accounting)
 }
 
-fn estimate_nanodollars(
+pub(crate) fn estimate_nanodollars(
     cost: &ModelCost,
     tier: Option<&ModelCostTier>,
     billable_input: u64,
@@ -102,7 +102,7 @@ fn estimate_nanodollars(
     Some(nanodollars.round() as i64)
 }
 
-fn priced_nanodollars(tokens: u64, price_per_million: Option<f64>) -> Option<f64> {
+pub(crate) fn priced_nanodollars(tokens: u64, price_per_million: Option<f64>) -> Option<f64> {
     if tokens == 0 {
         Some(0.0)
     } else {
@@ -110,7 +110,7 @@ fn priced_nanodollars(tokens: u64, price_per_million: Option<f64>) -> Option<f64
     }
 }
 
-fn usage_u64(value: &Value, keys: &[&str]) -> Option<u64> {
+pub(crate) fn usage_u64(value: &Value, keys: &[&str]) -> Option<u64> {
     keys.iter()
         .find_map(|key| value.get(*key).and_then(Value::as_u64))
 }

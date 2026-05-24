@@ -16,14 +16,13 @@ use crate::error::Result;
 use crate::events::PersistenceSink;
 use crate::messages::assistant_text;
 use crate::paths::canonical_workdir;
-use crate::store::SqliteStore;
 use crate::tools::coding_core_tools;
 use crate::types::{ModelMetadata, SmokeControl, SmokeOptions, SmokeResult};
 
-const SMOKE_DIR: &str = ".psychevo-smoke";
-const SMOKE_SUBJECT: &str = ".psychevo-smoke/subject.txt";
-const SMOKE_GENERATED: &str = ".psychevo-smoke/generated.txt";
-const SMOKE_MANIFEST: &str = ".psychevo-smoke/manifest.json";
+pub(crate) const SMOKE_DIR: &str = ".psychevo-smoke";
+pub(crate) const SMOKE_SUBJECT: &str = ".psychevo-smoke/subject.txt";
+pub(crate) const SMOKE_GENERATED: &str = ".psychevo-smoke/generated.txt";
+pub(crate) const SMOKE_MANIFEST: &str = ".psychevo-smoke/manifest.json";
 
 pub async fn run_smoke(options: SmokeOptions) -> Result<SmokeResult> {
     let workdir = canonical_workdir(&options.workdir)?;
@@ -32,7 +31,7 @@ pub async fn run_smoke(options: SmokeOptions) -> Result<SmokeResult> {
     }
     prepare_smoke_files(&workdir)?;
 
-    let store = SqliteStore::open(&options.db_path)?;
+    let store = options.state.store().clone();
     let session_id = if let Some(session_id) = options.session.clone() {
         store.resume_session(&session_id)?;
         session_id
@@ -111,7 +110,7 @@ pub async fn run_smoke(options: SmokeOptions) -> Result<SmokeResult> {
         session_id,
         outcome: completion.outcome,
         final_answer,
-        db_path: options.db_path,
+        db_path: options.state.db_path().to_path_buf(),
         workdir,
         tool_failures,
         expected_control_outcome,
@@ -119,11 +118,11 @@ pub async fn run_smoke(options: SmokeOptions) -> Result<SmokeResult> {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct SmokeManifest {
-    files: Vec<String>,
+pub(crate) struct SmokeManifest {
+    pub(crate) files: Vec<String>,
 }
 
-fn reset_smoke(workdir: &Path) -> Result<()> {
+pub(crate) fn reset_smoke(workdir: &Path) -> Result<()> {
     let manifest_path = workdir.join(SMOKE_MANIFEST);
     if !manifest_path.exists() {
         return Ok(());
@@ -141,7 +140,7 @@ fn reset_smoke(workdir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn prepare_smoke_files(workdir: &Path) -> Result<()> {
+pub(crate) fn prepare_smoke_files(workdir: &Path) -> Result<()> {
     let dir = workdir.join(SMOKE_DIR);
     fs::create_dir_all(&dir)?;
     fs::write(
@@ -151,7 +150,7 @@ fn prepare_smoke_files(workdir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn write_smoke_manifest(workdir: &Path) -> Result<()> {
+pub(crate) fn write_smoke_manifest(workdir: &Path) -> Result<()> {
     let manifest = SmokeManifest {
         files: vec![
             SMOKE_SUBJECT.to_string(),
@@ -166,7 +165,7 @@ fn write_smoke_manifest(workdir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn fake_scripts_for_prompt(prompt: &str) -> Vec<Vec<RawStreamEvent>> {
+pub(crate) fn fake_scripts_for_prompt(prompt: &str) -> Vec<Vec<RawStreamEvent>> {
     let tools = selected_tools(prompt);
     if tools.is_empty() {
         return vec![vec![
@@ -239,7 +238,7 @@ fn fake_scripts_for_prompt(prompt: &str) -> Vec<Vec<RawStreamEvent>> {
     ]
 }
 
-fn push_tool_call(
+pub(crate) fn push_tool_call(
     events: &mut Vec<RawStreamEvent>,
     call_index: usize,
     id: &str,
@@ -270,7 +269,7 @@ fn push_tool_call(
     });
 }
 
-fn selected_tools(prompt: &str) -> Vec<&'static str> {
+pub(crate) fn selected_tools(prompt: &str) -> Vec<&'static str> {
     let lower = prompt.to_lowercase();
     let mut found = ["read", "write", "edit", "exec_command", "write_stdin"]
         .into_iter()

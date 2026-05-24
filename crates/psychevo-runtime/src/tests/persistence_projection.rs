@@ -1,5 +1,7 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[tokio::test]
-async fn persistence_sink_streams_elapsed_metadata_for_assistant_message_end() {
+pub(crate) async fn persistence_sink_streams_elapsed_metadata_for_assistant_message_end() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
@@ -83,7 +85,7 @@ async fn persistence_sink_streams_elapsed_metadata_for_assistant_message_end() {
 }
 
 #[tokio::test]
-async fn persistence_sink_persists_selected_agent_on_assistant_message_end() {
+pub(crate) async fn persistence_sink_persists_selected_agent_on_assistant_message_end() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
@@ -142,7 +144,7 @@ async fn persistence_sink_persists_selected_agent_on_assistant_message_end() {
 }
 
 #[tokio::test]
-async fn persistence_sink_projects_and_persists_terminal_reason() {
+pub(crate) async fn persistence_sink_projects_and_persists_terminal_reason() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
@@ -225,7 +227,7 @@ async fn persistence_sink_projects_and_persists_terminal_reason() {
 }
 
 #[tokio::test]
-async fn persistence_sink_persists_assistant_reasoning_effort_metadata() {
+pub(crate) async fn persistence_sink_persists_assistant_reasoning_effort_metadata() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
@@ -296,7 +298,7 @@ async fn persistence_sink_persists_assistant_reasoning_effort_metadata() {
 }
 
 #[tokio::test]
-async fn persistence_sink_persists_tool_elapsed_metadata() {
+pub(crate) async fn persistence_sink_persists_tool_elapsed_metadata() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
@@ -394,7 +396,7 @@ async fn persistence_sink_persists_tool_elapsed_metadata() {
 }
 
 #[tokio::test]
-async fn persistence_sink_persists_prompt_context_evidence_once() {
+pub(crate) async fn persistence_sink_persists_prompt_context_evidence_once() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
@@ -470,7 +472,7 @@ async fn persistence_sink_persists_prompt_context_evidence_once() {
 }
 
 #[test]
-fn json_projection_hides_reasoning_unless_included() {
+pub(crate) fn json_projection_hides_reasoning_unless_included() {
     let message = Message::Assistant {
         content: vec![
             AssistantBlock::Reasoning {

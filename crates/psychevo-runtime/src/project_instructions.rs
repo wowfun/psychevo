@@ -6,7 +6,7 @@ use crate::error::{Error, Result};
 use crate::types::RunWarning;
 
 pub(crate) const PROJECT_INSTRUCTION_MAX_BYTES: usize = 32 * 1024;
-const TRUNCATION_MARKER: &str = "\n\n[truncated: project instruction budget exhausted]";
+pub(crate) const TRUNCATION_MARKER: &str = "\n\n[truncated: project instruction budget exhausted]";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProjectInstructionFragment {
@@ -26,19 +26,19 @@ pub(crate) struct ProjectInstructionLoad {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct InstructionCandidate {
-    source_name: &'static str,
-    relative_path: &'static str,
+pub(crate) struct InstructionCandidate {
+    pub(crate) source_name: &'static str,
+    pub(crate) relative_path: &'static str,
 }
 
 #[derive(Debug, Clone, Copy)]
-struct ClaudeCandidate {
-    relative_path: &'static str,
-    expected_agents_relative_path: &'static str,
-    suggestion: &'static str,
+pub(crate) struct ClaudeCandidate {
+    pub(crate) relative_path: &'static str,
+    pub(crate) expected_agents_relative_path: &'static str,
+    pub(crate) suggestion: &'static str,
 }
 
-const INSTRUCTION_CANDIDATES: &[InstructionCandidate] = &[
+pub(crate) const INSTRUCTION_CANDIDATES: &[InstructionCandidate] = &[
     InstructionCandidate {
         source_name: "AGENTS.md",
         relative_path: "AGENTS.md",
@@ -53,7 +53,7 @@ const INSTRUCTION_CANDIDATES: &[InstructionCandidate] = &[
     },
 ];
 
-const CLAUDE_CANDIDATES: &[ClaudeCandidate] = &[
+pub(crate) const CLAUDE_CANDIDATES: &[ClaudeCandidate] = &[
     ClaudeCandidate {
         relative_path: "CLAUDE.md",
         expected_agents_relative_path: "AGENTS.md",
@@ -81,7 +81,7 @@ pub(crate) fn load_project_instructions(workdir: &Path) -> Result<ProjectInstruc
     })
 }
 
-fn project_instruction_search_dirs(workdir: &Path) -> Vec<PathBuf> {
+pub(crate) fn project_instruction_search_dirs(workdir: &Path) -> Vec<PathBuf> {
     let Some(root) = project_root(workdir) else {
         return vec![workdir.to_path_buf()];
     };
@@ -101,14 +101,16 @@ fn project_instruction_search_dirs(workdir: &Path) -> Vec<PathBuf> {
     dirs
 }
 
-fn project_root(workdir: &Path) -> Option<PathBuf> {
+pub(crate) fn project_root(workdir: &Path) -> Option<PathBuf> {
     workdir
         .ancestors()
         .find(|ancestor| ancestor.join(".git").exists())
         .map(Path::to_path_buf)
 }
 
-fn load_instruction_fragments(search_dirs: &[PathBuf]) -> Result<Vec<ProjectInstructionFragment>> {
+pub(crate) fn load_instruction_fragments(
+    search_dirs: &[PathBuf],
+) -> Result<Vec<ProjectInstructionFragment>> {
     let mut fragments = Vec::new();
     let mut remaining = PROJECT_INSTRUCTION_MAX_BYTES;
 
@@ -146,7 +148,7 @@ fn load_instruction_fragments(search_dirs: &[PathBuf]) -> Result<Vec<ProjectInst
     Ok(fragments)
 }
 
-fn budget_content(text: &str, remaining: usize) -> (String, usize, bool) {
+pub(crate) fn budget_content(text: &str, remaining: usize) -> (String, usize, bool) {
     if text.len() <= remaining {
         return (text.to_string(), text.len(), false);
     }
@@ -156,7 +158,7 @@ fn budget_content(text: &str, remaining: usize) -> (String, usize, bool) {
     (content, end, true)
 }
 
-fn utf8_boundary_at_or_before(text: &str, max: usize) -> usize {
+pub(crate) fn utf8_boundary_at_or_before(text: &str, max: usize) -> usize {
     let mut end = max.min(text.len());
     while end > 0 && !text.is_char_boundary(end) {
         end -= 1;
@@ -164,7 +166,11 @@ fn utf8_boundary_at_or_before(text: &str, max: usize) -> usize {
     end
 }
 
-fn render_instruction_fragment(directory: &Path, content: &str, _truncated: bool) -> String {
+pub(crate) fn render_instruction_fragment(
+    directory: &Path,
+    content: &str,
+    _truncated: bool,
+) -> String {
     format!(
         "# AGENTS.md instructions for {}\n\n<INSTRUCTIONS>\n{}\n</INSTRUCTIONS>",
         directory.display(),
@@ -172,7 +178,7 @@ fn render_instruction_fragment(directory: &Path, content: &str, _truncated: bool
     )
 }
 
-fn claude_migration_warnings(search_dirs: &[PathBuf]) -> Result<Vec<RunWarning>> {
+pub(crate) fn claude_migration_warnings(search_dirs: &[PathBuf]) -> Result<Vec<RunWarning>> {
     let mut warnings = Vec::new();
     for dir in search_dirs {
         for candidate in CLAUDE_CANDIDATES {
@@ -198,7 +204,7 @@ fn claude_migration_warnings(search_dirs: &[PathBuf]) -> Result<Vec<RunWarning>>
     Ok(warnings)
 }
 
-fn read_optional_regular_file(path: &Path) -> Result<Option<Vec<u8>>> {
+pub(crate) fn read_optional_regular_file(path: &Path) -> Result<Option<Vec<u8>>> {
     match fs::metadata(path) {
         Ok(metadata) if metadata.is_file() => {}
         Ok(_) => return Ok(None),
@@ -218,7 +224,7 @@ fn read_optional_regular_file(path: &Path) -> Result<Option<Vec<u8>>> {
     })
 }
 
-fn is_regular_file(path: &Path) -> Result<bool> {
+pub(crate) fn is_regular_file(path: &Path) -> Result<bool> {
     match fs::metadata(path) {
         Ok(metadata) => Ok(metadata.is_file()),
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
@@ -230,8 +236,8 @@ fn is_regular_file(path: &Path) -> Result<bool> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) mod tests {
+    pub(crate) use super::*;
     use tempfile::tempdir;
 
     #[test]

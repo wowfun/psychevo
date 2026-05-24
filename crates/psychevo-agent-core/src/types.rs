@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("provider failed: {0}")]
@@ -352,7 +354,7 @@ impl ToolDisplaySpec {
     }
 }
 
-fn string_keys(keys: impl IntoIterator<Item = &'static str>) -> Vec<String> {
+pub(crate) fn string_keys(keys: impl IntoIterator<Item = &'static str>) -> Vec<String> {
     keys.into_iter().map(str::to_string).collect()
 }
 

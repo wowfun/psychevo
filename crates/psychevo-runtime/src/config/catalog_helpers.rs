@@ -1,10 +1,15 @@
-fn built_in_provider(provider: &str) -> Option<&'static BuiltInProvider> {
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) fn built_in_provider(provider: &str) -> Option<&'static BuiltInProvider> {
     BUILT_IN_PROVIDERS
         .iter()
         .find(|entry| entry.id == normalize_provider_id(provider))
 }
 
-fn catalog_provider_for(provider: &str, loaded: &LoadedRunConfig) -> Option<ModelCatalogProvider> {
+pub(crate) fn catalog_provider_for(
+    provider: &str,
+    loaded: &LoadedRunConfig,
+) -> Option<ModelCatalogProvider> {
     let provider = normalize_provider_id(provider);
     let config_entry = loaded.config.provider.get(&provider);
     let built_in = built_in_provider(&provider);
@@ -59,7 +64,10 @@ fn catalog_provider_for(provider: &str, loaded: &LoadedRunConfig) -> Option<Mode
     })
 }
 
-fn parse_model_catalog_response(provider: &str, value: &Value) -> Result<Vec<ModelCatalogEntry>> {
+pub(crate) fn parse_model_catalog_response(
+    provider: &str,
+    value: &Value,
+) -> Result<Vec<ModelCatalogEntry>> {
     let data = value
         .get("data")
         .and_then(Value::as_array)
@@ -78,7 +86,7 @@ fn parse_model_catalog_response(provider: &str, value: &Value) -> Result<Vec<Mod
                 metadata_from_models_dev_model(provider.to_string(), entry.clone(), "provider");
             metadata = merge_model_metadata(metadata, endpoint_metadata);
             ModelCatalogEntry {
-            id: id.to_string(),
+                id: id.to_string(),
                 context_limit: metadata.context_limit(),
                 metadata,
             }
@@ -88,7 +96,7 @@ fn parse_model_catalog_response(provider: &str, value: &Value) -> Result<Vec<Mod
     Ok(models)
 }
 
-fn provider_base_url(
+pub(crate) fn provider_base_url(
     provider: &str,
     config_entry: Option<&ConfigProviderEntry>,
     env_map: &BTreeMap<String, String>,
@@ -104,7 +112,7 @@ fn provider_base_url(
     ])
 }
 
-fn truncate_error(value: &str) -> String {
+pub(crate) fn truncate_error(value: &str) -> String {
     let trimmed = value.trim().replace(['\r', '\n', '\t'], " ");
     if trimmed.chars().count() <= 160 {
         trimmed
@@ -115,7 +123,7 @@ fn truncate_error(value: &str) -> String {
     }
 }
 
-fn normalize_provider_id(provider: &str) -> String {
+pub(crate) fn normalize_provider_id(provider: &str) -> String {
     let key = provider.trim().to_lowercase();
     match key.as_str() {
         "z.ai" | "z-ai" | "glm" => "zai".to_string(),
@@ -127,7 +135,7 @@ fn normalize_provider_id(provider: &str) -> String {
     }
 }
 
-fn first_string(values: impl IntoIterator<Item = Option<String>>) -> Option<String> {
+pub(crate) fn first_string(values: impl IntoIterator<Item = Option<String>>) -> Option<String> {
     values
         .into_iter()
         .flatten()
@@ -135,7 +143,7 @@ fn first_string(values: impl IntoIterator<Item = Option<String>>) -> Option<Stri
         .find(|value| !value.is_empty())
 }
 
-fn infer_provider_for_model(config: &RunConfig, model: &str) -> Option<String> {
+pub(crate) fn infer_provider_for_model(config: &RunConfig, model: &str) -> Option<String> {
     let matches = config
         .provider
         .iter()
@@ -146,12 +154,12 @@ fn infer_provider_for_model(config: &RunConfig, model: &str) -> Option<String> {
     (matches.len() == 1).then(|| matches[0].clone())
 }
 
-fn unique_config_model(entry: Option<&ConfigProviderEntry>) -> Option<String> {
+pub(crate) fn unique_config_model(entry: Option<&ConfigProviderEntry>) -> Option<String> {
     let entry = entry?;
     (entry.models.len() == 1).then(|| entry.models.keys().next().expect("one model").clone())
 }
 
-fn config_model_entry<'a>(
+pub(crate) fn config_model_entry<'a>(
     entry: Option<&'a ConfigProviderEntry>,
     model: &str,
 ) -> Option<&'a ConfigModelEntry> {

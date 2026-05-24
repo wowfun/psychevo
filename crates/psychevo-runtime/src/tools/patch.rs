@@ -1,16 +1,16 @@
 #[derive(Debug)]
-struct PatchFile {
-    path: String,
-    hunks: Vec<PatchHunk>,
+pub(crate) struct PatchFile {
+    pub(crate) path: String,
+    pub(crate) hunks: Vec<PatchHunk>,
 }
 
 #[derive(Debug)]
-struct PatchHunk {
-    old_lines: Vec<String>,
-    new_lines: Vec<String>,
+pub(crate) struct PatchHunk {
+    pub(crate) old_lines: Vec<String>,
+    pub(crate) new_lines: Vec<String>,
 }
 
-fn parse_unified_patch(patch: &str) -> Result<Vec<PatchFile>> {
+pub(crate) fn parse_unified_patch(patch: &str) -> Result<Vec<PatchFile>> {
     let mut files = Vec::new();
     let mut lines = patch.lines().peekable();
     while let Some(line) = lines.next() {
@@ -77,14 +77,14 @@ fn parse_unified_patch(patch: &str) -> Result<Vec<PatchFile>> {
     Ok(files)
 }
 
-fn strip_diff_prefix(path: &str) -> String {
+pub(crate) fn strip_diff_prefix(path: &str) -> String {
     path.strip_prefix("a/")
         .or_else(|| path.strip_prefix("b/"))
         .unwrap_or(path)
         .to_string()
 }
 
-fn find_unique_subslice(lines: &[String], needle: &[String]) -> Option<usize> {
+pub(crate) fn find_unique_subslice(lines: &[String], needle: &[String]) -> Option<usize> {
     let mut found = None;
     for idx in 0..=lines.len().saturating_sub(needle.len()) {
         if lines[idx..idx + needle.len()] == *needle {

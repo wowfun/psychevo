@@ -36,20 +36,20 @@ pub(crate) struct PromptPrefixRecordInput<'a> {
     pub(crate) metadata: Option<Value>,
 }
 
-struct PrefixSlotInput {
-    slot: String,
-    tier: String,
-    semantic_role: String,
-    provider_role: String,
-    order: usize,
-    content: String,
-    source_kind: Option<String>,
-    source_name: Option<String>,
-    source_path: Option<String>,
+pub(crate) struct PrefixSlotInput {
+    pub(crate) slot: String,
+    pub(crate) tier: String,
+    pub(crate) semantic_role: String,
+    pub(crate) provider_role: String,
+    pub(crate) order: usize,
+    pub(crate) content: String,
+    pub(crate) source_kind: Option<String>,
+    pub(crate) source_name: Option<String>,
+    pub(crate) source_path: Option<String>,
 }
 
 impl PrefixSlotInput {
-    fn new(
+    pub(crate) fn new(
         slot: impl Into<String>,
         tier: impl Into<String>,
         semantic_role: impl Into<String>,
@@ -70,7 +70,7 @@ impl PrefixSlotInput {
         }
     }
 
-    fn source(
+    pub(crate) fn source(
         mut self,
         source_kind: impl Into<String>,
         source_name: impl Into<String>,
@@ -486,7 +486,7 @@ pub(crate) fn stable_hash_hex(text: &str) -> String {
     format!("{hash:016x}")
 }
 
-fn format_project_instruction_prompt(fragment: &ProjectInstructionFragment) -> String {
+pub(crate) fn format_project_instruction_prompt(fragment: &ProjectInstructionFragment) -> String {
     prompt_templates::project_context(&fragment.content)
 }
 
@@ -498,7 +498,7 @@ pub(crate) fn developer_provider_role(capabilities: &ModelCapabilities) -> &'sta
     }
 }
 
-fn prefix_slot(input: PrefixSlotInput) -> PromptPrefixSlotRecord {
+pub(crate) fn prefix_slot(input: PrefixSlotInput) -> PromptPrefixSlotRecord {
     let content = input.content;
     PromptPrefixSlotRecord {
         slot: input.slot,
@@ -514,7 +514,7 @@ fn prefix_slot(input: PrefixSlotInput) -> PromptPrefixSlotRecord {
     }
 }
 
-fn turn_instruction(
+pub(crate) fn turn_instruction(
     slot: impl Into<String>,
     semantic_role: impl Into<String>,
     provider_role: impl Into<String>,
@@ -538,7 +538,7 @@ fn turn_instruction(
     }
 }
 
-fn instruction_from_slot(slot: &PromptPrefixSlotRecord) -> PromptInstruction {
+pub(crate) fn instruction_from_slot(slot: &PromptPrefixSlotRecord) -> PromptInstruction {
     PromptInstruction {
         slot: slot.slot.clone(),
         tier: slot.tier.clone(),
@@ -553,6 +553,6 @@ fn instruction_from_slot(slot: &PromptPrefixSlotRecord) -> PromptInstruction {
     }
 }
 
-fn prefix_hash(slots: &[PromptPrefixSlotRecord]) -> String {
+pub(crate) fn prefix_hash(slots: &[PromptPrefixSlotRecord]) -> String {
     stable_hash_hex(&serde_json::to_string(slots).unwrap_or_default())
 }

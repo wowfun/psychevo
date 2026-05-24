@@ -1,4 +1,6 @@
-fn resolve_config_path(
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) fn resolve_config_path(
     options: &RunOptions,
     env_map: &BTreeMap<String, String>,
 ) -> Result<Option<PathBuf>> {
@@ -13,7 +15,7 @@ fn resolve_config_path(
         .transpose()
 }
 
-fn resolve_psychevo_home(env_map: &BTreeMap<String, String>) -> Result<PathBuf> {
+pub(crate) fn resolve_psychevo_home(env_map: &BTreeMap<String, String>) -> Result<PathBuf> {
     if let Some(value) = env_map
         .get("PSYCHEVO_HOME")
         .map(|value| value.trim())
@@ -25,7 +27,10 @@ fn resolve_psychevo_home(env_map: &BTreeMap<String, String>) -> Result<PathBuf> 
     }
 }
 
-fn resolve_explicit_path(path: &Path, env_map: &BTreeMap<String, String>) -> Result<PathBuf> {
+pub(crate) fn resolve_explicit_path(
+    path: &Path,
+    env_map: &BTreeMap<String, String>,
+) -> Result<PathBuf> {
     let expanded = expand_tilde(path, env_map)?;
     if expanded.is_absolute() {
         Ok(expanded)
@@ -34,7 +39,7 @@ fn resolve_explicit_path(path: &Path, env_map: &BTreeMap<String, String>) -> Res
     }
 }
 
-fn expand_tilde(path: &Path, env_map: &BTreeMap<String, String>) -> Result<PathBuf> {
+pub(crate) fn expand_tilde(path: &Path, env_map: &BTreeMap<String, String>) -> Result<PathBuf> {
     let raw = path.to_string_lossy();
     if raw == "~" {
         return home_path(env_map);
@@ -45,7 +50,7 @@ fn expand_tilde(path: &Path, env_map: &BTreeMap<String, String>) -> Result<PathB
     Ok(path.to_path_buf())
 }
 
-fn home_path(env_map: &BTreeMap<String, String>) -> Result<PathBuf> {
+pub(crate) fn home_path(env_map: &BTreeMap<String, String>) -> Result<PathBuf> {
     env_map
         .get("HOME")
         .map(|value| value.trim())
@@ -87,7 +92,7 @@ pub(crate) fn write_toml_config_file(path: &Path, value: &Value) -> Result<()> {
     Ok(())
 }
 
-fn toml_config_string(value: &Value) -> Result<String> {
+pub(crate) fn toml_config_string(value: &Value) -> Result<String> {
     let toml_value = json_to_toml_value(value)?;
     let mut text = toml::to_string_pretty(&toml_value)?;
     if !text.ends_with('\n') {
@@ -96,7 +101,7 @@ fn toml_config_string(value: &Value) -> Result<String> {
     Ok(text)
 }
 
-fn json_to_toml_value(value: &Value) -> Result<toml::Value> {
+pub(crate) fn json_to_toml_value(value: &Value) -> Result<toml::Value> {
     match value {
         Value::Null => Err(Error::Config(
             "TOML config does not support null values".to_string(),
@@ -106,9 +111,8 @@ fn json_to_toml_value(value: &Value) -> Result<toml::Value> {
             if let Some(value) = value.as_i64() {
                 Ok(toml::Value::Integer(value))
             } else if let Some(value) = value.as_u64() {
-                let value = i64::try_from(value).map_err(|_| {
-                    Error::Config("TOML config integer exceeds i64".to_string())
-                })?;
+                let value = i64::try_from(value)
+                    .map_err(|_| Error::Config("TOML config integer exceeds i64".to_string()))?;
                 Ok(toml::Value::Integer(value))
             } else if let Some(value) = value.as_f64() {
                 Ok(toml::Value::Float(value))
@@ -137,7 +141,7 @@ fn json_to_toml_value(value: &Value) -> Result<toml::Value> {
     }
 }
 
-fn deep_merge(base: &mut Value, overlay: Value) {
+pub(crate) fn deep_merge(base: &mut Value, overlay: Value) {
     match (base, overlay) {
         (Value::Object(base), Value::Object(overlay)) => {
             for (key, value) in overlay {
@@ -152,7 +156,7 @@ fn deep_merge(base: &mut Value, overlay: Value) {
     }
 }
 
-fn load_dotenv_file(path: &Path, env_map: &mut BTreeMap<String, String>) -> Result<()> {
+pub(crate) fn load_dotenv_file(path: &Path, env_map: &mut BTreeMap<String, String>) -> Result<()> {
     if !path.exists() {
         return Ok(());
     }
@@ -174,13 +178,13 @@ fn load_dotenv_file(path: &Path, env_map: &mut BTreeMap<String, String>) -> Resu
     Ok(())
 }
 
-fn valid_env_name(name: &str) -> bool {
+pub(crate) fn valid_env_name(name: &str) -> bool {
     let mut chars = name.chars();
     matches!(chars.next(), Some('_' | 'A'..='Z' | 'a'..='z'))
         && chars.all(|ch| matches!(ch, '_' | 'A'..='Z' | 'a'..='z' | '0'..='9'))
 }
 
-fn strip_env_quotes(value: &str) -> &str {
+pub(crate) fn strip_env_quotes(value: &str) -> &str {
     if value.len() >= 2
         && ((value.starts_with('"') && value.ends_with('"'))
             || (value.starts_with('\'') && value.ends_with('\'')))

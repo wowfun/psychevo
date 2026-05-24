@@ -1,9 +1,11 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 impl SqliteStore {
     pub fn load_session_prompt_prefix(
         &self,
         session_id: &str,
     ) -> Result<Option<PromptPrefixRecord>> {
-        let conn = self.conn.lock().expect("sqlite lock poisoned");
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         conn.query_row(
             r#"
             SELECT session_id, version, created_at_ms, provider, model,
@@ -24,7 +26,7 @@ impl SqliteStore {
         mut record: PromptPrefixRecord,
     ) -> Result<PromptPrefixRecord> {
         let next_version = {
-            let conn = self.conn.lock().expect("sqlite lock poisoned");
+            let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
             conn.query_row(
                 "SELECT version FROM session_prompt_prefixes WHERE session_id = ?1",
                 params![&record.session_id],
@@ -79,14 +81,12 @@ impl SqliteStore {
     }
 }
 
-fn prompt_prefix_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PromptPrefixRecord> {
+pub(crate) fn prompt_prefix_record_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<PromptPrefixRecord> {
     let slots_json: String = row.get(8)?;
     let slots = serde_json::from_str(&slots_json).map_err(|err| {
-        rusqlite::Error::FromSqlConversionFailure(
-            8,
-            rusqlite::types::Type::Text,
-            Box::new(err),
-        )
+        rusqlite::Error::FromSqlConversionFailure(8, rusqlite::types::Type::Text, Box::new(err))
     })?;
     let metadata_json: Option<String> = row.get(9)?;
     let metadata = metadata_json
@@ -94,11 +94,7 @@ fn prompt_prefix_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Pr
         .map(serde_json::from_str)
         .transpose()
         .map_err(|err| {
-            rusqlite::Error::FromSqlConversionFailure(
-                9,
-                rusqlite::types::Type::Text,
-                Box::new(err),
-            )
+            rusqlite::Error::FromSqlConversionFailure(9, rusqlite::types::Type::Text, Box::new(err))
         })?;
     Ok(PromptPrefixRecord {
         session_id: row.get(0)?,

@@ -1,7 +1,9 @@
-struct ReadTool(WorkdirTool);
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) struct ReadTool(WorkdirTool);
 
 impl ReadTool {
-    fn new(workdir: PathBuf, context: ToolRuntimeContext) -> Self {
+    pub(crate) fn new(workdir: PathBuf, context: ToolRuntimeContext) -> Self {
         Self(WorkdirTool::with_context(workdir, context))
     }
 }
@@ -60,7 +62,7 @@ impl ToolBinding for ReadTool {
     }
 }
 
-fn read_tool_output(tool: WorkdirTool, args: Value) -> ToolOutput {
+pub(crate) fn read_tool_output(tool: WorkdirTool, args: Value) -> ToolOutput {
     match read_tool_impl(tool, args) {
         Ok(value) if value_reports_error(&value) => ToolOutput {
             json: value,
@@ -73,18 +75,18 @@ fn read_tool_output(tool: WorkdirTool, args: Value) -> ToolOutput {
     }
 }
 
-fn value_reports_error(value: &Value) -> bool {
+pub(crate) fn value_reports_error(value: &Value) -> bool {
     value
         .get("error")
         .and_then(Value::as_str)
         .is_some_and(|error| !error.is_empty())
 }
 
-fn read_tool_impl(tool: WorkdirTool, args: Value) -> Result<Value> {
+pub(crate) fn read_tool_impl(tool: WorkdirTool, args: Value) -> Result<Value> {
     let path = required_string(&args, "path")?;
     let offset = optional_i64(&args, "offset")?.unwrap_or(1).max(1) as usize;
-    let limit = optional_i64(&args, "limit")?
-        .map(|limit| limit.clamp(1, READ_MAX_LINES as i64) as usize);
+    let limit =
+        optional_i64(&args, "limit")?.map(|limit| limit.clamp(1, READ_MAX_LINES as i64) as usize);
     let target = match tool.resolve_existing(path) {
         Ok(target) => target,
         Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => {
@@ -119,7 +121,11 @@ fn read_tool_impl(tool: WorkdirTool, args: Value) -> Result<Value> {
     } else {
         None
     };
-    record_file_read(tool.task_id(), &target, offset > 1 || truncated_by.is_some());
+    record_file_read(
+        tool.task_id(),
+        &target,
+        offset > 1 || truncated_by.is_some(),
+    );
     let next_offset = if truncated_by.is_some() {
         if truncated.lines > 0 {
             Some(offset + truncated.lines)
@@ -161,7 +167,7 @@ fn read_tool_impl(tool: WorkdirTool, args: Value) -> Result<Value> {
     }))
 }
 
-fn read_hint(
+pub(crate) fn read_hint(
     offset: usize,
     total_lines: usize,
     shown_start_line: Option<usize>,
@@ -189,7 +195,7 @@ fn read_hint(
     }
 }
 
-fn missing_read_result(tool: &WorkdirTool, path: &str) -> Value {
+pub(crate) fn missing_read_result(tool: &WorkdirTool, path: &str) -> Value {
     json!({
         "path": path,
         "error": format!("file not found: {path}"),
@@ -197,7 +203,7 @@ fn missing_read_result(tool: &WorkdirTool, path: &str) -> Value {
     })
 }
 
-fn similar_files(tool: &WorkdirTool, path: &str) -> Vec<String> {
+pub(crate) fn similar_files(tool: &WorkdirTool, path: &str) -> Vec<String> {
     let target = tool.resolve_raw(path);
     let Some(parent) = target.parent() else {
         return Vec::new();
@@ -208,7 +214,10 @@ fn similar_files(tool: &WorkdirTool, path: &str) -> Vec<String> {
     if tool.ensure_contained(&parent).is_err() {
         return Vec::new();
     }
-    let Some(filename) = target.file_name().map(|name| name.to_string_lossy().to_string()) else {
+    let Some(filename) = target
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+    else {
         return Vec::new();
     };
     let Ok(entries) = fs::read_dir(parent) else {
@@ -230,14 +239,10 @@ fn similar_files(tool: &WorkdirTool, path: &str) -> Vec<String> {
         }
     }
     scored.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
-    scored
-        .into_iter()
-        .take(5)
-        .map(|(_, path)| path)
-        .collect()
+    scored.into_iter().take(5).map(|(_, path)| path).collect()
 }
 
-fn similar_file_score(query: &str, candidate: &str) -> usize {
+pub(crate) fn similar_file_score(query: &str, candidate: &str) -> usize {
     if query.is_empty() || candidate.is_empty() {
         return 0;
     }
@@ -287,8 +292,8 @@ fn similar_file_score(query: &str, candidate: &str) -> usize {
 }
 
 #[cfg(test)]
-mod read_tool_tests {
-    use super::*;
+pub(crate) mod read_tool_tests {
+    pub(crate) use super::*;
     use psychevo_agent_core::ToolBinding;
     use serde_json::{Value, json};
     use std::fs;
@@ -325,7 +330,10 @@ mod read_tool_tests {
         assert_eq!(parameters["properties"]["offset"]["default"], 1);
         assert_eq!(parameters["properties"]["offset"]["minimum"], 1);
         assert_eq!(parameters["properties"]["limit"]["minimum"], 1);
-        assert_eq!(parameters["properties"]["limit"]["maximum"], json!(READ_MAX_LINES));
+        assert_eq!(
+            parameters["properties"]["limit"]["maximum"],
+            json!(READ_MAX_LINES)
+        );
     }
 
     #[test]
@@ -349,8 +357,11 @@ mod read_tool_tests {
     #[test]
     fn read_tool_clamps_high_limit() {
         let temp = tempdir().expect("temp");
-        fs::write(temp.path().join("large.txt"), numbered_lines(READ_MAX_LINES + 5))
-            .expect("write");
+        fs::write(
+            temp.path().join("large.txt"),
+            numbered_lines(READ_MAX_LINES + 5),
+        )
+        .expect("write");
 
         let value = read_tool_impl(
             workdir_tool(temp.path()),
@@ -367,11 +378,14 @@ mod read_tool_tests {
     #[test]
     fn read_tool_reports_line_safety_truncation() {
         let temp = tempdir().expect("temp");
-        fs::write(temp.path().join("large.txt"), numbered_lines(READ_MAX_LINES + 5))
-            .expect("write");
+        fs::write(
+            temp.path().join("large.txt"),
+            numbered_lines(READ_MAX_LINES + 5),
+        )
+        .expect("write");
 
-        let value = read_tool_impl(workdir_tool(temp.path()), json!({"path": "large.txt"}))
-            .expect("read");
+        let value =
+            read_tool_impl(workdir_tool(temp.path()), json!({"path": "large.txt"})).expect("read");
 
         assert_eq!(value["output_lines"], json!(READ_MAX_LINES));
         assert_eq!(value["shown_start_line"], 1);
@@ -410,11 +424,8 @@ mod read_tool_tests {
         let content = format!("{}\nsmall", "x".repeat(READ_MAX_BYTES + 1));
         fs::write(temp.path().join("long-line.txt"), content).expect("write");
 
-        let value = read_tool_impl(
-            workdir_tool(temp.path()),
-            json!({"path": "long-line.txt"}),
-        )
-        .expect("read");
+        let value = read_tool_impl(workdir_tool(temp.path()), json!({"path": "long-line.txt"}))
+            .expect("read");
 
         assert_eq!(value["content"], "");
         assert_eq!(value["output_lines"], 0);
@@ -435,8 +446,15 @@ mod read_tool_tests {
         let output = read_tool_output(workdir_tool(temp.path()), json!({"path": "config.yml"}));
 
         assert!(output.is_error);
-        assert!(output.json["error"].as_str().expect("error").contains("config.yml"));
-        let similar = output.json["similar_files"].as_array().expect("similar files");
+        assert!(
+            output.json["error"]
+                .as_str()
+                .expect("error")
+                .contains("config.yml")
+        );
+        let similar = output.json["similar_files"]
+            .as_array()
+            .expect("similar files");
         assert!(similar.len() <= 5);
         assert!(similar.iter().any(|path| path == "config.yaml"));
         assert!(similar.iter().any(|path| path == "config.toml"));

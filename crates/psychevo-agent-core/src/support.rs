@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 pub fn user_text_message(text: impl Into<String>) -> Message {
     Message::User {
         content: vec![UserContentBlock::text(text)],
@@ -12,7 +14,7 @@ pub fn now_ms() -> i64 {
         .as_millis() as i64
 }
 
-fn duration_ms_u64(duration: Duration) -> u64 {
+pub(crate) fn duration_ms_u64(duration: Duration) -> u64 {
     duration.as_millis().min(u128::from(u64::MAX)) as u64
 }
 

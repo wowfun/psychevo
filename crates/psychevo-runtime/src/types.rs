@@ -14,6 +14,7 @@ use serde_json::Value;
 use tokio::sync::oneshot;
 
 use crate::skills::SelectedSkill;
+use crate::state_runtime::StateRuntime;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SmokeControl {
@@ -25,7 +26,7 @@ pub enum SmokeControl {
 
 #[derive(Debug, Clone)]
 pub struct SmokeOptions {
-    pub db_path: PathBuf,
+    pub state: StateRuntime,
     pub workdir: PathBuf,
     pub session: Option<String>,
     pub prompt: Option<String>,
@@ -47,7 +48,7 @@ pub struct SmokeResult {
 
 #[derive(Debug, Clone)]
 pub struct RunOptions {
-    pub db_path: PathBuf,
+    pub state: StateRuntime,
     pub workdir: PathBuf,
     pub snapshot_root: Option<PathBuf>,
     pub session: Option<String>,
@@ -76,7 +77,7 @@ pub struct RunOptions {
 
 #[derive(Debug, Clone)]
 pub struct AgentSpawnOptions {
-    pub db_path: PathBuf,
+    pub state: StateRuntime,
     pub workdir: PathBuf,
     pub parent_session: Option<String>,
     pub prompt: String,
@@ -374,7 +375,7 @@ pub struct RunResult {
 
 #[derive(Debug, Clone)]
 pub struct ReloadContextOptions {
-    pub db_path: PathBuf,
+    pub state: StateRuntime,
     pub session: String,
     pub config_path: Option<PathBuf>,
     pub mode: Option<RunMode>,
@@ -424,7 +425,7 @@ pub struct UserShellOptions {
 
 #[derive(Debug, Clone)]
 pub struct UserShellContextOptions {
-    pub db_path: PathBuf,
+    pub state: StateRuntime,
     pub session: Option<String>,
     pub continue_latest: bool,
     pub source: String,
@@ -438,7 +439,7 @@ pub struct UserShellContextOptions {
 
 #[derive(Debug, Clone)]
 pub struct StatsOptions {
-    pub db_path: PathBuf,
+    pub state: StateRuntime,
     pub workdir: PathBuf,
     pub all: bool,
     pub days: Option<u64>,
@@ -458,7 +459,7 @@ pub struct UserShellResult {
 
 #[derive(Debug, Clone)]
 pub struct SessionUndoOptions {
-    pub db_path: PathBuf,
+    pub state: StateRuntime,
     pub workdir: PathBuf,
     pub snapshot_root: PathBuf,
     pub session_id: String,
@@ -598,7 +599,7 @@ pub struct ModelLimits {
 }
 
 impl ModelLimits {
-    fn public_json(&self) -> Value {
+    pub(crate) fn public_json(&self) -> Value {
         let mut object = serde_json::Map::new();
         if let Some(value) = self.context {
             object.insert("context".to_string(), Value::from(value));
@@ -624,7 +625,7 @@ pub struct ModelCost {
 }
 
 impl ModelCost {
-    fn public_json(&self) -> Value {
+    pub(crate) fn public_json(&self) -> Value {
         let mut object = serde_json::Map::new();
         if let Some(value) = self.input {
             object.insert("input".to_string(), Value::from(value));
@@ -657,7 +658,7 @@ pub struct ModelCostTier {
 }
 
 impl ModelCostTier {
-    fn public_json(&self) -> Value {
+    pub(crate) fn public_json(&self) -> Value {
         let mut object = serde_json::Map::new();
         if let Some(value) = self.input {
             object.insert("input".to_string(), Value::from(value));
@@ -689,7 +690,7 @@ pub struct ModelCapabilities {
 }
 
 impl ModelCapabilities {
-    fn public_json(&self) -> Value {
+    pub(crate) fn public_json(&self) -> Value {
         let mut object = serde_json::Map::new();
         if let Some(value) = self.reasoning {
             object.insert("reasoning".to_string(), Value::Bool(value));
@@ -893,7 +894,7 @@ pub struct ClarifyResolvedEvent {
 
 #[derive(Debug, Default)]
 pub(crate) struct ClarifyControl {
-    pending: Mutex<HashMap<String, oneshot::Sender<ClarifyResult>>>,
+    pub(crate) pending: Mutex<HashMap<String, oneshot::Sender<ClarifyResult>>>,
 }
 
 impl ClarifyControl {

@@ -1,10 +1,12 @@
-async fn emit(sink: &Arc<dyn EventSink>, event: AgentEvent) -> Result<()> {
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) async fn emit(sink: &Arc<dyn EventSink>, event: AgentEvent) -> Result<()> {
     sink.emit(event)
         .await
         .map_err(|err| Error::EventSink(err.to_string()))
 }
 
-fn display_spec_for_tool(request: &AgentLoopRequest, name: &str) -> ToolDisplaySpec {
+pub(crate) fn display_spec_for_tool(request: &AgentLoopRequest, name: &str) -> ToolDisplaySpec {
     request
         .tools
         .iter()
@@ -13,7 +15,7 @@ fn display_spec_for_tool(request: &AgentLoopRequest, name: &str) -> ToolDisplayS
         .unwrap_or_else(|| ToolDisplaySpec::for_name(name))
 }
 
-async fn stream_assistant(
+pub(crate) async fn stream_assistant(
     provider: Arc<dyn GenerationProvider>,
     request: &AgentLoopRequest,
     context: &[Message],

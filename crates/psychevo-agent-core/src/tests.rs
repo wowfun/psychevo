@@ -1,11 +1,11 @@
-use super::*;
+pub(crate) use super::*;
 use futures::stream;
 use psychevo_ai::{FakeProvider, RawStreamEvent};
 use std::sync::Mutex;
 
 #[derive(Default)]
-struct CaptureSink {
-    events: Mutex<Vec<AgentEvent>>,
+pub(crate) struct CaptureSink {
+    pub(crate) events: Mutex<Vec<AgentEvent>>,
 }
 
 impl EventSink for CaptureSink {
@@ -16,8 +16,8 @@ impl EventSink for CaptureSink {
 }
 
 #[derive(Clone)]
-struct StaticProvider {
-    events: Vec<StreamEvent>,
+pub(crate) struct StaticProvider {
+    pub(crate) events: Vec<StreamEvent>,
 }
 
 impl GenerationProvider for StaticProvider {
@@ -35,8 +35,8 @@ impl GenerationProvider for StaticProvider {
 }
 
 #[derive(Clone, Default)]
-struct RequestCaptureProvider {
-    requests: Arc<Mutex<Vec<GenerationRequest>>>,
+pub(crate) struct RequestCaptureProvider {
+    pub(crate) requests: Arc<Mutex<Vec<GenerationRequest>>>,
 }
 
 impl GenerationProvider for RequestCaptureProvider {
@@ -57,7 +57,7 @@ impl GenerationProvider for RequestCaptureProvider {
     }
 }
 
-fn request() -> AgentLoopRequest {
+pub(crate) fn request() -> AgentLoopRequest {
     AgentLoopRequest {
         model_provider: "fake".to_string(),
         model: "model".to_string(),
@@ -74,7 +74,7 @@ fn request() -> AgentLoopRequest {
     }
 }
 
-struct DisplayOnlyTool;
+pub(crate) struct DisplayOnlyTool;
 
 impl ToolBinding for DisplayOnlyTool {
     fn name(&self) -> &str {
@@ -115,7 +115,7 @@ impl ToolBinding for DisplayOnlyTool {
 }
 
 #[tokio::test]
-async fn tool_display_spec_is_not_model_visible_declaration() {
+pub(crate) async fn tool_display_spec_is_not_model_visible_declaration() {
     let provider = RequestCaptureProvider::default();
     let requests = Arc::clone(&provider.requests);
     let (_, control) = ControlHandle::new();
@@ -139,7 +139,7 @@ async fn tool_display_spec_is_not_model_visible_declaration() {
 }
 
 #[tokio::test]
-async fn prefix_contextual_user_messages_are_inserted_before_history() {
+pub(crate) async fn prefix_contextual_user_messages_are_inserted_before_history() {
     let provider = RequestCaptureProvider::default();
     let requests = Arc::clone(&provider.requests);
     let (_, control) = ControlHandle::new();
@@ -206,7 +206,7 @@ async fn prefix_contextual_user_messages_are_inserted_before_history() {
 }
 
 #[tokio::test]
-async fn reasoning_only_progress_has_no_visible_message_update() {
+pub(crate) async fn reasoning_only_progress_has_no_visible_message_update() {
     let provider = Arc::new(FakeProvider::new(vec![vec![
         RawStreamEvent::Reasoning("private".to_string()),
         RawStreamEvent::Text("visible".to_string()),
@@ -231,7 +231,7 @@ async fn reasoning_only_progress_has_no_visible_message_update() {
 }
 
 #[test]
-fn user_message_deserializes_text_blocks_and_serializes_local_images() {
+pub(crate) fn user_message_deserializes_text_blocks_and_serializes_local_images() {
     let text_message = serde_json::from_value::<Message>(json!({
         "role": "user",
         "content": [{ "text": "hello" }],
@@ -270,7 +270,7 @@ fn user_message_deserializes_text_blocks_and_serializes_local_images() {
 }
 
 #[tokio::test]
-async fn usage_and_metadata_do_not_emit_empty_message_updates() {
+pub(crate) async fn usage_and_metadata_do_not_emit_empty_message_updates() {
     let provider = Arc::new(StaticProvider {
         events: vec![
             StreamEvent::Metadata {
@@ -311,7 +311,7 @@ async fn usage_and_metadata_do_not_emit_empty_message_updates() {
 }
 
 #[tokio::test]
-async fn tool_call_pending_is_emitted_before_message_end() {
+pub(crate) async fn tool_call_pending_is_emitted_before_message_end() {
     let provider = Arc::new(StaticProvider {
         events: vec![
             StreamEvent::ToolCallStart {
@@ -384,7 +384,7 @@ async fn tool_call_pending_is_emitted_before_message_end() {
 }
 
 #[tokio::test]
-async fn tool_output_can_separate_event_json_from_model_content() {
+pub(crate) async fn tool_output_can_separate_event_json_from_model_content() {
     #[derive(Clone)]
     struct SequencedProvider {
         responses: Arc<Mutex<Vec<Vec<StreamEvent>>>>,
@@ -410,7 +410,7 @@ async fn tool_output_can_separate_event_json_from_model_content() {
         }
     }
 
-    struct SplitOutputTool;
+    pub(crate) struct SplitOutputTool;
 
     impl ToolBinding for SplitOutputTool {
         fn name(&self) -> &str {
@@ -523,7 +523,7 @@ async fn tool_output_can_separate_event_json_from_model_content() {
 }
 
 #[tokio::test]
-async fn complete_inline_think_blocks_are_folded_reasoning() {
+pub(crate) async fn complete_inline_think_blocks_are_folded_reasoning() {
     let provider = Arc::new(FakeProvider::new(vec![vec![
         RawStreamEvent::Text("visible <think>secret</think> done".to_string()),
         RawStreamEvent::Done(Outcome::Normal),
@@ -558,7 +558,7 @@ async fn complete_inline_think_blocks_are_folded_reasoning() {
 }
 
 #[tokio::test]
-async fn reasoning_details_attach_to_reasoning_block_evidence() {
+pub(crate) async fn reasoning_details_attach_to_reasoning_block_evidence() {
     let provider = Arc::new(StaticProvider {
         events: vec![
             StreamEvent::ReasoningDelta {

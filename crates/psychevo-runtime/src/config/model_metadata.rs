@@ -1,9 +1,11 @@
-const MODELS_DEV_URL: &str = "https://models.dev/api.json";
-const MODELS_DEV_CACHE_FILE: &str = "models_dev_cache.json";
-const MODELS_DEV_FETCH_TIMEOUT_SECS: u64 = 15;
-const MODELS_DEV_URL_ENV: &str = "PSYCHEVO_MODELS_DEV_URL";
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) const MODELS_DEV_URL: &str = "https://models.dev/api.json";
+pub(crate) const MODELS_DEV_CACHE_FILE: &str = "models_dev_cache.json";
+pub(crate) const MODELS_DEV_FETCH_TIMEOUT_SECS: u64 = 15;
+pub(crate) const MODELS_DEV_URL_ENV: &str = "PSYCHEVO_MODELS_DEV_URL";
 
-fn resolve_model_metadata_cache_first(
+pub(crate) fn resolve_model_metadata_cache_first(
     provider: &str,
     model: &str,
     base_url: Option<&str>,
@@ -22,7 +24,10 @@ fn resolve_model_metadata_cache_first(
     metadata
 }
 
-fn merge_model_metadata(mut base: ModelMetadata, overlay: ModelMetadata) -> ModelMetadata {
+pub(crate) fn merge_model_metadata(
+    mut base: ModelMetadata,
+    overlay: ModelMetadata,
+) -> ModelMetadata {
     if overlay.limits.context.is_some() {
         base.limits.context = overlay.limits.context;
     }
@@ -45,7 +50,7 @@ fn merge_model_metadata(mut base: ModelMetadata, overlay: ModelMetadata) -> Mode
     base
 }
 
-fn merge_capabilities(base: &mut ModelCapabilities, overlay: ModelCapabilities) {
+pub(crate) fn merge_capabilities(base: &mut ModelCapabilities, overlay: ModelCapabilities) {
     if overlay.reasoning.is_some() {
         base.reasoning = overlay.reasoning;
     }
@@ -96,7 +101,7 @@ pub async fn refresh_model_metadata_cache(
     Ok(())
 }
 
-async fn fetch_models_dev_registry(url: &str) -> Result<Value> {
+pub(crate) async fn fetch_models_dev_registry(url: &str) -> Result<Value> {
     let client = reqwest::Client::new();
     tokio::time::timeout(Duration::from_secs(MODELS_DEV_FETCH_TIMEOUT_SECS), async {
         let response = client.get(url).send().await?;
@@ -116,7 +121,7 @@ async fn fetch_models_dev_registry(url: &str) -> Result<Value> {
     })?
 }
 
-fn prune_models_dev_registry(
+pub(crate) fn prune_models_dev_registry(
     registry: &Value,
     targets: &[ModelMetadataCacheTarget],
 ) -> Option<Value> {
@@ -131,8 +136,7 @@ fn prune_models_dev_registry(
         let Some(provider_value) = providers.get(&provider_key) else {
             continue;
         };
-        let Some((model_id, model_value)) =
-            models_dev_model_entry(provider_value, &target.model)
+        let Some((model_id, model_value)) = models_dev_model_entry(provider_value, &target.model)
         else {
             continue;
         };
@@ -152,7 +156,7 @@ fn prune_models_dev_registry(
     (!pruned.is_empty()).then_some(Value::Object(pruned))
 }
 
-fn provider_without_models(provider_value: &Value) -> Value {
+pub(crate) fn provider_without_models(provider_value: &Value) -> Value {
     let mut provider = provider_value
         .as_object()
         .cloned()
@@ -161,21 +165,21 @@ fn provider_without_models(provider_value: &Value) -> Value {
     Value::Object(provider)
 }
 
-fn read_models_dev_cache(env_map: &BTreeMap<String, String>) -> Option<Value> {
+pub(crate) fn read_models_dev_cache(env_map: &BTreeMap<String, String>) -> Option<Value> {
     models_dev_cache_path(env_map).and_then(|path| read_json_file(&path))
 }
 
-fn models_dev_cache_path(env_map: &BTreeMap<String, String>) -> Option<PathBuf> {
+pub(crate) fn models_dev_cache_path(env_map: &BTreeMap<String, String>) -> Option<PathBuf> {
     resolve_psychevo_home(env_map)
         .ok()
         .map(|home| models_dev_cache_path_for_home(&home))
 }
 
-fn models_dev_cache_path_for_home(home: &Path) -> PathBuf {
+pub(crate) fn models_dev_cache_path_for_home(home: &Path) -> PathBuf {
     home.join(MODELS_DEV_CACHE_FILE)
 }
 
-fn models_dev_url(env_map: &BTreeMap<String, String>) -> String {
+pub(crate) fn models_dev_url(env_map: &BTreeMap<String, String>) -> String {
     env_map
         .get(MODELS_DEV_URL_ENV)
         .map(|value| value.trim())
@@ -184,12 +188,12 @@ fn models_dev_url(env_map: &BTreeMap<String, String>) -> String {
         .to_string()
 }
 
-fn read_json_file(path: &Path) -> Option<Value> {
+pub(crate) fn read_json_file(path: &Path) -> Option<Value> {
     let text = fs::read_to_string(path).ok()?;
     serde_json::from_str(&text).ok()
 }
 
-fn models_dev_metadata(
+pub(crate) fn models_dev_metadata(
     registry: &Value,
     provider: &str,
     model: &str,
@@ -206,7 +210,10 @@ fn models_dev_metadata(
     ))
 }
 
-fn models_dev_model_entry(provider_value: &Value, model: &str) -> Option<(String, Value)> {
+pub(crate) fn models_dev_model_entry(
+    provider_value: &Value,
+    model: &str,
+) -> Option<(String, Value)> {
     provider_value
         .get("models")
         .and_then(Value::as_object)
@@ -223,7 +230,7 @@ fn models_dev_model_entry(provider_value: &Value, model: &str) -> Option<(String
         })
 }
 
-fn models_dev_provider_key(
+pub(crate) fn models_dev_provider_key(
     providers: &serde_json::Map<String, Value>,
     provider: &str,
     base_url: Option<&str>,
@@ -244,7 +251,7 @@ fn models_dev_provider_key(
     })
 }
 
-fn models_dev_provider_candidates(provider: &str) -> Vec<String> {
+pub(crate) fn models_dev_provider_candidates(provider: &str) -> Vec<String> {
     let provider = normalize_provider_id(provider);
     let mut candidates = vec![provider.clone()];
     match provider.as_str() {
@@ -260,11 +267,11 @@ fn models_dev_provider_candidates(provider: &str) -> Vec<String> {
     candidates
 }
 
-fn normalize_base_url(value: &str) -> String {
+pub(crate) fn normalize_base_url(value: &str) -> String {
     value.trim().trim_end_matches('/').to_ascii_lowercase()
 }
 
-fn metadata_from_models_dev_model(
+pub(crate) fn metadata_from_models_dev_model(
     provider_id: String,
     model_value: Value,
     source: &str,
@@ -275,11 +282,10 @@ fn metadata_from_models_dev_model(
         ..Default::default()
     };
     metadata.limits = parse_metadata_limits(&model_value);
-    metadata.cost = parse_metadata_cost(&model_value)
-        .map(|mut cost| {
-            cost.source = Some(source.to_string());
-            cost
-        });
+    metadata.cost = parse_metadata_cost(&model_value).map(|mut cost| {
+        cost.source = Some(source.to_string());
+        cost
+    });
     metadata.capabilities = parse_metadata_capabilities(&model_value);
     if metadata.source.as_deref() == Some("models.dev") {
         metadata.source = Some(format!("models.dev:{provider_id}"));
@@ -290,14 +296,14 @@ fn metadata_from_models_dev_model(
     metadata
 }
 
-fn parse_metadata_limits(value: &Value) -> ModelLimits {
+pub(crate) fn parse_metadata_limits(value: &Value) -> ModelLimits {
     let limit = value
         .get("limit")
         .or_else(|| value.get("limits"))
         .unwrap_or(value);
     ModelLimits {
-        context: u64_from_keys(limit, &["context", "context_window", "context_length"])
-            .or_else(|| {
+        context: u64_from_keys(limit, &["context", "context_window", "context_length"]).or_else(
+            || {
                 u64_from_keys(
                     value,
                     &[
@@ -307,7 +313,8 @@ fn parse_metadata_limits(value: &Value) -> ModelLimits {
                         "max_context_tokens",
                     ],
                 )
-            }),
+            },
+        ),
         input: u64_from_keys(limit, &["input", "max_input_tokens"])
             .or_else(|| u64_from_keys(value, &["input_limit", "max_input_tokens"])),
         output: u64_from_keys(limit, &["output", "max_output_tokens"])
@@ -315,7 +322,7 @@ fn parse_metadata_limits(value: &Value) -> ModelLimits {
     }
 }
 
-fn parse_metadata_cost(value: &Value) -> Option<ModelCost> {
+pub(crate) fn parse_metadata_cost(value: &Value) -> Option<ModelCost> {
     let cost = value.get("cost")?.as_object()?;
     Some(ModelCost {
         input: f64_from_keys(cost, &["input"]),
@@ -329,7 +336,7 @@ fn parse_metadata_cost(value: &Value) -> Option<ModelCost> {
     })
 }
 
-fn parse_metadata_cost_tier(value: &Value) -> Option<ModelCostTier> {
+pub(crate) fn parse_metadata_cost_tier(value: &Value) -> Option<ModelCostTier> {
     let object = value.as_object()?;
     Some(ModelCostTier {
         input: f64_from_keys(object, &["input"]),
@@ -339,7 +346,7 @@ fn parse_metadata_cost_tier(value: &Value) -> Option<ModelCostTier> {
     })
 }
 
-fn parse_metadata_capabilities(value: &Value) -> ModelCapabilities {
+pub(crate) fn parse_metadata_capabilities(value: &Value) -> ModelCapabilities {
     let mut capabilities = ModelCapabilities {
         reasoning: bool_from_keys(value, &["reasoning"]),
         tool_call: bool_from_keys(value, &["tool_call", "toolcall", "tools"]),
@@ -357,7 +364,7 @@ fn parse_metadata_capabilities(value: &Value) -> ModelCapabilities {
     capabilities
 }
 
-fn built_in_model_metadata(provider: &str, model: &str) -> Option<ModelMetadata> {
+pub(crate) fn built_in_model_metadata(provider: &str, model: &str) -> Option<ModelMetadata> {
     let provider = normalize_provider_id(provider);
     let lower = model.to_lowercase();
 
@@ -375,7 +382,7 @@ fn built_in_model_metadata(provider: &str, model: &str) -> Option<ModelMetadata>
     Some(built_in_limits_metadata(context, None))
 }
 
-fn built_in_limits_metadata(context: u64, output: Option<u64>) -> ModelMetadata {
+pub(crate) fn built_in_limits_metadata(context: u64, output: Option<u64>) -> ModelMetadata {
     ModelMetadata {
         limits: ModelLimits {
             context: Some(context),
@@ -387,11 +394,12 @@ fn built_in_limits_metadata(context: u64, output: Option<u64>) -> ModelMetadata 
     }
 }
 
-fn u64_from_keys(value: &Value, keys: &[&str]) -> Option<u64> {
-    keys.iter().find_map(|key| value.get(*key).and_then(Value::as_u64))
+pub(crate) fn u64_from_keys(value: &Value, keys: &[&str]) -> Option<u64> {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(Value::as_u64))
 }
 
-fn f64_from_keys(object: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<f64> {
+pub(crate) fn f64_from_keys(object: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<f64> {
     keys.iter().find_map(|key| {
         object
             .get(*key)
@@ -400,11 +408,12 @@ fn f64_from_keys(object: &serde_json::Map<String, Value>, keys: &[&str]) -> Opti
     })
 }
 
-fn bool_from_keys(value: &Value, keys: &[&str]) -> Option<bool> {
-    keys.iter().find_map(|key| value.get(*key).and_then(Value::as_bool))
+pub(crate) fn bool_from_keys(value: &Value, keys: &[&str]) -> Option<bool> {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(Value::as_bool))
 }
 
-fn string_vec_from_value(value: Option<&Value>) -> Vec<String> {
+pub(crate) fn string_vec_from_value(value: Option<&Value>) -> Vec<String> {
     value
         .and_then(Value::as_array)
         .map(|values| {

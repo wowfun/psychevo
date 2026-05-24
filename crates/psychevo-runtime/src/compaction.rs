@@ -19,14 +19,15 @@ use crate::context_usage::ContextSnapshot;
 use crate::error::{Error, Result};
 use crate::paths::canonical_workdir;
 use crate::prompt_templates;
+use crate::state_runtime::StateRuntime;
 use crate::store::{
     SessionCompactionInput, SessionCompactionRecord, SessionMessageRecord, SqliteStore,
 };
 use crate::types::{ImageInput, RunMode, RunOptions};
 
-const SUMMARY_TOOL_TEXT_LIMIT: usize = 4_000;
-const SUMMARY_MESSAGE_TEXT_LIMIT: usize = 12_000;
-const MIN_SUMMARIZED_MESSAGES: usize = 2;
+pub(crate) const SUMMARY_TOOL_TEXT_LIMIT: usize = 4_000;
+pub(crate) const SUMMARY_MESSAGE_TEXT_LIMIT: usize = 12_000;
+pub(crate) const MIN_SUMMARIZED_MESSAGES: usize = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -48,7 +49,7 @@ impl CompactionReason {
 
 #[derive(Debug, Clone)]
 pub struct CompactSessionOptions {
-    pub db_path: PathBuf,
+    pub state: StateRuntime,
     pub workdir: PathBuf,
     pub session: String,
     pub config_path: Option<PathBuf>,
@@ -62,7 +63,7 @@ pub struct CompactSessionOptions {
 
 #[derive(Debug, Clone)]
 pub struct AutoCompactionCheckOptions {
-    pub db_path: PathBuf,
+    pub state: StateRuntime,
     pub workdir: PathBuf,
     pub session: String,
     pub config_path: Option<PathBuf>,
@@ -88,7 +89,7 @@ pub struct CompactionResult {
 
 pub async fn compact_session(options: CompactSessionOptions) -> Result<CompactionResult> {
     let workdir = canonical_workdir(&options.workdir)?;
-    let store = SqliteStore::open(&options.db_path)?;
+    let store = options.state.store().clone();
     let summary = store
         .session_summary(&options.session)?
         .ok_or_else(|| Error::Message(format!("session not found: {}", options.session)))?;
@@ -303,14 +304,14 @@ pub(crate) fn is_context_overflow_error(error: &Error) -> bool {
 }
 
 #[derive(Debug, Clone)]
-struct CompactionPreparation {
-    first_kept_session_seq: Option<i64>,
-    messages_to_summarize: Vec<SessionMessageRecord>,
-    tokens_before: u64,
-    tokens_after_without_summary: u64,
+pub(crate) struct CompactionPreparation {
+    pub(crate) first_kept_session_seq: Option<i64>,
+    pub(crate) messages_to_summarize: Vec<SessionMessageRecord>,
+    pub(crate) tokens_before: u64,
+    pub(crate) tokens_after_without_summary: u64,
 }
 
-fn prepare_compaction(
+pub(crate) fn prepare_compaction(
     records: &[SessionMessageRecord],
     previous: Option<&SessionCompactionRecord>,
     keep_recent_tokens: u64,
@@ -364,7 +365,7 @@ fn prepare_compaction(
     })
 }
 
-fn choose_first_kept_index(
+pub(crate) fn choose_first_kept_index(
     records: &[SessionMessageRecord],
     keep_recent_tokens: u64,
 ) -> Option<usize> {
@@ -396,7 +397,7 @@ fn choose_first_kept_index(
     Some(adjust_for_tool_pairs(records, first))
 }
 
-fn adjust_for_tool_pairs(records: &[SessionMessageRecord], mut first: usize) -> usize {
+pub(crate) fn adjust_for_tool_pairs(records: &[SessionMessageRecord], mut first: usize) -> usize {
     let mut tool_call_index = BTreeMap::<String, usize>::new();
     for (index, record) in records.iter().enumerate() {
         for id in assistant_tool_call_ids(&record.message) {
@@ -430,7 +431,7 @@ fn adjust_for_tool_pairs(records: &[SessionMessageRecord], mut first: usize) -> 
     }
 }
 
-fn assistant_tool_call_ids(message: &Message) -> Vec<String> {
+pub(crate) fn assistant_tool_call_ids(message: &Message) -> Vec<String> {
     let Message::Assistant { content, .. } = message else {
         return Vec::new();
     };
@@ -443,7 +444,7 @@ fn assistant_tool_call_ids(message: &Message) -> Vec<String> {
         .collect()
 }
 
-async fn generate_summary(
+pub(crate) async fn generate_summary(
     provider: Arc<dyn GenerationProvider>,
     resolved: &crate::config::ResolvedRunProvider,
     previous: Option<&SessionCompactionRecord>,
@@ -506,11 +507,11 @@ async fn generate_summary(
     Ok(text.to_string())
 }
 
-fn summary_system_prompt() -> &'static str {
+pub(crate) fn summary_system_prompt() -> &'static str {
     prompt_templates::compaction_summary_system()
 }
 
-fn summary_user_prompt(
+pub(crate) fn summary_user_prompt(
     previous: Option<&SessionCompactionRecord>,
     messages: &[SessionMessageRecord],
     instructions: Option<&str>,
@@ -546,7 +547,7 @@ fn summary_user_prompt(
     )
 }
 
-fn message_summary_text(message: &Message) -> String {
+pub(crate) fn message_summary_text(message: &Message) -> String {
     let raw = match message {
         Message::User { content, .. } => content
             .iter()
@@ -578,7 +579,7 @@ fn message_summary_text(message: &Message) -> String {
     truncate_text(&redact_secrets(&raw), SUMMARY_MESSAGE_TEXT_LIMIT)
 }
 
-fn user_block_summary(block: &UserContentBlock) -> String {
+pub(crate) fn user_block_summary(block: &UserContentBlock) -> String {
     match block {
         UserContentBlock::Text(text) => text.text.clone(),
         UserContentBlock::LocalImage(image) => {
@@ -588,7 +589,7 @@ fn user_block_summary(block: &UserContentBlock) -> String {
     }
 }
 
-fn tool_call_summary(call: &ToolCallBlock) -> String {
+pub(crate) fn tool_call_summary(call: &ToolCallBlock) -> String {
     format!(
         "tool_call {} {}",
         call.name,
@@ -596,7 +597,7 @@ fn tool_call_summary(call: &ToolCallBlock) -> String {
     )
 }
 
-fn compaction_summary_message(record: &SessionCompactionRecord) -> Message {
+pub(crate) fn compaction_summary_message(record: &SessionCompactionRecord) -> Message {
     user_text_message(format!(
         "{}\n\n{}",
         prompt_templates::compaction_summary_prefix(),
@@ -604,7 +605,7 @@ fn compaction_summary_message(record: &SessionCompactionRecord) -> Message {
     ))
 }
 
-fn projection_tokens(
+pub(crate) fn projection_tokens(
     previous: Option<&SessionCompactionRecord>,
     records: &[SessionMessageRecord],
 ) -> u64 {
@@ -624,17 +625,17 @@ fn projection_tokens(
     }
 }
 
-fn estimate_message_tokens(message: &Message) -> u64 {
+pub(crate) fn estimate_message_tokens(message: &Message) -> u64 {
     serde_json::to_string(message)
         .map(|value| estimate_text_tokens(&value))
         .unwrap_or(0)
 }
 
-fn estimate_text_tokens(text: &str) -> u64 {
+pub(crate) fn estimate_text_tokens(text: &str) -> u64 {
     ((text.chars().count() as u64).saturating_add(3) / 4).max(1)
 }
 
-fn truncate_text(text: &str, limit: usize) -> String {
+pub(crate) fn truncate_text(text: &str, limit: usize) -> String {
     if text.chars().count() <= limit {
         return text.to_string();
     }
@@ -643,7 +644,7 @@ fn truncate_text(text: &str, limit: usize) -> String {
     output
 }
 
-fn redact_secrets(text: &str) -> String {
+pub(crate) fn redact_secrets(text: &str) -> String {
     text.lines()
         .map(|line| {
             let lower = line.to_lowercase();
@@ -669,7 +670,11 @@ fn redact_secrets(text: &str) -> String {
         .join("\n")
 }
 
-fn skipped_result(session_id: &str, reason: CompactionReason, message: &str) -> CompactionResult {
+pub(crate) fn skipped_result(
+    session_id: &str,
+    reason: CompactionReason,
+    message: &str,
+) -> CompactionResult {
     CompactionResult {
         session_id: session_id.to_string(),
         compacted: false,
@@ -685,13 +690,13 @@ fn skipped_result(session_id: &str, reason: CompactionReason, message: &str) -> 
     }
 }
 
-fn auto_compaction_check_run_options(
+pub(crate) fn auto_compaction_check_run_options(
     options: &AutoCompactionCheckOptions,
     snapshot: &ContextSnapshot,
     workdir: &std::path::Path,
 ) -> RunOptions {
     RunOptions {
-        db_path: options.db_path.clone(),
+        state: options.state.clone(),
         workdir: workdir.to_path_buf(),
         snapshot_root: None,
         session: Some(options.session.clone()),
@@ -722,14 +727,14 @@ fn auto_compaction_check_run_options(
     }
 }
 
-fn compaction_run_options(
+pub(crate) fn compaction_run_options(
     options: &CompactSessionOptions,
     session_provider: &str,
     session_model: &str,
     workdir: &std::path::Path,
 ) -> RunOptions {
     RunOptions {
-        db_path: options.db_path.clone(),
+        state: options.state.clone(),
         workdir: workdir.to_path_buf(),
         snapshot_root: None,
         session: Some(options.session.clone()),
@@ -761,8 +766,8 @@ fn compaction_run_options(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) mod tests {
+    pub(crate) use super::*;
     use crate::context_usage::{ContextScope, ContextTokenizer, ContextTotal};
     use psychevo_agent_core::{AssistantBlock, ToolCallBlock, now_ms};
     use std::fs;
@@ -826,7 +831,7 @@ mod tests {
         psychevo_home: PathBuf,
     ) -> AutoCompactionCheckOptions {
         AutoCompactionCheckOptions {
-            db_path,
+            state: StateRuntime::open(&db_path).expect("state runtime"),
             workdir,
             session: "session".to_string(),
             config_path: None,

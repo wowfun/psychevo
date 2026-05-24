@@ -1,5 +1,7 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[test]
-fn model_catalog_endpoint_follows_chat_base_url() {
+pub(crate) fn model_catalog_endpoint_follows_chat_base_url() {
     assert_eq!(
         model_catalog_endpoint("https://api.example.com/v1"),
         "https://api.example.com/v1/models"
@@ -19,7 +21,7 @@ fn model_catalog_endpoint_follows_chat_base_url() {
 }
 
 #[test]
-fn model_catalog_providers_resolve_auth_and_no_auth() {
+pub(crate) fn model_catalog_providers_resolve_auth_and_no_auth() {
     let temp = tempdir().expect("temp");
     let mut options = base_options(&temp);
     let config_dir = home_dir(&temp);
@@ -67,7 +69,7 @@ base_url = "http://127.0.0.1:1234/v1"
 }
 
 #[tokio::test]
-async fn model_catalog_fetch_parses_models_and_sends_auth() {
+pub(crate) async fn model_catalog_fetch_parses_models_and_sends_auth() {
     let server = CatalogServer::new(r#"{"data":[{"id":"zeta"},{"id":"alpha"},{"id":""}]}"#);
     let provider = ModelCatalogProvider {
         provider: "openai".to_string(),
@@ -86,7 +88,10 @@ async fn model_catalog_fetch_parses_models_and_sends_auth() {
             .expect("fetch");
 
     assert_eq!(
-        models.iter().map(|model| model.id.as_str()).collect::<Vec<_>>(),
+        models
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>(),
         vec!["alpha", "zeta"]
     );
     assert!(models.iter().all(|model| model.context_limit.is_none()));
@@ -105,7 +110,7 @@ async fn model_catalog_fetch_parses_models_and_sends_auth() {
 }
 
 #[tokio::test]
-async fn model_catalog_fetch_omits_auth_for_no_auth_providers() {
+pub(crate) async fn model_catalog_fetch_omits_auth_for_no_auth_providers() {
     let server = CatalogServer::new(r#"{"data":[]}"#);
     let provider = ModelCatalogProvider {
         provider: "lmstudio".to_string(),
@@ -128,7 +133,7 @@ async fn model_catalog_fetch_omits_auth_for_no_auth_providers() {
 }
 
 #[tokio::test]
-async fn model_catalog_fetch_times_out() {
+pub(crate) async fn model_catalog_fetch_times_out() {
     let server = CatalogServer::with_delay(r#"{"data":[]}"#, Duration::from_millis(80));
     let provider = ModelCatalogProvider {
         provider: "lmstudio".to_string(),

@@ -1,7 +1,9 @@
-struct WriteTool(WorkdirTool);
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) struct WriteTool(WorkdirTool);
 
 impl WriteTool {
-    fn new(workdir: PathBuf, context: ToolRuntimeContext) -> Self {
+    pub(crate) fn new(workdir: PathBuf, context: ToolRuntimeContext) -> Self {
         Self(WorkdirTool::with_context(workdir, context))
     }
 }
@@ -52,7 +54,7 @@ impl ToolBinding for WriteTool {
     }
 }
 
-fn write_tool_impl(tool: WorkdirTool, args: Value) -> Result<Value> {
+pub(crate) fn write_tool_impl(tool: WorkdirTool, args: Value) -> Result<Value> {
     let path = required_string(&args, "path")?;
     let content = required_string(&args, "content")?;
     let (target, dirs_created) = tool.resolve_write_target(path)?;
@@ -77,8 +79,8 @@ fn write_tool_impl(tool: WorkdirTool, args: Value) -> Result<Value> {
 }
 
 #[cfg(test)]
-mod write_tool_tests {
-    use super::*;
+pub(crate) mod write_tool_tests {
+    pub(crate) use super::*;
 
     fn workdir_tool(path: &Path) -> WorkdirTool {
         WorkdirTool::with_context(
@@ -165,8 +167,11 @@ mod write_tool_tests {
         let temp = tempfile::tempdir().expect("temp");
         fs::write(temp.path().join("partial.txt"), "one\ntwo\nthree\n").expect("seed");
         let tool = workdir_tool_with_task(temp.path(), "partial-read-test");
-        read_tool_impl(tool.clone(), json!({"path": "partial.txt", "offset": 1, "limit": 1}))
-            .expect("read");
+        read_tool_impl(
+            tool.clone(),
+            json!({"path": "partial.txt", "offset": 1, "limit": 1}),
+        )
+        .expect("read");
         let value = write_tool_impl(
             tool,
             json!({"path": "partial.txt", "content": "replacement\n"}),
@@ -182,16 +187,10 @@ mod write_tool_tests {
         let reader = workdir_tool_with_task(temp.path(), "reader-agent");
         let writer = workdir_tool_with_task(temp.path(), "writer-agent");
         read_tool_impl(reader.clone(), json!({"path": "shared.txt"})).expect("read");
-        write_tool_impl(
-            writer,
-            json!({"path": "shared.txt", "content": "two\n"}),
-        )
-        .expect("sibling write");
-        let value = write_tool_impl(
-            reader,
-            json!({"path": "shared.txt", "content": "three\n"}),
-        )
-        .expect("reader write");
+        write_tool_impl(writer, json!({"path": "shared.txt", "content": "two\n"}))
+            .expect("sibling write");
+        let value = write_tool_impl(reader, json!({"path": "shared.txt", "content": "three\n"}))
+            .expect("reader write");
         assert!(value["warning"].as_str().unwrap().contains("sibling agent"));
     }
 }

@@ -6,7 +6,7 @@ use psychevo_ai::{
 use serde_json::json;
 use tokio::sync::watch;
 
-fn request() -> GenerationRequest {
+pub(crate) fn request() -> GenerationRequest {
     GenerationRequest {
         model: ModelTarget {
             provider: "fake".to_string(),
@@ -19,7 +19,7 @@ fn request() -> GenerationRequest {
 }
 
 #[tokio::test]
-async fn fake_provider_normalizes_raw_stream_events() {
+pub(crate) async fn fake_provider_normalizes_raw_stream_events() {
     let provider = FakeProvider::new(vec![vec![
         RawStreamEvent::Text("hello".to_string()),
         RawStreamEvent::ToolStart {
@@ -80,7 +80,7 @@ async fn fake_provider_normalizes_raw_stream_events() {
 }
 
 #[tokio::test]
-async fn fake_provider_observes_abort_before_generation() {
+pub(crate) async fn fake_provider_observes_abort_before_generation() {
     let provider = FakeProvider::new(vec![vec![RawStreamEvent::Text("unused".to_string())]]);
     let (tx, rx) = watch::channel(false);
     tx.send(true).expect("abort");

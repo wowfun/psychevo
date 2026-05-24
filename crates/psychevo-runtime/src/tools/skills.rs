@@ -1,10 +1,12 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[derive(Clone)]
-struct ListSkillsTool {
-    options: SkillDiscoveryOptions,
+pub(crate) struct ListSkillsTool {
+    pub(crate) options: SkillDiscoveryOptions,
 }
 
 impl ListSkillsTool {
-    fn new(options: SkillDiscoveryOptions) -> Self {
+    pub(crate) fn new(options: SkillDiscoveryOptions) -> Self {
         Self { options }
     }
 }
@@ -105,12 +107,12 @@ impl ToolBinding for ListSkillsTool {
 }
 
 #[derive(Clone)]
-struct ViewSkillTool {
-    options: SkillDiscoveryOptions,
+pub(crate) struct ViewSkillTool {
+    pub(crate) options: SkillDiscoveryOptions,
 }
 
 impl ViewSkillTool {
-    fn new(options: SkillDiscoveryOptions) -> Self {
+    pub(crate) fn new(options: SkillDiscoveryOptions) -> Self {
         Self { options }
     }
 }
@@ -164,7 +166,7 @@ impl ToolBinding for ViewSkillTool {
     }
 }
 
-fn view_skill_tool_impl(options: &SkillDiscoveryOptions, args: Value) -> Result<Value> {
+pub(crate) fn view_skill_tool_impl(options: &SkillDiscoveryOptions, args: Value) -> Result<Value> {
     let catalog = discover_skills(options)?;
     let name = required_string(&args, "name")?;
     let file_path = optional_string(&args, "file_path")?;
@@ -172,12 +174,12 @@ fn view_skill_tool_impl(options: &SkillDiscoveryOptions, args: Value) -> Result<
 }
 
 #[derive(Clone)]
-struct SkillManageTool {
-    options: SkillDiscoveryOptions,
+pub(crate) struct SkillManageTool {
+    pub(crate) options: SkillDiscoveryOptions,
 }
 
 impl SkillManageTool {
-    fn new(options: SkillDiscoveryOptions) -> Self {
+    pub(crate) fn new(options: SkillDiscoveryOptions) -> Self {
         Self { options }
     }
 }
@@ -261,7 +263,7 @@ impl ToolBinding for SkillManageTool {
     }
 }
 
-fn skill_manage_impl(options: &SkillDiscoveryOptions, args: Value) -> Result<Value> {
+pub(crate) fn skill_manage_impl(options: &SkillDiscoveryOptions, args: Value) -> Result<Value> {
     let action = required_string(&args, "action")?;
     match action {
         "create" => {
@@ -343,18 +345,20 @@ fn skill_manage_impl(options: &SkillDiscoveryOptions, args: Value) -> Result<Val
                 required_string(&args, "file_path")?,
             )
         }
-        other => Err(Error::Message(format!("unknown skill_manage action: {other}"))),
+        other => Err(Error::Message(format!(
+            "unknown skill_manage action: {other}"
+        ))),
     }
 }
 
 #[derive(Clone)]
-struct SkillHubTool {
-    options: SkillDiscoveryOptions,
-    mode: RunMode,
+pub(crate) struct SkillHubTool {
+    pub(crate) options: SkillDiscoveryOptions,
+    pub(crate) mode: RunMode,
 }
 
 impl SkillHubTool {
-    fn new(options: SkillDiscoveryOptions, mode: RunMode) -> Self {
+    pub(crate) fn new(options: SkillDiscoveryOptions, mode: RunMode) -> Self {
         Self { options, mode }
     }
 }
@@ -443,9 +447,16 @@ impl ToolBinding for SkillHubTool {
     }
 }
 
-fn skill_hub_impl(options: &SkillDiscoveryOptions, mode: RunMode, args: Value) -> Result<Value> {
+pub(crate) fn skill_hub_impl(
+    options: &SkillDiscoveryOptions,
+    mode: RunMode,
+    args: Value,
+) -> Result<Value> {
     let action = required_string(&args, "action")?;
-    let readonly = matches!(action, "browse" | "search" | "inspect" | "list" | "check" | "audit");
+    let readonly = matches!(
+        action,
+        "browse" | "search" | "inspect" | "list" | "check" | "audit"
+    );
     if mode == RunMode::Plan && !readonly {
         return Err(Error::Message(format!(
             "skill_hub action {action} is not available in plan mode"
@@ -454,7 +465,9 @@ fn skill_hub_impl(options: &SkillDiscoveryOptions, mode: RunMode, args: Value) -
     match action {
         "browse" | "search" => {
             let catalog = discover_skills(options)?;
-            let query = optional_string(&args, "query")?.unwrap_or_default().to_lowercase();
+            let query = optional_string(&args, "query")?
+                .unwrap_or_default()
+                .to_lowercase();
             let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(20) as usize;
             let skills = catalog
                 .skills
@@ -487,7 +500,9 @@ fn skill_hub_impl(options: &SkillDiscoveryOptions, mode: RunMode, args: Value) -
                 },
             ))
         }
-        "check" => Ok(json!({"success": true, "updates": [], "message": "no hub update source configured"})),
+        "check" => Ok(
+            json!({"success": true, "updates": [], "message": "no hub update source configured"}),
+        ),
         "audit" => {
             let path = optional_string(&args, "path")?;
             if let Some(path) = path {
@@ -520,7 +535,9 @@ fn skill_hub_impl(options: &SkillDiscoveryOptions, mode: RunMode, args: Value) -
                 },
             )
         }
-        "update" => Ok(json!({"success": true, "updated": [], "message": "hub update is not configured for this source"})),
+        "update" => Ok(
+            json!({"success": true, "updated": [], "message": "hub update is not configured for this source"}),
+        ),
         "uninstall" => {
             let catalog = discover_skills(options)?;
             remove_skill(
@@ -550,13 +567,13 @@ fn skill_hub_impl(options: &SkillDiscoveryOptions, mode: RunMode, args: Value) -
 }
 
 #[derive(Clone)]
-struct SkillConfigTool {
-    options: SkillDiscoveryOptions,
-    mode: RunMode,
+pub(crate) struct SkillConfigTool {
+    pub(crate) options: SkillDiscoveryOptions,
+    pub(crate) mode: RunMode,
 }
 
 impl SkillConfigTool {
-    fn new(options: SkillDiscoveryOptions, mode: RunMode) -> Self {
+    pub(crate) fn new(options: SkillDiscoveryOptions, mode: RunMode) -> Self {
         Self { options, mode }
     }
 }
@@ -624,7 +641,11 @@ impl ToolBinding for SkillConfigTool {
     }
 }
 
-fn skill_config_impl(options: &SkillDiscoveryOptions, mode: RunMode, args: Value) -> Result<Value> {
+pub(crate) fn skill_config_impl(
+    options: &SkillDiscoveryOptions,
+    mode: RunMode,
+    args: Value,
+) -> Result<Value> {
     let action = required_string(&args, "action")?;
     if mode == RunMode::Plan && action != "status" {
         return Err(Error::Message(format!(
@@ -669,11 +690,13 @@ fn skill_config_impl(options: &SkillDiscoveryOptions, mode: RunMode, args: Value
                 value,
             )
         }
-        other => Err(Error::Message(format!("unknown skill_config action: {other}"))),
+        other => Err(Error::Message(format!(
+            "unknown skill_config action: {other}"
+        ))),
     }
 }
 
-fn target_from_args(args: &Value) -> Result<SkillTarget> {
+pub(crate) fn target_from_args(args: &Value) -> Result<SkillTarget> {
     match optional_string(args, "scope")?.unwrap_or("global") {
         "global" => Ok(SkillTarget::Global),
         "project" => Ok(SkillTarget::Project),
@@ -683,7 +706,7 @@ fn target_from_args(args: &Value) -> Result<SkillTarget> {
     }
 }
 
-fn optional_owned(args: &Value, key: &str) -> Option<String> {
+pub(crate) fn optional_owned(args: &Value, key: &str) -> Option<String> {
     args.get(key)
         .and_then(Value::as_str)
         .map(str::trim)

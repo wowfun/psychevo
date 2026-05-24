@@ -1,10 +1,10 @@
 use crate::error::{Error, Result};
 use crate::snapshot::SnapshotStore;
-use crate::store::{SessionRevertState, SqliteStore};
+use crate::store::SessionRevertState;
 use crate::types::{SessionRedoResult, SessionUndoOptions, SessionUndoResult};
 
 pub fn undo_session(options: SessionUndoOptions) -> Result<SessionUndoResult> {
-    let store = SqliteStore::open(&options.db_path)?;
+    let store = options.state.store().clone();
     let target = store
         .latest_undo_target(&options.session_id)?
         .ok_or_else(|| Error::Message("nothing to undo".to_string()))?;
@@ -40,7 +40,7 @@ pub fn undo_session(options: SessionUndoOptions) -> Result<SessionUndoResult> {
 }
 
 pub fn redo_session(options: SessionUndoOptions) -> Result<SessionRedoResult> {
-    let store = SqliteStore::open(&options.db_path)?;
+    let store = options.state.store().clone();
     let revert = store
         .session_revert_state(&options.session_id)?
         .ok_or_else(|| Error::Message("nothing to redo".to_string()))?;

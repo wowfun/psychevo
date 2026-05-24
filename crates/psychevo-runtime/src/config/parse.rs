@@ -1,4 +1,6 @@
-fn parse_run_config(value: Value) -> Result<RunConfig> {
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) fn parse_run_config(value: Value) -> Result<RunConfig> {
     let object = value
         .as_object()
         .ok_or_else(|| Error::Config("config root must be an object".to_string()))?;
@@ -46,7 +48,7 @@ fn parse_run_config(value: Value) -> Result<RunConfig> {
     Ok(config)
 }
 
-fn parse_tool_selection_config(value: &Value) -> Result<ToolSelectionConfig> {
+pub(crate) fn parse_tool_selection_config(value: &Value) -> Result<ToolSelectionConfig> {
     let object = value
         .as_object()
         .ok_or_else(|| Error::Config("tools must be an object".to_string()))?;
@@ -69,7 +71,7 @@ fn parse_tool_selection_config(value: &Value) -> Result<ToolSelectionConfig> {
     Ok(config)
 }
 
-fn parse_tool_mode_config(mode: &str, value: &Value) -> Result<ToolModeConfig> {
+pub(crate) fn parse_tool_mode_config(mode: &str, value: &Value) -> Result<ToolModeConfig> {
     let object = value
         .as_object()
         .ok_or_else(|| Error::Config(format!("tools.modes.{mode} must be an object")))?;
@@ -82,7 +84,9 @@ fn parse_tool_mode_config(mode: &str, value: &Value) -> Result<ToolModeConfig> {
     })
 }
 
-fn parse_custom_toolsets(value: &Value) -> Result<BTreeMap<String, CustomToolsetConfig>> {
+pub(crate) fn parse_custom_toolsets(
+    value: &Value,
+) -> Result<BTreeMap<String, CustomToolsetConfig>> {
     let object = value
         .as_object()
         .ok_or_else(|| Error::Config("toolsets must be an object".to_string()))?;
@@ -108,7 +112,7 @@ fn parse_custom_toolsets(value: &Value) -> Result<BTreeMap<String, CustomToolset
     Ok(out)
 }
 
-fn validate_toolset_name(name: &str) -> Result<()> {
+pub(crate) fn validate_toolset_name(name: &str) -> Result<()> {
     let valid = !name.trim().is_empty()
         && name
             .chars()
@@ -120,7 +124,7 @@ fn validate_toolset_name(name: &str) -> Result<()> {
     }
 }
 
-fn parse_compression_config(
+pub(crate) fn parse_compression_config(
     value: &Value,
     configured_keys: &HashSet<String>,
 ) -> Result<CompressionConfig> {
@@ -162,7 +166,7 @@ fn parse_compression_config(
     Ok(config)
 }
 
-fn parse_lsp_config(value: &Value) -> Result<LspConfig> {
+pub(crate) fn parse_lsp_config(value: &Value) -> Result<LspConfig> {
     let object = value
         .as_object()
         .ok_or_else(|| Error::Config("lsp must be an object".to_string()))?;
@@ -197,7 +201,7 @@ fn parse_lsp_config(value: &Value) -> Result<LspConfig> {
     Ok(config)
 }
 
-fn parse_permission_config(value: &Value) -> Result<PermissionConfig> {
+pub(crate) fn parse_permission_config(value: &Value) -> Result<PermissionConfig> {
     let object = value
         .as_object()
         .ok_or_else(|| Error::Config("permissions must be an object".to_string()))?;
@@ -229,7 +233,7 @@ fn parse_permission_config(value: &Value) -> Result<PermissionConfig> {
     })
 }
 
-fn parse_model_selection(
+pub(crate) fn parse_model_selection(
     value: &Value,
     configured_keys: &HashSet<String>,
 ) -> Result<ModelSelection> {
@@ -258,7 +262,10 @@ fn parse_model_selection(
     }
 }
 
-fn parse_config_provider_entry(name: &str, value: &Value) -> Result<ConfigProviderEntry> {
+pub(crate) fn parse_config_provider_entry(
+    name: &str,
+    value: &Value,
+) -> Result<ConfigProviderEntry> {
     let object = value
         .as_object()
         .ok_or_else(|| Error::Config(format!("provider.{name} must be an object")))?;
@@ -292,7 +299,7 @@ fn parse_config_provider_entry(name: &str, value: &Value) -> Result<ConfigProvid
     Ok(entry)
 }
 
-fn parse_config_model_entry(
+pub(crate) fn parse_config_model_entry(
     provider_name: &str,
     model_id: &str,
     value: &Value,
@@ -314,7 +321,9 @@ fn parse_config_model_entry(
     })
 }
 
-fn parse_config_model_metadata(object: &serde_json::Map<String, Value>) -> Result<ModelMetadata> {
+pub(crate) fn parse_config_model_metadata(
+    object: &serde_json::Map<String, Value>,
+) -> Result<ModelMetadata> {
     if object.contains_key("context_limit") {
         return Err(Error::Config(
             "context_limit is no longer supported; use limit.context".to_string(),
@@ -362,7 +371,7 @@ fn parse_config_model_metadata(object: &serde_json::Map<String, Value>) -> Resul
     Ok(metadata)
 }
 
-fn parse_model_limits(value: &Value) -> Result<ModelLimits> {
+pub(crate) fn parse_model_limits(value: &Value) -> Result<ModelLimits> {
     let object = value
         .as_object()
         .ok_or_else(|| Error::Config("limit must be an object".to_string()))?;
@@ -373,7 +382,7 @@ fn parse_model_limits(value: &Value) -> Result<ModelLimits> {
     })
 }
 
-fn parse_model_cost(value: &Value) -> Result<ModelCost> {
+pub(crate) fn parse_model_cost(value: &Value) -> Result<ModelCost> {
     let object = value
         .as_object()
         .ok_or_else(|| Error::Config("cost must be an object".to_string()))?;
@@ -390,7 +399,7 @@ fn parse_model_cost(value: &Value) -> Result<ModelCost> {
     })
 }
 
-fn parse_model_cost_tier(value: &Value) -> Result<ModelCostTier> {
+pub(crate) fn parse_model_cost_tier(value: &Value) -> Result<ModelCostTier> {
     let object = value
         .as_object()
         .ok_or_else(|| Error::Config("cost.context_over_200k must be an object".to_string()))?;
@@ -402,7 +411,7 @@ fn parse_model_cost_tier(value: &Value) -> Result<ModelCostTier> {
     })
 }
 
-fn optional_string_field(
+pub(crate) fn optional_string_field(
     object: &serde_json::Map<String, Value>,
     key: &str,
 ) -> Result<Option<String>> {
@@ -418,7 +427,7 @@ fn optional_string_field(
         .transpose()
 }
 
-fn optional_string_alias_field(
+pub(crate) fn optional_string_alias_field(
     object: &serde_json::Map<String, Value>,
     primary: &str,
     alias: &str,
@@ -429,7 +438,10 @@ fn optional_string_alias_field(
     }
 }
 
-fn optional_u64_field(object: &serde_json::Map<String, Value>, key: &str) -> Result<Option<u64>> {
+pub(crate) fn optional_u64_field(
+    object: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Option<u64>> {
     object
         .get(key)
         .map(|value| {
@@ -441,7 +453,10 @@ fn optional_u64_field(object: &serde_json::Map<String, Value>, key: &str) -> Res
         .transpose()
 }
 
-fn optional_f64_field(object: &serde_json::Map<String, Value>, key: &str) -> Result<Option<f64>> {
+pub(crate) fn optional_f64_field(
+    object: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Option<f64>> {
     object
         .get(key)
         .map(|value| {
@@ -453,7 +468,10 @@ fn optional_f64_field(object: &serde_json::Map<String, Value>, key: &str) -> Res
         .transpose()
 }
 
-fn optional_bool_field(object: &serde_json::Map<String, Value>, key: &str) -> Result<Option<bool>> {
+pub(crate) fn optional_bool_field(
+    object: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Option<bool>> {
     object
         .get(key)
         .map(|value| {
@@ -464,7 +482,7 @@ fn optional_bool_field(object: &serde_json::Map<String, Value>, key: &str) -> Re
         .transpose()
 }
 
-fn string_array_field(
+pub(crate) fn string_array_field(
     object: &serde_json::Map<String, Value>,
     key: &str,
     path: &str,
@@ -488,7 +506,7 @@ fn string_array_field(
         .collect()
 }
 
-fn validate_reasoning_effort(value: Option<String>) -> Result<Option<String>> {
+pub(crate) fn validate_reasoning_effort(value: Option<String>) -> Result<Option<String>> {
     let Some(value) = value else {
         return Ok(None);
     };
@@ -502,7 +520,7 @@ fn validate_reasoning_effort(value: Option<String>) -> Result<Option<String>> {
     }
 }
 
-fn enabled_reasoning_effort(value: Option<String>) -> Result<Option<String>> {
+pub(crate) fn enabled_reasoning_effort(value: Option<String>) -> Result<Option<String>> {
     match validate_reasoning_effort(value)? {
         Some(value) if value == "none" => Ok(None),
         value => Ok(value),
