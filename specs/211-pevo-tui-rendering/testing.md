@@ -166,6 +166,13 @@ deterministic local mock provider, an isolated repo-local `PSYCHEVO_HOME`, and
 the current workspace `pevo` binary. It writes PNG screenshots and companion
 material under `.local/.psychevo-dev/tui-shots/<timestamp>/`.
 
+Large deterministic VHS inputs, including the mock provider, tape template,
+and stable workdir/home fixture files, should live as checked-in assets next to
+the capture script instead of being embedded as shell heredocs. The script may
+still generate a per-run tape, config, request log, and screenshot directory
+for values that necessarily vary between runs, such as ports, database paths,
+and output artifact locations.
+
 The demo workdir must be isolated from the parent repository's git state so
 Modified Files does not reflect unrelated uncommitted work. The tape should pin
 terminal color environment, clear inherited `NO_COLOR`, and avoid theme choices

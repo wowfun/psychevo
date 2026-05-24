@@ -335,12 +335,13 @@ session latest by itself. In non-terminal scripted mode,
 `/sessions`, `/resume`, and `/continue` print a deterministic active-session
 list instead of opening a panel.
 
-Fullscreen `/model` opens a tabbed bottom pane with `Models` and `Info` tabs,
-using the same tab header behavior as `/help`. It opens on `Models`. `Tab` and
-`Right` switch to `Info`; `BackTab` and `Left` switch back to `Models`. The
-current query, selected row, and scroll position are preserved when switching
-tabs. `Esc` closes the model pane from either tab and cancels unfinished model
-catalog fetches.
+Fullscreen `/model` opens a tabbed bottom pane with `Models` and `Info` tabs
+in local-config mode. `/model -g` and `/model --global` open the same pane in
+global-config mode. It uses the same tab header behavior as `/help` and opens
+on `Models`. `Tab` and `Right` switch to `Info`; `BackTab` and `Left` switch
+back to `Models`. The current query, selected row, and scroll position are
+preserved when switching tabs. `Esc` closes the model pane from either tab and
+cancels unfinished model catalog fetches.
 
 At TUI startup, if `$PSYCHEVO_HOME/models_dev_cache.json` is absent, TUI starts
 one non-blocking, best-effort `models.dev` metadata cache warmup. Startup,
@@ -358,7 +359,8 @@ creating a global user-defined OpenAI Chat-compatible provider. Selecting `All
 providers` concurrently fetches every fetchable provider catalog; selecting a
 provider row fetches or retries only that provider. Fetch rows use `Enter
 fetch` in the footer. Model rows use `Enter select`, and `Enter` continues to
-open variant selection.
+open variant selection before writing the selected local or global default
+model.
 
 The `/model` add-provider wizard writes only global Psychevo provider
 configuration and global `.env` credentials. It prompts for display label,
@@ -454,14 +456,23 @@ current query.
 
 Selecting a fetched-only model opens the existing variant pane. For such rows,
 the `Config default` variant row describes `use provider default`. Final model
-selection writes only TUI state for the current workdir and updates recent
-models. It does not edit TOML provider configuration.
+selection writes the selected scope's TOML default model, clears TUI-local
+model and variant overrides for the current workdir, and updates recent models.
+When the user chooses an explicit variant, the TOML default model is written in
+object form with `reasoning_effort`. When the user chooses `Config default`,
+TUI writes the selected model's known configured `reasoning_effort` when one is
+available; otherwise it writes only the provider/model id. It does not write
+TOML provider metadata or credentials. If the picker was opened with
+`/model --global` and the current workdir has a local model setting that still
+wins effective resolution, the completion status reports the global write and
+local override.
 
 All bottom selection panes keep `Home` and `End` as direct first/last jumps, and
 their `Up` and `Down` navigation wraps between the first and last visible rows.
 
 Obsolete slash commands are not kept as compatibility redirects. Inputs such
-as `/models`, `/model set <provider/model>`, `/variant set <value>`, `/mode set
+as `/models`, `/model set <provider/model>`, `/model fetch`,
+`/variant set <value>`, `/mode set
 <value>`, `/thinking`, `/session list`, `/session show`, and `/session switch`
 are unsupported command forms and must not appear in the slash menu.
 
@@ -524,7 +535,10 @@ skill and bundle command names are not user-aliasable in v1.
 dashboard/help block; read subcommands include `list`, `browse`, `search`,
 `inspect`, `check`, `audit`, and `reload`. In fullscreen mode it appends a
 bounded status-style transcript block; in scripted mode it prints the same
-information deterministically.
+information deterministically. Mutating `/skills` subcommands that write
+scoped state default to the current workdir `.psychevo`, accept `--local` as an
+explicit local scope, accept `-g`/`--global` for global scope, and reject legacy
+`--scope` and `--project` forms.
 
 `/bundles` shows local bundle status and help, and `/curator` shows curator
 status/help. Mutating subcommands under `/skills`, `/bundles`, and `/curator`

@@ -58,6 +58,10 @@ inventory records. Shared caches, official dataset caches, and Python sidecar
 caches live outside per-run artifacts unless a later spec promotes them into
 the store.
 
+Report and dashboard rendering are part of the local CLI surface. Formatting or
+lint-only maintenance must preserve generated report semantics while keeping
+the renderer compatible with default workspace validation.
+
 The CLI must report the run artifact root in successful human output and in
 machine output.
 

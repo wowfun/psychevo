@@ -155,7 +155,21 @@ Chat-compatible providers in the global config or the current workdir's local
 provider id and must not collide with built-in provider ids or aliases. The
 credential variable is stored in `options.api_key_env`; raw API keys must be
 written only to `.env` files, never TOML configuration. CLI provider/auth
-writes default to global scope and use `--local` for the current workdir scope.
+writes default to the current workdir local scope and use `-g`/`--global` for
+the global scope.
+
+Interactive clients and CLI model commands may explicitly set the scoped
+default model by writing the top-level `model` field in the selected scope's
+`config.toml`. CLI `model set` writes `model = "provider/model"`. Interactive
+model pickers may write the equivalent object form when persisting a selected
+`reasoning_effort`: `model = { id = "provider/model", reasoning_effort =
+"high" }`. This write defaults to the current workdir `.psychevo/config.toml`
+and uses `-g`/`--global` for `$PSYCHEVO_HOME/config.toml`. It must require
+provider-qualified `provider/model` input, must validate that the provider is
+built-in or present in the selected scope's effective provider set, must
+validate any persisted `reasoning_effort`, must not contact provider `/models`
+endpoints, must not write API keys or model metadata, and must preserve
+unrelated configuration values.
 
 ## Environment
 

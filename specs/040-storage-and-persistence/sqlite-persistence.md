@@ -259,7 +259,15 @@ Storage failures that affect session or message persistence must be observable t
 
 The current implementation uses `PRAGMA user_version = 11`, WAL, foreign keys,
 short busy timeouts, `BEGIN IMMEDIATE`, bounded jitter retry, and best-effort
-periodic `wal_checkpoint(PASSIVE)`.
+periodic `wal_checkpoint(PASSIVE)` every 50 successful writes.
+
+Long-running processes should open SQLite state once through the cloneable
+`StateRuntime` handle and reuse that handle across high-level runtime calls.
+Path-based database opening remains a low-level initialization and migration
+concern, not the default high-level runtime contract. The fullscreen TUI must
+avoid idle high-frequency database polling; live agent reload checks are
+rate-limited to at most once every 250 ms while preserving immediate checks
+after session switches.
 
 The version 11 slice creates `session_compactions` for completed context
 compaction checkpoints. The checkpoints affect runtime context projection but

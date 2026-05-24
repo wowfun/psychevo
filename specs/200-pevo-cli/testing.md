@@ -101,15 +101,20 @@ scripts/validate.sh broad
 ## Model Coverage
 
 - `pevo model list` and `pevo model current` read only local config/cache.
+- `pevo model set <provider/model>` writes the current workdir local top-level
+  model setting by default; `-g`/`--global` writes
+  `$PSYCHEVO_HOME/config.toml`. It rejects unqualified model ids and unknown
+  providers without contacting providers.
 - `pevo model fetch <provider>` is the only model command that contacts
   provider `/models`, and tests use fake local providers only.
 - `--json` emits structured output; JSON errors use the common error shape.
 
 ## Config And Auth Coverage
 
-- Config/auth writes default to global `$PSYCHEVO_HOME`; `--local` writes the
-  current workdir `.psychevo` scope.
+- Scoped config/auth writes default to the current workdir `.psychevo` scope;
+  `-g`/`--global` writes global `$PSYCHEVO_HOME`.
 - `--global` and `--local` are mutually exclusive.
+- `--project` is rejected by argument parsing.
 - `pevo config provider add` writes provider TOML without raw keys.
 - `--api-key-env` records an env var name only; `--api-key-stdin` writes the
   secret to the selected `.env`.

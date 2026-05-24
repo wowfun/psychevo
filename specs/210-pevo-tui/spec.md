@@ -23,6 +23,7 @@ stdin/stdout, it keeps the deterministic line-by-line scripted behavior.
   indicators, undo/redo-adjacent session behavior, and history loading
 - model, variant, mode, thinking visibility, raw transcript visibility, local
   stats, context-usage, and status state surfaces
+- explicit scoped default-model writes from the model picker
 - responsive foreground interruption and preservation of every visible
   assistant answer emitted during a multi-tool turn
 - direct user shell escapes from fullscreen and scripted input, persisted as

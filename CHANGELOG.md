@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-05-25
+
+- Split oversized Rust modules into responsibility-named submodules, replacing
+  the temporary numbered split files without changing public APIs or command
+  behavior.
+- Reused injected skill bodies for explicit `$skill` prompts instead of asking
+  the model to reload `SKILL.md`.
+- Added shared `StateRuntime` plumbing for runtime, TUI, and ACP paths, reducing
+  idle TUI agent reload and WAL checkpoint churn.
+- Fixed scoped default-model writes for CLI/TUI model selection, including
+  explicit reasoning variants.
+
 ## 2026-05-24
 
 - Added the first `psychevo-eval`/`peval` slice and unified evaluation
@@ -9,9 +21,13 @@
   bounded fake/live smoke validation.
 - Added ACP setup docs, testing specs for clarify/compaction/ACP packaging, and
   a README refresh for the current CLI/TUI/ACP surfaces.
+- Made scoped config writes workdir-local by default, with `-g`/`--global` for
+  global writes, and removed legacy project-scope aliases.
+- Fixed the `psychevo-eval` HTML report lint failure under broad validation.
 - Cleaned active spec attachment links, retired archived 130-permissions docs,
   and documented the attachment label rule.
 - Hardened the fullscreen TUI running-child elapsed test against clock drift.
+- Split TUI capture fixtures and mock provider out of the capture script.
 
 ## 2026-05-23
 

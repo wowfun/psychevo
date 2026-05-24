@@ -37,15 +37,28 @@ Startup model and variant precedence is:
 Fullscreen `/model` opens an interactive model picker. It starts from local
 configured models and never fetches remote model catalogs until the user
 selects an explicit fetch row. Selecting a model then opens a variant picker.
-Selecting `Config default` clears the per-workdir variant override so runtime
-uses the selected model's configured `reasoning_effort` when it has one, or the
-provider default for fetched-only models; selecting an explicit variant persists
-that override.
+Selecting `Config default` clears the per-workdir variant override and writes
+the selected model's configured `reasoning_effort` into the scoped default model
+object when that configured default is known. For fetched-only models with no
+configured default, it writes only the provider/model id and lets the provider
+default apply. Selecting an explicit variant writes that value as the scoped
+default model object's `reasoning_effort`. `/model` opens the picker in
+local-config mode, so final model selection writes the current workdir
+`.psychevo/config.toml`. `/model -g` and `/model --global` open the same picker
+in global-config mode and write `$PSYCHEVO_HOME/config.toml`.
 `/variant <none|minimal|low|medium|high|xhigh|max>` continues to update only
 the per-workdir variant override. Bare `/variant` is not a display command and
 returns a bounded usage error. Obsolete `/variant set <value>` input is not a
 compatibility command. These TUI state changes affect later prompts in the
 current process and do not edit TOML provider configuration.
+
+Model picker config writes clear the current workdir's TUI-local model and
+variant overrides, update the recent-model list, and rebuild selected model
+metadata from effective configuration. They do not write provider credentials,
+provider catalog metadata, or provider `models.<id>` entries, and they do not
+contact provider catalogs. If a global write is shadowed by local configuration,
+TUI reports that the global default was saved while the current workdir remains
+governed by local config.
 
 `/show-thinking` toggles global thinking visibility and persists it. It is a
 visibility-only control: it does not enable or disable provider reasoning, does

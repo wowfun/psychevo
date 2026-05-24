@@ -134,9 +134,9 @@ implementing protocol handling in `psychevo-cli`.
 
 `pevo skill` owns the singular skill hub/config/list/view router. With no
 subcommand it shows help. `list` and `view` are read operations; `audit`
-absorbs the old scan behavior; `install` defaults to global scope unless
-project scope is explicit; `config` owns scoped enablement and
-`skills.config.*`; and `bundle` owns local bundle TOML. Old verb-style
+absorbs the old scan behavior; scoped `install`, `config`, and `bundle`
+writes default to the current workdir local scope and use `-g`/`--global` for
+global scope. Old verb-style
 lifecycle subcommands (`create`, `patch`, `remove`, `enable`, `disable`,
 `scan`) are not the CLI contract for this topic. Skill package, discovery,
 scanner, hub, bundle, curator, and provenance semantics belong to
@@ -151,8 +151,9 @@ shows built-in and user-defined toolsets, effective mode enablement, and
 expanded tools. `show <name>` displays one tool or toolset. `enable` and
 `disable` update per-mode `tools.modes.<mode>.enabled_toolsets` or
 `disabled_toolsets`; they default to project-local `.psychevo/config.toml` and
-accept `--global` for `$PSYCHEVO_HOME/config.toml`. `create` and `remove` manage
-user-defined `[toolsets.<name>]` entries.
+accept `-g`/`--global` for `$PSYCHEVO_HOME/config.toml`. `create` and `remove`
+manage user-defined `[toolsets.<name>]` entries with the same local-default
+scope behavior.
 
 `pevo context` owns local context-window usage inspection for one existing
 session. It does not contact providers, refresh catalogs, or persist prompt
@@ -233,15 +234,20 @@ publishing may build on this artifact boundary with an opt-in command. `share`
 does not support `last-provider-request` or legacy raw provider request flags;
 provider request bodies are intentionally excluded from share artifacts.
 
-`pevo model` owns local model inspection and explicit provider catalog fetches:
-`list`, `current`, and `fetch`. `list` and `current` read only local
-configuration/cache. `fetch` is the only model command that contacts provider
+`pevo model` owns local model inspection, explicit default-model configuration,
+and explicit provider catalog fetches: `list`, `current`, `set`, and `fetch`.
+`list`, `current`, and `set` read only local configuration/cache and never
+contact providers. `set <provider/model>` writes the top-level default model
+in the current workdir `.psychevo/config.toml` by default, uses
+`-g`/`--global` for `$PSYCHEVO_HOME/config.toml`, reports the written path, and
+supports `--json`. `fetch` is the only model command that contacts provider
 `/models` endpoints.
 
 `pevo config` owns path/config/provider inspection plus scoped provider
-creation. Config writes default to the global `$PSYCHEVO_HOME` scope; `--local`
-writes the current workdir's `.psychevo` scope; `--global` explicitly selects
-the default scope. `--global` and `--local` are mutually exclusive.
+creation. Scoped config writes default to the current workdir's `.psychevo`
+scope; `-g`/`--global` writes `$PSYCHEVO_HOME`; `--local` explicitly selects
+the default local scope. `--global` and `--local` are mutually exclusive.
+`--project` is not accepted.
 
 `pevo run` accepts `--permission-mode <default|acceptEdits|plan|dontAsk|bypassPermissions>`
 to override the configured permission mode for that invocation. `plan` also
@@ -260,8 +266,9 @@ writes use the same project-local rule store.
 `pevo auth` owns credential status and API-key writes for configured or
 built-in providers. It supports `status` and `set`; destructive
 unset/logout/remove behavior is not part of this batch. Raw API keys are never
-accepted as argv values. `auth set` reads the key from stdin and writes only to
-the selected scope's `.env`.
+accepted as argv values. `auth set` reads the key from stdin and writes to the
+current workdir `.psychevo/.env` by default; `-g`/`--global` writes the global
+`.env`.
 
 New `session`, `model`, `config`, and `auth` commands emit human output by
 default and support `--json`. JSON errors use:

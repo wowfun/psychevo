@@ -36,7 +36,8 @@ actual tool invocation names and useful arguments, not category verbs such as
 - lightweight terminal Markdown projection, raw transcript display, and
   copy-visible rendered text boundaries
 - non-terminal plain semantic rendering for `pevo tui`
-- visual regression and diagnostic artifact expectations
+- visual regression and diagnostic artifact expectations, including the
+  organization of deterministic VHS fixture assets
 
 Out of scope:
 

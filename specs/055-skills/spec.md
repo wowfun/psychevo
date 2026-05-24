@@ -92,9 +92,10 @@ index contains only name, description, and location. Skills marked
 `disable-model-invocation: true`, disabled skills, unsupported skills, and
 collision-ambiguous skills are omitted.
 
-The index is advisory: when the task matches a skill description, the model is
-instructed to load the full skill through `view_skill` before following it.
-Full skill content is not included in the prompt automatically.
+The index is advisory: when the task matches a listed skill that has not
+already been selected for the turn, the model is instructed to load the full
+skill through `view_skill` before following it. Full skill content is not
+included in the prompt automatically for index-only skills.
 
 Explicit skill invocation uses editable `$skill-name` markers. Runtime parses
 markers in every user entry surface, and also treats `--skill <name-or-path>` as
@@ -103,8 +104,10 @@ markers are rejected rather than resolved by precedence.
 
 Explicitly selected skills are injected as separate hidden contextual-user
 messages containing the full skill body. Relative references in injected skill
-content are resolved against the skill directory. Injected fragments are durable
-context evidence anchored to the accepted user prompt.
+content are resolved against the skill directory. Injected fragments are the
+already-loaded skill body for that turn, so the model should follow them
+directly and only load supporting files when needed. Injected fragments are
+durable context evidence anchored to the accepted user prompt.
 
 Skill content preprocessing supports `${PSYCHEVO_SKILL_DIR}` and
 `${PSYCHEVO_SESSION_ID}`. Runtime also accepts legacy aliases for imported skill
@@ -170,16 +173,20 @@ Primary command groups:
 applies when a bundled manifest exists; this spec does not add bundled skill
 seeding or syncing.
 
-`pevo skill install` defaults to global `$PSYCHEVO_HOME/skills`; project installs
-must pass an explicit project/local scope. Installing a managed skill as an
-editable copy uses `install --name <new-name>`, and the new name is required.
+`pevo skill install` defaults to the current workdir `.psychevo/skills`;
+`-g`/`--global` installs under `$PSYCHEVO_HOME/skills`. Installing a managed
+skill as an editable copy uses `install --name <new-name>`, and the new name is
+required. `--project` is not accepted as a scope alias.
 
 The TUI `/skills` command is a hub dispatcher. `/skills` with no arguments
 shows a bounded hub dashboard/help block. Read subcommands include `list`,
 `browse`, `search`, `inspect`, `check`, `audit`, and `reload`. Mutating
 hub/config actions go through Psychevo permissions and remain blocked in Plan
-Mode. Dynamic TUI slash uses `/<skill-or-bundle>` names and submits the slash
-line as prompt input from Enter or mouse selection. Runtime still receives the
+Mode. TUI skill mutations that write scoped state use the same scope rule as
+CLI: default current workdir `.psychevo`, `--local` explicit local, and
+`-g`/`--global` global; legacy `--scope` and `--project` are not accepted.
+Dynamic TUI slash uses `/<skill-or-bundle>` names and submits the slash line as
+prompt input from Enter or mouse selection. Runtime still receives the
 equivalent explicit `$skill` or `$bundle` marker text for skill expansion, but
 the fullscreen composer is cleared and the transcript/history display keeps the
 submitted slash line. Bundles and skills share marker syntax; bundles win over
