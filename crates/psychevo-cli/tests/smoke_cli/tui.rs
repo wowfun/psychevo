@@ -1,5 +1,7 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[test]
-fn cli_tui_initial_prompt_shows_thinking_by_default() {
+pub(crate) fn cli_tui_initial_prompt_shows_thinking_by_default() {
     let server = MockSseServer::start(vec![sse_reasoning_then_text(
         "private chain",
         "visible tui",
@@ -26,7 +28,7 @@ fn cli_tui_initial_prompt_shows_thinking_by_default() {
 }
 
 #[test]
-fn cli_tui_bang_shell_rejects_missing_provider_config_before_execution() {
+pub(crate) fn cli_tui_bang_shell_rejects_missing_provider_config_before_execution() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
@@ -54,7 +56,7 @@ fn cli_tui_bang_shell_rejects_missing_provider_config_before_execution() {
 }
 
 #[test]
-fn cli_tui_bang_shell_persists_context_with_config() {
+pub(crate) fn cli_tui_bang_shell_persists_context_with_config() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
@@ -105,7 +107,7 @@ fn cli_tui_bang_shell_persists_context_with_config() {
 }
 
 #[test]
-fn cli_tui_debug_shows_usage_metadata_summary() {
+pub(crate) fn cli_tui_debug_shows_usage_metadata_summary() {
     let server = MockSseServer::start(vec![sse_metadata_usage_then_text("debug metrics")]);
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
@@ -139,7 +141,7 @@ fn cli_tui_debug_shows_usage_metadata_summary() {
 }
 
 #[test]
-fn cli_tui_thinking_toggle_hides_reasoning_and_persists() {
+pub(crate) fn cli_tui_thinking_toggle_hides_reasoning_and_persists() {
     let server = MockSseServer::start(vec![sse_reasoning_then_text("debug chain", "visible tui")]);
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
@@ -177,7 +179,7 @@ fn cli_tui_thinking_toggle_hides_reasoning_and_persists() {
 }
 
 #[test]
-fn cli_tui_status_shows_configured_default_variant() {
+pub(crate) fn cli_tui_status_shows_configured_default_variant() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
@@ -225,7 +227,7 @@ fn cli_tui_status_shows_configured_default_variant() {
 }
 
 #[test]
-fn cli_tui_help_prints_commands_from_registry() {
+pub(crate) fn cli_tui_help_prints_commands_from_registry() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
@@ -264,7 +266,7 @@ fn cli_tui_help_prints_commands_from_registry() {
 }
 
 #[test]
-fn cli_tui_new_is_silent_until_next_prompt() {
+pub(crate) fn cli_tui_new_is_silent_until_next_prompt() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
@@ -295,7 +297,7 @@ fn cli_tui_new_is_silent_until_next_prompt() {
 }
 
 #[test]
-fn cli_tui_scripted_undo_and_redo_print_deterministic_status() {
+pub(crate) fn cli_tui_scripted_undo_and_redo_print_deterministic_status() {
     let server = MockSseServer::start(vec![sse_text("visible tui")]);
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
@@ -340,7 +342,7 @@ fn cli_tui_scripted_undo_and_redo_print_deterministic_status() {
 }
 
 #[test]
-fn cli_tui_mode_set_plan_persists_and_uses_read_only_tools() {
+pub(crate) fn cli_tui_mode_set_plan_persists_and_uses_read_only_tools() {
     let server = MockSseServer::start(vec![sse_text("planned")]);
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
@@ -420,7 +422,7 @@ fn cli_tui_mode_set_plan_persists_and_uses_read_only_tools() {
 }
 
 #[test]
-fn cli_tui_model_lists_configured_entries_without_prompt() {
+pub(crate) fn cli_tui_model_lists_configured_entries_without_prompt() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
@@ -452,7 +454,7 @@ fn cli_tui_model_lists_configured_entries_without_prompt() {
 }
 
 #[test]
-fn cli_tui_continues_latest_run_or_tui_session_and_new_creates_tui_session() {
+pub(crate) fn cli_tui_continues_latest_run_or_tui_session_and_new_creates_tui_session() {
     let server = MockSseServer::start(vec![
         sse_text("first"),
         sse_text("second"),
@@ -525,7 +527,7 @@ fn cli_tui_continues_latest_run_or_tui_session_and_new_creates_tui_session() {
 }
 
 #[test]
-fn cli_tui_sessions_lists_sessions_and_session_show_is_unknown() {
+pub(crate) fn cli_tui_sessions_lists_sessions_and_session_show_is_unknown() {
     let server = MockSseServer::start(vec![sse_reasoning_then_text("hidden chain", "visible")]);
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
@@ -570,7 +572,7 @@ fn cli_tui_sessions_lists_sessions_and_session_show_is_unknown() {
 }
 
 #[test]
-fn cli_tui_sessions_scripted_fallback_lists_sessions() {
+pub(crate) fn cli_tui_sessions_scripted_fallback_lists_sessions() {
     let server = MockSseServer::start(vec![sse_reasoning_then_text("hidden chain", "visible")]);
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
@@ -613,7 +615,7 @@ fn cli_tui_sessions_scripted_fallback_lists_sessions() {
 }
 
 #[test]
-fn cli_tui_sessions_scripted_fallback_hides_archived_sessions() {
+pub(crate) fn cli_tui_sessions_scripted_fallback_hides_archived_sessions() {
     let server = MockSseServer::start(vec![sse_reasoning_then_text("hidden chain", "visible")]);
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());

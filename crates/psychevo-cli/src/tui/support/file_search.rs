@@ -1,49 +1,51 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct FileSearchMatch {
-    path: String,
-    kind: FileSearchMatchKind,
+pub(crate) struct FileSearchMatch {
+    pub(crate) path: String,
+    pub(crate) kind: FileSearchMatchKind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FileSearchMatchKind {
+pub(crate) enum FileSearchMatchKind {
     File,
     Directory,
 }
 
 #[derive(Debug, Clone)]
-struct FileSearchResult {
-    generation: u64,
-    query: String,
-    matches: Vec<FileSearchMatch>,
+pub(crate) struct FileSearchResult {
+    pub(crate) generation: u64,
+    pub(crate) query: String,
+    pub(crate) matches: Vec<FileSearchMatch>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct FileToken {
-    row: usize,
-    start_col: usize,
-    end_col: usize,
-    query: String,
+pub(crate) struct FileToken {
+    pub(crate) row: usize,
+    pub(crate) start_col: usize,
+    pub(crate) end_col: usize,
+    pub(crate) query: String,
 }
 
-struct FileSearchState {
-    generation: u64,
-    popup: Option<FileSearchPopupState>,
-    dismissed_query: Option<String>,
-    cancel: Option<Arc<AtomicBool>>,
-    tx: mpsc::UnboundedSender<FileSearchResult>,
-    rx: mpsc::UnboundedReceiver<FileSearchResult>,
+pub(crate) struct FileSearchState {
+    pub(crate) generation: u64,
+    pub(crate) popup: Option<FileSearchPopupState>,
+    pub(crate) dismissed_query: Option<String>,
+    pub(crate) cancel: Option<Arc<AtomicBool>>,
+    pub(crate) tx: mpsc::UnboundedSender<FileSearchResult>,
+    pub(crate) rx: mpsc::UnboundedReceiver<FileSearchResult>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct FileSearchPopupState {
-    query: String,
-    matches: Vec<FileSearchMatch>,
-    selected: usize,
-    waiting: bool,
+pub(crate) struct FileSearchPopupState {
+    pub(crate) query: String,
+    pub(crate) matches: Vec<FileSearchMatch>,
+    pub(crate) selected: usize,
+    pub(crate) waiting: bool,
 }
 
 impl FileSearchState {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
         Self {
             generation: 0,
@@ -55,7 +57,7 @@ impl FileSearchState {
         }
     }
 
-    fn sync(&mut self, root: &Path, token: Option<&FileToken>) {
+    pub(crate) fn sync(&mut self, root: &Path, token: Option<&FileToken>) {
         let Some(token) = token else {
             self.close();
             self.dismissed_query = None;
@@ -77,7 +79,7 @@ impl FileSearchState {
         self.start_search(root, token.query.clone());
     }
 
-    fn start_search(&mut self, root: &Path, query: String) {
+    pub(crate) fn start_search(&mut self, root: &Path, query: String) {
         self.cancel_current();
         self.generation = self.generation.wrapping_add(1);
         self.popup = Some(FileSearchPopupState {
@@ -103,7 +105,7 @@ impl FileSearchState {
         });
     }
 
-    fn drain_results(&mut self) -> bool {
+    pub(crate) fn drain_results(&mut self) -> bool {
         let mut changed = false;
         while let Ok(result) = self.rx.try_recv() {
             if result.generation != self.generation {
@@ -123,23 +125,23 @@ impl FileSearchState {
         changed
     }
 
-    fn close(&mut self) {
+    pub(crate) fn close(&mut self) {
         self.cancel_current();
         self.popup = None;
     }
 
-    fn dismiss(&mut self, query: Option<String>) {
+    pub(crate) fn dismiss(&mut self, query: Option<String>) {
         self.dismissed_query = query;
         self.close();
     }
 
-    fn cancel_current(&mut self) {
+    pub(crate) fn cancel_current(&mut self) {
         if let Some(cancel) = self.cancel.take() {
             cancel.store(true, Ordering::Relaxed);
         }
     }
 
-    fn height(&self) -> u16 {
+    pub(crate) fn height(&self) -> u16 {
         let Some(popup) = &self.popup else {
             return 0;
         };
@@ -147,14 +149,14 @@ impl FileSearchState {
         rows as u16
     }
 
-    fn selected_path(&self) -> Option<String> {
+    pub(crate) fn selected_path(&self) -> Option<String> {
         self.popup
             .as_ref()
             .and_then(|popup| popup.matches.get(popup.selected))
             .map(|entry| entry.path.clone())
     }
 
-    fn move_selection(&mut self, direction: isize) {
+    pub(crate) fn move_selection(&mut self, direction: isize) {
         let Some(popup) = &mut self.popup else {
             return;
         };
@@ -167,7 +169,7 @@ impl FileSearchState {
         popup.selected = (current + direction).rem_euclid(len as isize) as usize;
     }
 
-    fn set_selection(&mut self, index: usize) {
+    pub(crate) fn set_selection(&mut self, index: usize) {
         let Some(popup) = &mut self.popup else {
             return;
         };

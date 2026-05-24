@@ -1,4 +1,6 @@
-fn default_title(kind: TranscriptKind) -> &'static str {
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) fn default_title(kind: TranscriptKind) -> &'static str {
     match kind {
         TranscriptKind::Prompt => "",
         TranscriptKind::Answer => "",
@@ -14,25 +16,25 @@ fn default_title(kind: TranscriptKind) -> &'static str {
 }
 
 #[derive(Debug, Clone)]
-struct UserPromptDisplay {
-    text: String,
-    attachment_meta: Option<String>,
+pub(crate) struct UserPromptDisplay {
+    pub(crate) text: String,
+    pub(crate) attachment_meta: Option<String>,
 }
 
 #[derive(Debug, Clone)]
-struct UserShellDisplay {
-    command: String,
-    result: Value,
-    outcome: String,
+pub(crate) struct UserShellDisplay {
+    pub(crate) command: String,
+    pub(crate) result: Value,
+    pub(crate) outcome: String,
 }
 
 #[derive(Debug, Clone)]
-struct AgentNotificationProjection {
-    text: String,
-    target: Option<String>,
+pub(crate) struct AgentNotificationProjection {
+    pub(crate) text: String,
+    pub(crate) target: Option<String>,
 }
 
-fn user_display_from_message(
+pub(crate) fn user_display_from_message(
     message: &Value,
     metadata: Option<&Value>,
 ) -> Option<UserPromptDisplay> {
@@ -59,21 +61,23 @@ fn user_display_from_message(
     })
 }
 
-fn agent_notification_display(metadata: Option<&Value>) -> Option<String> {
+pub(crate) fn agent_notification_display(metadata: Option<&Value>) -> Option<String> {
     agent_notification_projection(metadata).map(|projection| projection.text)
 }
 
-fn agent_notification_target(metadata: Option<&Value>) -> Option<String> {
+pub(crate) fn agent_notification_target(metadata: Option<&Value>) -> Option<String> {
     agent_notification_projection(metadata).and_then(|projection| projection.target)
 }
 
-fn agent_notification_present(metadata: Option<&Value>) -> bool {
+pub(crate) fn agent_notification_present(metadata: Option<&Value>) -> bool {
     metadata
         .and_then(|metadata| metadata.get("agent_notification"))
         .is_some()
 }
 
-fn agent_notification_projection(metadata: Option<&Value>) -> Option<AgentNotificationProjection> {
+pub(crate) fn agent_notification_projection(
+    metadata: Option<&Value>,
+) -> Option<AgentNotificationProjection> {
     let notification = metadata?.get("agent_notification")?;
     if notification
         .get("hidden")
@@ -95,7 +99,13 @@ fn agent_notification_projection(metadata: Option<&Value>) -> Option<AgentNotifi
         let agents = notification
             .get("agents")
             .and_then(Value::as_array)
-            .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "))
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
             .unwrap_or_default();
         return Some(AgentNotificationProjection {
             text: format!("required agent was not called: {agents}"),
@@ -134,7 +144,7 @@ fn agent_notification_projection(metadata: Option<&Value>) -> Option<AgentNotifi
     Some(AgentNotificationProjection { text, target })
 }
 
-fn user_text_from_message(message: &Value, metadata: Option<&Value>) -> Option<String> {
+pub(crate) fn user_text_from_message(message: &Value, metadata: Option<&Value>) -> Option<String> {
     if btw_inherited_message(metadata) {
         return None;
     }
@@ -144,7 +154,7 @@ fn user_text_from_message(message: &Value, metadata: Option<&Value>) -> Option<S
     user_display_from_message(message, metadata).map(|display| display.text)
 }
 
-fn btw_inherited_message(metadata: Option<&Value>) -> bool {
+pub(crate) fn btw_inherited_message(metadata: Option<&Value>) -> bool {
     metadata
         .and_then(|metadata| metadata.get(BTW_INHERITED_METADATA_KEY))
         .and_then(|value| value.get("hidden"))
@@ -152,7 +162,7 @@ fn btw_inherited_message(metadata: Option<&Value>) -> bool {
         .unwrap_or(false)
 }
 
-fn legacy_user_text_from_message(message: &Value) -> Option<String> {
+pub(crate) fn legacy_user_text_from_message(message: &Value) -> Option<String> {
     let text = message
         .get("content")?
         .as_array()?
@@ -168,7 +178,7 @@ fn legacy_user_text_from_message(message: &Value) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
-fn visible_tui_message_count(messages: &[TuiMessageSummary]) -> Result<usize> {
+pub(crate) fn visible_tui_message_count(messages: &[TuiMessageSummary]) -> Result<usize> {
     messages.iter().try_fold(0, |count, summary| {
         let message = serde_json::to_value(&summary.message)?;
         Ok(count
@@ -190,7 +200,7 @@ fn visible_tui_message_count(messages: &[TuiMessageSummary]) -> Result<usize> {
     })
 }
 
-fn user_shell_display_from_message(
+pub(crate) fn user_shell_display_from_message(
     message: &Value,
     metadata: Option<&Value>,
 ) -> Option<UserShellDisplay> {
@@ -204,7 +214,7 @@ fn user_shell_display_from_message(
     user_shell_display_from_xml(&text)
 }
 
-fn user_shell_display_from_metadata(metadata: &Value) -> Option<UserShellDisplay> {
+pub(crate) fn user_shell_display_from_metadata(metadata: &Value) -> Option<UserShellDisplay> {
     let command = metadata.get("command")?.as_str()?.to_string();
     let result = metadata
         .get("result")
@@ -222,7 +232,7 @@ fn user_shell_display_from_metadata(metadata: &Value) -> Option<UserShellDisplay
     })
 }
 
-fn user_shell_display_from_xml(text: &str) -> Option<UserShellDisplay> {
+pub(crate) fn user_shell_display_from_xml(text: &str) -> Option<UserShellDisplay> {
     let trimmed = text.trim_start();
     if !trimmed.starts_with("<user_shell_command>") {
         return None;
@@ -245,7 +255,7 @@ fn user_shell_display_from_xml(text: &str) -> Option<UserShellDisplay> {
     })
 }
 
-fn extract_xml_tag<'a>(text: &'a str, tag: &str) -> Option<&'a str> {
+pub(crate) fn extract_xml_tag<'a>(text: &'a str, tag: &str) -> Option<&'a str> {
     let start_tag = format!("<{tag}>");
     let end_tag = format!("</{tag}>");
     let start = text.find(&start_tag)? + start_tag.len();
@@ -253,32 +263,39 @@ fn extract_xml_tag<'a>(text: &'a str, tag: &str) -> Option<&'a str> {
     Some(&text[start..end])
 }
 
-fn unescape_xml_text(value: &str) -> String {
+pub(crate) fn unescape_xml_text(value: &str) -> String {
     value
         .replace("&lt;", "<")
         .replace("&gt;", ">")
         .replace("&amp;", "&")
 }
 
-fn tui_display_metadata(metadata: Option<&Value>) -> Option<PromptDisplayMetadata> {
+pub(crate) fn tui_display_metadata(metadata: Option<&Value>) -> Option<PromptDisplayMetadata> {
     metadata
         .and_then(|metadata| metadata.get(TUI_DISPLAY_METADATA_KEY))
         .cloned()
         .and_then(|value| serde_json::from_value(value).ok())
 }
 
-fn attachment_meta_from_display(attachments: &[PromptAttachmentDisplay]) -> Option<String> {
+pub(crate) fn attachment_meta_from_display(
+    attachments: &[PromptAttachmentDisplay],
+) -> Option<String> {
     if attachments.is_empty() {
         return None;
     }
     let mut lines = vec!["attachments".to_string()];
     for (index, attachment) in attachments.iter().enumerate() {
-        lines.push(format!("{} {}: {}", attachment.kind, index + 1, attachment.source));
+        lines.push(format!(
+            "{} {}: {}",
+            attachment.kind,
+            index + 1,
+            attachment.source
+        ));
     }
     Some(lines.join("\n"))
 }
 
-fn legacy_attachment_meta_from_message(message: &Value) -> Option<String> {
+pub(crate) fn legacy_attachment_meta_from_message(message: &Value) -> Option<String> {
     let content = message.get("content")?.as_array()?;
     let mut sources = Vec::new();
     for block in content {
@@ -307,13 +324,13 @@ fn legacy_attachment_meta_from_message(message: &Value) -> Option<String> {
 }
 
 #[cfg(test)]
-fn visible_transcript_message_count(rows: &[TranscriptRow]) -> usize {
+pub(crate) fn visible_transcript_message_count(rows: &[TranscriptRow]) -> usize {
     rows.iter()
         .filter(|row| matches!(row.kind, TranscriptKind::Prompt | TranscriptKind::Answer))
         .count()
 }
 
-fn assistant_text_from_message(message: &Value) -> Option<String> {
+pub(crate) fn assistant_text_from_message(message: &Value) -> Option<String> {
     let text = message
         .get("content")?
         .as_array()?
@@ -328,7 +345,7 @@ fn assistant_text_from_message(message: &Value) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
-fn assistant_reasoning_from_message(message: &Value) -> Option<String> {
+pub(crate) fn assistant_reasoning_from_message(message: &Value) -> Option<String> {
     let text = message
         .get("content")?
         .as_array()?
@@ -344,18 +361,18 @@ fn assistant_reasoning_from_message(message: &Value) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
-fn reasoning_only_message_receives_meta(message: &Value) -> bool {
+pub(crate) fn reasoning_only_message_receives_meta(message: &Value) -> bool {
     if !assistant_message_allows_terminal_meta(message) {
         return false;
     }
     !assistant_message_has_tool_calls(message)
 }
 
-fn visible_answer_message_receives_meta(message: &Value) -> bool {
+pub(crate) fn visible_answer_message_receives_meta(message: &Value) -> bool {
     assistant_message_allows_terminal_meta(message) && !assistant_message_has_tool_calls(message)
 }
 
-fn assistant_message_keeps_tool_calls_active(message: &Value) -> bool {
+pub(crate) fn assistant_message_keeps_tool_calls_active(message: &Value) -> bool {
     message.get("finish_reason").and_then(Value::as_str) == Some("tool_calls")
         && message
             .get("outcome")
@@ -363,7 +380,7 @@ fn assistant_message_keeps_tool_calls_active(message: &Value) -> bool {
             .is_none_or(|outcome| outcome == "normal")
 }
 
-fn assistant_message_allows_terminal_meta(message: &Value) -> bool {
+pub(crate) fn assistant_message_allows_terminal_meta(message: &Value) -> bool {
     if message
         .get("finish_reason")
         .and_then(Value::as_str)
@@ -377,7 +394,7 @@ fn assistant_message_allows_terminal_meta(message: &Value) -> bool {
         .is_none_or(|outcome| outcome == "normal")
 }
 
-fn assistant_message_has_tool_calls(message: &Value) -> bool {
+pub(crate) fn assistant_message_has_tool_calls(message: &Value) -> bool {
     message
         .get("content")
         .and_then(Value::as_array)
@@ -390,15 +407,15 @@ fn assistant_message_has_tool_calls(message: &Value) -> bool {
 }
 
 #[derive(Debug, Clone)]
-struct HistoryToolCall {
-    id: String,
-    name: String,
-    args: Value,
-    active_title: String,
-    completed_title: String,
+pub(crate) struct HistoryToolCall {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) args: Value,
+    pub(crate) active_title: String,
+    pub(crate) completed_title: String,
 }
 
-fn history_tool_calls_from_message(message: &Value) -> Vec<HistoryToolCall> {
+pub(crate) fn history_tool_calls_from_message(message: &Value) -> Vec<HistoryToolCall> {
     let Some(content) = message.get("content").and_then(Value::as_array) else {
         return Vec::new();
     };
@@ -423,7 +440,7 @@ fn history_tool_calls_from_message(message: &Value) -> Vec<HistoryToolCall> {
         .collect()
 }
 
-fn tool_call_args_from_block(block: &Value) -> Value {
+pub(crate) fn tool_call_args_from_block(block: &Value) -> Value {
     block
         .get("arguments")
         .cloned()
@@ -436,11 +453,11 @@ fn tool_call_args_from_block(block: &Value) -> Value {
         .unwrap_or(Value::Null)
 }
 
-fn message_timestamp_ms(message: &Value) -> Option<i64> {
+pub(crate) fn message_timestamp_ms(message: &Value) -> Option<i64> {
     message.get("timestamp_ms").and_then(Value::as_i64)
 }
 
-fn pending_input_id_from_message_end(value: &Value) -> Option<u64> {
+pub(crate) fn pending_input_id_from_message_end(value: &Value) -> Option<u64> {
     value
         .get("metadata")
         .and_then(|metadata| metadata.get("pending_input"))
@@ -448,7 +465,7 @@ fn pending_input_id_from_message_end(value: &Value) -> Option<u64> {
         .and_then(Value::as_u64)
 }
 
-fn outcome_from_value(value: &Value) -> Option<Outcome> {
+pub(crate) fn outcome_from_value(value: &Value) -> Option<Outcome> {
     match value.get("outcome").and_then(Value::as_str)? {
         "normal" => Some(Outcome::Normal),
         "stopped" => Some(Outcome::Stopped),
@@ -458,7 +475,7 @@ fn outcome_from_value(value: &Value) -> Option<Outcome> {
     }
 }
 
-fn history_meta_text(
+pub(crate) fn history_meta_text(
     message: &Value,
     _usage: Option<&Value>,
     metadata: Option<&Value>,
@@ -480,7 +497,7 @@ fn history_meta_text(
     (!parts.is_empty()).then(|| parts.join("  "))
 }
 
-fn history_elapsed_duration(
+pub(crate) fn history_elapsed_duration(
     message: &Value,
     metadata: Option<&Value>,
     prompt_started_ms: Option<i64>,
@@ -494,14 +511,14 @@ fn history_elapsed_duration(
     (elapsed >= 0).then_some(Duration::from_millis(elapsed as u64))
 }
 
-fn metadata_elapsed_duration(metadata: Option<&Value>) -> Option<Duration> {
+pub(crate) fn metadata_elapsed_duration(metadata: Option<&Value>) -> Option<Duration> {
     metadata
         .and_then(|metadata| metadata.get("elapsed_ms"))
         .and_then(Value::as_u64)
         .map(Duration::from_millis)
 }
 
-fn metadata_reasoning_effort(metadata: Option<&Value>) -> Option<&str> {
+pub(crate) fn metadata_reasoning_effort(metadata: Option<&Value>) -> Option<&str> {
     metadata
         .and_then(|metadata| metadata.get("reasoning_effort"))
         .and_then(Value::as_str)
@@ -509,7 +526,7 @@ fn metadata_reasoning_effort(metadata: Option<&Value>) -> Option<&str> {
         .filter(|value| !value.is_empty() && *value != "none")
 }
 
-fn instant_from_wall_timestamp_ms(started_at_ms: i64) -> Option<Instant> {
+pub(crate) fn instant_from_wall_timestamp_ms(started_at_ms: i64) -> Option<Instant> {
     let now = Instant::now();
     let elapsed_ms = wall_now_ms().checked_sub(started_at_ms)?;
     if elapsed_ms <= 0 {
@@ -519,33 +536,33 @@ fn instant_from_wall_timestamp_ms(started_at_ms: i64) -> Option<Instant> {
         .or(Some(now))
 }
 
-fn tool_started_instant(value: &Value) -> Instant {
+pub(crate) fn tool_started_instant(value: &Value) -> Instant {
     let Some(started_at_ms) = value.get("started_at_ms").and_then(Value::as_i64) else {
         return Instant::now();
     };
     instant_from_wall_timestamp_ms(started_at_ms).unwrap_or_else(Instant::now)
 }
 
-fn history_tool_started_instant(message: &Value) -> Instant {
+pub(crate) fn history_tool_started_instant(message: &Value) -> Instant {
     let Some(started_at_ms) = message_timestamp_ms(message) else {
         return Instant::now();
     };
     instant_from_wall_timestamp_ms(started_at_ms).unwrap_or_else(Instant::now)
 }
 
-fn wall_now_ms() -> i64 {
+pub(crate) fn wall_now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
 }
 
-fn row_visible(row: &TranscriptRow, thinking_visible: bool) -> bool {
+pub(crate) fn row_visible(row: &TranscriptRow, thinking_visible: bool) -> bool {
     thinking_visible || row.kind != TranscriptKind::Thinking
 }
 
 #[cfg(test)]
-fn next_visible_row(
+pub(crate) fn next_visible_row(
     rows: &[TranscriptRow],
     index: usize,
     thinking_visible: bool,
@@ -556,7 +573,7 @@ fn next_visible_row(
 }
 
 #[cfg(test)]
-fn compact_trailing_for(
+pub(crate) fn compact_trailing_for(
     rows: &[TranscriptRow],
     index: usize,
     row: &TranscriptRow,
@@ -567,7 +584,7 @@ fn compact_trailing_for(
 }
 
 #[cfg(test)]
-fn transcript_line_count(
+pub(crate) fn transcript_line_count(
     rows: &[TranscriptRow],
     width: u16,
     thinking_visible: bool,
@@ -584,7 +601,7 @@ fn transcript_line_count(
         .sum()
 }
 
-fn wrapped_line_count(lines: &[Line<'_>], width: u16) -> usize {
+pub(crate) fn wrapped_line_count(lines: &[Line<'_>], width: u16) -> usize {
     if width == 0 {
         return 0;
     }

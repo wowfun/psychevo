@@ -3,7 +3,7 @@ use serde_json::Value;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct TuiRenderer {
-    color: bool,
+    pub(crate) color: bool,
 }
 
 impl TuiRenderer {
@@ -27,7 +27,7 @@ impl TuiRenderer {
         self.paint(text, StyleKind::Error)
     }
 
-    fn paint(&self, text: &str, kind: StyleKind) -> String {
+    pub(crate) fn paint(&self, text: &str, kind: StyleKind) -> String {
         if !self.color {
             return text.to_string();
         }
@@ -41,7 +41,7 @@ impl TuiRenderer {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum StyleKind {
+pub(crate) enum StyleKind {
     Dim,
     Status,
     Success,
@@ -82,8 +82,8 @@ pub(crate) fn format_session_line(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) mod tests {
+    pub(crate) use super::*;
     use serde_json::json;
 
     #[test]

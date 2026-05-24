@@ -1,4 +1,6 @@
-fn draw_fullscreen_for_test(
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) fn draw_fullscreen_for_test(
     app: &TuiApp,
     ui: &mut FullscreenUi<'_>,
     width: u16,
@@ -12,7 +14,7 @@ fn draw_fullscreen_for_test(
     terminal.backend().buffer().clone()
 }
 
-fn draw_fullscreen_with_cursor_for_test(
+pub(crate) fn draw_fullscreen_with_cursor_for_test(
     app: &TuiApp,
     ui: &mut FullscreenUi<'_>,
     width: u16,
@@ -33,7 +35,7 @@ fn draw_fullscreen_with_cursor_for_test(
     (terminal.backend().buffer().clone(), cursor)
 }
 
-async fn drain_fullscreen_until_idle(app: &mut TuiApp, ui: &mut FullscreenUi<'_>) {
+pub(crate) async fn drain_fullscreen_until_idle(app: &mut TuiApp, ui: &mut FullscreenUi<'_>) {
     for _ in 0..200 {
         app.drain_fullscreen_events(ui).await.expect("drain events");
         if ui.running.is_none()
@@ -47,7 +49,7 @@ async fn drain_fullscreen_until_idle(app: &mut TuiApp, ui: &mut FullscreenUi<'_>
     panic!("fullscreen work did not become idle");
 }
 
-fn test_app(temp: &tempfile::TempDir) -> TuiApp {
+pub(crate) fn test_app(temp: &tempfile::TempDir) -> TuiApp {
     let home = temp.path().join("home");
     let workdir = temp.path().join("work");
     std::fs::create_dir_all(&home).expect("home");
@@ -63,12 +65,15 @@ fn test_app(temp: &tempfile::TempDir) -> TuiApp {
             .to_string(),
     );
     let (clipboard_result_tx, clipboard_result_rx) = std::sync::mpsc::channel();
+    let db_path = home.join("state.db");
+    let state_runtime = StateRuntime::open(&db_path).expect("state runtime");
     TuiApp {
         env_map,
         home: home.clone(),
         state_path: home.join("tui-state.json"),
         state: TuiState::default(),
-        db_path: home.join("state.db"),
+        state_runtime,
+        db_path,
         config_path: None,
         workdir: workdir.clone(),
         workdir_key: workdir.display().to_string(),
@@ -99,13 +104,14 @@ fn test_app(temp: &tempfile::TempDir) -> TuiApp {
         clipboard_copies_in_flight: 0,
         slash_config: EffectiveSlashConfig::default(),
         btw_side: None,
+        last_live_agent_reload_check: None,
         side_cleanup_task: None,
         compaction_task: None,
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-enum FixtureKind {
+pub(crate) enum FixtureKind {
     Idle,
     RunningThinking,
     CollapsedTool,
@@ -125,7 +131,7 @@ enum FixtureKind {
     FailureMeta,
 }
 
-fn fixture_ui<'a>(app: &TuiApp, kind: FixtureKind) -> FullscreenUi<'a> {
+pub(crate) fn fixture_ui<'a>(app: &TuiApp, kind: FixtureKind) -> FullscreenUi<'a> {
     let mut ui = FullscreenUi::new(app);
     ui.sidebar = stable_sidebar();
     match kind {
@@ -235,7 +241,7 @@ fn fixture_ui<'a>(app: &TuiApp, kind: FixtureKind) -> FullscreenUi<'a> {
     ui
 }
 
-fn stable_sidebar() -> SidebarSnapshot {
+pub(crate) fn stable_sidebar() -> SidebarSnapshot {
     SidebarSnapshot {
         title: "Review sidebar polish".to_string(),
         session: "12345678".to_string(),
@@ -247,7 +253,7 @@ fn stable_sidebar() -> SidebarSnapshot {
     }
 }
 
-fn stable_session_bottom_panel() -> BottomSelectionPanel {
+pub(crate) fn stable_session_bottom_panel() -> BottomSelectionPanel {
     BottomSelectionPanel::new_sessions(
         SessionListView::Active,
         vec![
@@ -279,7 +285,7 @@ fn stable_session_bottom_panel() -> BottomSelectionPanel {
     )
 }
 
-fn stable_archived_session_bottom_panel() -> BottomSelectionPanel {
+pub(crate) fn stable_archived_session_bottom_panel() -> BottomSelectionPanel {
     BottomSelectionPanel::new_sessions(
         SessionListView::Archived,
         vec![BottomSelectionRow {
@@ -298,7 +304,7 @@ fn stable_archived_session_bottom_panel() -> BottomSelectionPanel {
     )
 }
 
-fn push_completed_turn(ui: &mut FullscreenUi<'_>, kind: FixtureKind) {
+pub(crate) fn push_completed_turn(ui: &mut FullscreenUi<'_>, kind: FixtureKind) {
     ui.push_user("Summarize the TUI snapshot harness.".to_string());
     ui.transcript.push(TranscriptRow::with_title(
         TranscriptKind::Thinking,
@@ -368,7 +374,7 @@ fn push_completed_turn(ui: &mut FullscreenUi<'_>, kind: FixtureKind) {
     ));
 }
 
-fn push_consecutive_tool_rows_turn(ui: &mut FullscreenUi<'_>) {
+pub(crate) fn push_consecutive_tool_rows_turn(ui: &mut FullscreenUi<'_>) {
     ui.push_user("Summarize several tool calls.".to_string());
     ui.transcript.push(TranscriptRow::with_title(
         TranscriptKind::Thinking,
@@ -403,7 +409,7 @@ fn push_consecutive_tool_rows_turn(ui: &mut FullscreenUi<'_>) {
     ui.scroll_to_bottom();
 }
 
-fn push_expanded_long_command_turn(ui: &mut FullscreenUi<'_>) {
+pub(crate) fn push_expanded_long_command_turn(ui: &mut FullscreenUi<'_>) {
     ui.push_user("Inspect HN comments with sqlite.".to_string());
     let command = "cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db \"SELECT id || '|' || by || '|' || text FROM comments WHERE story_id = 48073680 ORDER BY id\" 2>&1 | head -c 3000";
     let mut row = TranscriptRow::with_title(
@@ -420,7 +426,7 @@ fn push_expanded_long_command_turn(ui: &mut FullscreenUi<'_>) {
     ui.scroll_to_bottom();
 }
 
-fn push_collapsed_json_tool_turn(ui: &mut FullscreenUi<'_>) {
+pub(crate) fn push_collapsed_json_tool_turn(ui: &mut FullscreenUi<'_>) {
     ui.push_user("Inspect cached HN comments.".to_string());
     let json = format!(
         "{{\"comments\":[{}]}}",
@@ -440,7 +446,7 @@ fn push_collapsed_json_tool_turn(ui: &mut FullscreenUi<'_>) {
     ui.scroll_to_bottom();
 }
 
-fn push_long_command_folded_output_turn(ui: &mut FullscreenUi<'_>) {
+pub(crate) fn push_long_command_folded_output_turn(ui: &mut FullscreenUi<'_>) {
     ui.push_user("Fetch comments from sqlite.".to_string());
     let command = "cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db \"SELECT id || '|' || by || '|' || text FROM comments WHERE story_id = 48072190 ORDER BY id\"";
     let output = (1..=12)
@@ -452,7 +458,7 @@ fn push_long_command_folded_output_turn(ui: &mut FullscreenUi<'_>) {
     ui.scroll_to_bottom();
 }
 
-fn push_failure_turn(ui: &mut FullscreenUi<'_>) {
+pub(crate) fn push_failure_turn(ui: &mut FullscreenUi<'_>) {
     ui.push_user("Run a command that fails.".to_string());
     let mut row = TranscriptRow::with_title(
         TranscriptKind::Ran,
@@ -473,14 +479,14 @@ fn push_failure_turn(ui: &mut FullscreenUi<'_>) {
     ));
 }
 
-fn long_tool_output() -> String {
+pub(crate) fn long_tool_output() -> String {
     (1..=24)
         .map(|line| format!("{line:02}: crates/psychevo-cli/src/tui.rs evidence row"))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-fn push_rich_markdown_turn(ui: &mut FullscreenUi<'_>, workdir: &Path) {
+pub(crate) fn push_rich_markdown_turn(ui: &mut FullscreenUi<'_>, workdir: &Path) {
     ui.push_user("Render a markdown answer.".to_string());
     let path = workdir.join("crates/psychevo-cli/src/tui/render/transcript.rs");
     ui.transcript.push(TranscriptRow::with_title(
@@ -493,7 +499,7 @@ fn push_rich_markdown_turn(ui: &mut FullscreenUi<'_>, workdir: &Path) {
     ));
 }
 
-fn push_active_write_after_answer_turn(ui: &mut FullscreenUi<'_>) {
+pub(crate) fn push_active_write_after_answer_turn(ui: &mut FullscreenUi<'_>) {
     ui.push_user("Write the report after collecting data.".to_string());
     ui.start_assistant();
     ui.apply_value_event(
@@ -544,7 +550,7 @@ fn push_active_write_after_answer_turn(ui: &mut FullscreenUi<'_>) {
     ui.scroll_to_bottom();
 }
 
-fn push_active_visible_write_preamble_turn(ui: &mut FullscreenUi<'_>) {
+pub(crate) fn push_active_visible_write_preamble_turn(ui: &mut FullscreenUi<'_>) {
     ui.push_user("Write the complete report.".to_string());
     ui.start_assistant();
     ui.apply_value_event(
@@ -575,7 +581,7 @@ fn push_active_visible_write_preamble_turn(ui: &mut FullscreenUi<'_>) {
     ui.scroll_to_bottom();
 }
 
-fn push_active_reasoning_write_turn(ui: &mut FullscreenUi<'_>) {
+pub(crate) fn push_active_reasoning_write_turn(ui: &mut FullscreenUi<'_>) {
     ui.push_user("Write the report after reasoning.".to_string());
     ui.start_assistant();
     ui.apply_value_event(
@@ -628,7 +634,7 @@ fn push_active_reasoning_write_turn(ui: &mut FullscreenUi<'_>) {
     ui.scroll_to_bottom();
 }
 
-fn push_long_markdown_bottom_turn(ui: &mut FullscreenUi<'_>) {
+pub(crate) fn push_long_markdown_bottom_turn(ui: &mut FullscreenUi<'_>) {
     ui.push_user("Render long markdown table and scroll to bottom.".to_string());
     let rows = (1..=32)
         .map(|index| {
@@ -654,7 +660,7 @@ fn push_long_markdown_bottom_turn(ui: &mut FullscreenUi<'_>) {
     ui.scroll_to_bottom();
 }
 
-fn push_long_thinking_markdown_bottom_turn(ui: &mut FullscreenUi<'_>) {
+pub(crate) fn push_long_thinking_markdown_bottom_turn(ui: &mut FullscreenUi<'_>) {
     ui.push_user("Restore a reasoning-only daily report.".to_string());
     let rows = (1..=12)
         .map(|index| {
@@ -680,7 +686,7 @@ fn push_long_thinking_markdown_bottom_turn(ui: &mut FullscreenUi<'_>) {
     ui.scroll_to_bottom();
 }
 
-fn assert_tui_snapshot(
+pub(crate) fn assert_tui_snapshot(
     name: &str,
     width: u16,
     height: u16,
@@ -705,7 +711,7 @@ fn assert_tui_snapshot(
     });
 }
 
-fn write_snapshot_diagnostics(name: &str, text: &str, styles: &str, combined: &str) {
+pub(crate) fn write_snapshot_diagnostics(name: &str, text: &str, styles: &str, combined: &str) {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../target/pevo-tui-snapshots")
         .join(name);
@@ -726,7 +732,7 @@ fn write_snapshot_diagnostics(name: &str, text: &str, styles: &str, combined: &s
     );
 }
 
-fn buffer_text(buffer: &ratatui::buffer::Buffer) -> String {
+pub(crate) fn buffer_text(buffer: &ratatui::buffer::Buffer) -> String {
     let area = *buffer.area();
     let mut text = String::new();
     for y in area.y..area.y + area.height {
@@ -740,7 +746,7 @@ fn buffer_text(buffer: &ratatui::buffer::Buffer) -> String {
     text
 }
 
-fn attach_pending_agent_running(ui: &mut FullscreenUi<'_>) {
+pub(crate) fn attach_pending_agent_running(ui: &mut FullscreenUi<'_>) {
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
         std::future::pending::<psychevo_runtime::Result<psychevo_runtime::RunResult>>().await
@@ -754,7 +760,7 @@ fn attach_pending_agent_running(ui: &mut FullscreenUi<'_>) {
     });
 }
 
-fn attach_background_agent_running(ui: &mut FullscreenUi<'_>, session_id: &str) {
+pub(crate) fn attach_background_agent_running(ui: &mut FullscreenUi<'_>, session_id: &str) {
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
         std::future::pending::<psychevo_runtime::Result<psychevo_runtime::RunResult>>().await
@@ -770,7 +776,7 @@ fn attach_background_agent_running(ui: &mut FullscreenUi<'_>, session_id: &str) 
     });
 }
 
-fn buffer_style_text(buffer: &ratatui::buffer::Buffer) -> String {
+pub(crate) fn buffer_style_text(buffer: &ratatui::buffer::Buffer) -> String {
     let area = *buffer.area();
     let mut text = String::new();
     for y in area.y..area.y + area.height {
@@ -790,7 +796,7 @@ fn buffer_style_text(buffer: &ratatui::buffer::Buffer) -> String {
     text
 }
 
-fn style_marker(color: Color) -> &'static str {
+pub(crate) fn style_marker(color: Color) -> &'static str {
     if color == TUI_MAGENTA || color == Color::Magenta {
         "[magenta]"
     } else if color == TUI_CYAN || color == Color::Cyan {

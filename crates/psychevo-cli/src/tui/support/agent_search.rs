@@ -1,32 +1,34 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct AgentSearchMatch {
-    name: String,
-    description: String,
+pub(crate) struct AgentSearchMatch {
+    pub(crate) name: String,
+    pub(crate) description: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct AgentToken {
-    row: usize,
-    start_col: usize,
-    end_col: usize,
-    query: String,
+pub(crate) struct AgentToken {
+    pub(crate) row: usize,
+    pub(crate) start_col: usize,
+    pub(crate) end_col: usize,
+    pub(crate) query: String,
 }
 
 #[derive(Debug, Clone, Default)]
-struct AgentSearchState {
-    popup: Option<AgentSearchPopupState>,
-    dismissed_query: Option<String>,
+pub(crate) struct AgentSearchState {
+    pub(crate) popup: Option<AgentSearchPopupState>,
+    pub(crate) dismissed_query: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct AgentSearchPopupState {
-    query: String,
-    matches: Vec<AgentSearchMatch>,
-    selected: usize,
+pub(crate) struct AgentSearchPopupState {
+    pub(crate) query: String,
+    pub(crate) matches: Vec<AgentSearchMatch>,
+    pub(crate) selected: usize,
 }
 
 impl AgentSearchState {
-    fn sync(&mut self, token: Option<&AgentToken>, matches: Vec<AgentSearchMatch>) {
+    pub(crate) fn sync(&mut self, token: Option<&AgentToken>, matches: Vec<AgentSearchMatch>) {
         let Some(token) = token else {
             self.close();
             self.dismissed_query = None;
@@ -55,30 +57,30 @@ impl AgentSearchState {
         });
     }
 
-    fn close(&mut self) {
+    pub(crate) fn close(&mut self) {
         self.popup = None;
     }
 
-    fn dismiss(&mut self, query: Option<String>) {
+    pub(crate) fn dismiss(&mut self, query: Option<String>) {
         self.dismissed_query = query;
         self.close();
     }
 
-    fn height(&self) -> u16 {
+    pub(crate) fn height(&self) -> u16 {
         let Some(popup) = &self.popup else {
             return 0;
         };
         popup.matches.len().clamp(1, FILE_POPUP_MAX_ROWS) as u16
     }
 
-    fn selected_name(&self) -> Option<String> {
+    pub(crate) fn selected_name(&self) -> Option<String> {
         self.popup
             .as_ref()
             .and_then(|popup| popup.matches.get(popup.selected))
             .map(|entry| entry.name.clone())
     }
 
-    fn move_selection(&mut self, direction: isize) {
+    pub(crate) fn move_selection(&mut self, direction: isize) {
         let Some(popup) = &mut self.popup else {
             return;
         };
@@ -91,7 +93,7 @@ impl AgentSearchState {
         popup.selected = (current + direction).rem_euclid(len as isize) as usize;
     }
 
-    fn set_selection(&mut self, index: usize) {
+    pub(crate) fn set_selection(&mut self, index: usize) {
         let Some(popup) = &mut self.popup else {
             return;
         };

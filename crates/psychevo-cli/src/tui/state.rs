@@ -5,8 +5,8 @@ use std::path::Path;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-const TUI_STATE_VERSION: u64 = 4;
-const RECENT_MODEL_LIMIT: usize = 8;
+pub(crate) const TUI_STATE_VERSION: u64 = 4;
+pub(crate) const RECENT_MODEL_LIMIT: usize = 8;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct TuiState {
@@ -139,28 +139,28 @@ impl TuiState {
         self.sidebar_visible = visible;
     }
 
-    fn push_recent_model(&mut self, model: String) {
+    pub(crate) fn push_recent_model(&mut self, model: String) {
         self.recent_models.retain(|entry| entry != &model);
         self.recent_models.insert(0, model);
         self.trim_recent();
     }
 
-    fn trim_recent(&mut self) {
+    pub(crate) fn trim_recent(&mut self) {
         self.recent_models.truncate(RECENT_MODEL_LIMIT);
     }
 }
 
-fn current_version() -> u64 {
+pub(crate) fn current_version() -> u64 {
     TUI_STATE_VERSION
 }
 
-fn default_thinking_visible() -> bool {
+pub(crate) fn default_thinking_visible() -> bool {
     true
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) mod tests {
+    pub(crate) use super::*;
     use tempfile::tempdir;
 
     #[test]

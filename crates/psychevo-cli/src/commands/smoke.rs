@@ -2,13 +2,14 @@ use std::process::ExitCode;
 
 use anyhow::Result;
 use psychevo_ai::Outcome;
-use psychevo_runtime::{SmokeOptions, run_smoke};
+use psychevo_runtime::{SmokeOptions, StateRuntime, run_smoke};
 
 use crate::args::SmokeArgs;
 
 pub(crate) async fn run_smoke_command(args: SmokeArgs) -> Result<ExitCode> {
+    let state = StateRuntime::open(&args.db)?;
     let result = run_smoke(SmokeOptions {
-        db_path: args.db,
+        state,
         workdir: args.workdir,
         session: args.session,
         prompt: args.prompt,

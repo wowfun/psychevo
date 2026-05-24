@@ -1,5 +1,7 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[test]
-fn cli_agent_inspect_unknown_id_reports_not_found() {
+pub(crate) fn cli_agent_inspect_unknown_id_reports_not_found() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
 
@@ -11,11 +13,14 @@ fn cli_agent_inspect_unknown_id_reports_not_found() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).expect("stderr");
-    assert!(stderr.contains("agent not found: missing-agent"), "{stderr}");
+    assert!(
+        stderr.contains("agent not found: missing-agent"),
+        "{stderr}"
+    );
 }
 
 #[test]
-fn cli_agent_inspect_json_includes_identity_and_depth() {
+pub(crate) fn cli_agent_inspect_json_includes_identity_and_depth() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let store = psychevo_runtime::SqliteStore::open(&db).expect("store");
@@ -64,7 +69,7 @@ fn cli_agent_inspect_json_includes_identity_and_depth() {
 }
 
 #[test]
-fn cli_agent_validate_json_reports_effective_empty_tools_policy() {
+pub(crate) fn cli_agent_validate_json_reports_effective_empty_tools_policy() {
     let temp = tempdir().expect("temp");
     let psychevo_home = init_tui_home(temp.path());
     let agents_dir = psychevo_home.join("agents");

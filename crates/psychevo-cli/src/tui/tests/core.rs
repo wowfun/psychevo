@@ -1,5 +1,7 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[test]
-fn resolves_unique_and_ambiguous_session_prefixes() {
+pub(crate) fn resolves_unique_and_ambiguous_session_prefixes() {
     let sessions = vec![summary("abcdef"), summary("abc999"), summary("def000")];
     assert_eq!(
         resolve_session_ref_from_summaries(&sessions, "def").unwrap(),
@@ -13,7 +15,7 @@ fn resolves_unique_and_ambiguous_session_prefixes() {
 }
 
 #[test]
-fn turn_printer_hides_reasoning_by_default() {
+pub(crate) fn turn_printer_hides_reasoning_by_default() {
     let mut printer = TurnPrinter::new(TuiRenderer::new(false), false, false);
     let mut output = Vec::new();
     printer
@@ -34,7 +36,7 @@ fn turn_printer_hides_reasoning_by_default() {
 }
 
 #[test]
-fn turn_printer_shows_reasoning_when_enabled() {
+pub(crate) fn turn_printer_shows_reasoning_when_enabled() {
     let mut printer = TurnPrinter::new(TuiRenderer::new(false), true, false);
     let mut output = Vec::new();
     printer
@@ -55,7 +57,7 @@ fn turn_printer_shows_reasoning_when_enabled() {
 }
 
 #[test]
-fn turn_printer_renders_project_instruction_warning() {
+pub(crate) fn turn_printer_renders_project_instruction_warning() {
     let mut printer = TurnPrinter::new(TuiRenderer::new(false), false, false);
     let mut output = Vec::new();
     printer
@@ -76,7 +78,7 @@ fn turn_printer_renders_project_instruction_warning() {
 }
 
 #[test]
-fn turn_printer_preserves_bash_command_title_until_tool_end() {
+pub(crate) fn turn_printer_preserves_bash_command_title_until_tool_end() {
     let mut printer = TurnPrinter::new(TuiRenderer::new(false), false, false);
     let mut output = Vec::new();
     printer
@@ -110,7 +112,7 @@ fn turn_printer_preserves_bash_command_title_until_tool_end() {
 }
 
 #[test]
-fn turn_printer_announces_streaming_tool_preparation_once() {
+pub(crate) fn turn_printer_announces_streaming_tool_preparation_once() {
     let mut printer = TurnPrinter::new(TuiRenderer::new(false), false, false);
     let mut output = Vec::new();
     printer
@@ -187,7 +189,7 @@ fn turn_printer_announces_streaming_tool_preparation_once() {
 }
 
 #[test]
-fn turn_printer_scopes_reused_tool_positions_across_messages() {
+pub(crate) fn turn_printer_scopes_reused_tool_positions_across_messages() {
     let mut printer = TurnPrinter::new(TuiRenderer::new(false), false, false);
     let mut output = Vec::new();
     printer

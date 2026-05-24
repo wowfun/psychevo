@@ -1,10 +1,12 @@
-fn new_textarea<'a>() -> TextArea<'a> {
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) fn new_textarea<'a>() -> TextArea<'a> {
     let mut textarea = TextArea::default();
     apply_composer_textarea_style(&mut textarea);
     textarea
 }
 
-fn textarea_with_text<'a>(text: &str) -> TextArea<'a> {
+pub(crate) fn textarea_with_text<'a>(text: &str) -> TextArea<'a> {
     let mut textarea = TextArea::new(text.split('\n').map(ToString::to_string).collect());
     apply_composer_textarea_style(&mut textarea);
     textarea.move_cursor(CursorMove::Bottom);
@@ -12,7 +14,7 @@ fn textarea_with_text<'a>(text: &str) -> TextArea<'a> {
     textarea
 }
 
-fn apply_composer_textarea_style(textarea: &mut TextArea<'_>) {
+pub(crate) fn apply_composer_textarea_style(textarea: &mut TextArea<'_>) {
     let theme = tui_theme();
     let style = theme.surface_style();
     textarea.set_block(Block::default().style(style));
@@ -22,7 +24,7 @@ fn apply_composer_textarea_style(textarea: &mut TextArea<'_>) {
     textarea.set_selection_style(text_selection_style());
 }
 
-fn composer_cursor_from_point(
+pub(crate) fn composer_cursor_from_point(
     textarea: &TextArea<'_>,
     area: Rect,
     column: u16,
@@ -46,7 +48,7 @@ fn composer_cursor_from_point(
     ))
 }
 
-fn composer_terminal_cursor_position(
+pub(crate) fn composer_terminal_cursor_position(
     textarea: &TextArea<'_>,
     area: Rect,
     top_row: &mut u16,
@@ -68,7 +70,7 @@ fn composer_terminal_cursor_position(
     ))
 }
 
-fn next_composer_cursor_top_row(prev_top: u16, cursor_row: u16, height: u16) -> u16 {
+pub(crate) fn next_composer_cursor_top_row(prev_top: u16, cursor_row: u16, height: u16) -> u16 {
     if height == 0 {
         return 0;
     }
@@ -81,7 +83,7 @@ fn next_composer_cursor_top_row(prev_top: u16, cursor_row: u16, height: u16) -> 
     }
 }
 
-fn composer_char_col_at_display_col(line: &str, display_col: usize) -> usize {
+pub(crate) fn composer_char_col_at_display_col(line: &str, display_col: usize) -> usize {
     let mut width = 0usize;
     for (index, ch) in line.chars().enumerate() {
         width = width.saturating_add(UnicodeWidthChar::width(ch).unwrap_or(0));
@@ -92,11 +94,15 @@ fn composer_char_col_at_display_col(line: &str, display_col: usize) -> usize {
     line.chars().count()
 }
 
-fn textarea_text(textarea: &TextArea<'_>) -> String {
+pub(crate) fn textarea_text(textarea: &TextArea<'_>) -> String {
     textarea.lines().join("\n")
 }
 
-fn textarea_with_lines_and_cursor<'a>(lines: Vec<String>, row: usize, col: usize) -> TextArea<'a> {
+pub(crate) fn textarea_with_lines_and_cursor<'a>(
+    lines: Vec<String>,
+    row: usize,
+    col: usize,
+) -> TextArea<'a> {
     let mut textarea = TextArea::new(lines);
     apply_composer_textarea_style(&mut textarea);
     textarea.move_cursor(CursorMove::Jump(
@@ -106,7 +112,7 @@ fn textarea_with_lines_and_cursor<'a>(lines: Vec<String>, row: usize, col: usize
     textarea
 }
 
-fn current_file_token(textarea: &TextArea<'_>) -> Option<FileToken> {
+pub(crate) fn current_file_token(textarea: &TextArea<'_>) -> Option<FileToken> {
     let cursor = textarea.cursor();
     let row = cursor.0;
     let col = cursor.1;
@@ -114,7 +120,7 @@ fn current_file_token(textarea: &TextArea<'_>) -> Option<FileToken> {
     file_token_on_line(row, line, col)
 }
 
-fn current_skill_token(textarea: &TextArea<'_>) -> Option<SkillToken> {
+pub(crate) fn current_skill_token(textarea: &TextArea<'_>) -> Option<SkillToken> {
     let cursor = textarea.cursor();
     let row = cursor.0;
     let col = cursor.1;
@@ -122,7 +128,7 @@ fn current_skill_token(textarea: &TextArea<'_>) -> Option<SkillToken> {
     skill_token_on_line(row, line, col)
 }
 
-fn current_agent_token(textarea: &TextArea<'_>) -> Option<AgentToken> {
+pub(crate) fn current_agent_token(textarea: &TextArea<'_>) -> Option<AgentToken> {
     let cursor = textarea.cursor();
     let row = cursor.0;
     let col = cursor.1;
@@ -130,7 +136,7 @@ fn current_agent_token(textarea: &TextArea<'_>) -> Option<AgentToken> {
     agent_token_on_line(row, line, col)
 }
 
-fn skill_token_on_line(row: usize, line: &str, cursor_col: usize) -> Option<SkillToken> {
+pub(crate) fn skill_token_on_line(row: usize, line: &str, cursor_col: usize) -> Option<SkillToken> {
     let chars = line.chars().collect::<Vec<_>>();
     let cursor_col = cursor_col.min(chars.len());
     let mut start = 0usize;
@@ -165,7 +171,7 @@ fn skill_token_on_line(row: usize, line: &str, cursor_col: usize) -> Option<Skil
     None
 }
 
-fn file_token_on_line(row: usize, line: &str, cursor_col: usize) -> Option<FileToken> {
+pub(crate) fn file_token_on_line(row: usize, line: &str, cursor_col: usize) -> Option<FileToken> {
     let chars = line.chars().collect::<Vec<_>>();
     let cursor_col = cursor_col.min(chars.len());
     let mut start = 0usize;
@@ -194,7 +200,7 @@ fn file_token_on_line(row: usize, line: &str, cursor_col: usize) -> Option<FileT
     None
 }
 
-fn agent_token_on_line(row: usize, line: &str, cursor_col: usize) -> Option<AgentToken> {
+pub(crate) fn agent_token_on_line(row: usize, line: &str, cursor_col: usize) -> Option<AgentToken> {
     let chars = line.chars().collect::<Vec<_>>();
     let cursor_col = cursor_col.min(chars.len());
     let mut start = 0usize;
@@ -229,7 +235,7 @@ fn agent_token_on_line(row: usize, line: &str, cursor_col: usize) -> Option<Agen
     None
 }
 
-fn replace_current_file_token(textarea: &mut TextArea<'_>, path: &str) -> bool {
+pub(crate) fn replace_current_file_token(textarea: &mut TextArea<'_>, path: &str) -> bool {
     let Some(token) = current_file_token(textarea) else {
         return false;
     };
@@ -256,7 +262,7 @@ fn replace_current_file_token(textarea: &mut TextArea<'_>, path: &str) -> bool {
     true
 }
 
-fn replace_current_skill_token(textarea: &mut TextArea<'_>, name: &str) -> bool {
+pub(crate) fn replace_current_skill_token(textarea: &mut TextArea<'_>, name: &str) -> bool {
     let Some(token) = current_skill_token(textarea) else {
         return false;
     };
@@ -269,7 +275,7 @@ fn replace_current_skill_token(textarea: &mut TextArea<'_>, name: &str) -> bool 
     )
 }
 
-fn replace_current_agent_token(textarea: &mut TextArea<'_>, name: &str) -> bool {
+pub(crate) fn replace_current_agent_token(textarea: &mut TextArea<'_>, name: &str) -> bool {
     let Some(token) = current_agent_token(textarea) else {
         return false;
     };
@@ -282,7 +288,7 @@ fn replace_current_agent_token(textarea: &mut TextArea<'_>, name: &str) -> bool 
     )
 }
 
-fn replace_token_range(
+pub(crate) fn replace_token_range(
     textarea: &mut TextArea<'_>,
     row: usize,
     start_col: usize,
@@ -310,7 +316,7 @@ fn replace_token_range(
     true
 }
 
-fn prompt_file_path(path: &str) -> String {
+pub(crate) fn prompt_file_path(path: &str) -> String {
     if path.chars().any(char::is_whitespace) && !path.contains('"') {
         format!("\"{path}\"")
     } else {
@@ -318,7 +324,11 @@ fn prompt_file_path(path: &str) -> String {
     }
 }
 
-fn search_workdir_files(root: &Path, query: &str, cancel: &AtomicBool) -> Vec<FileSearchMatch> {
+pub(crate) fn search_workdir_files(
+    root: &Path,
+    query: &str,
+    cancel: &AtomicBool,
+) -> Vec<FileSearchMatch> {
     let mut builder = ignore::WalkBuilder::new(root);
     builder
         .hidden(false)
@@ -379,7 +389,7 @@ fn search_workdir_files(root: &Path, query: &str, cancel: &AtomicBool) -> Vec<Fi
         .collect()
 }
 
-fn is_vcs_dir_entry(entry: &ignore::DirEntry) -> bool {
+pub(crate) fn is_vcs_dir_entry(entry: &ignore::DirEntry) -> bool {
     if !entry
         .file_type()
         .is_some_and(|file_type| file_type.is_dir())
@@ -392,19 +402,19 @@ fn is_vcs_dir_entry(entry: &ignore::DirEntry) -> bool {
     )
 }
 
-fn relative_path_text(path: &Path) -> Option<String> {
+pub(crate) fn relative_path_text(path: &Path) -> Option<String> {
     let text = path.to_string_lossy().replace('\\', "/");
     (!text.is_empty()).then_some(text)
 }
 
-fn file_kind_rank(kind: FileSearchMatchKind) -> u8 {
+pub(crate) fn file_kind_rank(kind: FileSearchMatchKind) -> u8 {
     match kind {
         FileSearchMatchKind::Directory => 0,
         FileSearchMatchKind::File => 1,
     }
 }
 
-fn file_match_rank(path: &str, query: &str) -> Option<(u8, usize)> {
+pub(crate) fn file_match_rank(path: &str, query: &str) -> Option<(u8, usize)> {
     let query = query.trim();
     if query.is_empty() {
         return Some((3, 0));
@@ -424,7 +434,7 @@ fn file_match_rank(path: &str, query: &str) -> Option<(u8, usize)> {
     fuzzy_subsequence_score(&path_lower, &query_lower).map(|score| (2, score))
 }
 
-fn fuzzy_subsequence_score(haystack: &str, query: &str) -> Option<usize> {
+pub(crate) fn fuzzy_subsequence_score(haystack: &str, query: &str) -> Option<usize> {
     let haystack = haystack.chars().collect::<Vec<_>>();
     let mut start = 0usize;
     let mut last = 0usize;
@@ -441,14 +451,14 @@ fn fuzzy_subsequence_score(haystack: &str, query: &str) -> Option<usize> {
     Some(score)
 }
 
-fn is_newline_key(key: KeyEvent) -> bool {
+pub(crate) fn is_newline_key(key: KeyEvent) -> bool {
     key.code == KeyCode::Enter
         && key
             .modifiers
             .intersects(KeyModifiers::SHIFT | KeyModifiers::CONTROL | KeyModifiers::ALT)
 }
 
-fn composer_height(textarea: &TextArea<'_>) -> u16 {
+pub(crate) fn composer_height(textarea: &TextArea<'_>) -> u16 {
     let lines = textarea.lines().len() as u16;
     lines.clamp(1, 6)
 }

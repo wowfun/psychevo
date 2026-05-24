@@ -1,0 +1,3 @@
+pevo TUI visual regression fixture
+line 02: stable local file evidence
+line 03: used by the read tool in the VHS demo

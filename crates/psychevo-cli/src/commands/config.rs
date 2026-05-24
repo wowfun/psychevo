@@ -15,6 +15,7 @@ use crate::args::{
 };
 use crate::commands::common::{
     base_run_options, config_scope_dir, print_json_error, read_secret_from_stdin, scope_label,
+    scoped_config_dir, scoped_label,
 };
 use crate::env::{env_path, inherited_env, resolve_psychevo_home, resolve_state_db};
 
@@ -29,7 +30,7 @@ pub(crate) fn run_config_command(args: ConfigArgs) -> Result<ExitCode> {
     }
 }
 
-fn run_config_command_inner(args: &ConfigArgs) -> Result<ExitCode> {
+pub(crate) fn run_config_command_inner(args: &ConfigArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
@@ -46,7 +47,7 @@ fn run_config_command_inner(args: &ConfigArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn print_paths(
+pub(crate) fn print_paths(
     args: &ConfigJsonArgs,
     env_map: &std::collections::BTreeMap<String, String>,
     home: &std::path::Path,
@@ -85,7 +86,7 @@ fn print_paths(
     Ok(())
 }
 
-fn run_provider_command(
+pub(crate) fn run_provider_command(
     args: &ConfigProviderArgs,
     env_map: &std::collections::BTreeMap<String, String>,
     home: &std::path::Path,
@@ -101,7 +102,7 @@ fn run_provider_command(
     }
 }
 
-fn run_permissions_command(
+pub(crate) fn run_permissions_command(
     args: &ConfigPermissionsArgs,
     env_map: &std::collections::BTreeMap<String, String>,
     home: &std::path::Path,
@@ -117,7 +118,7 @@ fn run_permissions_command(
     }
 }
 
-fn remove_permission_rule(
+pub(crate) fn remove_permission_rule(
     args: &ConfigPermissionRemoveArgs,
     home: &std::path::Path,
     cwd: &std::path::Path,
@@ -146,14 +147,14 @@ fn remove_permission_rule(
     Ok(())
 }
 
-fn add_provider(
+pub(crate) fn add_provider(
     args: &ConfigProviderAddArgs,
     home: &std::path::Path,
     cwd: &std::path::Path,
 ) -> Result<()> {
     let api_key = read_secret_from_stdin(args.api_key_stdin)?;
     let result = create_scoped_custom_provider(ScopedCustomProviderInput {
-        config_dir: config_scope_dir(home, cwd, args.local)?,
+        config_dir: scoped_config_dir(home, cwd, args.global)?,
         provider_id: args.id.clone(),
         label: args.label.clone(),
         base_url: args.base_url.clone(),
@@ -162,7 +163,7 @@ fn add_provider(
         api_key,
     })?;
     let value = json!({
-        "scope": scope_label(args.local),
+        "scope": scoped_label(args.global),
         "provider": result.provider_id,
         "label": result.label,
         "base_url": result.base_url,
@@ -187,7 +188,7 @@ fn add_provider(
     Ok(())
 }
 
-fn print_config_document(value: &Value, as_json: bool) -> Result<()> {
+pub(crate) fn print_config_document(value: &Value, as_json: bool) -> Result<()> {
     if as_json {
         println!("{}", serde_json::to_string_pretty(value)?);
     } else {
@@ -208,7 +209,7 @@ fn print_config_document(value: &Value, as_json: bool) -> Result<()> {
     Ok(())
 }
 
-fn print_provider_list(value: &Value, as_json: bool) -> Result<()> {
+pub(crate) fn print_provider_list(value: &Value, as_json: bool) -> Result<()> {
     if as_json {
         println!("{}", serde_json::to_string_pretty(value)?);
     } else {
@@ -235,7 +236,7 @@ fn print_provider_list(value: &Value, as_json: bool) -> Result<()> {
     Ok(())
 }
 
-fn print_permissions_list(value: &Value, as_json: bool) -> Result<()> {
+pub(crate) fn print_permissions_list(value: &Value, as_json: bool) -> Result<()> {
     if as_json {
         println!("{}", serde_json::to_string_pretty(value)?);
     } else {
@@ -271,7 +272,7 @@ fn print_permissions_list(value: &Value, as_json: bool) -> Result<()> {
     Ok(())
 }
 
-fn config_scope(args: &ConfigShowArgs) -> ConfigScope {
+pub(crate) fn config_scope(args: &ConfigShowArgs) -> ConfigScope {
     if args.global {
         ConfigScope::Global
     } else if args.local {
@@ -281,7 +282,7 @@ fn config_scope(args: &ConfigShowArgs) -> ConfigScope {
     }
 }
 
-fn config_json(args: &ConfigArgs) -> bool {
+pub(crate) fn config_json(args: &ConfigArgs) -> bool {
     match &args.command {
         ConfigCommand::Path(args) => args.json,
         ConfigCommand::Show(args) => args.json,

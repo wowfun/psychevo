@@ -1,8 +1,10 @@
-fn default_clipboard_sink() -> ClipboardSink {
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) fn default_clipboard_sink() -> ClipboardSink {
     Arc::new(copy_text_to_clipboard)
 }
 
-fn copy_text_to_clipboard(text: &str) -> io::Result<()> {
+pub(crate) fn copy_text_to_clipboard(text: &str) -> io::Result<()> {
     copy_text_to_clipboard_with(
         text,
         ClipboardEnvironment {
@@ -16,7 +18,7 @@ fn copy_text_to_clipboard(text: &str) -> io::Result<()> {
     )
 }
 
-fn copy_text_to_clipboard_with(
+pub(crate) fn copy_text_to_clipboard_with(
     text: &str,
     environment: ClipboardEnvironment,
     candidates: Vec<ClipboardCommand>,
@@ -59,7 +61,7 @@ fn copy_text_to_clipboard_with(
     }
 }
 
-fn terminal_clipboard_copy_with(
+pub(crate) fn terminal_clipboard_copy_with(
     text: &str,
     tmux_session: bool,
     osc52_result: io::Result<()>,
@@ -81,7 +83,7 @@ fn terminal_clipboard_copy_with(
     )))
 }
 
-fn clipboard_failure_summary(failures: &[String]) -> String {
+pub(crate) fn clipboard_failure_summary(failures: &[String]) -> String {
     if failures.is_empty() {
         return "no clipboard backend succeeded".to_string();
     }
@@ -89,7 +91,7 @@ fn clipboard_failure_summary(failures: &[String]) -> String {
     truncate_chars(&summary, 240)
 }
 
-fn write_osc52_clipboard(text: &str) -> io::Result<()> {
+pub(crate) fn write_osc52_clipboard(text: &str) -> io::Result<()> {
     let sequence = osc52_sequence(text)?;
     #[cfg(unix)]
     {
@@ -102,19 +104,19 @@ fn write_osc52_clipboard(text: &str) -> io::Result<()> {
     write_osc52_sequence(io::stdout(), &sequence)
 }
 
-fn write_osc52_sequence(mut writer: impl Write, sequence: &str) -> io::Result<()> {
+pub(crate) fn write_osc52_sequence(mut writer: impl Write, sequence: &str) -> io::Result<()> {
     writer.write_all(sequence.as_bytes())?;
     writer.flush()
 }
 
-fn osc52_sequence(text: &str) -> io::Result<String> {
+pub(crate) fn osc52_sequence(text: &str) -> io::Result<String> {
     osc52_sequence_with_passthrough(
         text,
         std::env::var_os("TMUX").is_some() || std::env::var_os("STY").is_some(),
     )
 }
 
-fn osc52_sequence_with_passthrough(text: &str, passthrough: bool) -> io::Result<String> {
+pub(crate) fn osc52_sequence_with_passthrough(text: &str, passthrough: bool) -> io::Result<String> {
     const OSC52_MAX_RAW_BYTES: usize = 100_000;
     let raw_bytes = text.len();
     if raw_bytes > OSC52_MAX_RAW_BYTES {
@@ -132,28 +134,28 @@ fn osc52_sequence_with_passthrough(text: &str, passthrough: bool) -> io::Result<
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ClipboardCommand {
-    command: &'static str,
-    args: &'static [&'static str],
+pub(crate) struct ClipboardCommand {
+    pub(crate) command: &'static str,
+    pub(crate) args: &'static [&'static str],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ClipboardEnvironment {
-    ssh_session: bool,
-    tmux_session: bool,
+pub(crate) struct ClipboardEnvironment {
+    pub(crate) ssh_session: bool,
+    pub(crate) tmux_session: bool,
 }
 
-const NO_ARGS: &[&str] = &[];
-const POWERSHELL_CLIPBOARD_ARGS: &[&str] = &[
+pub(crate) const NO_ARGS: &[&str] = &[];
+pub(crate) const POWERSHELL_CLIPBOARD_ARGS: &[&str] = &[
     "-NonInteractive",
     "-NoProfile",
     "-Command",
     "[Console]::InputEncoding = [System.Text.Encoding]::UTF8; $ErrorActionPreference = 'Stop'; $text = [Console]::In.ReadToEnd(); Set-Clipboard -Value $text",
 ];
-const XCLIP_CLIPBOARD_ARGS: &[&str] = &["-selection", "clipboard"];
-const XSEL_CLIPBOARD_ARGS: &[&str] = &["--clipboard", "--input"];
+pub(crate) const XCLIP_CLIPBOARD_ARGS: &[&str] = &["-selection", "clipboard"];
+pub(crate) const XSEL_CLIPBOARD_ARGS: &[&str] = &["--clipboard", "--input"];
 
-fn local_clipboard_commands() -> Vec<ClipboardCommand> {
+pub(crate) fn local_clipboard_commands() -> Vec<ClipboardCommand> {
     local_clipboard_commands_for(
         cfg!(target_os = "macos"),
         cfg!(target_os = "windows"),
@@ -162,21 +164,21 @@ fn local_clipboard_commands() -> Vec<ClipboardCommand> {
     )
 }
 
-fn is_ssh_session() -> bool {
+pub(crate) fn is_ssh_session() -> bool {
     std::env::var_os("SSH_TTY").is_some() || std::env::var_os("SSH_CONNECTION").is_some()
 }
 
-fn is_tmux_session() -> bool {
+pub(crate) fn is_tmux_session() -> bool {
     std::env::var_os("TMUX").is_some() || std::env::var_os("TMUX_PANE").is_some()
 }
 
-fn is_wayland_session() -> bool {
+pub(crate) fn is_wayland_session() -> bool {
     std::env::var_os("WAYLAND_DISPLAY").is_some()
         || std::env::var("XDG_SESSION_TYPE")
             .is_ok_and(|value| value.eq_ignore_ascii_case("wayland"))
 }
 
-fn is_probably_wsl() -> bool {
+pub(crate) fn is_probably_wsl() -> bool {
     let proc_version = std::fs::read_to_string("/proc/version").ok();
     let os_release = std::fs::read_to_string("/proc/sys/kernel/osrelease").ok();
     is_probably_wsl_from(
@@ -187,7 +189,7 @@ fn is_probably_wsl() -> bool {
     )
 }
 
-fn is_probably_wsl_from(
+pub(crate) fn is_probably_wsl_from(
     proc_version: Option<&str>,
     os_release: Option<&str>,
     distro_env: bool,
@@ -199,12 +201,12 @@ fn is_probably_wsl_from(
         || interop_env
 }
 
-fn contains_wsl_marker(value: &str) -> bool {
+pub(crate) fn contains_wsl_marker(value: &str) -> bool {
     let lower = value.to_ascii_lowercase();
     lower.contains("microsoft") || lower.contains("wsl")
 }
 
-fn local_clipboard_commands_for(
+pub(crate) fn local_clipboard_commands_for(
     macos: bool,
     windows: bool,
     wsl: bool,
@@ -251,7 +253,7 @@ fn local_clipboard_commands_for(
     candidates
 }
 
-fn pipe_to_command(command: &str, args: &[&str], text: &str) -> io::Result<bool> {
+pub(crate) fn pipe_to_command(command: &str, args: &[&str], text: &str) -> io::Result<bool> {
     let mut child = match StdCommand::new(command)
         .args(args)
         .stdin(Stdio::piped())
@@ -271,7 +273,7 @@ fn pipe_to_command(command: &str, args: &[&str], text: &str) -> io::Result<bool>
     Ok(status.success())
 }
 
-fn tmux_clipboard_copy(text: &str) -> io::Result<()> {
+pub(crate) fn tmux_clipboard_copy(text: &str) -> io::Result<()> {
     tmux_clipboard_copy_ready(
         || tmux_command_output(["show-options", "-gv", "set-clipboard"]),
         || tmux_command_output(["info"]),
@@ -279,7 +281,7 @@ fn tmux_clipboard_copy(text: &str) -> io::Result<()> {
     pipe_to_required_command("tmux", &["load-buffer", "-w", "-"], text)
 }
 
-fn tmux_clipboard_copy_ready(
+pub(crate) fn tmux_clipboard_copy_ready(
     set_clipboard_fn: impl FnOnce() -> io::Result<String>,
     tmux_info_fn: impl FnOnce() -> io::Result<String>,
 ) -> io::Result<()> {
@@ -298,7 +300,7 @@ fn tmux_clipboard_copy_ready(
     Ok(())
 }
 
-fn tmux_command_output<const N: usize>(args: [&str; N]) -> io::Result<String> {
+pub(crate) fn tmux_command_output<const N: usize>(args: [&str; N]) -> io::Result<String> {
     let output = StdCommand::new("tmux").args(args).output()?;
     if output.status.success() {
         return String::from_utf8(output.stdout)
@@ -316,7 +318,7 @@ fn tmux_command_output<const N: usize>(args: [&str; N]) -> io::Result<String> {
     }
 }
 
-fn pipe_to_required_command(command: &str, args: &[&str], text: &str) -> io::Result<()> {
+pub(crate) fn pipe_to_required_command(command: &str, args: &[&str], text: &str) -> io::Result<()> {
     let mut child = StdCommand::new(command)
         .args(args)
         .stdin(Stdio::piped())
@@ -351,7 +353,7 @@ fn pipe_to_required_command(command: &str, args: &[&str], text: &str) -> io::Res
     }
 }
 
-fn base64_encode(bytes: &[u8]) -> String {
+pub(crate) fn base64_encode(bytes: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {

@@ -1,10 +1,12 @@
-trait TuiRenderable {
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) trait TuiRenderable {
     fn desired_height(&self, width: u16) -> u16;
     fn render(&self, area: Rect, buf: &mut ratatui::buffer::Buffer);
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-enum DisplayRowTone {
+pub(crate) enum DisplayRowTone {
     #[default]
     Normal,
     Accent,
@@ -13,18 +15,18 @@ enum DisplayRowTone {
 }
 
 #[derive(Debug, Clone, Default)]
-struct DisplayRow {
-    marker: &'static str,
-    label: String,
-    description: Option<String>,
-    meta: Option<String>,
-    selected: bool,
-    disabled: bool,
-    tone: DisplayRowTone,
+pub(crate) struct DisplayRow {
+    pub(crate) marker: &'static str,
+    pub(crate) label: String,
+    pub(crate) description: Option<String>,
+    pub(crate) meta: Option<String>,
+    pub(crate) selected: bool,
+    pub(crate) disabled: bool,
+    pub(crate) tone: DisplayRowTone,
 }
 
 impl DisplayRow {
-    fn line(&self, width: u16) -> Line<'static> {
+    pub(crate) fn line(&self, width: u16) -> Line<'static> {
         let theme = tui_theme();
         let base = if self.selected {
             theme.selected_row_style()
@@ -59,7 +61,7 @@ impl DisplayRow {
     }
 }
 
-fn render_display_rows(
+pub(crate) fn render_display_rows(
     area: Rect,
     buf: &mut ratatui::buffer::Buffer,
     rows: &[DisplayRow],
@@ -75,7 +77,7 @@ fn render_display_rows(
     }
 }
 
-fn truncate_line_to_width(mut line: Line<'static>, width: u16) -> Line<'static> {
+pub(crate) fn truncate_line_to_width(mut line: Line<'static>, width: u16) -> Line<'static> {
     let max_width = usize::from(width);
     if line.width() <= max_width {
         return line;

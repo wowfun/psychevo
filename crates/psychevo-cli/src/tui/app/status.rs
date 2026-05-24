@@ -1,11 +1,17 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 impl TuiApp {
-    fn run_options(&self, prompt: String) -> RunOptions {
+    pub(crate) fn run_options(&self, prompt: String) -> RunOptions {
         self.run_options_with_images(prompt, Vec::new())
     }
 
-    fn run_options_with_images(&self, prompt: String, image_inputs: Vec<ImageInput>) -> RunOptions {
+    pub(crate) fn run_options_with_images(
+        &self,
+        prompt: String,
+        image_inputs: Vec<ImageInput>,
+    ) -> RunOptions {
         RunOptions {
-            db_path: self.db_path.clone(),
+            state: self.state_runtime.clone(),
             workdir: self.workdir.clone(),
             snapshot_root: Some(self.home.join("snapshots")),
             session: self.current_session.clone(),
@@ -33,9 +39,9 @@ impl TuiApp {
         }
     }
 
-    fn user_shell_context_options(&self) -> UserShellContextOptions {
+    pub(crate) fn user_shell_context_options(&self) -> UserShellContextOptions {
         UserShellContextOptions {
-            db_path: self.db_path.clone(),
+            state: self.state_runtime.clone(),
             session: self.current_session.clone(),
             continue_latest: self.current_session.is_none() && !self.force_new_once,
             source: "tui".to_string(),
@@ -51,26 +57,26 @@ impl TuiApp {
         }
     }
 
-    fn show_status(&self) -> Result<()> {
+    pub(crate) fn show_status(&self) -> Result<()> {
         println!("{}", self.status_text());
         Ok(())
     }
 
-    fn show_session_list(&self) -> Result<()> {
+    pub(crate) fn show_session_list(&self) -> Result<()> {
         for line in self.session_list_lines()? {
             println!("{line}");
         }
         Ok(())
     }
 
-    fn show_model(&self) -> Result<()> {
+    pub(crate) fn show_model(&self) -> Result<()> {
         for line in self.model_lines()? {
             println!("{line}");
         }
         Ok(())
     }
 
-    fn toolsets_status_text(&self) -> Result<String> {
+    pub(crate) fn toolsets_status_text(&self) -> Result<String> {
         let value = toolsets_value(&self.run_options(String::new()), ConfigScope::Effective)?;
         let mode_key = self.current_mode.as_str();
         let tools = value["modes"][mode_key]["effective_tools"]
@@ -95,37 +101,37 @@ impl TuiApp {
         Ok(lines.join("\n"))
     }
 
-    fn set_variant(&mut self, variant: String) -> Result<()> {
+    pub(crate) fn set_variant(&mut self, variant: String) -> Result<()> {
         self.set_variant_no_print(variant.clone())?;
         println!("{}", self.renderer.status(&format!("variant: {variant}")));
         Ok(())
     }
 
-    fn toggle_thinking(&mut self) -> Result<()> {
+    pub(crate) fn toggle_thinking(&mut self) -> Result<()> {
         self.set_thinking_no_print(!self.thinking_visible)?;
         self.show_thinking_status();
         Ok(())
     }
 
-    fn set_thinking(&mut self, enabled: bool) -> Result<()> {
+    pub(crate) fn set_thinking(&mut self, enabled: bool) -> Result<()> {
         self.set_thinking_no_print(enabled)?;
         self.show_thinking_status();
         Ok(())
     }
 
-    fn toggle_raw(&mut self) -> Result<()> {
+    pub(crate) fn toggle_raw(&mut self) -> Result<()> {
         self.set_raw_no_print(!self.raw_visible)?;
         self.show_raw_status();
         Ok(())
     }
 
-    fn set_raw(&mut self, enabled: bool) -> Result<()> {
+    pub(crate) fn set_raw(&mut self, enabled: bool) -> Result<()> {
         self.set_raw_no_print(enabled)?;
         self.show_raw_status();
         Ok(())
     }
 
-    fn show_thinking_status(&self) {
+    pub(crate) fn show_thinking_status(&self) {
         println!(
             "{}",
             self.renderer
@@ -133,7 +139,7 @@ impl TuiApp {
         );
     }
 
-    fn show_raw_status(&self) {
+    pub(crate) fn show_raw_status(&self) {
         println!(
             "{}",
             self.renderer
@@ -141,13 +147,13 @@ impl TuiApp {
         );
     }
 
-    fn set_mode(&mut self, mode: String) -> Result<()> {
+    pub(crate) fn set_mode(&mut self, mode: String) -> Result<()> {
         self.set_mode_no_print(&mode)?;
         println!("{}", self.renderer.status(&format!("mode: {mode}")));
         Ok(())
     }
 
-    fn rename_session(&mut self, title: String) -> Result<()> {
+    pub(crate) fn rename_session(&mut self, title: String) -> Result<()> {
         let title = self.rename_session_no_print(title)?;
         println!(
             "{}",
@@ -156,7 +162,7 @@ impl TuiApp {
         Ok(())
     }
 
-    fn undo_session_print(&mut self) -> Result<()> {
+    pub(crate) fn undo_session_print(&mut self) -> Result<()> {
         let result = undo_session(self.undo_options()?)?;
         println!(
             "{}",
@@ -168,7 +174,7 @@ impl TuiApp {
         Ok(())
     }
 
-    fn redo_session_print(&mut self) -> Result<()> {
+    pub(crate) fn redo_session_print(&mut self) -> Result<()> {
         let result = redo_session(self.undo_options()?)?;
         let suffix = if result.complete {
             "complete"
@@ -185,7 +191,7 @@ impl TuiApp {
         Ok(())
     }
 
-    fn status_lines(&self) -> Vec<String> {
+    pub(crate) fn status_lines(&self) -> Vec<String> {
         vec![
             format!("workdir: {}", self.workdir.display()),
             format!("home: {}", self.home.display()),
@@ -207,11 +213,11 @@ impl TuiApp {
         ]
     }
 
-    fn status_text(&self) -> String {
+    pub(crate) fn status_text(&self) -> String {
         self.status_lines().join("\n")
     }
 
-    fn session_list_lines(&self) -> Result<Vec<String>> {
+    pub(crate) fn session_list_lines(&self) -> Result<Vec<String>> {
         let sessions = self.tui_sessions_for_workdir(SessionListView::Active)?;
         if sessions.is_empty() {
             return Ok(vec!["no sessions for this workdir".to_string()]);
@@ -230,5 +236,4 @@ impl TuiApp {
             })
             .collect())
     }
-
 }

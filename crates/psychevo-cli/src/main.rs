@@ -1,13 +1,15 @@
+#![allow(clippy::module_inception)]
+
 use std::process::ExitCode;
 
 use anyhow::Result;
 use clap::Parser;
 
-mod args;
-mod command_registry;
-mod commands;
-mod env;
-mod tui;
+pub(crate) mod args;
+pub(crate) mod command_registry;
+pub(crate) mod commands;
+pub(crate) mod env;
+pub(crate) mod tui;
 
 use args::{Cli, Commands};
 use commands::agent::run_agent_command;
@@ -24,7 +26,7 @@ use commands::stats::run_stats_command;
 use commands::tool::run_tool_command;
 
 #[tokio::main]
-async fn main() -> ExitCode {
+pub(crate) async fn main() -> ExitCode {
     match run().await {
         Ok(code) => code,
         Err(err) => {
@@ -34,7 +36,7 @@ async fn main() -> ExitCode {
     }
 }
 
-async fn run() -> Result<ExitCode> {
+pub(crate) async fn run() -> Result<ExitCode> {
     debug_assert!(
         command_registry::CLI_COMMANDS
             .iter()

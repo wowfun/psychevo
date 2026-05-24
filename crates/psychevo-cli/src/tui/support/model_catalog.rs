@@ -1,42 +1,44 @@
-struct TuiSessionDisplaySummary {
-    summary: SessionSummary,
-    visible_message_count: usize,
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) struct TuiSessionDisplaySummary {
+    pub(crate) summary: SessionSummary,
+    pub(crate) visible_message_count: usize,
 }
 
-type ClipboardSink = Arc<dyn Fn(&str) -> io::Result<()> + Send + Sync>;
+pub(crate) type ClipboardSink = Arc<dyn Fn(&str) -> io::Result<()> + Send + Sync>;
 
 #[derive(Default)]
-struct ModelCatalogCache {
-    providers: BTreeMap<String, ModelProviderCatalogState>,
-    tasks: BTreeMap<String, JoinHandle<ModelCatalogFetchResult>>,
-    metadata_refresh: Option<ModelMetadataRefreshTask>,
+pub(crate) struct ModelCatalogCache {
+    pub(crate) providers: BTreeMap<String, ModelProviderCatalogState>,
+    pub(crate) tasks: BTreeMap<String, JoinHandle<ModelCatalogFetchResult>>,
+    pub(crate) metadata_refresh: Option<ModelMetadataRefreshTask>,
 }
 
-struct ModelProviderCatalogState {
-    provider: ModelCatalogProvider,
-    status: ModelCatalogStatus,
-    fetched: Vec<ModelCatalogEntry>,
+pub(crate) struct ModelProviderCatalogState {
+    pub(crate) provider: ModelCatalogProvider,
+    pub(crate) status: ModelCatalogStatus,
+    pub(crate) fetched: Vec<ModelCatalogEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum ModelCatalogStatus {
+pub(crate) enum ModelCatalogStatus {
     NotFetched,
     Fetching,
     Fetched,
     Failed(String),
 }
 
-struct ModelCatalogFetchResult {
-    provider: String,
-    result: std::result::Result<Vec<ModelCatalogEntry>, String>,
+pub(crate) struct ModelCatalogFetchResult {
+    pub(crate) provider: String,
+    pub(crate) result: std::result::Result<Vec<ModelCatalogEntry>, String>,
 }
 
-struct ModelMetadataRefreshTask {
-    user_initiated: bool,
-    task: JoinHandle<std::result::Result<(), String>>,
+pub(crate) struct ModelMetadataRefreshTask {
+    pub(crate) user_initiated: bool,
+    pub(crate) task: JoinHandle<std::result::Result<(), String>>,
 }
 
-fn push_model_metadata_target(
+pub(crate) fn push_model_metadata_target(
     targets: &mut Vec<ModelMetadataCacheTarget>,
     seen: &mut BTreeMap<String, ()>,
     model: &ConfiguredModel,
@@ -45,7 +47,7 @@ fn push_model_metadata_target(
     push_raw_model_metadata_target(targets, seen, &model.provider, &model.model, catalog);
 }
 
-fn push_raw_model_metadata_target(
+pub(crate) fn push_raw_model_metadata_target(
     targets: &mut Vec<ModelMetadataCacheTarget>,
     seen: &mut BTreeMap<String, ()>,
     provider: &str,
@@ -72,17 +74,17 @@ fn push_raw_model_metadata_target(
 }
 
 impl ModelCatalogCache {
-    fn any_fetching(&self) -> bool {
+    pub(crate) fn any_fetching(&self) -> bool {
         self.providers
             .values()
             .any(|state| matches!(state.status, ModelCatalogStatus::Fetching))
     }
 
-    fn metadata_refreshing(&self) -> bool {
+    pub(crate) fn metadata_refreshing(&self) -> bool {
         self.metadata_refresh.is_some()
     }
 
-    fn abort_unfinished(&mut self) {
+    pub(crate) fn abort_unfinished(&mut self) {
         for (_, task) in std::mem::take(&mut self.tasks) {
             task.abort();
         }

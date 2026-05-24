@@ -1,20 +1,24 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct TerminalDefaultColors {
-    foreground: (u8, u8, u8),
-    background: (u8, u8, u8),
+pub(crate) struct TerminalDefaultColors {
+    pub(crate) foreground: (u8, u8, u8),
+    pub(crate) background: (u8, u8, u8),
 }
 
 #[cfg(unix)]
-fn query_terminal_default_colors(timeout: Duration) -> Option<TerminalDefaultColors> {
-    unix_terminal_probe::query_default_colors(timeout).ok().flatten()
+pub(crate) fn query_terminal_default_colors(timeout: Duration) -> Option<TerminalDefaultColors> {
+    unix_terminal_probe::query_default_colors(timeout)
+        .ok()
+        .flatten()
 }
 
 #[cfg(not(unix))]
-fn query_terminal_default_colors(_timeout: Duration) -> Option<TerminalDefaultColors> {
+pub(crate) fn query_terminal_default_colors(_timeout: Duration) -> Option<TerminalDefaultColors> {
     None
 }
 
-fn parse_terminal_default_colors(buffer: &[u8]) -> Option<TerminalDefaultColors> {
+pub(crate) fn parse_terminal_default_colors(buffer: &[u8]) -> Option<TerminalDefaultColors> {
     let text = String::from_utf8_lossy(buffer);
     let foreground = parse_osc_color(&text, "10;")?;
     let background = parse_osc_color(&text, "11;")?;
@@ -24,14 +28,12 @@ fn parse_terminal_default_colors(buffer: &[u8]) -> Option<TerminalDefaultColors>
     })
 }
 
-fn parse_osc_color(text: &str, slot: &str) -> Option<(u8, u8, u8)> {
+pub(crate) fn parse_osc_color(text: &str, slot: &str) -> Option<(u8, u8, u8)> {
     let start = text.find(&format!("]{slot}"))?;
     let after_slot = &text[start + slot.len() + 1..];
     let color_start = after_slot.find("rgb:")?;
     let color = &after_slot[color_start + 4..];
-    let end = color
-        .find(['\u{0007}', '\u{001b}'])
-        .unwrap_or(color.len());
+    let end = color.find(['\u{0007}', '\u{001b}']).unwrap_or(color.len());
     let mut parts = color[..end].split('/');
     let r = parse_hex_color_component(parts.next()?)?;
     let g = parse_hex_color_component(parts.next()?)?;
@@ -39,7 +41,7 @@ fn parse_osc_color(text: &str, slot: &str) -> Option<(u8, u8, u8)> {
     Some((r, g, b))
 }
 
-fn parse_hex_color_component(value: &str) -> Option<u8> {
+pub(crate) fn parse_hex_color_component(value: &str) -> Option<u8> {
     let value = value.trim();
     if value.is_empty() || value.len() > 4 {
         return None;
@@ -50,8 +52,8 @@ fn parse_hex_color_component(value: &str) -> Option<u8> {
 }
 
 #[cfg(unix)]
-mod unix_terminal_probe {
-    use super::*;
+pub(crate) mod unix_terminal_probe {
+    pub(crate) use super::*;
     use std::fs::File;
     use std::fs::OpenOptions;
     use std::io;
@@ -85,7 +87,8 @@ mod unix_terminal_probe {
             if original_flags == -1 {
                 return Err(io::Error::last_os_error());
             }
-            let result = unsafe { libc::fcntl(fd, libc::F_SETFL, original_flags | libc::O_NONBLOCK) };
+            let result =
+                unsafe { libc::fcntl(fd, libc::F_SETFL, original_flags | libc::O_NONBLOCK) };
             if result == -1 {
                 return Err(io::Error::last_os_error());
             }
@@ -167,7 +170,7 @@ mod unix_terminal_probe {
         Ok(unsafe { File::from_raw_fd(duplicated) })
     }
 
-    pub(super) fn query_default_colors(
+    pub(crate) fn query_default_colors(
         timeout: Duration,
     ) -> io::Result<Option<TerminalDefaultColors>> {
         let mut tty = Tty::open()?;
@@ -189,4 +192,3 @@ mod unix_terminal_probe {
         }
     }
 }
-

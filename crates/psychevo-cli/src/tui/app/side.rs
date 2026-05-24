@@ -1,16 +1,18 @@
-const BTW_NO_SESSION_MESSAGE: &str =
-    "'/btw' is unavailable until the current conversation has started. Send a message first, then try /btw again.";
-const BTW_ALREADY_OPEN_MESSAGE: &str =
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) const BTW_NO_SESSION_MESSAGE: &str = "'/btw' is unavailable until the current conversation has started. Send a message first, then try /btw again.";
+pub(crate) const BTW_ALREADY_OPEN_MESSAGE: &str =
     "A /btw side conversation is already open. Press Ctrl+C to return before starting another.";
-const BTW_RETURNED_MESSAGE: &str = "returned from /btw side conversation";
-const RELOAD_CONTEXT_DEPRECATED_MESSAGE: &str = "/reload-context is hidden in the TUI; use /refresh";
+pub(crate) const BTW_RETURNED_MESSAGE: &str = "returned from /btw side conversation";
+pub(crate) const RELOAD_CONTEXT_DEPRECATED_MESSAGE: &str =
+    "/reload-context is hidden in the TUI; use /refresh";
 
 impl TuiApp {
-    fn in_btw_side(&self) -> bool {
+    pub(crate) fn in_btw_side(&self) -> bool {
         self.btw_side.is_some()
     }
 
-    fn start_btw_side_conversation(
+    pub(crate) fn start_btw_side_conversation(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         initial_prompt: Option<String>,
@@ -25,7 +27,7 @@ impl TuiApp {
         };
 
         let (provider, model) = self.side_session_provider_model()?;
-        let store = SqliteStore::open(&self.db_path)?;
+        let store = self.state_runtime.store();
         let side_session =
             store.create_child_session_from_parent_snapshot(ChildSessionSnapshotInput {
                 parent_session_id: &parent_session,
@@ -34,23 +36,23 @@ impl TuiApp {
                 model: &model,
                 provider: &provider,
                 metadata: Some(serde_json::json!({
-                BTW_SIDE_METADATA_KEY: {
-                    "ephemeral": true,
-                    "parent_session_id": parent_session.clone(),
-                },
-                "provider_label": provider,
-                "reasoning_effort": self.current_variant.clone(),
-                "mode": self.current_mode.as_str(),
-                "permission_mode": self.current_permission_mode.as_str(),
-                "selected_agent": self.current_agent.clone(),
-            })),
+                    BTW_SIDE_METADATA_KEY: {
+                        "ephemeral": true,
+                        "parent_session_id": parent_session.clone(),
+                    },
+                    "provider_label": provider,
+                    "reasoning_effort": self.current_variant.clone(),
+                    "mode": self.current_mode.as_str(),
+                    "permission_mode": self.current_permission_mode.as_str(),
+                    "selected_agent": self.current_agent.clone(),
+                })),
                 max_context_messages: self.run_options(String::new()).max_context_messages,
                 inherited_message_metadata: serde_json::json!({
-                BTW_INHERITED_METADATA_KEY: {
-                    "hidden": true,
-                    "parent_session_id": parent_session.clone(),
-                }
-            }),
+                    BTW_INHERITED_METADATA_KEY: {
+                        "hidden": true,
+                        "parent_session_id": parent_session.clone(),
+                    }
+                }),
                 boundary_text: side_conversation_boundary_prompt(),
             })?;
 
@@ -69,6 +71,7 @@ impl TuiApp {
         self.detach_running_for_session_switch(ui, None);
         self.btw_side = Some(side_state);
         self.current_session = Some(side_session.clone());
+        self.reset_live_agent_reload_poll();
         self.current_session_title = Some(format!("Side {}", short_session(&side_session)));
         self.force_new_once = false;
         ui.bottom_panel = None;
@@ -83,12 +86,13 @@ impl TuiApp {
         Ok(())
     }
 
-    fn close_btw_side_conversation(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
+    pub(crate) fn close_btw_side_conversation(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
         let Some(side) = self.btw_side.take() else {
             return Ok(());
         };
         let side_session = side.side_session.clone();
         self.current_session = Some(side.parent_session.clone());
+        self.reset_live_agent_reload_poll();
         self.current_session_title = side.parent_session_title;
         self.current_model = side.parent_model;
         self.current_variant = side.parent_variant;
@@ -109,14 +113,16 @@ impl TuiApp {
         ui.set_ephemeral_status(BTW_RETURNED_MESSAGE);
         ui.refresh_sidebar(self);
 
-        match SqliteStore::open(&self.db_path)?.delete_session(&side_session) {
+        match self.state_runtime.store().delete_session(&side_session) {
             Ok(()) => {}
-            Err(err) => ui.set_ephemeral_error(format!("failed to delete /btw side session: {err}")),
+            Err(err) => {
+                ui.set_ephemeral_error(format!("failed to delete /btw side session: {err}"))
+            }
         }
         Ok(())
     }
 
-    fn handle_btw_ctrl_c(&mut self, ui: &mut FullscreenUi<'_>) -> Result<bool> {
+    pub(crate) fn handle_btw_ctrl_c(&mut self, ui: &mut FullscreenUi<'_>) -> Result<bool> {
         if !self.in_btw_side() {
             return Ok(false);
         }
@@ -127,27 +133,31 @@ impl TuiApp {
         Ok(true)
     }
 
-    fn side_command_rejection(&self, command: &SlashCommand) -> Option<&'static str> {
+    pub(crate) fn side_command_rejection(&self, command: &SlashCommand) -> Option<&'static str> {
         if !self.in_btw_side() || side_command_allowed(command) {
             return None;
         }
         Some("command is unavailable inside a /btw side conversation; press Ctrl+C to return")
     }
 
-    fn side_session_provider_model(&self) -> Result<(String, String)> {
+    pub(crate) fn side_session_provider_model(&self) -> Result<(String, String)> {
         if let Some(model) = selected_configured_model(&self.run_options(String::new()))
             .ok()
             .flatten()
         {
             return Ok((model.provider, model.model));
         }
-        if let Some((provider, model)) = self.current_model.as_deref().and_then(|value| value.split_once('/')) {
+        if let Some((provider, model)) = self
+            .current_model
+            .as_deref()
+            .and_then(|value| value.split_once('/'))
+        {
             return Ok((provider.to_string(), model.to_string()));
         }
         Ok(("config".to_string(), "config".to_string()))
     }
 
-    fn restore_parent_tui_state(&mut self) -> Result<()> {
+    pub(crate) fn restore_parent_tui_state(&mut self) -> Result<()> {
         if let Some(model) = self.current_model.clone() {
             self.state.set_model(&self.workdir_key, model);
         } else {
@@ -168,27 +178,26 @@ impl TuiApp {
         Ok(())
     }
 
-    fn start_side_cleanup_task(&mut self) -> bool {
+    pub(crate) fn start_side_cleanup_task(&mut self) -> bool {
         if self.side_cleanup_task.is_some() {
             return false;
         }
-        let db_path = self.db_path.clone();
+        let state = self.state_runtime.clone();
         let workdir = self.workdir.clone();
         let task = tokio::spawn(async move {
-            SqliteStore::open(&db_path)
-                .and_then(|store| {
-                    store.delete_sessions_for_workdir_with_source(
-                        &workdir,
-                        TUI_SIDE_SESSION_SOURCE,
-                    )
-                })
+            state
+                .store()
+                .delete_sessions_for_workdir_with_source(&workdir, TUI_SIDE_SESSION_SOURCE)
                 .map_err(|err| err.to_string())
         });
         self.side_cleanup_task = Some(SideCleanupTask { task });
         true
     }
 
-    async fn drain_side_cleanup_task(&mut self, ui: &mut FullscreenUi<'_>) -> Result<bool> {
+    pub(crate) async fn drain_side_cleanup_task(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+    ) -> Result<bool> {
         let Some(task) = self.side_cleanup_task.as_ref() else {
             return Ok(false);
         };
@@ -205,13 +214,17 @@ impl TuiApp {
         Ok(true)
     }
 
-    fn btw_parent_status_label(&self, ui: &FullscreenUi<'_>) -> Option<String> {
+    pub(crate) fn btw_parent_status_label(&self, ui: &FullscreenUi<'_>) -> Option<String> {
         let side = self.btw_side.as_ref()?;
         let parent = side.parent_session.as_str();
         if ui
             .session_live_event_backlog
             .get(parent)
-            .is_some_and(|events| events.iter().any(|event| matches!(event, RunStreamEvent::ClarifyRequest(_))))
+            .is_some_and(|events| {
+                events
+                    .iter()
+                    .any(|event| matches!(event, RunStreamEvent::ClarifyRequest(_)))
+            })
         {
             return Some("side - main needs input - Ctrl+C".to_string());
         }
@@ -230,14 +243,14 @@ impl TuiApp {
     }
 }
 
-fn side_command_allowed(command: &SlashCommand) -> bool {
+pub(crate) fn side_command_allowed(command: &SlashCommand) -> bool {
     matches!(
         command,
         SlashCommand::Help
             | SlashCommand::Quit
             | SlashCommand::Status
             | SlashCommand::Context
-            | SlashCommand::ModelShow
+            | SlashCommand::ModelShowScoped { .. }
             | SlashCommand::VariantSet(_)
             | SlashCommand::ModeSet(_)
             | SlashCommand::Permissions

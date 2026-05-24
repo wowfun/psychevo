@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use anyhow::{Result, anyhow};
 use psychevo_runtime::{
     ReloadContextOptions, SessionArtifactKind, SessionExportFormat, SessionExportIncludeSet,
-    SessionExportOptions, SessionExportWriteResult, SessionSummary, SqliteStore,
+    SessionExportOptions, SessionExportWriteResult, SessionSummary, SqliteStore, StateRuntime,
     canonicalize_workdir, default_session_export_filename, reload_session_context,
     render_session_export, write_session_export,
 };
@@ -18,7 +18,7 @@ use crate::args::{
 use crate::commands::common::print_json_error;
 use crate::env::{ensure_home_initialized, inherited_env, resolve_psychevo_home, resolve_state_db};
 
-const SESSION_SOURCES: &[&str] = &["run", "tui"];
+pub(crate) const SESSION_SOURCES: &[&str] = &["run", "tui"];
 
 pub(crate) fn run_session_command(args: SessionArgs) -> Result<ExitCode> {
     match run_session_command_inner(&args) {
@@ -31,13 +31,14 @@ pub(crate) fn run_session_command(args: SessionArgs) -> Result<ExitCode> {
     }
 }
 
-fn run_session_command_inner(args: &SessionArgs) -> Result<ExitCode> {
+pub(crate) fn run_session_command_inner(args: &SessionArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     ensure_home_initialized(&home)?;
     let db_path = resolve_state_db(&env_map, &home, &cwd)?;
-    let store = SqliteStore::open(&db_path)?;
+    let state = StateRuntime::open(&db_path)?;
+    let store = state.store().clone();
     let workdir = canonicalize_workdir(&cwd)?;
 
     match &args.command {
@@ -51,7 +52,7 @@ fn run_session_command_inner(args: &SessionArgs) -> Result<ExitCode> {
         }
         SessionCommand::Rename(args) => rename_session(args, &store, &workdir)?,
         SessionCommand::ReloadContext(args) => {
-            reload_context(args, &store, &workdir, &db_path, env_map)?
+            reload_context(args, &store, &workdir, &state, env_map)?
         }
         SessionCommand::Export(args) => export_session(args, &store, &workdir)?,
         SessionCommand::Share(args) => share_session(args, &store, &workdir)?,
@@ -71,7 +72,7 @@ fn run_session_command_inner(args: &SessionArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn list_sessions(
+pub(crate) fn list_sessions(
     args: &SessionListArgs,
     store: &SqliteStore,
     workdir: &std::path::Path,
@@ -111,7 +112,7 @@ fn list_sessions(
     Ok(())
 }
 
-fn rename_session(
+pub(crate) fn rename_session(
     args: &SessionRenameArgs,
     store: &SqliteStore,
     workdir: &std::path::Path,
@@ -125,16 +126,16 @@ fn rename_session(
     print_session_result("renamed", &summary, args.json)
 }
 
-fn reload_context(
+pub(crate) fn reload_context(
     args: &SessionIdArgs,
     store: &SqliteStore,
     workdir: &Path,
-    db_path: &Path,
+    state: &StateRuntime,
     env_map: std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
     let session_id = resolve_session_id(store, workdir, &args.session)?;
     let result = reload_session_context(ReloadContextOptions {
-        db_path: db_path.to_path_buf(),
+        state: state.clone(),
         session: session_id,
         config_path: None,
         mode: None,
@@ -165,7 +166,11 @@ fn reload_context(
     Ok(())
 }
 
-fn export_session(args: &SessionExportArgs, store: &SqliteStore, workdir: &Path) -> Result<()> {
+pub(crate) fn export_session(
+    args: &SessionExportArgs,
+    store: &SqliteStore,
+    workdir: &Path,
+) -> Result<()> {
     let session_id = resolve_session_id(store, workdir, &args.session)?;
     let artifact_kind = SessionArtifactKind::Export;
     let options = SessionExportOptions {
@@ -183,7 +188,11 @@ fn export_session(args: &SessionExportArgs, store: &SqliteStore, workdir: &Path)
     Ok(())
 }
 
-fn share_session(args: &SessionShareArgs, store: &SqliteStore, workdir: &Path) -> Result<()> {
+pub(crate) fn share_session(
+    args: &SessionShareArgs,
+    store: &SqliteStore,
+    workdir: &Path,
+) -> Result<()> {
     let session_id = resolve_session_id(store, workdir, &args.session)?;
     let artifact_kind = SessionArtifactKind::Share;
     let output = args.output.clone().unwrap_or_else(|| {
@@ -202,7 +211,7 @@ fn share_session(args: &SessionShareArgs, store: &SqliteStore, workdir: &Path) -
     print_share_result(&result, args.json)
 }
 
-fn parse_include(
+pub(crate) fn parse_include(
     include: Option<&str>,
     artifact_kind: SessionArtifactKind,
 ) -> psychevo_runtime::Result<SessionExportIncludeSet> {
@@ -212,7 +221,7 @@ fn parse_include(
     }
 }
 
-fn mutate_session(
+pub(crate) fn mutate_session(
     args: &SessionIdArgs,
     store: &SqliteStore,
     workdir: &std::path::Path,
@@ -225,7 +234,11 @@ fn mutate_session(
         .ok_or_else(|| anyhow!("session not found: {session_id}"))
 }
 
-fn resolve_session_id(store: &SqliteStore, workdir: &std::path::Path, raw: &str) -> Result<String> {
+pub(crate) fn resolve_session_id(
+    store: &SqliteStore,
+    workdir: &std::path::Path,
+    raw: &str,
+) -> Result<String> {
     let raw = raw.trim();
     if raw == "latest" {
         return store
@@ -238,7 +251,11 @@ fn resolve_session_id(store: &SqliteStore, workdir: &std::path::Path, raw: &str)
     Ok(raw.to_string())
 }
 
-fn print_session_result(action: &str, summary: &SessionSummary, as_json: bool) -> Result<()> {
+pub(crate) fn print_session_result(
+    action: &str,
+    summary: &SessionSummary,
+    as_json: bool,
+) -> Result<()> {
     if as_json {
         println!(
             "{}",
@@ -259,7 +276,7 @@ fn print_session_result(action: &str, summary: &SessionSummary, as_json: bool) -
     Ok(())
 }
 
-fn session_value(session: &SessionSummary) -> Value {
+pub(crate) fn session_value(session: &SessionSummary) -> Value {
     json!({
         "id": session.id,
         "source": session.source,
@@ -277,7 +294,7 @@ fn session_value(session: &SessionSummary) -> Value {
     })
 }
 
-fn print_share_result(result: &SessionExportWriteResult, as_json: bool) -> Result<()> {
+pub(crate) fn print_share_result(result: &SessionExportWriteResult, as_json: bool) -> Result<()> {
     if as_json {
         println!(
             "{}",
@@ -295,7 +312,7 @@ fn print_share_result(result: &SessionExportWriteResult, as_json: bool) -> Resul
     Ok(())
 }
 
-fn session_json(args: &SessionArgs) -> bool {
+pub(crate) fn session_json(args: &SessionArgs) -> bool {
     match &args.command {
         SessionCommand::List(args) => args.json,
         SessionCommand::Show(args)

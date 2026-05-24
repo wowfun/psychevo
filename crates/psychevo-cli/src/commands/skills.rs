@@ -7,7 +7,7 @@ use clap::CommandFactory;
 use psychevo_runtime::{
     InstallOptions, ListSkillsOptions, SaveSkillBundleOptions, SkillBundle, SkillCatalog,
     SkillDiscoveryOptions, SkillTarget, delete_skill_bundle, discover_skills, install_skill,
-    list_skill_bundles, list_skills_value_with_options, remove_skill, save_skill_bundle,
+    list_skill_bundles, list_skills_value_with_options, remove_installed_skill, save_skill_bundle,
     scan_skill_path, set_skill_config_value, set_skill_enabled, view_skill_value,
 };
 use serde_json::{Value, json};
@@ -72,7 +72,7 @@ pub(crate) fn run_skills_command(args: SkillsArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn list_skills(
+pub(crate) fn list_skills(
     args: SkillsListArgs,
     home: &Path,
     workdir: &Path,
@@ -89,7 +89,7 @@ fn list_skills(
     Ok(())
 }
 
-fn view_skill(
+pub(crate) fn view_skill(
     args: SkillsViewArgs,
     home: &Path,
     workdir: &Path,
@@ -111,7 +111,7 @@ fn view_skill(
     Ok(())
 }
 
-fn query_skills(
+pub(crate) fn query_skills(
     action: &str,
     args: SkillsQueryArgs,
     home: &Path,
@@ -150,7 +150,7 @@ fn query_skills(
     Ok(())
 }
 
-fn inspect_skill(
+pub(crate) fn inspect_skill(
     args: SkillsInspectArgs,
     home: &Path,
     workdir: &Path,
@@ -175,7 +175,7 @@ fn inspect_skill(
     Ok(())
 }
 
-fn install_skill_cli(
+pub(crate) fn install_skill_cli(
     args: SkillsInstallArgs,
     home: &Path,
     workdir: &Path,
@@ -196,7 +196,7 @@ fn install_skill_cli(
     print_value(value, args.json)
 }
 
-fn audit_skills(
+pub(crate) fn audit_skills(
     args: SkillsAuditArgs,
     home: &Path,
     workdir: &Path,
@@ -220,18 +220,18 @@ fn audit_skills(
     print_value(value, args.json)
 }
 
-fn uninstall_skill(
+pub(crate) fn uninstall_skill(
     args: SkillsNameArgs,
     home: &Path,
     workdir: &Path,
     env_map: std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
-    let catalog = catalog(home, workdir, env_map)?;
-    let value = remove_skill(&catalog, home, workdir, &args.name)?;
+    drop(env_map);
+    let value = remove_installed_skill(home, workdir, target_from_uninstall(&args), &args.name)?;
     print_value(value, args.json)
 }
 
-fn publish_skill(
+pub(crate) fn publish_skill(
     args: SkillsPublishArgs,
     env_map: &std::collections::BTreeMap<String, String>,
     workdir: &Path,
@@ -255,7 +255,7 @@ fn publish_skill(
     )
 }
 
-fn config_command(
+pub(crate) fn config_command(
     args: SkillsConfigArgs,
     home: &Path,
     workdir: &Path,
@@ -280,7 +280,7 @@ fn config_command(
     }
 }
 
-fn set_enabled(
+pub(crate) fn set_enabled(
     args: SkillsNameScopeArgs,
     home: &Path,
     workdir: &Path,
@@ -290,7 +290,11 @@ fn set_enabled(
     print_value(value, args.json)
 }
 
-fn set_config_value(args: SkillsConfigSetArgs, home: &Path, workdir: &Path) -> Result<()> {
+pub(crate) fn set_config_value(
+    args: SkillsConfigSetArgs,
+    home: &Path,
+    workdir: &Path,
+) -> Result<()> {
     let value =
         serde_json::from_str(&args.value).unwrap_or_else(|_| Value::String(args.value.clone()));
     let result = set_skill_config_value(
@@ -303,7 +307,7 @@ fn set_config_value(args: SkillsConfigSetArgs, home: &Path, workdir: &Path) -> R
     print_value(result, args.json)
 }
 
-fn bundle_command(args: SkillsBundleArgs, home: &Path, workdir: &Path) -> Result<()> {
+pub(crate) fn bundle_command(args: SkillsBundleArgs, home: &Path, workdir: &Path) -> Result<()> {
     match args.command {
         SkillsBundleCommand::List(args) => {
             let bundles = list_skill_bundles(home, workdir)?;
@@ -322,7 +326,7 @@ fn bundle_command(args: SkillsBundleArgs, home: &Path, workdir: &Path) -> Result
     }
 }
 
-fn show_bundle(args: SkillsBundleNameArgs, home: &Path, workdir: &Path) -> Result<()> {
+pub(crate) fn show_bundle(args: SkillsBundleNameArgs, home: &Path, workdir: &Path) -> Result<()> {
     let bundle = find_bundle(home, workdir, &args.name)?;
     if args.json {
         println!("{}", serde_json::to_string_pretty(&bundle)?);
@@ -337,7 +341,11 @@ fn show_bundle(args: SkillsBundleNameArgs, home: &Path, workdir: &Path) -> Resul
     Ok(())
 }
 
-fn create_bundle(args: SkillsBundleCreateArgs, home: &Path, workdir: &Path) -> Result<()> {
+pub(crate) fn create_bundle(
+    args: SkillsBundleCreateArgs,
+    home: &Path,
+    workdir: &Path,
+) -> Result<()> {
     let value = save_skill_bundle(
         home,
         workdir,
@@ -353,12 +361,16 @@ fn create_bundle(args: SkillsBundleCreateArgs, home: &Path, workdir: &Path) -> R
     print_value(value, args.json)
 }
 
-fn delete_bundle(args: SkillsBundleDeleteArgs, home: &Path, workdir: &Path) -> Result<()> {
+pub(crate) fn delete_bundle(
+    args: SkillsBundleDeleteArgs,
+    home: &Path,
+    workdir: &Path,
+) -> Result<()> {
     let value = delete_skill_bundle(home, workdir, target_from_bundle_delete(&args), &args.name)?;
     print_value(value, args.json)
 }
 
-fn print_bundles(bundles: Vec<SkillBundle>, as_json: bool) -> Result<()> {
+pub(crate) fn print_bundles(bundles: Vec<SkillBundle>, as_json: bool) -> Result<()> {
     if as_json {
         println!(
             "{}",
@@ -380,12 +392,12 @@ fn print_bundles(bundles: Vec<SkillBundle>, as_json: bool) -> Result<()> {
     Ok(())
 }
 
-fn print_value(value: Value, _as_json: bool) -> Result<()> {
+pub(crate) fn print_value(value: Value, _as_json: bool) -> Result<()> {
     println!("{}", serde_json::to_string_pretty(&value)?);
     Ok(())
 }
 
-fn print_skill_list(value: &Value, detail: bool) {
+pub(crate) fn print_skill_list(value: &Value, detail: bool) {
     let rows = value["skills"].as_array().cloned().unwrap_or_default();
     if rows.is_empty() {
         println!("No skills found.");
@@ -394,7 +406,7 @@ fn print_skill_list(value: &Value, detail: bool) {
     }
 }
 
-fn print_skill_rows(rows: Vec<Value>, detail: bool) {
+pub(crate) fn print_skill_rows(rows: Vec<Value>, detail: bool) {
     for row in rows {
         if detail {
             println!(
@@ -416,7 +428,7 @@ fn print_skill_rows(rows: Vec<Value>, detail: bool) {
     }
 }
 
-fn print_diagnostics(catalog: &SkillCatalog) -> Result<()> {
+pub(crate) fn print_diagnostics(catalog: &SkillCatalog) -> Result<()> {
     if !catalog.diagnostics.is_empty() {
         eprintln!(
             "{}",
@@ -426,7 +438,7 @@ fn print_diagnostics(catalog: &SkillCatalog) -> Result<()> {
     Ok(())
 }
 
-fn list_options(args: &SkillsListArgs) -> ListSkillsOptions {
+pub(crate) fn list_options(args: &SkillsListArgs) -> ListSkillsOptions {
     ListSkillsOptions {
         include_hidden: args.all,
         detail: args.detail,
@@ -440,7 +452,7 @@ fn list_options(args: &SkillsListArgs) -> ListSkillsOptions {
     }
 }
 
-fn catalog(
+pub(crate) fn catalog(
     home: &Path,
     workdir: &Path,
     env_map: std::collections::BTreeMap<String, String>,
@@ -456,7 +468,7 @@ fn catalog(
     .map_err(Into::into)
 }
 
-fn find_bundle(home: &Path, workdir: &Path, name: &str) -> Result<SkillBundle> {
+pub(crate) fn find_bundle(home: &Path, workdir: &Path, name: &str) -> Result<SkillBundle> {
     let wanted = normalize_bundle_name(name);
     list_skill_bundles(home, workdir)?
         .into_iter()
@@ -464,7 +476,7 @@ fn find_bundle(home: &Path, workdir: &Path, name: &str) -> Result<SkillBundle> {
         .ok_or_else(|| anyhow!("bundle not found: {name}"))
 }
 
-fn normalize_bundle_name(name: &str) -> String {
+pub(crate) fn normalize_bundle_name(name: &str) -> String {
     name.chars()
         .flat_map(char::to_lowercase)
         .filter_map(|ch| {
@@ -483,47 +495,55 @@ fn normalize_bundle_name(name: &str) -> String {
         .join("-")
 }
 
-fn target_from_scope(args: &SkillsNameScopeArgs) -> SkillTarget {
-    if args.project {
-        SkillTarget::Project
-    } else {
+pub(crate) fn target_from_scope(args: &SkillsNameScopeArgs) -> SkillTarget {
+    if args.global {
         SkillTarget::Global
+    } else {
+        SkillTarget::Project
     }
 }
 
-fn target_from_config_set(args: &SkillsConfigSetArgs) -> SkillTarget {
-    if args.project {
-        SkillTarget::Project
-    } else {
+pub(crate) fn target_from_config_set(args: &SkillsConfigSetArgs) -> SkillTarget {
+    if args.global {
         SkillTarget::Global
+    } else {
+        SkillTarget::Project
     }
 }
 
-fn target_from_bundle_create(args: &SkillsBundleCreateArgs) -> SkillTarget {
-    if args.project {
-        SkillTarget::Project
-    } else {
+pub(crate) fn target_from_bundle_create(args: &SkillsBundleCreateArgs) -> SkillTarget {
+    if args.global {
         SkillTarget::Global
+    } else {
+        SkillTarget::Project
     }
 }
 
-fn target_from_bundle_delete(args: &SkillsBundleDeleteArgs) -> SkillTarget {
-    if args.project {
-        SkillTarget::Project
-    } else {
+pub(crate) fn target_from_bundle_delete(args: &SkillsBundleDeleteArgs) -> SkillTarget {
+    if args.global {
         SkillTarget::Global
+    } else {
+        SkillTarget::Project
     }
 }
 
-fn target_from_install(args: &SkillsInstallArgs) -> SkillTarget {
-    if args.project {
-        SkillTarget::Project
-    } else {
+pub(crate) fn target_from_install(args: &SkillsInstallArgs) -> SkillTarget {
+    if args.global {
         SkillTarget::Global
+    } else {
+        SkillTarget::Project
     }
 }
 
-fn normalize_install_source(
+pub(crate) fn target_from_uninstall(args: &SkillsNameArgs) -> SkillTarget {
+    if args.global {
+        SkillTarget::Global
+    } else {
+        SkillTarget::Project
+    }
+}
+
+pub(crate) fn normalize_install_source(
     source: &str,
     env_map: &std::collections::BTreeMap<String, String>,
     workdir: &Path,
@@ -536,7 +556,7 @@ fn normalize_install_source(
         .to_string())
 }
 
-fn source_looks_like_git(source: &str) -> bool {
+pub(crate) fn source_looks_like_git(source: &str) -> bool {
     source.starts_with("http://")
         || source.starts_with("https://")
         || source.starts_with("file://")

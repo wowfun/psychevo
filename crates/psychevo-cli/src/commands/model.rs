@@ -4,11 +4,13 @@ use std::process::ExitCode;
 use anyhow::{Result, anyhow};
 use psychevo_runtime::{
     ConfiguredModel, ModelCatalogEntry, ModelCatalogProvider, configured_models,
-    fetch_model_catalog, model_catalog_providers, selected_configured_model,
+    fetch_model_catalog, model_catalog_providers, selected_configured_model, set_default_model,
 };
 use serde_json::{Value, json};
 
-use crate::args::{ModelArgs, ModelCommand, ModelFetchArgs, ModelJsonArgs, ModelListArgs};
+use crate::args::{
+    ModelArgs, ModelCommand, ModelFetchArgs, ModelJsonArgs, ModelListArgs, ModelSetArgs,
+};
 use crate::commands::common::{base_run_options, print_json_error};
 use crate::env::{ensure_home_initialized, inherited_env, resolve_psychevo_home};
 
@@ -23,7 +25,7 @@ pub(crate) async fn run_model_command(args: ModelArgs) -> Result<ExitCode> {
     }
 }
 
-async fn run_model_command_inner(args: &ModelArgs) -> Result<ExitCode> {
+pub(crate) async fn run_model_command_inner(args: &ModelArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
@@ -32,12 +34,16 @@ async fn run_model_command_inner(args: &ModelArgs) -> Result<ExitCode> {
     match &args.command {
         ModelCommand::List(args) => list_models(args, &options)?,
         ModelCommand::Current(args) => current_model(args, &options)?,
+        ModelCommand::Set(args) => set_model(args, &home, &cwd)?,
         ModelCommand::Fetch(args) => fetch_models(args, &options).await?,
     }
     Ok(ExitCode::SUCCESS)
 }
 
-fn list_models(args: &ModelListArgs, options: &psychevo_runtime::RunOptions) -> Result<()> {
+pub(crate) fn list_models(
+    args: &ModelListArgs,
+    options: &psychevo_runtime::RunOptions,
+) -> Result<()> {
     let mut models = configured_models(options)?;
     if let Some(provider) = &args.provider {
         let provider = provider.trim().to_lowercase();
@@ -70,7 +76,10 @@ fn list_models(args: &ModelListArgs, options: &psychevo_runtime::RunOptions) -> 
     Ok(())
 }
 
-fn current_model(args: &ModelJsonArgs, options: &psychevo_runtime::RunOptions) -> Result<()> {
+pub(crate) fn current_model(
+    args: &ModelJsonArgs,
+    options: &psychevo_runtime::RunOptions,
+) -> Result<()> {
     let selected = selected_configured_model(options)?;
     if args.json {
         println!(
@@ -94,7 +103,26 @@ fn current_model(args: &ModelJsonArgs, options: &psychevo_runtime::RunOptions) -
     Ok(())
 }
 
-async fn fetch_models(args: &ModelFetchArgs, options: &psychevo_runtime::RunOptions) -> Result<()> {
+pub(crate) fn set_model(
+    args: &ModelSetArgs,
+    home: &std::path::Path,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    let value = set_default_model(home, cwd, args.global, &args.model)?;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&value)?);
+    } else {
+        println!("model: {}", value["model"].as_str().unwrap_or("-"));
+        println!("scope: {}", value["scope"].as_str().unwrap_or("-"));
+        println!("path: {}", value["path"].as_str().unwrap_or("-"));
+    }
+    Ok(())
+}
+
+pub(crate) async fn fetch_models(
+    args: &ModelFetchArgs,
+    options: &psychevo_runtime::RunOptions,
+) -> Result<()> {
     let mut providers = model_catalog_providers(options)?;
     if let Some(provider) = &args.provider {
         let provider = provider.trim().to_lowercase();
@@ -134,7 +162,7 @@ async fn fetch_models(args: &ModelFetchArgs, options: &psychevo_runtime::RunOpti
     Ok(())
 }
 
-fn model_value(model: &ConfiguredModel) -> Value {
+pub(crate) fn model_value(model: &ConfiguredModel) -> Value {
     json!({
         "provider": model.provider,
         "provider_label": model.provider_label,
@@ -145,7 +173,7 @@ fn model_value(model: &ConfiguredModel) -> Value {
     })
 }
 
-fn provider_value(provider: &ModelCatalogProvider) -> Value {
+pub(crate) fn provider_value(provider: &ModelCatalogProvider) -> Value {
     json!({
         "provider": provider.provider,
         "label": provider.display_label,
@@ -157,7 +185,7 @@ fn provider_value(provider: &ModelCatalogProvider) -> Value {
     })
 }
 
-fn catalog_model_value(model: &ModelCatalogEntry) -> Value {
+pub(crate) fn catalog_model_value(model: &ModelCatalogEntry) -> Value {
     json!({
         "id": model.id,
         "context_limit": model.context_limit,
@@ -165,10 +193,11 @@ fn catalog_model_value(model: &ModelCatalogEntry) -> Value {
     })
 }
 
-fn model_json(args: &ModelArgs) -> bool {
+pub(crate) fn model_json(args: &ModelArgs) -> bool {
     match &args.command {
         ModelCommand::List(args) => args.json,
         ModelCommand::Current(args) => args.json,
+        ModelCommand::Set(args) => args.json,
         ModelCommand::Fetch(args) => args.json,
     }
 }

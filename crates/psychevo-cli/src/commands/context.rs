@@ -2,7 +2,9 @@ use std::env;
 use std::process::ExitCode;
 
 use anyhow::{Result, anyhow};
-use psychevo_runtime::{ContextOptions, context_snapshot, format_context_snapshot_text};
+use psychevo_runtime::{
+    ContextOptions, StateRuntime, context_snapshot, format_context_snapshot_text,
+};
 
 use crate::args::ContextArgs;
 use crate::env::{
@@ -27,7 +29,7 @@ pub(crate) fn run_context_command(args: ContextArgs) -> Result<ExitCode> {
     }
 }
 
-fn run_context_command_inner(args: &ContextArgs) -> Result<ExitCode> {
+pub(crate) fn run_context_command_inner(args: &ContextArgs) -> Result<ExitCode> {
     let session = args
         .session
         .clone()
@@ -47,7 +49,7 @@ fn run_context_command_inner(args: &ContextArgs) -> Result<ExitCode> {
         None => cwd,
     };
     let snapshot = context_snapshot(ContextOptions {
-        db_path,
+        state: StateRuntime::open(&db_path)?,
         workdir,
         session,
         config_path,

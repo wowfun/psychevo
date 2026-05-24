@@ -1,5 +1,7 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[test]
-fn shell_escape_parser_accepts_leading_space_and_preserves_command() {
+pub(crate) fn shell_escape_parser_accepts_leading_space_and_preserves_command() {
     let parsed = parse_shell_escape_input("  !echo hi").expect("shell escape");
 
     assert_eq!(parsed.command, "echo hi");
@@ -12,7 +14,7 @@ fn shell_escape_parser_accepts_leading_space_and_preserves_command() {
 }
 
 #[test]
-fn shell_escape_history_survives_session_history_replacement() {
+pub(crate) fn shell_escape_history_survives_session_history_replacement() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -32,7 +34,7 @@ fn shell_escape_history_survives_session_history_replacement() {
 }
 
 #[tokio::test]
-async fn esc_clears_empty_shell_mode_composer() {
+pub(crate) async fn esc_clears_empty_shell_mode_composer() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -50,7 +52,7 @@ async fn esc_clears_empty_shell_mode_composer() {
 }
 
 #[test]
-fn status_line_marks_shell_mode_for_bang_input() {
+pub(crate) fn status_line_marks_shell_mode_for_bang_input() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -64,7 +66,7 @@ fn status_line_marks_shell_mode_for_bang_input() {
 }
 
 #[tokio::test]
-async fn running_status_line_shows_spinner_elapsed_and_esc_hint() {
+pub(crate) async fn running_status_line_shows_spinner_elapsed_and_esc_hint() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -100,7 +102,7 @@ async fn running_status_line_shows_spinner_elapsed_and_esc_hint() {
 }
 
 #[tokio::test]
-async fn status_line_elapsed_survives_run_and_tool_phase_changes() {
+pub(crate) async fn status_line_elapsed_survives_run_and_tool_phase_changes() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -152,7 +154,7 @@ async fn status_line_elapsed_survives_run_and_tool_phase_changes() {
 }
 
 #[test]
-fn historical_unfinished_prompt_without_live_work_does_not_show_running_elapsed() {
+pub(crate) fn historical_unfinished_prompt_without_live_work_does_not_show_running_elapsed() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
@@ -184,7 +186,7 @@ fn historical_unfinished_prompt_without_live_work_does_not_show_running_elapsed(
 }
 
 #[tokio::test]
-async fn esc_interrupts_running_turn_without_transcript_row() {
+pub(crate) async fn esc_interrupts_running_turn_without_transcript_row() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -223,7 +225,7 @@ async fn esc_interrupts_running_turn_without_transcript_row() {
 }
 
 #[tokio::test]
-async fn esc_dismisses_slash_menu_before_interrupting_running_turn() {
+pub(crate) async fn esc_dismisses_slash_menu_before_interrupting_running_turn() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -258,7 +260,7 @@ async fn esc_dismisses_slash_menu_before_interrupting_running_turn() {
 }
 
 #[tokio::test]
-async fn shifted_one_key_enters_shell_mode() {
+pub(crate) async fn shifted_one_key_enters_shell_mode() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -278,7 +280,7 @@ async fn shifted_one_key_enters_shell_mode() {
 }
 
 #[tokio::test]
-async fn empty_shell_mode_uses_bang_prompt_and_backspace_exits() {
+pub(crate) async fn empty_shell_mode_uses_bang_prompt_and_backspace_exits() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -314,7 +316,7 @@ async fn empty_shell_mode_uses_bang_prompt_and_backspace_exits() {
 }
 
 #[tokio::test]
-async fn pasted_bang_input_imports_shell_mode_without_literal_bang() {
+pub(crate) async fn pasted_bang_input_imports_shell_mode_without_literal_bang() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -331,7 +333,7 @@ async fn pasted_bang_input_imports_shell_mode_without_literal_bang() {
 }
 
 #[tokio::test]
-async fn shell_mode_submit_records_bang_history_and_executes_command_text() {
+pub(crate) async fn shell_mode_submit_records_bang_history_and_executes_command_text() {
     let temp = tempdir().expect("temp");
     let mut app = test_app_with_models(&temp);
     app.current_session = None;
@@ -361,7 +363,7 @@ async fn shell_mode_submit_records_bang_history_and_executes_command_text() {
 }
 
 #[test]
-fn user_shell_transcript_row_uses_prompt_surface_command_line() {
+pub(crate) fn user_shell_transcript_row_uses_prompt_surface_command_line() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -406,7 +408,7 @@ fn user_shell_transcript_row_uses_prompt_surface_command_line() {
 }
 
 #[tokio::test]
-async fn fullscreen_user_shell_runs_locally_and_drains_queued_shell_escape() {
+pub(crate) async fn fullscreen_user_shell_runs_locally_and_drains_queued_shell_escape() {
     let temp = tempdir().expect("temp");
     let mut app = test_app_with_models(&temp);
     app.current_session = None;
@@ -446,7 +448,8 @@ async fn fullscreen_user_shell_runs_locally_and_drains_queued_shell_escape() {
 }
 
 #[tokio::test]
-async fn fullscreen_user_shell_during_agent_turn_waits_for_run_start_then_starts_auxiliary_task() {
+pub(crate) async fn fullscreen_user_shell_during_agent_turn_waits_for_run_start_then_starts_auxiliary_task()
+ {
     let temp = tempdir().expect("temp");
     let mut app = test_app_with_models(&temp);
     app.current_session = None;
@@ -516,7 +519,7 @@ async fn fullscreen_user_shell_during_agent_turn_waits_for_run_start_then_starts
 }
 
 #[tokio::test]
-async fn auxiliary_user_shell_missing_config_does_not_execute_marker_command() {
+pub(crate) async fn auxiliary_user_shell_missing_config_does_not_execute_marker_command() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let session_id = SqliteStore::open(&app.db_path)
@@ -578,7 +581,7 @@ async fn auxiliary_user_shell_missing_config_does_not_execute_marker_command() {
 }
 
 #[tokio::test]
-async fn persisted_user_shell_history_reloads_as_ran_evidence() {
+pub(crate) async fn persisted_user_shell_history_reloads_as_ran_evidence() {
     let temp = tempdir().expect("temp");
     let mut app = test_app_with_models(&temp);
     app.current_session = None;
@@ -610,7 +613,7 @@ async fn persisted_user_shell_history_reloads_as_ran_evidence() {
 }
 
 #[test]
-fn composer_history_recall_preserves_draft() {
+pub(crate) fn composer_history_recall_preserves_draft() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -634,7 +637,7 @@ fn composer_history_recall_preserves_draft() {
 }
 
 #[test]
-fn shell_history_recall_restores_shell_mode_and_strips_bang() {
+pub(crate) fn shell_history_recall_restores_shell_mode_and_strips_bang() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -651,7 +654,7 @@ fn shell_history_recall_restores_shell_mode_and_strips_bang() {
 }
 
 #[test]
-fn composer_history_recall_respects_multiline_boundaries() {
+pub(crate) fn composer_history_recall_respects_multiline_boundaries() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -665,7 +668,7 @@ fn composer_history_recall_respects_multiline_boundaries() {
 }
 
 #[test]
-fn tool_only_thinking_message_does_not_create_turn_meta() {
+pub(crate) fn tool_only_thinking_message_does_not_create_turn_meta() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -707,7 +710,7 @@ fn tool_only_thinking_message_does_not_create_turn_meta() {
 }
 
 #[test]
-fn tool_failure_without_answer_keeps_failure_meta() {
+pub(crate) fn tool_failure_without_answer_keeps_failure_meta() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -760,7 +763,7 @@ fn tool_failure_without_answer_keeps_failure_meta() {
 }
 
 #[test]
-fn interrupted_bash_tool_renders_interrupted_without_failure_meta() {
+pub(crate) fn interrupted_bash_tool_renders_interrupted_without_failure_meta() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -798,7 +801,10 @@ fn interrupted_bash_tool_renders_interrupted_without_failure_meta() {
         .iter()
         .find(|row| row.kind == TranscriptKind::Ran)
         .expect("interrupted exec_command row");
-    assert_eq!(row.title, "exec_command find /home/kevin -name tmp.txt -type f");
+    assert_eq!(
+        row.title,
+        "exec_command find /home/kevin -name tmp.txt -type f"
+    );
     assert_eq!(row.text, "interrupted");
     assert!(row.interrupted);
     assert!(!row.failed);
@@ -831,7 +837,7 @@ fn interrupted_bash_tool_renders_interrupted_without_failure_meta() {
 }
 
 #[test]
-fn interrupted_reasoning_only_turn_meta_includes_interrupted() {
+pub(crate) fn interrupted_reasoning_only_turn_meta_includes_interrupted() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -879,7 +885,7 @@ fn interrupted_reasoning_only_turn_meta_includes_interrupted() {
 }
 
 #[test]
-fn interrupted_user_shell_renders_interrupted_marker() {
+pub(crate) fn interrupted_user_shell_renders_interrupted_marker() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);

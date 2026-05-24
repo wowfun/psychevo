@@ -1,27 +1,26 @@
-use std::collections::VecDeque;
-use std::io::{Read, Write};
-use std::net::TcpListener;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
-use std::thread;
+pub(crate) use std::collections::VecDeque;
+pub(crate) use std::io::{Read, Write};
+pub(crate) use std::net::TcpListener;
+pub(crate) use std::path::{Path, PathBuf};
+pub(crate) use std::process::{Command, Stdio};
+pub(crate) use std::sync::{Arc, Mutex};
+pub(crate) use std::thread;
 
-use pretty_assertions::assert_eq;
-use rusqlite::Connection;
-use serde_json::Value;
-use tempfile::tempdir;
+pub(crate) use rusqlite::Connection;
+pub(crate) use serde_json::Value;
+pub(crate) use tempfile::tempdir;
 
-fn pevo() -> &'static str {
+pub(crate) fn pevo() -> &'static str {
     env!("CARGO_BIN_EXE_pevo")
 }
 
-fn pevo_cmd(home: &Path) -> Command {
+pub(crate) fn pevo_cmd(home: &Path) -> Command {
     let mut command = Command::new(pevo());
     command.env_clear().env("HOME", home);
     command
 }
 
-fn isolated_run_cmd(home: &Path, config: &Path, db: &Path) -> Command {
+pub(crate) fn isolated_run_cmd(home: &Path, config: &Path, db: &Path) -> Command {
     seed_managed_rg(&home.join(".psychevo"));
     let mut command = pevo_cmd(home);
     command
@@ -30,13 +29,18 @@ fn isolated_run_cmd(home: &Path, config: &Path, db: &Path) -> Command {
     command
 }
 
-fn isolated_tui_cmd(home: &Path, psychevo_home: &Path, config: &Path, db: &Path) -> Command {
+pub(crate) fn isolated_tui_cmd(
+    home: &Path,
+    psychevo_home: &Path,
+    config: &Path,
+    db: &Path,
+) -> Command {
     let mut command = isolated_run_cmd(home, config, db);
     command.env("PSYCHEVO_HOME", psychevo_home);
     command
 }
 
-fn init_tui_home(test_home: &Path) -> PathBuf {
+pub(crate) fn init_tui_home(test_home: &Path) -> PathBuf {
     let psychevo_home = test_home.join("psychevo-home");
     let output = pevo_cmd(test_home)
         .env("PSYCHEVO_HOME", &psychevo_home)
@@ -52,14 +56,14 @@ fn init_tui_home(test_home: &Path) -> PathBuf {
     psychevo_home
 }
 
-fn seed_managed_rg(psychevo_home: &Path) {
+pub(crate) fn seed_managed_rg(psychevo_home: &Path) {
     let tools = psychevo_home.join("tools");
     std::fs::create_dir_all(&tools).expect("tools");
     let rg = tools.join(if cfg!(windows) { "rg.exe" } else { "rg" });
     std::fs::write(&rg, "#!/bin/sh\nprintf 'test rg\\n'\n").expect("rg");
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
+        pub(crate) use std::os::unix::fs::PermissionsExt;
 
         let mut permissions = std::fs::metadata(&rg).expect("metadata").permissions();
         permissions.set_mode(0o755);
@@ -67,13 +71,13 @@ fn seed_managed_rg(psychevo_home: &Path) {
     }
 }
 
-struct MockSseServer {
-    base_url: String,
-    requests: Arc<Mutex<Vec<String>>>,
+pub(crate) struct MockSseServer {
+    pub(crate) base_url: String,
+    pub(crate) requests: Arc<Mutex<Vec<String>>>,
 }
 
 impl MockSseServer {
-    fn start(responses: Vec<String>) -> Self {
+    pub(crate) fn start(responses: Vec<String>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         let base_url = format!("http://{}", listener.local_addr().expect("addr"));
         let requests = Arc::new(Mutex::new(Vec::new()));
@@ -95,7 +99,7 @@ impl MockSseServer {
         Self { base_url, requests }
     }
 
-    fn request_json(&self, index: usize) -> Value {
+    pub(crate) fn request_json(&self, index: usize) -> Value {
         let requests = self.requests.lock().expect("requests");
         let request = requests.get(index).expect("request");
         let body = request.split("\r\n\r\n").nth(1).expect("body");
@@ -103,7 +107,7 @@ impl MockSseServer {
     }
 }
 
-fn read_http_request(stream: &mut std::net::TcpStream) -> String {
+pub(crate) fn read_http_request(stream: &mut std::net::TcpStream) -> String {
     let mut data = Vec::new();
     let mut buf = [0u8; 1024];
     loop {
@@ -142,14 +146,14 @@ fn read_http_request(stream: &mut std::net::TcpStream) -> String {
     String::from_utf8_lossy(&data).to_string()
 }
 
-fn sse_text(text: &str) -> String {
+pub(crate) fn sse_text(text: &str) -> String {
     format!(
         "data: {{\"choices\":[{{\"delta\":{{\"content\":{}}},\"finish_reason\":\"stop\"}}]}}\n\ndata: [DONE]\n\n",
         serde_json::to_string(text).expect("text")
     )
 }
 
-fn sse_reasoning_then_text(reasoning: &str, text: &str) -> String {
+pub(crate) fn sse_reasoning_then_text(reasoning: &str, text: &str) -> String {
     format!(
         "data: {{\"choices\":[{{\"delta\":{{\"reasoning_content\":{}}},\"finish_reason\":null}}]}}\n\n\
          data: {{\"choices\":[{{\"delta\":{{\"content\":{}}},\"finish_reason\":\"stop\"}}]}}\n\n\
@@ -275,10 +279,31 @@ fn write_home_skill(home: &Path, name: &str, description: &str, body: &str) {
 }
 
 // Scenario chunks share this integration-test harness.
-include!("smoke_cli/init.rs");
-include!("smoke_cli/run.rs");
-include!("smoke_cli/tui.rs");
-include!("smoke_cli/agent.rs");
-include!("smoke_cli/skills.rs");
-include!("smoke_cli/install.rs");
-include!("smoke_cli/admin.rs");
+#[path = "smoke_cli/init.rs"]
+mod smoke_cli_init;
+#[allow(unused_imports)]
+use smoke_cli_init::*;
+#[path = "smoke_cli/run.rs"]
+mod smoke_cli_run;
+#[allow(unused_imports)]
+use smoke_cli_run::*;
+#[path = "smoke_cli/tui.rs"]
+mod smoke_cli_tui;
+#[allow(unused_imports)]
+use smoke_cli_tui::*;
+#[path = "smoke_cli/agent.rs"]
+mod smoke_cli_agent;
+#[allow(unused_imports)]
+use smoke_cli_agent::*;
+#[path = "smoke_cli/skills.rs"]
+mod smoke_cli_skills;
+#[allow(unused_imports)]
+use smoke_cli_skills::*;
+#[path = "smoke_cli/install.rs"]
+mod smoke_cli_install;
+#[allow(unused_imports)]
+use smoke_cli_install::*;
+#[path = "smoke_cli/admin.rs"]
+mod smoke_cli_admin;
+#[allow(unused_imports)]
+use smoke_cli_admin::*;

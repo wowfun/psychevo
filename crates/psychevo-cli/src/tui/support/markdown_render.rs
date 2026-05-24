@@ -1,6 +1,11 @@
-use std::borrow::Cow;
+#[allow(unused_imports)]
+pub(crate) use super::*;
 
-fn render_markdown_lines(input: &str, cwd: &Path, width: Option<u16>) -> Vec<Line<'static>> {
+pub(crate) fn render_markdown_lines(
+    input: &str,
+    cwd: &Path,
+    width: Option<u16>,
+) -> Vec<Line<'static>> {
     let mut options = pulldown_cmark::Options::empty();
     options.insert(pulldown_cmark::Options::ENABLE_TABLES);
     options.insert(pulldown_cmark::Options::ENABLE_STRIKETHROUGH);
@@ -12,42 +17,42 @@ fn render_markdown_lines(input: &str, cwd: &Path, width: Option<u16>) -> Vec<Lin
     writer.finish()
 }
 
-struct MarkdownWriter<'a> {
-    cwd: &'a Path,
-    width: Option<u16>,
-    lines: Vec<Line<'static>>,
-    current: Vec<Span<'static>>,
-    style_stack: Vec<Style>,
-    list_stack: Vec<Option<u64>>,
-    link_stack: Vec<MarkdownLink>,
-    code_block: Option<MarkdownCodeBlock>,
-    table: Option<MarkdownTable>,
-    blockquote_depth: usize,
+pub(crate) struct MarkdownWriter<'a> {
+    pub(crate) cwd: &'a Path,
+    pub(crate) width: Option<u16>,
+    pub(crate) lines: Vec<Line<'static>>,
+    pub(crate) current: Vec<Span<'static>>,
+    pub(crate) style_stack: Vec<Style>,
+    pub(crate) list_stack: Vec<Option<u64>>,
+    pub(crate) link_stack: Vec<MarkdownLink>,
+    pub(crate) code_block: Option<MarkdownCodeBlock>,
+    pub(crate) table: Option<MarkdownTable>,
+    pub(crate) blockquote_depth: usize,
 }
 
-struct MarkdownLink {
-    destination: String,
-    local_display: Option<String>,
-    suppress_label: bool,
+pub(crate) struct MarkdownLink {
+    pub(crate) destination: String,
+    pub(crate) local_display: Option<String>,
+    pub(crate) suppress_label: bool,
 }
 
-struct MarkdownCodeBlock {
-    lang: String,
-    code: String,
+pub(crate) struct MarkdownCodeBlock {
+    pub(crate) lang: String,
+    pub(crate) code: String,
 }
 
 #[derive(Debug, Clone)]
-struct MarkdownTable {
-    alignments: Vec<pulldown_cmark::Alignment>,
-    header: Option<Vec<String>>,
-    rows: Vec<Vec<String>>,
-    current_row: Option<Vec<String>>,
-    current_cell: Option<String>,
-    in_header: bool,
+pub(crate) struct MarkdownTable {
+    pub(crate) alignments: Vec<pulldown_cmark::Alignment>,
+    pub(crate) header: Option<Vec<String>>,
+    pub(crate) rows: Vec<Vec<String>>,
+    pub(crate) current_row: Option<Vec<String>>,
+    pub(crate) current_cell: Option<String>,
+    pub(crate) in_header: bool,
 }
 
 impl<'a> MarkdownWriter<'a> {
-    fn new(cwd: &'a Path, width: Option<u16>) -> Self {
+    pub(crate) fn new(cwd: &'a Path, width: Option<u16>) -> Self {
         Self {
             cwd,
             width,
@@ -62,13 +67,13 @@ impl<'a> MarkdownWriter<'a> {
         }
     }
 
-    fn render<'b>(&mut self, parser: pulldown_cmark::Parser<'b>) {
+    pub(crate) fn render<'b>(&mut self, parser: pulldown_cmark::Parser<'b>) {
         for event in parser {
             self.event(event);
         }
     }
 
-    fn finish(mut self) -> Vec<Line<'static>> {
+    pub(crate) fn finish(mut self) -> Vec<Line<'static>> {
         self.flush_current();
         while self.lines.last().is_some_and(is_blank_line) {
             self.lines.pop();
@@ -76,7 +81,7 @@ impl<'a> MarkdownWriter<'a> {
         self.lines
     }
 
-    fn event<'b>(&mut self, event: pulldown_cmark::Event<'b>) {
+    pub(crate) fn event<'b>(&mut self, event: pulldown_cmark::Event<'b>) {
         match event {
             pulldown_cmark::Event::Start(tag) => self.start_tag(tag),
             pulldown_cmark::Event::End(tag) => self.end_tag(tag),
@@ -104,7 +109,7 @@ impl<'a> MarkdownWriter<'a> {
         }
     }
 
-    fn start_tag<'b>(&mut self, tag: pulldown_cmark::Tag<'b>) {
+    pub(crate) fn start_tag<'b>(&mut self, tag: pulldown_cmark::Tag<'b>) {
         match tag {
             pulldown_cmark::Tag::Paragraph => {}
             pulldown_cmark::Tag::Heading { level, .. } => {
@@ -190,7 +195,7 @@ impl<'a> MarkdownWriter<'a> {
         }
     }
 
-    fn end_tag(&mut self, tag: pulldown_cmark::TagEnd) {
+    pub(crate) fn end_tag(&mut self, tag: pulldown_cmark::TagEnd) {
         match tag {
             pulldown_cmark::TagEnd::Paragraph => {
                 if self.table.is_none() {
@@ -245,7 +250,10 @@ impl<'a> MarkdownWriter<'a> {
             pulldown_cmark::TagEnd::TableCell => {
                 if let Some(table) = &mut self.table {
                     let cell = table.current_cell.take().unwrap_or_default();
-                    table.current_row.get_or_insert_with(Vec::new).push(clean_table_cell(cell));
+                    table
+                        .current_row
+                        .get_or_insert_with(Vec::new)
+                        .push(clean_table_cell(cell));
                 }
             }
             pulldown_cmark::TagEnd::TableRow => {
@@ -279,7 +287,7 @@ impl<'a> MarkdownWriter<'a> {
         }
     }
 
-    fn text(&mut self, text: &str) {
+    pub(crate) fn text(&mut self, text: &str) {
         if let Some(code) = self.code_block.as_mut() {
             code.code.push_str(text);
             return;
@@ -306,7 +314,7 @@ impl<'a> MarkdownWriter<'a> {
         }
     }
 
-    fn inline_code(&mut self, code: &str) {
+    pub(crate) fn inline_code(&mut self, code: &str) {
         if self
             .link_stack
             .last()
@@ -322,7 +330,7 @@ impl<'a> MarkdownWriter<'a> {
             .push(Span::styled(code.to_string(), tui_theme().code_style()));
     }
 
-    fn current_style(&self) -> Style {
+    pub(crate) fn current_style(&self) -> Style {
         let mut style = Style::default();
         for overlay in &self.style_stack {
             style = style.patch(*overlay);
@@ -330,29 +338,27 @@ impl<'a> MarkdownWriter<'a> {
         style
     }
 
-    fn flush_current(&mut self) {
+    pub(crate) fn flush_current(&mut self) {
         if self.current.is_empty() {
             return;
         }
         if self.blockquote_depth > 0 {
-            let mut spans = vec![Span::styled(
-                "│ ".to_string(),
-                tui_theme().dim_style(),
-            )];
+            let mut spans = vec![Span::styled("│ ".to_string(), tui_theme().dim_style())];
             spans.append(&mut self.current);
             self.lines.push(Line::from(spans));
         } else {
-            self.lines.push(Line::from(std::mem::take(&mut self.current)));
+            self.lines
+                .push(Line::from(std::mem::take(&mut self.current)));
         }
     }
 
-    fn push_blank(&mut self) {
+    pub(crate) fn push_blank(&mut self) {
         if !self.lines.is_empty() && !self.lines.last().is_some_and(is_blank_line) {
             self.lines.push(Line::from(""));
         }
     }
 
-    fn push_code_block(&mut self, block: &MarkdownCodeBlock) {
+    pub(crate) fn push_code_block(&mut self, block: &MarkdownCodeBlock) {
         let theme = tui_theme();
         let lang = block.lang.trim();
         let label = if lang.is_empty() {
@@ -387,7 +393,7 @@ impl<'a> MarkdownWriter<'a> {
         )));
     }
 
-    fn list_item_marker(&mut self) -> String {
+    pub(crate) fn list_item_marker(&mut self) -> String {
         let depth = self.list_stack.len().saturating_sub(1);
         let indent = "  ".repeat(depth);
         match self.list_stack.last_mut() {
@@ -400,7 +406,7 @@ impl<'a> MarkdownWriter<'a> {
         }
     }
 
-    fn append_table_text(&mut self, text: &str) {
+    pub(crate) fn append_table_text(&mut self, text: &str) {
         if let Some(table) = &mut self.table
             && let Some(cell) = &mut table.current_cell
         {
@@ -408,7 +414,7 @@ impl<'a> MarkdownWriter<'a> {
         }
     }
 
-    fn push_link_target(&mut self, target: String) {
+    pub(crate) fn push_link_target(&mut self, target: String) {
         if self.table.is_some() {
             self.append_table_text(&target);
             return;
@@ -423,7 +429,7 @@ impl<'a> MarkdownWriter<'a> {
 }
 
 impl MarkdownTable {
-    fn new(alignments: Vec<pulldown_cmark::Alignment>) -> Self {
+    pub(crate) fn new(alignments: Vec<pulldown_cmark::Alignment>) -> Self {
         Self {
             alignments,
             header: None,
@@ -435,7 +441,7 @@ impl MarkdownTable {
     }
 }
 
-fn heading_style(level: pulldown_cmark::HeadingLevel) -> Style {
+pub(crate) fn heading_style(level: pulldown_cmark::HeadingLevel) -> Style {
     let mut style = Style::default().add_modifier(Modifier::BOLD);
     if level == pulldown_cmark::HeadingLevel::H1 {
         style = style.add_modifier(Modifier::UNDERLINED);
@@ -443,7 +449,7 @@ fn heading_style(level: pulldown_cmark::HeadingLevel) -> Style {
     style
 }
 
-fn heading_prefix(level: pulldown_cmark::HeadingLevel) -> &'static str {
+pub(crate) fn heading_prefix(level: pulldown_cmark::HeadingLevel) -> &'static str {
     match level {
         pulldown_cmark::HeadingLevel::H1 => "# ",
         pulldown_cmark::HeadingLevel::H2 => "## ",
@@ -454,13 +460,13 @@ fn heading_prefix(level: pulldown_cmark::HeadingLevel) -> &'static str {
     }
 }
 
-fn is_blank_line(line: &Line<'_>) -> bool {
+pub(crate) fn is_blank_line(line: &Line<'_>) -> bool {
     line.spans
         .iter()
         .all(|span| span.content.chars().all(char::is_whitespace))
 }
 
-fn code_block_language(kind: pulldown_cmark::CodeBlockKind<'_>) -> String {
+pub(crate) fn code_block_language(kind: pulldown_cmark::CodeBlockKind<'_>) -> String {
     match kind {
         pulldown_cmark::CodeBlockKind::Fenced(info) => info
             .split_whitespace()
@@ -471,7 +477,7 @@ fn code_block_language(kind: pulldown_cmark::CodeBlockKind<'_>) -> String {
     }
 }
 
-fn clean_table_cell(value: String) -> String {
+pub(crate) fn clean_table_cell(value: String) -> String {
     value
         .lines()
         .map(str::trim)
@@ -480,7 +486,7 @@ fn clean_table_cell(value: String) -> String {
         .join(" ")
 }
 
-fn render_table(table: MarkdownTable, width: Option<u16>) -> Vec<Line<'static>> {
+pub(crate) fn render_table(table: MarkdownTable, width: Option<u16>) -> Vec<Line<'static>> {
     let Some(header) = table.header else {
         return Vec::new();
     };
@@ -502,7 +508,7 @@ fn render_table(table: MarkdownTable, width: Option<u16>) -> Vec<Line<'static>> 
     render_box_table(&header, &rows, &table.alignments, &widths)
 }
 
-fn table_column_count(
+pub(crate) fn table_column_count(
     header: &[String],
     rows: &[Vec<String>],
     alignments: &[pulldown_cmark::Alignment],
@@ -514,13 +520,13 @@ fn table_column_count(
         .unwrap_or(0)
 }
 
-fn normalize_table_row(row: &[String], columns: usize) -> Vec<String> {
+pub(crate) fn normalize_table_row(row: &[String], columns: usize) -> Vec<String> {
     (0..columns)
         .map(|index| row.get(index).cloned().unwrap_or_default())
         .collect()
 }
 
-fn table_widths(header: &[String], rows: &[Vec<String>], columns: usize) -> Vec<usize> {
+pub(crate) fn table_widths(header: &[String], rows: &[Vec<String>], columns: usize) -> Vec<usize> {
     (0..columns)
         .map(|column| {
             std::iter::once(header)
@@ -533,11 +539,11 @@ fn table_widths(header: &[String], rows: &[Vec<String>], columns: usize) -> Vec<
         .collect()
 }
 
-fn table_box_width(widths: &[usize]) -> usize {
+pub(crate) fn table_box_width(widths: &[usize]) -> usize {
     1 + widths.iter().map(|width| width + 3).sum::<usize>()
 }
 
-fn render_box_table(
+pub(crate) fn render_box_table(
     header: &[String],
     rows: &[Vec<String>],
     alignments: &[pulldown_cmark::Alignment],
@@ -554,7 +560,7 @@ fn render_box_table(
     out
 }
 
-fn table_border(
+pub(crate) fn table_border(
     left: &'static str,
     mid: &'static str,
     right: &'static str,
@@ -572,7 +578,7 @@ fn table_border(
     Line::from(Span::styled(text, tui_theme().dim_style()))
 }
 
-fn table_box_row(
+pub(crate) fn table_box_row(
     row: &[String],
     alignments: &[pulldown_cmark::Alignment],
     widths: &[usize],
@@ -599,7 +605,11 @@ fn table_box_row(
     Line::from(spans)
 }
 
-fn align_cell(value: &str, width: usize, alignment: pulldown_cmark::Alignment) -> String {
+pub(crate) fn align_cell(
+    value: &str,
+    width: usize,
+    alignment: pulldown_cmark::Alignment,
+) -> String {
     let value_width = UnicodeWidthStr::width(value);
     let padding = width.saturating_sub(value_width);
     match alignment {
@@ -613,7 +623,7 @@ fn align_cell(value: &str, width: usize, alignment: pulldown_cmark::Alignment) -
     }
 }
 
-fn render_pipe_table(
+pub(crate) fn render_pipe_table(
     header: &[String],
     rows: &[Vec<String>],
     alignments: &[pulldown_cmark::Alignment],
@@ -635,27 +645,32 @@ fn render_pipe_table(
     out
 }
 
-fn pipe_table_row(row: &[String]) -> String {
+pub(crate) fn pipe_table_row(row: &[String]) -> String {
     format!("| {} |", row.join(" | "))
 }
 
-fn pipe_table_delimiter(alignments: &[pulldown_cmark::Alignment], columns: usize) -> String {
+pub(crate) fn pipe_table_delimiter(
+    alignments: &[pulldown_cmark::Alignment],
+    columns: usize,
+) -> String {
     let cells = (0..columns)
-        .map(|index| match alignments
-            .get(index)
-            .copied()
-            .unwrap_or(pulldown_cmark::Alignment::None)
-        {
-            pulldown_cmark::Alignment::Left => ":---",
-            pulldown_cmark::Alignment::Right => "---:",
-            pulldown_cmark::Alignment::Center => ":---:",
-            pulldown_cmark::Alignment::None => "---",
+        .map(|index| {
+            match alignments
+                .get(index)
+                .copied()
+                .unwrap_or(pulldown_cmark::Alignment::None)
+            {
+                pulldown_cmark::Alignment::Left => ":---",
+                pulldown_cmark::Alignment::Right => "---:",
+                pulldown_cmark::Alignment::Center => ":---:",
+                pulldown_cmark::Alignment::None => "---",
+            }
         })
         .collect::<Vec<_>>();
     format!("| {} |", cells.join(" | "))
 }
 
-fn highlight_code_line(line: &str, lang: &str) -> Vec<Span<'static>> {
+pub(crate) fn highlight_code_line(line: &str, lang: &str) -> Vec<Span<'static>> {
     let theme = tui_theme();
     if is_comment_line(line, lang) {
         return vec![Span::styled(line.to_string(), theme.dim_style())];
@@ -733,15 +748,15 @@ fn highlight_code_line(line: &str, lang: &str) -> Vec<Span<'static>> {
     spans
 }
 
-fn is_identifier_start(ch: char) -> bool {
+pub(crate) fn is_identifier_start(ch: char) -> bool {
     ch == '_' || ch.is_ascii_alphabetic()
 }
 
-fn is_identifier_continue(ch: char) -> bool {
+pub(crate) fn is_identifier_continue(ch: char) -> bool {
     ch == '_' || ch == '-' || ch.is_ascii_alphanumeric()
 }
 
-fn normalized_lang(lang: &str) -> &str {
+pub(crate) fn normalized_lang(lang: &str) -> &str {
     match lang {
         "rs" => "rust",
         "js" | "jsx" | "ts" | "tsx" => "javascript",
@@ -750,7 +765,7 @@ fn normalized_lang(lang: &str) -> &str {
     }
 }
 
-fn is_comment_line(line: &str, lang: &str) -> bool {
+pub(crate) fn is_comment_line(line: &str, lang: &str) -> bool {
     let trimmed = line.trim_start();
     match normalized_lang(lang) {
         "shell" | "python" | "ruby" | "yaml" | "toml" => trimmed.starts_with('#'),
@@ -759,7 +774,7 @@ fn is_comment_line(line: &str, lang: &str) -> bool {
     }
 }
 
-fn is_code_keyword(token: &str, lang: &str) -> bool {
+pub(crate) fn is_code_keyword(token: &str, lang: &str) -> bool {
     match normalized_lang(lang) {
         "rust" => matches!(
             token,
@@ -824,169 +839,25 @@ fn is_code_keyword(token: &str, lang: &str) -> bool {
         "json" | "yaml" | "toml" => matches!(token, "true" | "false" | "null"),
         "shell" => matches!(
             token,
-            "case" | "do" | "done" | "elif" | "else" | "esac" | "fi" | "for" | "function"
-                | "if" | "in" | "then" | "while"
+            "case"
+                | "do"
+                | "done"
+                | "elif"
+                | "else"
+                | "esac"
+                | "fi"
+                | "for"
+                | "function"
+                | "if"
+                | "in"
+                | "then"
+                | "while"
         ),
         _ => matches!(token, "true" | "false" | "null"),
     }
 }
 
-fn unwrap_markdown_table_fences(input: &str) -> Cow<'_, str> {
-    let lines = input.lines().collect::<Vec<_>>();
-    let mut output = Vec::new();
-    let mut index = 0usize;
-    let mut changed = false;
-    while index < lines.len() {
-        let Some(open) = parse_fence_open(lines[index]) else {
-            output.push(lines[index].to_string());
-            index += 1;
-            continue;
-        };
-        if !is_markdown_fence_info(&open.info) {
-            output.push(lines[index].to_string());
-            index += 1;
-            continue;
-        }
-        let body_start = index + 1;
-        let mut close_index = None;
-        let mut cursor = body_start;
-        while cursor < lines.len() {
-            if is_fence_close(lines[cursor], open.marker, open.len) {
-                close_index = Some(cursor);
-                break;
-            }
-            cursor += 1;
-        }
-        let Some(close_index) = close_index else {
-            output.push(lines[index].to_string());
-            index += 1;
-            continue;
-        };
-        let body = &lines[body_start..close_index];
-        if is_markdown_table_like(body) {
-            output.extend(body.iter().map(|line| (*line).to_string()));
-            changed = true;
-        } else {
-            output.push(lines[index].to_string());
-            output.extend(body.iter().map(|line| (*line).to_string()));
-            output.push(lines[close_index].to_string());
-        }
-        index = close_index + 1;
-    }
-    if !changed {
-        return Cow::Borrowed(input);
-    }
-    let mut text = output.join("\n");
-    if input.ends_with('\n') {
-        text.push('\n');
-    }
-    Cow::Owned(text)
-}
-
-struct FenceOpen {
-    marker: char,
-    len: usize,
-    info: String,
-}
-
-fn parse_fence_open(line: &str) -> Option<FenceOpen> {
-    let indent = line.len().saturating_sub(line.trim_start().len());
-    if indent > 3 {
-        return None;
-    }
-    let trimmed = line.trim_start();
-    let marker = trimmed.chars().next()?;
-    if marker != '`' && marker != '~' {
-        return None;
-    }
-    let len = trimmed.chars().take_while(|ch| *ch == marker).count();
-    if len < 3 {
-        return None;
-    }
-    let info = trimmed.chars().skip(len).collect::<String>();
-    if marker == '`' && info.contains('`') {
-        return None;
-    }
-    Some(FenceOpen {
-        marker,
-        len,
-        info: info.trim().to_string(),
-    })
-}
-
-fn is_fence_close(line: &str, marker: char, len: usize) -> bool {
-    let indent = line.len().saturating_sub(line.trim_start().len());
-    if indent > 3 {
-        return false;
-    }
-    let trimmed = line.trim_start();
-    if !trimmed.starts_with(marker) {
-        return false;
-    }
-    let count = trimmed.chars().take_while(|ch| *ch == marker).count();
-    count >= len && trimmed.chars().skip(count).all(char::is_whitespace)
-}
-
-fn is_markdown_fence_info(info: &str) -> bool {
-    matches!(
-        info.split_whitespace().next().unwrap_or_default(),
-        "md" | "markdown"
-    )
-}
-
-fn is_markdown_table_like(lines: &[&str]) -> bool {
-    let mut non_empty = lines.iter().map(|line| line.trim()).filter(|line| !line.is_empty());
-    let Some(header) = non_empty.next() else {
-        return false;
-    };
-    let Some(delimiter) = non_empty.next() else {
-        return false;
-    };
-    header.contains('|') && is_table_delimiter_line(delimiter)
-}
-
-fn is_table_delimiter_line(line: &str) -> bool {
-    let trimmed = line.trim().trim_matches('|');
-    let cells = trimmed.split('|').map(str::trim).collect::<Vec<_>>();
-    cells.len() >= 2
-        && cells.iter().all(|cell| {
-            let cell = cell.trim_matches(':').trim();
-            cell.len() >= 3 && cell.chars().all(|ch| ch == '-')
-        })
-}
-
-fn local_link_display(destination: &str, cwd: &Path) -> Option<String> {
-    let destination = destination.trim();
-    if destination.contains("://") && !destination.starts_with("file://") {
-        return None;
-    }
-    let destination = destination.strip_prefix("file://").unwrap_or(destination);
-    let (path_text, suffix) = split_location_suffix(destination);
-    let path = Path::new(path_text);
-    if !path.is_absolute() && destination.starts_with("file:") {
-        return None;
-    }
-    let display_path = if path.is_absolute() {
-        path.strip_prefix(cwd)
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|_| path.to_path_buf())
-    } else {
-        path.to_path_buf()
-    };
-    let display = display_path.to_string_lossy().replace('\\', "/");
-    (!display.is_empty()).then(|| format!("{display}{suffix}"))
-}
-
-fn split_location_suffix(value: &str) -> (&str, &str) {
-    static LOCATION_SUFFIX: std::sync::LazyLock<regex_lite::Regex> =
-        std::sync::LazyLock::new(|| {
-            regex_lite::Regex::new(r":\d+(?::\d+)?(?:[-–]\d+(?::\d+)?)?$")
-                .expect("valid location suffix regex")
-        });
-    if let Some(found) = LOCATION_SUFFIX.find(value)
-        && found.end() == value.len()
-    {
-        return (&value[..found.start()], &value[found.start()..]);
-    }
-    (value, "")
-}
+#[path = "markdown_render/fences.rs"]
+pub(crate) mod fences;
+#[allow(unused_imports)]
+pub use fences::*;

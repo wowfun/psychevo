@@ -1,21 +1,23 @@
-struct TurnPrinter {
-    renderer: TuiRenderer,
-    last_assistant_text: String,
-    reasoning_active: bool,
-    thinking_enabled: bool,
-    debug: bool,
-    run_provider: String,
-    run_model: String,
-    run_mode: String,
-    context_limit: Option<u64>,
-    tool_titles: BTreeMap<String, String>,
-    pending_tool_keys: BTreeMap<String, String>,
-    streaming_tool_message_seq: u64,
-    streaming_tool_message_open: bool,
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) struct TurnPrinter {
+    pub(crate) renderer: TuiRenderer,
+    pub(crate) last_assistant_text: String,
+    pub(crate) reasoning_active: bool,
+    pub(crate) thinking_enabled: bool,
+    pub(crate) debug: bool,
+    pub(crate) run_provider: String,
+    pub(crate) run_model: String,
+    pub(crate) run_mode: String,
+    pub(crate) context_limit: Option<u64>,
+    pub(crate) tool_titles: BTreeMap<String, String>,
+    pub(crate) pending_tool_keys: BTreeMap<String, String>,
+    pub(crate) streaming_tool_message_seq: u64,
+    pub(crate) streaming_tool_message_open: bool,
 }
 
 impl TurnPrinter {
-    fn new(renderer: TuiRenderer, thinking_enabled: bool, debug: bool) -> Self {
+    pub(crate) fn new(renderer: TuiRenderer, thinking_enabled: bool, debug: bool) -> Self {
         Self {
             renderer,
             last_assistant_text: String::new(),
@@ -33,7 +35,11 @@ impl TurnPrinter {
         }
     }
 
-    fn render_event(&mut self, event: &RunStreamEvent, out: &mut impl Write) -> io::Result<()> {
+    pub(crate) fn render_event(
+        &mut self,
+        event: &RunStreamEvent,
+        out: &mut impl Write,
+    ) -> io::Result<()> {
         match event {
             RunStreamEvent::ReasoningDelta { text } => {
                 if self.thinking_enabled {
@@ -59,7 +65,11 @@ impl TurnPrinter {
         out.flush()
     }
 
-    fn render_value_event(&mut self, value: &Value, out: &mut impl Write) -> io::Result<()> {
+    pub(crate) fn render_value_event(
+        &mut self,
+        value: &Value,
+        out: &mut impl Write,
+    ) -> io::Result<()> {
         match value
             .get("type")
             .and_then(Value::as_str)
@@ -89,10 +99,18 @@ impl TurnPrinter {
             }
             "warning" => {
                 if let Some(message) = value.get("message").and_then(Value::as_str) {
-                    writeln!(out, "{}", self.renderer.status(&format!("warning: {message}")))?;
+                    writeln!(
+                        out,
+                        "{}",
+                        self.renderer.status(&format!("warning: {message}"))
+                    )?;
                 }
                 if let Some(suggestion) = value.get("suggestion").and_then(Value::as_str) {
-                    writeln!(out, "{}", self.renderer.dim(&format!("suggestion: {suggestion}")))?;
+                    writeln!(
+                        out,
+                        "{}",
+                        self.renderer.dim(&format!("suggestion: {suggestion}"))
+                    )?;
                 }
             }
             "message_update" => {
@@ -192,7 +210,7 @@ impl TurnPrinter {
         Ok(())
     }
 
-    fn render_streaming_tool_calls(
+    pub(crate) fn render_streaming_tool_calls(
         &mut self,
         value: &Value,
         out: &mut impl Write,
@@ -236,7 +254,7 @@ impl TurnPrinter {
         Ok(())
     }
 
-    fn finish(&mut self, out: &mut impl Write) -> io::Result<()> {
+    pub(crate) fn finish(&mut self, out: &mut impl Write) -> io::Result<()> {
         if self.reasoning_active {
             writeln!(out)?;
             self.reasoning_active = false;

@@ -1,24 +1,24 @@
-use super::*;
-use psychevo_runtime::{ContextCategory, ContextScope, ContextTokenizer, ContextTotal};
-use ratatui::backend::{Backend, TestBackend};
-use ratatui::layout::Position;
-use std::fs;
-use std::io::{Read, Write};
-use std::net::TcpListener;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::{Duration, Instant};
-use tempfile::tempdir;
+pub(crate) use super::*;
+pub(crate) use psychevo_runtime::{ContextCategory, ContextScope, ContextTokenizer, ContextTotal};
+pub(crate) use ratatui::backend::{Backend, TestBackend};
+pub(crate) use ratatui::layout::Position;
+pub(crate) use std::fs;
+pub(crate) use std::io::{Read, Write};
+pub(crate) use std::net::TcpListener;
+pub(crate) use std::path::{Path, PathBuf};
+pub(crate) use std::sync::{Arc, Mutex};
+pub(crate) use std::thread;
+pub(crate) use std::time::{Duration, Instant};
+pub(crate) use tempfile::tempdir;
 
-fn line_text(line: &Line<'_>) -> String {
+pub(crate) fn line_text(line: &Line<'_>) -> String {
     line.spans
         .iter()
         .map(|span| span.content.as_ref())
         .collect()
 }
 
-fn summary(id: &str) -> SessionSummary {
+pub(crate) fn summary(id: &str) -> SessionSummary {
     SessionSummary {
         id: id.to_string(),
         source: "tui".to_string(),
@@ -36,13 +36,13 @@ fn summary(id: &str) -> SessionSummary {
     }
 }
 
-struct TuiCatalogServer {
-    base_url: String,
-    requests: Arc<Mutex<Vec<String>>>,
+pub(crate) struct TuiCatalogServer {
+    pub(crate) base_url: String,
+    pub(crate) requests: Arc<Mutex<Vec<String>>>,
 }
 
 impl TuiCatalogServer {
-    fn new(body: &'static str) -> Self {
+    pub(crate) fn new(body: &'static str) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         let addr = listener.local_addr().expect("addr");
         let requests = Arc::new(Mutex::new(Vec::new()));
@@ -66,7 +66,7 @@ impl TuiCatalogServer {
     }
 }
 
-fn read_http_request(stream: &mut std::net::TcpStream) -> String {
+pub(crate) fn read_http_request(stream: &mut std::net::TcpStream) -> String {
     let mut request = Vec::new();
     let mut buf = [0; 1024];
     loop {
@@ -82,7 +82,7 @@ fn read_http_request(stream: &mut std::net::TcpStream) -> String {
     String::from_utf8_lossy(&request).to_string()
 }
 
-fn insert_tui_message(
+pub(crate) fn insert_tui_message(
     conn: &rusqlite::Connection,
     session_id: &str,
     seq: i64,
@@ -101,7 +101,7 @@ fn insert_tui_message(
     .expect("insert tui message");
 }
 
-fn insert_tui_message_with_metadata(
+pub(crate) fn insert_tui_message_with_metadata(
     db_path: &PathBuf,
     session_id: &str,
     seq: i64,
@@ -131,7 +131,7 @@ fn insert_tui_message_with_metadata(
     .expect("insert tui message");
 }
 
-fn test_track_snapshot(app: &TuiApp, session_id: &str) -> String {
+pub(crate) fn test_track_snapshot(app: &TuiApp, session_id: &str) -> String {
     let git_dir = app.home.join("snapshots").join("sessions").join(session_id);
     fs::create_dir_all(&git_dir).expect("snapshot dir");
     if !git_dir.join("HEAD").exists() {
@@ -170,7 +170,7 @@ fn test_track_snapshot(app: &TuiApp, session_id: &str) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
-fn write_tui_model_config(temp: &tempfile::TempDir) -> PathBuf {
+pub(crate) fn write_tui_model_config(temp: &tempfile::TempDir) -> PathBuf {
     let path = temp.path().join("model-config.toml");
     fs::write(
         &path,
@@ -212,11 +212,14 @@ reasoning_effort = "high"
     path
 }
 
-fn test_app_with_models(temp: &tempfile::TempDir) -> TuiApp {
+pub(crate) fn test_app_with_models(temp: &tempfile::TempDir) -> TuiApp {
     let mut app = test_app(temp);
     app.env_map
         .insert("TEST_PROVIDER_KEY".to_string(), "test-key".to_string());
-    app.config_path = Some(write_tui_model_config(temp));
+    let config_path = write_tui_model_config(temp);
+    std::fs::create_dir_all(app.workdir.join(".psychevo")).expect("local config dir");
+    std::fs::copy(&config_path, app.workdir.join(".psychevo/config.toml")).expect("local config");
+    app.config_path = Some(config_path);
     app.current_model = Some("mock/mock-model".to_string());
     app.current_variant = None;
     app.refresh_selected_model();
@@ -224,17 +227,59 @@ fn test_app_with_models(temp: &tempfile::TempDir) -> TuiApp {
 }
 
 // Test chunks stay in this module so existing helpers remain shared.
-include!("core.rs");
-include!("clarify.rs");
-include!("snapshots.rs");
-include!("transcript_files.rs");
-include!("input_popups.rs");
-include!("agents_panel.rs");
-include!("commands.rs");
-include!("models.rs");
-include!("runtime_sessions.rs");
-include!("rendering_history.rs");
-include!("shell_history.rs");
-include!("selection_clipboard.rs");
-include!("adaptive_rendering.rs");
-include!("fixtures.rs");
+#[path = "core.rs"]
+pub(crate) mod core;
+#[allow(unused_imports)]
+use core::*;
+#[path = "clarify.rs"]
+pub(crate) mod clarify;
+#[allow(unused_imports)]
+use clarify::*;
+#[path = "snapshots.rs"]
+pub(crate) mod snapshots;
+#[allow(unused_imports)]
+use snapshots::*;
+#[path = "transcript_files.rs"]
+pub(crate) mod transcript_files;
+#[allow(unused_imports)]
+use transcript_files::*;
+#[path = "input_popups.rs"]
+pub(crate) mod input_popups;
+#[allow(unused_imports)]
+use input_popups::*;
+#[path = "agents_panel.rs"]
+pub(crate) mod agents_panel;
+#[allow(unused_imports)]
+use agents_panel::*;
+#[path = "commands.rs"]
+pub(crate) mod commands;
+#[allow(unused_imports)]
+use commands::*;
+#[path = "models.rs"]
+pub(crate) mod models;
+#[allow(unused_imports)]
+use models::*;
+#[path = "runtime_sessions.rs"]
+pub(crate) mod runtime_sessions;
+#[allow(unused_imports)]
+use runtime_sessions::*;
+#[path = "rendering_history.rs"]
+pub(crate) mod rendering_history;
+#[allow(unused_imports)]
+use rendering_history::*;
+#[path = "shell_history.rs"]
+pub(crate) mod shell_history;
+#[allow(unused_imports)]
+use shell_history::*;
+#[path = "selection_clipboard.rs"]
+pub(crate) mod selection_clipboard;
+#[allow(unused_imports)]
+use selection_clipboard::*;
+#[path = "adaptive_rendering.rs"]
+pub(crate) mod adaptive_rendering;
+#[allow(unused_imports)]
+use adaptive_rendering::*;
+#[path = "fixtures.rs"]
+pub(crate) mod fixtures;
+#[allow(unused_imports)]
+use fixtures::*;

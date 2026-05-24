@@ -1,68 +1,72 @@
-struct TuiApp {
-    env_map: BTreeMap<String, String>,
-    home: PathBuf,
-    state_path: PathBuf,
-    state: TuiState,
-    db_path: PathBuf,
-    config_path: Option<PathBuf>,
-    workdir: PathBuf,
-    workdir_key: String,
-    current_session: Option<String>,
-    current_session_title: Option<String>,
-    force_new_once: bool,
-    current_model: Option<String>,
-    current_variant: Option<String>,
-    selected_model: Option<ConfiguredModel>,
-    current_mode: RunMode,
-    current_permission_mode: PermissionMode,
-    startup_agent: Option<String>,
-    current_agent: Option<String>,
-    current_agent_explicit_default: bool,
-    no_agents: bool,
-    no_skills: bool,
-    skill_inputs: Vec<String>,
-    thinking_visible: bool,
-    raw_visible: bool,
-    clipboard: ClipboardSink,
-    renderer: TuiRenderer,
-    debug: bool,
-    had_error: bool,
-    last_context_snapshot: Option<ContextSnapshot>,
-    model_catalog: ModelCatalogCache,
-    clipboard_result_tx: std::sync::mpsc::Sender<Result<(), String>>,
-    clipboard_result_rx: std::sync::mpsc::Receiver<Result<(), String>>,
-    clipboard_copies_in_flight: usize,
-    slash_config: EffectiveSlashConfig,
-    btw_side: Option<BtwSideState>,
-    side_cleanup_task: Option<SideCleanupTask>,
-    compaction_task: Option<CompactionTask>,
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) struct TuiApp {
+    pub(crate) env_map: BTreeMap<String, String>,
+    pub(crate) home: PathBuf,
+    pub(crate) state_path: PathBuf,
+    pub(crate) state: TuiState,
+    pub(crate) state_runtime: StateRuntime,
+    pub(crate) db_path: PathBuf,
+    pub(crate) config_path: Option<PathBuf>,
+    pub(crate) workdir: PathBuf,
+    pub(crate) workdir_key: String,
+    pub(crate) current_session: Option<String>,
+    pub(crate) current_session_title: Option<String>,
+    pub(crate) force_new_once: bool,
+    pub(crate) current_model: Option<String>,
+    pub(crate) current_variant: Option<String>,
+    pub(crate) selected_model: Option<ConfiguredModel>,
+    pub(crate) current_mode: RunMode,
+    pub(crate) current_permission_mode: PermissionMode,
+    pub(crate) startup_agent: Option<String>,
+    pub(crate) current_agent: Option<String>,
+    pub(crate) current_agent_explicit_default: bool,
+    pub(crate) no_agents: bool,
+    pub(crate) no_skills: bool,
+    pub(crate) skill_inputs: Vec<String>,
+    pub(crate) thinking_visible: bool,
+    pub(crate) raw_visible: bool,
+    pub(crate) clipboard: ClipboardSink,
+    pub(crate) renderer: TuiRenderer,
+    pub(crate) debug: bool,
+    pub(crate) had_error: bool,
+    pub(crate) last_context_snapshot: Option<ContextSnapshot>,
+    pub(crate) model_catalog: ModelCatalogCache,
+    pub(crate) clipboard_result_tx: std::sync::mpsc::Sender<Result<(), String>>,
+    pub(crate) clipboard_result_rx: std::sync::mpsc::Receiver<Result<(), String>>,
+    pub(crate) clipboard_copies_in_flight: usize,
+    pub(crate) slash_config: EffectiveSlashConfig,
+    pub(crate) btw_side: Option<BtwSideState>,
+    pub(crate) last_live_agent_reload_check: Option<Instant>,
+    pub(crate) side_cleanup_task: Option<SideCleanupTask>,
+    pub(crate) compaction_task: Option<CompactionTask>,
 }
 
-struct BtwSideState {
-    parent_session: String,
-    parent_session_title: Option<String>,
-    parent_model: Option<String>,
-    parent_variant: Option<String>,
-    parent_mode: RunMode,
-    parent_permission_mode: PermissionMode,
-    parent_agent: Option<String>,
-    parent_agent_explicit_default: bool,
-    side_session: String,
+pub(crate) struct BtwSideState {
+    pub(crate) parent_session: String,
+    pub(crate) parent_session_title: Option<String>,
+    pub(crate) parent_model: Option<String>,
+    pub(crate) parent_variant: Option<String>,
+    pub(crate) parent_mode: RunMode,
+    pub(crate) parent_permission_mode: PermissionMode,
+    pub(crate) parent_agent: Option<String>,
+    pub(crate) parent_agent_explicit_default: bool,
+    pub(crate) side_session: String,
 }
 
-struct SideCleanupTask {
-    task: JoinHandle<std::result::Result<usize, String>>,
+pub(crate) struct SideCleanupTask {
+    pub(crate) task: JoinHandle<std::result::Result<usize, String>>,
 }
 
-struct CompactionTask {
-    session_id: String,
-    command_echo: Option<String>,
-    manual: bool,
-    task: JoinHandle<std::result::Result<CompactionResult, String>>,
+pub(crate) struct CompactionTask {
+    pub(crate) session_id: String,
+    pub(crate) command_echo: Option<String>,
+    pub(crate) manual: bool,
+    pub(crate) task: JoinHandle<std::result::Result<CompactionResult, String>>,
 }
 
 impl TuiApp {
-    fn current_skill_catalog(&self) -> Option<SkillCatalog> {
+    pub(crate) fn current_skill_catalog(&self) -> Option<SkillCatalog> {
         discover_skills(&SkillDiscoveryOptions {
             home: self.home.clone(),
             workdir: self.workdir.clone(),
@@ -74,7 +78,7 @@ impl TuiApp {
         .ok()
     }
 
-    fn current_agent_catalog(&self) -> Option<AgentCatalog> {
+    pub(crate) fn current_agent_catalog(&self) -> Option<AgentCatalog> {
         if self.no_agents {
             return None;
         }
@@ -88,14 +92,14 @@ impl TuiApp {
         .ok()
     }
 
-    fn current_skill_bundles(&self) -> Vec<SkillBundle> {
+    pub(crate) fn current_skill_bundles(&self) -> Vec<SkillBundle> {
         if self.no_skills {
             return Vec::new();
         }
         list_skill_bundles(&self.home, &self.workdir).unwrap_or_default()
     }
 
-    fn slash_items(&self) -> Vec<SlashMenuItem> {
+    pub(crate) fn slash_items(&self) -> Vec<SlashMenuItem> {
         let mut items = configured_slash_menu_items(&self.slash_config);
         let mut dynamic_names = BTreeSet::new();
         for bundle in self.current_skill_bundles() {
@@ -131,11 +135,11 @@ impl TuiApp {
         items
     }
 
-    fn slash_menu_items(&self, input: &str) -> Vec<SlashMenuItem> {
+    pub(crate) fn slash_menu_items(&self, input: &str) -> Vec<SlashMenuItem> {
         slash_menu_items_from(input, &self.slash_items())
     }
 
-    fn skill_search_matches(&self, query: &str) -> Vec<SkillSearchMatch> {
+    pub(crate) fn skill_search_matches(&self, query: &str) -> Vec<SkillSearchMatch> {
         let Some(catalog) = self.current_skill_catalog() else {
             return Vec::new();
         };
@@ -167,7 +171,7 @@ impl TuiApp {
             .collect()
     }
 
-    fn agent_search_matches(&self, query: &str) -> Vec<AgentSearchMatch> {
+    pub(crate) fn agent_search_matches(&self, query: &str) -> Vec<AgentSearchMatch> {
         let query = query.trim().to_lowercase();
         let Some(catalog) = self.current_agent_catalog() else {
             return Vec::new();
@@ -199,7 +203,7 @@ impl TuiApp {
             .collect()
     }
 
-    fn sync_agent_popup(&self, ui: &mut FullscreenUi<'_>) {
+    pub(crate) fn sync_agent_popup(&self, ui: &mut FullscreenUi<'_>) {
         if ui.shell_mode || ui.current_skill_token().is_some() {
             ui.close_agent_popup();
             return;
@@ -214,7 +218,7 @@ impl TuiApp {
         }
     }
 
-    fn sync_skill_popup(&self, ui: &mut FullscreenUi<'_>) {
+    pub(crate) fn sync_skill_popup(&self, ui: &mut FullscreenUi<'_>) {
         if ui.shell_mode || ui.current_file_token().is_some() || ui.agent_popup_visible() {
             ui.close_skill_popup();
             return;
@@ -227,7 +231,7 @@ impl TuiApp {
     }
 }
 
-fn skill_match_rank(name: &str, description: &str, query: &str) -> Option<(u8, usize)> {
+pub(crate) fn skill_match_rank(name: &str, description: &str, query: &str) -> Option<(u8, usize)> {
     if query.is_empty() {
         return Some((3, 0));
     }

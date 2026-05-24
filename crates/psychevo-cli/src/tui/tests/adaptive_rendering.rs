@@ -1,5 +1,7 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[test]
-fn adaptive_theme_falls_back_without_terminal_profile() {
+pub(crate) fn adaptive_theme_falls_back_without_terminal_profile() {
     let theme = TuiTheme::from_profile(TerminalProfile::unknown());
 
     assert_eq!(theme.surface_bg, TUI_SURFACE_BG);
@@ -8,7 +10,7 @@ fn adaptive_theme_falls_back_without_terminal_profile() {
 }
 
 #[test]
-fn adaptive_theme_derives_distinct_light_and_dark_surfaces() {
+pub(crate) fn adaptive_theme_derives_distinct_light_and_dark_surfaces() {
     let dark = TuiTheme::from_profile(TerminalProfile::dark());
     let light = TuiTheme::from_profile(TerminalProfile::light());
 
@@ -19,7 +21,7 @@ fn adaptive_theme_derives_distinct_light_and_dark_surfaces() {
 }
 
 #[test]
-fn adaptive_theme_ansi16_uses_stable_fallback_surfaces() {
+pub(crate) fn adaptive_theme_ansi16_uses_stable_fallback_surfaces() {
     let profile = TerminalProfile {
         foreground: Some((238, 238, 238)),
         background: Some((12, 12, 14)),
@@ -32,7 +34,7 @@ fn adaptive_theme_ansi16_uses_stable_fallback_surfaces() {
 }
 
 #[test]
-fn terminal_probe_parses_default_color_replies() {
+pub(crate) fn terminal_probe_parses_default_color_replies() {
     let colors = parse_terminal_default_colors(
         b"\x1b]10;rgb:eeee/eeee/eeee\x1b\\\x1b]11;rgb:1010/1212/1414\x1b\\",
     )
@@ -43,32 +45,31 @@ fn terminal_probe_parses_default_color_replies() {
 }
 
 #[test]
-fn motion_uses_shared_activity_spinner_frames() {
+pub(crate) fn motion_uses_shared_activity_spinner_frames() {
     assert_eq!(activity_spinner_frame(Duration::from_secs(12)), "⠼");
 }
 
 #[test]
-fn markdown_renders_local_links_relative_to_workdir() {
+pub(crate) fn markdown_renders_local_links_relative_to_workdir() {
     let temp = tempdir().expect("temp");
     let file = temp.path().join("src/main.rs");
-    let markdown = format!(
-        "See [ignored label]({}:42) and `inline`.",
-        file.display()
-    );
+    let markdown = format!("See [ignored label]({}:42) and `inline`.", file.display());
 
     let lines = render_markdown_lines(&markdown, temp.path(), Some(80));
     let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
 
     assert!(text.contains("src/main.rs:42"), "{text}");
     assert!(!text.contains("ignored label"), "{text}");
-    assert!(lines
-        .iter()
-        .flat_map(|line| &line.spans)
-        .any(|span| span.style.fg == Some(tui_theme().code)));
+    assert!(
+        lines
+            .iter()
+            .flat_map(|line| &line.spans)
+            .any(|span| span.style.fg == Some(tui_theme().code))
+    );
 }
 
 #[test]
-fn markdown_renders_tables_as_boxes_with_pipe_fallback() {
+pub(crate) fn markdown_renders_tables_as_boxes_with_pipe_fallback() {
     let temp = tempdir().expect("temp");
     let markdown = "| Name | Value |\n|---|---:|\n| alpha | 42 |";
 
@@ -85,7 +86,7 @@ fn markdown_renders_tables_as_boxes_with_pipe_fallback() {
 }
 
 #[test]
-fn markdown_unwraps_fenced_markdown_tables_only_when_table_like() {
+pub(crate) fn markdown_unwraps_fenced_markdown_tables_only_when_table_like() {
     let temp = tempdir().expect("temp");
     let table_fence = "```markdown\n| Name | Value |\n|---|---|\n| alpha | beta |\n```";
     let rich = render_markdown_lines(table_fence, temp.path(), Some(80));
@@ -101,7 +102,7 @@ fn markdown_unwraps_fenced_markdown_tables_only_when_table_like() {
 }
 
 #[test]
-fn markdown_code_blocks_have_boundaries_folding_and_highlighting() {
+pub(crate) fn markdown_code_blocks_have_boundaries_folding_and_highlighting() {
     let temp = tempdir().expect("temp");
     let code = (1..=10)
         .map(|index| format!("fn line_{index}() {{ let value = \"{index}\"; }}"))
@@ -124,7 +125,7 @@ fn markdown_code_blocks_have_boundaries_folding_and_highlighting() {
 }
 
 #[test]
-fn markdown_exposes_normal_link_destinations() {
+pub(crate) fn markdown_exposes_normal_link_destinations() {
     let temp = tempdir().expect("temp");
     let lines = render_markdown_lines(
         "See [docs](https://example.test/docs).",
@@ -137,7 +138,7 @@ fn markdown_exposes_normal_link_destinations() {
 }
 
 #[test]
-fn raw_answer_display_keeps_markdown_source_instead_of_rich_projection() {
+pub(crate) fn raw_answer_display_keeps_markdown_source_instead_of_rich_projection() {
     let temp = tempdir().expect("temp");
     let row = TranscriptRow::with_title(
         TranscriptKind::Answer,

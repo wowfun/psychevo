@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::args::{AuthArgs, AuthCommand, AuthSetArgs, AuthStatusArgs};
 use crate::commands::common::{
-    base_run_options, config_scope_dir, print_json_error, read_secret_from_stdin,
+    base_run_options, print_json_error, read_secret_from_stdin, scoped_config_dir,
 };
 use crate::env::{ensure_home_initialized, inherited_env, resolve_psychevo_home};
 
@@ -22,7 +22,7 @@ pub(crate) fn run_auth_command(args: AuthArgs) -> Result<ExitCode> {
     }
 }
 
-fn run_auth_command_inner(args: &AuthArgs) -> Result<ExitCode> {
+pub(crate) fn run_auth_command_inner(args: &AuthArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
@@ -34,7 +34,10 @@ fn run_auth_command_inner(args: &AuthArgs) -> Result<ExitCode> {
     }
 }
 
-fn auth_status(args: &AuthStatusArgs, options: &psychevo_runtime::RunOptions) -> Result<ExitCode> {
+pub(crate) fn auth_status(
+    args: &AuthStatusArgs,
+    options: &psychevo_runtime::RunOptions,
+) -> Result<ExitCode> {
     let value = auth_status_value(options, args.provider.as_deref())?;
     if args.json {
         println!("{}", serde_json::to_string_pretty(&value)?);
@@ -44,7 +47,7 @@ fn auth_status(args: &AuthStatusArgs, options: &psychevo_runtime::RunOptions) ->
     Ok(ExitCode::SUCCESS)
 }
 
-fn auth_set(
+pub(crate) fn auth_set(
     args: &AuthSetArgs,
     options: &psychevo_runtime::RunOptions,
     home: &std::path::Path,
@@ -56,7 +59,7 @@ fn auth_set(
     let api_key = read_secret_from_stdin(true)?.expect("required stdin secret");
     let value = set_provider_api_key(
         options,
-        config_scope_dir(home, cwd, args.local)?,
+        scoped_config_dir(home, cwd, args.global)?,
         &args.provider,
         &api_key,
     )?;
@@ -77,7 +80,7 @@ fn auth_set(
     Ok(ExitCode::SUCCESS)
 }
 
-fn print_auth_status(value: &Value) {
+pub(crate) fn print_auth_status(value: &Value) {
     let rows = value["providers"].as_array().cloned().unwrap_or_default();
     if rows.is_empty() {
         println!("No providers found.");
@@ -94,7 +97,7 @@ fn print_auth_status(value: &Value) {
     }
 }
 
-fn auth_json(args: &AuthArgs) -> bool {
+pub(crate) fn auth_json(args: &AuthArgs) -> bool {
     match &args.command {
         AuthCommand::Status(args) => args.json,
         AuthCommand::Set(args) => args.json,

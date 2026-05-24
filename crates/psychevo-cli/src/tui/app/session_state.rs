@@ -1,39 +1,41 @@
-const SESSION_MAIN_AGENT_METADATA_KEY: &str = "main_agent";
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) const SESSION_MAIN_AGENT_METADATA_KEY: &str = "main_agent";
+pub(crate) const LIVE_AGENT_RELOAD_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum LoadedMainAgent {
+pub(crate) enum LoadedMainAgent {
     Missing,
     Default,
     Agent(String),
 }
 
 impl TuiApp {
-    fn refresh_selected_model(&mut self) {
+    pub(crate) fn refresh_selected_model(&mut self) {
         self.selected_model = selected_configured_model(&self.run_options(String::new()))
             .ok()
             .flatten();
     }
 
-    fn refresh_current_session_title(&mut self) -> Result<()> {
-        self.current_session_title = self
-            .current_session
-            .as_deref()
-            .map(|session_id| SqliteStore::open(&self.db_path)?.session_summary(session_id))
-            .transpose()?
-            .flatten()
+    pub(crate) fn refresh_current_session_title(&mut self) -> Result<()> {
+        let summary = match self.current_session.as_deref() {
+            Some(session_id) => self.state_runtime.store().session_summary(session_id)?,
+            None => None,
+        };
+        self.current_session_title = summary
             .and_then(|summary| summary.title)
             .filter(|title| !title.trim().is_empty());
         Ok(())
     }
 
-    fn refresh_current_session_agent(&mut self) -> Result<()> {
+    pub(crate) fn refresh_current_session_agent(&mut self) -> Result<()> {
         let Some(session_id) = self.current_session.as_deref() else {
             if !self.current_agent_explicit_default && self.current_agent.is_none() {
                 self.current_agent = self.startup_agent.clone();
             }
             return Ok(());
         };
-        let store = SqliteStore::open(&self.db_path)?;
+        let store = self.state_runtime.store();
         let metadata = store.session_metadata(session_id)?;
         match main_agent_from_session_metadata(metadata.as_ref()) {
             LoadedMainAgent::Default => {
@@ -57,7 +59,7 @@ impl TuiApp {
         Ok(())
     }
 
-    fn session_identity_label(&self) -> Option<String> {
+    pub(crate) fn session_identity_label(&self) -> Option<String> {
         let agent = self.current_agent.as_deref()?.trim();
         if agent.is_empty() {
             return None;
@@ -65,7 +67,7 @@ impl TuiApp {
         self.current_agent_display_name(agent)
     }
 
-    fn current_agent_display_name(&self, input: &str) -> Option<String> {
+    pub(crate) fn current_agent_display_name(&self, input: &str) -> Option<String> {
         let catalog = self.current_agent_catalog()?;
         resolve_agent_definition(&catalog, input, &self.workdir, &self.env_map)
             .ok()
@@ -73,7 +75,7 @@ impl TuiApp {
             .or_else(|| Some(input.to_string()))
     }
 
-    fn main_agent_metadata_for_input(&self, input: &str) -> Result<Value> {
+    pub(crate) fn main_agent_metadata_for_input(&self, input: &str) -> Result<Value> {
         let catalog = self
             .current_agent_catalog()
             .ok_or_else(|| anyhow!("agents are disabled"))?;
@@ -86,16 +88,17 @@ impl TuiApp {
         ))
     }
 
-    fn persist_main_agent_selection_for_session(&self, session_id: &str) -> Result<()> {
+    pub(crate) fn persist_main_agent_selection_for_session(&self, session_id: &str) -> Result<()> {
+        let store = self.state_runtime.store();
         if self.current_agent_explicit_default {
-            SqliteStore::open(&self.db_path)?.set_session_metadata_field(
+            store.set_session_metadata_field(
                 session_id,
                 SESSION_MAIN_AGENT_METADATA_KEY,
                 Some(main_agent_default_metadata()),
             )?;
         } else if let Some(input) = self.current_agent.as_deref() {
             let value = self.main_agent_metadata_for_input(input)?;
-            SqliteStore::open(&self.db_path)?.set_session_metadata_field(
+            store.set_session_metadata_field(
                 session_id,
                 SESSION_MAIN_AGENT_METADATA_KEY,
                 Some(value),
@@ -104,7 +107,7 @@ impl TuiApp {
         Ok(())
     }
 
-    fn session_sidebar_title(&self) -> String {
+    pub(crate) fn session_sidebar_title(&self) -> String {
         self.current_session_title
             .clone()
             .or_else(|| {
@@ -117,17 +120,22 @@ impl TuiApp {
     }
 
     #[cfg(test)]
-    fn switch_session_no_print(&mut self, reference: &str) -> Result<String> {
+    pub(crate) fn switch_session_no_print(&mut self, reference: &str) -> Result<String> {
         let id = self.resolve_session_ref(reference)?;
-        SqliteStore::open(&self.db_path)?.resume_session(&id)?;
+        self.state_runtime.store().resume_session(&id)?;
         self.current_session = Some(id.clone());
+        self.reset_live_agent_reload_poll();
         self.force_new_once = false;
         self.refresh_current_session_title()?;
         self.refresh_current_session_agent()?;
         Ok(id)
     }
 
-    fn open_agent_target_session(&mut self, ui: &mut FullscreenUi<'_>, target: &str) -> Result<()> {
+    pub(crate) fn open_agent_target_session(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        target: &str,
+    ) -> Result<()> {
         if ui
             .running
             .as_ref()
@@ -136,33 +144,45 @@ impl TuiApp {
             ui.push_status("finish the current shell command before opening an agent session");
             return Ok(());
         }
-        let store = SqliteStore::open(&self.db_path)?;
-        let edge = store
-            .find_agent_edge(target)?
-            .ok_or_else(|| anyhow!("agent not found: {target}"))?;
-        self.detach_running_for_session_switch(ui, Some(edge.child_session_id.clone()));
-        store.resume_session(&edge.child_session_id)?;
-        self.current_session = Some(edge.child_session_id.clone());
+        let child_session_id = {
+            let store = self.state_runtime.store();
+            let edge = store
+                .find_agent_edge(target)?
+                .ok_or_else(|| anyhow!("agent not found: {target}"))?;
+            store.resume_session(&edge.child_session_id)?;
+            edge.child_session_id
+        };
+        self.detach_running_for_session_switch(ui, Some(child_session_id.clone()));
+        self.current_session = Some(child_session_id.clone());
+        self.reset_live_agent_reload_poll();
         self.force_new_once = false;
         self.refresh_current_session_title()?;
         self.refresh_current_session_agent()?;
         ui.bottom_panel = None;
         ui.clear_transcript();
         self.load_current_session_history(ui)?;
-        self.replay_session_live_event_backlog(ui, &edge.child_session_id);
-        self.replay_agent_child_event_backlog(ui, &edge.child_session_id);
+        self.replay_session_live_event_backlog(ui, &child_session_id);
+        self.replay_agent_child_event_backlog(ui, &child_session_id);
         ui.refresh_sidebar(self);
         Ok(())
     }
 
-    fn maybe_reload_live_agent_session(&mut self, ui: &mut FullscreenUi<'_>) -> Result<bool> {
+    pub(crate) fn maybe_reload_live_agent_session(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+    ) -> Result<bool> {
         if ui.running.is_some() {
             return Ok(false);
         }
         let Some(session_id) = self.current_session.clone() else {
             return Ok(false);
         };
-        let store = SqliteStore::open(&self.db_path)?;
+        let now = Instant::now();
+        if !live_agent_reload_due(self.last_live_agent_reload_check, now) {
+            return Ok(false);
+        }
+        self.last_live_agent_reload_check = Some(now);
+        let store = self.state_runtime.store();
         let Some(edge) = store.find_agent_edge(&session_id)? else {
             return Ok(false);
         };
@@ -178,13 +198,16 @@ impl TuiApp {
         Ok(true)
     }
 
-    fn request_current_session_interrupt(&mut self, ui: &mut FullscreenUi<'_>) -> bool {
+    pub(crate) fn reset_live_agent_reload_poll(&mut self) {
+        self.last_live_agent_reload_check = None;
+    }
+
+    pub(crate) fn request_current_session_interrupt(&mut self, ui: &mut FullscreenUi<'_>) -> bool {
         let current_session = self.current_session.clone();
         let mut interrupted = ui.request_interrupt(current_session.as_deref());
-        if let Some(session_id) = current_session.as_deref()
-            && let Ok(store) = SqliteStore::open(&self.db_path)
-        {
-            let value = agent_status_value(Some(&store), Some(session_id), false);
+        if let Some(session_id) = current_session.as_deref() {
+            let store = self.state_runtime.store();
+            let value = agent_status_value(Some(store), Some(session_id), false);
             let targets = value
                 .get("agents")
                 .and_then(Value::as_array)
@@ -205,7 +228,7 @@ impl TuiApp {
                 })
                 .collect::<Vec<_>>();
             for target in targets {
-                if stop_agent_id_with_grace(&target, Some(&store), Duration::ZERO)
+                if stop_agent_id_with_grace(&target, Some(store), Duration::ZERO)
                     .ok()
                     .flatten()
                     .is_some()
@@ -220,11 +243,11 @@ impl TuiApp {
         interrupted
     }
 
-    fn open_agent_parent_session(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
+    pub(crate) fn open_agent_parent_session(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
         let Some(current) = self.current_session.clone() else {
             return Ok(());
         };
-        let store = SqliteStore::open(&self.db_path)?;
+        let store = self.state_runtime.store();
         let Some(edge) = store.find_agent_edge(&current)? else {
             ui.push_status("no parent agent session");
             return Ok(());
@@ -232,7 +255,7 @@ impl TuiApp {
         self.open_session_direct(ui, &edge.parent_session_id)
     }
 
-    fn open_agent_sibling_session(
+    pub(crate) fn open_agent_sibling_session(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         direction: isize,
@@ -240,7 +263,7 @@ impl TuiApp {
         let Some(current) = self.current_session.clone() else {
             return Ok(());
         };
-        let store = SqliteStore::open(&self.db_path)?;
+        let store = self.state_runtime.store();
         let Some(edge) = store.find_agent_edge(&current)? else {
             ui.push_status("no sibling agent sessions");
             return Ok(());
@@ -258,10 +281,15 @@ impl TuiApp {
         self.open_session_direct(ui, &siblings[next].child_session_id)
     }
 
-    fn open_session_direct(&mut self, ui: &mut FullscreenUi<'_>, session_id: &str) -> Result<()> {
+    pub(crate) fn open_session_direct(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        session_id: &str,
+    ) -> Result<()> {
         self.detach_running_for_session_switch(ui, None);
-        SqliteStore::open(&self.db_path)?.resume_session(session_id)?;
+        self.state_runtime.store().resume_session(session_id)?;
         self.current_session = Some(session_id.to_string());
+        self.reset_live_agent_reload_poll();
         self.force_new_once = false;
         self.refresh_current_session_title()?;
         self.refresh_current_session_agent()?;
@@ -274,7 +302,7 @@ impl TuiApp {
         Ok(())
     }
 
-    fn detach_running_for_session_switch(
+    pub(crate) fn detach_running_for_session_switch(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         child_session_id: Option<String>,
@@ -325,7 +353,11 @@ impl TuiApp {
         ui.finish_turn();
     }
 
-    fn replay_agent_child_event_backlog(&mut self, ui: &mut FullscreenUi<'_>, session_id: &str) {
+    pub(crate) fn replay_agent_child_event_backlog(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        session_id: &str,
+    ) {
         let Some(events) = ui.agent_child_event_backlog.remove(session_id) else {
             return;
         };
@@ -340,7 +372,11 @@ impl TuiApp {
         ui.follow_transcript_if_needed();
     }
 
-    fn replay_session_live_event_backlog(&mut self, ui: &mut FullscreenUi<'_>, session_id: &str) {
+    pub(crate) fn replay_session_live_event_backlog(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        session_id: &str,
+    ) {
         let Some(events) = ui.session_live_event_backlog.remove(session_id) else {
             return;
         };
@@ -349,9 +385,9 @@ impl TuiApp {
         ui.follow_transcript_if_needed();
     }
 
-    fn agent_breadcrumb_status(&self) -> Option<String> {
+    pub(crate) fn agent_breadcrumb_status(&self) -> Option<String> {
         let session_id = self.current_session.as_deref()?;
-        let store = SqliteStore::open(&self.db_path).ok()?;
+        let store = self.state_runtime.store();
         let edge = store.find_agent_edge(session_id).ok().flatten()?;
         let sibling_count = store
             .list_agent_edges_for_parent(&edge.parent_session_id)
@@ -365,29 +401,57 @@ impl TuiApp {
         Some(parts.join(" · "))
     }
 
-    fn set_model_and_variant_no_print(
+    pub(crate) fn set_model_default_from_picker(
         &mut self,
         model: String,
-        variant: Option<String>,
-    ) -> Result<()> {
+        reasoning_effort: Option<String>,
+        global: bool,
+    ) -> Result<String> {
         validate_model_spec(&model)?;
-        if let Some(variant) = &variant {
-            validate_variant(variant)?;
-        }
-        self.current_model = Some(model.clone());
-        self.current_variant = variant.clone();
-        self.state.set_model(&self.workdir_key, model);
-        if let Some(variant) = variant {
-            self.state.set_variant(&self.workdir_key, variant);
-        } else {
-            self.state.clear_variant(&self.workdir_key);
-        }
+        let value = set_default_model_with_reasoning(
+            &self.home,
+            &self.workdir,
+            global,
+            &model,
+            reasoning_effort.as_deref(),
+        )?;
+        self.current_model = None;
+        self.current_variant = None;
+        self.state.set_model(&self.workdir_key, model.clone());
+        self.state.clear_model(&self.workdir_key);
+        self.state.clear_variant(&self.workdir_key);
         self.state.save(&self.state_path)?;
         self.refresh_selected_model();
-        Ok(())
+        let scope = value["scope"]
+            .as_str()
+            .unwrap_or(if global { "global" } else { "local" });
+        let path = value["path"].as_str().unwrap_or("-");
+        let effective = self
+            .selected_model
+            .as_ref()
+            .map(|model| format!("{}/{}", model.provider, model.model));
+        let reasoning = value
+            .get("reasoning_effort")
+            .and_then(Value::as_str)
+            .map(|value| format!("  reasoning_effort: {value}"))
+            .unwrap_or_default();
+        if global
+            && effective
+                .as_deref()
+                .is_some_and(|effective| effective != model)
+        {
+            Ok(format!(
+                "global model saved: {model}{reasoning}  path: {path}  current workdir still uses local model: {}",
+                effective.unwrap()
+            ))
+        } else {
+            Ok(format!(
+                "model: {model}{reasoning}  scope: {scope}  path: {path}"
+            ))
+        }
     }
 
-    fn set_variant_no_print(&mut self, variant: String) -> Result<()> {
+    pub(crate) fn set_variant_no_print(&mut self, variant: String) -> Result<()> {
         validate_variant(&variant)?;
         self.current_variant = Some(variant.clone());
         self.state.set_variant(&self.workdir_key, variant);
@@ -396,7 +460,7 @@ impl TuiApp {
         Ok(())
     }
 
-    fn set_mode_no_print(&mut self, mode: &str) -> Result<()> {
+    pub(crate) fn set_mode_no_print(&mut self, mode: &str) -> Result<()> {
         let (run_mode, permission_mode) = match mode {
             "plan" => (RunMode::Plan, PermissionMode::Default),
             "default" => (RunMode::Default, PermissionMode::Default),
@@ -421,42 +485,45 @@ impl TuiApp {
         Ok(())
     }
 
-    fn set_thinking_no_print(&mut self, enabled: bool) -> Result<()> {
+    pub(crate) fn set_thinking_no_print(&mut self, enabled: bool) -> Result<()> {
         self.thinking_visible = enabled;
         self.state.set_thinking_visible(enabled);
         self.state.save(&self.state_path)?;
         Ok(())
     }
 
-    fn set_raw_no_print(&mut self, enabled: bool) -> Result<()> {
+    pub(crate) fn set_raw_no_print(&mut self, enabled: bool) -> Result<()> {
         self.raw_visible = enabled;
         self.state.set_raw_visible(enabled);
         self.state.save(&self.state_path)?;
         Ok(())
     }
 
-    fn rename_session_no_print(&mut self, title: String) -> Result<String> {
+    pub(crate) fn rename_session_no_print(&mut self, title: String) -> Result<String> {
         let Some(session_id) = self.current_session.as_deref() else {
             return Err(anyhow!("no current session to rename"));
         };
-        let title = SqliteStore::open(&self.db_path)?.set_session_title(session_id, &title)?;
+        let title = self
+            .state_runtime
+            .store()
+            .set_session_title(session_id, &title)?;
         self.current_session_title = Some(title.clone());
         Ok(title)
     }
 
-    fn undo_options(&self) -> Result<SessionUndoOptions> {
+    pub(crate) fn undo_options(&self) -> Result<SessionUndoOptions> {
         let Some(session_id) = self.current_session.clone() else {
             return Err(anyhow!("no current session to undo"));
         };
         Ok(SessionUndoOptions {
-            db_path: self.db_path.clone(),
+            state: self.state_runtime.clone(),
             workdir: self.workdir.clone(),
             snapshot_root: self.home.join("snapshots"),
             session_id,
         })
     }
 
-    fn undo_session_no_print(&mut self, ui: &mut FullscreenUi<'_>) -> Result<String> {
+    pub(crate) fn undo_session_no_print(&mut self, ui: &mut FullscreenUi<'_>) -> Result<String> {
         let result = undo_session(self.undo_options()?)?;
         ui.clear_transcript();
         self.load_current_session_history(ui)?;
@@ -468,7 +535,7 @@ impl TuiApp {
         ))
     }
 
-    fn redo_session_no_print(&mut self, ui: &mut FullscreenUi<'_>) -> Result<String> {
+    pub(crate) fn redo_session_no_print(&mut self, ui: &mut FullscreenUi<'_>) -> Result<String> {
         let result = redo_session(self.undo_options()?)?;
         ui.clear_transcript();
         self.load_current_session_history(ui)?;
@@ -485,13 +552,13 @@ impl TuiApp {
         ))
     }
 
-    fn set_sidebar_visible_no_print(&mut self, visible: bool) -> Result<()> {
+    pub(crate) fn set_sidebar_visible_no_print(&mut self, visible: bool) -> Result<()> {
         self.state.set_sidebar_visible(visible);
         self.state.save(&self.state_path)?;
         Ok(())
     }
 
-    fn cycle_mode(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
+    pub(crate) fn cycle_mode(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
         let next = match (self.current_mode, self.current_permission_mode) {
             (RunMode::Default, PermissionMode::Default) => "acceptEdits",
             (RunMode::Default, PermissionMode::AcceptEdits) => "plan",
@@ -504,23 +571,24 @@ impl TuiApp {
     }
 
     #[cfg(test)]
-    fn resolve_session_ref(&self, reference: &str) -> Result<String> {
+    pub(crate) fn resolve_session_ref(&self, reference: &str) -> Result<String> {
         let sessions = self.sessions_for_workdir()?;
         resolve_session_ref_from_summaries(&sessions, reference)
     }
 
     #[cfg(test)]
-    fn sessions_for_workdir(&self) -> Result<Vec<SessionSummary>> {
-        SqliteStore::open(&self.db_path)?
+    pub(crate) fn sessions_for_workdir(&self) -> Result<Vec<SessionSummary>> {
+        self.state_runtime
+            .store()
             .list_sessions_for_workdir_with_sources(&self.workdir, TUI_SESSION_SOURCES)
             .map_err(Into::into)
     }
 
-    fn tui_sessions_for_workdir(
+    pub(crate) fn tui_sessions_for_workdir(
         &self,
         view: SessionListView,
     ) -> Result<Vec<TuiSessionDisplaySummary>> {
-        let store = SqliteStore::open(&self.db_path)?;
+        let store = self.state_runtime.store();
         let sessions = match view {
             SessionListView::Active => {
                 store.list_sessions_for_workdir_with_sources(&self.workdir, TUI_SESSION_SOURCES)?
@@ -542,7 +610,7 @@ impl TuiApp {
             .collect()
     }
 
-    fn load_current_session_history(&self, ui: &mut FullscreenUi<'_>) -> Result<()> {
+    pub(crate) fn load_current_session_history(&self, ui: &mut FullscreenUi<'_>) -> Result<()> {
         let Some(session_id) = self.current_session.as_deref() else {
             ui.loaded_session_message_count = 0;
             ui.visible_turn_started = None;
@@ -550,10 +618,10 @@ impl TuiApp {
             ui.refresh_sidebar(self);
             return Ok(());
         };
-        let store = SqliteStore::open(&self.db_path)?;
+        let store = self.state_runtime.store();
         let metadata = store.session_metadata(session_id)?;
         ui.sidebar_context_limit =
-            session_context_limit_with_parent_fallback(&store, session_id, metadata.as_ref())?;
+            session_context_limit_with_parent_fallback(store, session_id, metadata.as_ref())?;
         let summaries = store.load_tui_message_summaries(session_id)?;
         ui.loaded_session_message_count = summaries.len();
         let summary_count = summaries.len();
@@ -587,7 +655,7 @@ impl TuiApp {
     }
 }
 
-fn session_context_limit_with_parent_fallback(
+pub(crate) fn session_context_limit_with_parent_fallback(
     store: &SqliteStore,
     session_id: &str,
     metadata: Option<&Value>,
@@ -602,15 +670,22 @@ fn session_context_limit_with_parent_fallback(
     Ok(parent_metadata.as_ref().and_then(session_context_limit))
 }
 
-fn session_context_limit(metadata: &Value) -> Option<u64> {
+pub(crate) fn session_context_limit(metadata: &Value) -> Option<u64> {
     metadata.get("context_limit").and_then(Value::as_u64)
 }
 
-fn main_agent_default_metadata() -> Value {
+pub(crate) fn live_agent_reload_due(last_check: Option<Instant>, now: Instant) -> bool {
+    match last_check {
+        Some(last_check) => now.duration_since(last_check) >= LIVE_AGENT_RELOAD_POLL_INTERVAL,
+        None => true,
+    }
+}
+
+pub(crate) fn main_agent_default_metadata() -> Value {
     serde_json::json!({"mode": "default"})
 }
 
-fn main_agent_metadata(
+pub(crate) fn main_agent_metadata(
     input: &str,
     name: &str,
     source: AgentSource,
@@ -625,7 +700,7 @@ fn main_agent_metadata(
     })
 }
 
-fn main_agent_from_session_metadata(metadata: Option<&Value>) -> LoadedMainAgent {
+pub(crate) fn main_agent_from_session_metadata(metadata: Option<&Value>) -> LoadedMainAgent {
     let Some(metadata) = metadata else {
         return LoadedMainAgent::Missing;
     };
@@ -666,7 +741,7 @@ fn main_agent_from_session_metadata(metadata: Option<&Value>) -> LoadedMainAgent
     LoadedMainAgent::Missing
 }
 
-fn session_base_agent_name_from_metadata(metadata: Option<&Value>) -> Option<String> {
+pub(crate) fn session_base_agent_name_from_metadata(metadata: Option<&Value>) -> Option<String> {
     metadata?
         .get("agent")
         .and_then(|value| value.get("name"))
@@ -674,4 +749,27 @@ fn session_base_agent_name_from_metadata(metadata: Option<&Value>) -> Option<Str
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
+}
+
+#[cfg(test)]
+pub(crate) mod live_agent_reload_tests {
+    pub(crate) use super::*;
+
+    #[test]
+    fn live_agent_reload_first_check_is_immediate() {
+        assert!(live_agent_reload_due(None, Instant::now()));
+    }
+
+    #[test]
+    fn live_agent_reload_checks_are_gated_for_250ms() {
+        let last = Instant::now();
+        assert!(!live_agent_reload_due(
+            Some(last),
+            last + LIVE_AGENT_RELOAD_POLL_INTERVAL - Duration::from_millis(1)
+        ));
+        assert!(live_agent_reload_due(
+            Some(last),
+            last + LIVE_AGENT_RELOAD_POLL_INTERVAL
+        ));
+    }
 }

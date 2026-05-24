@@ -65,7 +65,7 @@ pub(crate) fn resolve_explicit_path(
     }
 }
 
-fn expand_tilde(path: &Path, env_map: &BTreeMap<String, String>) -> Result<PathBuf> {
+pub(crate) fn expand_tilde(path: &Path, env_map: &BTreeMap<String, String>) -> Result<PathBuf> {
     let raw = path.to_string_lossy();
     if raw == "~" {
         return home_path(env_map);
@@ -76,7 +76,7 @@ fn expand_tilde(path: &Path, env_map: &BTreeMap<String, String>) -> Result<PathB
     Ok(path.to_path_buf())
 }
 
-fn home_path(env_map: &BTreeMap<String, String>) -> Result<PathBuf> {
+pub(crate) fn home_path(env_map: &BTreeMap<String, String>) -> Result<PathBuf> {
     env_value("HOME", env_map)
         .map(PathBuf::from)
         .ok_or_else(|| anyhow!("HOME is required to expand ~"))

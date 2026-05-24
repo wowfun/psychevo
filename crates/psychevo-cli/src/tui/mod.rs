@@ -1,23 +1,23 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::fs;
-use std::io::{self, BufRead, IsTerminal, Write};
-use std::path::{Path, PathBuf};
-use std::process::{Command as StdCommand, ExitCode, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+pub(crate) use std::collections::{BTreeMap, BTreeSet, VecDeque};
+pub(crate) use std::fs;
+pub(crate) use std::io::{self, BufRead, IsTerminal, Write};
+pub(crate) use std::path::{Path, PathBuf};
+pub(crate) use std::process::{Command as StdCommand, ExitCode, Stdio};
+pub(crate) use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+pub(crate) use std::sync::{Arc, Mutex};
+pub(crate) use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use anyhow::{Result, anyhow};
-use crossterm::event::{
+pub(crate) use anyhow::{Result, anyhow};
+pub(crate) use crossterm::event::{
     self, DisableBracketedPaste, EnableBracketedPaste, Event as CrosstermEvent, KeyCode, KeyEvent,
     KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
-use crossterm::execute;
-use crossterm::terminal::{
+pub(crate) use crossterm::execute;
+pub(crate) use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use psychevo_ai::Outcome;
-use psychevo_runtime::{
+pub(crate) use psychevo_ai::Outcome;
+pub(crate) use psychevo_runtime::{
     AgentCatalog, AgentDiscoveryOptions, AgentEdgeRecord, AgentSource, AgentSpawnOptions,
     AutoCompactionCheckOptions, ChildSessionSnapshotInput, ClarifyAnswer, ClarifyQuestion,
     ClarifyRequestEvent, ClarifyResolvedEvent, ClarifyResponse, ClarifyResult,
@@ -28,43 +28,45 @@ use psychevo_runtime::{
     PromptDisplayMetadata, ReloadContextOptions, RunControlHandle, RunMode, RunOptions,
     RunStreamEvent, RunStreamSink, SessionArtifactKind, SessionExportFormat, SessionExportOptions,
     SessionExportWriteResult, SessionSummary, SessionUndoOptions, SkillBundle, SkillCatalog,
-    SkillDiscoveryOptions, SkillTarget, SqliteStore, StatsOptions, TUI_DISPLAY_METADATA_KEY,
-    TerminalReason, ToolDisplayBodyPolicy, ToolDisplayCategory, ToolDisplaySpec, TuiMessageSummary,
-    USER_SHELL_METADATA_KEY, UserShellContextOptions, UserShellOptions, agent_spawn_paused,
-    agent_status_value, auto_compaction_due_for_snapshot, canonicalize_workdir, compact_session,
-    config_show_value, configured_models, context_snapshot, create_global_custom_provider,
-    custom_provider_api_key_env, default_session_export_filename, discover_agents, discover_skills,
-    fetch_model_catalog, format_context_snapshot_text_with_options, format_context_total_value,
+    SkillDiscoveryOptions, SkillTarget, SqliteStore, StateRuntime, StatsOptions,
+    TUI_DISPLAY_METADATA_KEY, TerminalReason, ToolDisplayBodyPolicy, ToolDisplayCategory,
+    ToolDisplaySpec, TuiMessageSummary, USER_SHELL_METADATA_KEY, UserShellContextOptions,
+    UserShellOptions, agent_spawn_paused, agent_status_value, auto_compaction_due_for_snapshot,
+    canonicalize_workdir, compact_session, config_show_value, configured_models, context_snapshot,
+    create_global_custom_provider, custom_provider_api_key_env, default_session_export_filename,
+    discover_agents, discover_skills, fetch_model_catalog,
+    format_context_snapshot_text_with_options, format_context_total_value,
     format_context_total_value_parts, install_skill, list_skill_bundles, model_catalog_providers,
     model_metadata_explicitly_disallows_image_input, normalize_context_bar_width,
     permission_rules_value, prompt_message_from_inputs_with_options,
     prompt_starts_with_supported_image_path, redo_session, refresh_model_metadata_cache,
-    reload_session_context, remove_skill, resolve_agent_definition, resolve_image_source,
+    reload_session_context, remove_installed_skill, resolve_agent_definition, resolve_image_source,
     run_control, run_live_streaming, run_live_streaming_controlled,
     run_user_shell_command_streaming_controlled, scan_skill_path, selected_configured_model,
-    set_agent_spawn_paused, set_local_toolset_enabled, set_skill_config_value, set_skill_enabled,
-    side_conversation_boundary_prompt, spawn_agent_background, stop_agent_id_with_grace,
-    toolsets_value, undo_session, usage_stats, view_skill_value, write_session_export,
+    set_agent_spawn_paused, set_default_model_with_reasoning, set_local_toolset_enabled,
+    set_skill_config_value, set_skill_enabled, side_conversation_boundary_prompt,
+    spawn_agent_background, stop_agent_id_with_grace, toolsets_value, undo_session, usage_stats,
+    view_skill_value, write_session_export,
 };
-use ratatui::Frame;
-use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap};
-use ratatui_textarea::{CursorMove, TextArea, WrapMode};
-use serde_json::Value;
-use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+pub(crate) use ratatui::Frame;
+pub(crate) use ratatui::Terminal;
+pub(crate) use ratatui::backend::CrosstermBackend;
+pub(crate) use ratatui::layout::{Constraint, Direction, Layout, Rect};
+pub(crate) use ratatui::style::{Color, Modifier, Style};
+pub(crate) use ratatui::text::{Line, Span, Text};
+pub(crate) use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap};
+pub(crate) use ratatui_textarea::{CursorMove, TextArea, WrapMode};
+pub(crate) use serde_json::Value;
+pub(crate) use tokio::sync::mpsc;
+pub(crate) use tokio::task::JoinHandle;
+pub(crate) use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-mod plain;
-mod slash;
-mod state;
+pub(crate) mod plain;
+pub(crate) mod slash;
+pub(crate) mod state;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use self::plain::{TuiRenderer, assistant_text_from_event, format_session_line};
 use self::slash::{
@@ -74,18 +76,18 @@ use self::slash::{
     slash_menu_items_from, slash_prefix_menu_items_from, validate_model_spec, validate_variant,
 };
 use self::state::TuiState;
-use crate::args::TuiArgs;
-use crate::env::{
+pub(crate) use crate::args::TuiArgs;
+pub(crate) use crate::env::{
     ensure_home_initialized, env_path, env_value, inherited_env, resolve_explicit_path,
     resolve_psychevo_home, resolve_state_db,
 };
 
-const TUI_SESSION_SOURCES: &[&str] = &["run", "tui"];
-const TUI_SIDE_SESSION_SOURCE: &str = "tui-side";
-const BTW_SIDE_METADATA_KEY: &str = "btw_side";
-const BTW_INHERITED_METADATA_KEY: &str = "btw_inherited";
-const USER_SHELL_HELP: &str = "shell mode: type !<command> to run a local shell command";
-const FILE_POPUP_MAX_ROWS: usize = 8;
+pub(crate) const TUI_SESSION_SOURCES: &[&str] = &["run", "tui"];
+pub(crate) const TUI_SIDE_SESSION_SOURCE: &str = "tui-side";
+pub(crate) const BTW_SIDE_METADATA_KEY: &str = "btw_side";
+pub(crate) const BTW_INHERITED_METADATA_KEY: &str = "btw_inherited";
+pub(crate) const USER_SHELL_HELP: &str = "shell mode: type !<command> to run a local shell command";
+pub(crate) const FILE_POPUP_MAX_ROWS: usize = 8;
 
 pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
@@ -94,6 +96,7 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
     ensure_home_initialized(&home)?;
     let config_path = env_path("PSYCHEVO_CONFIG", &env_map, &cwd)?;
     let db_path = resolve_state_db(&env_map, &home, &cwd)?;
+    let state_runtime = StateRuntime::open(&db_path)?;
     let workdir = match &args.dir {
         Some(dir) => resolve_explicit_path(dir, &env_map, &cwd)?,
         None => cwd,
@@ -101,7 +104,7 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
     let workdir = canonicalize_workdir(&workdir)?;
     let slash_config = load_effective_tui_slash_config(
         &env_map,
-        db_path.clone(),
+        state_runtime.clone(),
         workdir.clone(),
         config_path.clone(),
     )?;
@@ -137,7 +140,8 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
     } else if args.new_session {
         None
     } else {
-        SqliteStore::open(&db_path)?
+        state_runtime
+            .store()
             .latest_session_for_workdir_with_sources(&workdir, TUI_SESSION_SOURCES)?
     };
 
@@ -148,6 +152,7 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
         home,
         state_path,
         state,
+        state_runtime,
         db_path,
         config_path,
         workdir,
@@ -179,6 +184,7 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
         clipboard_copies_in_flight: 0,
         slash_config,
         btw_side: None,
+        last_live_agent_reload_check: None,
         side_cleanup_task: None,
         compaction_task: None,
     };
@@ -189,14 +195,14 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
     app.run(args.message.join(" ")).await
 }
 
-fn load_effective_tui_slash_config(
+pub(crate) fn load_effective_tui_slash_config(
     env_map: &BTreeMap<String, String>,
-    db_path: PathBuf,
+    state: StateRuntime,
     workdir: PathBuf,
     config_path: Option<PathBuf>,
 ) -> Result<EffectiveSlashConfig> {
     let options = RunOptions {
-        db_path,
+        state,
         workdir,
         snapshot_root: None,
         session: None,
@@ -226,37 +232,136 @@ fn load_effective_tui_slash_config(
     parse_effective_slash_config(&document["value"])
 }
 
-// Kept as same-module includes for the first behavior-preserving split.
-include!("app/state.rs");
-include!("app/loop.rs");
-include!("app/bottom_panel.rs");
-include!("app/side.rs");
-include!("app/commands.rs");
-include!("app/events.rs");
-include!("app/status.rs");
-include!("app/panels.rs");
-include!("app/session_state.rs");
-include!("support/running.rs");
-include!("support/file_search.rs");
-include!("support/agent_search.rs");
-include!("support/skill_search.rs");
-include!("support/model_catalog.rs");
-include!("ui/types.rs");
-include!("support/terminal_probe.rs");
-include!("support/theme.rs");
-include!("support/renderable.rs");
-include!("support/motion.rs");
-include!("support/markdown_render.rs");
-include!("ui/fullscreen.rs");
-include!("support/history.rs");
-include!("support/selection.rs");
-include!("support/input.rs");
-include!("support/evidence.rs");
-include!("support/sidebar.rs");
-include!("support/composer.rs");
-include!("render/transcript.rs");
-include!("render/surfaces.rs");
-include!("render/helpers.rs");
-include!("support/clipboard.rs");
-include!("support/formatting.rs");
-include!("support/turn_printer.rs");
+// Split into normal Rust modules while preserving the original TUI module surface.
+#[path = "app/state.rs"]
+pub(crate) mod app_state;
+#[allow(unused_imports)]
+use app_state::*;
+#[path = "app/loop.rs"]
+pub(crate) mod app_loop;
+#[allow(unused_imports)]
+use app_loop::*;
+#[path = "app/bottom_panel.rs"]
+pub(crate) mod app_bottom_panel;
+#[allow(unused_imports)]
+use app_bottom_panel::*;
+#[path = "app/side.rs"]
+pub(crate) mod app_side;
+#[allow(unused_imports)]
+use app_side::*;
+#[path = "app/commands.rs"]
+pub(crate) mod app_commands;
+#[allow(unused_imports)]
+use app_commands::*;
+#[path = "app/events.rs"]
+pub(crate) mod app_events;
+#[allow(unused_imports)]
+use app_events::*;
+#[path = "app/status.rs"]
+pub(crate) mod app_status;
+#[allow(unused_imports)]
+use app_status::*;
+#[path = "app/panels.rs"]
+pub(crate) mod app_panels;
+#[allow(unused_imports)]
+use app_panels::*;
+#[path = "app/session_state.rs"]
+pub(crate) mod app_session_state;
+#[allow(unused_imports)]
+use app_session_state::*;
+#[path = "support/running.rs"]
+pub(crate) mod support_running;
+#[allow(unused_imports)]
+use support_running::*;
+#[path = "support/file_search.rs"]
+pub(crate) mod support_file_search;
+#[allow(unused_imports)]
+use support_file_search::*;
+#[path = "support/agent_search.rs"]
+pub(crate) mod support_agent_search;
+#[allow(unused_imports)]
+use support_agent_search::*;
+#[path = "support/skill_search.rs"]
+pub(crate) mod support_skill_search;
+#[allow(unused_imports)]
+use support_skill_search::*;
+#[path = "support/model_catalog.rs"]
+pub(crate) mod support_model_catalog;
+#[allow(unused_imports)]
+use support_model_catalog::*;
+#[path = "ui/types.rs"]
+pub(crate) mod ui_types;
+#[allow(unused_imports)]
+use ui_types::*;
+#[path = "support/terminal_probe.rs"]
+pub(crate) mod support_terminal_probe;
+#[allow(unused_imports)]
+use support_terminal_probe::*;
+#[path = "support/theme.rs"]
+pub(crate) mod support_theme;
+#[allow(unused_imports)]
+use support_theme::*;
+#[path = "support/renderable.rs"]
+pub(crate) mod support_renderable;
+#[allow(unused_imports)]
+use support_renderable::*;
+#[path = "support/motion.rs"]
+pub(crate) mod support_motion;
+#[allow(unused_imports)]
+use support_motion::*;
+#[path = "support/markdown_render.rs"]
+pub(crate) mod support_markdown_render;
+#[allow(unused_imports)]
+use support_markdown_render::*;
+#[path = "ui/fullscreen.rs"]
+pub(crate) mod ui_fullscreen;
+#[allow(unused_imports)]
+use ui_fullscreen::*;
+#[path = "support/history.rs"]
+pub(crate) mod support_history;
+#[allow(unused_imports)]
+use support_history::*;
+#[path = "support/selection.rs"]
+pub(crate) mod support_selection;
+#[allow(unused_imports)]
+use support_selection::*;
+#[path = "support/input.rs"]
+pub(crate) mod support_input;
+#[allow(unused_imports)]
+use support_input::*;
+#[path = "support/evidence.rs"]
+pub(crate) mod support_evidence;
+#[allow(unused_imports)]
+use support_evidence::*;
+#[path = "support/sidebar.rs"]
+pub(crate) mod support_sidebar;
+#[allow(unused_imports)]
+use support_sidebar::*;
+#[path = "support/composer.rs"]
+pub(crate) mod support_composer;
+#[allow(unused_imports)]
+use support_composer::*;
+#[path = "render/transcript.rs"]
+pub(crate) mod render_transcript;
+#[allow(unused_imports)]
+use render_transcript::*;
+#[path = "render/surfaces.rs"]
+pub(crate) mod render_surfaces;
+#[allow(unused_imports)]
+use render_surfaces::*;
+#[path = "render/helpers.rs"]
+pub(crate) mod render_helpers;
+#[allow(unused_imports)]
+use render_helpers::*;
+#[path = "support/clipboard.rs"]
+pub(crate) mod support_clipboard;
+#[allow(unused_imports)]
+use support_clipboard::*;
+#[path = "support/formatting.rs"]
+pub(crate) mod support_formatting;
+#[allow(unused_imports)]
+use support_formatting::*;
+#[path = "support/turn_printer.rs"]
+pub(crate) mod support_turn_printer;
+#[allow(unused_imports)]
+use support_turn_printer::*;

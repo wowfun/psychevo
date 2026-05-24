@@ -7,9 +7,9 @@ use anyhow::{Result, anyhow};
 use psychevo_ai::Outcome;
 use psychevo_runtime::{
     AgentCatalog, AgentDiscoveryOptions, AgentEdgeRecord, RunMode, RunOptions, SessionSummary,
-    SqliteStore, TuiMessageSummary, agent_status_value, close_agent_id, discover_agents,
-    list_agents_value, resolve_agent_definition, resume_agent_id, send_agent_message,
-    view_agent_value_with_catalog, wait_agent_mailbox,
+    SqliteStore, StateRuntime, TuiMessageSummary, agent_status_value, close_agent_id,
+    discover_agents, list_agents_value, resolve_agent_definition, resume_agent_id,
+    send_agent_message, view_agent_value_with_catalog, wait_agent_mailbox,
 };
 use serde_json::{Value, json};
 
@@ -39,7 +39,7 @@ pub(crate) async fn run_agent_command(args: AgentArgs) -> Result<ExitCode> {
     }
 }
 
-fn list_agents(args: AgentListArgs) -> Result<ExitCode> {
+pub(crate) fn list_agents(args: AgentListArgs) -> Result<ExitCode> {
     let catalog = catalog()?;
     if args.json {
         println!("{}", serde_json::to_string(&list_agents_value(&catalog))?);
@@ -64,7 +64,7 @@ fn list_agents(args: AgentListArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn view_agent(args: AgentNameArgs) -> Result<ExitCode> {
+pub(crate) fn view_agent(args: AgentNameArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
@@ -81,7 +81,7 @@ fn view_agent(args: AgentNameArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn validate_agent(args: AgentNameArgs) -> Result<ExitCode> {
+pub(crate) fn validate_agent(args: AgentNameArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
@@ -104,7 +104,7 @@ fn validate_agent(args: AgentNameArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-async fn run_agent(args: AgentRunArgs) -> Result<ExitCode> {
+pub(crate) async fn run_agent(args: AgentRunArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
@@ -132,7 +132,7 @@ async fn run_agent(args: AgentRunArgs) -> Result<ExitCode> {
     }
 
     let result = psychevo_runtime::run_live(RunOptions {
-        db_path,
+        state: StateRuntime::open(&db_path)?,
         workdir,
         snapshot_root: Some(home.join("snapshots")),
         session: None,
@@ -182,7 +182,7 @@ async fn run_agent(args: AgentRunArgs) -> Result<ExitCode> {
     })
 }
 
-fn agent_status(args: AgentStatusArgs) -> Result<ExitCode> {
+pub(crate) fn agent_status(args: AgentStatusArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
@@ -203,7 +203,7 @@ fn agent_status(args: AgentStatusArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn inspect_agent(args: AgentInspectArgs) -> Result<ExitCode> {
+pub(crate) fn inspect_agent(args: AgentInspectArgs) -> Result<ExitCode> {
     let store = command_store()?;
     let edge = store
         .find_agent_edge(&args.id)?
@@ -252,7 +252,7 @@ fn inspect_agent(args: AgentInspectArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-async fn wait_agent(args: AgentWaitArgs) -> Result<ExitCode> {
+pub(crate) async fn wait_agent(args: AgentWaitArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
@@ -272,7 +272,7 @@ async fn wait_agent(args: AgentWaitArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn close_agent(args: AgentIdArgs) -> Result<ExitCode> {
+pub(crate) fn close_agent(args: AgentIdArgs) -> Result<ExitCode> {
     let store = command_store()?;
     let record = close_agent_id(&args.id, Some(&store))?;
     if args.json {
@@ -288,7 +288,7 @@ fn close_agent(args: AgentIdArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn send_agent(args: AgentSendArgs) -> Result<ExitCode> {
+pub(crate) fn send_agent(args: AgentSendArgs) -> Result<ExitCode> {
     let store = command_store()?;
     let record = send_agent_message(&args.id, &args.message.join(" "), Some(&store))?;
     if args.json {
@@ -301,7 +301,7 @@ fn send_agent(args: AgentSendArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn resume_agent(args: AgentIdArgs) -> Result<ExitCode> {
+pub(crate) fn resume_agent(args: AgentIdArgs) -> Result<ExitCode> {
     let store = command_store()?;
     let record = resume_agent_id(&args.id, Some(&store))?;
     if args.json {
@@ -314,7 +314,7 @@ fn resume_agent(args: AgentIdArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-async fn attach_agent(args: AgentIdArgs) -> Result<ExitCode> {
+pub(crate) async fn attach_agent(args: AgentIdArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
@@ -341,7 +341,7 @@ async fn attach_agent(args: AgentIdArgs) -> Result<ExitCode> {
         .unwrap_or(ExitCode::FAILURE))
 }
 
-fn agent_logs(args: AgentLogsArgs) -> Result<ExitCode> {
+pub(crate) fn agent_logs(args: AgentLogsArgs) -> Result<ExitCode> {
     let store = command_store()?;
     let edge = store
         .find_agent_edge(&args.id)?
@@ -370,7 +370,7 @@ fn agent_logs(args: AgentLogsArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn agent_status_record_value(
+pub(crate) fn agent_status_record_value(
     store: &SqliteStore,
     target: &str,
     edge: &AgentEdgeRecord,
@@ -387,7 +387,11 @@ fn agent_status_record_value(
         .ok_or_else(|| anyhow!("agent not found: {target}"))
 }
 
-fn agent_value_matches_target(item: &Value, target: &str, edge: &AgentEdgeRecord) -> bool {
+pub(crate) fn agent_value_matches_target(
+    item: &Value,
+    target: &str,
+    edge: &AgentEdgeRecord,
+) -> bool {
     item.get("id").and_then(Value::as_str) == Some(target)
         || item.get("task_name").and_then(Value::as_str) == Some(target)
         || item.get("child_session_id").and_then(Value::as_str) == Some(target)
@@ -395,7 +399,7 @@ fn agent_value_matches_target(item: &Value, target: &str, edge: &AgentEdgeRecord
             == Some(edge.child_session_id.as_str())
 }
 
-fn agent_edge_value(edge: &AgentEdgeRecord) -> Value {
+pub(crate) fn agent_edge_value(edge: &AgentEdgeRecord) -> Value {
     json!({
         "parent_session_id": edge.parent_session_id,
         "child_session_id": edge.child_session_id,
@@ -406,7 +410,7 @@ fn agent_edge_value(edge: &AgentEdgeRecord) -> Value {
     })
 }
 
-fn session_summary_value(summary: &SessionSummary) -> Value {
+pub(crate) fn session_summary_value(summary: &SessionSummary) -> Value {
     json!({
         "id": summary.id,
         "source": summary.source,
@@ -424,7 +428,7 @@ fn session_summary_value(summary: &SessionSummary) -> Value {
     })
 }
 
-fn tui_message_summary_value(summary: &TuiMessageSummary) -> Result<Value> {
+pub(crate) fn tui_message_summary_value(summary: &TuiMessageSummary) -> Result<Value> {
     Ok(json!({
         "message": serde_json::to_value(&summary.message)?,
         "usage": summary.usage,
@@ -433,7 +437,7 @@ fn tui_message_summary_value(summary: &TuiMessageSummary) -> Result<Value> {
     }))
 }
 
-fn print_agent_inspect(
+pub(crate) fn print_agent_inspect(
     record: &Value,
     edge: &AgentEdgeRecord,
     parent_session: Option<&SessionSummary>,
@@ -494,7 +498,7 @@ fn print_agent_inspect(
     Ok(())
 }
 
-fn session_summary_label(summary: Option<&SessionSummary>, fallback_id: &str) -> String {
+pub(crate) fn session_summary_label(summary: Option<&SessionSummary>, fallback_id: &str) -> String {
     let Some(summary) = summary else {
         return fallback_id.to_string();
     };
@@ -513,7 +517,7 @@ fn session_summary_label(summary: Option<&SessionSummary>, fallback_id: &str) ->
     parts.join(" ")
 }
 
-fn message_preview(message: &Value) -> String {
+pub(crate) fn message_preview(message: &Value) -> String {
     match message
         .get("role")
         .and_then(Value::as_str)
@@ -548,7 +552,7 @@ fn message_preview(message: &Value) -> String {
     }
 }
 
-fn message_content_text(message: &Value) -> String {
+pub(crate) fn message_content_text(message: &Value) -> String {
     message
         .get("content")
         .and_then(Value::as_array)
@@ -569,7 +573,7 @@ fn message_content_text(message: &Value) -> String {
         .unwrap_or_default()
 }
 
-fn assistant_tool_call_names(message: &Value) -> Vec<String> {
+pub(crate) fn assistant_tool_call_names(message: &Value) -> Vec<String> {
     message
         .get("content")
         .and_then(Value::as_array)
@@ -584,14 +588,14 @@ fn assistant_tool_call_names(message: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn latest_usage_from_summaries(messages: &[TuiMessageSummary]) -> Option<Value> {
+pub(crate) fn latest_usage_from_summaries(messages: &[TuiMessageSummary]) -> Option<Value> {
     messages
         .iter()
         .rev()
         .find_map(|summary| summary.usage.clone())
 }
 
-fn usage_total_tokens(usage: &Value) -> Option<u64> {
+pub(crate) fn usage_total_tokens(usage: &Value) -> Option<u64> {
     usage
         .get("total_tokens")
         .and_then(Value::as_u64)
@@ -614,7 +618,7 @@ fn usage_total_tokens(usage: &Value) -> Option<u64> {
         })
 }
 
-fn truncate_preview(input: &str, max_chars: usize) -> String {
+pub(crate) fn truncate_preview(input: &str, max_chars: usize) -> String {
     let normalized = input.split_whitespace().collect::<Vec<_>>().join(" ");
     if normalized.chars().count() <= max_chars {
         return normalized;
@@ -627,7 +631,7 @@ fn truncate_preview(input: &str, max_chars: usize) -> String {
     out
 }
 
-fn catalog() -> Result<AgentCatalog> {
+pub(crate) fn catalog() -> Result<AgentCatalog> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
@@ -636,7 +640,7 @@ fn catalog() -> Result<AgentCatalog> {
     catalog_for(&home, &workdir, env_map)
 }
 
-fn catalog_for(
+pub(crate) fn catalog_for(
     home: &std::path::Path,
     workdir: &std::path::Path,
     env_map: std::collections::BTreeMap<String, String>,
@@ -651,7 +655,7 @@ fn catalog_for(
     .map_err(Into::into)
 }
 
-fn command_store() -> Result<SqliteStore> {
+pub(crate) fn command_store() -> Result<SqliteStore> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
@@ -659,7 +663,7 @@ fn command_store() -> Result<SqliteStore> {
     Ok(SqliteStore::open(&db_path)?)
 }
 
-fn print_agent_status(value: &Value) {
+pub(crate) fn print_agent_status(value: &Value) {
     let Some(agents) = value.get("agents").and_then(Value::as_array) else {
         println!("No agents found.");
         return;
@@ -673,7 +677,7 @@ fn print_agent_status(value: &Value) {
     }
 }
 
-fn print_wait_report(value: &Value) {
+pub(crate) fn print_wait_report(value: &Value) {
     let message = value
         .get("message")
         .and_then(Value::as_str)
@@ -688,14 +692,14 @@ fn print_wait_report(value: &Value) {
     }
 }
 
-fn print_agent_record(record: &psychevo_runtime::AgentRunRecord) {
+pub(crate) fn print_agent_record(record: &psychevo_runtime::AgentRunRecord) {
     println!(
         "{}\t{}\t{:?}\t{}",
         record.id, record.agent_name, record.status, record.task
     );
 }
 
-fn print_agent_value(item: &Value) {
+pub(crate) fn print_agent_value(item: &Value) {
     println!(
         "{}\t{}\t{}\t{}",
         item.get("id").and_then(Value::as_str).unwrap_or_default(),
@@ -709,7 +713,7 @@ fn print_agent_value(item: &Value) {
     );
 }
 
-fn read_prompt(message: &[String]) -> Result<String> {
+pub(crate) fn read_prompt(message: &[String]) -> Result<String> {
     let mut prompt = message.join(" ");
     if !io::stdin().is_terminal() {
         let mut stdin = String::new();

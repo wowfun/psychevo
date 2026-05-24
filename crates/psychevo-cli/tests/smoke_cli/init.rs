@@ -1,5 +1,7 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[test]
-fn cli_help_lists_aligned_command_descriptions() {
+pub(crate) fn cli_help_lists_aligned_command_descriptions() {
     let temp = tempdir().expect("temp");
     let output = pevo_cmd(temp.path())
         .arg("--help")
@@ -20,7 +22,7 @@ fn cli_help_lists_aligned_command_descriptions() {
 }
 
 #[test]
-fn cli_help_describes_representative_commands_and_flags() {
+pub(crate) fn cli_help_describes_representative_commands_and_flags() {
     let temp = tempdir().expect("temp");
     assert_help_contains(
         temp.path(),
@@ -99,7 +101,7 @@ fn cli_help_describes_representative_commands_and_flags() {
     );
 }
 
-fn assert_help_contains(test_home: &Path, args: &[&str], expected: &[&str]) {
+pub(crate) fn assert_help_contains(test_home: &Path, args: &[&str], expected: &[&str]) {
     let output = pevo_cmd(test_home).args(args).output().expect("pevo help");
     assert!(
         output.status.success(),
@@ -116,7 +118,7 @@ fn assert_help_contains(test_home: &Path, args: &[&str], expected: &[&str]) {
 }
 
 #[test]
-fn cli_init_creates_home_tree_and_is_idempotent() {
+pub(crate) fn cli_init_creates_home_tree_and_is_idempotent() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let output = pevo_cmd(temp.path())
@@ -170,7 +172,7 @@ fn cli_init_creates_home_tree_and_is_idempotent() {
 }
 
 #[test]
-fn cli_init_reset_state_backs_up_existing_sqlite_files() {
+pub(crate) fn cli_init_reset_state_backs_up_existing_sqlite_files() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let init = pevo_cmd(temp.path())
@@ -223,7 +225,7 @@ fn cli_init_reset_state_backs_up_existing_sqlite_files() {
 }
 
 #[test]
-fn cli_smoke_preserves_deterministic_harness_flags() {
+pub(crate) fn cli_smoke_preserves_deterministic_harness_flags() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = temp.path().join("work");

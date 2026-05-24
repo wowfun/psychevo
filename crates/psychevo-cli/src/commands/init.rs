@@ -10,7 +10,7 @@ use psychevo_runtime::SqliteStore;
 use crate::args::InitArgs;
 use crate::env::{inherited_env, resolve_psychevo_home};
 
-const STARTER_CONFIG: &str = r#"model = "deepseek/deepseek-chat"
+pub(crate) const STARTER_CONFIG: &str = r#"model = "deepseek/deepseek-chat"
 
 [provider.deepseek.options]
 base_url = "https://api.deepseek.com/v1"
@@ -20,7 +20,7 @@ api_key_env = "DEEPSEEK_API_KEY"
 reasoning_effort = "medium"
 "#;
 
-const STARTER_ENV: &str = r#"# Psychevo live provider credentials.
+pub(crate) const STARTER_ENV: &str = r#"# Psychevo live provider credentials.
 # Keep raw API keys here or in your shell environment, not in config.toml.
 #
 # DEEPSEEK_API_KEY=sk-...
@@ -62,7 +62,7 @@ pub(crate) fn run_init_command(args: InitArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn backup_state_files(home: &Path, state: &Path) -> Result<()> {
+pub(crate) fn backup_state_files(home: &Path, state: &Path) -> Result<()> {
     let timestamp_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()

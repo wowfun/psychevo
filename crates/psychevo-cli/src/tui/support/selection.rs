@@ -1,11 +1,13 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 impl ScreenLine {
     #[cfg(test)]
-    fn first_x(&self) -> u16 {
+    pub(crate) fn first_x(&self) -> u16 {
         self.cells.first().map(|cell| cell.x).unwrap_or(0)
     }
 
     #[cfg(test)]
-    fn text(&self) -> String {
+    pub(crate) fn text(&self) -> String {
         self.cells
             .iter()
             .map(|cell| cell.text.as_str())
@@ -14,7 +16,7 @@ impl ScreenLine {
 }
 
 #[cfg(test)]
-fn screen_cells_from_text(start_x: u16, text: &str) -> Vec<ScreenCell> {
+pub(crate) fn screen_cells_from_text(start_x: u16, text: &str) -> Vec<ScreenCell> {
     let mut cells: Vec<ScreenCell> = Vec::new();
     let mut x = start_x;
     for ch in text.chars() {
@@ -35,7 +37,7 @@ fn screen_cells_from_text(start_x: u16, text: &str) -> Vec<ScreenCell> {
     cells
 }
 
-fn screen_line_from_buffer(
+pub(crate) fn screen_line_from_buffer(
     buffer: &ratatui::buffer::Buffer,
     start_x: u16,
     y: u16,
@@ -63,13 +65,16 @@ fn screen_line_from_buffer(
     (!cells.is_empty()).then_some(ScreenLine { region, y, cells })
 }
 
-fn trim_screen_padding_right(cells: &mut Vec<ScreenCell>) {
+pub(crate) fn trim_screen_padding_right(cells: &mut Vec<ScreenCell>) {
     while cells.last().is_some_and(|cell| cell.text == " ") {
         cells.pop();
     }
 }
 
-fn selected_text_from_lines(lines: &[ScreenLine], selection: &SelectionState) -> Option<String> {
+pub(crate) fn selected_text_from_lines(
+    lines: &[ScreenLine],
+    selection: &SelectionState,
+) -> Option<String> {
     let anchor = selection.anchor?;
     let focus = selection.focus?;
     if anchor == focus {
@@ -106,13 +111,17 @@ fn selected_text_from_lines(lines: &[ScreenLine], selection: &SelectionState) ->
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct SelectedSegment {
-    start_x: u16,
-    end_x: u16,
-    text: String,
+pub(crate) struct SelectedSegment {
+    pub(crate) start_x: u16,
+    pub(crate) end_x: u16,
+    pub(crate) text: String,
 }
 
-fn selected_segment_from_line(line: &ScreenLine, from: u16, to: u16) -> Option<SelectedSegment> {
+pub(crate) fn selected_segment_from_line(
+    line: &ScreenLine,
+    from: u16,
+    to: u16,
+) -> Option<SelectedSegment> {
     if to <= from {
         return None;
     }
@@ -144,12 +153,12 @@ fn selected_segment_from_line(line: &ScreenLine, from: u16, to: u16) -> Option<S
     })
 }
 
-fn cell_overlaps_range(cell: &ScreenCell, from: u16, to: u16) -> bool {
+pub(crate) fn cell_overlaps_range(cell: &ScreenCell, from: u16, to: u16) -> bool {
     let cell_end = cell.x.saturating_add(cell.width);
     to > cell.x && from < cell_end
 }
 
-fn ordered_selection(anchor: (u16, u16), focus: (u16, u16)) -> ((u16, u16), (u16, u16)) {
+pub(crate) fn ordered_selection(anchor: (u16, u16), focus: (u16, u16)) -> ((u16, u16), (u16, u16)) {
     let (ax, ay) = anchor;
     let (fx, fy) = focus;
     if (ay, ax) <= (fy, fx) {
@@ -158,4 +167,3 @@ fn ordered_selection(anchor: (u16, u16), focus: (u16, u16)) -> ((u16, u16), (u16
         ((fx, fy), (ax, ay))
     }
 }
-

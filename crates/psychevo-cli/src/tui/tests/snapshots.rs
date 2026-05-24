@@ -1,5 +1,7 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[test]
-fn tui_snapshot_wide_idle_minimal_chrome() {
+pub(crate) fn tui_snapshot_wide_idle_minimal_chrome() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let ui = fixture_ui(&app, FixtureKind::Idle);
@@ -7,7 +9,7 @@ fn tui_snapshot_wide_idle_minimal_chrome() {
 }
 
 #[test]
-fn tui_snapshot_wide_optional_sidebar() {
+pub(crate) fn tui_snapshot_wide_optional_sidebar() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
@@ -17,7 +19,7 @@ fn tui_snapshot_wide_optional_sidebar() {
 }
 
 #[test]
-fn tui_snapshot_narrow_idle_composer_without_sidebar() {
+pub(crate) fn tui_snapshot_narrow_idle_composer_without_sidebar() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let ui = fixture_ui(&app, FixtureKind::Idle);
@@ -25,7 +27,7 @@ fn tui_snapshot_narrow_idle_composer_without_sidebar() {
 }
 
 #[test]
-fn tui_snapshot_slash_menu_prefix_filtering() {
+pub(crate) fn tui_snapshot_slash_menu_prefix_filtering() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
@@ -34,7 +36,7 @@ fn tui_snapshot_slash_menu_prefix_filtering() {
 }
 
 #[test]
-fn tui_snapshot_file_completion_popup() {
+pub(crate) fn tui_snapshot_file_completion_popup() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
@@ -62,7 +64,7 @@ fn tui_snapshot_file_completion_popup() {
 }
 
 #[test]
-fn tui_snapshot_model_bottom_panel() {
+pub(crate) fn tui_snapshot_model_bottom_panel() {
     let temp = tempdir().expect("temp");
     let mut app = test_app_with_models(&temp);
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
@@ -73,7 +75,7 @@ fn tui_snapshot_model_bottom_panel() {
 }
 
 #[test]
-fn tui_snapshot_model_info_tab() {
+pub(crate) fn tui_snapshot_model_info_tab() {
     let temp = tempdir().expect("temp");
     let mut app = test_app_with_models(&temp);
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
@@ -84,7 +86,7 @@ fn tui_snapshot_model_info_tab() {
 }
 
 #[test]
-fn tui_snapshot_variant_bottom_panel() {
+pub(crate) fn tui_snapshot_variant_bottom_panel() {
     let temp = tempdir().expect("temp");
     let mut app = test_app_with_models(&temp);
     let models = ModelPanel::new(app.model_selection_panel().expect("model panel"));
@@ -105,7 +107,7 @@ fn tui_snapshot_variant_bottom_panel() {
 }
 
 #[test]
-fn tui_snapshot_session_bottom_panel() {
+pub(crate) fn tui_snapshot_session_bottom_panel() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
@@ -114,24 +116,18 @@ fn tui_snapshot_session_bottom_panel() {
 }
 
 #[tokio::test]
-async fn tui_snapshot_session_bottom_panel_background_running() {
+pub(crate) async fn tui_snapshot_session_bottom_panel_background_running() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
     ui.running_elapsed_override = Some(Duration::from_secs(12));
     attach_background_agent_running(&mut ui, "session-b");
     ui.bottom_panel = Some(BottomPanel::Sessions(stable_session_bottom_panel()));
-    assert_tui_snapshot(
-        "session_bottom_panel_background_running",
-        120,
-        24,
-        &app,
-        ui,
-    );
+    assert_tui_snapshot("session_bottom_panel_background_running", 120, 24, &app, ui);
 }
 
 #[test]
-fn tui_snapshot_archived_session_action_bottom_panel() {
+pub(crate) fn tui_snapshot_archived_session_action_bottom_panel() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
@@ -142,7 +138,7 @@ fn tui_snapshot_archived_session_action_bottom_panel() {
 }
 
 #[tokio::test]
-async fn tui_snapshot_running_turn_with_visible_thinking() {
+pub(crate) async fn tui_snapshot_running_turn_with_visible_thinking() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = fixture_ui(&app, FixtureKind::RunningThinking);
@@ -151,7 +147,7 @@ async fn tui_snapshot_running_turn_with_visible_thinking() {
 }
 
 #[test]
-fn tui_snapshot_completed_ledger_collapsed_tool_output() {
+pub(crate) fn tui_snapshot_completed_ledger_collapsed_tool_output() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let ui = fixture_ui(&app, FixtureKind::CollapsedTool);
@@ -159,7 +155,7 @@ fn tui_snapshot_completed_ledger_collapsed_tool_output() {
 }
 
 #[test]
-fn tui_snapshot_expanded_long_tool_output() {
+pub(crate) fn tui_snapshot_expanded_long_tool_output() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let ui = fixture_ui(&app, FixtureKind::ExpandedTool);
@@ -167,7 +163,7 @@ fn tui_snapshot_expanded_long_tool_output() {
 }
 
 #[test]
-fn tui_snapshot_expanded_long_command() {
+pub(crate) fn tui_snapshot_expanded_long_command() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let ui = fixture_ui(&app, FixtureKind::ExpandedLongCommand);
@@ -175,7 +171,7 @@ fn tui_snapshot_expanded_long_command() {
 }
 
 #[test]
-fn tui_snapshot_collapsed_long_json_tool_output() {
+pub(crate) fn tui_snapshot_collapsed_long_json_tool_output() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let ui = fixture_ui(&app, FixtureKind::CollapsedJsonTool);
@@ -183,7 +179,7 @@ fn tui_snapshot_collapsed_long_json_tool_output() {
 }
 
 #[test]
-fn tui_snapshot_long_command_folded_output() {
+pub(crate) fn tui_snapshot_long_command_folded_output() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let ui = fixture_ui(&app, FixtureKind::LongCommandFoldedOutput);
@@ -191,7 +187,7 @@ fn tui_snapshot_long_command_folded_output() {
 }
 
 #[test]
-fn tui_snapshot_consecutive_tool_rows_flat() {
+pub(crate) fn tui_snapshot_consecutive_tool_rows_flat() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let ui = fixture_ui(&app, FixtureKind::ConsecutiveToolRows);
@@ -199,7 +195,7 @@ fn tui_snapshot_consecutive_tool_rows_flat() {
 }
 
 #[test]
-fn tui_snapshot_rich_markdown_answer() {
+pub(crate) fn tui_snapshot_rich_markdown_answer() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let ui = fixture_ui(&app, FixtureKind::RichMarkdown);
@@ -207,7 +203,7 @@ fn tui_snapshot_rich_markdown_answer() {
 }
 
 #[tokio::test]
-async fn tui_snapshot_active_write_after_visible_answer() {
+pub(crate) async fn tui_snapshot_active_write_after_visible_answer() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = fixture_ui(&app, FixtureKind::ActiveWriteAfterAnswer);
@@ -216,7 +212,7 @@ async fn tui_snapshot_active_write_after_visible_answer() {
 }
 
 #[tokio::test]
-async fn tui_snapshot_active_visible_write_preamble() {
+pub(crate) async fn tui_snapshot_active_visible_write_preamble() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = fixture_ui(&app, FixtureKind::ActiveVisibleWritePreamble);
@@ -225,7 +221,7 @@ async fn tui_snapshot_active_visible_write_preamble() {
 }
 
 #[test]
-fn tui_snapshot_history_pending_write_call() {
+pub(crate) fn tui_snapshot_history_pending_write_call() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -276,7 +272,7 @@ fn tui_snapshot_history_pending_write_call() {
 }
 
 #[tokio::test]
-async fn tui_snapshot_active_write_suppresses_failure_meta() {
+pub(crate) async fn tui_snapshot_active_write_suppresses_failure_meta() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -325,7 +321,7 @@ async fn tui_snapshot_active_write_suppresses_failure_meta() {
 }
 
 #[tokio::test]
-async fn tui_snapshot_reasoning_suppresses_failure_meta() {
+pub(crate) async fn tui_snapshot_reasoning_suppresses_failure_meta() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -362,7 +358,7 @@ async fn tui_snapshot_reasoning_suppresses_failure_meta() {
 }
 
 #[tokio::test]
-async fn tui_snapshot_active_reasoning_write() {
+pub(crate) async fn tui_snapshot_active_reasoning_write() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = fixture_ui(&app, FixtureKind::ActiveReasoningWrite);
@@ -371,7 +367,7 @@ async fn tui_snapshot_active_reasoning_write() {
 }
 
 #[test]
-fn tui_snapshot_long_markdown_meta_bottom_scroll() {
+pub(crate) fn tui_snapshot_long_markdown_meta_bottom_scroll() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let ui = fixture_ui(&app, FixtureKind::LongMarkdownBottom);
@@ -379,15 +375,21 @@ fn tui_snapshot_long_markdown_meta_bottom_scroll() {
 }
 
 #[test]
-fn tui_snapshot_long_thinking_markdown_meta_bottom_scroll() {
+pub(crate) fn tui_snapshot_long_thinking_markdown_meta_bottom_scroll() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let ui = fixture_ui(&app, FixtureKind::LongThinkingMarkdownBottom);
-    assert_tui_snapshot("long_thinking_markdown_meta_bottom_scroll", 100, 18, &app, ui);
+    assert_tui_snapshot(
+        "long_thinking_markdown_meta_bottom_scroll",
+        100,
+        18,
+        &app,
+        ui,
+    );
 }
 
 #[test]
-fn tui_snapshot_long_thinking_markdown_expanded_meta_bottom_scroll() {
+pub(crate) fn tui_snapshot_long_thinking_markdown_expanded_meta_bottom_scroll() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let ui = fixture_ui(&app, FixtureKind::LongThinkingMarkdownExpandedBottom);
@@ -401,7 +403,7 @@ fn tui_snapshot_long_thinking_markdown_expanded_meta_bottom_scroll() {
 }
 
 #[test]
-fn tui_snapshot_debug_meta_with_usage_metadata() {
+pub(crate) fn tui_snapshot_debug_meta_with_usage_metadata() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     app.debug = true;
@@ -410,7 +412,7 @@ fn tui_snapshot_debug_meta_with_usage_metadata() {
 }
 
 #[test]
-fn tui_snapshot_failure_tool_error_turn_meta() {
+pub(crate) fn tui_snapshot_failure_tool_error_turn_meta() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let ui = fixture_ui(&app, FixtureKind::FailureMeta);

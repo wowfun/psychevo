@@ -1,9 +1,11 @@
-struct GitSnapshot {
-    branch: String,
-    changed_files: Vec<String>,
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) struct GitSnapshot {
+    pub(crate) branch: String,
+    pub(crate) changed_files: Vec<String>,
 }
 
-fn git_snapshot(workdir: &PathBuf) -> GitSnapshot {
+pub(crate) fn git_snapshot(workdir: &PathBuf) -> GitSnapshot {
     let branch = StdCommand::new("git")
         .arg("-C")
         .arg(workdir)
@@ -39,7 +41,7 @@ fn git_snapshot(workdir: &PathBuf) -> GitSnapshot {
     }
 }
 
-fn tail_compact_status_line(line: &str) -> String {
+pub(crate) fn tail_compact_status_line(line: &str) -> String {
     let mut parts = line.split_whitespace().collect::<Vec<_>>();
     let Some(path) = parts.pop() else {
         return line.to_string();
@@ -57,7 +59,7 @@ fn tail_compact_status_line(line: &str) -> String {
     }
 }
 
-fn tail_compact_path(path: &str, max_chars: usize) -> String {
+pub(crate) fn tail_compact_path(path: &str, max_chars: usize) -> String {
     if path.chars().count() <= max_chars {
         return path.to_string();
     }
@@ -72,7 +74,7 @@ fn tail_compact_path(path: &str, max_chars: usize) -> String {
     format!("...{tail}")
 }
 
-fn home_dir_for_display(app: &TuiApp) -> Option<PathBuf> {
+pub(crate) fn home_dir_for_display(app: &TuiApp) -> Option<PathBuf> {
     app.env_map
         .get("HOME")
         .filter(|value| !value.is_empty())
@@ -84,7 +86,7 @@ fn home_dir_for_display(app: &TuiApp) -> Option<PathBuf> {
         })
 }
 
-fn format_directory_display_with_home(
+pub(crate) fn format_directory_display_with_home(
     directory: &Path,
     home: Option<&Path>,
     max_width: usize,
@@ -92,7 +94,7 @@ fn format_directory_display_with_home(
     center_truncate_path(&directory_display_value(directory, home), max_width)
 }
 
-fn directory_display_value(directory: &Path, home: Option<&Path>) -> String {
+pub(crate) fn directory_display_value(directory: &Path, home: Option<&Path>) -> String {
     if let Some(home) = home
         && !home.as_os_str().is_empty()
         && let Ok(relative) = directory.strip_prefix(home)
@@ -105,7 +107,7 @@ fn directory_display_value(directory: &Path, home: Option<&Path>) -> String {
     directory.display().to_string()
 }
 
-fn center_truncate_path(path: &str, max_width: usize) -> String {
+pub(crate) fn center_truncate_path(path: &str, max_width: usize) -> String {
     if max_width == 0 {
         return String::new();
     }
@@ -124,7 +126,7 @@ fn center_truncate_path(path: &str, max_width: usize) -> String {
     format!("{prefix}…{suffix}")
 }
 
-fn take_width_prefix(text: &str, max_width: usize) -> String {
+pub(crate) fn take_width_prefix(text: &str, max_width: usize) -> String {
     let mut out = String::new();
     let mut width = 0usize;
     for ch in text.chars() {
@@ -138,7 +140,7 @@ fn take_width_prefix(text: &str, max_width: usize) -> String {
     out
 }
 
-fn take_width_suffix(text: &str, max_width: usize) -> String {
+pub(crate) fn take_width_suffix(text: &str, max_width: usize) -> String {
     let mut chars = Vec::new();
     let mut width = 0usize;
     for ch in text.chars().rev() {

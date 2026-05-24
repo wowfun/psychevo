@@ -1,16 +1,18 @@
-fn install_workspace_root() -> PathBuf {
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) fn install_workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()
         .expect("workspace root")
 }
 
-fn install_script_path() -> PathBuf {
+pub(crate) fn install_script_path() -> PathBuf {
     install_workspace_root().join("scripts/install.sh")
 }
 
 #[test]
-fn install_dry_run_uses_explicit_source_and_default_init() {
+pub(crate) fn install_dry_run_uses_explicit_source_and_default_init() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let root = install_workspace_root();
@@ -56,7 +58,7 @@ fn install_dry_run_uses_explicit_source_and_default_init() {
 }
 
 #[test]
-fn install_dry_run_plans_clone_mode_and_no_init() {
+pub(crate) fn install_dry_run_plans_clone_mode_and_no_init() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let output = Command::new("sh")
@@ -97,7 +99,7 @@ fn install_dry_run_plans_clone_mode_and_no_init() {
 }
 
 #[test]
-fn install_dry_run_uses_windows_binary_name_for_git_bash() {
+pub(crate) fn install_dry_run_uses_windows_binary_name_for_git_bash() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let root = install_workspace_root();
@@ -122,7 +124,10 @@ fn install_dry_run_uses_windows_binary_name_for_git_bash() {
     let stdout = String::from_utf8(output.stdout).expect("stdout");
     assert!(stdout.contains("platform: windows-git-bash"), "{stdout}");
     assert!(
-        stdout.contains(&format!("pevo_binary: {}/.cargo/bin/pevo.exe", home.display())),
+        stdout.contains(&format!(
+            "pevo_binary: {}/.cargo/bin/pevo.exe",
+            home.display()
+        )),
         "{stdout}"
     );
     assert!(

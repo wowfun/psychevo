@@ -1,4 +1,6 @@
-fn init_skill_home(test_home: &Path, psychevo_home: &Path) {
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) fn init_skill_home(test_home: &Path, psychevo_home: &Path) {
     let output = pevo_cmd(test_home)
         .env("PSYCHEVO_HOME", psychevo_home)
         .arg("init")
@@ -11,7 +13,7 @@ fn init_skill_home(test_home: &Path, psychevo_home: &Path) {
     );
 }
 
-fn skill_cmd(test_home: &Path, psychevo_home: &Path, workdir: &Path) -> Command {
+pub(crate) fn skill_cmd(test_home: &Path, psychevo_home: &Path, workdir: &Path) -> Command {
     let mut command = pevo_cmd(test_home);
     command
         .env("PSYCHEVO_HOME", psychevo_home)
@@ -19,7 +21,7 @@ fn skill_cmd(test_home: &Path, psychevo_home: &Path, workdir: &Path) -> Command 
     command
 }
 
-fn write_cli_skill(root: &Path, name: &str, description: &str, body: &str) {
+pub(crate) fn write_cli_skill(root: &Path, name: &str, description: &str, body: &str) {
     let dir = root.join(name);
     std::fs::create_dir_all(&dir).expect("skill dir");
     std::fs::write(
@@ -30,7 +32,7 @@ fn write_cli_skill(root: &Path, name: &str, description: &str, body: &str) {
 }
 
 #[test]
-fn cli_skill_list_view_config_and_json() {
+pub(crate) fn cli_skill_list_view_config_and_json() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let workdir = temp.path().join("work");
@@ -131,12 +133,34 @@ fn cli_skill_list_view_config_and_json() {
         "stderr: {}",
         String::from_utf8_lossy(&set_config.stderr)
     );
-    let config = std::fs::read_to_string(psychevo_home.join("config.toml")).expect("config");
+    let config =
+        std::fs::read_to_string(workdir.join(".psychevo/config.toml")).expect("local config");
     assert!(config.contains("mode = \"strict\""));
+
+    let set_global_config = skill_cmd(temp.path(), &psychevo_home, &workdir)
+        .args([
+            "skill",
+            "config",
+            "set",
+            "skills.config.reviewer.global_mode",
+            "\"shared\"",
+            "-g",
+            "--json",
+        ])
+        .output()
+        .expect("pevo skill config set global");
+    assert!(
+        set_global_config.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&set_global_config.stderr)
+    );
+    let global_config =
+        std::fs::read_to_string(psychevo_home.join("config.toml")).expect("global config");
+    assert!(global_config.contains("global_mode = \"shared\""));
 }
 
 #[test]
-fn cli_skill_install_local_scope_and_scan_dangerous() {
+pub(crate) fn cli_skill_install_local_scope_and_scan_dangerous() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let workdir = temp.path().join("work");
@@ -158,12 +182,7 @@ fn cli_skill_install_local_scope_and_scan_dangerous() {
     );
 
     let install = skill_cmd(temp.path(), &psychevo_home, &workdir)
-        .args([
-            "skill",
-            "install",
-            source.to_str().expect("source"),
-            "--project",
-        ])
+        .args(["skill", "install", source.to_str().expect("source")])
         .output()
         .expect("pevo skill install");
     assert!(
@@ -194,7 +213,6 @@ fn cli_skill_install_local_scope_and_scan_dangerous() {
             "review-flow",
             "--skill",
             "imported",
-            "--project",
             "--json",
         ])
         .output()
@@ -206,10 +224,19 @@ fn cli_skill_install_local_scope_and_scan_dangerous() {
     );
     let bundle_value: Value = serde_json::from_slice(&bundle.stdout).expect("bundle json");
     assert_eq!(bundle_value["slug"], "review-flow");
-    assert!(workdir.join(".psychevo/skill-bundles/review-flow.toml").exists());
+    assert!(
+        workdir
+            .join(".psychevo/skill-bundles/review-flow.toml")
+            .exists()
+    );
 
     let scan = skill_cmd(temp.path(), &psychevo_home, &workdir)
-        .args(["skill", "audit", dangerous.to_str().expect("dangerous"), "--json"])
+        .args([
+            "skill",
+            "audit",
+            dangerous.to_str().expect("dangerous"),
+            "--json",
+        ])
         .output()
         .expect("pevo skill audit");
     assert!(
@@ -221,12 +248,7 @@ fn cli_skill_install_local_scope_and_scan_dangerous() {
     assert_eq!(value["scan"]["verdict"], "dangerous");
 
     let blocked = skill_cmd(temp.path(), &psychevo_home, &workdir)
-        .args([
-            "skill",
-            "install",
-            dangerous.to_str().expect("dangerous"),
-            "--project",
-        ])
+        .args(["skill", "install", dangerous.to_str().expect("dangerous")])
         .output()
         .expect("pevo skill install dangerous");
     assert!(!blocked.status.success());
@@ -236,7 +258,7 @@ fn cli_skill_install_local_scope_and_scan_dangerous() {
 }
 
 #[test]
-fn cli_skill_install_git_from_local_repo() {
+pub(crate) fn cli_skill_install_git_from_local_repo() {
     if Command::new("git").arg("--version").output().is_err() {
         return;
     }
@@ -296,6 +318,7 @@ fn cli_skill_install_git_from_local_repo() {
         "stderr: {}",
         String::from_utf8_lossy(&install.stderr)
     );
-    assert!(psychevo_home.join("skills/git-skill/SKILL.md").exists());
-    assert!(!psychevo_home.join("skills/.provenance.json").exists());
+    assert!(workdir.join(".psychevo/skills/git-skill/SKILL.md").exists());
+    assert!(!workdir.join(".psychevo/skills/.provenance.json").exists());
+    assert!(!psychevo_home.join("skills/git-skill/SKILL.md").exists());
 }

@@ -26,7 +26,7 @@ size=120x24
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-› /model  choose model
+› /model  configure model
   /mode  set runtime permission mode
   /permissions  view/edit permission policy
 › /mo
@@ -52,7 +52,7 @@ mock/model  high  ~/work · main
 [default]
 [default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-[cyan]› /model[default]  [dim]choose model[default]
+[cyan]› /model[default]  [dim]configure model[default]
 [cyan]  /mode[default]  [dim]set runtime permission mode[default]
 [cyan]  /permissions[default]  [dim]view/edit permission policy[default]
 [dim]›[default] /mo

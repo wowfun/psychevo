@@ -2,7 +2,7 @@ use std::env;
 use std::process::ExitCode;
 
 use anyhow::Result;
-use psychevo_runtime::{StatsOptions, usage_stats};
+use psychevo_runtime::{StateRuntime, StatsOptions, usage_stats};
 use serde_json::Value;
 
 use crate::args::StatsArgs;
@@ -16,7 +16,7 @@ pub(crate) fn run_stats_command(args: StatsArgs) -> Result<ExitCode> {
     ensure_home_initialized(&home)?;
     let db_path = resolve_state_db(&env_map, &home, &cwd)?;
     let report = usage_stats(StatsOptions {
-        db_path,
+        state: StateRuntime::open(&db_path)?,
         workdir,
         all: args.all,
         days: args.days,
@@ -30,7 +30,7 @@ pub(crate) fn run_stats_command(args: StatsArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn print_human_report(report: &Value) {
+pub(crate) fn print_human_report(report: &Value) {
     let scope = report.get("scope").unwrap_or(&Value::Null);
     let totals = report.get("totals").unwrap_or(&Value::Null);
     let scope_label = if scope.get("all").and_then(Value::as_bool) == Some(true) {
@@ -98,7 +98,7 @@ fn print_human_report(report: &Value) {
     );
 }
 
-fn print_table(
+pub(crate) fn print_table(
     title: &str,
     rows: Option<&Value>,
     left: impl Fn(&Value) -> String,
@@ -115,11 +115,11 @@ fn print_table(
     }
 }
 
-fn int(value: &Value, key: &str) -> i64 {
+pub(crate) fn int(value: &Value, key: &str) -> i64 {
     value.get(key).and_then(Value::as_i64).unwrap_or(0)
 }
 
-fn format_nanodollars(value: i64) -> String {
+pub(crate) fn format_nanodollars(value: i64) -> String {
     if value == 0 {
         "$0.000000".to_string()
     } else {

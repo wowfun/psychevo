@@ -1,32 +1,34 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct SkillSearchMatch {
-    name: String,
-    description: String,
+pub(crate) struct SkillSearchMatch {
+    pub(crate) name: String,
+    pub(crate) description: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct SkillToken {
-    row: usize,
-    start_col: usize,
-    end_col: usize,
-    query: String,
+pub(crate) struct SkillToken {
+    pub(crate) row: usize,
+    pub(crate) start_col: usize,
+    pub(crate) end_col: usize,
+    pub(crate) query: String,
 }
 
 #[derive(Debug, Clone, Default)]
-struct SkillSearchState {
-    popup: Option<SkillSearchPopupState>,
-    dismissed_query: Option<String>,
+pub(crate) struct SkillSearchState {
+    pub(crate) popup: Option<SkillSearchPopupState>,
+    pub(crate) dismissed_query: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct SkillSearchPopupState {
-    query: String,
-    matches: Vec<SkillSearchMatch>,
-    selected: usize,
+pub(crate) struct SkillSearchPopupState {
+    pub(crate) query: String,
+    pub(crate) matches: Vec<SkillSearchMatch>,
+    pub(crate) selected: usize,
 }
 
 impl SkillSearchState {
-    fn sync(&mut self, token: Option<&SkillToken>, matches: Vec<SkillSearchMatch>) {
+    pub(crate) fn sync(&mut self, token: Option<&SkillToken>, matches: Vec<SkillSearchMatch>) {
         let Some(token) = token else {
             self.close();
             self.dismissed_query = None;
@@ -51,16 +53,16 @@ impl SkillSearchState {
         });
     }
 
-    fn close(&mut self) {
+    pub(crate) fn close(&mut self) {
         self.popup = None;
     }
 
-    fn dismiss(&mut self, query: Option<String>) {
+    pub(crate) fn dismiss(&mut self, query: Option<String>) {
         self.dismissed_query = query;
         self.close();
     }
 
-    fn height(&self) -> u16 {
+    pub(crate) fn height(&self) -> u16 {
         let Some(popup) = &self.popup else {
             return 0;
         };
@@ -68,14 +70,14 @@ impl SkillSearchState {
         rows as u16
     }
 
-    fn selected_name(&self) -> Option<String> {
+    pub(crate) fn selected_name(&self) -> Option<String> {
         self.popup
             .as_ref()
             .and_then(|popup| popup.matches.get(popup.selected))
             .map(|entry| entry.name.clone())
     }
 
-    fn move_selection(&mut self, direction: isize) {
+    pub(crate) fn move_selection(&mut self, direction: isize) {
         let Some(popup) = &mut self.popup else {
             return;
         };
@@ -88,7 +90,7 @@ impl SkillSearchState {
         popup.selected = (current + direction).rem_euclid(len as isize) as usize;
     }
 
-    fn set_selection(&mut self, index: usize) {
+    pub(crate) fn set_selection(&mut self, index: usize) {
         let Some(popup) = &mut self.popup else {
             return;
         };

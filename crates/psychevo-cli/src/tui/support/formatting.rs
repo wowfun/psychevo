@@ -1,4 +1,6 @@
-fn increment_row_index(value: &mut Option<usize>, inserted_at: usize) {
+#[allow(unused_imports)]
+pub(crate) use super::*;
+pub(crate) fn increment_row_index(value: &mut Option<usize>, inserted_at: usize) {
     if let Some(index) = value
         && *index >= inserted_at
     {
@@ -6,7 +8,7 @@ fn increment_row_index(value: &mut Option<usize>, inserted_at: usize) {
     }
 }
 
-fn decrement_row_index(value: &mut Option<usize>, removed_at: usize) {
+pub(crate) fn decrement_row_index(value: &mut Option<usize>, removed_at: usize) {
     if let Some(index) = value {
         if *index == removed_at {
             *value = None;
@@ -16,7 +18,7 @@ fn decrement_row_index(value: &mut Option<usize>, removed_at: usize) {
     }
 }
 
-fn format_configured_model(model: &ConfiguredModel) -> String {
+pub(crate) fn format_configured_model(model: &ConfiguredModel) -> String {
     let mut parts = vec![format!("{}/{}", model.provider, model.model)];
     if let Some(variant) = &model.reasoning_effort {
         parts.push(format!("variant={variant}"));
@@ -27,11 +29,11 @@ fn format_configured_model(model: &ConfiguredModel) -> String {
     parts.join(" ")
 }
 
-fn format_model_spec(model: &ConfiguredModel) -> String {
+pub(crate) fn format_model_spec(model: &ConfiguredModel) -> String {
     format!("{}/{}", model.provider, model.model)
 }
 
-fn variant_description(variant: &str) -> &'static str {
+pub(crate) fn variant_description(variant: &str) -> &'static str {
     match variant {
         "none" => "suppress provider reasoning field",
         "minimal" => "smallest reasoning request",
@@ -45,7 +47,7 @@ fn variant_description(variant: &str) -> &'static str {
 }
 
 #[cfg(test)]
-fn resolve_session_ref_from_summaries(
+pub(crate) fn resolve_session_ref_from_summaries(
     sessions: &[SessionSummary],
     reference: &str,
 ) -> Result<String> {

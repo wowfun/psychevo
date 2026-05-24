@@ -12,7 +12,9 @@ use crate::args::{
     ToolArgs, ToolCommand, ToolCreateArgs, ToolListArgs, ToolModeMutationArgs, ToolRemoveArgs,
     ToolShowArgs,
 };
-use crate::commands::common::{base_run_options, config_scope_dir, print_json_error, scope_label};
+use crate::commands::common::{
+    base_run_options, print_json_error, scoped_config_dir, scoped_label,
+};
 use crate::env::{inherited_env, resolve_psychevo_home};
 
 pub(crate) fn run_tool_command(args: ToolArgs) -> Result<ExitCode> {
@@ -26,7 +28,7 @@ pub(crate) fn run_tool_command(args: ToolArgs) -> Result<ExitCode> {
     }
 }
 
-fn run_tool_command_inner(args: &ToolArgs) -> Result<ExitCode> {
+pub(crate) fn run_tool_command_inner(args: &ToolArgs) -> Result<ExitCode> {
     let Some(command) = args.command.as_ref() else {
         list_toolsets(&ToolListArgs { json: false })?;
         return Ok(ExitCode::SUCCESS);
@@ -42,14 +44,14 @@ fn run_tool_command_inner(args: &ToolArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn list_toolsets(args: &ToolListArgs) -> Result<()> {
+pub(crate) fn list_toolsets(args: &ToolListArgs) -> Result<()> {
     let (env_map, home, cwd) = command_context()?;
     let options = base_run_options(&env_map, &home, &cwd)?;
     let value = toolsets_value(&options, ConfigScope::Effective)?;
     print_toolsets_value(&value, args.json)
 }
 
-fn show_toolset(args: &ToolShowArgs) -> Result<()> {
+pub(crate) fn show_toolset(args: &ToolShowArgs) -> Result<()> {
     let (env_map, home, cwd) = command_context()?;
     let options = base_run_options(&env_map, &home, &cwd)?;
     let value = toolsets_value(&options, ConfigScope::Effective)?;
@@ -69,16 +71,16 @@ fn show_toolset(args: &ToolShowArgs) -> Result<()> {
     Ok(())
 }
 
-fn set_toolset_enabled(args: &ToolModeMutationArgs, enabled: bool) -> Result<()> {
+pub(crate) fn set_toolset_enabled(args: &ToolModeMutationArgs, enabled: bool) -> Result<()> {
     let (env_map, home, cwd) = command_context()?;
     let result = set_local_toolset_enabled(
-        config_scope_dir(&home, &cwd, true)?,
+        scoped_config_dir(&home, &cwd, args.global)?,
         args.mode.run_mode(),
         &args.name,
         enabled,
     )?;
     let value = json!({
-        "scope": scope_label(true),
+        "scope": scoped_label(args.global),
         "path": result.config_path,
         "name": result.name,
         "mode": args.mode.run_mode().as_str(),
@@ -100,10 +102,10 @@ fn set_toolset_enabled(args: &ToolModeMutationArgs, enabled: bool) -> Result<()>
     Ok(())
 }
 
-fn create_toolset(args: &ToolCreateArgs) -> Result<()> {
+pub(crate) fn create_toolset(args: &ToolCreateArgs) -> Result<()> {
     let (_env_map, home, cwd) = command_context()?;
     let result = create_local_toolset(
-        config_scope_dir(&home, &cwd, true)?,
+        scoped_config_dir(&home, &cwd, args.global)?,
         &args.name,
         args.description.clone(),
         args.tools.clone(),
@@ -111,7 +113,7 @@ fn create_toolset(args: &ToolCreateArgs) -> Result<()> {
         args.force,
     )?;
     let value = json!({
-        "scope": scope_label(true),
+        "scope": scoped_label(args.global),
         "path": result.config_path,
         "name": result.name,
         "changed": result.changed,
@@ -126,11 +128,11 @@ fn create_toolset(args: &ToolCreateArgs) -> Result<()> {
     Ok(())
 }
 
-fn remove_toolset(args: &ToolRemoveArgs) -> Result<()> {
+pub(crate) fn remove_toolset(args: &ToolRemoveArgs) -> Result<()> {
     let (_env_map, home, cwd) = command_context()?;
-    let result = remove_local_toolset(config_scope_dir(&home, &cwd, true)?, &args.name)?;
+    let result = remove_local_toolset(scoped_config_dir(&home, &cwd, args.global)?, &args.name)?;
     let value = json!({
-        "scope": scope_label(true),
+        "scope": scoped_label(args.global),
         "path": result.config_path,
         "name": result.name,
         "changed": result.changed,
@@ -153,7 +155,7 @@ fn remove_toolset(args: &ToolRemoveArgs) -> Result<()> {
     Ok(())
 }
 
-fn command_context() -> Result<(
+pub(crate) fn command_context() -> Result<(
     std::collections::BTreeMap<String, String>,
     std::path::PathBuf,
     std::path::PathBuf,
@@ -164,7 +166,7 @@ fn command_context() -> Result<(
     Ok((env_map, home, cwd))
 }
 
-fn print_toolsets_value(value: &Value, as_json: bool) -> Result<()> {
+pub(crate) fn print_toolsets_value(value: &Value, as_json: bool) -> Result<()> {
     if as_json {
         println!("{}", serde_json::to_string_pretty(value)?);
         return Ok(());
@@ -198,7 +200,7 @@ fn print_toolsets_value(value: &Value, as_json: bool) -> Result<()> {
     Ok(())
 }
 
-fn print_toolset_row(row: &Value) {
+pub(crate) fn print_toolset_row(row: &Value) {
     println!("name: {}", row["name"].as_str().unwrap_or("-"));
     println!("source: {}", row["source"].as_str().unwrap_or("-"));
     println!(
@@ -213,7 +215,7 @@ fn print_toolset_row(row: &Value) {
     }
 }
 
-fn join_strings(value: &Value) -> String {
+pub(crate) fn join_strings(value: &Value) -> String {
     value
         .as_array()
         .map(|values| {
@@ -226,7 +228,7 @@ fn join_strings(value: &Value) -> String {
         .unwrap_or_default()
 }
 
-fn tool_json(args: &ToolArgs) -> bool {
+pub(crate) fn tool_json(args: &ToolArgs) -> bool {
     match &args.command {
         Some(ToolCommand::List(args)) => args.json,
         Some(ToolCommand::Show(args)) => args.json,

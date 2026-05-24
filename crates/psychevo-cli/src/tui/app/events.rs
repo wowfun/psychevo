@@ -1,5 +1,10 @@
+#[allow(unused_imports)]
+pub(crate) use super::*;
 impl TuiApp {
-    async fn drain_fullscreen_events(&mut self, ui: &mut FullscreenUi<'_>) -> Result<bool> {
+    pub(crate) async fn drain_fullscreen_events(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+    ) -> Result<bool> {
         let mut changed = false;
         let (agent_changed, active_tool_frame_requested) =
             self.drain_finished_auxiliary_agent_tasks(ui).await?;
@@ -154,7 +159,7 @@ impl TuiApp {
         Ok(changed)
     }
 
-    fn drain_available_fullscreen_stream_events(
+    pub(crate) fn drain_available_fullscreen_stream_events(
         &mut self,
         ui: &mut FullscreenUi<'_>,
     ) -> (bool, bool) {
@@ -179,7 +184,7 @@ impl TuiApp {
         }
     }
 
-    fn apply_pending_fullscreen_stream_events(
+    pub(crate) fn apply_pending_fullscreen_stream_events(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         mut pending: VecDeque<RunStreamEvent>,
@@ -196,7 +201,7 @@ impl TuiApp {
         (had_pending, false)
     }
 
-    fn apply_pending_fullscreen_stream_events_without_frames(
+    pub(crate) fn apply_pending_fullscreen_stream_events_without_frames(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         mut pending: VecDeque<RunStreamEvent>,
@@ -209,7 +214,7 @@ impl TuiApp {
         had_pending
     }
 
-    fn apply_pending_auxiliary_agent_events(
+    pub(crate) fn apply_pending_auxiliary_agent_events(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         owner_session: Option<&str>,
@@ -223,7 +228,7 @@ impl TuiApp {
         had_pending
     }
 
-    fn apply_pending_auxiliary_shell_events(
+    pub(crate) fn apply_pending_auxiliary_shell_events(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         owner_session: Option<&str>,
@@ -242,7 +247,7 @@ impl TuiApp {
         (had_pending, false)
     }
 
-    fn apply_pending_owned_fullscreen_stream_events(
+    pub(crate) fn apply_pending_owned_fullscreen_stream_events(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         owner_session: Option<&str>,
@@ -256,7 +261,7 @@ impl TuiApp {
         had_pending
     }
 
-    fn apply_pending_owned_fullscreen_stream_events_with_frames(
+    pub(crate) fn apply_pending_owned_fullscreen_stream_events_with_frames(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         owner_session: Option<&str>,
@@ -275,7 +280,7 @@ impl TuiApp {
         (had_pending, false)
     }
 
-    fn apply_auxiliary_agent_stream_event(
+    pub(crate) fn apply_auxiliary_agent_stream_event(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         owner_session: Option<&str>,
@@ -291,7 +296,7 @@ impl TuiApp {
         }
     }
 
-    fn apply_auxiliary_shell_stream_event(
+    pub(crate) fn apply_auxiliary_shell_stream_event(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         owner_session: Option<&str>,
@@ -300,7 +305,7 @@ impl TuiApp {
         self.apply_owned_fullscreen_stream_event(ui, owner_session, event)
     }
 
-    fn apply_owned_fullscreen_stream_event(
+    pub(crate) fn apply_owned_fullscreen_stream_event(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         owner_session: Option<&str>,
@@ -337,7 +342,7 @@ impl TuiApp {
         active_tool_frame_requested
     }
 
-    fn apply_fullscreen_stream_event(
+    pub(crate) fn apply_fullscreen_stream_event(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         event: RunStreamEvent,
@@ -358,6 +363,7 @@ impl TuiApp {
             }
             if running_owner_missing && self.current_session.is_none() {
                 self.current_session = Some(session_id.to_string());
+                self.reset_live_agent_reload_poll();
                 self.current_session_title = None;
             }
             if self
@@ -397,7 +403,7 @@ impl TuiApp {
         ui.apply_stream_event_for_session(event, self.thinking_visible, self.debug, event_session)
     }
 
-    fn apply_scoped_fullscreen_stream_event(
+    pub(crate) fn apply_scoped_fullscreen_stream_event(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         session_id: &str,
@@ -441,7 +447,11 @@ impl TuiApp {
         false
     }
 
-    fn observe_fullscreen_value_event(&mut self, ui: &mut FullscreenUi<'_>, value: &Value) -> bool {
+    pub(crate) fn observe_fullscreen_value_event(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        value: &Value,
+    ) -> bool {
         if value.get("type").and_then(Value::as_str) != Some("run_start") {
             return false;
         }
@@ -450,6 +460,7 @@ impl TuiApp {
         };
         if self.current_session.as_deref() != Some(session_id) {
             self.current_session = Some(session_id.to_string());
+            self.reset_live_agent_reload_poll();
             self.current_session_title = None;
         }
         if let Some(running) = ui.running.as_mut()
@@ -467,7 +478,7 @@ impl TuiApp {
         true
     }
 
-    fn finish_streamed_agent_turn(&mut self, ui: &mut FullscreenUi<'_>) {
+    pub(crate) fn finish_streamed_agent_turn(&mut self, ui: &mut FullscreenUi<'_>) {
         let outcome = ui.turn_outcome.unwrap_or(Outcome::Normal);
         let terminal_message = ui.turn_terminal_message.take();
         if let Some(running) = ui.running.take() {
@@ -525,7 +536,10 @@ impl TuiApp {
         }
     }
 
-    async fn drain_compaction_task(&mut self, ui: &mut FullscreenUi<'_>) -> Result<bool> {
+    pub(crate) async fn drain_compaction_task(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+    ) -> Result<bool> {
         let Some(task) = self.compaction_task.as_ref() else {
             return Ok(false);
         };
@@ -585,7 +599,10 @@ impl TuiApp {
         Ok(true)
     }
 
-    fn maybe_start_auto_compaction(&mut self, ui: &mut FullscreenUi<'_>) -> Result<bool> {
+    pub(crate) fn maybe_start_auto_compaction(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+    ) -> Result<bool> {
         if self.in_btw_side()
             || self.current_session.is_none()
             || ui.running.is_some()
@@ -603,7 +620,7 @@ impl TuiApp {
         };
         let session = self.current_session.clone().expect("checked session");
         let options = AutoCompactionCheckOptions {
-            db_path: self.db_path.clone(),
+            state: self.state_runtime.clone(),
             workdir: self.workdir.clone(),
             session,
             config_path: self.config_path.clone(),
@@ -625,7 +642,7 @@ impl TuiApp {
         Ok(true)
     }
 
-    async fn drain_finished_auxiliary_agent_tasks(
+    pub(crate) async fn drain_finished_auxiliary_agent_tasks(
         &mut self,
         ui: &mut FullscreenUi<'_>,
     ) -> Result<(bool, bool)> {
@@ -673,7 +690,7 @@ impl TuiApp {
         Ok((changed, false))
     }
 
-    async fn drain_auxiliary_shell_tasks(
+    pub(crate) async fn drain_auxiliary_shell_tasks(
         &mut self,
         ui: &mut FullscreenUi<'_>,
     ) -> Result<(bool, bool)> {
@@ -752,7 +769,7 @@ impl TuiApp {
         Ok((changed, false))
     }
 
-    fn render_fullscreen(&self, frame: &mut Frame<'_>, ui: &mut FullscreenUi<'_>) {
+    pub(crate) fn render_fullscreen(&self, frame: &mut Frame<'_>, ui: &mut FullscreenUi<'_>) {
         let area = frame.area();
         ui.clear_screen_lines();
         ui.set_thinking_visible(self.thinking_visible);
@@ -930,63 +947,7 @@ impl TuiApp {
     }
 }
 
-fn agent_child_event_ends_live_backlog(event: &RunStreamEvent) -> bool {
-    match event {
-        RunStreamEvent::Event(value) => matches!(
-            value.get("type").and_then(Value::as_str),
-            Some("message_end") | Some("run_end")
-        ),
-        RunStreamEvent::Scoped { event, .. } => agent_child_event_ends_live_backlog(event),
-        _ => false,
-    }
-}
-
-fn stream_event_session_id(event: &RunStreamEvent) -> Option<&str> {
-    match event {
-        RunStreamEvent::Event(value) => value.get("session_id").and_then(Value::as_str),
-        RunStreamEvent::Scoped { session_id, .. } => Some(session_id.as_str()),
-        _ => None,
-    }
-}
-
-fn buffer_session_live_event(ui: &mut FullscreenUi<'_>, session_id: &str, event: RunStreamEvent) {
-    if session_live_event_ends_backlog(&event) {
-        ui.session_live_event_backlog.remove(session_id);
-        return;
-    }
-    let backlog = ui
-        .session_live_event_backlog
-        .entry(session_id.to_string())
-        .or_default();
-    backlog.push(event);
-    const MAX_SESSION_LIVE_BACKLOG_EVENTS: usize = 500;
-    if backlog.len() > MAX_SESSION_LIVE_BACKLOG_EVENTS {
-        let drain = backlog.len() - MAX_SESSION_LIVE_BACKLOG_EVENTS;
-        backlog.drain(0..drain);
-    }
-}
-
-fn session_live_event_ends_backlog(event: &RunStreamEvent) -> bool {
-    match event {
-        RunStreamEvent::Event(value) => matches!(
-            value.get("type").and_then(Value::as_str),
-            Some("message_end") | Some("agent_end") | Some("run_end")
-        ),
-        RunStreamEvent::Scoped { event, .. } => session_live_event_ends_backlog(event),
-        _ => false,
-    }
-}
-
-fn turn_ended_error_message(outcome: Outcome, terminal_reason: Option<TerminalReason>) -> String {
-    turn_ended_error_text(
-        outcome,
-        terminal_reason.map(TerminalReason::message).as_deref(),
-    )
-}
-
-fn turn_ended_error_text(outcome: Outcome, terminal_message: Option<&str>) -> String {
-    match terminal_message.filter(|message| !message.trim().is_empty()) {
-        Some(message) => format!("turn ended: {} - {message}", outcome.as_str()),
-        None => format!("turn ended: {}", outcome.as_str()),
-    }
-}
+#[path = "events/helpers.rs"]
+pub(crate) mod helpers;
+#[allow(unused_imports)]
+pub use helpers::*;

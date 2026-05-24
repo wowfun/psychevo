@@ -8,7 +8,7 @@ use futures::future::BoxFuture;
 use psychevo_ai::Outcome;
 use psychevo_runtime::{
     ApprovalHandler, PermissionApprovalDecision, PermissionApprovalRequest, PermissionMode,
-    RunMode, RunOptions, run_live,
+    RunMode, RunOptions, StateRuntime, run_live,
 };
 
 use crate::args::{PermissionModeArg, RunArgs, RunFormatArg};
@@ -34,7 +34,7 @@ pub(crate) async fn run_run_command(args: RunArgs) -> Result<ExitCode> {
     }
 }
 
-async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
+pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
     if args.include_reasoning && args.format != RunFormatArg::Json {
         return Err(anyhow!("--include-reasoning requires --format json"));
     }
@@ -73,9 +73,10 @@ async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
         .map(PermissionModeArg::permission_mode)
         .filter(|mode| *mode != PermissionMode::Default);
     let approval_handler = interactive_approval_handler();
+    let state = StateRuntime::open(&db_path)?;
 
     let result = run_live(RunOptions {
-        db_path,
+        state,
         workdir,
         snapshot_root: Some(home.join("snapshots")),
         session: args.session.clone(),
@@ -134,7 +135,7 @@ async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
     })
 }
 
-fn read_prompt(message: &[String]) -> Result<String> {
+pub(crate) fn read_prompt(message: &[String]) -> Result<String> {
     let mut prompt = message.join(" ");
     if !io::stdin().is_terminal() {
         let mut stdin = String::new();
@@ -151,13 +152,13 @@ fn read_prompt(message: &[String]) -> Result<String> {
     Ok(prompt)
 }
 
-fn interactive_approval_handler() -> Option<Arc<dyn ApprovalHandler>> {
+pub(crate) fn interactive_approval_handler() -> Option<Arc<dyn ApprovalHandler>> {
     (io::stdin().is_terminal() && io::stderr().is_terminal())
         .then(|| Arc::new(CliApprovalHandler) as Arc<dyn ApprovalHandler>)
 }
 
 #[derive(Debug)]
-struct CliApprovalHandler;
+pub(crate) struct CliApprovalHandler;
 
 impl ApprovalHandler for CliApprovalHandler {
     fn timeout_secs(&self) -> u64 {
@@ -176,7 +177,9 @@ impl ApprovalHandler for CliApprovalHandler {
     }
 }
 
-fn prompt_for_permission(request: PermissionApprovalRequest) -> PermissionApprovalDecision {
+pub(crate) fn prompt_for_permission(
+    request: PermissionApprovalRequest,
+) -> PermissionApprovalDecision {
     let mut stderr = io::stderr();
     let _ = writeln!(stderr, "permission required: {}", request.reason);
     let _ = writeln!(stderr, "tool: {}", request.tool_name);
