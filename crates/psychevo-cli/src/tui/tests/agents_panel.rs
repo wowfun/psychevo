@@ -1178,10 +1178,23 @@ async fn esc_interrupts_running_child_from_parent_session_after_return() {
     assert_eq!(app.current_session.as_deref(), Some(parent.as_str()));
     assert!(ui.running.is_none());
     assert_eq!(ui.auxiliary_agent_tasks.len(), 1);
+    let before_draw_ms = wall_now_ms();
     let buffer = draw_fullscreen_for_test(&app, &mut ui, 100, 12);
+    let after_draw_ms = wall_now_ms();
     let text = buffer_text(&buffer);
-    assert!(text.contains("22s · Esc"), "{text}");
-    assert!(!text.contains("6s · Esc"), "{text}");
+    let elapsed = rendered_running_elapsed_seconds(&text).expect("running elapsed in status line");
+    let parent_range = rendered_elapsed_seconds_range(parent_prompt_ms, before_draw_ms, after_draw_ms);
+    let child_range = rendered_elapsed_seconds_range(child_prompt_ms, before_draw_ms, after_draw_ms);
+    assert!(
+        (parent_range.0..=parent_range.1).contains(&elapsed),
+        "expected parent elapsed in range {:?}, got {elapsed}s\n{text}",
+        parent_range
+    );
+    assert!(
+        !(child_range.0..=child_range.1).contains(&elapsed),
+        "expected parent elapsed instead of child elapsed range {:?}, got {elapsed}s\n{text}",
+        child_range
+    );
 
     app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
         .await
@@ -1190,6 +1203,39 @@ async fn esc_interrupts_running_child_from_parent_session_after_return() {
     assert!(ui.interrupt_requested);
     for agent in &ui.auxiliary_agent_tasks {
         agent.task.abort();
+    }
+}
+
+fn rendered_elapsed_seconds_range(start_ms: i64, before_ms: i64, after_ms: i64) -> (u64, u64) {
+    (
+        before_ms.saturating_sub(start_ms).max(0) as u64 / 1_000,
+        after_ms.saturating_sub(start_ms).max(0) as u64 / 1_000,
+    )
+}
+
+fn rendered_running_elapsed_seconds(text: &str) -> Option<u64> {
+    let mut elapsed = None;
+    for line in text.lines() {
+        let mut start = 0;
+        while let Some(offset) = line[start..].find(" · Esc") {
+            let marker = start + offset;
+            if let Some(token) = line[..marker].split_whitespace().last()
+                && let Some(seconds) = compact_duration_seconds(token)
+            {
+                elapsed = Some(seconds);
+            }
+            start = marker + " · Esc".len();
+        }
+    }
+    elapsed
+}
+
+fn compact_duration_seconds(token: &str) -> Option<u64> {
+    let token = token.strip_suffix('s')?;
+    if let Some((minutes, seconds)) = token.split_once('m') {
+        Some(minutes.parse::<u64>().ok()? * 60 + seconds.parse::<u64>().ok()?)
+    } else {
+        token.parse::<u64>().ok()
     }
 }
 

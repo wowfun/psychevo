@@ -103,6 +103,11 @@ resource policy rules, path rules, or failure policy.
 
 A tool result artifact is loop-visible result material produced after a tool execution. Tool-result message semantics are defined by [002 Agent Execution](../002-agent-execution/spec.md). This spec does not define tool result payloads, rendering, schema validation, or durable record shape.
 
+## Attachments
+
+- [Declaration Quality](declaration-quality.md) defines first-slice
+  expectations for model-visible tool declaration descriptions.
+
 ## Related Topics
 
 - [000 Foundation](../000-foundation/spec.md) defines the upstream project foundation and implementation-neutral principles.
@@ -119,5 +124,3 @@ A tool result artifact is loop-visible result material produced after a tool exe
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines how capability contributions may provide tool candidates before agent-invocation scoped selection.
 - [051 Agents](../051-agents/spec.md) defines selected-agent tool policy.
 - [051 Subagents](../051-agents/subagents.md) defines subagent control tools.
-- [007 Declaration Quality](declaration-quality.md) defines first-slice
-  expectations for model-visible tool declaration descriptions.

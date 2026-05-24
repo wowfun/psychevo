@@ -144,6 +144,12 @@ Summary context produced by a transformation is model-visible context. Summary c
 
 Transformation policy may depend on caller inputs, runtime configuration, provider constraints, or model limits. This spec does not define those policies or their precedence.
 
+## Attachments
+
+- [Prompt Assembly Attachment](prompt-assembly.md) defines typed prompt slot
+  ordering, prefix snapshots, provider-role fallback, and context usage
+  categories.
+
 ## Related Topics
 
 - [000 Foundation](../000-foundation/spec.md) defines the upstream project foundation and implementation-neutral principles.
@@ -161,6 +167,3 @@ Transformation policy may depend on caller inputs, runtime configuration, provid
 - [055 Skills](../055-skills/spec.md) defines skill package discovery and model-visible skill index semantics.
 - [130 Context Compaction](../130-context-compaction/spec.md) defines the
   implementation policy for compacted summary context.
-- [Prompt Assembly Attachment](prompt-assembly.md) defines typed prompt slot
-  ordering, prefix snapshots, provider-role fallback, and context usage
-  categories.

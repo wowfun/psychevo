@@ -124,6 +124,10 @@ declaration in the reconstructed provider tool schema. Reconstruction should use
 the same tool-surface declaration assembly as live runs, with inert bindings
 where execution-only responders are unavailable.
 
+## Attachments
+
+- [Testing](testing.md) defines acceptance scenarios and validation expectations.
+
 ## Related Topics
 
 - [002 Agent Execution](../002-agent-execution/spec.md) defines tool execution

@@ -41,7 +41,7 @@ Out of scope:
 - durable session and model metadata contracts; these belong to
   [210 pevo TUI](../210-pevo-tui/spec.md)
 
-## Topic Attachments
+## Attachments
 
 - [Keymap and Composer](keymap-and-composer.md) defines fullscreen key handling,
   composer state, paste handling, mouse routing, and local selection basics.

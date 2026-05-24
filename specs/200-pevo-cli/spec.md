@@ -274,25 +274,28 @@ default and support `--json`. JSON errors use:
 supports installing from a local checkout or a cloned Git repository, verifies
 the installed binary, and optionally initializes the global Psychevo home.
 
+## Attachments
+
+- [pevo init](pevo-init.md) defines global home initialization.
+- [pevo run](pevo-run.md) defines the live coding-agent command.
+- [pevo stats](pevo-stats.md) defines local usage and estimated-cost
+  reporting.
+- [pevo context](pevo-context.md) defines local context-window usage
+  inspection.
+- [pevo install](install.md) defines the source install helper script.
+- [Testing](testing.md) defines acceptance coverage.
+
 ## Related Topics
 
 - [025 CLI](../025-cli/spec.md) defines command-line foundation semantics.
 - [026 Commands](../026-commands/spec.md) defines shared command contract
   conventions.
-- [200 pevo init](pevo-init.md) defines global home initialization.
-- [200 pevo run](pevo-run.md) defines the live coding-agent command.
-- [200 pevo stats](pevo-stats.md) defines local usage and estimated-cost
-  reporting.
-- [200 pevo context](pevo-context.md) defines local context-window usage
-  inspection.
-- [200 pevo install](install.md) defines the source install helper script.
 - [210 pevo TUI](../210-pevo-tui/spec.md) defines the fullscreen interactive
   terminal command.
 - [055 Skills](../055-skills/spec.md) defines the skill package and lifecycle
   semantics exposed by `pevo skill`.
 - [051 Agents](../051-agents/spec.md) defines agent definition semantics.
 - [051 Subagents](../051-agents/subagents.md) defines subagent command semantics.
-- [200 Testing](testing.md) defines acceptance coverage.
 - [120 Provider Registry](../120-provider-registry/spec.md) defines
   provider/model configuration and resolution.
 - [035 Permissions](../035-permissions/spec.md) defines permission rules,

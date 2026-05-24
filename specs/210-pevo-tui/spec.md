@@ -113,10 +113,8 @@ or keybinding configuration rejects TUI startup with a bounded configuration
 error. Configured aliases participate in slash menu completion as alias rows,
 and configured concrete slash lines appear in `/help` `Custom commands`.
 
-## Topic Attachments
+## Attachments
 
-- [080 Design System](../080-design-system/spec.md) is the source of truth for
-  visual language, shared TUI component contracts, and interaction principles.
 - [Sessions](sessions.md) defines session resume, switching, stable activity
   ordering, history, titles, archive/delete, and undo/redo-adjacent session
   behavior.

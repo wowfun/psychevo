@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-05-24
+
+- Added ACP setup docs, testing specs for clarify/compaction/ACP packaging, and
+  a README refresh for the current CLI/TUI/ACP surfaces.
+- Cleaned active spec attachment links, retired archived 130-permissions docs,
+  and documented the attachment label rule.
+- Hardened the fullscreen TUI running-child elapsed test against clock drift.
+
 ## 2026-05-23
 
 ### Added

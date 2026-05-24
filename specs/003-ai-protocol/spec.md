@@ -180,13 +180,16 @@ Provider and model failures must surface as observable failed generation outcome
 
 `psychevo-cli` owns process and terminal behavior. CLI rendering must not define AI protocol semantics.
 
+## Attachments
+
+- [Normalized Stream](normalized-stream.md) defines the first implementation slice stream contract.
+- [OpenAI Chat Stream](openai-chat-stream.md) defines the first live Chat-compatible stream adapter contract.
+
 ## Related Topics
 
 - [000 Foundation](../000-foundation/spec.md) defines the upstream project foundation and implementation-neutral principles.
 - [001 Architecture](../001-architecture/spec.md) defines Rust workspace layout, crate boundaries, runtime coordination, and dependency direction.
 - [002 Agent Execution](../002-agent-execution/spec.md) defines agent-core execution semantics and core event families.
-- [003 Normalized Stream](normalized-stream.md) defines the first implementation slice stream contract.
-- [003 OpenAI Chat Stream](openai-chat-stream.md) defines the first live Chat-compatible stream adapter contract.
 - [004 Runtime Contract](../004-runtime-contract/spec.md) defines agent-invocation assembly and evidence sink wiring.
 - [005 Durable Evidence](../005-durable-evidence/spec.md) defines durable evidence semantics for AI outcomes and optional metadata preservation.
 - [006 Context Assembly](../006-context-assembly/spec.md) defines model context assembly consumed by generation requests.

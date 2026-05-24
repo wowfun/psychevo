@@ -46,7 +46,7 @@ Out of scope:
 - session storage, model selection, variant persistence, and history ownership;
   these belong to [210 pevo TUI](../210-pevo-tui/spec.md)
 
-## Topic Attachments
+## Attachments
 
 - [Layout](layout.md) defines the fullscreen layout, transcript/composer/status
   line, and sidebar rendering rules.

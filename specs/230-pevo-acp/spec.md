@@ -74,6 +74,10 @@ in-flight cancellation handles. That state is not durable session evidence.
 apply the ACP session id. It also handles supported slash-command prompts
 locally before invoking the model-backed runtime path.
 
+## Attachments
+
+- [Testing](testing.md) defines acceptance scenarios and validation expectations.
+
 ## Related Topics
 
 - [001 Architecture](../001-architecture/spec.md) defines crate boundaries and

@@ -155,7 +155,7 @@ writes must be observable in the JSON result. Same-resource mutations must be
 ordered or conflicts must be visible.
 
 This spec defines semantic modes and result material. The first implementation
-slice's concrete parameter names and patch syntax are defined by [110 Tool I/O](tool-io.md).
+slice's concrete parameter names and patch syntax are defined by [Tool I/O](tool-io.md).
 
 ## `exec_command` and `write_stdin`
 
@@ -249,11 +249,15 @@ input; otherwise the tool result contains a visible warning. PDF, archive, and
 other unsupported binary responses return structured errors rather than base64
 text.
 
+## Attachments
+
+- [Tool I/O](tool-io.md) defines the first implementation slice parameter
+  and JSON result contract.
+- [Testing](testing.md) defines acceptance scenarios and validation expectations.
+
 ## Related Topics
 
 - [100 Coding Agent](../100-coding-agent/spec.md) requires the `coding-core` toolset for default coding-agent invocations.
-- [110 Tool I/O](tool-io.md) defines the first implementation slice parameter and JSON result contract.
-- [110 Testing](testing.md) defines acceptance scenarios and validation expectations.
 - [004 Runtime Contract](../004-runtime-contract/spec.md) defines agent-invocation assembly and tool surface wiring.
 - [007 Tool Surface](../007-tool-surface/spec.md) defines agent-invocation scoped tool declarations, generation-request tool declaration snapshots, execution bindings, and toolset expansion.
 - [009 Resource Surface](../009-resource-surface/spec.md) defines resource decisions that may affect tool execution.

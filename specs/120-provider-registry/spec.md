@@ -272,6 +272,10 @@ unknown; known zero pricing is a valid free model cost.
 `qwen` is a built-in alias for a Chat-compatible endpoint in this slice.
 Browser-based portal OAuth is explicitly deferred.
 
+## Attachments
+
+- [Testing](testing.md) defines deterministic and live opt-in validation.
+
 ## Related Topics
 
 - [003 AI Protocol](../003-ai-protocol/spec.md) defines provider-neutral
@@ -283,4 +287,3 @@ Browser-based portal OAuth is explicitly deferred.
   behavior.
 - [100 Runtime Assembly](../100-coding-agent/runtime-assembly.md) defines how
   the built-in coding agent is assembled by runtime.
-- [120 Testing](testing.md) defines deterministic and live opt-in validation.

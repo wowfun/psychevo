@@ -19,7 +19,7 @@ the same definition model.
 
 Out of scope:
 
-- parent/child and forked agent run control, defined by [051 Subagents](subagents.md)
+- parent/child and forked agent run control, defined by [Subagents](subagents.md)
 - concrete CLI command spelling, terminal rendering, process behavior, or exit
   codes
 - byte-for-byte compatibility with any external product
@@ -58,7 +58,7 @@ the agent instruction body. Runtime accepts compatibility fields including
 `projectInstructions`, and `effort`. `maxSpawnDepth` is a Psychevo extension
 that defaults to `0`; it controls how many additional descendant spawn levels a
 child created from this definition may use, as defined by
-[051 Subagents](subagents.md). `memory` and `isolation: worktree` are parsed
+[Subagents](subagents.md). `memory` and `isolation: worktree` are parsed
 for compatibility but are unsupported in the first implementation slice and
 must produce diagnostics rather than executing.
 
@@ -208,6 +208,10 @@ Supported hook points are `PreToolUse`, `PostToolUse`, `Stop`,
 execution and returns stderr as a tool error. Other non-zero exit codes are
 diagnostics and do not fail closed in the first implementation slice.
 
+## Attachments
+
+- [Subagents](subagents.md) defines child and forked agent run semantics.
+
 ## Related Topics
 
 - [001 Architecture](../001-architecture/spec.md) defines crate boundaries and
@@ -219,7 +223,6 @@ diagnostics and do not fail closed in the first implementation slice.
   fallback.
 - [007 Tool Surface](../007-tool-surface/spec.md) defines tool declaration and
   execution binding semantics.
-- [051 Subagents](subagents.md) defines child and forked agent run semantics.
 - [055 Skills](../055-skills/spec.md) defines skill package semantics that an
   agent definition may reference.
 - [100 Coding Agent](../100-coding-agent/spec.md) defines the built-in coding

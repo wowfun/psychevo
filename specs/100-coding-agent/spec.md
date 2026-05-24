@@ -67,6 +67,12 @@ The answer format is not stable in this spec. Product entrypoints may render sum
 
 Self-evolution is a later capability domain. Any future evaluate-modify-retain-or-discard loop must be specified separately on top of durable evidence, session continuity, optional memory, toolsets, and resource boundaries. It is not part of this coding-agent slice.
 
+## Attachments
+
+- [Runtime Assembly](runtime-assembly.md) defines the first implementation
+  slice assembly contract.
+- [Testing](testing.md) defines acceptance scenarios and validation expectations.
+
 ## Related Topics
 
 - [004 Runtime Contract](../004-runtime-contract/spec.md) defines agent-invocation assembly and capability target resolution.
@@ -76,8 +82,6 @@ Self-evolution is a later capability domain. Any future evaluate-modify-retain-o
 - [020 Interfaces](../020-interfaces/spec.md) defines caller-facing invocation, observation, and completion semantics.
 - [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines material retrieval through session and evidence relationships.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability source, availability, and conflict boundaries.
-- [100 Runtime Assembly](runtime-assembly.md) defines the first implementation slice assembly contract.
-- [100 Testing](testing.md) defines acceptance scenarios and validation expectations.
 - [110 Coding Core Tools](../110-coding-core-tools/spec.md) defines the required `coding-core` toolset.
 - [055 Skills](../055-skills/spec.md) defines optional skill discovery, view, and management behavior.
 - [051 Agents](../051-agents/spec.md) defines optional selected-agent behavior.

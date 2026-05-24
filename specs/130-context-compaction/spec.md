@@ -102,6 +102,10 @@ Fullscreen TUI reports compaction completion with before/after token estimates
 and a folded summary row. The row is display-only and is not persisted as a
 transcript message.
 
+## Attachments
+
+- [Testing](testing.md) defines acceptance scenarios and validation expectations.
+
 ## Related Topics
 
 - [006 Context Assembly](../006-context-assembly/spec.md) defines summary

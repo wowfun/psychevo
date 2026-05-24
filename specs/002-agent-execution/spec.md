@@ -126,11 +126,14 @@ This spec owns agent-core execution semantics and event families.
 
 `psychevo-cli` owns terminal rendering and process behavior. CLI output must not define core execution semantics.
 
+## Attachments
+
+- [Agent Loop](agent-loop.md) defines the first implementation slice loop contract.
+
 ## Related Topics
 
 - [000 Foundation](../000-foundation/spec.md) defines the upstream project foundation and implementation-neutral principles.
 - [001 Architecture](../001-architecture/spec.md) defines Rust workspace layout, crate boundaries, runtime coordination, and dependency direction.
-- [002 Agent Loop](agent-loop.md) defines the first implementation slice loop contract.
 - [003 AI Protocol](../003-ai-protocol/spec.md) defines provider-neutral generation semantics consumed by agent execution.
 - [004 Runtime Contract](../004-runtime-contract/spec.md) defines agent-invocation assembly and evidence sink wiring.
 - [005 Durable Evidence](../005-durable-evidence/spec.md) defines durable evidence semantics for finalized execution facts.
