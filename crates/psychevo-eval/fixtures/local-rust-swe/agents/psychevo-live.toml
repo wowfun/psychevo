@@ -1,0 +1,12 @@
+schema_version = 1
+id = "psychevo-live"
+name = "Psychevo live adapter"
+kind = "psychevo"
+
+[psychevo]
+command = "sh"
+args = [
+    "scripts/psychevo-live-wrapper.sh",
+    "{workspace}",
+    "{prompt}",
+]

@@ -1,0 +1,6 @@
+schema_version = 1
+id = "rust-swe"
+name = "Local Rust SWE-style fixture"
+description = "Tiny local Rust issue-to-patch fixture for deterministic peval validation."
+agents = ["fake-pass", "fake-fail"]
+tasks = ["../tasks/rust-swe-add/task.toml"]

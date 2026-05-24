@@ -5,6 +5,7 @@ members = [
     "crates/psychevo-runtime",
     "crates/psychevo-acp",
     "crates/psychevo-cli",
+    "crates/psychevo-eval",
 ]
 resolver = "3"
 

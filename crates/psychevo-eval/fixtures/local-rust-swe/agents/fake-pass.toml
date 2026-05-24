@@ -1,0 +1,7 @@
+schema_version = 1
+id = "fake-pass"
+name = "Passing fake agent"
+kind = "fake"
+
+[fake]
+behavior = "pass"

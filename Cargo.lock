@@ -2541,6 +2541,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "psychevo-eval"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+ "uuid",
+]
+
+[[package]]
 name = "psychevo-runtime"
 version = "0.1.0"
 dependencies = [

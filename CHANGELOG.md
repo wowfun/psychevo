@@ -2,6 +2,9 @@
 
 ## 2026-05-24
 
+- Added the evaluation specs and first `psychevo-eval`/`peval` slice, including
+  local Rust SWE-style fixtures, reports, compare/replay, and bounded live
+  Psychevo smoke validation.
 - Added ACP setup docs, testing specs for clarify/compaction/ACP packaging, and
   a README refresh for the current CLI/TUI/ACP surfaces.
 - Cleaned active spec attachment links, retired archived 130-permissions docs,

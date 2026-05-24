@@ -1,0 +1,7 @@
+schema_version = 1
+id = "fake-fail"
+name = "Failing fake agent"
+kind = "fake"
+
+[fake]
+behavior = "fail"
