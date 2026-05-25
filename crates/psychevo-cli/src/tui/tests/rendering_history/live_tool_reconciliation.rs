@@ -750,6 +750,114 @@ pub(crate) fn streaming_tool_completion_reuses_pending_row_as_completed_evidence
 }
 
 #[test]
+pub(crate) fn late_preamble_message_end_after_tool_completion_does_not_create_temp_meta() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.start_assistant();
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "run_start",
+            "provider": "deepseek",
+            "model": "deepseek-v4-pro",
+            "mode": "default"
+        }),
+        false,
+    );
+    let preamble = "I'll query the local cache before answering.";
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_update",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": preamble}]
+            }
+        }),
+        false,
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_call_pending",
+            "tool_call_id": "call_sqlite",
+            "tool_name": "exec_command",
+            "arguments_json": "{\"cmd\":\"sqlite3 feeds.db\"}",
+            "content_index": 1,
+            "call_index": 0
+        }),
+        false,
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_execution_end",
+            "tool_call_id": "call_sqlite",
+            "tool_name": "exec_command",
+            "args": {"cmd": "sqlite3 feeds.db"},
+            "result": {"output": "row 1", "exit_code": 0},
+            "outcome": "normal",
+            "elapsed_ms": 0
+        }),
+        false,
+    );
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": preamble}],
+                "timestamp_ms": 2,
+                "finish_reason": "stop",
+                "outcome": "normal",
+                "provider": "deepseek",
+                "model": "deepseek-v4-pro"
+            },
+            "metadata": {"elapsed_ms": 0}
+        }),
+        false,
+    );
+
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.kind != TranscriptKind::Meta),
+        "{:?}",
+        ui.transcript
+    );
+
+    let final_answer = "The cached rows point to the API docs article.";
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_update",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": final_answer}]
+            }
+        }),
+        false,
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": final_answer}],
+                "timestamp_ms": 3,
+                "finish_reason": "stop",
+                "outcome": "normal",
+                "provider": "deepseek",
+                "model": "deepseek-v4-pro"
+            },
+            "metadata": {"elapsed_ms": 120_000}
+        }),
+        false,
+    );
+
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Meta && row.text.contains("deepseek/deepseek-v4-pro")
+    }));
+}
+
+#[test]
 pub(crate) fn completed_live_tool_elapsed_keeps_visible_active_duration_for_all_tool_phases() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);

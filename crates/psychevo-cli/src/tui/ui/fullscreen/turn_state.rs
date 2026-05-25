@@ -256,11 +256,16 @@ impl<'a> FullscreenUi<'a> {
             self.remove_turn_meta();
             return;
         }
-        if !(allow_visible_answer
+        let last_visible_kind = self.last_non_meta_transcript_kind();
+        let terminal_visible_answer = allow_visible_answer
             && (self.assistant_row.is_some() || self.turn_terminal_visible_answer)
-            || allow_reasoning_only && self.turn_had_reasoning
-            || allow_failure_summary && (self.turn_failures > 0 || self.turn_interrupted))
-        {
+            && last_visible_kind == Some(TranscriptKind::Answer);
+        let terminal_reasoning_only = allow_reasoning_only
+            && self.turn_had_reasoning
+            && last_visible_kind == Some(TranscriptKind::Thinking);
+        let terminal_failure_summary =
+            allow_failure_summary && (self.turn_failures > 0 || self.turn_interrupted);
+        if !(terminal_visible_answer || terminal_reasoning_only || terminal_failure_summary) {
             return;
         }
         let running_session = self
@@ -299,6 +304,14 @@ impl<'a> FullscreenUi<'a> {
             idx
         });
         self.transcript[idx].text = meta;
+    }
+
+    pub(crate) fn last_non_meta_transcript_kind(&self) -> Option<TranscriptKind> {
+        self.transcript
+            .iter()
+            .rev()
+            .find(|row| row.kind != TranscriptKind::Meta)
+            .map(|row| row.kind)
     }
 
     pub(crate) fn remove_turn_meta(&mut self) {
