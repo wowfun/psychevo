@@ -79,6 +79,10 @@ Required ACP/runtime wiring coverage:
 - Command advertisements use the shared command catalog and ACP capability
   filter, hide TUI-only commands, and are emitted after the session id is
   usable by the client.
+- `/diff` is advertised for ACP sessions, is accepted while an agent turn is
+  active, emits a synthetic tool-call update with ACP `ToolCallContent::Diff`,
+  stores summary and truncation metadata only in raw tool output, sends no
+  assistant text fallback, and leaves runtime model-context messages unchanged.
 - Transport-local active-session and cancellation maps are cleared on close or
   cancellation without persisting ACP-only state.
 

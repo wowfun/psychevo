@@ -89,10 +89,15 @@ Required interaction coverage:
   submitted image prompts preserve composer text.
 - `/status`, `/usage`/`/stats`, `/context`, `/refresh`, `/btw`,
   `/show-thinking`, `/show-raw`, `/mode`, `/variant`, `/skills`,
-  `/<skill-or-bundle>`, `/export`, and `/share`
+  `/<skill-or-bundle>`, `/diff`, `/export`, and `/share`
   behavior, including parser errors, fullscreen/scripted parity, transcript
   command-row versus bottom-pane ownership, `-f` format aliases for export,
   share rejecting `-f`, and sensitive include handling.
+- `/diff` interaction: registry/menu/help visibility, availability during an
+  active turn, argument rejection, fullscreen overlay opening, computing state,
+  static snapshot behavior, empty-diff message, scrolling with arrow/page
+  keys, `Esc` close priority before transcript interruption, scripted bounded
+  fallback, and no durable transcript/model-message insertion.
 - `/context` command interaction: argument rejection, fullscreen command row,
   scripted output without the bar, and output limited to implemented context
   categories.
@@ -163,8 +168,8 @@ Required interaction coverage:
   snapshot restore, repeated boundary movement, composer prompt restoration,
   cleanup before next prompt, and bounded no-op/error paths for no session, no
   user message, missing snapshot, non-Git workdir, and unsettled turns.
-- `Esc` priority: transcript/sidebar selection, file popup, skill popup, slash
-  menu, composer selection, bottom pane, history search, and empty shell
+- `Esc` priority: `/diff` overlay, transcript/sidebar selection, file popup,
+  skill popup, slash menu, composer selection, bottom pane, history search, and empty shell
   composer clear before interruption; provider transport and foreground shell
   waits wake promptly; post-abort title generation is skipped; idle `Esc` is
   non-destructive.

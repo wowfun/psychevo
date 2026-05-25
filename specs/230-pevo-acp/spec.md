@@ -74,6 +74,13 @@ in-flight cancellation handles. That state is not durable session evidence.
 apply the ACP session id. It also handles supported slash-command prompts
 locally before invoking the model-backed runtime path.
 
+Local observational commands such as `/diff` are resolved entirely inside the
+ACP transport. `/diff` uses the shared runtime workspace diff collector and
+emits a synthetic ACP tool-call update containing structured
+`ToolCallContent::Diff` entries. It must not append assistant text chunks, and
+it must not mutate runtime model-context messages, export content, statistics,
+or durable session evidence.
+
 ## Attachments
 
 - [Testing](testing.md) defines acceptance scenarios and validation expectations.

@@ -38,9 +38,11 @@ The domain supports three first-class task families:
 - SWE-style tasks for issue-to-patch workflows judged by tests or an official
   harness
 
-The first implementation slice validates the domain with one local Rust
-SWE-style task, fake pass/fail agents, and a deterministic local scorer. It
-does not claim benchmark coverage beyond proving the domain shape end to end.
+The first implementation slice validates the domain with the `local-coding`
+fixture project. That project includes one coding-loop task, one prompt A/B
+task, one SWE-style task, fake pass/fail agents, and deterministic local
+scorers. It does not claim benchmark coverage beyond proving the domain shape
+end to end.
 
 ## Workspace Rule
 
@@ -48,6 +50,12 @@ Each case starts from an isolated task workspace. The scorer may inspect the
 final workspace, but coding reports do not persist code diffs or patch
 artifacts by default. SWE-style scoring may generate an ephemeral patch for a
 harness and then discard it after score import.
+
+Reports should make local coding failures diagnosable without retaining the
+workspace by default. Report metadata includes task family, failure class,
+scorer details, trajectory links, and artifact links. Diff or patch artifacts
+remain excluded unless an explicit retained-workspace or debug mode is added in
+a later spec.
 
 ## Attachments
 

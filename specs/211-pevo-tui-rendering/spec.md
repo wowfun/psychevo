@@ -18,6 +18,10 @@ tree indentation used by evidence bodies.
 Tool evidence title text is tool-name first. Fullscreen rendering should show
 actual tool invocation names and useful arguments, not category verbs such as
 `Exploring`/`Explored`, `Running`/`Ran`, or `Updating`/`Updated`.
+Transcript rendering consumes semantic display blocks and reusable renderable
+components as defined by [213 pevo Display Model](../213-pevo-display-model/spec.md).
+The TUI must not persist viewport-wrapped terminal lines as durable display
+state.
 
 ## Scope
 
@@ -38,6 +42,7 @@ actual tool invocation names and useful arguments, not category verbs such as
 - non-terminal plain semantic rendering for `pevo tui`
 - visual regression and diagnostic artifact expectations, including the
   organization of deterministic VHS fixture assets
+- read-only overlay surfaces for display artifacts such as `/diff`
 
 Out of scope:
 
@@ -67,3 +72,5 @@ Out of scope:
   state, sessions, and cross-cutting behavior.
 - [212 pevo TUI Interaction](../212-pevo-tui-interaction/spec.md) defines
   input routing, slash commands, panels, popups, and selection behavior.
+- [214 pevo Diff Command](../214-pevo-diff-command/spec.md) defines the
+  Codex-style `/diff` overlay.

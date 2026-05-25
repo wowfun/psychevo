@@ -48,8 +48,9 @@ Required rendering coverage:
   assistant tool-call blocks, runtime pending tool-call input events, and local
   tool-execution starts; they must migrate temporary content keys to
   `tool_call_id`, avoid duplicate rows, suppress premature turn metadata during
-  intermediate `tool_execution_end` events and while the foreground running
-  marker remains visible after terminal `message_end`, and settle into
+  intermediate `tool_execution_end` events, after terminal tool-completion
+  events that precede the final assistant message, and while the foreground
+  running marker remains visible after terminal `message_end`, and settle into
   completed rows while preserving the visible active duration.
 - Interrupted pending rows render as muted `interrupted` evidence, aborted exec command
   results render `interrupted` instead of `(no output)`, timeout failures render
@@ -131,6 +132,16 @@ Required rendering coverage:
   tool-name-first preparation notices, completed tool-name-first evidence,
   `Answer`, and `Meta` blocks, including `--debug`, without repeated
   preparation lines for every argument delta.
+- `/diff` overlay rendering must cover the static `D I F F` pager, computing
+  state, empty-diff message, file headers, hunk headers, add/delete/context
+  lines, old/new line numbers, truncation notice, binary and unreadable
+  placeholders, and lightweight syntax highlighting using the existing
+  terminal highlighter.
+- Transcript rendering must be rebuildable from durable semantic display
+  blocks rather than persisted terminal-line storage. Snapshot fixtures should
+  cover prompt, answer, thinking, tool, status, command, and diff/artifact
+  display-block surfaces while keeping model-context messages as the source of
+  export and statistics truth.
 
 ## Visual Regression
 
@@ -177,11 +188,12 @@ The demo workdir must be isolated from the parent repository's git state so
 Modified Files does not reflect unrelated uncommitted work. The tape should pin
 terminal color environment, clear inherited `NO_COLOR`, and avoid theme choices
 that squash TUI color-role contrast across repeated runs. The tape must include
-a long Markdown/table answer and a terminal reasoning-only Thinking table with
-turn metadata, scroll the transcript away from the bottom and then back down,
-capture the default collapsed Thinking/table state, then expand the Thinking
-row and capture a screenshot proving the bottom marker and metadata row are
-visible. It must also capture an interrupted foreground exec command row so the settled
+a `/diff` overlay screenshot for an isolated fixture change, a long
+Markdown/table answer, and a terminal reasoning-only Thinking table with turn
+metadata, scroll the transcript away from the bottom and then back down, capture
+the default collapsed Thinking/table state, then expand the Thinking row and
+capture a screenshot proving the bottom marker and metadata row are visible. It
+must also capture an interrupted foreground exec command row so the settled
 `interrupted` marker can be visually inspected.
 
 Agent-observability VHS coverage must include a foreground clickable `Agent`

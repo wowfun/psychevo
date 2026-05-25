@@ -16,6 +16,7 @@ The first TUI supports:
 - `/status`
 - `/usage`, `/stats`
 - `/context`
+- `/diff`
 - `/refresh`
 - `/btw [prompt]`
 - `/steer <message>`
@@ -95,6 +96,12 @@ opens a bottom help pane with
 `Help`, `General`, `Commands`, and `Custom commands` header tabs; `Esc` closes
 the pane, and tab/arrow navigation may switch help sections. Scripted `/help`
 prints the same deterministic help text without opening a pane.
+
+`/diff` is backed by the shared command catalog and the semantics in
+[214 pevo Diff Command](../214-pevo-diff-command/spec.md). Fullscreen TUI opens
+a read-only `D I F F` overlay pager instead of appending a command transcript
+row. The overlay is a static snapshot, may be used while a turn is active,
+closes with Esc, and supports normal transcript-style scrolling keys.
 
 `/status` shows workdir, home, db, session, model, variant, mode, permission
 mode, and debug state as one multi-line status block. It does not include thinking or raw

@@ -114,10 +114,16 @@ attachment flow or using the TUI/CLI for local clipboard/display commands.
 
 While an ACP session has an active runtime turn, ACP applies the shared
 active-turn availability gate. Live-safe commands such as help, status,
-context, usage, tools, agents, steer, queue, and pending may run. Disruptive
-state changes such as new session, resume, mode/model changes, compaction, and
-dynamic prompt commands are rejected with guidance to wait, cancel, or queue
-ordinary prompt text.
+context, usage, tools, agents, diff, steer, queue, and pending may run.
+Disruptive state changes such as new session, resume, mode/model changes,
+compaction, and dynamic prompt commands are rejected with guidance to wait,
+cancel, or queue ordinary prompt text.
+
+ACP `/diff` projects an observational structured diff update. It sends a
+synthetic tool-call update whose content uses ACP `ToolCallContent::Diff` and
+must not send a plain assistant text fallback. The update is display-only and
+must not append runtime messages, affect model context, session export content,
+or usage/accounting statistics.
 
 ACP `/steer <text>` uses messaging-friendly semantics: if an agent turn is
 running, the text is injected through the runtime control handle; if runtime is

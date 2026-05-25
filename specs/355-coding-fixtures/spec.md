@@ -28,9 +28,12 @@ Fixtures are not benchmark claims. They are small, deterministic examples that
 prove the evaluation framework can load tasks, expand factors, run fake
 candidates, score outcomes, write artifacts, and render reports.
 
-The first fixture set should cover one coding-loop task, one prompt A/B task,
-and one SWE-style task. It should include both passing and failing fake
-candidate paths where practical.
+The first fixture set is the `local-coding` project. It covers one
+coding-loop task, one prompt A/B task, and one SWE-style task. It includes
+passing and failing fake candidate paths and keeps all scoring local and
+deterministic. Older `local-rust-swe` references are historical and should be
+renamed or migrated to `local-coding` rather than remaining the main fixture
+path.
 
 ## Attachments
 

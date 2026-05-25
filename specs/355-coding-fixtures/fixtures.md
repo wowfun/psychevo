@@ -25,10 +25,10 @@ The first fixture inventory should include:
 - a SWE-style task with an issue statement, base workspace, and test-based
   oracle
 
-The first implementation slice may start with one local Rust SWE-style fixture
-when the framework, CLI, artifact, report, compare, and replay paths are all
-exercised end to end. Additional coding-loop and prompt A/B fixtures remain
-part of the fixture inventory target.
+The first implementation slice uses the `local-coding` fixture project as the
+main local path. It includes all three required families in one inventory:
+coding-loop, prompt A/B, and SWE-style. Older `local-rust-swe` paths should be
+migrated or renamed rather than preserved as the primary fixture project.
 
 Fixture workspaces should be tiny, self-contained, and fast. They should not
 need network access, package installation from remote registries, system

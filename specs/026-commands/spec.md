@@ -89,15 +89,16 @@ Output kinds are:
 - prompt submission
 - process stdout/stderr result
 - bounded feedback
+- structured display artifact
 
 Surface capabilities are descriptive gates, not permissions. They include
 picker, clipboard, renderer toggle, process exit, side conversation, image
 attachment, active-turn control, queue, session switch, local artifact write,
-config write, policy write, and skill-state write. A surface advertises a
-command only when it can satisfy the command's capability requirements and the
-command is currently available. If a user types a known command that is hidden
-only because the current surface lacks a capability, the command returns
-bounded guidance instead of silently doing nothing.
+config write, policy write, skill-state write, and structured diff display. A
+surface advertises a command only when it can satisfy the command's capability
+requirements and the command is currently available. If a user types a known
+command that is hidden only because the current surface lacks a capability, the
+command returns bounded guidance instead of silently doing nothing.
 
 Permission and approval policy remains separate from command capability
 filtering. Capability filtering decides whether a command can be represented on
@@ -117,8 +118,15 @@ slash-looking input as a bounded local error.
 Shared execution returns an effect rather than directly manipulating a UI. The
 effect vocabulary includes local text, pass-through prompt, prompt submission,
 steer, queue, pending cancel, session switch, state patch, artifact result,
-unsupported guidance, and approval required. Surfaces apply these effects to
-their own transcript, panes, protocol updates, queues, or approval UI.
+structured diff result, unsupported guidance, and approval required. Surfaces
+apply these effects to their own transcript, panes, protocol updates, queues,
+or approval UI.
+
+`/diff` is an observational shared command. It requires a surface capable of
+showing a structured diff result, is available during active turns, and must
+not write runtime messages, affect model context, alter exports, or change
+usage/accounting. Its concrete semantics are defined by
+[214 pevo Diff Command](../214-pevo-diff-command/spec.md).
 
 Interactive terminal surfaces may project local slash command feedback that is
 written to the transcript as a distinct command-result transcript row. Such
@@ -224,3 +232,5 @@ Concrete surfaces may wrap these messages in their normal error presentation.
 - [212 pevo TUI Interaction](../212-pevo-tui-interaction/spec.md) defines the
   fullscreen interactive slash command surface.
 - [027 ACP](../027-acp/spec.md) defines ACP slash-command projection.
+- [214 pevo Diff Command](../214-pevo-diff-command/spec.md) defines the
+  shared `/diff` command.
