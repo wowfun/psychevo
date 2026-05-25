@@ -1,0 +1,22 @@
+schema_version = 1
+id = "coding-loop-status"
+name = "Complete the release status"
+kind = "coding-loop"
+
+[prompt]
+text = "Update the release status file so it records a completed local coding loop."
+
+[workspace]
+source = "workspace"
+
+[scorer]
+command = ["sh", "scripts/score.sh"]
+timeout_seconds = 5
+
+[fake.pass]
+command = ["sh", "scripts/fake-pass.sh"]
+timeout_seconds = 5
+
+[fake.fail]
+command = ["sh", "scripts/fake-fail.sh"]
+timeout_seconds = 5

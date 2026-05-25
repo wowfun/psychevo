@@ -34,7 +34,7 @@ use uuid::Uuid;
 pub(crate) fn project_discovery_validation_and_matrix_are_deterministic() {
     let project =
         EvalProject::load(fixture_project().join("tasks/rust-swe-add")).expect("project load");
-    assert_eq!(project.name, "local-rust-swe");
+    assert_eq!(project.name, "local-coding");
     let cases = check_project(&project, Some("rust-swe"), None).expect("check");
     let ids = cases
         .iter()
@@ -46,6 +46,15 @@ pub(crate) fn project_discovery_validation_and_matrix_are_deterministic() {
             "rust-swe__rust-swe-add__fake-pass",
             "rust-swe__rust-swe-add__fake-fail"
         ]
+    );
+    let all_fake_pass = check_project(&project, None, Some("fake-pass")).expect("all families");
+    let families = all_fake_pass
+        .iter()
+        .map(|case| case.task_family.as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        families,
+        BTreeSet::from(["coding-loop", "prompt-ab", "swe-style"])
     );
 }
 
@@ -109,6 +118,11 @@ pub(crate) fn fake_agents_write_artifacts_reports_compare_and_replay() {
     })
     .expect("markdown");
     assert!(markdown.contains("fake-pass"));
+    assert!(markdown.contains("swe-style"));
+    assert!(markdown.contains("oracle_failed"));
+    assert!(markdown.contains("cargo test"));
+    assert!(!markdown.to_ascii_lowercase().contains("diff"));
+    assert!(!markdown.to_ascii_lowercase().contains("patch"));
     let html = render_report(ReportRequest {
         run_root: root_one.clone(),
         format: ReportFormat::Html,
@@ -583,7 +597,7 @@ pub(crate) fn cli_smoke_covers_all_commands() {
     assert_eq!(store_run.code, 0, "{}", store_run.stderr);
     assert!(
         store_root
-            .join("runs/local-rust-swe/cli-store-run/report.html")
+            .join("runs/local-coding/cli-store-run/report.html")
             .is_file()
     );
     assert!(store_root.join("dashboard.html").is_file());
@@ -621,7 +635,7 @@ pub(crate) fn cli_smoke_covers_all_commands() {
         "peval",
         "compare",
         "latest",
-        "local-rust-swe/cli-store-run",
+        "local-coding/cli-store-run",
         "-c",
         config.to_str().unwrap(),
         "--agent",

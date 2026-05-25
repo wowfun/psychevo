@@ -229,8 +229,12 @@ pub struct CaseResult {
     pub case_id: String,
     pub suite_id: String,
     pub task_id: String,
+    #[serde(default = "default_task_kind")]
+    pub task_family: String,
     pub agent_id: String,
     pub status: CaseStatus,
+    #[serde(default)]
+    pub failure_class: Option<String>,
     pub score: ScoreResult,
     pub duration_ms: u128,
     pub artifacts: CaseArtifacts,
@@ -837,8 +841,10 @@ pub fn check_project(
             case_id: case.case_id,
             suite_id: case.suite.id,
             task_id: case.task.id,
+            task_family: case.task.kind,
             agent_id: case.agent.id,
             status: CaseStatus::Passed,
+            failure_class: None,
             score: ScoreResult {
                 schema_version: SCHEMA_VERSION,
                 passed: true,

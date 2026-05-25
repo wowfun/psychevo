@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-PROJECT="${1:-crates/psychevo-eval/fixtures/local-rust-swe}"
+PROJECT="${1:-crates/psychevo-eval/fixtures/local-coding}"
 SUITE="${PEVAL_LIVE_SUITE:-rust-swe}"
 AGENT="${PEVAL_LIVE_AGENT:-psychevo-live}"
 RUN_ID="${PEVAL_LIVE_RUN_ID:-live-psychevo-smoke}"

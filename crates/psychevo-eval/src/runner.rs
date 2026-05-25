@@ -387,8 +387,10 @@ pub(crate) fn run_case(
         case_id: case.case_id,
         suite_id: case.suite.id,
         task_id: case.task.id,
+        task_family: case.task.kind,
         agent_id: case.agent.id,
         status,
+        failure_class: failure_class(status, &score),
         score,
         duration_ms: started.elapsed().as_millis(),
         artifacts: CaseArtifacts {
@@ -400,6 +402,23 @@ pub(crate) fn run_case(
     };
     write_json_pretty(&artifact_root.join(&result_rel), &result)?;
     Ok(result)
+}
+
+pub(crate) fn failure_class(status: CaseStatus, score: &ScoreResult) -> Option<String> {
+    match status {
+        CaseStatus::Passed => None,
+        CaseStatus::Failed => Some("oracle_failed".to_string()),
+        CaseStatus::SetupFailed => Some("setup_failed".to_string()),
+        CaseStatus::RuntimeFailed => Some("runtime_failed".to_string()),
+        CaseStatus::ScorerFailed if score.message.contains("malformed scorer JSON") => {
+            Some("scorer_malformed_json".to_string())
+        }
+        CaseStatus::ScorerFailed if score.message.contains("scorer exited") => {
+            Some("scorer_exit".to_string())
+        }
+        CaseStatus::ScorerFailed => Some("scorer_failed".to_string()),
+        CaseStatus::Timeout => Some("timeout".to_string()),
+    }
 }
 
 pub(crate) fn run_agent(

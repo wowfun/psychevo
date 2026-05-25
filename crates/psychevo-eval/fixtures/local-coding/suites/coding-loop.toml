@@ -1,0 +1,6 @@
+schema_version = 1
+id = "coding-loop"
+name = "Local coding-loop fixture"
+description = "Tiny repository-edit loop fixture for deterministic peval validation."
+agents = ["fake-pass", "fake-fail"]
+tasks = ["../tasks/coding-loop-status/task.toml"]

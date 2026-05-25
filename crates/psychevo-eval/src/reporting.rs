@@ -271,17 +271,20 @@ pub(crate) fn render_summary_report(summary: &RunSummary, format: ReportFormat) 
             out.push_str(&format!("- cases: {}\n", summary.total_cases));
             out.push_str(&format!("- passed: {}\n", summary.passed_cases));
             out.push_str(&format!("- failed: {}\n\n", summary.failed_cases));
-            out.push_str("| case | suite | task | agent | status | score | artifacts |\n");
-            out.push_str("| --- | --- | --- | --- | --- | --- | --- |\n");
+            out.push_str("| case | suite | task | family | agent | status | failure | score | scorer details | artifacts |\n");
+            out.push_str("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n");
             for case in &summary.cases {
                 out.push_str(&format!(
-                    "| `{}` | `{}` | `{}` | `{}` | {:?} | {} | [result]({}) [trajectory]({}) [stdout]({}) [stderr]({}) |\n",
+                    "| `{}` | `{}` | `{}` | `{}` | `{}` | {:?} | `{}` | {} | `{}` | [result]({}) [trajectory]({}) [stdout]({}) [stderr]({}) |\n",
                     case.case_id,
                     case.suite_id,
                     case.task_id,
+                    case.task_family,
                     case.agent_id,
                     case.status,
+                    case.failure_class.as_deref().unwrap_or("-"),
                     case.score.score.unwrap_or_default(),
+                    scorer_details_label(&case.score.details),
                     case.artifacts.result.display(),
                     case.artifacts.trajectory.display(),
                     case.artifacts.scorer_stdout.display(),
@@ -294,7 +297,7 @@ pub(crate) fn render_summary_report(summary: &RunSummary, format: ReportFormat) 
             let mut rows = String::new();
             for case in &summary.cases {
                 rows.push_str(&format!(
-                    "<tr data-status=\"{}\" data-suite=\"{}\" data-agent=\"{}\"><td><button class=\"case-toggle\" type=\"button\" aria-expanded=\"false\">{}</button><div class=\"case-note\" hidden>{}</div></td><td>{}</td><td>{}</td><td>{}</td><td><span class=\"stamp {}\">{:?}</span></td><td class=\"num\">{}</td><td class=\"links\"><a href=\"{}\">result</a><a href=\"{}\">trajectory</a><a href=\"{}\">stdout</a><a href=\"{}\">stderr</a></td></tr>",
+                    "<tr data-status=\"{}\" data-suite=\"{}\" data-agent=\"{}\"><td><button class=\"case-toggle\" type=\"button\" aria-expanded=\"false\">{}</button><div class=\"case-note\" hidden>{}</div></td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td><span class=\"stamp {}\">{:?}</span></td><td>{}</td><td class=\"num\">{}</td><td>{}</td><td class=\"links\"><a href=\"{}\">result</a><a href=\"{}\">trajectory</a><a href=\"{}\">stdout</a><a href=\"{}\">stderr</a></td></tr>",
                     status_filter_value(case.status),
                     escape_html(&case.suite_id),
                     escape_html(&case.agent_id),
@@ -302,10 +305,13 @@ pub(crate) fn render_summary_report(summary: &RunSummary, format: ReportFormat) 
                     escape_html(&truncate_text(&case.score.message, 220)),
                     escape_html(&case.suite_id),
                     escape_html(&case.task_id),
+                    escape_html(&case.task_family),
                     escape_html(&case.agent_id),
                     status_class(case.status),
                     case.status,
+                    escape_html(case.failure_class.as_deref().unwrap_or("-")),
                     case.score.score.unwrap_or_default(),
+                    escape_html(&scorer_details_label(&case.score.details)),
                     escape_html(&case.artifacts.result.to_string_lossy()),
                     escape_html(&case.artifacts.trajectory.to_string_lossy()),
                     escape_html(&case.artifacts.scorer_stdout.to_string_lossy()),
@@ -313,7 +319,7 @@ pub(crate) fn render_summary_report(summary: &RunSummary, format: ReportFormat) 
                 ));
             }
             Ok(format!(
-                "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>peval {}</title>{}</head><body><main class=\"page\"><section class=\"mast\"><div><p class=\"eyebrow\">Psychevo evaluation report</p><h1>{}</h1><p class=\"subline\">{} · artifacts at <code>{}</code></p></div><div class=\"verdict {}\">{:?}</div></section><section class=\"metrics\"><div><span>{}</span><strong>{:?}</strong></div><div><span>passed</span><strong>{}</strong></div><div><span>failed</span><strong>{}</strong></div><div><span>total</span><strong>{}</strong></div></section><section class=\"toolbar\"><button type=\"button\" data-filter=\"all\">all</button><button type=\"button\" data-filter=\"failed\">exceptions</button><input type=\"search\" id=\"caseSearch\" placeholder=\"filter cases\"></section><section class=\"ledger\"><table id=\"caseTable\"><thead><tr><th>case</th><th>suite</th><th>task</th><th>agent</th><th>status</th><th>score</th><th>artifacts</th></tr></thead><tbody>{}</tbody></table></section></main>{}</body></html>",
+                "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>peval {}</title>{}</head><body><main class=\"page\"><section class=\"mast\"><div><p class=\"eyebrow\">Psychevo evaluation report</p><h1>{}</h1><p class=\"subline\">{} · artifacts at <code>{}</code></p></div><div class=\"verdict {}\">{:?}</div></section><section class=\"metrics\"><div><span>{}</span><strong>{:?}</strong></div><div><span>passed</span><strong>{}</strong></div><div><span>failed</span><strong>{}</strong></div><div><span>total</span><strong>{}</strong></div></section><section class=\"toolbar\"><button type=\"button\" data-filter=\"all\">all</button><button type=\"button\" data-filter=\"failed\">exceptions</button><input type=\"search\" id=\"caseSearch\" placeholder=\"filter cases\"></section><section class=\"ledger\"><table id=\"caseTable\"><thead><tr><th>case</th><th>suite</th><th>task</th><th>family</th><th>agent</th><th>status</th><th>failure</th><th>score</th><th>scorer</th><th>artifacts</th></tr></thead><tbody>{}</tbody></table></section></main>{}</body></html>",
                 escape_html(&summary.run_id),
                 report_css(),
                 escape_html(&summary.run_id),
@@ -575,6 +581,16 @@ pub(crate) fn truncate_text(value: &str, limit: usize) -> String {
         .collect::<String>();
     out.push_str("...");
     out
+}
+
+pub(crate) fn scorer_details_label(details: &Value) -> String {
+    if details.is_null() {
+        return "-".to_string();
+    }
+    if let Some(scorer) = details.get("scorer").and_then(Value::as_str) {
+        return scorer.to_string();
+    }
+    truncate_text(&details.to_string(), 80)
 }
 
 pub(crate) fn report_css() -> &'static str {

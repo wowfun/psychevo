@@ -736,7 +736,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn fixture_project() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/local-rust-swe")
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/local-coding")
     }
     pub(crate) mod project_lifecycle;
 }
