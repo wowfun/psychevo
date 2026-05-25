@@ -337,6 +337,10 @@ pub(crate) fn parse_registered_slash_command(
             parse_no_arguments(spec, command, rest)?;
             Ok(SlashCommand::Context)
         }
+        SlashCommandAction::Diff => {
+            parse_no_arguments(spec, command, rest)?;
+            Ok(SlashCommand::Diff)
+        }
         SlashCommandAction::Refresh => {
             parse_no_arguments(spec, command, rest)?;
             Ok(SlashCommand::Refresh)

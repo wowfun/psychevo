@@ -94,6 +94,10 @@ impl TuiApp {
                 }
             }
         }
+        if let Some(task) = self.diff_task.take() {
+            task.task.abort();
+            let _ = task.task.await;
+        }
         self.model_catalog.abort_unfinished();
         Ok(())
     }
@@ -185,6 +189,10 @@ impl TuiApp {
             task.task.abort();
             let _ = task.task.await;
         }
+        if let Some(task) = self.diff_task.take() {
+            task.task.abort();
+            let _ = task.task.await;
+        }
         Ok(())
     }
 
@@ -193,6 +201,10 @@ impl TuiApp {
         ui: &mut FullscreenUi<'_>,
         key: KeyEvent,
     ) -> Result<bool> {
+        if ui.diff_overlay.is_some() {
+            self.handle_diff_overlay_key(ui, key);
+            return Ok(false);
+        }
         if key.code == KeyCode::Char('c')
             && key.modifiers.contains(KeyModifiers::CONTROL)
             && self.copy_selected_text(ui)?
@@ -587,6 +599,31 @@ impl TuiApp {
         Ok(false)
     }
 
+    pub(crate) fn handle_diff_overlay_key(&mut self, ui: &mut FullscreenUi<'_>, key: KeyEvent) {
+        if key.code == KeyCode::Esc {
+            ui.diff_overlay = None;
+            ui.last_diff_overlay_area = None;
+            return;
+        }
+        let viewport_height = ui
+            .last_diff_overlay_area
+            .map(|area| area.height)
+            .unwrap_or(12);
+        let page = viewport_height.saturating_sub(4).max(1) as isize;
+        let Some(overlay) = ui.diff_overlay.as_mut() else {
+            return;
+        };
+        match key.code {
+            KeyCode::Up => overlay.scroll_by(-1, viewport_height),
+            KeyCode::Down => overlay.scroll_by(1, viewport_height),
+            KeyCode::PageUp => overlay.scroll_by(-page, viewport_height),
+            KeyCode::PageDown => overlay.scroll_by(page, viewport_height),
+            KeyCode::Home => overlay.scroll_to_top(),
+            KeyCode::End => overlay.scroll_to_bottom(viewport_height),
+            _ => {}
+        }
+    }
+
     pub(crate) fn handle_pending_input_edit_key(
         &mut self,
         ui: &mut FullscreenUi<'_>,
@@ -667,6 +704,7 @@ impl TuiApp {
     pub(crate) fn slash_shortcuts_active(&self, ui: &FullscreenUi<'_>) -> bool {
         ui.focus == FocusMode::Composer
             && ui.bottom_panel.is_none()
+            && ui.diff_overlay.is_none()
             && !ui.history_search
             && !ui.shell_mode
             && ui.pending_input_edit.is_none()
@@ -684,6 +722,18 @@ impl TuiApp {
         ui: &mut FullscreenUi<'_>,
         mouse: MouseEvent,
     ) -> Result<bool> {
+        if let Some(overlay) = ui.diff_overlay.as_mut() {
+            let viewport_height = ui
+                .last_diff_overlay_area
+                .map(|area| area.height)
+                .unwrap_or(12);
+            match mouse.kind {
+                MouseEventKind::ScrollUp => overlay.scroll_by(-3, viewport_height),
+                MouseEventKind::ScrollDown => overlay.scroll_by(3, viewport_height),
+                _ => {}
+            }
+            return Ok(false);
+        }
         match mouse.kind {
             MouseEventKind::ScrollUp => {
                 self.handle_fullscreen_mouse_wheel(ui, mouse.column, mouse.row, -3);

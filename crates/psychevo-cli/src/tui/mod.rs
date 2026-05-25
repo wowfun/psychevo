@@ -31,8 +31,9 @@ pub(crate) use psychevo_runtime::{
     SkillDiscoveryOptions, SkillTarget, SqliteStore, StateRuntime, StatsOptions,
     TUI_DISPLAY_METADATA_KEY, TerminalReason, ToolDisplayBodyPolicy, ToolDisplayCategory,
     ToolDisplaySpec, TuiMessageSummary, USER_SHELL_METADATA_KEY, UserShellContextOptions,
-    UserShellOptions, agent_spawn_paused, agent_status_value, auto_compaction_due_for_snapshot,
-    canonicalize_workdir, compact_session, config_show_value, configured_models, context_snapshot,
+    UserShellOptions, WorkspaceDiff, agent_spawn_paused, agent_status_value,
+    auto_compaction_due_for_snapshot, canonicalize_workdir, collect_workspace_diff,
+    compact_session, config_show_value, configured_models, context_snapshot,
     create_global_custom_provider, custom_provider_api_key_env, default_session_export_filename,
     discover_agents, discover_skills, fetch_model_catalog,
     format_context_snapshot_text_with_options, format_context_total_value,
@@ -187,6 +188,7 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
         last_live_agent_reload_check: None,
         side_cleanup_task: None,
         compaction_task: None,
+        diff_task: None,
     };
     app.start_missing_model_metadata_cache_warmup();
     app.refresh_selected_model();
@@ -313,6 +315,10 @@ use support_motion::*;
 pub(crate) mod support_markdown_render;
 #[allow(unused_imports)]
 use support_markdown_render::*;
+#[path = "support/diff_render.rs"]
+pub(crate) mod support_diff_render;
+#[allow(unused_imports)]
+use support_diff_render::*;
 #[path = "ui/fullscreen.rs"]
 pub(crate) mod ui_fullscreen;
 #[allow(unused_imports)]

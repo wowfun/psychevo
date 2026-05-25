@@ -106,6 +106,8 @@ impl<'a> FullscreenUi<'a> {
             last_skill_popup_areas: Vec::new(),
             last_bottom_panel_areas: Vec::new(),
             bottom_panel: None,
+            diff_overlay: None,
+            last_diff_overlay_area: None,
             ephemeral_status: None,
             screen_lines: Vec::new(),
             selection: SelectionState::default(),
@@ -169,6 +171,8 @@ impl<'a> FullscreenUi<'a> {
         self.turn_had_reasoning = false;
         self.pending_images.clear();
         self.ephemeral_status = None;
+        self.diff_overlay = None;
+        self.last_diff_overlay_area = None;
     }
 
     pub(crate) fn take_terminal_clear_request(&mut self) -> bool {

@@ -23,7 +23,7 @@ pub(crate) use crate::types::{
     TuiMessageSummary,
 };
 
-pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 11;
+pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 12;
 pub(crate) const SESSION_REVERT_METADATA_KEY: &str = "revert";
 pub(crate) const MESSAGE_UNDO_METADATA_KEY: &str = "undo";
 pub(crate) const MESSAGE_PRE_SNAPSHOT_KEY: &str = "pre_snapshot";
@@ -180,6 +180,75 @@ pub struct SessionMessageRecord {
     pub message: Message,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DisplayBlockKind {
+    Prompt,
+    Answer,
+    Thinking,
+    Tool,
+    Status,
+    Command,
+    Diff,
+    Artifact,
+}
+
+impl DisplayBlockKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Prompt => "prompt",
+            Self::Answer => "answer",
+            Self::Thinking => "thinking",
+            Self::Tool => "tool",
+            Self::Status => "status",
+            Self::Command => "command",
+            Self::Diff => "diff",
+            Self::Artifact => "artifact",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "prompt" => Some(Self::Prompt),
+            "answer" => Some(Self::Answer),
+            "thinking" => Some(Self::Thinking),
+            "tool" => Some(Self::Tool),
+            "status" => Some(Self::Status),
+            "command" => Some(Self::Command),
+            "diff" => Some(Self::Diff),
+            "artifact" => Some(Self::Artifact),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DisplayBlockInput {
+    pub session_id: String,
+    pub kind: DisplayBlockKind,
+    pub surface: String,
+    pub source: String,
+    pub message_session_seq: Option<i64>,
+    pub title: Option<String>,
+    pub content_text: String,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DisplayBlockRecord {
+    pub id: i64,
+    pub session_id: String,
+    pub block_seq: i64,
+    pub kind: DisplayBlockKind,
+    pub surface: String,
+    pub source: String,
+    pub message_session_seq: Option<i64>,
+    pub title: Option<String>,
+    pub content_text: String,
+    pub metadata: Option<Value>,
+    pub created_at_ms: i64,
+}
+
 #[derive(Clone)]
 pub struct SqliteStore {
     pub(crate) inner: Arc<SqliteStoreInner>,
@@ -226,6 +295,10 @@ use store_agent_mailbox::*;
 pub(crate) mod store_compactions;
 #[allow(unused_imports)]
 use store_compactions::*;
+#[path = "store/display_blocks.rs"]
+pub(crate) mod store_display_blocks;
+#[allow(unused_imports)]
+use store_display_blocks::*;
 #[path = "store/lifecycle.rs"]
 pub(crate) mod store_lifecycle;
 #[allow(unused_imports)]

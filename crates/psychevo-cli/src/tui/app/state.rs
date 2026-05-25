@@ -40,6 +40,7 @@ pub(crate) struct TuiApp {
     pub(crate) last_live_agent_reload_check: Option<Instant>,
     pub(crate) side_cleanup_task: Option<SideCleanupTask>,
     pub(crate) compaction_task: Option<CompactionTask>,
+    pub(crate) diff_task: Option<DiffTask>,
 }
 
 pub(crate) struct BtwSideState {
@@ -63,6 +64,10 @@ pub(crate) struct CompactionTask {
     pub(crate) command_echo: Option<String>,
     pub(crate) manual: bool,
     pub(crate) task: JoinHandle<std::result::Result<CompactionResult, String>>,
+}
+
+pub(crate) struct DiffTask {
+    pub(crate) task: JoinHandle<std::result::Result<WorkspaceDiff, String>>,
 }
 
 impl TuiApp {

@@ -21,6 +21,7 @@ impl TuiApp {
         changed |= self.drain_finished_clipboard_copies(ui);
         changed |= self.drain_side_cleanup_task(ui).await?;
         changed |= self.drain_compaction_task(ui).await?;
+        changed |= self.drain_diff_task(ui).await?;
         changed |= self.drain_model_metadata_refresh(ui).await?;
         changed |= self.drain_model_catalog_fetches(ui).await?;
         changed |= ui.drain_file_search_results();
@@ -599,6 +600,29 @@ impl TuiApp {
         Ok(true)
     }
 
+    pub(crate) async fn drain_diff_task(&mut self, ui: &mut FullscreenUi<'_>) -> Result<bool> {
+        let Some(task) = self.diff_task.as_ref() else {
+            return Ok(false);
+        };
+        if !task.task.is_finished() {
+            return Ok(false);
+        }
+        let task = self.diff_task.take().expect("checked task");
+        match task.task.await {
+            Ok(Ok(diff)) => {
+                ui.diff_overlay = Some(diff_overlay_from_workspace_diff(&diff));
+            }
+            Ok(Err(err)) => {
+                ui.diff_overlay = Some(DiffOverlay::error(err));
+            }
+            Err(err) if err.is_cancelled() => {}
+            Err(err) => {
+                ui.diff_overlay = Some(DiffOverlay::error(err.to_string()));
+            }
+        }
+        Ok(true)
+    }
+
     pub(crate) fn maybe_start_auto_compaction(
         &mut self,
         ui: &mut FullscreenUi<'_>,
@@ -836,6 +860,11 @@ impl TuiApp {
                 render_sidebar(frame, horizontal[1], ui);
             }
             render_active_selection(frame, ui);
+            if let Some(overlay) = ui.diff_overlay.as_mut() {
+                render_diff_overlay(frame, area, overlay, &mut ui.last_diff_overlay_area);
+            } else {
+                ui.last_diff_overlay_area = None;
+            }
             return;
         }
         let composer_height = composer_height(&ui.textarea);
@@ -944,6 +973,11 @@ impl TuiApp {
             render_sidebar(frame, horizontal[1], ui);
         }
         render_active_selection(frame, ui);
+        if let Some(overlay) = ui.diff_overlay.as_mut() {
+            render_diff_overlay(frame, area, overlay, &mut ui.last_diff_overlay_area);
+        } else {
+            ui.last_diff_overlay_area = None;
+        }
     }
 }
 

@@ -334,6 +334,7 @@ pub(crate) fn slash_command_echo(command: &SlashCommand) -> String {
         SlashCommand::Sessions => "/sessions".to_string(),
         SlashCommand::Usage => "/usage".to_string(),
         SlashCommand::Context => "/context".to_string(),
+        SlashCommand::Diff => "/diff".to_string(),
         SlashCommand::Refresh => "/refresh".to_string(),
         SlashCommand::ReloadContextDeprecated => "/reload-context".to_string(),
         SlashCommand::Btw(prompt) => prompt

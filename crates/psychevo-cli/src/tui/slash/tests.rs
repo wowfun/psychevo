@@ -43,6 +43,10 @@ pub(crate) mod tests {
             Some(SlashCommand::Context)
         );
         assert_eq!(
+            parse_slash_command("/diff").unwrap(),
+            Some(SlashCommand::Diff)
+        );
+        assert_eq!(
             parse_slash_command("/refresh").unwrap(),
             Some(SlashCommand::Refresh)
         );
@@ -85,6 +89,7 @@ pub(crate) mod tests {
         );
         assert!(parse_slash_command("/stats all").is_err());
         assert!(parse_slash_command("/context now").is_err());
+        assert!(parse_slash_command("/diff now").is_err());
         assert!(parse_slash_command("/session show abc").is_err());
         assert!(parse_slash_command("/session switch abc").is_err());
         assert_eq!(

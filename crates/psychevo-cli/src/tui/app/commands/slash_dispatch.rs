@@ -67,6 +67,11 @@ impl TuiApp {
                 );
                 Ok(())
             }
+            SlashCommand::Diff => {
+                let diff = collect_workspace_diff(&self.workdir)?;
+                println!("{}", workspace_diff_plain_text(&diff));
+                Ok(())
+            }
             SlashCommand::Refresh => {
                 let session = self
                     .current_session

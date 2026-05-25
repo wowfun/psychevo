@@ -28,6 +28,7 @@ pub enum CommandOutputKind {
     BottomSelectionPane,
     BottomHelpPane,
     ImmediateStateChange,
+    OverlayPager,
     PromptSubmission,
     ProcessResult,
     BoundedFeedback,
@@ -51,6 +52,7 @@ pub enum CommandCapability {
     Queue,
     SessionSwitch,
     ArtifactWrite,
+    WorkspaceDiff,
     ConfigWrite,
     PolicyWrite,
     SkillStateWrite,
@@ -66,6 +68,7 @@ pub enum SlashCommandAction {
     Resume,
     Usage,
     Context,
+    Diff,
     Refresh,
     Btw,
     Steer,
@@ -137,6 +140,7 @@ impl SlashCommandSpec {
             SlashCommandAction::Export | SlashCommandAction::Share => {
                 &[CommandCapability::ArtifactWrite]
             }
+            SlashCommandAction::Diff => &[CommandCapability::WorkspaceDiff],
             SlashCommandAction::Skills => &[],
             _ => &[],
         }
@@ -190,6 +194,7 @@ impl SlashCommandSpec {
                 | SlashCommandAction::Status
                 | SlashCommandAction::Usage
                 | SlashCommandAction::Context
+                | SlashCommandAction::Diff
                 | SlashCommandAction::Tools
                 | SlashCommandAction::Agents
                 | SlashCommandAction::Steer
@@ -341,6 +346,22 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         output_kind: CommandOutputKind::TranscriptStatusBlock,
         status: CommandStatus::Active,
         action: SlashCommandAction::Context,
+        common: true,
+    },
+    SlashCommandSpec {
+        canonical: "/diff",
+        aliases: &[],
+        usage: "/diff",
+        summary: "show workspace diff",
+        help_detail: Some(
+            "Shows a bounded local git diff snapshot for tracked unstaged changes and untracked files; it does not add a model message.",
+        ),
+        surface: TUI_SLASH,
+        group: COMMANDS,
+        argument_kind: CommandArgumentKind::None,
+        output_kind: CommandOutputKind::OverlayPager,
+        status: CommandStatus::Active,
+        action: SlashCommandAction::Diff,
         common: true,
     },
     SlashCommandSpec {
@@ -825,6 +846,7 @@ pub enum SlashCommandEffect {
     Share {
         args: Option<String>,
     },
+    Diff,
     Unsupported(String),
 }
 

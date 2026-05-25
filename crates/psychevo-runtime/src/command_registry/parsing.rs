@@ -309,9 +309,14 @@ pub fn slash_invocation_effect(
         | SlashCommandAction::Status
         | SlashCommandAction::Usage
         | SlashCommandAction::Context
+        | SlashCommandAction::Diff
         | SlashCommandAction::Refresh => {
             no_args(spec, &invocation.args)?;
-            Ok(SlashCommandEffect::LocalText)
+            if spec.action == SlashCommandAction::Diff {
+                Ok(SlashCommandEffect::Diff)
+            } else {
+                Ok(SlashCommandEffect::LocalText)
+            }
         }
         SlashCommandAction::New => {
             no_args(spec, &invocation.args)?;
@@ -693,6 +698,7 @@ pub(crate) mod tests {
                 CommandCapability::Queue,
                 CommandCapability::SessionSwitch,
                 CommandCapability::ArtifactWrite,
+                CommandCapability::WorkspaceDiff,
                 CommandCapability::ConfigWrite,
                 CommandCapability::PolicyWrite,
                 CommandCapability::SkillStateWrite,
@@ -707,6 +713,7 @@ pub(crate) mod tests {
             .map(|command| command.name.as_str())
             .collect::<Vec<_>>();
         assert!(names.contains(&"tools"));
+        assert!(names.contains(&"diff"));
         assert!(names.contains(&"resume"));
         assert!(!names.contains(&"copy"));
         assert!(!names.contains(&"image"));
@@ -721,6 +728,7 @@ pub(crate) mod tests {
                 CommandCapability::Queue,
                 CommandCapability::SessionSwitch,
                 CommandCapability::ArtifactWrite,
+                CommandCapability::WorkspaceDiff,
             ],
             true,
             &[],
@@ -733,8 +741,24 @@ pub(crate) mod tests {
             .collect::<Vec<_>>();
         assert!(names.contains(&"steer"));
         assert!(names.contains(&"queue"));
+        assert!(names.contains(&"diff"));
         assert!(!names.contains(&"resume"));
         assert!(!names.contains(&"compact"));
+    }
+
+    #[test]
+    fn shared_effect_parses_diff_and_allows_active_turn() {
+        let SlashCommandParse::Known(invocation) = parse_slash_command_line("/diff") else {
+            panic!("expected known command");
+        };
+        let effect = slash_invocation_effect(
+            &invocation,
+            &[CommandCapability::WorkspaceDiff],
+            SlashCommandSurface::Acp,
+            true,
+        )
+        .expect("diff effect");
+        assert_eq!(effect, SlashCommandEffect::Diff);
     }
 
     #[test]

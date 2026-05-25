@@ -250,6 +250,7 @@ pub(crate) fn side_command_allowed(command: &SlashCommand) -> bool {
             | SlashCommand::Quit
             | SlashCommand::Status
             | SlashCommand::Context
+            | SlashCommand::Diff
             | SlashCommand::ModelShowScoped { .. }
             | SlashCommand::VariantSet(_)
             | SlashCommand::ModeSet(_)

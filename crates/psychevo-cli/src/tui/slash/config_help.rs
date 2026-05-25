@@ -5,6 +5,7 @@ pub(crate) const VARIANTS: &[&str] = &["none", "minimal", "low", "medium", "high
 pub(crate) const GENERAL_COMMANDS: &[&str] = &[
     "/status",
     "/context",
+    "/diff",
     "/refresh",
     "/btw",
     "/model",
@@ -26,6 +27,7 @@ pub(crate) enum SlashCommand {
     Sessions,
     Usage,
     Context,
+    Diff,
     Refresh,
     ReloadContextDeprecated,
     Btw(Option<String>),

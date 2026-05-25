@@ -352,11 +352,60 @@ pub(crate) struct FullscreenUi<'a> {
     pub(crate) last_skill_popup_areas: Vec<(usize, Rect)>,
     pub(crate) last_bottom_panel_areas: Vec<(usize, Rect)>,
     pub(crate) bottom_panel: Option<BottomPanel>,
+    pub(crate) diff_overlay: Option<DiffOverlay>,
+    pub(crate) last_diff_overlay_area: Option<Rect>,
     pub(crate) ephemeral_status: Option<UiEphemeralStatus>,
     pub(crate) screen_lines: Vec<ScreenLine>,
     pub(crate) selection: SelectionState,
     pub(crate) terminal_clear_requested: bool,
     pub(crate) quit_requested: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct DiffOverlay {
+    pub(crate) title: String,
+    pub(crate) lines: Vec<Line<'static>>,
+    pub(crate) scroll: u16,
+}
+
+impl DiffOverlay {
+    pub(crate) fn computing() -> Self {
+        Self::from_lines(vec![Line::from("computing diff")])
+    }
+
+    pub(crate) fn error(message: impl Into<String>) -> Self {
+        Self::from_lines(vec![Line::from(format!("error: {}", message.into()))])
+    }
+
+    pub(crate) fn from_lines(lines: Vec<Line<'static>>) -> Self {
+        Self {
+            title: "D I F F".to_string(),
+            lines,
+            scroll: 0,
+        }
+    }
+
+    pub(crate) fn scroll_by(&mut self, amount: isize, viewport_height: u16) {
+        let max_scroll = self.max_scroll(viewport_height);
+        if amount.is_negative() {
+            self.scroll = self.scroll.saturating_sub(amount.unsigned_abs() as u16);
+        } else {
+            self.scroll = self.scroll.saturating_add(amount as u16).min(max_scroll);
+        }
+    }
+
+    pub(crate) fn scroll_to_top(&mut self) {
+        self.scroll = 0;
+    }
+
+    pub(crate) fn scroll_to_bottom(&mut self, viewport_height: u16) {
+        self.scroll = self.max_scroll(viewport_height);
+    }
+
+    pub(crate) fn max_scroll(&self, viewport_height: u16) -> u16 {
+        let visible = viewport_height.saturating_sub(2);
+        (self.lines.len() as u16).saturating_sub(visible)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

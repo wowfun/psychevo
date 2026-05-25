@@ -25,6 +25,10 @@ impl PsychevoAcpAgent {
                 };
                 Ok(send_slash_text(cx, session_id, text))
             }
+            SlashCommandEffect::Diff => {
+                let diff = collect_workspace_diff(&session.cwd).map_err(acp_internal_error)?;
+                Ok(send_diff_tool_call(cx, session_id, &diff))
+            }
             SlashCommandEffect::PassThroughPrompt(prompt)
             | SlashCommandEffect::SubmitPrompt(prompt) => Ok(SlashPromptAction::RunPrompt(prompt)),
             SlashCommandEffect::Steer(message) => self.apply_steer_effect(session_id, &message, cx),

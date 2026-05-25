@@ -800,3 +800,123 @@ pub(crate) async fn pending_preview_shows_steer_and_queue_above_composer_without
     assert!(pending_top >= slash_bottom);
     assert!(pending_top < composer_area.y);
 }
+
+#[tokio::test]
+pub(crate) async fn diff_command_opens_overlay_and_renders_untracked_diff_without_transcript_row() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    init_git_repo_for_diff_test(&app.workdir);
+    fs::write(app.workdir.join("notes.txt"), "hello from diff\n").expect("write");
+    let mut ui = FullscreenUi::new(&app);
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Diff)
+        .await
+        .expect("diff command");
+
+    assert!(app.diff_task.is_some());
+    assert!(ui.transcript.is_empty());
+    let overlay = ui.diff_overlay.as_ref().expect("diff overlay");
+    assert_eq!(overlay.title, "D I F F");
+    assert_eq!(overlay_text(overlay), "computing diff");
+
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 100, 18);
+    let text = buffer_text(&buffer);
+    assert!(text.contains("D I F F"), "{text}");
+    assert!(text.contains("computing diff"), "{text}");
+
+    drain_diff_task_for_test(&mut app, &mut ui).await;
+
+    assert!(app.diff_task.is_none());
+    assert!(ui.transcript.is_empty());
+    let overlay = ui.diff_overlay.as_ref().expect("diff overlay");
+    let text = overlay_text(overlay);
+    assert!(text.contains("diff --git"), "{text}");
+    assert!(text.contains("notes.txt"), "{text}");
+    assert!(text.contains("+hello from diff"), "{text}");
+}
+
+#[tokio::test]
+pub(crate) async fn diff_command_shows_empty_message_for_clean_workspace() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    init_git_repo_for_diff_test(&app.workdir);
+    let mut ui = FullscreenUi::new(&app);
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Diff)
+        .await
+        .expect("diff command");
+    drain_diff_task_for_test(&mut app, &mut ui).await;
+
+    let overlay = ui.diff_overlay.as_ref().expect("diff overlay");
+    assert_eq!(overlay_text(overlay), "No changes detected.");
+    assert!(ui.transcript.is_empty());
+}
+
+#[tokio::test]
+pub(crate) async fn diff_overlay_scrolls_and_closes_with_keys() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.diff_overlay = Some(DiffOverlay::from_lines(
+        (0..80)
+            .map(|index| Line::from(format!("diff line {index}")))
+            .collect(),
+    ));
+
+    let _ = draw_fullscreen_for_test(&app, &mut ui, 100, 18);
+    let viewport_height = ui.last_diff_overlay_area.expect("overlay area").height;
+
+    app.handle_fullscreen_key(
+        &mut ui,
+        KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE),
+    )
+    .await
+    .expect("page down");
+    let overlay = ui.diff_overlay.as_ref().expect("diff overlay");
+    assert!(overlay.scroll > 0);
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::End, KeyModifiers::NONE))
+        .await
+        .expect("end");
+    let overlay = ui.diff_overlay.as_ref().expect("diff overlay");
+    assert_eq!(overlay.scroll, overlay.max_scroll(viewport_height));
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .await
+        .expect("escape");
+    assert!(ui.diff_overlay.is_none());
+    assert!(ui.last_diff_overlay_area.is_none());
+}
+
+async fn drain_diff_task_for_test(app: &mut TuiApp, ui: &mut FullscreenUi<'_>) {
+    for _ in 0..100 {
+        if app.drain_diff_task(ui).await.expect("drain diff task") {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("diff task did not finish");
+}
+
+fn overlay_text(overlay: &DiffOverlay) -> String {
+    overlay
+        .lines
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn init_git_repo_for_diff_test(path: &Path) {
+    let output = StdCommand::new("git")
+        .arg("init")
+        .current_dir(path)
+        .output()
+        .expect("git init");
+    assert!(
+        output.status.success(),
+        "git init failed\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

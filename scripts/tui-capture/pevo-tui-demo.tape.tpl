@@ -14,6 +14,15 @@ Env TEST_PROVIDER_KEY "test-key"
 Type {{PEVO_CMD}}
 Enter
 Wait+Screen /Ask pevo/
+Type "/diff"
+Enter
+Wait+Screen /D I F F/
+Wait+Screen /diff-demo.rs/
+Sleep 300 ms
+Screenshot "19-diff-overlay.png"
+Sleep 500 ms
+Escape
+Sleep 100 ms
 Type "/model"
 Enter
 Wait+Screen /Add provider/

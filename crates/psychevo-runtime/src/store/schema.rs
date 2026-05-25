@@ -15,17 +15,7 @@ impl SqliteStore {
         let user_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
         let has_schema =
             sqlite_table_exists(&conn, "sessions")? || sqlite_table_exists(&conn, "messages")?;
-        if user_version != 0
-            && user_version != SQLITE_SCHEMA_VERSION
-            && user_version != 3
-            && user_version != 4
-            && user_version != 5
-            && user_version != 6
-            && user_version != 7
-            && user_version != 8
-            && user_version != 9
-            && user_version != 10
-        {
+        if user_version != 0 && user_version != SQLITE_SCHEMA_VERSION {
             return Err(Error::Config(format!(
                 "state database schema version {user_version} is not supported; run `pevo init --reset-state` or set PSYCHEVO_DB to a new state database"
             )));
@@ -161,6 +151,21 @@ impl SqliteStore {
                 metadata_json TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS display_blocks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                block_seq INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                surface TEXT NOT NULL,
+                source TEXT NOT NULL,
+                message_session_seq INTEGER,
+                title TEXT,
+                content_text TEXT NOT NULL,
+                metadata_json TEXT,
+                created_at_ms INTEGER NOT NULL,
+                UNIQUE(session_id, block_seq)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_messages_session_seq
                 ON messages(session_id, session_seq);
             CREATE INDEX IF NOT EXISTS idx_context_evidence_prompt
@@ -171,6 +176,8 @@ impl SqliteStore {
                 ON agent_mailbox_events(parent_session_id, delivered_at_ms, created_at_ms);
             CREATE INDEX IF NOT EXISTS idx_session_compactions_latest
                 ON session_compactions(session_id, created_after_session_seq, created_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_display_blocks_session_seq
+                ON display_blocks(session_id, block_seq);
             "#,
         )?;
         if user_version == 3 && !sqlite_column_exists(&conn, "sessions", "archived_at_ms")? {

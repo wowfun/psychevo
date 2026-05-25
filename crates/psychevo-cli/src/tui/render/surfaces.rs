@@ -13,3 +13,7 @@ pub use panels::*;
 mod help_provider;
 #[allow(unused_imports)]
 pub use help_provider::*;
+#[path = "surfaces/diff_overlay.rs"]
+mod diff_overlay;
+#[allow(unused_imports)]
+pub use diff_overlay::*;

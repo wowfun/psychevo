@@ -107,6 +107,7 @@ pub(crate) fn test_app(temp: &tempfile::TempDir) -> TuiApp {
         last_live_agent_reload_check: None,
         side_cleanup_task: None,
         compaction_task: None,
+        diff_task: None,
     }
 }
 

@@ -32,6 +32,7 @@ pub(crate) mod tools;
 pub(crate) mod types;
 pub(crate) mod undo;
 pub(crate) mod user_shell;
+pub mod workspace_diff;
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -105,8 +106,9 @@ pub use state_runtime::StateRuntime;
 pub use stats::usage_stats;
 pub use store::{AgentEdgeRecord, AgentEdgeStatus};
 pub use store::{
-    ChildSessionSnapshotInput, ContextEvidenceInput, ContextEvidenceRecord, SessionCompactionInput,
-    SessionCompactionRecord, SessionMessageRecord, SqliteStore,
+    ChildSessionSnapshotInput, ContextEvidenceInput, ContextEvidenceRecord, DisplayBlockInput,
+    DisplayBlockKind, DisplayBlockRecord, SessionCompactionInput, SessionCompactionRecord,
+    SessionMessageRecord, SqliteStore,
 };
 pub use tools::tool_names_for_mode;
 pub use types::{
@@ -126,3 +128,8 @@ pub use types::{
 };
 pub use undo::{redo_session, undo_session};
 pub use user_shell::run_user_shell_command_streaming_controlled;
+pub use workspace_diff::{
+    WORKSPACE_DIFF_MAX_BYTES, WORKSPACE_DIFF_MAX_LINES, WorkspaceDiff, WorkspaceDiffFile,
+    WorkspaceDiffFileStatus, WorkspaceDiffTruncation, collect_workspace_diff,
+    collect_workspace_diff_with_caps,
+};

@@ -4,338 +4,33 @@ pub(crate) use super::*;
 pub(crate) use super::*;
 
 #[test]
-pub(crate) fn sqlite_schema_v11_migrates_v3_state_databases() {
-    let temp = tempdir().expect("temp");
-    let db = temp.path().join("v3.db");
-    let workdir = temp.path().join("work").to_string_lossy().to_string();
-    {
-        let conn = Connection::open(&db).expect("db");
-        conn.execute_batch(
-            r#"
-            CREATE TABLE sessions (
-                id TEXT PRIMARY KEY,
-                source TEXT NOT NULL,
-                parent_session_id TEXT,
-                workdir TEXT NOT NULL,
-                model TEXT NOT NULL,
-                provider TEXT NOT NULL,
-                started_at_ms INTEGER NOT NULL,
-                updated_at_ms INTEGER NOT NULL,
-                ended_at_ms INTEGER,
-                end_reason TEXT,
-                message_count INTEGER NOT NULL DEFAULT 0,
-                tool_call_count INTEGER NOT NULL DEFAULT 0,
-                title TEXT,
-                metadata_json TEXT
-            );
+pub(crate) fn sqlite_schema_v12_rejects_v3_through_v11_state_databases() {
+    for version in 3..=11 {
+        let temp = tempdir().expect("temp");
+        let db = temp.path().join(format!("v{version}.db"));
+        {
+            let conn = Connection::open(&db).expect("db");
+            conn.execute_batch("CREATE TABLE sessions (id TEXT);")
+                .expect("schema");
+            conn.pragma_update(None, "user_version", version)
+                .expect("version");
+        }
 
-            CREATE TABLE messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL REFERENCES sessions(id),
-                session_seq INTEGER NOT NULL,
-                role TEXT NOT NULL,
-                timestamp_ms INTEGER NOT NULL,
-                message_json TEXT NOT NULL,
-                content_text TEXT,
-                tool_call_id TEXT,
-                tool_name TEXT,
-                tool_calls_json TEXT,
-                finish_reason TEXT,
-                outcome TEXT,
-                model TEXT,
-                provider TEXT,
-                usage_json TEXT,
-                metadata_json TEXT,
-                UNIQUE(session_id, session_seq)
-            );
-
-            CREATE INDEX idx_messages_session_seq
-                ON messages(session_id, session_seq);
-            "#,
-        )
-        .expect("schema");
-        conn.execute(
-            r#"
-            INSERT INTO sessions (
-                id, source, parent_session_id, workdir, model, provider,
-                started_at_ms, updated_at_ms, ended_at_ms, end_reason,
-                message_count, tool_call_count, title, metadata_json
-            ) VALUES ('session-v3', 'run', NULL, ?1, 'model', 'provider',
-                1, 2, NULL, NULL, 0, 0, NULL, NULL)
-            "#,
-            rusqlite::params![workdir],
-        )
-        .expect("session");
-        conn.pragma_update(None, "user_version", 3)
-            .expect("version");
+        let err = match SqliteStore::open(&db) {
+            Ok(_) => panic!("v{version} db opened successfully"),
+            Err(err) => err,
+        };
+        assert!(
+            err.to_string()
+                .contains(&format!("schema version {version}"))
+        );
+        assert!(err.to_string().contains("--reset-state"));
+        assert!(err.to_string().contains("PSYCHEVO_DB"));
     }
-
-    let store = SqliteStore::open(&db).expect("migrate");
-    let conn = Connection::open(&db).expect("db");
-    let user_version: i64 = conn
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .expect("user_version");
-    assert_eq!(user_version, 11);
-    let archived_at: Option<i64> = conn
-        .query_row(
-            "SELECT archived_at_ms FROM sessions WHERE id = 'session-v3'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("archived");
-    assert_eq!(archived_at, None);
-    assert!(
-        sqlite_columns(&conn, "messages")
-            .iter()
-            .any(|name| name == "estimated_cost_nanodollars")
-    );
-    assert!(
-        sqlite_columns(&conn, "context_evidence")
-            .iter()
-            .any(|name| name == "source_kind")
-    );
-    assert!(
-        sqlite_columns(&conn, "agent_edges")
-            .iter()
-            .any(|name| name == "child_session_id")
-    );
-    assert!(!sqlite_columns(&conn, "agent_mailbox_events").is_empty());
-    assert!(!sqlite_columns(&conn, "session_compactions").is_empty());
-    assert!(
-        sqlite_columns(&conn, "context_evidence")
-            .iter()
-            .any(|name| name == "provider_group")
-    );
-    assert_eq!(
-        store
-            .latest_run_session_for_workdir(&temp.path().join("work"))
-            .expect("latest"),
-        Some("session-v3".to_string())
-    );
 }
 
 #[test]
-pub(crate) fn sqlite_schema_v11_migrates_v5_state_databases() {
-    let temp = tempdir().expect("temp");
-    let db = temp.path().join("v5.db");
-    let workdir = temp.path().join("work").to_string_lossy().to_string();
-    {
-        let conn = Connection::open(&db).expect("db");
-        conn.execute_batch(
-            r#"
-            CREATE TABLE sessions (
-                id TEXT PRIMARY KEY,
-                source TEXT NOT NULL,
-                parent_session_id TEXT,
-                workdir TEXT NOT NULL,
-                model TEXT NOT NULL,
-                provider TEXT NOT NULL,
-                started_at_ms INTEGER NOT NULL,
-                updated_at_ms INTEGER NOT NULL,
-                ended_at_ms INTEGER,
-                end_reason TEXT,
-                archived_at_ms INTEGER,
-                message_count INTEGER NOT NULL DEFAULT 0,
-                tool_call_count INTEGER NOT NULL DEFAULT 0,
-                title TEXT,
-                metadata_json TEXT
-            );
-
-            CREATE TABLE messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL REFERENCES sessions(id),
-                session_seq INTEGER NOT NULL,
-                role TEXT NOT NULL,
-                timestamp_ms INTEGER NOT NULL,
-                message_json TEXT NOT NULL,
-                content_text TEXT,
-                tool_call_id TEXT,
-                tool_name TEXT,
-                tool_calls_json TEXT,
-                finish_reason TEXT,
-                outcome TEXT,
-                model TEXT,
-                provider TEXT,
-                usage_json TEXT,
-                metadata_json TEXT,
-                context_input_tokens INTEGER,
-                billable_input_tokens INTEGER,
-                billable_output_tokens INTEGER,
-                reasoning_tokens INTEGER,
-                cache_read_tokens INTEGER,
-                cache_write_tokens INTEGER,
-                reported_total_tokens INTEGER,
-                estimated_cost_nanodollars INTEGER,
-                pricing_source TEXT,
-                pricing_tier TEXT,
-                UNIQUE(session_id, session_seq)
-            );
-
-            CREATE INDEX idx_messages_session_seq
-                ON messages(session_id, session_seq);
-            "#,
-        )
-        .expect("schema");
-        conn.execute(
-            r#"
-            INSERT INTO sessions (
-                id, source, parent_session_id, workdir, model, provider,
-                started_at_ms, updated_at_ms, ended_at_ms, end_reason,
-                archived_at_ms, message_count, tool_call_count, title, metadata_json
-            ) VALUES ('session-v5', 'run', NULL, ?1, 'model', 'provider',
-                1, 2, NULL, NULL, NULL, 0, 0, NULL, NULL)
-            "#,
-            rusqlite::params![workdir],
-        )
-        .expect("session");
-        conn.pragma_update(None, "user_version", 5)
-            .expect("version");
-    }
-
-    let store = SqliteStore::open(&db).expect("migrate");
-    let conn = Connection::open(&db).expect("db");
-    let user_version: i64 = conn
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .expect("user_version");
-    assert_eq!(user_version, 11);
-    assert!(
-        sqlite_columns(&conn, "context_evidence")
-            .iter()
-            .any(|name| name == "content_text")
-    );
-    assert!(
-        sqlite_columns(&conn, "context_evidence")
-            .iter()
-            .any(|name| name == "provider_block_index")
-    );
-    assert!(!sqlite_columns(&conn, "agent_mailbox_events").is_empty());
-    assert_eq!(
-        store
-            .latest_run_session_for_workdir(&temp.path().join("work"))
-            .expect("latest"),
-        Some("session-v5".to_string())
-    );
-}
-
-#[test]
-pub(crate) fn sqlite_schema_v11_migrates_v6_state_databases() {
-    let temp = tempdir().expect("temp");
-    let db = temp.path().join("v6.db");
-    let workdir = temp.path().join("work").to_string_lossy().to_string();
-    {
-        let conn = Connection::open(&db).expect("db");
-        conn.execute_batch(
-            r#"
-            CREATE TABLE sessions (
-                id TEXT PRIMARY KEY,
-                source TEXT NOT NULL,
-                parent_session_id TEXT,
-                workdir TEXT NOT NULL,
-                model TEXT NOT NULL,
-                provider TEXT NOT NULL,
-                started_at_ms INTEGER NOT NULL,
-                updated_at_ms INTEGER NOT NULL,
-                ended_at_ms INTEGER,
-                end_reason TEXT,
-                archived_at_ms INTEGER,
-                message_count INTEGER NOT NULL DEFAULT 0,
-                tool_call_count INTEGER NOT NULL DEFAULT 0,
-                title TEXT,
-                metadata_json TEXT
-            );
-
-            CREATE TABLE messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL REFERENCES sessions(id),
-                session_seq INTEGER NOT NULL,
-                role TEXT NOT NULL,
-                timestamp_ms INTEGER NOT NULL,
-                message_json TEXT NOT NULL,
-                content_text TEXT,
-                tool_call_id TEXT,
-                tool_name TEXT,
-                tool_calls_json TEXT,
-                finish_reason TEXT,
-                outcome TEXT,
-                model TEXT,
-                provider TEXT,
-                usage_json TEXT,
-                metadata_json TEXT,
-                context_input_tokens INTEGER,
-                billable_input_tokens INTEGER,
-                billable_output_tokens INTEGER,
-                reasoning_tokens INTEGER,
-                cache_read_tokens INTEGER,
-                cache_write_tokens INTEGER,
-                reported_total_tokens INTEGER,
-                estimated_cost_nanodollars INTEGER,
-                pricing_source TEXT,
-                pricing_tier TEXT,
-                UNIQUE(session_id, session_seq)
-            );
-
-            CREATE TABLE context_evidence (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-                prompt_session_seq INTEGER NOT NULL,
-                context_seq INTEGER NOT NULL,
-                role TEXT NOT NULL,
-                source_kind TEXT NOT NULL,
-                source_name TEXT,
-                source_path TEXT,
-                timestamp_ms INTEGER NOT NULL,
-                content_text TEXT NOT NULL,
-                metadata_json TEXT,
-                UNIQUE(session_id, prompt_session_seq, context_seq),
-                FOREIGN KEY (session_id, prompt_session_seq)
-                    REFERENCES messages(session_id, session_seq)
-                    ON DELETE CASCADE
-            );
-
-            CREATE INDEX idx_messages_session_seq
-                ON messages(session_id, session_seq);
-            CREATE INDEX idx_context_evidence_prompt
-                ON context_evidence(session_id, prompt_session_seq, context_seq);
-            "#,
-        )
-        .expect("schema");
-        conn.execute(
-            r#"
-            INSERT INTO sessions (
-                id, source, parent_session_id, workdir, model, provider,
-                started_at_ms, updated_at_ms, ended_at_ms, end_reason,
-                archived_at_ms, message_count, tool_call_count, title, metadata_json
-            ) VALUES ('session-v6', 'run', NULL, ?1, 'model', 'provider',
-                1, 2, NULL, NULL, NULL, 0, 0, NULL, NULL)
-            "#,
-            rusqlite::params![workdir],
-        )
-        .expect("session");
-        conn.pragma_update(None, "user_version", 6)
-            .expect("version");
-    }
-
-    let store = SqliteStore::open(&db).expect("migrate");
-    let conn = Connection::open(&db).expect("db");
-    let user_version: i64 = conn
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .expect("user_version");
-    assert_eq!(user_version, 11);
-    let columns = sqlite_columns(&conn, "context_evidence");
-    assert!(columns.iter().any(|name| name == "provider_group"));
-    assert!(columns.iter().any(|name| name == "provider_block_index"));
-    assert!(columns.iter().any(|name| name == "context_kind"));
-    assert!(!sqlite_columns(&conn, "agent_mailbox_events").is_empty());
-    assert_eq!(
-        store
-            .latest_run_session_for_workdir(&temp.path().join("work"))
-            .expect("latest"),
-        Some("session-v6".to_string())
-    );
-}
-
-#[test]
-pub(crate) fn sqlite_schema_v11_rejects_old_state_databases() {
+pub(crate) fn sqlite_schema_v12_rejects_v1_and_v2_state_databases() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("old.db");
     {
@@ -367,6 +62,56 @@ pub(crate) fn sqlite_schema_v11_rejects_old_state_databases() {
     };
     assert!(err.to_string().contains("schema version 2"));
     assert!(err.to_string().contains("--reset-state"));
+}
+
+#[test]
+pub(crate) fn sqlite_schema_v12_stores_semantic_display_blocks() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let store = SqliteStore::open(&db).expect("store");
+    let session_id = store
+        .create_session_with_metadata(&workdir, "run", "model", "provider", None)
+        .expect("session");
+    let message_seq = store
+        .append_message_with_undo_snapshot_and_context_evidence(
+            &session_id,
+            &user_message("show diff", 1),
+            None,
+            &[],
+        )
+        .expect("message");
+
+    let block_seq = store
+        .append_display_block(DisplayBlockInput {
+            session_id: session_id.clone(),
+            kind: DisplayBlockKind::Diff,
+            surface: "tui".to_string(),
+            source: "slash:/diff".to_string(),
+            message_session_seq: Some(message_seq),
+            title: Some("D I F F".to_string()),
+            content_text: "diff --git a/a b/a\n".to_string(),
+            metadata: Some(json!({ "truncated": false })),
+        })
+        .expect("display block");
+
+    assert_eq!(block_seq, 1);
+    let conn = Connection::open(&db).expect("db");
+    let user_version: i64 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .expect("user_version");
+    assert_eq!(user_version, 12);
+    assert!(
+        sqlite_columns(&conn, "display_blocks")
+            .iter()
+            .any(|name| name == "kind")
+    );
+    let blocks = store.load_display_blocks(&session_id).expect("blocks");
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].kind, DisplayBlockKind::Diff);
+    assert_eq!(blocks[0].surface, "tui");
+    assert_eq!(blocks[0].message_session_seq, Some(message_seq));
+    assert_eq!(blocks[0].metadata, Some(json!({ "truncated": false })));
 }
 
 #[test]

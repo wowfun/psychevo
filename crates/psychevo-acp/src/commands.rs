@@ -470,6 +470,7 @@ pub(crate) fn acp_command_capabilities()
         CommandCapability::Queue,
         CommandCapability::SessionSwitch,
         CommandCapability::ArtifactWrite,
+        CommandCapability::WorkspaceDiff,
         CommandCapability::ConfigWrite,
         CommandCapability::PolicyWrite,
         CommandCapability::SkillStateWrite,
@@ -487,6 +488,86 @@ pub(crate) fn send_slash_text(
         SessionUpdate::AgentMessageChunk(ContentChunk::new(text.into().into())),
     );
     SlashPromptAction::Handled(PromptResponse::new(StopReason::EndTurn))
+}
+
+pub(crate) fn send_diff_tool_call(
+    cx: &ConnectionTo<Client>,
+    session_id: &SessionId,
+    diff: &WorkspaceDiff,
+) -> SlashPromptAction {
+    let call_id = format!("slash_diff_{}", Uuid::now_v7());
+    let (start, completed) = diff_tool_call_updates(call_id, diff);
+    send_session_update(cx, session_id.clone(), start);
+    send_session_update(cx, session_id.clone(), completed);
+    SlashPromptAction::Handled(PromptResponse::new(StopReason::EndTurn))
+}
+
+fn diff_tool_call_updates(
+    call_id: impl Into<String>,
+    diff: &WorkspaceDiff,
+) -> (SessionUpdate, SessionUpdate) {
+    let call_id = call_id.into();
+    (
+        SessionUpdate::ToolCall(
+            ToolCall::new(call_id.clone(), "Workspace diff")
+                .kind(ToolKind::Read)
+                .status(ToolCallStatus::InProgress)
+                .raw_input(json!({ "command": "/diff" })),
+        ),
+        SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            call_id,
+            ToolCallUpdateFields::new()
+                .title("Workspace diff")
+                .kind(ToolKind::Read)
+                .status(ToolCallStatus::Completed)
+                .content(acp_diff_content(diff))
+                .raw_output(diff_raw_output(diff)),
+        )),
+    )
+}
+
+fn acp_diff_content(diff: &WorkspaceDiff) -> Vec<ToolCallContent> {
+    diff.files
+        .iter()
+        .map(|file| {
+            let new_text = file.new_text.clone().unwrap_or_else(|| {
+                file.placeholder
+                    .clone()
+                    .unwrap_or_else(|| format!("diff unavailable for {}", file.path))
+            });
+            let mut acp_diff = AcpDiff::new(PathBuf::from(&file.path), new_text);
+            if let Some(old_text) = file.old_text.clone() {
+                acp_diff = acp_diff.old_text(old_text);
+            }
+            ToolCallContent::Diff(acp_diff)
+        })
+        .collect()
+}
+
+fn diff_raw_output(diff: &WorkspaceDiff) -> Value {
+    let status = if !diff.is_git_repo {
+        "not_git_repo"
+    } else if diff.is_empty() {
+        "empty"
+    } else {
+        "ok"
+    };
+    json!({
+        "status": status,
+        "file_count": diff.files.len(),
+        "truncation": diff.truncation,
+        "files": diff.files.iter().map(diff_file_summary).collect::<Vec<_>>(),
+    })
+}
+
+fn diff_file_summary(file: &WorkspaceDiffFile) -> Value {
+    json!({
+        "path": file.path,
+        "status": file.status,
+        "binary": file.binary,
+        "unreadable": file.unreadable,
+        "placeholder": file.placeholder,
+    })
 }
 
 pub(crate) fn user_text_message(text: &str) -> Message {
@@ -848,5 +929,125 @@ pub(crate) fn send_run_stream_update(
         RunStreamEvent::ReasoningEnd
         | RunStreamEvent::ClarifyRequest(_)
         | RunStreamEvent::ClarifyResolved(_) => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use psychevo_runtime::command_registry::{
+        SlashCommandEffect, SlashCommandParse, SlashCommandSurface,
+        available_slash_commands_for_surface, parse_slash_command_line, slash_invocation_effect,
+    };
+    use psychevo_runtime::{WorkspaceDiffFileStatus, WorkspaceDiffTruncation};
+
+    #[test]
+    fn acp_advertises_diff_and_allows_it_during_active_turns() {
+        let available = available_slash_commands_for_surface(
+            acp_command_capabilities(),
+            true,
+            &[],
+            ACP_COMMAND_ADVERTISEMENT_LIMIT,
+        );
+        assert!(
+            available
+                .commands
+                .iter()
+                .any(|command| command.name == "diff"),
+            "{available:?}"
+        );
+
+        let SlashCommandParse::Known(invocation) = parse_slash_command_line("/diff") else {
+            panic!("expected /diff to parse");
+        };
+        let effect = slash_invocation_effect(
+            &invocation,
+            acp_command_capabilities(),
+            SlashCommandSurface::Acp,
+            true,
+        )
+        .expect("slash effect");
+        assert_eq!(effect, SlashCommandEffect::Diff);
+    }
+
+    #[test]
+    fn diff_tool_call_update_uses_structured_diff_without_text_fallback() {
+        let diff = sample_workspace_diff();
+        let (start, completed) = diff_tool_call_updates("slash_diff_test", &diff);
+
+        match start {
+            SessionUpdate::ToolCall(call) => {
+                assert_eq!(call.title, "Workspace diff");
+                assert_eq!(call.kind, ToolKind::Read);
+                assert_eq!(call.status, ToolCallStatus::InProgress);
+                assert_eq!(
+                    call.raw_input
+                        .as_ref()
+                        .and_then(|value| value.get("command"))
+                        .and_then(Value::as_str),
+                    Some("/diff")
+                );
+                assert!(call.content.is_empty());
+            }
+            SessionUpdate::AgentMessageChunk(_) => panic!("diff must not use assistant text"),
+            other => panic!("unexpected start update: {other:?}"),
+        }
+
+        match completed {
+            SessionUpdate::ToolCallUpdate(update) => {
+                assert_eq!(update.fields.title.as_deref(), Some("Workspace diff"));
+                assert_eq!(update.fields.kind, Some(ToolKind::Read));
+                assert_eq!(update.fields.status, Some(ToolCallStatus::Completed));
+                let content = update.fields.content.expect("diff content");
+                assert_eq!(content.len(), 1);
+                match &content[0] {
+                    ToolCallContent::Diff(diff) => {
+                        assert_eq!(diff.path, PathBuf::from("src/lib.rs"));
+                        assert_eq!(diff.old_text.as_deref(), Some("old body\n"));
+                        assert_eq!(diff.new_text, "new body\n");
+                    }
+                    other => panic!("unexpected content: {other:?}"),
+                }
+
+                let raw = update.fields.raw_output.expect("raw output");
+                assert_eq!(raw.get("status").and_then(Value::as_str), Some("ok"));
+                assert_eq!(raw.get("file_count").and_then(Value::as_u64), Some(1));
+                assert_eq!(
+                    raw.pointer("/truncation/truncated")
+                        .and_then(Value::as_bool),
+                    Some(true)
+                );
+                let raw_text = serde_json::to_string(&raw).expect("raw output json");
+                assert!(!raw_text.contains("UNIFIED_PATCH_BODY_SHOULD_NOT_APPEAR"));
+                assert!(!raw_text.contains("new body"));
+            }
+            SessionUpdate::AgentMessageChunk(_) => panic!("diff must not use assistant text"),
+            other => panic!("unexpected completed update: {other:?}"),
+        }
+    }
+
+    fn sample_workspace_diff() -> WorkspaceDiff {
+        WorkspaceDiff {
+            is_git_repo: true,
+            files: vec![WorkspaceDiffFile {
+                path: "src/lib.rs".to_string(),
+                status: WorkspaceDiffFileStatus::Modified,
+                old_text: Some("old body\n".to_string()),
+                new_text: Some("new body\n".to_string()),
+                binary: false,
+                unreadable: false,
+                placeholder: None,
+            }],
+            unified_diff:
+                "diff --git a/src/lib.rs b/src/lib.rs\n+UNIFIED_PATCH_BODY_SHOULD_NOT_APPEAR\n"
+                    .to_string(),
+            truncation: WorkspaceDiffTruncation {
+                truncated: true,
+                max_bytes: 256,
+                max_lines: 3000,
+                omitted_bytes: 64,
+                omitted_lines: 2,
+            },
+        }
     }
 }

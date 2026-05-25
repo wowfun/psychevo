@@ -80,6 +80,10 @@ impl TuiApp {
                     }
                 }
             }
+            SlashCommand::Diff => {
+                ui.diff_overlay = Some(DiffOverlay::computing());
+                self.start_diff_task();
+            }
             SlashCommand::Refresh => {
                 if ui.status_has_running(self.current_session.as_deref()) {
                     ui.push_command_result(
@@ -390,6 +394,17 @@ impl TuiApp {
                 Ok(false)
             }
         }
+    }
+
+    pub(crate) fn start_diff_task(&mut self) {
+        if let Some(task) = self.diff_task.take() {
+            task.task.abort();
+        }
+        let workdir = self.workdir.clone();
+        let task = tokio::task::spawn_blocking(move || {
+            collect_workspace_diff(&workdir).map_err(|err| err.to_string())
+        });
+        self.diff_task = Some(DiffTask { task });
     }
 
     pub(crate) fn submit_fullscreen_prompt(
