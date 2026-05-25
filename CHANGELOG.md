@@ -2,11 +2,20 @@
 
 ## 2026-05-25
 
+- Added `/diff` across TUI and ACP with shared workspace diff collection,
+  structured ACP output, a Codex-style TUI pager, and deterministic VHS
+  coverage.
+- Upgraded local state storage to schema v12 with durable semantic display
+  blocks and reset guidance for older state databases.
+- Migrated evaluation fixtures from `local-rust-swe` to `local-coding` with
+  coding-loop, prompt A/B, and SWE-style task families plus richer diagnostics.
 - Split oversized Rust modules into responsibility-named submodules, replacing
   the temporary numbered split files without changing public APIs or command
   behavior.
 - Reused injected skill bodies for explicit `$skill` prompts instead of asking
   the model to reload `SKILL.md`.
+- Fixed transient TUI turn metadata rows appearing after completed tool output
+  before the final assistant message.
 - Added shared `StateRuntime` plumbing for runtime, TUI, and ACP paths, reducing
   idle TUI agent reload and WAL checkpoint churn.
 - Fixed scoped default-model writes for CLI/TUI model selection, including
