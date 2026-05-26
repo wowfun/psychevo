@@ -9,18 +9,20 @@ repo_ref="${PEVO_INSTALL_REF:-$DEFAULT_REPO_REF}"
 source_arg=""
 run_init=1
 dry_run=0
+install_peval=0
 tmp_dir=""
 
 usage() {
   cat <<'EOF'
 usage: install.sh [options]
 
-Install pevo from source.
+Install pevo from source. Use --with-peval to install the evaluation CLI too.
 
 Options:
   --repo-url <url>  Git repository to clone when no local checkout is found
   --ref <ref>       Git branch or tag to clone
   --source <path>   Install from a local Psychevo source checkout
+  --with-peval      Also install and verify the peval evaluation CLI
   --no-init         Skip post-install pevo init
   --dry-run         Print the resolved install plan without making changes
   -h, --help        Show this help
@@ -132,6 +134,10 @@ candidate_pevo_bin() {
   printf '%s/pevo%s\n' "$(cargo_bin_dir)" "$(pevo_bin_suffix)"
 }
 
+candidate_peval_bin() {
+  printf '%s/peval%s\n' "$(cargo_bin_dir)" "$(pevo_bin_suffix)"
+}
+
 path_contains_dir() {
   case ":${PATH:-}:" in
     *":$1:"*) return 0 ;;
@@ -234,6 +240,25 @@ resolve_pevo_bin() {
   return 1
 }
 
+resolve_peval_bin() {
+  candidate=$(candidate_peval_bin)
+  if [ -x "$candidate" ]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+  found=$(command -v peval 2>/dev/null || true)
+  if [ -n "$found" ]; then
+    printf '%s\n' "$found"
+    return 0
+  fi
+  found=$(command -v peval.exe 2>/dev/null || true)
+  if [ -n "$found" ]; then
+    printf '%s\n' "$found"
+    return 0
+  fi
+  return 1
+}
+
 print_path_hint_if_needed() {
   bin_dir=$(cargo_bin_dir)
   if path_contains_dir "$bin_dir"; then
@@ -247,7 +272,7 @@ Cargo's bin directory is not on PATH for this shell:
 For this session, run:
   export PATH="$(shell_quote "$bin_dir"):\$PATH"
 
-Add that line to your shell profile if you want pevo available in new shells.
+Add that line to your shell profile if you want installed commands available in new shells.
 EOF
 }
 
@@ -261,6 +286,7 @@ print_plan() {
   printf 'mode: %s\n' "$source_origin"
   printf 'repo_url: %s\n' "$repo_url"
   printf 'repo_ref: %s\n' "$repo_ref"
+  printf 'with_peval: %s\n' "$install_peval"
   printf 'source: %s\n' "$source_display"
   if [ "$source_origin" = "clone" ]; then
     printf 'clone_command: git clone --depth 1 --branch %s %s %s\n' \
@@ -271,6 +297,11 @@ print_plan() {
   printf 'install_command: cargo install --locked --path %s --force\n' \
     "$(shell_quote "$source_display/crates/psychevo-cli")"
   printf 'pevo_binary: %s\n' "$(candidate_pevo_bin)"
+  if [ "$install_peval" -eq 1 ]; then
+    printf 'peval_install_command: cargo install --locked --path %s --force\n' \
+      "$(shell_quote "$source_display/crates/psychevo-eval")"
+    printf 'peval_binary: %s\n' "$(candidate_peval_bin)"
+  fi
   if [ "$run_init" -eq 1 ]; then
     printf 'init_command: %s init\n' "$(shell_quote "$(candidate_pevo_bin)")"
   else
@@ -294,6 +325,10 @@ while [ "$#" -gt 0 ]; do
       [ "$#" -gt 1 ] || die "--source requires a value"
       source_arg=$2
       shift 2
+      ;;
+    --with-peval)
+      install_peval=1
+      shift
       ;;
     --no-init)
       run_init=0
@@ -362,6 +397,20 @@ pevo_bin=$(resolve_pevo_bin) || die "pevo was installed, but the binary could no
 info "Verifying pevo..."
 "$pevo_bin" --help >/dev/null
 
+if [ "$install_peval" -eq 1 ]; then
+  [ -f "$source_dir/crates/psychevo-eval/Cargo.toml" ] || die "source checkout does not contain crates/psychevo-eval/Cargo.toml"
+  info "Installing peval from $source_dir..."
+  if ! cargo install --locked --path "$source_dir/crates/psychevo-eval" --force; then
+    if is_windows_shell; then
+      die "peval cargo install failed. On Windows Git Bash/MSYS/MINGW, install Rust and native C/C++ build tools such as Visual Studio Build Tools or a compatible MinGW setup, then rerun this script."
+    fi
+    die "peval cargo install failed."
+  fi
+  peval_bin=$(resolve_peval_bin) || die "peval was installed, but the binary could not be found."
+  info "Verifying peval..."
+  "$peval_bin" --help >/dev/null
+fi
+
 if [ "$run_init" -eq 1 ]; then
   info "Initializing Psychevo home..."
   "$pevo_bin" init
@@ -375,8 +424,24 @@ cat <<EOF
 
 pevo is installed:
   $pevo_bin
+EOF
 
+if [ "$install_peval" -eq 1 ]; then
+  cat <<EOF
+peval is installed:
+  $peval_bin
+
+EOF
+fi
+
+cat <<EOF
 Try:
   pevo --help
   pevo tui
 EOF
+
+if [ "$install_peval" -eq 1 ]; then
+  cat <<'EOF'
+  peval --help
+EOF
+fi

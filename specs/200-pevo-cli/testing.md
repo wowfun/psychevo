@@ -139,7 +139,7 @@ scripts/validate.sh broad
 - `scripts/install.sh` passes POSIX shell syntax validation with `sh -n`.
 - Dry-run coverage verifies local `--source` install planning, clone-mode
   defaults and overrides, default post-install initialization, `--no-init`, and
-  Git Bash/MSYS/MINGW binary naming.
+  `--with-peval` planning. It also verifies Git Bash/MSYS/MINGW binary naming.
 - Dry-run output is deterministic and does not require `git`, `cargo`, network
   access, provider credentials, or global Psychevo state.
 

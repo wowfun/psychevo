@@ -28,6 +28,10 @@ first: commands must return structured diagnostics when JSON output is
 requested, preserve useful exit codes, and avoid requiring an interactive
 terminal for benchmark execution.
 
+User-facing evaluation guides live under `docs/evaluation/`. Those guides may
+show installation, getting-started, authoring, live evaluation, and automation
+workflows, but this spec remains the source of truth for command behavior.
+
 `peval check` is the offline safety gate. It validates manifests, schema
 versions, local fixtures, adapter declarations, command availability, output
 paths, and report inputs without running live providers or downloading official

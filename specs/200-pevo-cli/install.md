@@ -41,15 +41,22 @@ Accepted flags and environment defaults:
 - `--ref <ref>` overrides the clone branch or tag. `PEVO_INSTALL_REF` is the
   environment default.
 - `--source <path>` forces installation from a local Psychevo source tree.
+- `--with-peval` also installs and verifies the `peval` evaluation CLI.
 - `--no-init` skips post-install `pevo init`.
 - `--dry-run` prints the resolved plan and commands without cloning,
   installing, initializing, or requiring installed dependencies.
 - `-h, --help` prints usage.
 
-Installation uses:
+Default installation uses:
 
 ```bash
 cargo install --locked --path crates/psychevo-cli --force
+```
+
+When `--with-peval` is supplied, installation also uses:
+
+```bash
+cargo install --locked --path crates/psychevo-eval --force
 ```
 
 The script must validate that local source directories contain the workspace
@@ -79,7 +86,13 @@ Tools or a compatible MinGW setup, may be required.
 ## Post-Install Behavior
 
 After `cargo install` succeeds, the script locates `pevo` or `pevo.exe`, runs
-`pevo --help`, and by default runs `pevo init`.
+`pevo --help`, and by default runs `pevo init`. When `--with-peval` is
+supplied, the script also locates `peval` or `peval.exe` and runs
+`peval --help`.
+
+The install script must not run `peval init` automatically. Evaluation store
+setup remains an explicit user action through `peval init`, `--root`, or
+`PEVAL_ROOT`.
 
 `pevo init` is idempotent and must not overwrite existing `config.toml` or
 `.env` files. The install script must not write raw API keys.

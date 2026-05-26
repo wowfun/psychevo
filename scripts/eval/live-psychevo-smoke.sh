@@ -1,7 +1,19 @@
 #!/usr/bin/env sh
 set -eu
 
-PROJECT="${1:-crates/psychevo-eval/fixtures/local-coding}"
+SCRIPT_DIR=$(CDPATH= cd "$(dirname "$0")" && pwd -P)
+REPO_ROOT=$(CDPATH= cd "$SCRIPT_DIR/../.." && pwd -P)
+INVOCATION_DIR=$(pwd -P)
+
+if [ "$#" -gt 0 ]; then
+    case "$1" in
+        /*) PROJECT="$1" ;;
+        *) PROJECT="$INVOCATION_DIR/$1" ;;
+    esac
+else
+    PROJECT="$REPO_ROOT/crates/psychevo-eval/fixtures/local-coding"
+fi
+
 SUITE="${PEVAL_LIVE_SUITE:-rust-swe}"
 AGENT="${PEVAL_LIVE_AGENT:-psychevo-live}"
 RUN_ID="${PEVAL_LIVE_RUN_ID:-live-psychevo-smoke}"
@@ -27,11 +39,12 @@ LIVE_HOME="$(mktemp -d "${TMPDIR:-/tmp}/psychevo-peval-live-home.XXXXXX")"
 trap 'rm -rf "$LIVE_HOME"' EXIT HUP INT TERM
 PSYCHEVO_HOME="$LIVE_HOME"
 PSYCHEVO_DB="$LIVE_HOME/state.db"
-PEVAL_ROOT="${PEVAL_ROOT:-$(pwd)/.local/evals}"
+PEVAL_ROOT="${PEVAL_ROOT:-$REPO_ROOT/.local/evals}"
 export PSYCHEVO_HOME PSYCHEVO_DB PEVAL_ROOT
 
+cd "$REPO_ROOT"
 cargo build -p psychevo-cli --bin pevo
-PATH="$(pwd)/target/debug:$PATH"
+PATH="$REPO_ROOT/target/debug:$PATH"
 export PATH
 
 cargo run -p psychevo-eval --bin peval -- run \

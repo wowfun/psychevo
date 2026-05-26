@@ -10,9 +10,10 @@ project is focused on observable agent execution, explicit provider
 configuration, durable local state, permission-aware tools, and reusable
 runtime primitives for agents, skills, and editor integrations.
 
-The user-facing command is `pevo`. Use it for one-shot coding-agent turns,
+The main user-facing command is `pevo`. Use it for one-shot coding-agent turns,
 interactive TUI work, ACP editor integration, local skills and agents, toolsets,
-sessions, model/provider configuration, and usage/context inspection.
+sessions, model/provider configuration, and usage/context inspection. Use
+`peval` for local and live evaluation workflows.
 
 ## Current Capabilities
 
@@ -29,6 +30,7 @@ sessions, model/provider configuration, and usage/context inspection.
 | Permissions | Runtime permissions combine policy rules, config, and interactive approvals before sensitive actions run. |
 | MCP | MCP servers can contribute tools through configured or client-provided sources, while Psychevo keeps runtime permission checks in charge. |
 | Usage, context, and compaction | `pevo stats`, `pevo context`, session history, and compaction support help track cost, context pressure, and long-running work. |
+| Evaluation | `peval` checks evaluation manifests, runs local and live candidate matrices, writes artifacts, and renders reports. |
 
 ## Not Yet
 
@@ -58,7 +60,8 @@ pevo --help
 The install script builds with `cargo install --locked --path
 crates/psychevo-cli --force`, verifies `pevo --help`, and runs the idempotent
 `pevo init` by default. Use `sh scripts/install.sh --no-init` to skip
-initialization.
+initialization. Use `sh scripts/install.sh --with-peval` when you also want
+the `peval` evaluation CLI installed and verified.
 
 The workspace uses Rust 1.94 and edition 2024. If Rust/Cargo is missing, the
 script asks before trying to install Rust. Windows Git Bash/MSYS/MINGW shells
@@ -135,12 +138,14 @@ pevo run -m deepseek/deepseek-chat "inspect the CLI entrypoints"
 | `pevo stats` | Show local token and estimated-cost statistics from SQLite state. |
 | `pevo context --session <id\|latest>` | Inspect local context-window usage for a session. |
 | `pevo smoke --db <path> --workdir <path>` | Run the deterministic fake-provider validation harness. |
+| `peval ...` | Check, run, report, compare, and replay evaluation work. |
 
-Run `pevo <command> --help` for flags.
+Run `pevo <command> --help` or `peval <command> --help` for flags.
 
 ## Documentation
 
 - [ACP Configuration Guide](docs/acp-configuration.md)
+- [Evaluation Guide](docs/evaluation/README.md)
 - [TUI Troubleshooting](docs/troubleshooting/tui.md)
 
 ## Workspace
@@ -152,6 +157,7 @@ Run `pevo <command> --help` for flags.
 | `psychevo-runtime` | Coding-agent runtime assembly, provider/model resolution, context, tools, persistence, skills, agents, permissions, and usage accounting. |
 | `psychevo-acp` | ACP server packaging and runtime bridge used by `pevo acp`. |
 | `psychevo-cli` | The `pevo` command-line entrypoint and fullscreen terminal UI. |
+| `psychevo-eval` | The `peval` evaluation CLI, local fixture runner, artifact store, reports, and dataset inventory. |
 
 ## Development
 

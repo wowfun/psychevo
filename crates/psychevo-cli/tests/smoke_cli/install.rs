@@ -48,6 +48,54 @@ pub(crate) fn install_dry_run_uses_explicit_source_and_default_init() {
         )),
         "{stdout}"
     );
+    assert!(stdout.contains("with_peval: 0"), "{stdout}");
+    assert!(
+        stdout.contains(&format!(
+            "init_command: '{}/.cargo/bin/pevo' init",
+            home.display()
+        )),
+        "{stdout}"
+    );
+}
+
+#[test]
+pub(crate) fn install_dry_run_can_include_peval() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let root = install_workspace_root();
+    let output = Command::new("sh")
+        .arg(install_script_path())
+        .arg("--dry-run")
+        .arg("--with-peval")
+        .arg("--source")
+        .arg(&root)
+        .env("HOME", &home)
+        .env_remove("CARGO_HOME")
+        .env_remove("CARGO_INSTALL_ROOT")
+        .output()
+        .expect("install dry run");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+    let source = root.display().to_string();
+    assert!(stdout.contains("with_peval: 1"), "{stdout}");
+    assert!(
+        stdout.contains(&format!(
+            "peval_install_command: cargo install --locked --path '{source}/crates/psychevo-eval' --force"
+        )),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains(&format!(
+            "peval_binary: {}/.cargo/bin/peval",
+            home.display()
+        )),
+        "{stdout}"
+    );
     assert!(
         stdout.contains(&format!(
             "init_command: '{}/.cargo/bin/pevo' init",

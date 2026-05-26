@@ -54,11 +54,11 @@ startup. Evaluation hooks should be passive runtime outputs or explicitly
 enabled adapter calls.
 
 Live Psychevo smoke validation is owned by an explicit script outside the
-default test path. It must verify the manifest live gate before invoking the
-real runtime/provider route. Smoke fixtures may wrap the real `pevo run`
-process to keep state isolated and to post-check the task workspace when a
-provider stream does not close cleanly; the structured evaluation scorer still
-decides whether the case passes.
+default test path: `scripts/eval/live-psychevo-smoke.sh`. It must verify the
+manifest live gate before invoking the real runtime/provider route. Smoke
+fixtures may wrap the real `pevo run` process to keep state isolated and to
+post-check the task workspace when a provider stream does not close cleanly;
+the structured evaluation scorer still decides whether the case passes.
 
 ## Related Topics
 
