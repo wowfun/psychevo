@@ -1,17 +1,19 @@
 use std::env;
-use std::process::ExitCode;
+use std::fs;
+use std::process::{Command, ExitCode};
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use psychevo_runtime::{
     ConfigScope, ScopedCustomProviderInput, config_provider_list_value, config_show_value,
     create_scoped_custom_provider, permission_rules_value, remove_local_permission_rule,
+    set_config_value, set_provider_api_key,
 };
 use serde_json::{Value, json};
 
 use crate::args::{
-    ConfigArgs, ConfigCommand, ConfigJsonArgs, ConfigPermissionRemoveArgs, ConfigPermissionsArgs,
-    ConfigPermissionsCommand, ConfigProviderAddArgs, ConfigProviderArgs, ConfigProviderCommand,
-    ConfigShowArgs,
+    ConfigArgs, ConfigCommand, ConfigEditArgs, ConfigJsonArgs, ConfigPermissionRemoveArgs,
+    ConfigPermissionsArgs, ConfigPermissionsCommand, ConfigProviderAddArgs, ConfigProviderArgs,
+    ConfigProviderCommand, ConfigSetArgs, ConfigShowArgs,
 };
 use crate::commands::common::{
     base_run_options, config_scope_dir, print_json_error, read_secret_from_stdin, scope_label,
@@ -41,10 +43,179 @@ pub(crate) fn run_config_command_inner(args: &ConfigArgs) -> Result<ExitCode> {
             let value = config_show_value(&options, config_scope(args))?;
             print_config_document(&value, args.json)?;
         }
+        ConfigCommand::Edit(args) => edit_config(args, &home, &cwd)?,
+        ConfigCommand::Set(args) => set_config(args, &env_map, &home, &cwd)?,
+        ConfigCommand::Validate(args) => validate_config(args, &env_map, &home, &cwd)?,
+        ConfigCommand::Doctor(args) => doctor_config(args, &env_map, &home, &cwd)?,
+        ConfigCommand::Status(args) => doctor_config(args, &env_map, &home, &cwd)?,
         ConfigCommand::Provider(args) => run_provider_command(args, &env_map, &home, &cwd)?,
         ConfigCommand::Permissions(args) => run_permissions_command(args, &env_map, &home, &cwd)?,
     }
     Ok(ExitCode::SUCCESS)
+}
+
+pub(crate) fn edit_config(
+    args: &ConfigEditArgs,
+    home: &std::path::Path,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    let config_dir = scoped_config_dir(home, cwd, args.global)?;
+    fs::create_dir_all(&config_dir)?;
+    let path = config_dir.join("config.toml");
+    if !path.exists() {
+        fs::write(&path, "")?;
+    }
+    let editor = env::var("VISUAL")
+        .or_else(|_| env::var("EDITOR"))
+        .unwrap_or_else(|_| "vi".to_string());
+    let status = Command::new(editor).arg(&path).status()?;
+    if !status.success() {
+        anyhow::bail!("editor exited with status {status}");
+    }
+    Ok(())
+}
+
+pub(crate) fn set_config(
+    args: &ConfigSetArgs,
+    env_map: &std::collections::BTreeMap<String, String>,
+    home: &std::path::Path,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    let config_dir = scoped_config_dir(home, cwd, args.global)?;
+    let options = base_run_options(env_map, home, cwd)?;
+    if let Some(provider) = api_key_provider_from_key(&args.key) {
+        let api_key = parse_config_set_string_value(&args.value)?;
+        let result = set_provider_api_key(&options, config_dir, &provider, &api_key)?;
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        } else {
+            println!(
+                "wrote api key env: {}",
+                result["api_key_env"].as_str().unwrap_or("-")
+            );
+            println!("path: {}", result["env_path"].as_str().unwrap_or("-"));
+        }
+        return Ok(());
+    }
+    let value = parse_toml_literal(&args.value)?;
+    let result = set_config_value(config_dir, &args.key, value)?;
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "path": result.path,
+                "key": result.key,
+                "changed": result.changed,
+            }))?
+        );
+    } else {
+        println!(
+            "{} config: {}",
+            if result.changed {
+                "updated"
+            } else {
+                "unchanged"
+            },
+            result.key
+        );
+        println!("path: {}", result.path.display());
+    }
+    Ok(())
+}
+
+pub(crate) fn parse_toml_literal(value: &str) -> Result<Value> {
+    let parsed: toml::Value = toml::from_str(&format!("value = {value}\n"))?;
+    let value = parsed
+        .get("value")
+        .cloned()
+        .ok_or_else(|| anyhow!("failed to parse TOML literal"))?;
+    Ok(serde_json::to_value(value)?)
+}
+
+pub(crate) fn parse_config_set_string_value(value: &str) -> Result<String> {
+    match parse_toml_literal(value)? {
+        Value::String(value) => Ok(value),
+        _ => anyhow::bail!("API key config values must be TOML strings"),
+    }
+}
+
+pub(crate) fn api_key_provider_from_key(key: &str) -> Option<String> {
+    let parts = key.split('.').collect::<Vec<_>>();
+    if parts.len() == 4
+        && parts[0] == "provider"
+        && parts[2] == "options"
+        && matches!(parts[3], "api_key" | "apiKey")
+    {
+        Some(parts[1].to_string())
+    } else {
+        None
+    }
+}
+
+pub(crate) fn validate_config(
+    args: &ConfigShowArgs,
+    env_map: &std::collections::BTreeMap<String, String>,
+    home: &std::path::Path,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    let options = base_run_options(env_map, home, cwd)?;
+    let value = permission_rules_value(&options, config_scope(args))?;
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "ok": true,
+                "scope": value["scope"],
+                "path": value["path"],
+            }))?
+        );
+    } else {
+        println!("config ok");
+        if let Some(path) = value["path"].as_str() {
+            println!("path: {path}");
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn doctor_config(
+    args: &ConfigShowArgs,
+    env_map: &std::collections::BTreeMap<String, String>,
+    home: &std::path::Path,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    let options = base_run_options(env_map, home, cwd)?;
+    let config = config_show_value(&options, config_scope(args))?;
+    let permissions = permission_rules_value(&options, config_scope(args))?;
+    let value = json!({
+        "scope": config["scope"],
+        "path": config["path"],
+        "sources": config["sources"],
+        "exists": config["exists"],
+        "permissions": permissions["permissions"],
+    });
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&value)?);
+    } else {
+        println!("scope: {}", value["scope"].as_str().unwrap_or("-"));
+        if let Some(path) = value["path"].as_str() {
+            println!("path: {path}");
+        }
+        let permissions = &value["permissions"];
+        println!(
+            "approval_policy: {}",
+            permissions["approval_policy"].as_str().unwrap_or("-")
+        );
+        println!(
+            "approvals_reviewer: {}",
+            permissions["approvals_reviewer"].as_str().unwrap_or("-")
+        );
+        println!(
+            "default_permissions: {}",
+            permissions["default_permissions"].as_str().unwrap_or("-")
+        );
+    }
+    Ok(())
 }
 
 pub(crate) fn print_paths(
@@ -246,26 +417,53 @@ pub(crate) fn print_permissions_list(value: &Value, as_json: bool) -> Result<()>
         }
         let permissions = &value["permissions"];
         println!(
-            "approval_mode: {}",
-            permissions["approval_mode"].as_str().unwrap_or("-")
+            "approval_policy: {}",
+            permissions["approval_policy"].as_str().unwrap_or("-")
         );
         println!(
-            "permission_mode: {}",
-            permissions["permission_mode"].as_str().unwrap_or("-")
+            "approvals_reviewer: {}",
+            permissions["approvals_reviewer"].as_str().unwrap_or("-")
         );
         println!(
-            "smart_model: {}",
-            permissions["smart_model"].as_str().unwrap_or("-")
+            "default_permissions: {}",
+            permissions["default_permissions"].as_str().unwrap_or("-")
         );
-        for kind in ["allow", "ask", "deny"] {
-            println!("{kind}:");
-            let rules = permissions[kind].as_array().cloned().unwrap_or_default();
-            if rules.is_empty() {
-                println!("  -");
-            } else {
-                for rule in rules {
-                    println!("  {}", rule.as_str().unwrap_or("-"));
-                }
+        println!("profiles:");
+        let profiles = permissions["profiles"]
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+        if profiles.is_empty() {
+            println!("  -");
+        } else {
+            for key in profiles.keys() {
+                println!("  {key}");
+            }
+        }
+        println!("exec_policy:");
+        let rules = permissions["exec_policy"]["rules"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        if rules.is_empty() {
+            println!("  -");
+        } else {
+            for rule in rules {
+                let prefix = rule["prefix"]
+                    .as_array()
+                    .map(|values| {
+                        values
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+                    .unwrap_or_else(|| "-".to_string());
+                println!(
+                    "  {} -> {}",
+                    prefix,
+                    rule["decision"].as_str().unwrap_or("-")
+                );
             }
         }
     }
@@ -286,6 +484,11 @@ pub(crate) fn config_json(args: &ConfigArgs) -> bool {
     match &args.command {
         ConfigCommand::Path(args) => args.json,
         ConfigCommand::Show(args) => args.json,
+        ConfigCommand::Edit(_) => false,
+        ConfigCommand::Set(args) => args.json,
+        ConfigCommand::Validate(args)
+        | ConfigCommand::Doctor(args)
+        | ConfigCommand::Status(args) => args.json,
         ConfigCommand::Provider(args) => match &args.command {
             ConfigProviderCommand::List(args) => args.json,
             ConfigProviderCommand::Add(args) => args.json,

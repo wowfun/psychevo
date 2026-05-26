@@ -295,6 +295,9 @@ pub(crate) struct FullscreenUi<'a> {
     pub(crate) session_live_event_backlog: BTreeMap<String, Vec<RunStreamEvent>>,
     pub(crate) auxiliary_shell_tasks: Vec<AuxiliaryShellTask>,
     pub(crate) pending_auxiliary_shell_commands: VecDeque<String>,
+    pub(crate) approval_rx: Option<mpsc::UnboundedReceiver<TuiApprovalRequest>>,
+    pub(crate) pending_permission_approvals: VecDeque<TuiApprovalRequest>,
+    pub(crate) active_permission_approval: Option<oneshot::Sender<PermissionApprovalDecision>>,
     pub(crate) visible_turn_started: Option<Instant>,
     pub(crate) motion_started: Instant,
     #[cfg(test)]
@@ -799,6 +802,7 @@ pub(crate) enum BottomPanel {
     Stats(BottomSelectionPanel),
     Tools(BottomSelectionPanel),
     ProviderWizard(ProviderWizardPanel),
+    PermissionApproval(PermissionApprovalPanel),
     Clarify(ClarifyPanel),
     Variants {
         models: Box<ModelPanel>,
@@ -852,6 +856,15 @@ pub(crate) struct ClarifyPanel {
     pub(crate) question_index: usize,
     pub(crate) states: Vec<ClarifyQuestionState>,
     pub(crate) answers: Vec<Option<ClarifyAnswer>>,
+    pub(crate) previous_panel: Option<Box<BottomPanel>>,
+    pub(crate) notice: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PermissionApprovalPanel {
+    pub(crate) session_id: Option<String>,
+    pub(crate) request: PermissionApprovalRequest,
+    pub(crate) selected: usize,
     pub(crate) previous_panel: Option<Box<BottomPanel>>,
     pub(crate) notice: Option<String>,
 }

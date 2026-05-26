@@ -477,10 +477,10 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         canonical: "/mode",
         aliases: &[],
-        usage: "/mode <plan|default|acceptEdits|dontAsk|bypassPermissions>",
-        summary: "set runtime permission mode",
+        usage: "/mode <plan|default>",
+        summary: "set collaboration mode",
         help_detail: Some(
-            "Changes mode for future turns; plan uses read-only tools and dangerous bypass modes never skip hard denies.",
+            "Changes collaboration mode for future turns. Permission policy is managed with /permissions and pevo config.",
         ),
         surface: TUI_SLASH,
         group: COMMANDS,

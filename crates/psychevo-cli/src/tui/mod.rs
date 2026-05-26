@@ -19,12 +19,13 @@ pub(crate) use crossterm::terminal::{
 pub(crate) use psychevo_ai::Outcome;
 pub(crate) use psychevo_runtime::{
     AgentCatalog, AgentDiscoveryOptions, AgentEdgeRecord, AgentSource, AgentSpawnOptions,
-    AutoCompactionCheckOptions, ChildSessionSnapshotInput, ClarifyAnswer, ClarifyQuestion,
-    ClarifyRequestEvent, ClarifyResolvedEvent, ClarifyResponse, ClarifyResult,
+    ApprovalHandler, AutoCompactionCheckOptions, ChildSessionSnapshotInput, ClarifyAnswer,
+    ClarifyQuestion, ClarifyRequestEvent, ClarifyResolvedEvent, ClarifyResponse, ClarifyResult,
     CompactSessionOptions, CompactionReason, CompactionResult, ConfigScope, ConfiguredModel,
     ContextFormatOptions, ContextOptions, ContextSnapshot, CustomProviderInput, ImageInput,
     InstallOptions, MAX_AGENT_SPAWN_DEPTH_CAP, ModelCatalogEntry, ModelCatalogProvider,
-    ModelMetadataCacheTarget, PendingInputId, PermissionMode, PromptAttachmentDisplay,
+    ModelMetadataCacheTarget, PendingInputId, PermissionApprovalDecision,
+    PermissionApprovalOutcome, PermissionApprovalRequest, PermissionMode, PromptAttachmentDisplay,
     PromptDisplayMetadata, ReloadContextOptions, RunControlHandle, RunMode, RunOptions,
     RunStreamEvent, RunStreamSink, SessionArtifactKind, SessionExportFormat, SessionExportOptions,
     SessionExportWriteResult, SessionSummary, SessionUndoOptions, SkillBundle, SkillCatalog,
@@ -58,7 +59,7 @@ pub(crate) use ratatui::text::{Line, Span, Text};
 pub(crate) use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap};
 pub(crate) use ratatui_textarea::{CursorMove, TextArea, WrapMode};
 pub(crate) use serde_json::Value;
-pub(crate) use tokio::sync::mpsc;
+pub(crate) use tokio::sync::{mpsc, oneshot};
 pub(crate) use tokio::task::JoinHandle;
 pub(crate) use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -72,9 +73,10 @@ pub(crate) mod tests;
 use self::plain::{TuiRenderer, assistant_text_from_event, format_session_line};
 use self::slash::{
     EffectiveSlashConfig, SlashCommand, SlashHelpSections, SlashMenuItem, SlashShortcutMatch,
-    VARIANTS, configured_slash_menu_items, format_slash_help_with_config,
-    parse_effective_slash_config, parse_slash_command_with_config, slash_help_sections_with_config,
-    slash_menu_items_from, slash_prefix_menu_items_from, validate_model_spec, validate_variant,
+    TuiSlashParse, VARIANTS, configured_slash_menu_items, format_slash_help_with_config,
+    parse_effective_slash_config, parse_slash_command_with_config, parse_tui_slash_with_config,
+    slash_help_sections_with_config, slash_menu_items_from, slash_prefix_menu_items_from,
+    validate_model_spec, validate_variant,
 };
 use self::state::TuiState;
 pub(crate) use crate::args::TuiArgs;

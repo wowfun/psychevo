@@ -462,18 +462,9 @@ impl TuiApp {
 
     pub(crate) fn set_mode_no_print(&mut self, mode: &str) -> Result<()> {
         let (run_mode, permission_mode) = match mode {
-            "plan" => (RunMode::Plan, PermissionMode::Default),
-            "default" => (RunMode::Default, PermissionMode::Default),
-            "acceptEdits" | "accept-edits" => (RunMode::Default, PermissionMode::AcceptEdits),
-            "dontAsk" | "dont-ask" => (RunMode::Default, PermissionMode::DontAsk),
-            "bypassPermissions" | "bypass-permissions" => {
-                (RunMode::Default, PermissionMode::BypassPermissions)
-            }
-            _ => {
-                return Err(anyhow!(
-                    "mode must be one of plan, default, acceptEdits, dontAsk, bypassPermissions"
-                ));
-            }
+            "plan" => (RunMode::Plan, self.current_permission_mode),
+            "default" => (RunMode::Default, self.current_permission_mode),
+            _ => return Err(anyhow!("mode must be one of plan, default")),
         };
         self.current_mode = run_mode;
         self.current_permission_mode = permission_mode;
@@ -559,11 +550,9 @@ impl TuiApp {
     }
 
     pub(crate) fn cycle_mode(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
-        let next = match (self.current_mode, self.current_permission_mode) {
-            (RunMode::Default, PermissionMode::Default) => "acceptEdits",
-            (RunMode::Default, PermissionMode::AcceptEdits) => "plan",
-            (RunMode::Plan, _) => "default",
-            _ => "default",
+        let next = match self.current_mode {
+            RunMode::Default => "plan",
+            RunMode::Plan => "default",
         };
         self.set_mode_no_print(next)?;
         ui.refresh_sidebar(self);

@@ -286,6 +286,16 @@ pub(crate) enum ConfigCommand {
     Path(ConfigJsonArgs),
     #[command(about = "Show global, local, or effective config")]
     Show(ConfigShowArgs),
+    #[command(about = "Open the project or global config in $EDITOR")]
+    Edit(ConfigEditArgs),
+    #[command(about = "Set a TOML config value by dot path")]
+    Set(ConfigSetArgs),
+    #[command(about = "Validate global, local, or effective config")]
+    Validate(ConfigShowArgs),
+    #[command(about = "Show config diagnostics")]
+    Doctor(ConfigShowArgs),
+    #[command(about = "Show concise config status")]
+    Status(ConfigShowArgs),
     #[command(about = "Inspect and add provider configuration")]
     Provider(ConfigProviderArgs),
     #[command(about = "List and remove project-local permission rules")]
@@ -306,6 +316,38 @@ pub(crate) struct ConfigShowArgs {
     pub(crate) local: bool,
     #[arg(long, conflicts_with_all = ["global", "local"], help = "Show the effective merged configuration")]
     pub(crate) effective: bool,
+    #[arg(long, help = "Emit structured JSON instead of human text")]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct ConfigEditArgs {
+    #[arg(
+        short = 'g',
+        long = "global",
+        help = "Edit the global Psychevo home config instead of the current workdir config"
+    )]
+    pub(crate) global: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct ConfigSetArgs {
+    #[arg(
+        value_name = "KEY",
+        help = "Dot-path config key, for example approval_policy"
+    )]
+    pub(crate) key: String,
+    #[arg(
+        value_name = "VALUE",
+        help = "TOML literal value, for example \"on-request\", true, or [\"cargo\"]"
+    )]
+    pub(crate) value: String,
+    #[arg(
+        short = 'g',
+        long = "global",
+        help = "Write the global config instead of the current workdir config"
+    )]
+    pub(crate) global: bool,
     #[arg(long, help = "Emit structured JSON instead of human text")]
     pub(crate) json: bool,
 }

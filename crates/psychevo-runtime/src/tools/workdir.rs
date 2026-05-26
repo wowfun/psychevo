@@ -30,17 +30,13 @@ impl WorkdirTool {
 
     pub(crate) fn resolve_existing(&self, raw: &str) -> Result<PathBuf> {
         let target = self.resolve_raw(raw);
-        let canonical = target.canonicalize()?;
-        self.ensure_contained(&canonical)?;
-        Ok(canonical)
+        Ok(target.canonicalize()?)
     }
 
     pub(crate) fn resolve_write_target(&self, raw: &str) -> Result<(PathBuf, bool)> {
         let target = self.resolve_raw(raw);
         if target.exists() {
-            let canonical = target.canonicalize()?;
-            self.ensure_contained(&canonical)?;
-            return Ok((canonical, false));
+            return Ok((target.canonicalize()?, false));
         }
         let parent = target
             .parent()
@@ -50,10 +46,8 @@ impl WorkdirTool {
         while !existing.exists() {
             existing = existing
                 .parent()
-                .ok_or_else(|| Error::Message("no existing parent under workdir".to_string()))?;
+                .ok_or_else(|| Error::Message("no existing parent for target".to_string()))?;
         }
-        let canonical_parent = existing.canonicalize()?;
-        self.ensure_contained(&canonical_parent)?;
         let dirs_created = !parent.exists();
         Ok((target, dirs_created))
     }

@@ -194,6 +194,91 @@ class Handler(BaseHTTPRequestHandler):
                 },
                 delay=0.2,
             )
+        elif "call_inline_edit_diff" in body:
+            self.send_event(
+                {
+                    "id": "resp_tui_capture_inline_edit_final",
+                    "model": "mock-model",
+                    "choices": [
+                        {
+                            "delta": {"content": "INLINE_EDIT_DIFF_FINAL"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+                delay=0.2,
+            )
+        elif "call_permission_approval_vhs" in body:
+            self.send_event(
+                {
+                    "id": "resp_tui_capture_permission_final",
+                    "model": "mock-model",
+                    "choices": [
+                        {
+                            "delta": {"content": "PERMISSION_APPROVAL_FINAL"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+                delay=0.2,
+            )
+        elif "Permission approval VHS fixture" in body:
+            self.send_event(
+                {
+                    "id": "resp_tui_capture_permission",
+                    "model": "mock-model",
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "index": 0,
+                                        "id": "call_permission_approval_vhs",
+                                        "function": {
+                                            "name": "read",
+                                            "arguments": "{\"path\":\"/etc/hosts\"}",
+                                        },
+                                    }
+                                ]
+                            },
+                            "finish_reason": "tool_calls",
+                        }
+                    ],
+                },
+                delay=0.2,
+            )
+        elif "Inline edit diff VHS fixture" in body:
+            self.send_event(
+                {
+                    "id": "resp_tui_capture_inline_edit",
+                    "model": "mock-model",
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "index": 0,
+                                        "id": "call_inline_edit_diff",
+                                        "function": {
+                                            "name": "edit",
+                                            "arguments": json.dumps(
+                                                {
+                                                    "mode": "replace",
+                                                    "path": "inline-diff-fixture.txt",
+                                                    "old_string": "line 02: limit = 1000\n",
+                                                    "new_string": "line 02: limit = 2000\n",
+                                                }
+                                            ),
+                                        },
+                                    }
+                                ]
+                            },
+                            "finish_reason": "tool_calls",
+                        }
+                    ],
+                },
+                delay=0.2,
+            )
         elif "Visible write preamble fixture" in body:
             self.send_event(
                 {
@@ -347,7 +432,10 @@ class Handler(BaseHTTPRequestHandler):
                     ],
                 }
             )
-        elif Handler.request_count == 1:
+        elif (
+            "Inspect the snapshot harness and read fixture.txt" in body
+            and "call_exec_fixture" not in body
+        ):
             self.send_event(
                 {
                     "id": "resp_tui_capture_1",

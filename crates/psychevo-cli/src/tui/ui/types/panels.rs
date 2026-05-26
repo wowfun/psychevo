@@ -320,6 +320,73 @@ impl ClarifyPanel {
     }
 }
 
+impl PermissionApprovalPanel {
+    pub(crate) fn new(
+        session_id: Option<String>,
+        request: PermissionApprovalRequest,
+        previous_panel: Option<BottomPanel>,
+    ) -> Self {
+        Self {
+            session_id,
+            request,
+            selected: 0,
+            previous_panel: previous_panel.map(Box::new),
+            notice: None,
+        }
+    }
+
+    pub(crate) fn options(&self) -> Vec<(PermissionApprovalOutcome, &'static str, &'static str)> {
+        let mut options = vec![
+            (
+                PermissionApprovalOutcome::AllowOnce,
+                "Allow once",
+                "Run this operation one time",
+            ),
+            (
+                PermissionApprovalOutcome::AllowSession,
+                "Allow session",
+                "Remember this operation for the current session",
+            ),
+        ];
+        if self.request.allow_always {
+            options.push((
+                PermissionApprovalOutcome::AllowAlways,
+                "Allow permanent",
+                "Write a project-local permission grant",
+            ));
+        }
+        options.push((
+            PermissionApprovalOutcome::Deny,
+            "Deny",
+            "Reject this operation",
+        ));
+        options
+    }
+
+    pub(crate) fn desired_height(&self) -> u16 {
+        let detail_rows = u16::from(self.request.matched_rule.is_some())
+            + u16::from(self.request.suggested_rule.is_some())
+            + u16::from(self.notice.is_some());
+        (7 + self.options().len() as u16 + detail_rows).max(10)
+    }
+
+    pub(crate) fn move_selection(&mut self, delta: isize) {
+        let max = self.options().len().saturating_sub(1) as isize;
+        self.selected = (self.selected as isize + delta).clamp(0, max) as usize;
+    }
+
+    pub(crate) fn select_outcome(&self) -> PermissionApprovalOutcome {
+        self.options()
+            .get(self.selected)
+            .map(|(outcome, _, _)| *outcome)
+            .unwrap_or(PermissionApprovalOutcome::Deny)
+    }
+
+    pub(crate) fn restore_panel(self) -> Option<BottomPanel> {
+        self.previous_panel.map(|panel| *panel)
+    }
+}
+
 pub(crate) fn char_count(value: &str) -> usize {
     value.chars().count()
 }
@@ -737,6 +804,9 @@ impl BottomPanel {
             BottomPanel::ProviderWizard(_) => {
                 panic!("provider wizard does not expose a selection panel")
             }
+            BottomPanel::PermissionApproval(_) => {
+                panic!("permission approval panel does not expose a selection panel")
+            }
             BottomPanel::Clarify(_) => {
                 panic!("clarify panel does not expose a selection panel")
             }
@@ -764,6 +834,9 @@ impl BottomPanel {
             BottomPanel::ProviderWizard(_) => {
                 panic!("provider wizard does not expose a selection panel")
             }
+            BottomPanel::PermissionApproval(_) => {
+                panic!("permission approval panel does not expose a selection panel")
+            }
             BottomPanel::Clarify(_) => {
                 panic!("clarify panel does not expose a selection panel")
             }
@@ -787,6 +860,7 @@ impl BottomPanel {
             | BottomPanel::Stats(_)
             | BottomPanel::Tools(_)
             | BottomPanel::ProviderWizard(_)
+            | BottomPanel::PermissionApproval(_)
             | BottomPanel::Clarify(_)
             | BottomPanel::Variants { .. } => None,
         }

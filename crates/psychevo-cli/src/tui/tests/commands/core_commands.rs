@@ -20,9 +20,7 @@ pub(crate) async fn mode_slash_command_requires_value() {
         row.kind == TranscriptKind::Command
             && row.title == "/mode"
             && row.failed
-            && row.text.contains(
-                "error: usage: /mode <plan|default|acceptEdits|dontAsk|bypassPermissions>",
-            )
+            && row.text.contains("error: usage: /mode <plan|default>")
     }));
 }
 

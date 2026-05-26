@@ -527,13 +527,17 @@ pub(crate) fn cli_tui_continues_latest_run_or_tui_session_and_new_creates_tui_se
 }
 
 #[test]
-pub(crate) fn cli_tui_sessions_lists_sessions_and_session_show_is_unknown() {
-    let server = MockSseServer::start(vec![sse_reasoning_then_text("hidden chain", "visible")]);
+pub(crate) fn cli_tui_sessions_lists_sessions_and_unknown_slash_falls_back_to_prompt() {
+    let initial_server = MockSseServer::start(vec![
+        sse_reasoning_then_text("hidden chain", "visible"),
+        sse_text("initial title"),
+    ]);
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
     let workdir = temp.path().join("work");
-    let config = write_run_config(&temp.path().join("config"), &server.base_url);
+    let config_dir = temp.path().join("config");
+    let config = write_run_config(&config_dir, &initial_server.base_url);
 
     let first = isolated_tui_cmd(temp.path(), &home, &config, &db)
         .args(["tui", "--dir", workdir.to_str().expect("workdir"), "hello"])
@@ -545,6 +549,11 @@ pub(crate) fn cli_tui_sessions_lists_sessions_and_session_show_is_unknown() {
         String::from_utf8_lossy(&first.stderr)
     );
 
+    let fallback_server = MockSseServer::start(vec![
+        sse_reasoning_then_text("fallback chain", "fallback visible"),
+        sse_text("fallback title"),
+    ]);
+    let config = write_run_config(&config_dir, &fallback_server.base_url);
     let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
         .args(["tui", "--dir", workdir.to_str().expect("workdir")])
         .stdin(Stdio::piped())
@@ -560,15 +569,16 @@ pub(crate) fn cli_tui_sessions_lists_sessions_and_session_show_is_unknown() {
         .expect("write stdin");
     let output = child.wait_with_output().expect("output");
     assert!(
-        !output.status.success(),
-        "stdout: {}",
-        String::from_utf8_lossy(&output.stdout)
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
     let stderr = String::from_utf8(output.stderr).expect("stderr");
-    assert!(stderr.contains("unknown slash command: /session"));
+    assert!(!stderr.contains("unknown slash command: /session"));
     let stdout = String::from_utf8(output.stdout).expect("stdout");
     assert!(stdout.contains("mock/mock-model"));
-    assert!(!stdout.contains("hidden chain"));
+    assert!(stdout.contains("fallback visible"));
+    assert!(stdout.contains("fallback chain"));
 }
 
 #[test]

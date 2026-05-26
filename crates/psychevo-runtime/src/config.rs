@@ -9,10 +9,12 @@ pub(crate) use serde_json::{Value, json};
 pub(crate) use crate::error::{Error, Result};
 pub(crate) use crate::paths::canonical_workdir;
 pub(crate) use crate::types::{
-    ApprovalMode, ConfigScope, ConfiguredModel, CustomProviderInput, CustomProviderResult,
-    ModelCapabilities, ModelCatalogEntry, ModelCatalogProvider, ModelCost, ModelCostTier,
-    ModelLimits, ModelMetadata, ModelMetadataCacheTarget, PermissionConfig, PermissionMode,
-    RunMode, RunOptions, ScopedCustomProviderInput,
+    ApprovalPolicy, ApprovalsReviewer, AutoReviewConfig, ConfigScope, ConfiguredModel,
+    CustomProviderInput, CustomProviderResult, ExecPolicyConfig, ExecPolicyDecision,
+    ExecPolicyRule, GranularApprovalConfig, ModelCapabilities, ModelCatalogEntry,
+    ModelCatalogProvider, ModelCost, ModelCostTier, ModelLimits, ModelMetadata,
+    ModelMetadataCacheTarget, PermissionAccess, PermissionConfig, PermissionProfileConfig, RunMode,
+    RunOptions, ScopedCustomProviderInput,
 };
 
 #[derive(Debug, Clone, Default)]

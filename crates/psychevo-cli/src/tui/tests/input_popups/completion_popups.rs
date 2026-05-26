@@ -81,7 +81,7 @@ pub(crate) async fn new_command_clears_pending_images_and_ephemeral_status() {
 }
 
 #[tokio::test]
-pub(crate) async fn unknown_dynamic_skill_reports_bounded_error() {
+pub(crate) async fn unknown_dynamic_skill_submits_as_prompt() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -91,12 +91,23 @@ pub(crate) async fn unknown_dynamic_skill_reports_bounded_error() {
         .expect("submit");
 
     assert_eq!(ui.history.last().map(String::as_str), Some("/unknown"));
-    assert!(ui.running.is_none());
-    assert!(ui.transcript.iter().any(|row| {
-        row.kind == TranscriptKind::Command
-            && row.failed
-            && row.text.contains("unknown skill or bundle: unknown")
-    }));
+    assert!(ui.running.is_some());
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.kind == TranscriptKind::Prompt && row.text == "/unknown")
+    );
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| !row.text.contains("unknown skill or bundle"))
+    );
+    if let Some(running) = ui.running.take() {
+        running.control.abort();
+        if let RunningTask::Agent(task) = running.task {
+            let _ = task.await;
+        }
+    }
 }
 
 pub(crate) fn tiny_png_bytes() -> &'static [u8] {
@@ -137,9 +148,7 @@ pub(crate) async fn slash_menu_selection_can_choose_mode_over_model() {
         row.kind == TranscriptKind::Command
             && row.title == "/mode"
             && row.failed
-            && row.text.contains(
-                "error: usage: /mode <plan|default|acceptEdits|dontAsk|bypassPermissions>",
-            )
+            && row.text.contains("error: usage: /mode <plan|default>")
     }));
 }
 

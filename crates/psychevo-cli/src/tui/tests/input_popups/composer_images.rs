@@ -766,6 +766,123 @@ pub(crate) async fn leading_absolute_image_path_submits_as_prompt_not_slash_comm
 }
 
 #[tokio::test]
+pub(crate) async fn leading_absolute_markdown_path_submits_as_prompt_not_slash_command() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app_with_models(&temp);
+    let path = app
+        .workdir
+        .join("docs")
+        .join("evaluation")
+        .join("README.md");
+    fs::create_dir_all(path.parent().expect("parent")).expect("docs dir");
+    fs::write(&path, "# Evaluation\n").expect("markdown");
+    let mut ui = FullscreenUi::new(&app);
+    let prompt = path.display().to_string();
+    ui.textarea = textarea_with_text(&prompt);
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .expect("submit");
+
+    assert_eq!(ui.history.last().map(String::as_str), Some(prompt.as_str()));
+    assert!(ui.running.is_some());
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.kind == TranscriptKind::Prompt && row.text == prompt)
+    );
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| !row.text.contains("unknown slash command"))
+    );
+    if let Some(running) = ui.running.take() {
+        running.control.abort();
+        if let RunningTask::Agent(task) = running.task {
+            let _ = task.await;
+        }
+    }
+}
+
+#[tokio::test]
+pub(crate) async fn unknown_slash_input_submits_as_prompt() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app_with_models(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    let prompt = "/made-up explain this".to_string();
+
+    app.submit_fullscreen_text(&mut ui, prompt.clone(), true)
+        .await
+        .expect("submit");
+
+    assert_eq!(ui.history.last().map(String::as_str), Some(prompt.as_str()));
+    assert!(ui.running.is_some());
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.kind == TranscriptKind::Prompt && row.text == prompt)
+    );
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| !row.text.contains("unknown slash command"))
+    );
+    if let Some(running) = ui.running.take() {
+        running.control.abort();
+        if let RunningTask::Agent(task) = running.task {
+            let _ = task.await;
+        }
+    }
+}
+
+#[tokio::test]
+pub(crate) async fn uninstalled_dynamic_slash_input_submits_as_prompt() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app_with_models(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    let prompt = "/helper apply it to src/lib.rs".to_string();
+
+    app.submit_fullscreen_text(&mut ui, prompt.clone(), true)
+        .await
+        .expect("submit");
+
+    assert_eq!(ui.history.last().map(String::as_str), Some(prompt.as_str()));
+    assert!(ui.running.is_some());
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.kind == TranscriptKind::Prompt && row.text == prompt)
+    );
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| !row.text.contains("unknown skill or bundle"))
+    );
+    if let Some(running) = ui.running.take() {
+        running.control.abort();
+        if let RunningTask::Agent(task) = running.task {
+            let _ = task.await;
+        }
+    }
+}
+
+#[tokio::test]
+pub(crate) async fn known_slash_command_argument_errors_remain_command_errors() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app_with_models(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    app.submit_fullscreen_text(&mut ui, "/model set mock/model".to_string(), true)
+        .await
+        .expect("submit");
+
+    assert!(ui.running.is_none());
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command && row.failed && row.text.contains("usage: /model")
+    }));
+}
+
+#[tokio::test]
 pub(crate) async fn embedded_absolute_image_path_submits_as_text() {
     let temp = tempdir().expect("temp");
     let mut app = test_app_with_models(&temp);

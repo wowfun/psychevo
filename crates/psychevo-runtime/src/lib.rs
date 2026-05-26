@@ -57,8 +57,8 @@ pub use config::{
     custom_provider_api_key_env, fetch_model_catalog, model_catalog_endpoint,
     model_catalog_providers, permission_rules_value, refresh_model_metadata_cache,
     remove_local_permission_rule, remove_local_toolset, selected_configured_model,
-    set_default_model, set_default_model_with_reasoning, set_local_toolset_enabled,
-    set_provider_api_key, toolsets_value,
+    set_config_value, set_default_model, set_default_model_with_reasoning,
+    set_local_toolset_enabled, set_provider_api_key, toolsets_value,
 };
 pub use context::prune_context;
 pub use context_usage::{

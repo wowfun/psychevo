@@ -277,14 +277,13 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         mcp_servers: options.mcp_servers.clone(),
     };
     let loaded = load_run_config(&run_options, &workdir)?;
-    let permission_mode = options
-        .permission_mode
-        .or(loaded.config.permissions.permission_mode)
-        .unwrap_or_default();
-    let approval_mode = options
-        .approval_mode
-        .or(loaded.config.permissions.approval_mode)
-        .unwrap_or_default();
+    let permission_mode = options.permission_mode.unwrap_or_default();
+    let approval_mode = options.approval_mode.unwrap_or_else(|| {
+        match loaded.config.permissions.approvals_reviewer {
+            crate::types::ApprovalsReviewer::User => crate::types::ApprovalMode::Manual,
+            crate::types::ApprovalsReviewer::Smart => crate::types::ApprovalMode::Smart,
+        }
+    });
     let agents_home = resolve_agents_home(&loaded.env, &workdir)?;
     let agent_catalog = discover_agents(&AgentDiscoveryOptions {
         home: agents_home,

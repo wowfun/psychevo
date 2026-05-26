@@ -38,7 +38,7 @@ pub(crate) async fn fullscreen_rename_updates_session_title_and_sidebar() {
 }
 
 #[tokio::test]
-pub(crate) async fn obsolete_thinking_command_is_unknown_in_fullscreen() {
+pub(crate) async fn obsolete_thinking_command_submits_as_prompt_in_fullscreen() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -48,10 +48,20 @@ pub(crate) async fn obsolete_thinking_command_is_unknown_in_fullscreen() {
         .await
         .expect("enter");
 
-    assert!(ui.transcript.iter().any(|row| {
-        row.kind == TranscriptKind::Command
-            && row.title == "/thinking"
-            && row.failed
-            && row.text.contains("error: unknown slash command: /thinking")
-    }));
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.kind == TranscriptKind::Prompt && row.text == "/thinking")
+    );
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| !row.text.contains("unknown slash command"))
+    );
+    if let Some(running) = ui.running.take() {
+        running.control.abort();
+        if let RunningTask::Agent(task) = running.task {
+            let _ = task.await;
+        }
+    }
 }

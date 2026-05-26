@@ -7,6 +7,12 @@ pub(crate) struct RunningTurn {
     pub(crate) task: RunningTask,
 }
 
+pub(crate) struct TuiApprovalRequest {
+    pub(crate) session_id: Option<String>,
+    pub(crate) request: PermissionApprovalRequest,
+    pub(crate) response: oneshot::Sender<PermissionApprovalDecision>,
+}
+
 pub(crate) struct AuxiliaryShellTask {
     pub(crate) session_id: Option<String>,
     pub(crate) control: RunControlHandle,

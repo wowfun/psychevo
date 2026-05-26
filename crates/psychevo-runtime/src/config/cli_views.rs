@@ -67,6 +67,60 @@ pub fn config_provider_list_value(options: &RunOptions, scope: ConfigScope) -> R
     }))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigSetResult {
+    pub path: PathBuf,
+    pub key: String,
+    pub changed: bool,
+}
+
+pub fn set_config_value(config_dir: PathBuf, key: &str, value: Value) -> Result<ConfigSetResult> {
+    let path_parts = key
+        .split('.')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if path_parts.is_empty() {
+        return Err(Error::Config("config key must not be empty".to_string()));
+    }
+    fs::create_dir_all(&config_dir)?;
+    let config_path = config_dir.join(CONFIG_FILE_NAME);
+    let mut parsed = load_toml_config_file(&config_path, false)?;
+    if !parsed.is_object() {
+        parsed = json!({});
+    }
+    let before = parsed.clone();
+    set_config_path_value(&mut parsed, &path_parts, value)?;
+    let changed = parsed != before;
+    if changed {
+        write_toml_config_file(&config_path, &parsed)?;
+    }
+    Ok(ConfigSetResult {
+        path: config_path,
+        key: key.to_string(),
+        changed,
+    })
+}
+
+pub(crate) fn set_config_path_value(root: &mut Value, path: &[&str], value: Value) -> Result<()> {
+    let mut current = root
+        .as_object_mut()
+        .ok_or_else(|| Error::Config("config root must be an object".to_string()))?;
+    for part in &path[..path.len().saturating_sub(1)] {
+        let entry = current
+            .entry((*part).to_string())
+            .or_insert_with(|| Value::Object(serde_json::Map::new()));
+        current = entry
+            .as_object_mut()
+            .ok_or_else(|| Error::Config(format!("config path `{part}` must be an object")))?;
+    }
+    let last = path
+        .last()
+        .ok_or_else(|| Error::Config("config key must not be empty".to_string()))?;
+    current.insert((*last).to_string(), value);
+    Ok(())
+}
+
 pub fn auth_status_value(options: &RunOptions, provider: Option<&str>) -> Result<Value> {
     let workdir = canonical_workdir(&options.workdir)?;
     let loaded = load_run_config(options, &workdir)?;

@@ -497,6 +497,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         permission_mode,
         child.context.approval_mode,
         child.context.approval_handler.clone(),
+        None,
     );
     tools = permission_runtime.wrap_tools(tools);
     let effective_tool_names = effective_tool_names(&tools);

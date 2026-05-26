@@ -227,6 +227,17 @@ pub(crate) fn fuzzy_subsequence_score(command: &str, query: &str) -> Option<u16>
     Some(gap_score.min(u16::MAX as usize) as u16)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TuiSlashParse {
+    NotSlash,
+    Command(SlashCommand),
+    Unknown {
+        original: String,
+        command: String,
+        args: String,
+    },
+}
+
 pub(crate) fn parse_slash_command(line: &str) -> Result<Option<SlashCommand>> {
     parse_slash_command_inner(line)
 }
@@ -242,9 +253,27 @@ pub(crate) fn parse_slash_command_with_config(
 }
 
 pub(crate) fn parse_slash_command_inner(line: &str) -> Result<Option<SlashCommand>> {
+    match parse_tui_slash_inner(line, line.trim().to_string())? {
+        TuiSlashParse::NotSlash => Ok(None),
+        TuiSlashParse::Command(command) => Ok(Some(command)),
+        TuiSlashParse::Unknown { command, .. } => Err(anyhow!("unknown slash command: {command}")),
+    }
+}
+
+pub(crate) fn parse_tui_slash_with_config(
+    line: &str,
+    config: &EffectiveSlashConfig,
+) -> Result<TuiSlashParse> {
+    if let Some(expanded) = config.expand_alias_line(line) {
+        return parse_tui_slash_inner(&expanded, line.to_string());
+    }
+    parse_tui_slash_inner(line, line.to_string())
+}
+
+pub(crate) fn parse_tui_slash_inner(line: &str, original: String) -> Result<TuiSlashParse> {
     let trimmed = line.trim();
     if !trimmed.starts_with('/') {
-        return Ok(None);
+        return Ok(TuiSlashParse::NotSlash);
     }
     let mut parts = trimmed.split_whitespace();
     let command = parts.next().unwrap_or_default();
@@ -259,19 +288,27 @@ pub(crate) fn parse_slash_command_inner(line: &str) -> Result<Option<SlashComman
     } else {
         let Some(spec) = slash_command_spec(command) else {
             if OBSOLETE_SLASH_COMMAND_TOKENS.contains(&command) {
-                return Err(anyhow!("unknown slash command: {command}"));
+                return Ok(TuiSlashParse::Unknown {
+                    original,
+                    command: command.to_string(),
+                    args: rest.join(" "),
+                });
             }
             if let Some(name) = dynamic_skill_name(command) {
-                return Ok(Some(SlashCommand::SkillInvoke {
+                return Ok(TuiSlashParse::Command(SlashCommand::SkillInvoke {
                     name,
                     args: rest.join(" "),
                 }));
             }
-            return Err(anyhow!("unknown slash command: {command}"));
+            return Ok(TuiSlashParse::Unknown {
+                original,
+                command: command.to_string(),
+                args: rest.join(" "),
+            });
         };
         parse_registered_slash_command(spec, command, &rest)?
     };
-    Ok(Some(parsed))
+    Ok(TuiSlashParse::Command(parsed))
 }
 
 pub(crate) fn dynamic_skill_name(command: &str) -> Option<String> {
@@ -672,10 +709,7 @@ pub(crate) fn validate_variant(value: &str) -> Result<()> {
 
 pub(crate) fn validate_mode(value: &str) -> Result<()> {
     match value {
-        "plan" | "default" | "acceptEdits" | "accept-edits" | "dontAsk" | "dont-ask"
-        | "bypassPermissions" | "bypass-permissions" => Ok(()),
-        _ => Err(anyhow!(
-            "mode must be one of plan, default, acceptEdits, dontAsk, bypassPermissions"
-        )),
+        "plan" | "default" => Ok(()),
+        _ => Err(anyhow!("mode must be one of plan, default")),
     }
 }

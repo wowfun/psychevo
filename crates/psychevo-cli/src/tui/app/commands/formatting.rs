@@ -1,5 +1,50 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
+
+#[derive(Clone)]
+pub(crate) struct TuiApprovalHandler {
+    pub(crate) session_id: Option<String>,
+    pub(crate) tx: mpsc::UnboundedSender<TuiApprovalRequest>,
+}
+
+impl std::fmt::Debug for TuiApprovalHandler {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("TuiApprovalHandler")
+            .field("session_id", &self.session_id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ApprovalHandler for TuiApprovalHandler {
+    fn timeout_secs(&self) -> u64 {
+        0
+    }
+
+    fn request_permission(
+        &self,
+        request: PermissionApprovalRequest,
+    ) -> futures::future::BoxFuture<'static, PermissionApprovalDecision> {
+        let tx = self.tx.clone();
+        let session_id = self.session_id.clone();
+        Box::pin(async move {
+            let (response, rx) = oneshot::channel();
+            if tx
+                .send(TuiApprovalRequest {
+                    session_id,
+                    request,
+                    response,
+                })
+                .is_err()
+            {
+                return PermissionApprovalDecision::deny();
+            }
+            rx.await
+                .unwrap_or_else(|_| PermissionApprovalDecision::deny())
+        })
+    }
+}
+
 impl TuiApp {
     pub(crate) async fn submit_shell_command(&mut self, command: String) -> Result<()> {
         if command.trim().is_empty() {
@@ -73,12 +118,18 @@ impl TuiApp {
         let sink: RunStreamSink = Arc::new(move |event| {
             let _ = tx.send(event);
         });
+        let (approval_tx, approval_rx) = mpsc::unbounded_channel();
         let (control_handle, control) = run_control();
         let mut options = self.run_options_with_images(prompt, image_inputs);
+        options.approval_handler = Some(Arc::new(TuiApprovalHandler {
+            session_id: self.current_session.clone(),
+            tx: approval_tx,
+        }));
         options.prompt_display = prompt_display_metadata(display_prompt, &images, &self.workdir);
         let task = tokio::spawn(async move {
             run_live_streaming_controlled(options, "tui", TUI_SESSION_SOURCES, sink, control).await
         });
+        ui.approval_rx = Some(approval_rx);
         ui.scroll_to_bottom();
         ui.running = Some(RunningTurn {
             session_id: self.current_session.clone(),

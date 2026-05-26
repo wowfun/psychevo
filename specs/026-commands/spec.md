@@ -111,9 +111,8 @@ approval path.
 Shared slash parsing returns a command invocation with canonical metadata,
 resolved alias, raw argument text, parsed command arguments when available, and
 the original submitted line. Unknown slash-looking input is represented as a
-pass-through prompt so ACP and messaging surfaces can send it to the model when
-that surface chooses model fallback behavior. TUI may still treat unknown
-slash-looking input as a bounded local error.
+pass-through prompt so prompt-bearing user surfaces can send it to the model
+with the original submitted text.
 
 Shared execution returns an effect rather than directly manipulating a UI. The
 effect vocabulary includes local text, pass-through prompt, prompt submission,
@@ -207,17 +206,10 @@ Commands with required arguments reject missing or malformed input with:
 usage: <usage>
 ```
 
-Unsupported known commands reject with bounded guidance. TUI unknown commands
-reject with:
-
-```text
-unknown slash command: /<command>
-```
-
-ACP and messaging surfaces may instead pass unknown slash-looking input through
-as ordinary model input. This fallback must apply only to unknown commands, not
-to known commands whose arguments are malformed or whose required capability is
-missing.
+Unsupported known commands reject with bounded guidance. Prompt-bearing user
+surfaces pass unknown slash-looking input through as ordinary model input. This
+fallback must apply only to unknown commands, not to known commands whose
+arguments are malformed or whose required capability is missing.
 
 Concrete surfaces may wrap these messages in their normal error presentation.
 

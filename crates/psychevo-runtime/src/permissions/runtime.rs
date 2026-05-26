@@ -10,15 +10,13 @@ pub(crate) struct PermissionRuntimeInner {
     pub(crate) workdir: PathBuf,
     pub(crate) project_config_dir: PathBuf,
     pub(crate) mode: PermissionMode,
-    pub(crate) approval_mode: ApprovalMode,
-    pub(crate) smart_model: Option<String>,
-    pub(crate) allow: Vec<PermissionRule>,
-    pub(crate) ask: Vec<PermissionRule>,
-    pub(crate) deny: Vec<PermissionRule>,
+    pub(crate) config: PermissionConfig,
     pub(crate) session_grants: Mutex<HashSet<String>>,
     pub(crate) approval_handler: Option<Arc<dyn crate::types::ApprovalHandler>>,
+    pub(crate) smart_approval_handler: Option<Arc<dyn crate::types::ApprovalHandler>>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PermissionRule {
     pub(crate) raw: String,
@@ -35,10 +33,31 @@ pub(crate) enum PermissionDecision {
         suggested_rule: Option<String>,
         allow_always: bool,
         session_key: String,
+        persistent_grants: Vec<PersistentPermissionGrant>,
     },
     Deny {
         reason: String,
         matched_rule: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PersistentPermissionGrant {
+    Filesystem {
+        path: String,
+        access: PermissionAccess,
+    },
+    Network {
+        host: String,
+        access: PermissionAccess,
+    },
+    Exec {
+        prefix: Vec<String>,
+        decision: ExecPolicyDecision,
+    },
+    Skill {
+        key: String,
+        access: PermissionAccess,
     },
 }
 
@@ -48,21 +67,19 @@ impl PermissionRuntime {
         project_config_dir: PathBuf,
         config: PermissionConfig,
         mode: PermissionMode,
-        approval_mode: ApprovalMode,
+        _approval_mode: ApprovalMode,
         approval_handler: Option<Arc<dyn crate::types::ApprovalHandler>>,
+        smart_approval_handler: Option<Arc<dyn crate::types::ApprovalHandler>>,
     ) -> Self {
         Self {
             inner: Arc::new(PermissionRuntimeInner {
                 workdir,
                 project_config_dir,
                 mode,
-                approval_mode,
-                smart_model: config.smart_model,
-                allow: parse_rules(config.allow),
-                ask: parse_rules(config.ask),
-                deny: parse_rules(config.deny),
+                config,
                 session_grants: Mutex::new(HashSet::new()),
                 approval_handler,
+                smart_approval_handler,
             }),
         }
     }
@@ -118,6 +135,7 @@ impl PermissionRuntime {
                 suggested_rule,
                 allow_always,
                 session_key,
+                persistent_grants,
             } => {
                 if self.inner.mode.bypasses_prompt_asks() {
                     return Ok(());
@@ -129,24 +147,34 @@ impl PermissionRuntime {
                         matched_rule.as_deref(),
                     ));
                 }
-                if self.inner.approval_handler.is_none()
-                    || matches!(self.inner.approval_mode, ApprovalMode::Smart)
-                        && self.inner.approval_handler.is_none()
-                {
-                    return Ok(());
+                if matches!(self.inner.config.approval_policy, ApprovalPolicy::Never) {
+                    return Err(permission_error(
+                        "denied",
+                        &format!("approval_policy=never suppressed prompt: {reason}"),
+                        matched_rule.as_deref(),
+                    ));
                 }
-                let Some(handler) = &self.inner.approval_handler else {
-                    return Ok(());
+                let reviewer = self.inner.config.approvals_reviewer;
+                let handler = match reviewer {
+                    ApprovalsReviewer::User => self.inner.approval_handler.as_ref(),
+                    ApprovalsReviewer::Smart => self.inner.smart_approval_handler.as_ref(),
+                };
+                let Some(handler) = handler else {
+                    return Err(permission_error(
+                        "denied",
+                        &format!("permission reviewer unavailable; failing closed: {reason}"),
+                        matched_rule.as_deref(),
+                    ));
                 };
                 let timeout_secs = handler.timeout_secs();
                 let request = PermissionApprovalRequest {
                     tool_call_id: tool_call_id.to_string(),
                     tool_name: tool_name.to_string(),
                     summary: action_summary(tool_name, args),
-                    reason: if self.inner.approval_mode == ApprovalMode::Smart {
-                        match &self.inner.smart_model {
+                    reason: if self.inner.config.approvals_reviewer == ApprovalsReviewer::Smart {
+                        match &self.inner.config.auto_review.model {
                             Some(model) => format!("{reason} (smart reviewer configured: {model})"),
-                            None => reason.clone(),
+                            None => format!("{reason} (smart reviewer configured)"),
                         }
                     } else {
                         reason.clone()
@@ -156,12 +184,28 @@ impl PermissionRuntime {
                     allow_always,
                     timeout_secs,
                 };
-                let decision = time::timeout(
-                    Duration::from_secs(timeout_secs),
-                    handler.request_permission(request),
-                )
-                .await
-                .unwrap_or_else(|_| crate::types::PermissionApprovalDecision::deny());
+                let decision = if timeout_secs == 0 {
+                    handler.request_permission(request).await
+                } else {
+                    time::timeout(
+                        Duration::from_secs(timeout_secs),
+                        handler.request_permission(request),
+                    )
+                    .await
+                    .unwrap_or_else(|_| crate::types::PermissionApprovalDecision::deny())
+                };
+                if reviewer == ApprovalsReviewer::Smart {
+                    return match decision.outcome {
+                        PermissionApprovalOutcome::AllowOnce
+                        | PermissionApprovalOutcome::AllowSession
+                        | PermissionApprovalOutcome::AllowAlways => Ok(()),
+                        PermissionApprovalOutcome::Deny => Err(permission_error(
+                            "denied",
+                            &format!("smart reviewer denied permission: {reason}"),
+                            matched_rule.as_deref(),
+                        )),
+                    };
+                }
                 match decision.outcome {
                     PermissionApprovalOutcome::AllowOnce => Ok(()),
                     PermissionApprovalOutcome::AllowSession => {
@@ -170,19 +214,72 @@ impl PermissionRuntime {
                     }
                     PermissionApprovalOutcome::AllowAlways => {
                         self.remember_session_grant(session_key);
-                        if allow_always && let Some(rule) = suggested_rule {
-                            let _ = append_local_permission_allow_rule(
-                                self.inner.project_config_dir.clone(),
-                                &rule,
-                            );
+                        if allow_always {
+                            self.persist_permission_grants(&persistent_grants);
                         }
                         Ok(())
                     }
-                    PermissionApprovalOutcome::Deny => {
-                        Err(permission_error("denied", &reason, matched_rule.as_deref()))
-                    }
+                    PermissionApprovalOutcome::Deny => Err(permission_error(
+                        "denied",
+                        &format!(
+                            "user denied permission; do not retry the same operation: {reason}"
+                        ),
+                        matched_rule.as_deref(),
+                    )),
                 }
             }
+        }
+    }
+
+    pub(crate) fn persist_permission_grants(&self, grants: &[PersistentPermissionGrant]) {
+        let fallback_extends = self.local_profile_fallback_extends();
+        for grant in grants {
+            let result = match grant {
+                PersistentPermissionGrant::Filesystem { path, access } => {
+                    append_local_filesystem_grant_with_extends(
+                        self.inner.project_config_dir.clone(),
+                        path,
+                        *access,
+                        format!("filesystem:{path}"),
+                        &fallback_extends,
+                    )
+                }
+                PersistentPermissionGrant::Network { host, access } => {
+                    append_local_network_grant_with_extends(
+                        self.inner.project_config_dir.clone(),
+                        host,
+                        *access,
+                        format!("network:{host}"),
+                        &fallback_extends,
+                    )
+                }
+                PersistentPermissionGrant::Exec { prefix, decision } => {
+                    append_local_exec_policy_rule(
+                        self.inner.project_config_dir.clone(),
+                        prefix,
+                        *decision,
+                        format!("exec:{}", prefix.join(" ")),
+                    )
+                }
+                PersistentPermissionGrant::Skill { key, access } => {
+                    append_local_skill_grant_with_extends(
+                        self.inner.project_config_dir.clone(),
+                        key,
+                        *access,
+                        format!("skill:{key}"),
+                        &fallback_extends,
+                    )
+                }
+            };
+            let _ = result;
+        }
+    }
+
+    pub(crate) fn local_profile_fallback_extends(&self) -> String {
+        if self.inner.config.default_permissions == "local" {
+            ":workspace".to_string()
+        } else {
+            self.inner.config.default_permissions.clone()
         }
     }
 
@@ -212,51 +309,29 @@ impl PermissionRuntime {
             };
         }
 
-        if let Some(rule) = self.matching_rule(&self.inner.deny, &action) {
+        let evaluation = self.evaluate_action_policy(&action);
+        if let ActionPolicyEvaluation::Deny {
+            reason,
+            matched_rule,
+        } = evaluation.clone()
+        {
             return PermissionDecision::Deny {
-                reason: format!("blocked by permissions.deny rule `{}`", rule.raw),
-                matched_rule: Some(rule.raw.clone()),
+                reason,
+                matched_rule,
             };
         }
 
         let session_key = action.session_key();
-        if self.has_session_grant(&session_key) {
+        if self.has_session_grant(&session_key)
+            || self.inner.mode == PermissionMode::BypassPermissions
+        {
             return PermissionDecision::Allow;
         }
 
-        if let Some(rule) = self.matching_rule(&self.inner.ask, &action) {
-            if self.inner.mode == PermissionMode::AcceptEdits && action.is_safe_file_edit() {
-                return PermissionDecision::Allow;
-            }
-            return PermissionDecision::Ask {
-                reason: format!("permissions.ask rule `{}` matched", rule.raw),
-                matched_rule: Some(rule.raw.clone()),
-                suggested_rule: action.suggested_rule(),
-                allow_always: action.allow_always(),
-                session_key,
-            };
-        }
-
-        if let Some(_rule) = self.matching_rule(&self.inner.allow, &action) {
-            return PermissionDecision::Allow;
-        }
-
-        if let Some(reason) = default_ask_reason(&action) {
-            if self.inner.mode == PermissionMode::AcceptEdits && action.is_safe_file_edit() {
-                return PermissionDecision::Allow;
-            }
-            return PermissionDecision::Ask {
-                reason,
-                matched_rule: None,
-                suggested_rule: action.suggested_rule(),
-                allow_always: action.allow_always(),
-                session_key,
-            };
-        }
-
-        PermissionDecision::Allow
+        self.evaluation_to_permission_decision(&action, session_key, evaluation)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn matching_rule<'a>(
         &'a self,
         rules: &'a [PermissionRule],
@@ -264,6 +339,171 @@ impl PermissionRuntime {
     ) -> Option<&'a PermissionRule> {
         rules.iter().find(|rule| action.matches_rule(rule))
     }
+
+    pub(crate) fn evaluation_to_permission_decision(
+        &self,
+        action: &PermissionAction,
+        session_key: String,
+        evaluation: ActionPolicyEvaluation,
+    ) -> PermissionDecision {
+        match evaluation {
+            ActionPolicyEvaluation::Allow => PermissionDecision::Allow,
+            ActionPolicyEvaluation::Deny {
+                reason,
+                matched_rule,
+            } => PermissionDecision::Deny {
+                reason,
+                matched_rule,
+            },
+            ActionPolicyEvaluation::Ask {
+                reason,
+                matched_rule,
+                suggested_rule,
+                persistent_grants,
+            } => {
+                if self.inner.mode == PermissionMode::AcceptEdits
+                    && action.is_safe_file_edit()
+                    && action.file_targets_all_within_workdir()
+                {
+                    return PermissionDecision::Allow;
+                }
+                if matches!(self.inner.config.approval_policy, ApprovalPolicy::Granular)
+                    && !self.granular_allows_prompt(action)
+                {
+                    return PermissionDecision::Deny {
+                        reason: format!(
+                            "granular approval disabled for {}: {reason}",
+                            action.category()
+                        ),
+                        matched_rule,
+                    };
+                }
+                PermissionDecision::Ask {
+                    reason,
+                    matched_rule,
+                    suggested_rule,
+                    allow_always: !persistent_grants.is_empty(),
+                    session_key,
+                    persistent_grants,
+                }
+            }
+        }
+    }
+
+    pub(crate) fn evaluate_action_policy(
+        &self,
+        action: &PermissionAction,
+    ) -> ActionPolicyEvaluation {
+        if let Some(decision) = self.exec_policy_decision(action) {
+            return decision;
+        }
+        let default_permissions = self.inner.config.default_permissions.as_str();
+        self.profile_decision(default_permissions, action, &mut BTreeSet::new())
+            .unwrap_or_else(|| builtin_profile_decision(":workspace", action))
+    }
+
+    pub(crate) fn exec_policy_decision(
+        &self,
+        action: &PermissionAction,
+    ) -> Option<ActionPolicyEvaluation> {
+        let PermissionAction::ExecCommand { command, .. } = action else {
+            return None;
+        };
+        let tokens = command_tokens(command);
+        if tokens.is_empty() {
+            return None;
+        }
+        let mut prompt: Option<&crate::types::ExecPolicyRule> = None;
+        let mut allow: Option<&crate::types::ExecPolicyRule> = None;
+        for rule in &self.inner.config.exec_policy.rules {
+            if !exec_prefix_matches(&rule.prefix, &tokens) {
+                continue;
+            }
+            match rule.decision {
+                ExecPolicyDecision::Deny => {
+                    return Some(ActionPolicyEvaluation::Deny {
+                        reason: format!(
+                            "blocked by exec_policy prefix `{}`",
+                            rule.prefix.join(" ")
+                        ),
+                        matched_rule: Some(format!("exec_policy:{}", rule.prefix.join(" "))),
+                    });
+                }
+                ExecPolicyDecision::Prompt => prompt = Some(rule),
+                ExecPolicyDecision::Allow => allow = Some(rule),
+            }
+        }
+        if let Some(rule) = prompt {
+            return Some(ActionPolicyEvaluation::Ask {
+                reason: format!(
+                    "exec_policy prefix `{}` requires approval",
+                    rule.prefix.join(" ")
+                ),
+                matched_rule: Some(format!("exec_policy:{}", rule.prefix.join(" "))),
+                suggested_rule: Some(format!("exec:{}", tokens.join(" "))),
+                persistent_grants: action.persistent_grants(),
+            });
+        }
+        allow.map(|_| ActionPolicyEvaluation::Allow)
+    }
+
+    pub(crate) fn profile_decision(
+        &self,
+        profile_name: &str,
+        action: &PermissionAction,
+        seen: &mut BTreeSet<String>,
+    ) -> Option<ActionPolicyEvaluation> {
+        if profile_name.starts_with(':') {
+            return Some(builtin_profile_decision(profile_name, action));
+        }
+        if !seen.insert(profile_name.to_string()) {
+            return Some(ActionPolicyEvaluation::Deny {
+                reason: format!("permission profile `{profile_name}` extends cycle detected"),
+                matched_rule: Some(format!("permissions.{profile_name}")),
+            });
+        }
+        let Some(profile) = self.inner.config.profiles.get(profile_name) else {
+            return Some(ActionPolicyEvaluation::Deny {
+                reason: format!("permission profile `{profile_name}` is not configured"),
+                matched_rule: Some(format!("permissions.{profile_name}")),
+            });
+        };
+        if let Some(decision) = explicit_profile_decision(profile_name, profile, action) {
+            return Some(decision);
+        }
+        match profile.extends.as_deref() {
+            Some(parent) => self.profile_decision(parent, action, seen),
+            None => Some(builtin_profile_decision(":workspace", action)),
+        }
+    }
+
+    pub(crate) fn granular_allows_prompt(&self, action: &PermissionAction) -> bool {
+        let Some(granular) = &self.inner.config.granular else {
+            return false;
+        };
+        match action {
+            PermissionAction::ExecCommand { .. } => granular.exec,
+            PermissionAction::File { .. } => granular.filesystem,
+            PermissionAction::Skill { .. } => granular.skill,
+            PermissionAction::McpStartup { .. } | PermissionAction::Mcp { .. } => granular.mcp,
+            PermissionAction::WebFetch { .. } => granular.network,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ActionPolicyEvaluation {
+    Allow,
+    Ask {
+        reason: String,
+        matched_rule: Option<String>,
+        suggested_rule: Option<String>,
+        persistent_grants: Vec<PersistentPermissionGrant>,
+    },
+    Deny {
+        reason: String,
+        matched_rule: Option<String>,
+    },
 }
 
 pub(crate) struct PermissionTool {
@@ -434,6 +674,7 @@ impl PermissionAction {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn matches_rule(&self, rule: &PermissionRule) -> bool {
         match self {
             Self::ExecCommand { normalized, .. } => {
@@ -495,6 +736,7 @@ impl PermissionAction {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn allow_always(&self) -> bool {
         matches!(
             self,
@@ -504,6 +746,67 @@ impl PermissionAction {
                 | Self::Mcp { .. }
                 | Self::WebFetch { .. }
         )
+    }
+
+    pub(crate) fn persistent_grants(&self) -> Vec<PersistentPermissionGrant> {
+        match self {
+            Self::ExecCommand { command, .. } => {
+                let prefix = command_tokens(command);
+                (!prefix.is_empty())
+                    .then_some(PersistentPermissionGrant::Exec {
+                        prefix,
+                        decision: ExecPolicyDecision::Allow,
+                    })
+                    .into_iter()
+                    .collect()
+            }
+            Self::File {
+                paths, mutating, ..
+            } => {
+                let access = if *mutating {
+                    PermissionAccess::Write
+                } else {
+                    PermissionAccess::Read
+                };
+                paths
+                    .iter()
+                    .map(|target| PersistentPermissionGrant::Filesystem {
+                        path: target.absolute.to_string_lossy().to_string(),
+                        access,
+                    })
+                    .collect()
+            }
+            Self::Skill { tool, action } => vec![PersistentPermissionGrant::Skill {
+                key: format!("{tool}/{action}"),
+                access: PermissionAccess::Allow,
+            }],
+            Self::WebFetch { url } => web_fetch_host(url)
+                .map(|host| {
+                    vec![PersistentPermissionGrant::Network {
+                        host,
+                        access: PermissionAccess::Allow,
+                    }]
+                })
+                .unwrap_or_default(),
+            Self::McpStartup { .. } | Self::Mcp { .. } => Vec::new(),
+        }
+    }
+
+    pub(crate) fn file_targets_all_within_workdir(&self) -> bool {
+        match self {
+            Self::File { paths, .. } => paths.iter().all(|path| path.within_workdir),
+            _ => false,
+        }
+    }
+
+    pub(crate) fn category(&self) -> &'static str {
+        match self {
+            Self::ExecCommand { .. } => "exec",
+            Self::File { .. } => "filesystem",
+            Self::Skill { .. } => "skill",
+            Self::McpStartup { .. } | Self::Mcp { .. } => "mcp",
+            Self::WebFetch { .. } => "network",
+        }
     }
 
     pub(crate) fn is_safe_file_edit(&self) -> bool {
@@ -651,6 +954,324 @@ pub(crate) fn default_ask_reason(action: &PermissionAction) -> Option<String> {
         }
         PermissionAction::WebFetch { .. } => None,
     }
+}
+
+pub(crate) fn builtin_profile_decision(
+    profile_name: &str,
+    action: &PermissionAction,
+) -> ActionPolicyEvaluation {
+    match profile_name {
+        ":danger-full-access" => ActionPolicyEvaluation::Allow,
+        ":read-only" => read_only_profile_decision(action),
+        ":workspace" => workspace_profile_decision(action),
+        other => ActionPolicyEvaluation::Deny {
+            reason: format!("unknown built-in permission profile `{other}`"),
+            matched_rule: Some(other.to_string()),
+        },
+    }
+}
+
+pub(crate) fn workspace_profile_decision(action: &PermissionAction) -> ActionPolicyEvaluation {
+    match action {
+        PermissionAction::File {
+            paths, mutating, ..
+        } => {
+            if paths.iter().all(|target| target.within_workdir) {
+                return ActionPolicyEvaluation::Allow;
+            }
+            let outside = paths
+                .iter()
+                .filter(|target| !target.within_workdir)
+                .map(|target| target.absolute.to_string_lossy().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            ActionPolicyEvaluation::Ask {
+                reason: format!(
+                    "{} outside workdir requires approval: {outside}",
+                    if *mutating { "file write" } else { "file read" }
+                ),
+                matched_rule: None,
+                suggested_rule: Some(format!("filesystem:{outside}")),
+                persistent_grants: action.persistent_grants(),
+            }
+        }
+        PermissionAction::ExecCommand { .. } => {
+            if let Some(reason) = default_ask_reason(action) {
+                ActionPolicyEvaluation::Ask {
+                    reason,
+                    matched_rule: None,
+                    suggested_rule: action.suggested_rule(),
+                    persistent_grants: action.persistent_grants(),
+                }
+            } else {
+                ActionPolicyEvaluation::Allow
+            }
+        }
+        PermissionAction::Skill {
+            tool,
+            action: skill_action,
+        } => ActionPolicyEvaluation::Ask {
+            reason: format!(
+                "{tool} action `{skill_action}` changes skill configuration or files and requires approval"
+            ),
+            matched_rule: None,
+            suggested_rule: Some(format!("skill:{tool}/{skill_action}")),
+            persistent_grants: action.persistent_grants(),
+        },
+        PermissionAction::McpStartup { server, transport } => ActionPolicyEvaluation::Ask {
+            reason: format!("MCP server `{server}` startup over {transport} requires approval"),
+            matched_rule: None,
+            suggested_rule: Some(format!("mcp_startup:{server}")),
+            persistent_grants: action.persistent_grants(),
+        },
+        PermissionAction::Mcp { server, tool } => ActionPolicyEvaluation::Ask {
+            reason: format!("MCP tool `{server}/{tool}` requires approval"),
+            matched_rule: None,
+            suggested_rule: Some(format!("mcp:{server}/{tool}")),
+            persistent_grants: action.persistent_grants(),
+        },
+        PermissionAction::WebFetch { url } => {
+            let host = web_fetch_host(url).unwrap_or_else(|| url.to_string());
+            ActionPolicyEvaluation::Ask {
+                reason: format!("network access to `{host}` requires approval"),
+                matched_rule: None,
+                suggested_rule: Some(format!("network:{host}")),
+                persistent_grants: action.persistent_grants(),
+            }
+        }
+    }
+}
+
+pub(crate) fn read_only_profile_decision(action: &PermissionAction) -> ActionPolicyEvaluation {
+    match action {
+        PermissionAction::File {
+            paths,
+            mutating: false,
+            ..
+        } if paths.iter().all(|target| target.within_workdir) => ActionPolicyEvaluation::Allow,
+        PermissionAction::File { .. } => ActionPolicyEvaluation::Ask {
+            reason:
+                "read-only permissions require approval for file writes or outside-workdir reads"
+                    .to_string(),
+            matched_rule: None,
+            suggested_rule: action.suggested_rule(),
+            persistent_grants: action.persistent_grants(),
+        },
+        _ => ActionPolicyEvaluation::Ask {
+            reason: format!(
+                "{} action requires approval under :read-only",
+                action.category()
+            ),
+            matched_rule: None,
+            suggested_rule: action.suggested_rule(),
+            persistent_grants: action.persistent_grants(),
+        },
+    }
+}
+
+pub(crate) fn explicit_profile_decision(
+    profile_name: &str,
+    profile: &PermissionProfileConfig,
+    action: &PermissionAction,
+) -> Option<ActionPolicyEvaluation> {
+    match action {
+        PermissionAction::File {
+            paths, mutating, ..
+        } => profile_filesystem_decision(profile_name, &profile.filesystem, paths, *mutating),
+        PermissionAction::WebFetch { url } => web_fetch_host(url).and_then(|host| {
+            profile_access_decision(
+                profile_name,
+                "network",
+                &profile.network_domains,
+                &host,
+                || format!("network access to `{host}` requires approval"),
+                || action.persistent_grants(),
+            )
+        }),
+        PermissionAction::Skill { tool, action } => {
+            let key = format!("{tool}/{action}");
+            profile_access_decision(
+                profile_name,
+                "skill",
+                &profile.skill_tools,
+                &key,
+                || format!("{tool} action `{action}` requires approval"),
+                || {
+                    vec![PersistentPermissionGrant::Skill {
+                        key: key.clone(),
+                        access: PermissionAccess::Allow,
+                    }]
+                },
+            )
+        }
+        PermissionAction::ExecCommand { .. }
+        | PermissionAction::McpStartup { .. }
+        | PermissionAction::Mcp { .. } => None,
+    }
+}
+
+pub(crate) fn profile_filesystem_decision(
+    profile_name: &str,
+    rules: &std::collections::BTreeMap<String, PermissionAccess>,
+    paths: &[FileTarget],
+    mutating: bool,
+) -> Option<ActionPolicyEvaluation> {
+    let mut matched_allow = 0usize;
+    for target in paths {
+        let Some((rule, access)) = matching_filesystem_access(rules, target) else {
+            continue;
+        };
+        match access {
+            PermissionAccess::Deny => {
+                return Some(ActionPolicyEvaluation::Deny {
+                    reason: format!("blocked by permissions.{profile_name}.filesystem `{rule}`"),
+                    matched_rule: Some(format!("permissions.{profile_name}.filesystem.{rule}")),
+                });
+            }
+            PermissionAccess::Prompt => {
+                return Some(ActionPolicyEvaluation::Ask {
+                    reason: format!(
+                        "permissions.{profile_name}.filesystem `{rule}` requires approval"
+                    ),
+                    matched_rule: Some(format!("permissions.{profile_name}.filesystem.{rule}")),
+                    suggested_rule: Some(format!(
+                        "filesystem:{}",
+                        target.absolute.to_string_lossy()
+                    )),
+                    persistent_grants: vec![PersistentPermissionGrant::Filesystem {
+                        path: target.absolute.to_string_lossy().to_string(),
+                        access: if mutating {
+                            PermissionAccess::Write
+                        } else {
+                            PermissionAccess::Read
+                        },
+                    }],
+                });
+            }
+            PermissionAccess::Read if mutating => {
+                return Some(ActionPolicyEvaluation::Ask {
+                    reason: format!(
+                        "permissions.{profile_name}.filesystem `{rule}` allows read only"
+                    ),
+                    matched_rule: Some(format!("permissions.{profile_name}.filesystem.{rule}")),
+                    suggested_rule: Some(format!(
+                        "filesystem:{}",
+                        target.absolute.to_string_lossy()
+                    )),
+                    persistent_grants: vec![PersistentPermissionGrant::Filesystem {
+                        path: target.absolute.to_string_lossy().to_string(),
+                        access: PermissionAccess::Write,
+                    }],
+                });
+            }
+            PermissionAccess::Read | PermissionAccess::Write | PermissionAccess::Allow => {
+                matched_allow += 1;
+            }
+        }
+    }
+    (matched_allow == paths.len() && !paths.is_empty()).then_some(ActionPolicyEvaluation::Allow)
+}
+
+pub(crate) fn profile_access_decision<F, G>(
+    profile_name: &str,
+    category: &str,
+    rules: &std::collections::BTreeMap<String, PermissionAccess>,
+    target: &str,
+    prompt_reason: F,
+    persistent_grants: G,
+) -> Option<ActionPolicyEvaluation>
+where
+    F: FnOnce() -> String,
+    G: FnOnce() -> Vec<PersistentPermissionGrant>,
+{
+    let (rule, access) = matching_access(rules, target)?;
+    match access {
+        PermissionAccess::Deny => Some(ActionPolicyEvaluation::Deny {
+            reason: format!("blocked by permissions.{profile_name}.{category} `{rule}`"),
+            matched_rule: Some(format!("permissions.{profile_name}.{category}.{rule}")),
+        }),
+        PermissionAccess::Prompt => Some(ActionPolicyEvaluation::Ask {
+            reason: prompt_reason(),
+            matched_rule: Some(format!("permissions.{profile_name}.{category}.{rule}")),
+            suggested_rule: Some(format!("{category}:{target}")),
+            persistent_grants: persistent_grants(),
+        }),
+        PermissionAccess::Read | PermissionAccess::Write | PermissionAccess::Allow => {
+            Some(ActionPolicyEvaluation::Allow)
+        }
+    }
+}
+
+pub(crate) fn matching_filesystem_access<'a>(
+    rules: &'a std::collections::BTreeMap<String, PermissionAccess>,
+    target: &FileTarget,
+) -> Option<(&'a str, PermissionAccess)> {
+    rules
+        .iter()
+        .filter(|(rule, _)| filesystem_rule_matches(rule, target))
+        .max_by_key(|(rule, _)| rule.len())
+        .map(|(rule, access)| (rule.as_str(), *access))
+}
+
+pub(crate) fn filesystem_rule_matches(rule: &str, target: &FileTarget) -> bool {
+    let rule_path = Path::new(rule);
+    if rule_path.is_absolute() {
+        let normalized = lexical_normalize(rule_path);
+        return target.absolute == normalized || target.absolute.starts_with(&normalized);
+    }
+    let rule = rule.replace('\\', "/");
+    target.relative == rule
+        || target
+            .relative
+            .strip_prefix(&rule)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
+pub(crate) fn matching_access<'a>(
+    rules: &'a std::collections::BTreeMap<String, PermissionAccess>,
+    target: &str,
+) -> Option<(&'a str, PermissionAccess)> {
+    rules
+        .iter()
+        .filter(|(rule, _)| access_rule_matches(rule, target))
+        .max_by_key(|(rule, _)| rule.len())
+        .map(|(rule, access)| (rule.as_str(), *access))
+}
+
+pub(crate) fn access_rule_matches(rule: &str, target: &str) -> bool {
+    let rule = rule.to_ascii_lowercase();
+    let target = target.to_ascii_lowercase();
+    if rule == target || wildcard_match(&rule, &target) {
+        return true;
+    }
+    target
+        .strip_suffix(&rule)
+        .is_some_and(|prefix| prefix.ends_with('.'))
+}
+
+pub(crate) fn web_fetch_host(value: &str) -> Option<String> {
+    let rest = value
+        .strip_prefix("http://")
+        .or_else(|| value.strip_prefix("https://"))
+        .unwrap_or(value);
+    rest.split('/')
+        .next()
+        .map(str::trim)
+        .filter(|host| !host.is_empty())
+        .map(str::to_ascii_lowercase)
+}
+
+pub(crate) fn command_tokens(command: &str) -> Vec<String> {
+    command
+        .split_whitespace()
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+pub(crate) fn exec_prefix_matches(prefix: &[String], tokens: &[String]) -> bool {
+    prefix.len() <= tokens.len() && prefix.iter().zip(tokens).all(|(left, right)| left == right)
 }
 
 pub(crate) fn permission_rule_tool(tool: &str) -> &str {

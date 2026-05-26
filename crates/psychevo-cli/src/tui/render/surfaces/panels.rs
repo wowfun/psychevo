@@ -18,6 +18,10 @@ pub(crate) fn render_bottom_panel(
         render_provider_wizard_panel(frame, area, panel);
         return;
     }
+    if let BottomPanel::PermissionApproval(panel) = panel {
+        render_permission_approval_panel(frame, area, panel, row_areas);
+        return;
+    }
     if let BottomPanel::Clarify(panel) = panel {
         render_clarify_panel(frame, area, panel, row_areas);
         return;
@@ -127,6 +131,97 @@ pub(crate) fn render_bottom_panel(
     )));
 
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
+}
+
+pub(crate) fn render_permission_approval_panel(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    panel: &mut PermissionApprovalPanel,
+    row_areas: &mut Vec<(usize, Rect)>,
+) {
+    let theme = tui_theme();
+    frame.render_widget(Block::default().style(theme.menu_style()), area);
+    let inner = Rect {
+        x: area.x.saturating_add(2),
+        y: area.y.saturating_add(1),
+        width: area.width.saturating_sub(4),
+        height: area.height.saturating_sub(2),
+    };
+    let source = panel
+        .session_id
+        .as_deref()
+        .map(short_session)
+        .unwrap_or("current");
+    let mut lines = vec![
+        Line::from(Span::styled(
+            format!("Permission required  source: {source}"),
+            theme.accent_style().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(panel.request.reason.clone(), Style::default())),
+        Line::from(Span::styled(
+            format!(
+                "tool: {}  action: {}",
+                panel.request.tool_name, panel.request.summary
+            ),
+            theme.dim_style(),
+        )),
+    ];
+    if let Some(rule) = &panel.request.matched_rule {
+        lines.push(Line::from(Span::styled(
+            format!("matched: {rule}"),
+            theme.dim_style(),
+        )));
+    }
+    if let Some(rule) = &panel.request.suggested_rule {
+        lines.push(Line::from(Span::styled(
+            format!("grant: {rule}"),
+            theme.dim_style(),
+        )));
+    }
+    lines.push(Line::from(""));
+
+    for (index, (_outcome, label, description)) in panel.options().iter().enumerate() {
+        let row_y = inner.y.saturating_add(lines.len() as u16);
+        row_areas.push((
+            index,
+            Rect {
+                x: inner.x,
+                y: row_y,
+                width: inner.width,
+                height: 1,
+            },
+        ));
+        let selected = index == panel.selected;
+        let marker = if selected { "›" } else { " " };
+        let key = match *label {
+            "Allow once" => "y",
+            "Allow session" => "a",
+            "Allow permanent" => "p",
+            _ => "d",
+        };
+        let style = if selected {
+            theme.accent_style().add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{marker} [{key}] "), theme.dim_style()),
+            Span::styled((*label).to_string(), style),
+            Span::styled("  ", theme.dim_style()),
+            Span::styled((*description).to_string(), theme.dim_style()),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+    if let Some(notice) = &panel.notice {
+        lines.push(Line::from(Span::styled(notice.clone(), theme.dim_style())));
+    }
+    lines.push(Line::from(Span::styled(
+        "↑/↓ or j/k select | enter confirm | y once | a session | p permanent | d/esc deny",
+        theme.dim_style(),
+    )));
+
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 }
 
 pub(crate) fn render_clarify_panel(

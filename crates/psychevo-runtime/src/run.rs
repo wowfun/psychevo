@@ -2,12 +2,16 @@ pub(crate) use std::collections::BTreeMap;
 pub(crate) use std::sync::{Arc, Mutex};
 pub(crate) use std::time::{Duration, Instant};
 
+pub(crate) use futures::StreamExt;
 pub(crate) use psychevo_agent_core::{
     AgentLoopRequest, AssistantBlock, ControlHandle, Message, NoopEventSink, PromptInstruction,
     run_agent_loop, user_text_message,
 };
-pub(crate) use psychevo_ai::{GenerationProvider, OpenAiChatProvider, Outcome};
-pub(crate) use serde_json::json;
+pub(crate) use psychevo_ai::{
+    AbortSignal, GenerationProvider, GenerationRequest, ModelTarget, OpenAiChatProvider, Outcome,
+    StreamEvent,
+};
+pub(crate) use serde_json::{Value, json};
 pub(crate) use tokio::time;
 
 pub(crate) use crate::agents::{
@@ -52,7 +56,8 @@ pub(crate) use crate::tool_surface::{
 };
 pub(crate) use crate::tools::{detach_exec_sessions_for_task, interrupt_exec_sessions_for_task};
 pub(crate) use crate::types::{
-    AgentSpawnOptions, AgentSpawnResult, ModelMetadata, PermissionConfig, ReloadContextOptions,
+    AgentSpawnOptions, AgentSpawnResult, ApprovalHandler, ModelMetadata,
+    PermissionApprovalDecision, PermissionApprovalRequest, PermissionConfig, ReloadContextOptions,
     ReloadContextResult, RunControl, RunOptions, RunResult, RunStreamEvent, RunStreamSink,
     RunWarning, SelectedAgent, SmokeControl,
 };

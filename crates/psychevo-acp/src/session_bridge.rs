@@ -613,9 +613,6 @@ impl PsychevoAcpAgent {
         };
         if let Some(mode) = RunMode::parse(value) {
             session.mode = mode;
-            if mode == RunMode::Plan {
-                session.permission_mode = None;
-            }
             send_session_update(
                 cx,
                 session_id.clone(),
@@ -623,17 +620,7 @@ impl PsychevoAcpAgent {
             );
             return Ok(format!("mode: {}", mode.as_str()));
         }
-        let Some(permission_mode) = PermissionMode::parse(value) else {
-            return Err(Error::invalid_params().data(format!("unsupported mode: {value}")));
-        };
-        session.mode = RunMode::Default;
-        session.permission_mode = Some(permission_mode);
-        send_session_update(
-            cx,
-            session_id.clone(),
-            SessionUpdate::CurrentModeUpdate(CurrentModeUpdate::new(RunMode::Default.as_str())),
-        );
-        Ok(format!("mode: {}", permission_mode.as_str()))
+        Err(Error::invalid_params().data(format!("unsupported mode: {value}; use plan or default")))
     }
 
     pub(crate) fn permissions_status_text(&self, session: &AcpSession) -> Result<String, Error> {
@@ -651,23 +638,62 @@ impl PsychevoAcpAgent {
                     .unwrap_or("default")
             ),
             format!(
-                "approval_mode: {}",
-                permissions["approval_mode"].as_str().unwrap_or("manual")
+                "approval_policy: {}",
+                permissions["approval_policy"]
+                    .as_str()
+                    .unwrap_or("on-request")
+            ),
+            format!(
+                "approvals_reviewer: {}",
+                permissions["approvals_reviewer"].as_str().unwrap_or("user")
+            ),
+            format!(
+                "default_permissions: {}",
+                permissions["default_permissions"]
+                    .as_str()
+                    .unwrap_or(":workspace")
             ),
             format!(
                 "path: {}",
                 value["path"].as_str().unwrap_or(".psychevo/config.toml")
             ),
         ];
-        for kind in ["allow", "ask", "deny"] {
-            lines.push(format!("{kind}:"));
-            let rules = permissions[kind].as_array().cloned().unwrap_or_default();
-            if rules.is_empty() {
-                lines.push("  (none)".to_string());
-            } else {
-                for rule in rules {
-                    lines.push(format!("  {}", rule.as_str().unwrap_or("-")));
-                }
+        lines.push("profiles:".to_string());
+        let profiles = permissions["profiles"]
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+        if profiles.is_empty() {
+            lines.push("  (none)".to_string());
+        } else {
+            for name in profiles.keys() {
+                lines.push(format!("  {name}"));
+            }
+        }
+        lines.push("exec_policy:".to_string());
+        let rules = permissions["exec_policy"]["rules"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        if rules.is_empty() {
+            lines.push("  (none)".to_string());
+        } else {
+            for rule in rules {
+                let prefix = rule["prefix"]
+                    .as_array()
+                    .map(|values| {
+                        values
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+                    .unwrap_or_else(|| "-".to_string());
+                lines.push(format!(
+                    "  {} -> {}",
+                    prefix,
+                    rule["decision"].as_str().unwrap_or("-")
+                ));
             }
         }
         Ok(lines.join("\n"))

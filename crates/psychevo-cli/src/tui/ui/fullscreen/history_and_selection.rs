@@ -49,6 +49,9 @@ impl<'a> FullscreenUi<'a> {
             session_live_event_backlog: BTreeMap::new(),
             auxiliary_shell_tasks: Vec::new(),
             pending_auxiliary_shell_commands: VecDeque::new(),
+            approval_rx: None,
+            pending_permission_approvals: VecDeque::new(),
+            active_permission_approval: None,
             visible_turn_started: None,
             motion_started: Instant::now(),
             #[cfg(test)]
@@ -116,6 +119,46 @@ impl<'a> FullscreenUi<'a> {
         };
         ui.refresh_sidebar(app);
         ui
+    }
+
+    pub(crate) fn drain_permission_approval_requests(&mut self) -> bool {
+        let mut changed = false;
+        if let Some(rx) = &mut self.approval_rx {
+            while let Ok(request) = rx.try_recv() {
+                self.pending_permission_approvals.push_back(request);
+                changed = true;
+            }
+        }
+        changed | self.open_next_permission_approval()
+    }
+
+    pub(crate) fn open_next_permission_approval(&mut self) -> bool {
+        if self.active_permission_approval.is_some()
+            || matches!(self.bottom_panel, Some(BottomPanel::PermissionApproval(_)))
+        {
+            return false;
+        }
+        let Some(request) = self.pending_permission_approvals.pop_front() else {
+            return false;
+        };
+        let previous_panel = self.bottom_panel.take();
+        self.active_permission_approval = Some(request.response);
+        self.bottom_panel = Some(BottomPanel::PermissionApproval(
+            PermissionApprovalPanel::new(request.session_id, request.request, previous_panel),
+        ));
+        true
+    }
+
+    pub(crate) fn resolve_permission_approval(
+        &mut self,
+        panel: PermissionApprovalPanel,
+        decision: PermissionApprovalDecision,
+    ) {
+        if let Some(response) = self.active_permission_approval.take() {
+            let _ = response.send(decision);
+        }
+        self.bottom_panel = panel.restore_panel();
+        self.open_next_permission_approval();
     }
 
     pub(crate) fn refresh_sidebar(&mut self, app: &TuiApp) {

@@ -69,8 +69,8 @@ pub(crate) async fn shift_tab_cycles_mode_without_status_row() {
     .await
     .expect("shift tab");
 
-    assert_eq!(app.current_mode, RunMode::Default);
-    assert_eq!(app.current_permission_mode, PermissionMode::AcceptEdits);
+    assert_eq!(app.current_mode, RunMode::Plan);
+    assert_eq!(app.current_permission_mode, PermissionMode::Default);
     assert!(
         !ui.transcript
             .iter()

@@ -26,6 +26,7 @@ serde.workspace = true
 serde_json.workspace = true
 supports-color.workspace = true
 tokio.workspace = true
+toml.workspace = true
 unicode-width.workspace = true
 
 [target.'cfg(unix)'.dependencies]

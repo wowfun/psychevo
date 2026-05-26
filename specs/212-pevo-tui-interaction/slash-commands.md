@@ -111,11 +111,12 @@ transcript row without an extra `Status` title, and non-terminal scripted TUI
 writes the same multi-line status text as one output block.
 
 Composer submission classifies input before slash parsing. Leading shell
-escapes keep taking precedence. Known slash commands and unknown slash-looking
-commands remain slash command input in the TUI, including bounded errors such
-as `/unknown`; ACP and messaging surfaces may choose the shared pass-through
-fallback for unknown slash-looking input. Ordinary prompt text is not scanned
-for image paths or image URLs:
+escapes keep taking precedence. Known slash commands parse as commands, and
+known command argument errors remain bounded local errors. Unknown
+slash-looking input passes through as ordinary prompt text with the original
+submitted line, so inputs such as `/home/me/docs/README.md`,
+`/made-up explain this`, and an uninstalled `/<skill-or-bundle> [args]` reach
+the model. Ordinary prompt text is not scanned for image paths or image URLs:
 `描述这张图片的内容：img1.avif`, `/home/me/out.avif`, `@img.avif`,
 `https://example.com/image.png`, and `data:image/*;base64,...` are all prompt
 text unless they came from an existing pending image placeholder. This prevents

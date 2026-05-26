@@ -81,12 +81,14 @@ Required interaction coverage:
   reuse for `cat @src<Tab>`; preserved quoting for paths with spaces; no naked
   shell completion; and image paths inserted as text rather than attachments.
 - Image attachment UX: ordinary prompt text with image-looking paths remains
-  text; standalone readable image-source paste creates a `[Image #N]`
-  placeholder and pending attachment; unreadable/missing image-looking paste
-  inserts text without error; `/image missing.png` renders a bounded error;
-  `/image image.png describe` inserts placeholder plus prompt text; deleting a
-  placeholder unbinds the image; `/new` clears pending images and placeholders;
-  submitted image prompts preserve composer text.
+  text; leading absolute non-image paths and unknown slash-looking inputs submit
+  as prompt text instead of command errors; standalone readable image-source
+  paste creates a `[Image #N]` placeholder and pending attachment;
+  unreadable/missing image-looking paste inserts text without error; `/image
+  missing.png` renders a bounded error; `/image image.png describe` inserts
+  placeholder plus prompt text; deleting a placeholder unbinds the image; `/new`
+  clears pending images and placeholders; submitted image prompts preserve
+  composer text.
 - `/status`, `/usage`/`/stats`, `/context`, `/refresh`, `/btw`,
   `/show-thinking`, `/show-raw`, `/mode`, `/variant`, `/skills`,
   `/<skill-or-bundle>`, `/diff`, `/export`, and `/share`

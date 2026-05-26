@@ -262,14 +262,189 @@ impl ApprovalMode {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ApprovalPolicy {
+    #[default]
+    OnRequest,
+    Untrusted,
+    Never,
+    Granular,
+}
+
+impl ApprovalPolicy {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::OnRequest => "on-request",
+            Self::Untrusted => "untrusted",
+            Self::Never => "never",
+            Self::Granular => "granular",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "on-request" | "on_request" => Some(Self::OnRequest),
+            "untrusted" => Some(Self::Untrusted),
+            "never" => Some(Self::Never),
+            "granular" => Some(Self::Granular),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GranularApprovalConfig {
+    pub filesystem: bool,
+    pub network: bool,
+    pub exec: bool,
+    pub mcp: bool,
+    pub skill: bool,
+    pub request_permissions: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalsReviewer {
+    #[default]
+    User,
+    Smart,
+}
+
+impl ApprovalsReviewer {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Smart => "smart",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "user" => Some(Self::User),
+            "smart" | "auto_review" | "guardian_subagent" => Some(Self::Smart),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoReviewConfig {
+    pub model: Option<String>,
+    pub timeout_secs: u64,
+    pub policy: Option<String>,
+}
+
+impl Default for AutoReviewConfig {
+    fn default() -> Self {
+        Self {
+            model: None,
+            timeout_secs: 90,
+            policy: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PermissionAccess {
+    Deny,
+    Read,
+    Write,
+    Allow,
+    Prompt,
+}
+
+impl PermissionAccess {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "deny" => Some(Self::Deny),
+            "read" => Some(Self::Read),
+            "write" => Some(Self::Write),
+            "allow" => Some(Self::Allow),
+            "prompt" | "ask" => Some(Self::Prompt),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Deny => "deny",
+            Self::Read => "read",
+            Self::Write => "write",
+            Self::Allow => "allow",
+            Self::Prompt => "prompt",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PermissionProfileConfig {
+    pub extends: Option<String>,
+    pub filesystem: BTreeMap<String, PermissionAccess>,
+    pub network_domains: BTreeMap<String, PermissionAccess>,
+    pub skill_tools: BTreeMap<String, PermissionAccess>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExecPolicyDecision {
+    Allow,
+    Prompt,
+    Deny,
+}
+
+impl ExecPolicyDecision {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "allow" => Some(Self::Allow),
+            "prompt" | "ask" => Some(Self::Prompt),
+            "deny" => Some(Self::Deny),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Allow => "allow",
+            Self::Prompt => "prompt",
+            Self::Deny => "deny",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecPolicyRule {
+    pub prefix: Vec<String>,
+    pub decision: ExecPolicyDecision,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExecPolicyConfig {
+    pub rules: Vec<ExecPolicyRule>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PermissionConfig {
-    pub approval_mode: Option<ApprovalMode>,
-    pub permission_mode: Option<PermissionMode>,
-    pub smart_model: Option<String>,
+    pub approval_policy: ApprovalPolicy,
+    pub approvals_reviewer: ApprovalsReviewer,
+    pub granular: Option<GranularApprovalConfig>,
+    pub auto_review: AutoReviewConfig,
+    pub default_permissions: String,
+    pub profiles: BTreeMap<String, PermissionProfileConfig>,
+    pub exec_policy: ExecPolicyConfig,
     pub allow_login_shell: bool,
-    pub allow: Vec<String>,
-    pub ask: Vec<String>,
-    pub deny: Vec<String>,
+}
+
+impl Default for PermissionConfig {
+    fn default() -> Self {
+        Self {
+            approval_policy: ApprovalPolicy::OnRequest,
+            approvals_reviewer: ApprovalsReviewer::User,
+            granular: None,
+            auto_review: AutoReviewConfig::default(),
+            default_permissions: ":workspace".to_string(),
+            profiles: BTreeMap::new(),
+            exec_policy: ExecPolicyConfig::default(),
+            allow_login_shell: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -3,7 +3,31 @@ pub(crate) use super::*;
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
+pub(crate) enum SubmittedSlashInput {
+    Command(SlashCommand),
+    PassThroughPrompt(String),
+    NotSlash,
+}
+
 impl TuiApp {
+    pub(crate) fn classify_submitted_slash_input(&self, text: &str) -> Result<SubmittedSlashInput> {
+        if !should_parse_slash_command_input(text) {
+            return Ok(SubmittedSlashInput::NotSlash);
+        }
+        match parse_tui_slash_with_config(text, &self.slash_config)? {
+            TuiSlashParse::NotSlash => Ok(SubmittedSlashInput::NotSlash),
+            TuiSlashParse::Unknown { original, .. } => {
+                Ok(SubmittedSlashInput::PassThroughPrompt(original))
+            }
+            TuiSlashParse::Command(SlashCommand::SkillInvoke { name, args })
+                if self.skill_or_bundle_marker(&name, &args).is_none() =>
+            {
+                Ok(SubmittedSlashInput::PassThroughPrompt(text.to_string()))
+            }
+            TuiSlashParse::Command(command) => Ok(SubmittedSlashInput::Command(command)),
+        }
+    }
+
     #[cfg(test)]
     pub(crate) async fn handle_fullscreen_command(
         &mut self,
@@ -350,6 +374,12 @@ impl TuiApp {
         record_history: bool,
     ) -> Result<bool> {
         ui.scroll_to_bottom();
+        if self.handle_permission_approval_slash(ui, &text)? {
+            if record_history {
+                ui.push_submitted_history(text.clone());
+            }
+            return Ok(false);
+        }
         if let Some(shell) = parse_shell_escape_input(&text) {
             if record_history {
                 ui.push_submitted_history(shell.history_text.clone());
@@ -369,17 +399,17 @@ impl TuiApp {
                 ui.push_submitted_history(display_text.clone());
             }
         }
-        let slash_command = if should_parse_slash_command_input(&text) {
-            parse_slash_command_with_config(&text, &self.slash_config)
-        } else {
-            Ok(None)
-        };
-        match slash_command {
-            Ok(Some(command)) => {
+        match self.classify_submitted_slash_input(&text) {
+            Ok(SubmittedSlashInput::Command(command)) => {
                 self.handle_fullscreen_command_with_echo(ui, command, Some(text))
                     .await
             }
-            Ok(None) => {
+            Ok(SubmittedSlashInput::PassThroughPrompt(prompt)) => {
+                let images = ui.take_submitted_images(&text);
+                self.submit_fullscreen_prompt(ui, prompt, images)?;
+                Ok(false)
+            }
+            Ok(SubmittedSlashInput::NotSlash) => {
                 let images = ui.take_submitted_images(&text);
                 self.submit_fullscreen_prompt(ui, display_text, images)?;
                 Ok(false)
@@ -394,6 +424,71 @@ impl TuiApp {
                 Ok(false)
             }
         }
+    }
+
+    pub(crate) fn handle_permission_approval_slash(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        text: &str,
+    ) -> Result<bool> {
+        let trimmed = text.trim();
+        let Some(rest) = trimmed.strip_prefix("/approve") else {
+            if trimmed == "/deny" {
+                self.resolve_permission_approval_from_command(
+                    ui,
+                    PermissionApprovalDecision::deny(),
+                    trimmed,
+                )?;
+                return Ok(true);
+            }
+            return Ok(false);
+        };
+        let decision = match rest.trim() {
+            "" | "once" => PermissionApprovalDecision::allow_once(),
+            "session" => PermissionApprovalDecision::allow_session(),
+            "always" | "permanent" => PermissionApprovalDecision::allow_always(),
+            other => {
+                ui.push_command_result(
+                    trimmed.to_string(),
+                    None,
+                    format!("error: unsupported approval scope `{other}`"),
+                    true,
+                );
+                return Ok(true);
+            }
+        };
+        self.resolve_permission_approval_from_command(ui, decision, trimmed)?;
+        Ok(true)
+    }
+
+    pub(crate) fn resolve_permission_approval_from_command(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        decision: PermissionApprovalDecision,
+        command_echo: &str,
+    ) -> Result<()> {
+        let Some(BottomPanel::PermissionApproval(panel)) = ui.bottom_panel.take() else {
+            ui.push_command_result(
+                command_echo.to_string(),
+                None,
+                "no pending permission approval".to_string(),
+                true,
+            );
+            return Ok(());
+        };
+        if decision.outcome == PermissionApprovalOutcome::AllowAlways && !panel.request.allow_always
+        {
+            ui.bottom_panel = Some(BottomPanel::PermissionApproval(panel));
+            ui.push_command_result(
+                command_echo.to_string(),
+                None,
+                "current permission request does not support permanent approval".to_string(),
+                true,
+            );
+            return Ok(());
+        }
+        ui.resolve_permission_approval(panel, decision);
+        Ok(())
     }
 
     pub(crate) fn start_diff_task(&mut self) {

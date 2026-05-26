@@ -21,14 +21,13 @@ pub(crate) async fn run_live_internal(
         ));
     }
     let loaded = load_run_config(&options, &workdir)?;
-    let permission_mode = options
-        .permission_mode
-        .or(loaded.config.permissions.permission_mode)
-        .unwrap_or_default();
-    let approval_mode = options
-        .approval_mode
-        .or(loaded.config.permissions.approval_mode)
-        .unwrap_or_default();
+    let permission_mode = options.permission_mode.unwrap_or_default();
+    let approval_mode = options.approval_mode.unwrap_or_else(|| {
+        match loaded.config.permissions.approvals_reviewer {
+            crate::types::ApprovalsReviewer::User => crate::types::ApprovalMode::Manual,
+            crate::types::ApprovalsReviewer::Smart => crate::types::ApprovalMode::Smart,
+        }
+    });
     let agents_home = resolve_agents_home(&loaded.env, &workdir)?;
     let agent_catalog = discover_agents(&AgentDiscoveryOptions {
         home: agents_home,
@@ -300,6 +299,12 @@ pub(crate) async fn run_live_internal(
         permission_mode,
         approval_mode,
         options.approval_handler.clone(),
+        smart_approval_handler(
+            Arc::clone(&provider),
+            &resolved,
+            &loaded.config.permissions,
+            generation_metadata.clone(),
+        ),
     );
     let (mcp_tools, mcp_warnings) =
         crate::mcp::mcp_tool_bindings(&options.mcp_servers, &workdir, Some(&permission_runtime))
@@ -806,6 +811,131 @@ pub(crate) fn required_agent_mentions(prompt: &str, agents: &[AgentDefinition]) 
     found.into_iter().collect()
 }
 
+pub(crate) fn smart_approval_handler(
+    provider: Arc<dyn GenerationProvider>,
+    resolved: &ResolvedRunProvider,
+    config: &PermissionConfig,
+    metadata: Value,
+) -> Option<Arc<dyn ApprovalHandler>> {
+    if config.approvals_reviewer != crate::types::ApprovalsReviewer::Smart {
+        return None;
+    }
+    let model = config
+        .auto_review
+        .model
+        .as_deref()
+        .and_then(parse_provider_model)
+        .unwrap_or_else(|| ModelTarget {
+            provider: resolved.provider.clone(),
+            model: resolved.model.clone(),
+        });
+    Some(Arc::new(SmartReviewerApprovalHandler {
+        provider,
+        model,
+        metadata,
+        timeout_secs: config.auto_review.timeout_secs,
+    }))
+}
+
+pub(crate) fn parse_provider_model(value: &str) -> Option<ModelTarget> {
+    let (provider, model) = value.trim().split_once('/')?;
+    let provider = provider.trim();
+    let model = model.trim();
+    (!provider.is_empty() && !model.is_empty()).then(|| ModelTarget {
+        provider: provider.to_string(),
+        model: model.to_string(),
+    })
+}
+
+#[derive(Clone)]
+pub(crate) struct SmartReviewerApprovalHandler {
+    pub(crate) provider: Arc<dyn GenerationProvider>,
+    pub(crate) model: ModelTarget,
+    pub(crate) metadata: Value,
+    pub(crate) timeout_secs: u64,
+}
+
+impl std::fmt::Debug for SmartReviewerApprovalHandler {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SmartReviewerApprovalHandler")
+            .field(
+                "model",
+                &format!("{}/{}", self.model.provider, self.model.model),
+            )
+            .finish_non_exhaustive()
+    }
+}
+
+impl ApprovalHandler for SmartReviewerApprovalHandler {
+    fn timeout_secs(&self) -> u64 {
+        self.timeout_secs
+    }
+
+    fn request_permission(
+        &self,
+        request: PermissionApprovalRequest,
+    ) -> futures::future::BoxFuture<'static, PermissionApprovalDecision> {
+        let provider = Arc::clone(&self.provider);
+        let model = self.model.clone();
+        let metadata = self.metadata.clone();
+        Box::pin(async move {
+            smart_review_permission(provider, model, metadata, request)
+                .await
+                .unwrap_or_else(|_| PermissionApprovalDecision::deny())
+        })
+    }
+}
+
+pub(crate) async fn smart_review_permission(
+    provider: Arc<dyn GenerationProvider>,
+    model: ModelTarget,
+    metadata: Value,
+    request: PermissionApprovalRequest,
+) -> Result<PermissionApprovalDecision> {
+    let prompt = json!({
+        "instruction": "Review this tool permission request. Return strict JSON only with decision allow or deny, risk, and rationale.",
+        "request": {
+            "tool": request.tool_name,
+            "summary": request.summary,
+            "reason": request.reason,
+            "matched_rule": request.matched_rule,
+            "suggested_rule": request.suggested_rule,
+        }
+    });
+    let generation = GenerationRequest {
+        model,
+        messages: vec![json!({
+            "role": "user",
+            "content": prompt.to_string(),
+        })],
+        tools: Vec::new(),
+        metadata,
+    };
+    let (_abort_tx, abort_rx) = tokio::sync::watch::channel(false);
+    let mut stream = provider
+        .stream(generation, AbortSignal::new(abort_rx))
+        .await
+        .map_err(|err| Error::Message(err.to_string()))?;
+    let mut text = String::new();
+    while let Some(event) = stream.next().await {
+        match event.map_err(|err| Error::Message(err.to_string()))? {
+            StreamEvent::TextDelta { text: delta } => text.push_str(&delta),
+            StreamEvent::Done { .. } => break,
+            _ => {}
+        }
+    }
+    let value: Value =
+        serde_json::from_str(text.trim()).map_err(|err| Error::Message(err.to_string()))?;
+    match value.get("decision").and_then(Value::as_str) {
+        Some("allow") => Ok(PermissionApprovalDecision::allow_once()),
+        Some("deny") => Ok(PermissionApprovalDecision::deny()),
+        _ => Err(Error::Message(
+            "smart reviewer JSON must include decision allow or deny".to_string(),
+        )),
+    }
+}
+
 pub(crate) fn record_missed_required_agents(
     store: &SqliteStore,
     session_id: &str,
@@ -840,4 +970,68 @@ pub(crate) fn record_missed_required_agents(
             }
         })),
     )
+}
+
+#[cfg(test)]
+mod smart_reviewer_tests {
+    use super::*;
+    use psychevo_ai::{FakeProvider, RawStreamEvent};
+
+    fn request() -> PermissionApprovalRequest {
+        PermissionApprovalRequest {
+            tool_call_id: "call-1".to_string(),
+            tool_name: "read".to_string(),
+            summary: "/etc/hosts".to_string(),
+            reason: "outside workdir".to_string(),
+            matched_rule: None,
+            suggested_rule: Some("filesystem:/etc/hosts".to_string()),
+            allow_always: true,
+            timeout_secs: 90,
+        }
+    }
+
+    #[tokio::test]
+    async fn smart_reviewer_allows_once_from_json() {
+        let provider: Arc<dyn GenerationProvider> = Arc::new(FakeProvider::new(vec![vec![
+            RawStreamEvent::Text(
+                r#"{"decision":"allow","risk":"low","rationale":"read-only"}"#.to_string(),
+            ),
+            RawStreamEvent::Done(Outcome::Normal),
+        ]]));
+        let decision = smart_review_permission(
+            provider,
+            ModelTarget {
+                provider: "mock".to_string(),
+                model: "reviewer".to_string(),
+            },
+            json!({}),
+            request(),
+        )
+        .await
+        .expect("review");
+        assert_eq!(
+            decision.outcome,
+            crate::types::PermissionApprovalOutcome::AllowOnce
+        );
+    }
+
+    #[tokio::test]
+    async fn smart_reviewer_fails_closed_on_malformed_json() {
+        let provider: Arc<dyn GenerationProvider> = Arc::new(FakeProvider::new(vec![vec![
+            RawStreamEvent::Text("not json".to_string()),
+            RawStreamEvent::Done(Outcome::Normal),
+        ]]));
+        let err = smart_review_permission(
+            provider,
+            ModelTarget {
+                provider: "mock".to_string(),
+                model: "reviewer".to_string(),
+            },
+            json!({}),
+            request(),
+        )
+        .await
+        .expect_err("malformed JSON should fail");
+        assert!(err.to_string().contains("expected ident"));
+    }
 }

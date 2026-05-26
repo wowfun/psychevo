@@ -23,6 +23,29 @@ Screenshot "19-diff-overlay.png"
 Sleep 500 ms
 Escape
 Sleep 100 ms
+Type "Inline edit diff VHS fixture"
+Enter
+Wait+Screen /Edited inline-diff-fixture.txt/
+Wait+Screen /line 02: limit = 2000/
+Wait+Screen /INLINE_EDIT_DIFF_FINAL/
+Sleep 300 ms
+Screenshot "20-inline-edit-diff.png"
+Type "/new"
+Enter
+Wait+Screen /Ask pevo/
+Sleep 100 ms
+Type "Permission approval VHS fixture"
+Enter
+Wait+Screen /Permission required/
+Wait+Screen /\/etc\/hosts/
+Sleep 300 ms
+Screenshot "21-permission-approval.png"
+Type "y"
+Wait+Screen /PERMISSION_APPROVAL_FINAL/
+Type "/new"
+Enter
+Wait+Screen /Ask pevo/
+Sleep 100 ms
 Type "/model"
 Enter
 Wait+Screen /Add provider/

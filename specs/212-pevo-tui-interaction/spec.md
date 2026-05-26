@@ -32,6 +32,8 @@ Rendering of the resulting transcript rows and panels is defined by
 - `/agents`, `@agent`, `/fork`, selected-main-agent, and child-session
   navigation controls from the TUI
 - undo/redo command interactions and interruption priority
+- transparent permission approval prompts, queued approval routing, and
+  approval slash commands
 
 Out of scope:
 
@@ -51,6 +53,29 @@ Out of scope:
 - [Agent Controls](agent-interaction.md) defines `/agents`, `@agent`, `/fork`,
   selected-main-agent, child-session navigation, and Agent row controls.
 - [Testing](testing.md) defines interaction acceptance coverage.
+
+## Permission Approval Interaction
+
+When a running foreground or background turn reaches a permission prompt, the
+TUI must suspend the original tool call and show a bottom approval panel. The
+panel owns a FIFO queue of approval requests and displays the source
+session/agent when the request did not originate from the active main thread.
+
+Approval panel defaults:
+
+- show after a short idle delay when the user has just typed in the composer;
+  approval shortcut keys typed during the delay remain composer input
+- never auto-time out while the turn is active
+- use a list-selection interaction with Up/Down or `j`/`k`, `Enter` to accept
+  the highlighted option, `Esc` to cancel/deny, and direct action shortcuts
+  `y`, `a`, `p`, and `d` where the current approval type exposes them
+- offer once, session, always, and deny choices when the backend request
+  supports them; hidden or unsupported choices must not be rendered
+
+The `/approve` and `/deny` slash commands resolve the current pending approval
+or the most recent smart-review denial override. `/approve` accepts `once`,
+`session`, or `always`; omitted scope defaults to `once`. These commands must
+not substitute for the model-visible clarify tool.
 
 ## Related Topics
 

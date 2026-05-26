@@ -593,17 +593,7 @@ pub(crate) fn validate_variant(value: &str) -> bool {
 }
 
 pub(crate) fn validate_mode(value: &str) -> bool {
-    matches!(
-        value,
-        "plan"
-            | "default"
-            | "acceptEdits"
-            | "accept-edits"
-            | "dontAsk"
-            | "dont-ask"
-            | "bypassPermissions"
-            | "bypass-permissions"
-    )
+    matches!(value, "plan" | "default")
 }
 
 #[cfg(test)]

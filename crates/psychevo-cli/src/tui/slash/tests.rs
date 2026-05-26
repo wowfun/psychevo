@@ -155,7 +155,7 @@ pub(crate) mod tests {
             parse_slash_command("/mode set plan")
                 .unwrap_err()
                 .to_string()
-                .contains("usage: /mode <plan|default|acceptEdits|dontAsk|bypassPermissions>")
+                .contains("usage: /mode <plan|default>")
         );
         assert!(parse_slash_command("/mode build").is_err());
         assert!(parse_slash_command("/mode maybe").is_err());

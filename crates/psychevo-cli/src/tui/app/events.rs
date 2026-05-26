@@ -25,6 +25,7 @@ impl TuiApp {
         changed |= self.drain_model_metadata_refresh(ui).await?;
         changed |= self.drain_model_catalog_fetches(ui).await?;
         changed |= ui.drain_file_search_results();
+        changed |= ui.drain_permission_approval_requests();
         changed |= self.maybe_reload_live_agent_session(ui)?;
 
         let (had_pending, active_tool_frame_requested) =
@@ -825,6 +826,9 @@ impl TuiApp {
                 .as_ref()
                 .map(|panel| match panel {
                     BottomPanel::Clarify(panel) => {
+                        panel.desired_height().min(bottom_panel_height(main.height))
+                    }
+                    BottomPanel::PermissionApproval(panel) => {
                         panel.desired_height().min(bottom_panel_height(main.height))
                     }
                     _ => bottom_panel_height(main.height),

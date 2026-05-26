@@ -9,14 +9,16 @@ impl TuiApp {
             }
             return Ok(false);
         }
-        let slash_command = if should_parse_slash_command_input(line) {
-            parse_slash_command_with_config(line, &self.slash_config)
-        } else {
-            Ok(None)
-        };
-        match slash_command {
-            Ok(Some(command)) => self.handle_command(command).await,
-            Ok(None) => {
+        match self.classify_submitted_slash_input(line) {
+            Ok(SubmittedSlashInput::Command(command)) => self.handle_command(command).await,
+            Ok(SubmittedSlashInput::PassThroughPrompt(prompt)) => {
+                if let Err(err) = self.submit_prompt(prompt).await {
+                    self.had_error = true;
+                    eprintln!("{}", self.renderer.error(&format!("error: {err:#}")));
+                }
+                Ok(false)
+            }
+            Ok(SubmittedSlashInput::NotSlash) => {
                 if let Err(err) = self.submit_prompt(line.to_string()).await {
                     self.had_error = true;
                     eprintln!("{}", self.renderer.error(&format!("error: {err:#}")));
@@ -594,23 +596,62 @@ impl TuiApp {
             format!("mode: {}", self.current_mode.as_str()),
             format!("permission_mode: {}", self.current_permission_mode.as_str()),
             format!(
-                "approval_mode: {}",
-                permissions["approval_mode"].as_str().unwrap_or("manual")
+                "approval_policy: {}",
+                permissions["approval_policy"]
+                    .as_str()
+                    .unwrap_or("on-request")
+            ),
+            format!(
+                "approvals_reviewer: {}",
+                permissions["approvals_reviewer"].as_str().unwrap_or("user")
+            ),
+            format!(
+                "default_permissions: {}",
+                permissions["default_permissions"]
+                    .as_str()
+                    .unwrap_or(":workspace")
             ),
             format!(
                 "path: {}",
                 value["path"].as_str().unwrap_or(".psychevo/config.toml")
             ),
         ];
-        for kind in ["allow", "ask", "deny"] {
-            lines.push(format!("{kind}:"));
-            let rules = permissions[kind].as_array().cloned().unwrap_or_default();
-            if rules.is_empty() {
-                lines.push("  (none)".to_string());
-            } else {
-                for rule in rules {
-                    lines.push(format!("  {}", rule.as_str().unwrap_or("-")));
-                }
+        lines.push("profiles:".to_string());
+        let profiles = permissions["profiles"]
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+        if profiles.is_empty() {
+            lines.push("  (none)".to_string());
+        } else {
+            for name in profiles.keys() {
+                lines.push(format!("  {name}"));
+            }
+        }
+        lines.push("exec_policy:".to_string());
+        let rules = permissions["exec_policy"]["rules"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        if rules.is_empty() {
+            lines.push("  (none)".to_string());
+        } else {
+            for rule in rules {
+                let prefix = rule["prefix"]
+                    .as_array()
+                    .map(|values| {
+                        values
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+                    .unwrap_or_else(|| "-".to_string());
+                lines.push(format!(
+                    "  {} -> {}",
+                    prefix,
+                    rule["decision"].as_str().unwrap_or("-")
+                ));
             }
         }
         Ok(lines.join("\n"))

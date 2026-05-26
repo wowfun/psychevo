@@ -18,6 +18,9 @@ impl TuiApp {
         if matches!(ui.bottom_panel, Some(BottomPanel::ProviderWizard(_))) {
             return self.handle_provider_wizard_key(ui, key);
         }
+        if matches!(ui.bottom_panel, Some(BottomPanel::PermissionApproval(_))) {
+            return self.handle_permission_approval_panel_key(ui, key);
+        }
         if matches!(ui.bottom_panel, Some(BottomPanel::Clarify(_))) {
             return self.handle_clarify_panel_key(ui, key);
         }
@@ -110,6 +113,57 @@ impl TuiApp {
                 }
             }
             _ => {}
+        }
+        Ok(false)
+    }
+
+    pub(crate) fn handle_permission_approval_panel_key(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        key: KeyEvent,
+    ) -> Result<bool> {
+        let Some(BottomPanel::PermissionApproval(mut panel)) = ui.bottom_panel.take() else {
+            return Ok(false);
+        };
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('d') | KeyCode::Char('D') => {
+                ui.resolve_permission_approval(panel, PermissionApprovalDecision::deny());
+            }
+            KeyCode::Enter => {
+                let decision = match panel.select_outcome() {
+                    PermissionApprovalOutcome::AllowOnce => {
+                        PermissionApprovalDecision::allow_once()
+                    }
+                    PermissionApprovalOutcome::AllowSession => {
+                        PermissionApprovalDecision::allow_session()
+                    }
+                    PermissionApprovalOutcome::AllowAlways => {
+                        PermissionApprovalDecision::allow_always()
+                    }
+                    PermissionApprovalOutcome::Deny => PermissionApprovalDecision::deny(),
+                };
+                ui.resolve_permission_approval(panel, decision);
+            }
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                ui.resolve_permission_approval(panel, PermissionApprovalDecision::allow_once());
+            }
+            KeyCode::Char('a') | KeyCode::Char('A') => {
+                ui.resolve_permission_approval(panel, PermissionApprovalDecision::allow_session());
+            }
+            KeyCode::Char('p') | KeyCode::Char('P') if panel.request.allow_always => {
+                ui.resolve_permission_approval(panel, PermissionApprovalDecision::allow_always());
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                panel.move_selection(-1);
+                ui.bottom_panel = Some(BottomPanel::PermissionApproval(panel));
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                panel.move_selection(1);
+                ui.bottom_panel = Some(BottomPanel::PermissionApproval(panel));
+            }
+            _ => {
+                ui.bottom_panel = Some(BottomPanel::PermissionApproval(panel));
+            }
         }
         Ok(false)
     }

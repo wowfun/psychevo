@@ -144,10 +144,21 @@ pub(crate) fn cli_config_permissions_lists_and_removes_project_local_rules() {
         workdir.join(".psychevo/config.toml"),
         r#"# project-local policy
 
-[permissions]
-allow = ["ExecCommand(npm test *)"]
-ask = ["ExecCommand(cargo publish *)"]
-deny = ["Write(.env)"]
+default_permissions = "local"
+
+[permissions.local]
+extends = ":workspace"
+
+[permissions.local.filesystem]
+".env" = "deny"
+
+[[exec_policy.rules]]
+prefix = ["npm", "test"]
+decision = "allow"
+
+[[exec_policy.rules]]
+prefix = ["cargo", "publish"]
+decision = "prompt"
 "#,
     )
     .expect("config");
@@ -163,12 +174,19 @@ deny = ["Write(.env)"]
     );
     let value: Value = serde_json::from_slice(&listed.stdout).expect("json");
     assert_eq!(value["scope"], "local");
-    assert_eq!(value["permissions"]["allow"][0], "ExecCommand(npm test *)");
+    assert_eq!(value["permissions"]["default_permissions"], "local");
     assert_eq!(
-        value["permissions"]["ask"][0],
-        "ExecCommand(cargo publish *)"
+        value["permissions"]["profiles"]["local"]["filesystem"][".env"],
+        "deny"
     );
-    assert_eq!(value["permissions"]["deny"][0], "Write(.env)");
+    assert_eq!(
+        value["permissions"]["exec_policy"]["rules"][0]["prefix"],
+        serde_json::json!(["npm", "test"])
+    );
+    assert_eq!(
+        value["permissions"]["exec_policy"]["rules"][1]["decision"],
+        "prompt"
+    );
 
     let removed = admin_cmd(temp.path(), &psychevo_home, &workdir)
         .args([
@@ -191,8 +209,8 @@ deny = ["Write(.env)"]
     let value: Value = serde_json::from_slice(&removed.stdout).expect("json");
     assert_eq!(value["changed"], true);
     let config = std::fs::read_to_string(workdir.join(".psychevo/config.toml")).expect("config");
-    assert!(!config.contains("ExecCommand(npm test *)"));
-    assert!(config.contains("ExecCommand(cargo publish *)"));
+    assert!(!config.contains("\"npm\""));
+    assert!(config.contains("\"cargo\""));
 }
 
 #[test]
