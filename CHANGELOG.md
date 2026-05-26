@@ -2,6 +2,9 @@
 
 ## 2026-05-25
 
+- Reworked permission approvals around the new profile-based config schema,
+  fail-closed runtime prompts, persistent project-local grants, TUI approval
+  panels, ACP/CLI approval parity, and VHS coverage for the approval panel.
 - Added `/diff` across TUI and ACP with shared workspace diff collection,
   structured ACP output, a Codex-style TUI pager, and deterministic VHS
   coverage.
@@ -9,6 +12,8 @@
   blocks and reset guidance for older state databases.
 - Migrated evaluation fixtures from `local-rust-swe` to `local-coding` with
   coding-loop, prompt A/B, and SWE-style task families plus richer diagnostics.
+- Added evaluation user docs, a `scripts/install.sh --with-peval` install path,
+  and moved live smoke validation to `scripts/eval/live-psychevo-smoke.sh`.
 - Split oversized Rust modules into responsibility-named submodules, replacing
   the temporary numbered split files without changing public APIs or command
   behavior.
@@ -20,6 +25,12 @@
   idle TUI agent reload and WAL checkpoint churn.
 - Fixed scoped default-model writes for CLI/TUI model selection, including
   explicit reasoning variants.
+- Normalized `edit` tool diffs to Git-style patch blocks and rendered completed
+  inline edit rows with a Codex-style single line-number gutter while keeping
+  `/diff` on its existing dual-column diff display, with deterministic VHS
+  coverage for the inline edit row.
+- Treated unknown slash-looking TUI input, including absolute paths, as normal
+  prompt text while preserving local errors for malformed known commands.
 
 ## 2026-05-24
 
