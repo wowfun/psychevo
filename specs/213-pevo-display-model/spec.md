@@ -35,6 +35,12 @@ Display-only command output and observational artifacts, including `/diff`,
 must not become model context, session export message content, usage/cost
 statistics, or durable loop-visible assistant/user messages.
 
+Model-visible tool results may contain material that also benefits from richer
+UI projection. Display readers may parse stable tool-result fields, such as an
+`edit.diff` Git patch block, into semantic diff blocks for rendering. The
+parsed block is a UI artifact; it must not replace or mutate the model-visible
+tool result.
+
 ## Storage
 
 The state database schema version is `12`. Psychevo does not migrate state

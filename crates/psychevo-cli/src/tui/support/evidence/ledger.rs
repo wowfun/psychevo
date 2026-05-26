@@ -404,6 +404,7 @@ pub(crate) fn display_value_inline(value: &Value) -> Option<String> {
 
 pub(crate) fn display_value_block(value: &Value) -> Option<String> {
     match value {
+        Value::Null => None,
         Value::String(value) => Some(value.clone()),
         Value::Array(items) if items.is_empty() => None,
         Value::Object(items) if items.is_empty() => None,
@@ -860,5 +861,27 @@ pub(crate) fn model_label(provider: &str, model: &str) -> String {
         (false, true) => provider.to_string(),
         (true, false) => model.to_string(),
         (true, true) => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn body_text_from_keys_skips_null_values() {
+        let keys = vec!["diff".to_string(), "error".to_string()];
+        let result = json!({
+            "diff": "diff text",
+            "error": null
+        });
+        assert_eq!(
+            body_text_from_keys(&keys, &result),
+            Some("diff text".to_string())
+        );
+
+        let keys = vec!["error".to_string()];
+        assert_eq!(body_text_from_keys(&keys, &result), None);
     }
 }

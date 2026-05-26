@@ -149,7 +149,8 @@ Successful result fields:
 - `warning`
 - `error`
 
-Diffs are unified diffs generated from original and updated text.
+Diffs are Git-style patch blocks. Update, add, and delete operations include
+`diff --git`, file headers, and unified hunks; pure moves use Git rename headers.
 
 ## `exec_command`
 

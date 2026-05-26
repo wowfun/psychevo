@@ -365,10 +365,62 @@ pub(crate) fn tool_lines(
     compact_trailing: bool,
     width: u16,
 ) -> Vec<Line<'static>> {
+    if let Some(lines) = inline_edit_tool_lines(row, selected, compact_trailing, width) {
+        return lines;
+    }
     ledger_evidence_lines(
         tool_ledger_view(row, selected, compact_trailing, width),
         width,
     )
+}
+
+pub(crate) fn inline_edit_tool_lines(
+    row: &TranscriptRow,
+    selected: bool,
+    compact_trailing: bool,
+    width: u16,
+) -> Option<Vec<Line<'static>>> {
+    if row.kind != TranscriptKind::Updated
+        || row.tool_name.as_deref() != Some("edit")
+        || row.failed
+        || row.interrupted
+        || ToolRowPhase::from_row(row) != ToolRowPhase::Completed
+    {
+        return None;
+    }
+    let diff = row.full_text.as_deref().unwrap_or(&row.text);
+    let rendered = render_inline_edit_diff(diff, width.saturating_sub(4).max(1))?;
+    let theme = tui_theme();
+    let marker = if selected { "› " } else { "• " };
+    let marker_style = if selected {
+        theme.accent_style()
+    } else {
+        theme.success_style()
+    };
+    let title_style = Style::default().add_modifier(Modifier::BOLD);
+    let elapsed = tool_elapsed_label(row);
+    let hint = row_expand_hint(row, selected, None);
+    let mut out = vec![ledger_title_line(
+        marker,
+        marker_style,
+        &rendered.title,
+        title_style,
+        elapsed.as_deref(),
+        hint.as_deref(),
+        width,
+    )];
+    if !row.details_collapsed {
+        for (index, mut line) in rendered.lines.into_iter().enumerate() {
+            let prefix = if index == 0 { "  └ " } else { "    " };
+            let mut spans = vec![Span::styled(prefix.to_string(), theme.dim_style())];
+            spans.append(&mut line.spans);
+            out.push(Line::from(spans).style(line.style));
+        }
+    }
+    if !compact_trailing {
+        out.push(Line::from(""));
+    }
+    Some(out)
 }
 
 pub(crate) fn is_agent_tool_row(row: &TranscriptRow) -> bool {

@@ -139,7 +139,7 @@ validation failures do not leave partial changes behind.
 
 Successful edits return a JSON object with stable fields:
 - `success`: true when the edit was applied
-- `diff`: unified diff or equivalent change text
+- `diff`: Git-style patch blocks describing the applied edit
 - `files_modified`: modified paths or equivalent target identifiers
 - `files_created`: created paths or equivalent target identifiers
 - `files_deleted`: deleted paths or equivalent target identifiers
@@ -153,6 +153,11 @@ Ambiguous matches, not-found targets, no-change edits, stale content conflicts,
 partial-read overwrite risk, sibling-agent write conflicts, and resource-denied
 writes must be observable in the JSON result. Same-resource mutations must be
 ordered or conflicts must be visible.
+
+The `diff` field remains model-visible. It should use one parseable Git patch
+block per changed file. Update, add, and delete blocks include `diff --git`,
+`---`/`+++`, and unified hunks. Pure moves use `diff --git`, `similarity index
+100%`, `rename from`, and `rename to` without inventing content hunks.
 
 This spec defines semantic modes and result material. The first implementation
 slice's concrete parameter names and patch syntax are defined by [Tool I/O](tool-io.md).

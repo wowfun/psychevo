@@ -14,7 +14,7 @@ impl ToolBinding for EditTool {
     }
 
     fn description(&self) -> &str {
-        "Apply targeted file edits inside the working directory. Use edit instead of sed/awk for replacements. Replace mode uses fuzzy matching and returns a unified diff. Patch mode accepts V4A multi-file patches with Update/Add/Delete/Move operations."
+        "Apply targeted file edits inside the working directory. Use edit instead of sed/awk for replacements. Replace mode uses fuzzy matching and returns a Git-style patch diff. Patch mode accepts V4A multi-file patches with Update/Add/Delete/Move operations."
     }
 
     fn parameters(&self) -> Value {
@@ -105,7 +105,7 @@ pub(crate) fn edit_replace(tool: WorkdirTool, args: Value) -> Result<Value> {
         }
     };
     let rel = tool.relative(&target);
-    let diff = unified_diff(&rel, &text.normalized, &outcome.content);
+    let diff = git_patch_update(&rel, &text.normalized, &outcome.content);
     let restored = restore_text_file(&text, &outcome.content);
     let (lint, lsp) = write_edit_text(&tool, &target, &restored, Some(&text.original))?;
     Ok(edit_success_value(EditSuccess {
@@ -285,12 +285,7 @@ pub(crate) fn apply_v4a_plan(tool: &WorkdirTool, plan: Vec<V4aApply>) -> Result<
                     fs::create_dir_all(parent)?;
                 }
                 let (lint, lsp) = write_edit_text(tool, &target, &content, None)?;
-                diffs.push(unified_diff_named(
-                    "/dev/null",
-                    &format!("b/{rel}"),
-                    "",
-                    &content,
-                ));
+                diffs.push(git_patch_add(&rel, &content));
                 if let Some(lint) = lint {
                     lint_by_file.insert(rel.clone(), lint);
                 }
@@ -307,7 +302,7 @@ pub(crate) fn apply_v4a_plan(tool: &WorkdirTool, plan: Vec<V4aApply>) -> Result<
             } => {
                 let restored = restore_text_file(&text, &updated);
                 let (lint, lsp) = write_edit_text(tool, &target, &restored, Some(&text.original))?;
-                diffs.push(unified_diff(&rel, &text.normalized, &updated));
+                diffs.push(git_patch_update(&rel, &text.normalized, &updated));
                 if let Some(lint) = lint {
                     lint_by_file.insert(rel.clone(), lint);
                 }
@@ -318,12 +313,7 @@ pub(crate) fn apply_v4a_plan(tool: &WorkdirTool, plan: Vec<V4aApply>) -> Result<
             }
             V4aApply::Delete { target, rel, text } => {
                 fs::remove_file(&target)?;
-                diffs.push(unified_diff_named(
-                    &format!("a/{rel}"),
-                    "/dev/null",
-                    &text.normalized,
-                    "",
-                ));
+                diffs.push(git_patch_delete(&rel, &text.normalized));
                 files_deleted.push(rel);
             }
             V4aApply::Move {
@@ -337,7 +327,7 @@ pub(crate) fn apply_v4a_plan(tool: &WorkdirTool, plan: Vec<V4aApply>) -> Result<
                 }
                 fs::rename(&source, &dest)?;
                 note_file_write(tool.task_id(), &dest);
-                diffs.push(format!("# Moved: {source_rel} -> {dest_rel}"));
+                diffs.push(git_patch_move(&source_rel, &dest_rel));
                 files_moved.push(json!({ "from": source_rel, "to": dest_rel }));
             }
         }
@@ -345,7 +335,7 @@ pub(crate) fn apply_v4a_plan(tool: &WorkdirTool, plan: Vec<V4aApply>) -> Result<
     let lint = (!lint_by_file.is_empty()).then_some(Value::Object(lint_by_file));
     let lsp = (!lsp_blocks.is_empty()).then(|| lsp_blocks.join("\n\n"));
     Ok(edit_success_value(EditSuccess {
-        diff: diffs.join("\n"),
+        diff: diffs.concat(),
         files_modified,
         files_created,
         files_deleted,
@@ -417,6 +407,11 @@ pub(crate) mod edit_tool_tests {
         )
         .expect("edit");
         assert_eq!(value["success"], true);
+        let diff = value["diff"].as_str().expect("diff");
+        assert!(diff.starts_with("diff --git a/main.rs b/main.rs"), "{diff}");
+        assert!(diff.contains("--- a/main.rs\n+++ b/main.rs"), "{diff}");
+        assert!(diff.contains("-    println!(\"hi\");"), "{diff}");
+        assert!(diff.contains("+    println!(\"bye\");"), "{diff}");
         assert!(
             fs::read_to_string(temp.path().join("main.rs"))
                 .expect("file")
@@ -524,6 +519,34 @@ pub(crate) mod edit_tool_tests {
             value["files_moved"][0],
             json!({"from": "move.txt", "to": "moved.txt"})
         );
+        let diff = value["diff"].as_str().expect("diff");
+        assert_eq!(diff.matches("diff --git ").count(), 4, "{diff}");
+        assert!(
+            diff.contains("diff --git a/update.txt b/update.txt"),
+            "{diff}"
+        );
+        assert!(
+            diff.contains("--- a/update.txt\n+++ b/update.txt"),
+            "{diff}"
+        );
+        assert!(diff.contains("-beta"), "{diff}");
+        assert!(diff.contains("+bravo"), "{diff}");
+        assert!(diff.contains("diff --git a/add.txt b/add.txt"), "{diff}");
+        assert!(diff.contains("new file mode 100644"), "{diff}");
+        assert!(diff.contains("--- /dev/null\n+++ b/add.txt"), "{diff}");
+        assert!(
+            diff.contains("diff --git a/delete.txt b/delete.txt"),
+            "{diff}"
+        );
+        assert!(diff.contains("deleted file mode 100644"), "{diff}");
+        assert!(diff.contains("--- a/delete.txt\n+++ /dev/null"), "{diff}");
+        assert!(diff.contains("diff --git a/move.txt b/moved.txt"), "{diff}");
+        assert!(diff.contains("similarity index 100%"), "{diff}");
+        assert!(
+            diff.contains("rename from move.txt\nrename to moved.txt"),
+            "{diff}"
+        );
+        assert!(!diff.contains("# Moved"), "{diff}");
     }
 
     #[test]

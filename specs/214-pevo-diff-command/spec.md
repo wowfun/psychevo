@@ -52,9 +52,19 @@ The renderer should show file headers, hunk headers, add/delete/context lines,
 line numbers, truncation notice, and lightweight syntax highlighting using the
 existing terminal highlighter rather than a heavy new dependency.
 
+Inline transcript rendering for `edit` tool results may reuse the same parsing
+model but is a separate surface from the fullscreen `/diff` overlay. Inline
+edit rows use a Codex-like single visible line-number gutter: deleted rows show
+the old line number, added rows show the new line number, and context rows show
+the current new line number. The fullscreen `/diff` overlay keeps its old/new
+dual-column line-number display.
+
 The deterministic VHS demo must include a screenshot of the `/diff` overlay
 against an isolated fixture worktree with a visible changed file, so visual
-validation covers overlay framing, title, line numbering, and diff colors.
+validation covers overlay framing, title, line numbering, and diff colors. When
+the inline edit renderer changes, the demo should also capture a completed
+`edit` tool row with a Git patch result so visual review covers its single
+gutter and add/delete row backgrounds.
 
 ## ACP
 

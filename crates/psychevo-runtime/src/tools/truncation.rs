@@ -100,10 +100,3 @@ pub(crate) fn restore_line_endings(text: &str, line_ending: &str) -> String {
         text.replace('\n', line_ending)
     }
 }
-
-pub(crate) fn unified_diff(path: &str, old: &str, new: &str) -> String {
-    TextDiff::from_lines(old, new)
-        .unified_diff()
-        .header(&format!("a/{path}"), &format!("b/{path}"))
-        .to_string()
-}

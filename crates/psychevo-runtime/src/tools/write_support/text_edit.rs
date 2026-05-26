@@ -175,6 +175,45 @@ pub(crate) fn unified_diff_named(old_path: &str, new_path: &str, old: &str, new:
         .to_string()
 }
 
+pub(crate) fn git_patch_update(path: &str, old: &str, new: &str) -> String {
+    let mut patch = format!("diff --git a/{path} b/{path}\n");
+    patch.push_str(&unified_diff_named(
+        &format!("a/{path}"),
+        &format!("b/{path}"),
+        old,
+        new,
+    ));
+    patch
+}
+
+pub(crate) fn git_patch_add(path: &str, content: &str) -> String {
+    let mut patch = format!("diff --git a/{path} b/{path}\nnew file mode 100644\n");
+    patch.push_str(&unified_diff_named(
+        "/dev/null",
+        &format!("b/{path}"),
+        "",
+        content,
+    ));
+    patch
+}
+
+pub(crate) fn git_patch_delete(path: &str, content: &str) -> String {
+    let mut patch = format!("diff --git a/{path} b/{path}\ndeleted file mode 100644\n");
+    patch.push_str(&unified_diff_named(
+        &format!("a/{path}"),
+        "/dev/null",
+        content,
+        "",
+    ));
+    patch
+}
+
+pub(crate) fn git_patch_move(source_path: &str, dest_path: &str) -> String {
+    format!(
+        "diff --git a/{source_path} b/{dest_path}\nsimilarity index 100%\nrename from {source_path}\nrename to {dest_path}\n"
+    )
+}
+
 pub(crate) fn write_edit_text(
     tool: &WorkdirTool,
     target: &Path,

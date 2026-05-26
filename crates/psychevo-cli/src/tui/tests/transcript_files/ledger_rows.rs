@@ -578,6 +578,38 @@ pub(crate) fn long_command_and_long_output_expand_together() {
 }
 
 #[test]
+pub(crate) fn edit_tool_row_renders_inline_codex_style_diff() {
+    let diff = "diff --git a/primes.py b/primes.py\n--- a/primes.py\n+++ b/primes.py\n@@ -1,2 +1,2 @@\n def main():\n-    limit = 1000\n+    limit = 2000\n";
+    let mut row = TranscriptRow::with_title(TranscriptKind::Updated, "edit primes.py", diff);
+    row.tool_name = Some("edit".to_string());
+
+    let lines = tool_lines(&row, false, true, 80);
+    let rendered = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+    assert!(rendered.contains("Edited primes.py (+1 -1)"), "{rendered}");
+    assert!(rendered.contains("1  def main():"), "{rendered}");
+    assert!(rendered.contains("2 -    limit = 1000"), "{rendered}");
+    assert!(rendered.contains("2 +    limit = 2000"), "{rendered}");
+    assert!(!rendered.contains("1     1 |"), "{rendered}");
+}
+
+#[test]
+pub(crate) fn malformed_edit_tool_diff_falls_back_to_plain_body() {
+    let mut row =
+        TranscriptRow::with_title(TranscriptKind::Updated, "edit primes.py", "not a patch");
+    row.tool_name = Some("edit".to_string());
+
+    let rendered = tool_lines(&row, false, true, 80)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(rendered.contains("edit primes.py"), "{rendered}");
+    assert!(rendered.contains("not a patch"), "{rendered}");
+}
+
+#[test]
 pub(crate) fn long_running_command_row_expands_full_command() {
     let command = "cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db \"SELECT id || '|' || by || '|' || text FROM comments WHERE story_id = 48073680 ORDER BY id\"";
     let mut row =
