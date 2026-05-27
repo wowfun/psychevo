@@ -1,0 +1,16 @@
+schema_version = 4
+id = "pidx-coding"
+name = "pidx-coding"
+
+[evaluator]
+kind = "local-coding"
+
+[[task_sources]]
+path = "tasks.jsonl"
+format = "jsonl"
+
+[[task_sets]]
+id = "base"
+name = "Base pidx coding"
+description = "Small deterministic coding tasks for cross-agent comparison."
+tasks = ["patch-add", "tool-state", "rust-swe-add"]

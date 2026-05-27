@@ -73,10 +73,6 @@ pub(crate) fn slugify(value: &str) -> String {
     }
 }
 
-pub(crate) fn generate_run_id() -> String {
-    Uuid::now_v7().to_string()
-}
-
 pub(crate) fn now_ms() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -85,23 +81,48 @@ pub(crate) fn now_ms() -> u128 {
 }
 
 pub(crate) fn reject_unsupported(schema_version: u32, path: &Path) -> Result<()> {
-    if schema_version != SCHEMA_VERSION {
+    if schema_version != MANIFEST_SCHEMA_VERSION {
         bail!(
             "{} uses unsupported schema_version {}; supported schema_version is {}",
             path.display(),
             schema_version,
-            SCHEMA_VERSION
+            MANIFEST_SCHEMA_VERSION
         );
     }
     Ok(())
 }
 
-pub(crate) fn reject_unsupported_result_schema(schema_version: u32) -> Result<()> {
-    if schema_version != SCHEMA_VERSION {
+pub(crate) fn reject_unsupported_artifact(schema_version: u32, path: &Path) -> Result<()> {
+    if schema_version != ARTIFACT_SCHEMA_VERSION {
         bail!(
-            "scorer returned unsupported schema_version {}; supported schema_version is {}",
+            "{} uses unsupported artifact schema_version {}; supported artifact schema_version is {}",
+            path.display(),
             schema_version,
-            SCHEMA_VERSION
+            ARTIFACT_SCHEMA_VERSION
+        );
+    }
+    Ok(())
+}
+
+pub(crate) fn reject_unsupported_index(schema_version: u32, path: &Path) -> Result<()> {
+    if schema_version != INDEX_SCHEMA_VERSION {
+        bail!(
+            "{} uses unsupported index schema_version {}; supported index schema_version is {}",
+            path.display(),
+            schema_version,
+            INDEX_SCHEMA_VERSION
+        );
+    }
+    Ok(())
+}
+
+pub(crate) fn reject_unsupported_workspace(schema_version: u32, path: &Path) -> Result<()> {
+    if schema_version != WORKSPACE_SCHEMA_VERSION {
+        bail!(
+            "{} uses unsupported workspace schema_version {}; supported workspace schema_version is {}",
+            path.display(),
+            schema_version,
+            WORKSPACE_SCHEMA_VERSION
         );
     }
     Ok(())
@@ -116,7 +137,7 @@ pub struct CliOutcome {
 
 #[derive(Debug, Parser)]
 #[command(name = "peval")]
-#[command(about = "Run local Psychevo evaluation suites")]
+#[command(about = "Run local Psychevo evaluation task sets")]
 pub(crate) struct Cli {
     #[command(subcommand)]
     pub(crate) command: Commands,
@@ -124,32 +145,73 @@ pub(crate) struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Commands {
-    #[command(about = "Initialize the user-level peval store")]
+    #[command(about = "Initialize a peval workspace")]
     Init(InitArgs),
+    #[command(subcommand, hide = true, about = "Removed project registry commands")]
+    Project(ProjectCommands),
     #[command(about = "Inspect local evaluation readiness")]
     Doctor(ProjectArgs),
-    #[command(about = "List suites, agents, tasks, and report formats")]
+    #[command(about = "List task sets, agents, tasks, view formats, and datasets")]
     List(ListArgs),
     #[command(about = "Validate evaluation manifests without executing cases")]
     Check(SelectArgs),
     #[command(about = "Run an evaluation matrix and write artifacts")]
     Run(RunArgs),
-    #[command(about = "Render a report from existing run artifacts")]
-    Report(ReportArgs),
-    #[command(about = "Compare existing run artifact roots")]
-    Compare(CompareArgs),
-    #[command(about = "Replay stored trajectory events")]
-    Replay(ReplayArgs),
+    #[command(about = "Render dynamic views over stored cell artifacts")]
+    View(ViewArgs),
     #[command(subcommand, about = "Manage local evaluation datasets")]
     Dataset(DatasetCommands),
 }
 
 #[derive(Debug, Parser)]
 pub(crate) struct InitArgs {
-    #[arg(long = "root", value_name = "DIR")]
+    #[arg(short = 'r', long = "root", value_name = "DIR")]
     pub(crate) root: Option<PathBuf>,
+    #[arg(long = "default")]
+    pub(crate) make_default: bool,
     #[arg(long)]
     pub(crate) force: bool,
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum ProjectCommands {
+    #[command(about = "Removed project registry command")]
+    Add(ProjectAddArgs),
+    #[command(about = "Removed project registry command")]
+    List(ProjectListArgs),
+    #[command(name = "rm", about = "Removed project registry command")]
+    Remove(ProjectRemoveArgs),
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct ProjectAddArgs {
+    #[arg(short = 'r', long = "root", value_name = "DIR")]
+    pub(crate) store_root: Option<PathBuf>,
+    #[arg(short = 'c', long = "config", value_name = "PATH")]
+    pub(crate) config: PathBuf,
+    #[arg(long)]
+    pub(crate) id: Option<String>,
+    #[arg(long)]
+    pub(crate) force: bool,
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct ProjectListArgs {
+    #[arg(short = 'r', long = "root", value_name = "DIR")]
+    pub(crate) store_root: Option<PathBuf>,
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct ProjectRemoveArgs {
+    pub(crate) id: String,
+    #[arg(short = 'r', long = "root", value_name = "DIR")]
+    pub(crate) store_root: Option<PathBuf>,
     #[arg(long)]
     pub(crate) json: bool,
 }
@@ -164,7 +226,9 @@ pub(crate) enum DatasetCommands {
 pub(crate) struct ProjectArgs {
     #[arg(short = 'c', long = "config", value_name = "PATH")]
     pub(crate) config: Option<PathBuf>,
-    #[arg(long = "root", value_name = "DIR")]
+    #[arg(long = "benchmark", value_name = "ID_OR_PATH")]
+    pub(crate) benchmark: Option<String>,
+    #[arg(short = 'r', long = "root", value_name = "DIR")]
     pub(crate) store_root: Option<PathBuf>,
     #[arg(long)]
     pub(crate) json: bool,
@@ -174,7 +238,9 @@ pub(crate) struct ProjectArgs {
 pub(crate) struct ListArgs {
     #[arg(short = 'c', long = "config", value_name = "PATH")]
     pub(crate) config: Option<PathBuf>,
-    #[arg(long = "root", value_name = "DIR")]
+    #[arg(long = "benchmark", value_name = "ID_OR_PATH")]
+    pub(crate) benchmark: Option<String>,
+    #[arg(short = 'r', long = "root", value_name = "DIR")]
     pub(crate) store_root: Option<PathBuf>,
     #[arg(long, value_enum, default_value_t = ListKind::All)]
     pub(crate) kind: ListKind,
@@ -185,11 +251,11 @@ pub(crate) struct ListArgs {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub(crate) enum ListKind {
     All,
-    Suites,
+    TaskSets,
     Agents,
+    Benchmarks,
     Tasks,
-    Reports,
-    Runs,
+    Views,
     Datasets,
 }
 
@@ -197,12 +263,16 @@ pub(crate) enum ListKind {
 pub(crate) struct SelectArgs {
     #[arg(short = 'c', long = "config", value_name = "PATH")]
     pub(crate) config: Option<PathBuf>,
-    #[arg(long = "root", value_name = "DIR")]
+    #[arg(long = "benchmark", value_name = "ID_OR_PATH")]
+    pub(crate) benchmark: Option<String>,
+    #[arg(short = 'r', long = "root", value_name = "DIR")]
     pub(crate) store_root: Option<PathBuf>,
-    #[arg(long)]
-    pub(crate) suite: Option<String>,
+    #[arg(long = "task-set")]
+    pub(crate) task_set: Option<String>,
     #[arg(long)]
     pub(crate) agent: Option<String>,
+    #[arg(long)]
+    pub(crate) task: Option<String>,
     #[arg(long)]
     pub(crate) json: bool,
 }
@@ -211,14 +281,18 @@ pub(crate) struct SelectArgs {
 pub(crate) struct RunArgs {
     #[arg(short = 'c', long = "config", value_name = "PATH")]
     pub(crate) config: Option<PathBuf>,
-    #[arg(long = "root", value_name = "DIR")]
+    #[arg(long = "benchmark", value_name = "ID_OR_PATH")]
+    pub(crate) benchmark: Option<String>,
+    #[arg(short = 'r', long = "root", value_name = "DIR")]
     pub(crate) store_root: Option<PathBuf>,
-    #[arg(long)]
-    pub(crate) suite: Option<String>,
+    #[arg(long = "task-set")]
+    pub(crate) task_set: Option<String>,
     #[arg(long)]
     pub(crate) agent: Option<String>,
     #[arg(long)]
-    pub(crate) run_id: Option<String>,
+    pub(crate) task: Option<String>,
+    #[arg(long)]
+    pub(crate) overwrite: bool,
     #[arg(long, value_name = "DIR")]
     pub(crate) output_root: Option<PathBuf>,
     #[arg(long)]
@@ -226,68 +300,38 @@ pub(crate) struct RunArgs {
 }
 
 #[derive(Debug, Parser)]
-pub(crate) struct ReportArgs {
+pub(crate) struct ViewArgs {
     #[arg(short = 'c', long = "config", value_name = "PATH")]
     pub(crate) config: Option<PathBuf>,
-    #[arg(long = "root", value_name = "DIR")]
+    #[arg(long = "benchmark", value_name = "ID_OR_PATH")]
+    pub(crate) benchmark: Option<String>,
+    #[arg(short = 'r', long = "root", value_name = "DIR")]
     pub(crate) store_root: Option<PathBuf>,
-    #[arg(long, value_name = "RUN")]
-    pub(crate) run_root: PathBuf,
-    #[arg(long)]
-    pub(crate) suite: Option<String>,
+    #[arg(long, value_name = "PATH")]
+    pub(crate) path: Option<PathBuf>,
+    #[arg(long = "task-set")]
+    pub(crate) task_set: Option<String>,
     #[arg(long)]
     pub(crate) agent: Option<String>,
+    #[arg(long)]
+    pub(crate) task: Option<String>,
     #[arg(long, value_enum)]
-    pub(crate) status: Option<RunStatusFilter>,
-    #[arg(long, value_enum, default_value_t = ReportFormat::Markdown)]
-    pub(crate) format: ReportFormat,
+    pub(crate) status: Option<CaseStatusFilter>,
+    #[arg(long = "group-by", value_name = "ITEMS")]
+    pub(crate) group_by: Vec<String>,
+    #[arg(short = 'i', long = "include", value_name = "ITEMS")]
+    pub(crate) include: Vec<String>,
+    #[arg(long, value_enum)]
+    pub(crate) format: Option<ViewFormat>,
     #[arg(long, value_name = "PATH")]
     pub(crate) output: Option<PathBuf>,
-}
-
-#[derive(Debug, Parser)]
-pub(crate) struct CompareArgs {
-    #[arg(value_name = "RUN_ROOT", required = true)]
-    pub(crate) run_roots: Vec<PathBuf>,
-    #[arg(short = 'c', long = "config", value_name = "PATH")]
-    pub(crate) config: Option<PathBuf>,
-    #[arg(long = "root", value_name = "DIR")]
-    pub(crate) store_root: Option<PathBuf>,
-    #[arg(long)]
-    pub(crate) suite: Option<String>,
-    #[arg(long)]
-    pub(crate) agent: Option<String>,
-    #[arg(long, value_enum)]
-    pub(crate) status: Option<RunStatusFilter>,
-    #[arg(long)]
-    pub(crate) json: bool,
-}
-
-#[derive(Debug, Parser)]
-pub(crate) struct ReplayArgs {
-    #[arg(short = 'c', long = "config", value_name = "PATH")]
-    pub(crate) config: Option<PathBuf>,
-    #[arg(long = "root", value_name = "DIR")]
-    pub(crate) store_root: Option<PathBuf>,
-    #[arg(long, value_name = "RUN")]
-    pub(crate) run_root: PathBuf,
-    #[arg(long)]
-    pub(crate) suite: Option<String>,
-    #[arg(long)]
-    pub(crate) agent: Option<String>,
-    #[arg(long, value_enum)]
-    pub(crate) status: Option<RunStatusFilter>,
-    #[arg(long)]
-    pub(crate) case: Option<String>,
-    #[arg(long)]
-    pub(crate) json: bool,
 }
 
 #[derive(Debug, Parser)]
 pub(crate) struct DatasetImportArgs {
     #[arg(value_name = "PATH")]
     pub(crate) path: PathBuf,
-    #[arg(long = "root", value_name = "DIR")]
+    #[arg(short = 'r', long = "root", value_name = "DIR")]
     pub(crate) store_root: Option<PathBuf>,
     #[arg(long)]
     pub(crate) id: Option<String>,
@@ -319,14 +363,29 @@ where
     T: Into<OsString> + Clone,
 {
     match Cli::try_parse_from(args) {
-        Ok(cli) => match dispatch_cli(cli) {
-            Ok(outcome) => outcome,
-            Err(err) => CliOutcome {
-                code: 1,
-                stdout: String::new(),
-                stderr: format!("error: {err:#}\n"),
-            },
-        },
+        Ok(cli) => {
+            let json_errors = command_wants_json(&cli.command);
+            match dispatch_cli(cli) {
+                Ok(outcome) => outcome,
+                Err(err) if json_errors => {
+                    let diagnostic = EvalDiagnostic::from_error(err);
+                    CliOutcome {
+                        code: 1,
+                        stdout: String::new(),
+                        stderr: format!(
+                            "{}\n",
+                            serde_json::to_string_pretty(&diagnostic)
+                                .unwrap_or_else(|_| "{\"code\":\"peval_error\"}".to_string())
+                        ),
+                    }
+                }
+                Err(err) => CliOutcome {
+                    code: 1,
+                    stdout: String::new(),
+                    stderr: format!("error: {err:#}\n"),
+                },
+            }
+        }
         Err(err) => CliOutcome {
             code: if err.use_stderr() { 2 } else { 0 },
             stdout: if err.use_stderr() {
@@ -343,76 +402,150 @@ where
     }
 }
 
+pub(crate) fn command_wants_json(command: &Commands) -> bool {
+    match command {
+        Commands::Init(args) => args.json,
+        Commands::Project(ProjectCommands::Add(args)) => args.json,
+        Commands::Project(ProjectCommands::List(args)) => args.json,
+        Commands::Project(ProjectCommands::Remove(args)) => args.json,
+        Commands::Doctor(args) => args.json,
+        Commands::List(args) => args.json,
+        Commands::Check(args) => args.json,
+        Commands::Run(args) => args.json,
+        Commands::View(args) => effective_view_format(args.format, args.output.as_deref())
+            .is_ok_and(|format| format == ViewFormat::Json),
+        Commands::Dataset(DatasetCommands::Import(args)) => args.json,
+    }
+}
+
 pub(crate) fn dispatch_cli(cli: Cli) -> Result<CliOutcome> {
     match cli.command {
         Commands::Init(args) => run_init(args),
+        Commands::Project(args) => run_project(args),
         Commands::Doctor(args) => run_doctor(args),
         Commands::List(args) => run_list(args),
         Commands::Check(args) => run_check(args),
         Commands::Run(args) => run_run(args),
-        Commands::Report(args) => run_report(args),
-        Commands::Compare(args) => run_compare(args),
-        Commands::Replay(args) => run_replay(args),
+        Commands::View(args) => run_view(args),
         Commands::Dataset(args) => run_dataset(args),
     }
 }
 
+pub(crate) fn process_service() -> Result<EvalService> {
+    Ok(EvalService::new(ServiceContext::from_process()?))
+}
+
 pub(crate) fn run_init(args: InitArgs) -> Result<CliOutcome> {
-    let config = init_eval_store(InitStoreRequest {
-        root: args.root,
-        force: args.force,
-    })?;
+    let service = process_service()?;
+    let config = service
+        .init(InitStoreRequest {
+            root: args.root,
+            make_default: args.make_default,
+            force: args.force,
+        })
+        .map_err(anyhow::Error::new)?;
     if args.json {
         return Ok(success(serde_json::to_string_pretty(&config)?));
     }
-    Ok(success(format!("peval root: {}\n", config.root.display())))
+    Ok(success(format!(
+        "peval workspace: {}\ndefault workspace: {}\n",
+        config.root.display(),
+        config.default_workspace
+    )))
+}
+
+pub(crate) fn run_project(args: ProjectCommands) -> Result<CliOutcome> {
+    let wants_json = match &args {
+        ProjectCommands::Add(args) => args.json,
+        ProjectCommands::List(args) => args.json,
+        ProjectCommands::Remove(args) => args.json,
+    };
+    let message = "`peval project` is removed; use `--config <eval-config.toml>`, `--benchmark <id-or-path>`, and agent/benchmark registries in eval, workspace, or user config files";
+    if wants_json {
+        let diagnostic = EvalDiagnostic::error("removed_command", message);
+        return Ok(CliOutcome {
+            code: 1,
+            stdout: String::new(),
+            stderr: format!("{}\n", serde_json::to_string_pretty(&diagnostic)?),
+        });
+    }
+    bail!("{message}")
 }
 
 pub(crate) fn run_doctor(args: ProjectArgs) -> Result<CliOutcome> {
-    let project = load_project_from_config(args.config.as_deref())?;
-    let store = EvalStore::resolve(args.store_root)?;
+    let service = process_service()?;
+    let project = service
+        .load_project(
+            args.config.as_deref(),
+            args.benchmark.as_deref(),
+            args.store_root.clone(),
+        )
+        .map_err(anyhow::Error::new)?;
+    let store = service.store(args.store_root).map_err(anyhow::Error::new)?;
     let payload = json!({
         "schema_version": SCHEMA_VERSION,
-        "project": &project.name,
-        "root": &project.root,
+        "eval": &project.name,
+        "benchmark": &project.benchmark_id,
+        "root": &project.benchmark_root,
         "eval_root": &store.root,
-        "allow_live": project.allow_live,
+        "evaluator": {
+            "kind": project.evaluator.kind,
+            "run_supported": project.evaluator.run_supported(),
+        },
         "agents": project.agents.len(),
-        "suites": project.suites.len(),
+        "task_sets": project.task_sets.len(),
         "fake_adapter": "available",
-        "psychevo_adapter": "manifest-gated",
-        "reports": ["html", "markdown", "json"],
+        "psychevo_adapter": "wrapper",
+        "opencode_adapter": "wrapper",
+        "hermes_adapter": "wrapper",
+        "views": ["html", "markdown", "json"],
     });
     if args.json {
         return Ok(success(serde_json::to_string_pretty(&payload)?));
     }
     Ok(success(format!(
-        "project: {}\nroot: {}\neval root: {}\nallow_live: {}\nagents: {}\nsuites: {}\nfake adapter: available\npsychevo adapter: manifest-gated\n",
+        "eval: {}\nbenchmark: {}\nroot: {}\neval root: {}\nagents: {}\ntask sets: {}\nfake adapter: available\npsychevo adapter: wrapper\nopencode adapter: wrapper\nhermes adapter: wrapper\n",
         project.name,
-        project.root.display(),
+        project.benchmark_id,
+        project.benchmark_root.display(),
         store.root.display(),
-        project.allow_live,
         project.agents.len(),
-        project.suites.len(),
+        project.task_sets.len(),
     )))
 }
 
 pub(crate) fn run_list(args: ListArgs) -> Result<CliOutcome> {
+    let service = process_service()?;
     let needs_project = matches!(
         args.kind,
-        ListKind::All | ListKind::Suites | ListKind::Agents | ListKind::Tasks
+        ListKind::All | ListKind::TaskSets | ListKind::Tasks
     );
     let project = if needs_project {
-        Some(load_project_from_config(args.config.as_deref())?)
+        Some(
+            service
+                .load_project(
+                    args.config.as_deref(),
+                    args.benchmark.as_deref(),
+                    args.store_root.clone(),
+                )
+                .map_err(anyhow::Error::new)?,
+        )
     } else {
-        try_load_project_from_config(args.config.as_deref())?
+        service
+            .try_load_project(
+                args.config.as_deref(),
+                args.benchmark.as_deref(),
+                args.store_root.clone(),
+            )
+            .map_err(anyhow::Error::new)?
     };
-    let needs_store = matches!(
-        args.kind,
-        ListKind::All | ListKind::Runs | ListKind::Datasets
-    );
+    let needs_store = matches!(args.kind, ListKind::All | ListKind::Datasets);
     let store = if needs_store {
-        Some(EvalStore::resolve(args.store_root)?)
+        Some(
+            service
+                .store(args.store_root.clone())
+                .map_err(anyhow::Error::new)?,
+        )
     } else {
         None
     };
@@ -421,52 +554,63 @@ pub(crate) fn run_list(args: ListArgs) -> Result<CliOutcome> {
         .map(list_tasks)
         .transpose()?
         .unwrap_or_default();
-    let runs = store
-        .as_ref()
-        .map(EvalStore::list_runs)
-        .transpose()?
-        .unwrap_or_default();
-    let datasets = store
-        .as_ref()
-        .map(EvalStore::list_datasets)
-        .transpose()?
-        .unwrap_or_default();
+    let datasets = if needs_store {
+        service
+            .list_datasets(args.store_root.clone())
+            .map_err(anyhow::Error::new)?
+    } else {
+        Vec::new()
+    };
     let eval_root = store.as_ref().map(|store| store.root.clone());
+    let registry_agents = if let Some(project) = project.as_ref() {
+        project.agents.values().cloned().collect::<Vec<_>>()
+    } else {
+        list_registry_agents(args.store_root.clone())?
+    };
+    let registry_benchmarks = list_registry_benchmarks(args.store_root.clone())?;
     let payload = json!({
         "schema_version": SCHEMA_VERSION,
         "eval_root": eval_root,
-        "suites": project.as_ref().map(|project| project.suites.values().map(|suite| json!({
-            "id": &suite.id,
-            "name": &suite.name,
-            "agents": &suite.agents,
-            "tasks": &suite.tasks,
+        "benchmarks": registry_benchmarks,
+        "task_sets": project.as_ref().map(|project| project.task_sets.values().map(|task_set| json!({
+            "id": &task_set.id,
+            "name": &task_set.name,
+            "tasks": &task_set.tasks,
         })).collect::<Vec<_>>()).unwrap_or_default(),
-        "agents": project.as_ref().map(|project| project.agents.values().map(|agent| json!({
+        "agents": registry_agents.iter().map(|agent| json!({
             "id": &agent.id,
             "name": &agent.name,
             "kind": agent.kind,
-        })).collect::<Vec<_>>()).unwrap_or_default(),
+        })).collect::<Vec<_>>(),
         "tasks": tasks,
-        "reports": ["html", "markdown", "json"],
-        "runs": runs,
+        "views": ["html", "markdown", "json"],
         "datasets": datasets,
     });
     if args.json {
         return Ok(success(serde_json::to_string_pretty(&payload)?));
     }
     let mut out = String::new();
-    if matches!(args.kind, ListKind::All | ListKind::Suites) {
+    if matches!(args.kind, ListKind::All | ListKind::TaskSets) {
         let project = project.as_ref().context("list kind requires eval config")?;
-        out.push_str("suites\n");
-        for suite in project.suites.values() {
-            out.push_str(&format!("- {}\n", suite.id));
+        out.push_str("task sets\n");
+        for task_set in project.task_sets.values() {
+            out.push_str(&format!("- {}\n", task_set.id));
         }
     }
     if matches!(args.kind, ListKind::All | ListKind::Agents) {
-        let project = project.as_ref().context("list kind requires eval config")?;
         out.push_str("agents\n");
-        for agent in project.agents.values() {
+        for agent in &registry_agents {
             out.push_str(&format!("- {} ({:?})\n", agent.id, agent.kind));
+        }
+    }
+    if matches!(args.kind, ListKind::All | ListKind::Benchmarks) {
+        out.push_str("benchmarks\n");
+        for benchmark in list_registry_benchmarks(args.store_root.clone())? {
+            out.push_str(&format!(
+                "- {} {}\n",
+                benchmark["id"].as_str().unwrap_or("unknown"),
+                benchmark["path"].as_str().unwrap_or("")
+            ));
         }
     }
     if matches!(args.kind, ListKind::All | ListKind::Tasks) {
@@ -476,28 +620,13 @@ pub(crate) fn run_list(args: ListArgs) -> Result<CliOutcome> {
             out.push_str(&format!("- {}\n", task["id"].as_str().unwrap_or("unknown")));
         }
     }
-    if matches!(args.kind, ListKind::All | ListKind::Reports) {
-        out.push_str("reports\n- html\n- markdown\n- json\n");
-    }
-    if matches!(args.kind, ListKind::All | ListKind::Runs) {
-        let store = store.as_ref().context("list kind requires peval root")?;
-        out.push_str("runs\n");
-        for run in store.list_runs()? {
-            out.push_str(&format!(
-                "- {}/{} {:?} {}/{} {}\n",
-                run.project_slug,
-                run.run_id,
-                run.status,
-                run.passed_cases,
-                run.total_cases,
-                run.artifact_root.display()
-            ));
-        }
+    if matches!(args.kind, ListKind::All | ListKind::Views) {
+        out.push_str("views\n- html\n- markdown\n- json\n");
     }
     if matches!(args.kind, ListKind::All | ListKind::Datasets) {
-        let store = store.as_ref().context("list kind requires peval root")?;
+        let _store = store.as_ref().context("list kind requires peval root")?;
         out.push_str("datasets\n");
-        for dataset in store.list_datasets()? {
+        for dataset in &datasets {
             out.push_str(&format!(
                 "- {} ({}) payload={} exists={}\n",
                 dataset.id,
@@ -511,11 +640,36 @@ pub(crate) fn run_list(args: ListArgs) -> Result<CliOutcome> {
 }
 
 pub(crate) fn run_check(args: SelectArgs) -> Result<CliOutcome> {
-    let project = load_project_from_config(args.config.as_deref())?;
-    let cases = check_project(&project, args.suite.as_deref(), args.agent.as_deref())?;
+    let service = process_service()?;
+    validate_direct_benchmark_selection(
+        args.benchmark.as_deref(),
+        args.agent.as_deref(),
+        args.task_set.as_deref(),
+        args.task.as_deref(),
+    )?;
+    let project = service
+        .load_project(
+            args.config.as_deref(),
+            args.benchmark.as_deref(),
+            args.store_root,
+        )
+        .map_err(anyhow::Error::new)?;
+    let cases = service
+        .check(
+            &project,
+            args.task_set.as_deref(),
+            args.task.as_deref(),
+            args.agent.as_deref(),
+        )
+        .map_err(anyhow::Error::new)?;
     let payload = json!({
         "schema_version": SCHEMA_VERSION,
-        "project": project.name,
+        "eval": project.name,
+        "benchmark": project.benchmark_id,
+        "evaluator": {
+            "kind": project.evaluator.kind,
+            "run_supported": project.evaluator.run_supported(),
+        },
         "cases": cases.len(),
         "status": "ok",
     });
@@ -526,14 +680,19 @@ pub(crate) fn run_check(args: SelectArgs) -> Result<CliOutcome> {
 }
 
 pub(crate) fn run_run(args: RunArgs) -> Result<CliOutcome> {
-    let summary = run_evaluation(RunRequest {
-        config: args.config,
-        suite: args.suite,
-        agent: args.agent,
-        run_id: args.run_id,
-        store_root: args.store_root,
-        output_root: args.output_root,
-    })?;
+    let service = process_service()?;
+    let summary = service
+        .run(RunRequest {
+            config: args.config,
+            benchmark: args.benchmark,
+            task_set: args.task_set,
+            task: args.task,
+            agent: args.agent,
+            overwrite: args.overwrite,
+            store_root: args.store_root,
+            output_root: args.output_root,
+        })
+        .map_err(anyhow::Error::new)?;
     let code = if summary.status == RunStatus::Passed {
         0
     } else {
@@ -549,33 +708,39 @@ pub(crate) fn run_run(args: RunArgs) -> Result<CliOutcome> {
     Ok(CliOutcome {
         code,
         stdout: format!(
-            "run {}: {:?}\nartifact root: {}\ncases: {} passed / {} failed / {} total\n",
-            summary.run_id,
+            "run {:?}\nbenchmark: {}\ncells: {} selected / {} executed / {} reused / {} overwritten / {} retried\nresults: {} passed / {} failed\n",
             summary.status,
-            summary.artifact_root.display(),
-            summary.passed_cases,
-            summary.failed_cases,
-            summary.total_cases,
+            summary.benchmark,
+            summary.selected_cells,
+            summary.executed_cells,
+            summary.reused_cells,
+            summary.overwritten_cells,
+            summary.retried_cells,
+            summary.passed_cells,
+            summary.failed_cells,
         ),
         stderr: String::new(),
     })
 }
 
-pub(crate) fn run_report(args: ReportArgs) -> Result<CliOutcome> {
-    let run_root = resolve_cli_run_selector(
-        args.config.as_deref(),
-        args.store_root,
-        &args.run_root,
-        RunSelectorFilters {
-            suite: args.suite,
+pub(crate) fn run_view(args: ViewArgs) -> Result<CliOutcome> {
+    let service = process_service()?;
+    let format = effective_view_format(args.format, args.output.as_deref())?;
+    let view = service
+        .view(ViewRequest {
+            config: args.config,
+            benchmark: args.benchmark,
+            store_root: args.store_root,
+            path: args.path,
+            task_set: args.task_set,
             agent: args.agent,
+            task: args.task,
             status: args.status,
-        },
-    )?;
-    let rendered = render_report(ReportRequest {
-        run_root,
-        format: args.format,
-    })?;
+            group_by: parse_view_groups(&args.group_by)?,
+            include: parse_view_includes(&args.include)?,
+        })
+        .map_err(anyhow::Error::new)?;
+    let rendered = render_view(&view, format)?;
     if let Some(output) = args.output {
         fs::write(&output, rendered.as_bytes())
             .with_context(|| format!("failed to write {}", output.display()))?;
@@ -585,63 +750,26 @@ pub(crate) fn run_report(args: ReportArgs) -> Result<CliOutcome> {
     }
 }
 
-pub(crate) fn run_compare(args: CompareArgs) -> Result<CliOutcome> {
-    let filters = RunSelectorFilters {
-        suite: args.suite,
-        agent: args.agent,
-        status: args.status,
-    };
-    let run_roots = args
-        .run_roots
-        .iter()
-        .map(|run_root| {
-            resolve_cli_run_selector(
-                args.config.as_deref(),
-                args.store_root.clone(),
-                run_root,
-                filters.clone(),
-            )
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let report = compare_runs(CompareRequest { run_roots })?;
-    Ok(success(render_compare(&report, args.json)?))
-}
-
-pub(crate) fn run_replay(args: ReplayArgs) -> Result<CliOutcome> {
-    let run_root = resolve_cli_run_selector(
-        args.config.as_deref(),
-        args.store_root,
-        &args.run_root,
-        RunSelectorFilters {
-            suite: args.suite,
-            agent: args.agent,
-            status: args.status,
-        },
-    )?;
-    let report = replay_run(ReplayRequest {
-        run_root,
-        case_id: args.case,
-    })?;
-    Ok(success(render_replay(&report, args.json)?))
-}
-
 pub(crate) fn run_dataset(args: DatasetCommands) -> Result<CliOutcome> {
     match args {
         DatasetCommands::Import(args) => {
-            let entry = import_dataset(DatasetImportRequest {
-                store_root: args.store_root,
-                path: args.path,
-                id: args.id,
-                name: args.name,
-                kind: args.kind,
-                loader: args.loader,
-                split: args.split,
-                sample_limit: args.sample_limit,
-                cache_key: args.cache_key,
-                license: args.license,
-                tags: args.tags,
-                notes: args.notes,
-            })?;
+            let service = process_service()?;
+            let entry = service
+                .dataset_import(DatasetImportRequest {
+                    store_root: args.store_root,
+                    path: args.path,
+                    id: args.id,
+                    name: args.name,
+                    kind: args.kind,
+                    loader: args.loader,
+                    split: args.split,
+                    sample_limit: args.sample_limit,
+                    cache_key: args.cache_key,
+                    license: args.license,
+                    tags: args.tags,
+                    notes: args.notes,
+                })
+                .map_err(anyhow::Error::new)?;
             if args.json {
                 Ok(success(serde_json::to_string_pretty(&entry)?))
             } else {
@@ -657,20 +785,63 @@ pub(crate) fn run_dataset(args: DatasetCommands) -> Result<CliOutcome> {
     }
 }
 
-pub(crate) fn resolve_cli_run_selector(
-    config: Option<&Path>,
-    store_root: Option<PathBuf>,
-    selector: &Path,
-    filters: RunSelectorFilters,
-) -> Result<PathBuf> {
-    let explicit_selector = resolve_cli_path(selector)?;
-    if explicit_selector.join("summary.json").is_file() {
-        return Ok(explicit_selector);
+pub(crate) fn parse_view_includes(values: &[String]) -> Result<Vec<ViewInclude>> {
+    let mut includes = Vec::new();
+    for value in values {
+        for item in value
+            .split(',')
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+        {
+            let include = ViewInclude::from_str(item, true)
+                .map_err(|err| anyhow::anyhow!("invalid view include `{item}`: {err}"))?;
+            includes.push(include);
+        }
     }
-    let project = try_load_project_from_config(config)?;
-    let namespace = project.as_ref().map(EvalProject::namespace).transpose()?;
-    let store = EvalStore::resolve(store_root)?;
-    store.resolve_run_selector(namespace.as_deref(), selector, &filters)
+    Ok(includes)
+}
+
+pub(crate) fn parse_view_groups(values: &[String]) -> Result<Vec<ViewGroupBy>> {
+    let mut groups = Vec::new();
+    for value in values {
+        for item in value
+            .split(',')
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+        {
+            let group = ViewGroupBy::from_str(item, true)
+                .map_err(|err| anyhow::anyhow!("invalid view group `{item}`: {err}"))?;
+            groups.push(group);
+        }
+    }
+    Ok(groups
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect())
+}
+
+pub(crate) fn effective_view_format(
+    explicit: Option<ViewFormat>,
+    output: Option<&Path>,
+) -> Result<ViewFormat> {
+    if let Some(format) = explicit {
+        return Ok(format);
+    }
+    let Some(output) = output else {
+        return Ok(ViewFormat::Markdown);
+    };
+    match output
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("json") => Ok(ViewFormat::Json),
+        Some("html") | Some("htm") => Ok(ViewFormat::Html),
+        Some("md") | Some("markdown") => Ok(ViewFormat::Markdown),
+        _ => Ok(ViewFormat::Markdown),
+    }
 }
 
 pub(crate) fn success(stdout: String) -> CliOutcome {
@@ -684,8 +855,8 @@ pub(crate) fn success(stdout: String) -> CliOutcome {
 pub(crate) fn list_tasks(project: &EvalProject) -> Result<Vec<Value>> {
     let mut tasks = Vec::new();
     let mut seen = BTreeSet::new();
-    for suite in project.suites.values() {
-        for task in load_suite_tasks(suite)? {
+    for task_set in project.task_sets.values() {
+        for task in load_task_set_tasks(project, task_set, None)? {
             if seen.insert(task.id.clone()) {
                 tasks.push(json!({
                     "id": task.id,
@@ -699,44 +870,43 @@ pub(crate) fn list_tasks(project: &EvalProject) -> Result<Vec<Value>> {
     Ok(tasks)
 }
 
+pub(crate) fn resolved_registry_for_cli(store_root: Option<PathBuf>) -> Result<ResolvedRegistry> {
+    let env_map = inherited_env();
+    let cwd = env::current_dir()?;
+    let home = resolve_psychevo_home(&env_map, &cwd)?;
+    let store = resolve_optional_store(store_root)?;
+    ResolvedRegistry::load(
+        None,
+        store.as_ref().map(|store| store.root.as_path()),
+        &home,
+    )
+}
+
+pub(crate) fn list_registry_agents(store_root: Option<PathBuf>) -> Result<Vec<AgentManifest>> {
+    Ok(resolved_registry_for_cli(store_root)?
+        .agents
+        .into_values()
+        .collect())
+}
+
+pub(crate) fn list_registry_benchmarks(store_root: Option<PathBuf>) -> Result<Vec<Value>> {
+    Ok(resolved_registry_for_cli(store_root)?
+        .benchmarks
+        .into_values()
+        .map(|benchmark| {
+            json!({
+                "id": benchmark.id,
+                "name": benchmark.name,
+                "path": benchmark.path,
+                "path_exists": benchmark.path.is_file(),
+            })
+        })
+        .collect())
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     pub(crate) use super::*;
-    pub(crate) use std::sync::Mutex;
 
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    struct EnvGuard {
-        key: &'static str,
-        previous: Option<OsString>,
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            unsafe {
-                if let Some(previous) = &self.previous {
-                    std::env::set_var(self.key, previous);
-                } else {
-                    std::env::remove_var(self.key);
-                }
-            }
-        }
-    }
-
-    fn set_env_var(key: &'static str, value: Option<&Path>) -> EnvGuard {
-        let previous = std::env::var_os(key);
-        unsafe {
-            if let Some(value) = value {
-                std::env::set_var(key, value);
-            } else {
-                std::env::remove_var(key);
-            }
-        }
-        EnvGuard { key, previous }
-    }
-
-    pub(crate) fn fixture_project() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/local-coding")
-    }
     pub(crate) mod project_lifecycle;
 }

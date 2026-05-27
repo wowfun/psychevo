@@ -25,6 +25,12 @@ pub use runner::*;
 mod reporting;
 #[allow(unused_imports)]
 pub use reporting::*;
+mod views;
+#[allow(unused_imports)]
+pub use views::*;
+mod service;
+#[allow(unused_imports)]
+pub use service::*;
 mod cli;
 #[allow(unused_imports)]
 pub use cli::*;

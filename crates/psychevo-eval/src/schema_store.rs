@@ -28,22 +28,91 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 #[allow(unused_imports)]
 use uuid::Uuid;
 
-pub const SCHEMA_VERSION: u32 = 1;
+pub const MANIFEST_SCHEMA_VERSION: u32 = 4;
+pub const EVALUATOR_RESULT_SCHEMA_VERSION: u32 = 2;
+pub const ARTIFACT_SCHEMA_VERSION: u32 = 6;
+pub const INDEX_SCHEMA_VERSION: u32 = 1;
+pub const VIEW_SCHEMA_VERSION: u32 = 4;
+pub const WORKSPACE_SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = MANIFEST_SCHEMA_VERSION;
 
 #[derive(Debug, Clone)]
 pub struct EvalProject {
+    pub eval_root: Option<PathBuf>,
+    pub eval_manifest_path: Option<PathBuf>,
+    pub id: String,
+    pub name: String,
+    pub benchmark_root: PathBuf,
+    pub benchmark_manifest_path: PathBuf,
+    pub benchmark_id: String,
+    pub benchmark_name: String,
+    pub schema_version: u32,
+    pub output_root: Option<PathBuf>,
+    pub evaluator: EvaluatorManifest,
+    pub agents: BTreeMap<String, AgentManifest>,
+    pub task_sets: BTreeMap<String, TaskSetManifest>,
+    pub tasks: BTreeMap<String, TaskManifest>,
+    pub selection: EvalSelection,
+}
+
+#[derive(Debug, Clone)]
+pub struct BenchmarkManifest {
     pub root: PathBuf,
     pub manifest_path: PathBuf,
     pub schema_version: u32,
+    pub id: String,
     pub name: String,
-    pub output_root: Option<PathBuf>,
-    pub allow_live: bool,
-    pub agents: BTreeMap<String, AgentManifest>,
-    pub suites: BTreeMap<String, SuiteManifest>,
+    pub evaluator: EvaluatorManifest,
+    pub task_sets: BTreeMap<String, TaskSetManifest>,
+    pub tasks: BTreeMap<String, TaskManifest>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct EvalSelection {
+    #[serde(default)]
+    pub agents: Vec<String>,
+    #[serde(default)]
+    pub task_sets: Vec<String>,
+    #[serde(default)]
+    pub tasks: Vec<String>,
+}
+
+impl EvalSelection {
+    pub fn is_empty(&self) -> bool {
+        self.agents.is_empty() && self.task_sets.is_empty() && self.tasks.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvaluatorManifest {
+    pub kind: EvaluatorKind,
+    #[serde(default)]
+    pub args: BTreeMap<String, Value>,
+}
+
+impl EvaluatorManifest {
+    pub fn run_supported(&self) -> bool {
+        self.kind.run_supported()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum EvaluatorKind {
+    LocalCoding,
+    Tau2,
+    SweBench,
+}
+
+impl EvaluatorKind {
+    pub fn run_supported(self) -> bool {
+        matches!(self, Self::LocalCoding)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentManifest {
+    #[serde(default = "current_manifest_schema_version")]
     pub schema_version: u32,
     pub id: String,
     #[serde(default)]
@@ -53,6 +122,10 @@ pub struct AgentManifest {
     pub fake: FakeAgentOptions,
     #[serde(default)]
     pub psychevo: PsychevoAgentOptions,
+    #[serde(default)]
+    pub opencode: WrapperAgentOptions,
+    #[serde(default)]
+    pub hermes: WrapperAgentOptions,
     #[serde(skip)]
     pub manifest_path: PathBuf,
 }
@@ -62,6 +135,8 @@ pub struct AgentManifest {
 pub enum AgentKind {
     Fake,
     Psychevo,
+    Opencode,
+    Hermes,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,8 +174,21 @@ pub struct PsychevoAgentOptions {
     pub model: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct WrapperAgentOptions {
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub collector: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SuiteManifest {
+pub struct TaskSetManifest {
+    #[serde(default = "current_manifest_schema_version")]
     pub schema_version: u32,
     pub id: String,
     #[serde(default)]
@@ -108,32 +196,32 @@ pub struct SuiteManifest {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
-    pub agents: Vec<String>,
+    pub tasks: Vec<String>,
+    #[serde(skip)]
+    pub manifest_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskManifest {
+    #[serde(default = "current_manifest_schema_version")]
+    pub schema_version: u32,
+    #[serde(rename = "task_id")]
+    pub id: String,
     #[serde(default)]
-    pub tasks: Vec<PathBuf>,
+    pub name: Option<String>,
+    #[serde(default = "default_task_kind")]
+    pub kind: String,
+    pub problem_statement: String,
+    pub workspace: WorkspaceManifest,
+    pub test_spec: TestSpecManifest,
     #[serde(skip)]
     pub manifest_path: PathBuf,
     #[serde(skip)]
     pub dir: PathBuf,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskManifest {
-    pub schema_version: u32,
-    pub id: String,
-    #[serde(default)]
-    pub name: Option<String>,
-    #[serde(default = "default_task_kind")]
-    pub kind: String,
-    pub prompt: PromptManifest,
-    pub workspace: WorkspaceManifest,
-    pub scorer: CommandManifest,
-    #[serde(default)]
-    pub fake: FakeTaskCommands,
-    #[serde(skip)]
-    pub manifest_path: PathBuf,
-    #[serde(skip)]
-    pub dir: PathBuf,
+pub(crate) fn current_manifest_schema_version() -> u32 {
+    MANIFEST_SCHEMA_VERSION
 }
 
 pub(crate) fn default_task_kind() -> String {
@@ -141,16 +229,43 @@ pub(crate) fn default_task_kind() -> String {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PromptManifest {
-    #[serde(default)]
-    pub text: String,
-    #[serde(default)]
-    pub file: Option<PathBuf>,
+pub struct WorkspaceManifest {
+    pub source: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkspaceManifest {
-    pub source: PathBuf,
+pub struct TestSpecManifest {
+    #[serde(default)]
+    pub checks: Vec<LocalCodingCheck>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum LocalCodingCheck {
+    PythonFunctionCases {
+        module: PathBuf,
+        function: String,
+        cases: Vec<PythonFunctionCase>,
+        #[serde(default)]
+        timeout_seconds: Option<u64>,
+    },
+    ExactFile {
+        path: PathBuf,
+        expected: String,
+    },
+    CargoTest {
+        #[serde(default)]
+        timeout_seconds: Option<u64>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PythonFunctionCase {
+    #[serde(default)]
+    pub args: Vec<Value>,
+    #[serde(default)]
+    pub kwargs: BTreeMap<String, Value>,
+    pub expected: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -171,9 +286,11 @@ pub struct FakeTaskCommands {
 #[derive(Debug, Clone)]
 pub struct RunRequest {
     pub config: Option<PathBuf>,
-    pub suite: Option<String>,
+    pub benchmark: Option<String>,
+    pub task_set: Option<String>,
+    pub task: Option<String>,
     pub agent: Option<String>,
-    pub run_id: Option<String>,
+    pub overwrite: bool,
     pub store_root: Option<PathBuf>,
     pub output_root: Option<PathBuf>,
 }
@@ -181,22 +298,59 @@ pub struct RunRequest {
 #[derive(Debug, Clone)]
 pub struct InitStoreRequest {
     pub root: Option<PathBuf>,
+    pub make_default: bool,
     pub force: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RunSummary {
+pub struct CellRun {
     pub schema_version: u32,
-    pub run_id: String,
-    pub project: String,
-    pub artifact_root: PathBuf,
+    pub benchmark: String,
+    pub benchmark_slug: String,
+    pub cell_key: String,
+    pub fingerprint: String,
+    pub cell_root: PathBuf,
     pub started_at_ms: u128,
     pub finished_at_ms: u128,
-    pub total_cases: usize,
-    pub passed_cases: usize,
-    pub failed_cases: usize,
+    pub case: CaseResult,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunExecutionSummary {
+    pub schema_version: u32,
+    pub project: String,
+    pub benchmark: String,
+    pub benchmark_slug: String,
+    pub selected_cells: usize,
+    pub executed_cells: usize,
+    pub reused_cells: usize,
+    pub overwritten_cells: usize,
+    pub retried_cells: usize,
+    pub failed_cells: usize,
+    pub passed_cells: usize,
     pub status: RunStatus,
-    pub cases: Vec<CaseResult>,
+    pub cells: Vec<RunExecutionCell>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunExecutionCell {
+    pub cell_key: String,
+    pub fingerprint: String,
+    pub cell_root: PathBuf,
+    pub task_set_id: String,
+    pub task_id: String,
+    pub agent_id: String,
+    pub status: CaseStatus,
+    pub action: CellRunAction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CellRunAction {
+    Executed,
+    Reused,
+    Overwritten,
+    Retried,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -226,8 +380,12 @@ impl From<RunStatusFilter> for RunStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CaseResult {
     pub schema_version: u32,
+    pub identity: CaseIdentity,
+    pub candidate: CandidateIdentity,
+    #[serde(default)]
+    pub factors: CaseFactors,
     pub case_id: String,
-    pub suite_id: String,
+    pub task_set_id: String,
     pub task_id: String,
     #[serde(default = "default_task_kind")]
     pub task_family: String,
@@ -237,7 +395,82 @@ pub struct CaseResult {
     pub failure_class: Option<String>,
     pub score: ScoreResult,
     pub duration_ms: u128,
+    #[serde(default)]
+    pub metrics: CaseMetrics,
     pub artifacts: CaseArtifacts,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CaseIdentity {
+    pub case_id: String,
+    pub task_set_id: String,
+    pub task_id: String,
+    #[serde(default = "default_task_kind")]
+    pub task_family: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CandidateIdentity {
+    pub agent_id: String,
+    pub adapter: AgentKind,
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CaseFactors {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub values: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RunMetrics {
+    pub duration_ms: u128,
+    pub total_tool_calls: u64,
+    pub total_tool_errors: u64,
+    #[serde(default)]
+    pub total_turns: Option<u64>,
+    #[serde(default)]
+    pub usage: UsageMetrics,
+    #[serde(default)]
+    pub cost: CostMetrics,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CaseMetrics {
+    pub duration_ms: u128,
+    pub tool_calls: u64,
+    pub tool_errors: u64,
+    #[serde(default)]
+    pub turns: Option<u64>,
+    #[serde(default)]
+    pub usage: UsageMetrics,
+    #[serde(default)]
+    pub cost: CostMetrics,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UsageMetrics {
+    #[serde(default)]
+    pub input_tokens: Option<u64>,
+    #[serde(default)]
+    pub output_tokens: Option<u64>,
+    #[serde(default)]
+    pub cache_read_tokens: Option<u64>,
+    #[serde(default)]
+    pub cache_write_tokens: Option<u64>,
+    #[serde(default)]
+    pub reasoning_tokens: Option<u64>,
+    #[serde(default)]
+    pub total_tokens: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CostMetrics {
+    #[serde(default)]
+    pub amount_usd: Option<f64>,
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -247,8 +480,24 @@ pub enum CaseStatus {
     Failed,
     SetupFailed,
     RuntimeFailed,
-    ScorerFailed,
+    EvaluatorFailed,
     Timeout,
+}
+
+impl CaseStatus {
+    pub fn is_terminal_reusable(self) -> bool {
+        matches!(
+            self,
+            CaseStatus::Passed
+                | CaseStatus::Failed
+                | CaseStatus::EvaluatorFailed
+                | CaseStatus::Timeout
+        )
+    }
+
+    pub fn is_passed(self) -> bool {
+        self == CaseStatus::Passed
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -266,8 +515,8 @@ pub struct ScoreResult {
 pub struct CaseArtifacts {
     pub result: PathBuf,
     pub trajectory: PathBuf,
-    pub scorer_stdout: PathBuf,
-    pub scorer_stderr: PathBuf,
+    pub evaluator_stdout: PathBuf,
+    pub evaluator_stderr: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -283,93 +532,149 @@ pub struct TrajectoryEvent {
 }
 
 #[derive(Debug, Clone)]
-pub struct ReportRequest {
-    pub run_root: PathBuf,
-    pub format: ReportFormat,
+pub struct ViewRequest {
+    pub config: Option<PathBuf>,
+    pub benchmark: Option<String>,
+    pub store_root: Option<PathBuf>,
+    pub path: Option<PathBuf>,
+    pub task_set: Option<String>,
+    pub agent: Option<String>,
+    pub task: Option<String>,
+    pub status: Option<CaseStatusFilter>,
+    pub group_by: Vec<ViewGroupBy>,
+    pub include: Vec<ViewInclude>,
 }
 
-#[derive(Debug, Clone)]
-pub struct CompareRequest {
-    pub run_roots: Vec<PathBuf>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+#[clap(rename_all = "kebab-case")]
+pub enum ViewInclude {
+    Summary,
+    Matrix,
+    Usage,
 }
 
-#[derive(Debug, Clone)]
-pub struct ReplayRequest {
-    pub run_root: PathBuf,
-    pub case_id: Option<String>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+#[clap(rename_all = "kebab-case")]
+pub enum ViewFormat {
+    Markdown,
+    Json,
+    Html,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+#[clap(rename_all = "kebab-case")]
+pub enum ViewGroupBy {
+    Agent,
+    Task,
+    TaskSet,
+    Status,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "snake_case")]
+#[clap(rename_all = "kebab-case")]
+pub enum CaseStatusFilter {
+    Passed,
+    Failed,
+    SetupFailed,
+    RuntimeFailed,
+    EvaluatorFailed,
+    Timeout,
+}
+
+impl From<CaseStatusFilter> for CaseStatus {
+    fn from(value: CaseStatusFilter) -> Self {
+        match value {
+            CaseStatusFilter::Passed => CaseStatus::Passed,
+            CaseStatusFilter::Failed => CaseStatus::Failed,
+            CaseStatusFilter::SetupFailed => CaseStatus::SetupFailed,
+            CaseStatusFilter::RuntimeFailed => CaseStatus::RuntimeFailed,
+            CaseStatusFilter::EvaluatorFailed => CaseStatus::EvaluatorFailed,
+            CaseStatusFilter::Timeout => CaseStatus::Timeout,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct CompareReport {
+pub struct ViewReport {
     pub schema_version: u32,
-    pub runs: Vec<CompareRun>,
-    pub cases: Vec<CompareCase>,
+    pub includes: Vec<ViewInclude>,
+    pub scope: ViewScope,
+    pub summary: ViewSummary,
+    pub groups: Vec<ViewGroupRow>,
+    pub matrix: Vec<ViewMatrixRow>,
+    pub usage: Vec<ViewUsageRow>,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct CompareRun {
-    pub run_id: String,
-    pub artifact_root: PathBuf,
+pub struct ViewScope {
+    pub workspace_root: PathBuf,
+    pub path: PathBuf,
+    pub benchmark: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ViewSummary {
+    pub total_cells: usize,
+    pub passed_cells: usize,
+    pub failed_cells: usize,
     pub status: RunStatus,
+    pub metrics: RunMetrics,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct CompareCase {
+pub struct ViewMatrixRow {
+    pub benchmark: String,
+    pub cell_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_root: Option<PathBuf>,
+    pub case_id: String,
+    pub task_set_id: String,
+    pub task_id: String,
+    pub task_family: String,
+    pub agent_id: String,
+    pub adapter: AgentKind,
+    pub status: CaseStatus,
+    pub failure_class: Option<String>,
+    pub score: Option<f64>,
+    pub duration_ms: u128,
+    pub turns: Option<u64>,
+    pub tool_calls: u64,
+    pub tool_errors: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ViewUsageRow {
+    pub benchmark: String,
+    pub cell_key: String,
+    pub case_id: String,
+    pub agent_id: String,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub cache_read_tokens: Option<u64>,
+    pub cache_write_tokens: Option<u64>,
+    pub reasoning_tokens: Option<u64>,
+    pub total_tokens: Option<u64>,
+    pub cost_usd: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ViewGroupRow {
     pub key: String,
-    pub statuses: BTreeMap<String, CaseStatus>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ReplayReport {
-    pub schema_version: u32,
-    pub run_id: String,
-    pub events: Vec<TrajectoryEvent>,
+    pub total_cells: usize,
+    pub passed_cells: usize,
+    pub failed_cells: usize,
+    pub status: RunStatus,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct RunSelectorFilters {
-    pub suite: Option<String>,
+    pub task_set: Option<String>,
     pub agent: Option<String>,
     pub status: Option<RunStatusFilter>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RunIndexEntry {
-    pub schema_version: u32,
-    pub project: String,
-    pub project_slug: String,
-    #[serde(default)]
-    pub namespace: PathBuf,
-    pub run_id: String,
-    pub artifact_root: PathBuf,
-    pub report_html: PathBuf,
-    pub report_markdown: PathBuf,
-    pub started_at_ms: u128,
-    pub finished_at_ms: u128,
-    pub total_cases: usize,
-    pub passed_cases: usize,
-    pub failed_cases: usize,
-    pub status: RunStatus,
-    pub suites: Vec<String>,
-    pub agents: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EvalStoreIndex {
-    pub schema_version: u32,
-    pub generated_at_ms: u128,
-    pub runs: Vec<RunIndexEntry>,
-    pub datasets: Vec<DatasetEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LatestProjectIndex {
-    pub schema_version: u32,
-    pub generated_at_ms: u128,
-    pub project: String,
-    pub project_slug: String,
-    pub latest: Option<RunIndexEntry>,
-    pub runs: Vec<RunIndexEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -444,38 +749,161 @@ pub struct EvalStore {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PevalConfig {
+pub struct InitStoreResult {
     pub schema_version: u32,
     pub root: PathBuf,
+    pub default_workspace: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PevalGlobalConfig {
+    pub schema_version: u32,
+    #[serde(default)]
+    pub default_workspace: Option<PathBuf>,
+    #[serde(default)]
+    pub agents: Vec<AgentManifest>,
+    #[serde(default)]
+    pub benchmarks: Vec<RegistryBenchmark>,
+}
+
+impl Default for PevalGlobalConfig {
+    fn default() -> Self {
+        Self {
+            schema_version: WORKSPACE_SCHEMA_VERSION,
+            default_workspace: None,
+            agents: Vec::new(),
+            benchmarks: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PevalWorkspaceConfig {
+    pub schema_version: u32,
+    pub kind: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub agents: Vec<AgentManifest>,
+    #[serde(default)]
+    pub benchmarks: Vec<RegistryBenchmark>,
+}
+
+impl Default for PevalWorkspaceConfig {
+    fn default() -> Self {
+        Self {
+            schema_version: WORKSPACE_SCHEMA_VERSION,
+            kind: "workspace".to_string(),
+            name: None,
+            agents: Vec::new(),
+            benchmarks: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistryBenchmark {
+    pub id: String,
+    pub path: PathBuf,
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ProjectManifest {
+pub(crate) struct EvalConfigManifest {
     pub(crate) schema_version: u32,
+    pub(crate) id: String,
     pub(crate) name: String,
     pub(crate) output_root: Option<PathBuf>,
-    pub(crate) allow_live: bool,
+    pub(crate) benchmark: BenchmarkReference,
+    pub(crate) selection: EvalSelection,
+    pub(crate) agents: Vec<AgentManifest>,
+    pub(crate) benchmarks: Vec<RegistryBenchmark>,
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct RawProjectManifest {
+#[serde(deny_unknown_fields)]
+pub(crate) struct RawEvalConfigManifest {
     pub(crate) schema_version: u32,
-    #[serde(default = "default_project_name")]
-    pub(crate) name: String,
+    #[serde(default = "default_eval_id")]
+    pub(crate) id: String,
+    #[serde(default)]
+    pub(crate) name: Option<String>,
     #[serde(default)]
     pub(crate) output_root: Option<PathBuf>,
+    pub(crate) benchmark: BenchmarkReference,
+    pub(crate) select: EvalSelection,
     #[serde(default)]
-    pub(crate) allow_live: bool,
+    pub(crate) agents: Vec<AgentManifest>,
+    #[serde(default)]
+    pub(crate) benchmarks: Vec<RegistryBenchmark>,
 }
 
-pub(crate) fn default_project_name() -> String {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BenchmarkReference {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub path: Option<PathBuf>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RawBenchmarkManifestSerde {
+    pub(crate) schema_version: u32,
+    pub(crate) id: String,
+    #[serde(default)]
+    pub(crate) name: Option<String>,
+    pub(crate) evaluator: EvaluatorManifest,
+    #[serde(default)]
+    pub(crate) task_sources: Vec<TaskSourceManifest>,
+    #[serde(default)]
+    pub(crate) task_sets: Vec<TaskSetManifest>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskSourceManifest {
+    pub path: PathBuf,
+    #[serde(default = "default_task_source_format")]
+    pub format: TaskSourceFormat,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskSourceFormat {
+    Jsonl,
+}
+
+pub(crate) fn default_task_source_format() -> TaskSourceFormat {
+    TaskSourceFormat::Jsonl
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RawTaskRecord {
+    #[serde(default = "current_manifest_schema_version")]
+    pub(crate) schema_version: u32,
+    pub(crate) task_id: String,
+    #[serde(default)]
+    pub(crate) name: Option<String>,
+    #[serde(default = "default_task_kind")]
+    pub(crate) kind: String,
+    #[serde(default)]
+    pub(crate) dir: Option<PathBuf>,
+    pub(crate) problem_statement: String,
+    pub(crate) workspace: WorkspaceManifest,
+    pub(crate) test_spec: TestSpecManifest,
+}
+
+pub(crate) fn default_eval_id() -> String {
     "evaluation".to_string()
 }
 
 #[derive(Debug, Clone)]
 pub struct CasePlan {
     pub case_id: String,
-    pub suite: SuiteManifest,
+    pub task_set: TaskSetManifest,
     pub task: TaskManifest,
     pub agent: AgentManifest,
 }
@@ -492,23 +920,7 @@ pub(crate) struct ProcessOutcome {
 impl EvalProject {
     pub fn load(start: impl AsRef<Path>) -> Result<Self> {
         let manifest_path = discover_manifest(start.as_ref())?;
-        let root = manifest_path
-            .parent()
-            .context("eval.toml has no parent directory")?
-            .to_path_buf();
-        let manifest = read_project_manifest(&manifest_path)?;
-        let agents = load_agent_manifests(&root)?;
-        let suites = load_suite_manifests(&root)?;
-        Ok(Self {
-            root,
-            manifest_path,
-            schema_version: manifest.schema_version,
-            name: manifest.name,
-            output_root: manifest.output_root,
-            allow_live: manifest.allow_live,
-            agents,
-            suites,
-        })
+        load_eval_config(&manifest_path, None)
     }
 
     pub fn namespace(&self) -> Result<PathBuf> {
@@ -521,7 +933,42 @@ impl EvalProject {
     }
 
     pub fn slug(&self) -> String {
-        slugify(&self.name)
+        slugify(&self.benchmark_id)
+    }
+}
+
+impl BenchmarkManifest {
+    pub fn load(start: impl AsRef<Path>) -> Result<Self> {
+        let manifest_path = discover_benchmark_manifest(start.as_ref())?;
+        let root = manifest_path
+            .parent()
+            .context("benchmark.toml has no parent directory")?
+            .to_path_buf();
+        let raw: RawBenchmarkManifestSerde = read_toml(&manifest_path)?;
+        reject_unsupported(raw.schema_version, &manifest_path)?;
+        let tasks = if !raw.evaluator.run_supported()
+            && raw.task_sources.is_empty()
+            && raw.task_sets.is_empty()
+        {
+            BTreeMap::new()
+        } else {
+            load_task_sources(&root, &raw.task_sources)?
+        };
+        let task_sets = if !raw.evaluator.run_supported() && raw.task_sets.is_empty() {
+            BTreeMap::new()
+        } else {
+            collect_task_set_manifests(raw.task_sets, &manifest_path, &tasks)?
+        };
+        Ok(BenchmarkManifest {
+            root,
+            manifest_path,
+            schema_version: raw.schema_version,
+            id: slugify(&raw.id),
+            name: raw.name.unwrap_or(raw.id),
+            evaluator: raw.evaluator,
+            task_sets,
+            tasks,
+        })
     }
 }
 
@@ -540,74 +987,26 @@ impl EvalStore {
         Ok(self.root.join(project.namespace()?))
     }
 
+    pub fn cell_runs_root(&self, project: &EvalProject) -> PathBuf {
+        self.root.join("runs").join(project.slug())
+    }
+
+    pub fn cell_root(&self, project: &EvalProject, case: &CasePlan, cell_key: &str) -> PathBuf {
+        self.cell_runs_root(project)
+            .join(sanitize_id(&case.agent.id))
+            .join(sanitize_id(&case.task.id))
+            .join(cell_key)
+    }
+
     pub fn ensure_layout(&self) -> Result<()> {
         fs::create_dir_all(self.root.join("runs"))
             .with_context(|| format!("failed to create {}", self.root.join("runs").display()))?;
         fs::create_dir_all(self.root.join("datasets")).with_context(|| {
             format!("failed to create {}", self.root.join("datasets").display())
         })?;
-        self.refresh_indexes()?;
-        self.write_dashboard()
-    }
-
-    pub fn resolve_run_selector(
-        &self,
-        namespace: Option<&Path>,
-        selector: &Path,
-        filters: &RunSelectorFilters,
-    ) -> Result<PathBuf> {
-        let explicit_selector = resolve_cli_path(selector)?;
-        if explicit_selector.join("summary.json").is_file() {
-            return Ok(explicit_selector);
-        }
-
-        let selector_text = selector.to_string_lossy();
-        if selector_text == "latest" {
-            return self
-                .latest_run(namespace, filters)?
-                .map(|entry| entry.artifact_root)
-                .with_context(|| {
-                    let scope = namespace
-                        .map(|path| path.display().to_string())
-                        .unwrap_or_else(|| "global".to_string());
-                    format!(
-                        "no latest run found for {scope} under {}",
-                        self.root.display()
-                    )
-                });
-        }
-
-        if let Some(namespace) = namespace
-            && selector.components().count() == 1
-        {
-            let run_root = self.root.join(namespace).join(selector);
-            if run_root.join("summary.json").is_file() {
-                return Ok(run_root);
-            }
-        }
-
-        let store_root = self.root.join(selector);
-        if store_root.join("summary.json").is_file() {
-            return Ok(store_root);
-        }
-
-        let legacy_runs_root = self.root.join("runs").join(selector);
-        if legacy_runs_root.join("summary.json").is_file() {
-            return Ok(legacy_runs_root);
-        }
-
-        bail!(
-            "could not resolve run selector `{}` under {}",
-            selector.display(),
-            self.root.display()
-        )
-    }
-
-    pub fn list_runs(&self) -> Result<Vec<RunIndexEntry>> {
-        match self.read_index() {
-            Ok(index) => Ok(index.runs),
-            Err(_) => self.scan_runs(),
-        }
+        fs::create_dir_all(self.root.join("scripts"))
+            .with_context(|| format!("failed to create {}", self.root.join("scripts").display()))?;
+        Ok(())
     }
 
     pub fn list_datasets(&self) -> Result<Vec<DatasetEntry>> {
@@ -628,138 +1027,37 @@ impl EvalStore {
         Ok(entries)
     }
 
-    pub fn register_run(&self, _summary: &RunSummary) -> Result<()> {
-        self.refresh_indexes()?;
-        self.write_dashboard().with_context(|| {
-            format!(
-                "failed to write {}",
-                self.root.join("dashboard.html").display()
-            )
-        })
-    }
-
     pub fn refresh_after_dataset_change(&self) -> Result<()> {
-        self.refresh_indexes()?;
-        self.write_dashboard()
-    }
-
-    pub(crate) fn latest_run(
-        &self,
-        namespace: Option<&Path>,
-        filters: &RunSelectorFilters,
-    ) -> Result<Option<RunIndexEntry>> {
-        let status = filters.status.map(RunStatus::from);
-        let mut runs = self.list_runs()?;
-        runs.retain(|entry| {
-            namespace.is_none_or(|expected| entry.namespace == expected)
-                && filters
-                    .suite
-                    .as_ref()
-                    .is_none_or(|suite| entry.suites.iter().any(|value| value == suite))
-                && filters
-                    .agent
-                    .as_ref()
-                    .is_none_or(|agent| entry.agents.iter().any(|value| value == agent))
-                && status.is_none_or(|expected| entry.status == expected)
-        });
-        runs.sort_by(|left, right| {
-            right
-                .started_at_ms
-                .cmp(&left.started_at_ms)
-                .then_with(|| right.run_id.cmp(&left.run_id))
-        });
-        Ok(runs.into_iter().next())
-    }
-
-    pub(crate) fn read_index(&self) -> Result<EvalStoreIndex> {
-        let path = self.root.join("index.json");
-        let index: EvalStoreIndex = serde_json::from_str(
-            &fs::read_to_string(&path)
-                .with_context(|| format!("failed to read {}", path.display()))?,
-        )
-        .with_context(|| format!("failed to parse {}", path.display()))?;
-        reject_unsupported(index.schema_version, &path)?;
-        Ok(index)
-    }
-
-    pub(crate) fn refresh_indexes(&self) -> Result<()> {
-        fs::create_dir_all(&self.root)
-            .with_context(|| format!("failed to create {}", self.root.display()))?;
-        let runs = self.scan_runs()?;
-        let datasets = self.list_datasets()?;
-        let index = EvalStoreIndex {
-            schema_version: SCHEMA_VERSION,
-            generated_at_ms: now_ms(),
-            runs: runs.clone(),
-            datasets,
-        };
-        write_json_pretty(&self.root.join("index.json"), &index)?;
-
-        let mut by_namespace: BTreeMap<PathBuf, (String, String, Vec<RunIndexEntry>)> =
-            BTreeMap::new();
-        for run in runs {
-            by_namespace
-                .entry(run.namespace.clone())
-                .or_insert_with(|| (run.project.clone(), run.project_slug.clone(), Vec::new()))
-                .2
-                .push(run);
-        }
-        for (namespace, (project, project_slug, runs)) in by_namespace {
-            self.write_latest_for_namespace(&namespace, &project, &project_slug, &runs)?;
-        }
         Ok(())
     }
 
-    pub(crate) fn write_latest_for_namespace(
-        &self,
-        namespace: &Path,
-        project: &str,
-        project_slug: &str,
-        runs: &[RunIndexEntry],
-    ) -> Result<()> {
-        let mut sorted = runs.to_vec();
-        sorted.sort_by(|left, right| {
-            right
-                .started_at_ms
-                .cmp(&left.started_at_ms)
-                .then_with(|| right.run_id.cmp(&left.run_id))
-        });
-        let latest = sorted.first().cloned();
-        let latest_index = LatestProjectIndex {
-            schema_version: SCHEMA_VERSION,
-            generated_at_ms: now_ms(),
-            project: project.to_string(),
-            project_slug: project_slug.to_string(),
-            latest,
-            runs: sorted,
+    pub fn scan_cell_runs(&self, scope: &Path) -> Result<Vec<CellRun>> {
+        let scope = if scope.is_absolute() {
+            scope.to_path_buf()
+        } else {
+            self.root.join(scope)
         };
-        let dir = self.root.join(namespace);
-        fs::create_dir_all(&dir).with_context(|| format!("failed to create {}", dir.display()))?;
-        write_json_pretty(&dir.join("latest.json"), &latest_index)
-    }
-
-    pub(crate) fn scan_runs(&self) -> Result<Vec<RunIndexEntry>> {
-        let mut runs = Vec::new();
-        if !self.root.is_dir() {
-            return Ok(runs);
+        let mut cells = Vec::new();
+        if !scope.is_dir() {
+            return Ok(cells);
         }
-        self.scan_runs_in(&self.root, &mut runs)?;
-        runs.sort_by(|left, right| {
-            right
-                .started_at_ms
-                .cmp(&left.started_at_ms)
-                .then_with(|| right.run_id.cmp(&left.run_id))
+        self.scan_cell_runs_in(&scope, &mut cells)?;
+        cells.sort_by(|left, right| {
+            left.benchmark
+                .cmp(&right.benchmark)
+                .then_with(|| left.case.agent_id.cmp(&right.case.agent_id))
+                .then_with(|| left.case.task_id.cmp(&right.case.task_id))
+                .then_with(|| left.cell_key.cmp(&right.cell_key))
         });
-        Ok(runs)
+        Ok(cells)
     }
 
-    pub(crate) fn scan_runs_in(&self, dir: &Path, runs: &mut Vec<RunIndexEntry>) -> Result<()> {
-        if dir == self.root.join("datasets") {
-            return Ok(());
-        }
-        if dir.join("summary.json").is_file() {
-            let summary = read_run_summary(dir)?;
-            runs.push(run_index_entry(&summary, dir, &self.root));
+    fn scan_cell_runs_in(&self, dir: &Path, cells: &mut Vec<CellRun>) -> Result<()> {
+        let run_json = dir.join("run.json");
+        if run_json.is_file() {
+            if let Ok(cell) = read_cell_run(dir) {
+                cells.push(cell);
+            }
             return Ok(());
         }
         for entry in
@@ -767,97 +1065,164 @@ impl EvalStore {
         {
             let path = entry?.path();
             if path.is_dir() {
-                self.scan_runs_in(&path, runs)?;
+                self.scan_cell_runs_in(&path, cells)?;
             }
         }
         Ok(())
     }
-
-    pub(crate) fn write_dashboard(&self) -> Result<()> {
-        fs::create_dir_all(&self.root)
-            .with_context(|| format!("failed to create {}", self.root.display()))?;
-        let runs = self.list_runs()?;
-        let datasets = self.list_datasets()?;
-        let html = render_store_dashboard(self, &runs, &datasets);
-        fs::write(self.root.join("dashboard.html"), html).with_context(|| {
-            format!(
-                "failed to write {}",
-                self.root.join("dashboard.html").display()
-            )
-        })
-    }
 }
 
-pub fn init_eval_store(request: InitStoreRequest) -> Result<PevalConfig> {
-    let env_map = inherited_env();
-    let cwd = env::current_dir()?;
-    let home = resolve_psychevo_home(&env_map, &cwd)?;
-    let config_path = home.join("peval.toml");
-    let root = if let Some(path) = request.root {
-        resolve_explicit_path(&path, &env_map, &cwd)?
-    } else {
-        home_path(&env_map)?.join(".local/evals")
-    };
-    let config = PevalConfig {
-        schema_version: SCHEMA_VERSION,
-        root,
-    };
+pub(crate) fn workspace_config_path(root: &Path) -> PathBuf {
+    root.join("peval.toml")
+}
 
-    if config_path.is_file() {
-        let existing = read_peval_config(&config_path)?;
-        if existing.root == config.root {
-            EvalStore::new(existing.root.clone()).ensure_layout()?;
-            return Ok(existing);
-        }
-        if !request.force {
-            bail!(
-                "{} already points to {}; rerun `peval init --force --root {}` to replace it",
-                config_path.display(),
-                existing.root.display(),
-                config.root.display()
-            );
-        }
+pub(crate) fn global_peval_config_path(home: &Path) -> PathBuf {
+    home.join("peval-config.toml")
+}
+
+pub(crate) fn ensure_workspace_config(root: &Path) -> Result<()> {
+    let path = workspace_config_path(root);
+    if path.is_file() {
+        let _ = read_workspace_config(root)?;
+        return Ok(());
     }
+    let config = PevalWorkspaceConfig::default();
+    write_toml_pretty(&path, &config)
+}
 
-    fs::create_dir_all(&home).with_context(|| format!("failed to create {}", home.display()))?;
-    write_toml_pretty(&config_path, &config)?;
-    EvalStore::new(config.root.clone()).ensure_layout()?;
+pub(crate) fn read_workspace_config(root: &Path) -> Result<PevalWorkspaceConfig> {
+    let path = workspace_config_path(root);
+    let config: PevalWorkspaceConfig = read_toml(&path)?;
+    reject_unsupported_workspace(config.schema_version, &path)?;
+    if config.kind != "workspace" {
+        bail!(
+            "{} is not a peval workspace config; expected kind = \"workspace\"",
+            path.display()
+        );
+    }
     Ok(config)
 }
 
-pub fn check_project(
+pub(crate) fn read_global_peval_config(home: &Path) -> Result<PevalGlobalConfig> {
+    let path = global_peval_config_path(home);
+    if !path.is_file() {
+        return Ok(PevalGlobalConfig::default());
+    }
+    let config: PevalGlobalConfig = read_toml(&path)?;
+    reject_unsupported_workspace(config.schema_version, &path)?;
+    Ok(config)
+}
+
+pub(crate) fn write_global_peval_config(home: &Path, config: &PevalGlobalConfig) -> Result<()> {
+    fs::create_dir_all(home).with_context(|| format!("failed to create {}", home.display()))?;
+    write_toml_pretty(&global_peval_config_path(home), config)
+}
+
+pub(crate) fn write_default_workspace(home: &Path, root: &Path, force: bool) -> Result<()> {
+    let mut config = read_global_peval_config(home)?;
+    if let Some(existing) = &config.default_workspace
+        && existing != root
+        && !force
+    {
+        bail!(
+            "{} already points to {}; rerun `peval init --default --force --root {}` to replace it",
+            global_peval_config_path(home).display(),
+            existing.display(),
+            root.display()
+        );
+    }
+    config.default_workspace = Some(root.to_path_buf());
+    write_global_peval_config(home, &config)
+}
+
+pub(crate) fn copy_workspace_templates(root: &Path) -> Result<()> {
+    let scripts = root.join("scripts");
+    fs::create_dir_all(&scripts).with_context(|| format!("failed to create {}", scripts.display()))
+}
+
+pub fn init_eval_store(request: InitStoreRequest) -> Result<InitStoreResult> {
+    let env_map = inherited_env();
+    let cwd = env::current_dir()?;
+    let home = resolve_psychevo_home(&env_map, &cwd)?;
+    let root = if let Some(path) = request.root {
+        resolve_explicit_path(&path, &env_map, &cwd)?
+    } else {
+        cwd
+    };
+    fs::create_dir_all(&root).with_context(|| format!("failed to create {}", root.display()))?;
+    let root = absolute_path(&root);
+    ensure_workspace_config(&root)?;
+    copy_workspace_templates(&root)?;
+    EvalStore::new(root.clone()).ensure_layout()?;
+
+    let mut default_workspace = false;
+    if request.make_default {
+        write_default_workspace(&home, &root, request.force)?;
+        default_workspace = true;
+    }
+
+    Ok(InitStoreResult {
+        schema_version: WORKSPACE_SCHEMA_VERSION,
+        root,
+        default_workspace,
+    })
+}
+
+pub(crate) fn check_project(
     project: &EvalProject,
-    suite_filter: Option<&str>,
+    task_set_filter: Option<&str>,
+    task_filter: Option<&str>,
     agent_filter: Option<&str>,
 ) -> Result<Vec<CaseResult>> {
-    let cases = expand_matrix(project, suite_filter, agent_filter)?;
+    if !project.evaluator.run_supported() {
+        return Ok(Vec::new());
+    }
+    let cases = expand_matrix(project, task_set_filter, task_filter, agent_filter)?;
     for case in &cases {
-        validate_case(project, case)?;
+        validate_case(case)?;
     }
     Ok(cases
         .into_iter()
         .map(|case| CaseResult {
-            schema_version: SCHEMA_VERSION,
+            schema_version: ARTIFACT_SCHEMA_VERSION,
+            identity: CaseIdentity {
+                case_id: case.case_id.clone(),
+                task_set_id: case.task_set.id.clone(),
+                task_id: case.task.id.clone(),
+                task_family: case.task.kind.clone(),
+            },
+            candidate: CandidateIdentity {
+                agent_id: case.agent.id.clone(),
+                adapter: case.agent.kind,
+                model: match case.agent.kind {
+                    AgentKind::Psychevo => case.agent.psychevo.model.clone(),
+                    AgentKind::Opencode => case.agent.opencode.model.clone(),
+                    AgentKind::Hermes => case.agent.hermes.model.clone(),
+                    AgentKind::Fake => None,
+                },
+            },
+            factors: CaseFactors::default(),
             case_id: case.case_id,
-            suite_id: case.suite.id,
+            task_set_id: case.task_set.id,
             task_id: case.task.id,
             task_family: case.task.kind,
             agent_id: case.agent.id,
             status: CaseStatus::Passed,
             failure_class: None,
             score: ScoreResult {
-                schema_version: SCHEMA_VERSION,
+                schema_version: EVALUATOR_RESULT_SCHEMA_VERSION,
                 passed: true,
                 score: None,
                 message: "validated".to_string(),
                 details: Value::Null,
             },
             duration_ms: 0,
+            metrics: CaseMetrics::default(),
             artifacts: CaseArtifacts {
                 result: PathBuf::new(),
                 trajectory: PathBuf::new(),
-                scorer_stdout: PathBuf::new(),
-                scorer_stderr: PathBuf::new(),
+                evaluator_stdout: PathBuf::new(),
+                evaluator_stderr: PathBuf::new(),
             },
         })
         .collect())

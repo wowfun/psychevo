@@ -1,0 +1,17 @@
+schema_version = 4
+id = "pidx-fake-patch-add"
+name = "pidx fake patch-add"
+
+[benchmark]
+path = "../benchmarks/pidx-coding/benchmark.toml"
+
+[select]
+agents = ["fake-pass"]
+task_sets = ["base"]
+tasks = ["patch-add"]
+
+[[agents]]
+id = "fake-pass"
+name = "Fake pass"
+kind = "fake"
+fake = { behavior = "pass" }

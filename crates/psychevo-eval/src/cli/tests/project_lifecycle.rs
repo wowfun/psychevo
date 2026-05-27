@@ -3,39 +3,21 @@ pub(crate) use super::*;
 
 use pretty_assertions::assert_eq;
 
-#[allow(unused_imports)]
-use anyhow::{Context, Result, bail};
-#[allow(unused_imports)]
-use clap::{Parser, Subcommand, ValueEnum};
-#[allow(unused_imports)]
-use serde_json::{Value, json};
-#[allow(unused_imports)]
-use std::collections::{BTreeMap, BTreeSet};
-#[allow(unused_imports)]
-use std::env;
-#[allow(unused_imports)]
-use std::ffi::OsString;
-#[allow(unused_imports)]
-use std::fs;
-#[allow(unused_imports)]
-use std::io::{BufRead, BufReader};
-#[allow(unused_imports)]
-use std::path::{Component, Path, PathBuf};
-#[allow(unused_imports)]
-use std::process::{Command, Stdio};
-#[allow(unused_imports)]
-use std::thread;
-#[allow(unused_imports)]
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-#[allow(unused_imports)]
-use uuid::Uuid;
-
 #[test]
-pub(crate) fn project_discovery_validation_and_matrix_are_deterministic() {
-    let project =
-        EvalProject::load(fixture_project().join("tasks/rust-swe-add")).expect("project load");
-    assert_eq!(project.name, "local-coding");
-    let cases = check_project(&project, Some("rust-swe"), None).expect("check");
+pub(crate) fn eval_config_resolves_benchmark_and_inline_agents() {
+    let temp = tempfile::tempdir().expect("temp");
+    let fixture = create_local_coding_eval(&temp.path().join("test-coding"));
+    let project = EvalProject::load(fixture.join("eval.toml")).expect("eval config load");
+
+    assert_eq!(project.name, "test-coding eval");
+    assert_eq!(project.benchmark_id, "test-coding");
+    assert_eq!(
+        project.agents["fake-fail"].fake.behavior,
+        FakeBehavior::Fail
+    );
+
+    let cases =
+        check_project(&project, Some("rust-swe"), None, None).expect("check selected matrix");
     let ids = cases
         .iter()
         .map(|case| case.case_id.as_str())
@@ -43,750 +25,590 @@ pub(crate) fn project_discovery_validation_and_matrix_are_deterministic() {
     assert_eq!(
         ids,
         [
+            "rust-swe__rust-swe-add__fake-fail",
             "rust-swe__rust-swe-add__fake-pass",
-            "rust-swe__rust-swe-add__fake-fail"
         ]
     );
-    let all_fake_pass = check_project(&project, None, Some("fake-pass")).expect("all families");
-    let families = all_fake_pass
-        .iter()
-        .map(|case| case.task_family.as_str())
-        .collect::<BTreeSet<_>>();
+}
+
+#[test]
+pub(crate) fn pidx_benchmark_is_benchmark_only_and_templates_select_agents() {
+    let manifest =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benchmarks/pidx-coding/benchmark.toml");
+    let benchmark = BenchmarkManifest::load(&manifest).expect("pidx benchmark");
+    assert_eq!(benchmark.id, "pidx-coding");
+    assert_eq!(benchmark.task_sets["base"].tasks.len(), 3);
+
+    let template =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("templates/pidx-fake-patch-add.eval.toml");
+    let project = EvalProject::load(&template).expect("pidx template eval");
+    assert_eq!(project.benchmark_id, "pidx-coding");
     assert_eq!(
-        families,
-        BTreeSet::from(["coding-loop", "prompt-ab", "swe-style"])
+        project.agents.keys().collect::<Vec<_>>(),
+        vec![&"fake-pass".to_string()]
     );
+    let cases = check_project(&project, Some("base"), Some("patch-add"), Some("fake-pass"))
+        .expect("check template");
+    assert_eq!(cases.len(), 1);
 }
 
 #[test]
-pub(crate) fn unsupported_schema_is_rejected() {
+pub(crate) fn registry_precedence_and_direct_benchmark_selection() {
     let temp = tempfile::tempdir().expect("temp");
-    write_minimal_project(temp.path(), 99, r#"agents = ["fake-pass"]"#);
-    let err = EvalProject::load(temp.path()).expect_err("unsupported schema");
-    assert!(
-        err.to_string().contains("unsupported schema_version 99"),
-        "{err:#}"
-    );
-}
-
-#[test]
-pub(crate) fn psychevo_live_agent_requires_manifest_opt_in() {
-    let temp = tempfile::tempdir().expect("temp");
-    write_minimal_project(temp.path(), 1, r#"agents = ["psychevo-live"]"#);
+    let fixture = create_local_coding_eval(&temp.path().join("test-coding"));
+    let store_root = init_workspace(temp.path().join("evals"));
     fs::write(
-            temp.path().join("agents/psychevo-live.toml"),
-            "schema_version = 1\nid = \"psychevo-live\"\nkind = \"psychevo\"\n[psychevo]\ncommand = \"pevo\"\n",
-        )
-        .expect("psychevo agent");
-    let project = EvalProject::load(temp.path()).expect("project");
-    let err = check_project(&project, Some("suite"), Some("psychevo-live"))
-        .expect_err("live agent should be gated");
-    assert!(err.to_string().contains("allow_live = false"), "{err:#}");
-}
+        store_root.join("peval.toml"),
+        format!(
+            r#"schema_version = 2
+kind = "workspace"
+name = "test workspace"
 
-#[test]
-pub(crate) fn fake_agents_write_artifacts_reports_compare_and_replay() {
-    let temp = tempfile::tempdir().expect("temp");
-    let run_one = run_evaluation(RunRequest {
-        config: Some(fixture_project().join("eval.toml")),
-        suite: Some("rust-swe".to_string()),
-        agent: None,
-        run_id: Some("fixture-one".to_string()),
-        store_root: None,
-        output_root: Some(temp.path().to_path_buf()),
-    })
-    .expect("run");
-    assert_eq!(run_one.status, RunStatus::Failed);
-    assert_eq!(run_one.passed_cases, 1);
-    assert_eq!(run_one.failed_cases, 1);
-    let root_one = temp.path().join("fixture-one");
-    assert!(root_one.join("summary.json").is_file());
-    assert!(
-        root_one
-            .join("cases/rust-swe__rust-swe-add__fake-pass/result.json")
-            .is_file()
-    );
-    assert!(
-        !root_one
-            .join("cases/rust-swe__rust-swe-add__fake-pass/workspace")
-            .exists(),
-        "case workspaces should not be retained as artifacts"
-    );
-    let markdown = render_report(ReportRequest {
-        run_root: root_one.clone(),
-        format: ReportFormat::Markdown,
-    })
-    .expect("markdown");
-    assert!(markdown.contains("fake-pass"));
-    assert!(markdown.contains("swe-style"));
-    assert!(markdown.contains("oracle_failed"));
-    assert!(markdown.contains("cargo test"));
-    assert!(!markdown.to_ascii_lowercase().contains("diff"));
-    assert!(!markdown.to_ascii_lowercase().contains("patch"));
-    let html = render_report(ReportRequest {
-        run_root: root_one.clone(),
-        format: ReportFormat::Html,
-    })
-    .expect("html");
-    assert!(html.contains("id=\"caseTable\""));
-    let json_report = render_report(ReportRequest {
-        run_root: root_one.clone(),
-        format: ReportFormat::Json,
-    })
-    .expect("json");
-    assert!(json_report.contains("\"schema_version\": 1"));
+[[agents]]
+id = "fake-pass"
+kind = "fake"
+fake = {{ behavior = "fail" }}
 
-    let run_two = run_evaluation(RunRequest {
-        config: Some(fixture_project().join("eval.toml")),
-        suite: Some("rust-swe".to_string()),
-        agent: Some("fake-pass".to_string()),
-        run_id: Some("fixture-two".to_string()),
-        store_root: None,
-        output_root: Some(temp.path().to_path_buf()),
-    })
-    .expect("run two");
-    assert_eq!(run_two.status, RunStatus::Passed);
-    let compare = compare_runs(CompareRequest {
-        run_roots: vec![root_one.clone(), temp.path().join("fixture-two")],
-    })
-    .expect("compare");
-    assert_eq!(compare.runs.len(), 2);
-    assert!(
-        compare
-            .cases
-            .iter()
-            .any(|case| case.key == "rust-swe/rust-swe-add/fake-pass")
-    );
-    let replay = replay_run(ReplayRequest {
-        run_root: root_one,
-        case_id: Some("rust-swe__rust-swe-add__fake-pass".to_string()),
-    })
-    .expect("replay");
-    assert!(
-        replay
-            .events
-            .iter()
-            .any(|event| event.kind == "scorer_finished")
-    );
-}
-
-#[test]
-pub(crate) fn eval_store_init_default_root_env_root_output_bypass_and_manifest_namespace() {
-    let _lock = ENV_LOCK.lock().expect("env lock");
-    let _env = set_env_var("PEVAL_ROOT", None);
-    let temp = tempfile::tempdir().expect("temp");
-    let psychevo_home = temp.path().join("psychevo-home");
-    let user_home = temp.path().join("user-home");
-    fs::create_dir_all(&user_home).expect("user home");
-    let _psychevo_home = set_env_var("PSYCHEVO_HOME", Some(&psychevo_home));
-    let _home = set_env_var("HOME", Some(&user_home));
-
-    let project_root = temp.path().join("project");
-    fs::create_dir_all(&project_root).expect("project dir");
-    write_minimal_project(&project_root, 1, r#"agents = ["fake-pass"]"#);
-
-    let uninitialized = run_evaluation(RunRequest {
-        config: Some(project_root.join("eval.toml")),
-        suite: Some("suite".to_string()),
-        agent: Some("fake-pass".to_string()),
-        run_id: Some("uninitialized".to_string()),
-        store_root: None,
-        output_root: None,
-    })
-    .expect_err("uninitialized store should fail");
-    assert!(uninitialized.to_string().contains("peval init"));
-
-    let initialized = init_eval_store(InitStoreRequest {
-        root: None,
-        force: false,
-    })
-    .expect("init default root");
-    assert_eq!(initialized.root, user_home.join(".local/evals"));
-    assert!(psychevo_home.join("peval.toml").is_file());
-    assert!(initialized.root.join("runs").is_dir());
-    assert!(initialized.root.join("datasets").is_dir());
-    assert!(initialized.root.join("index.json").is_file());
-    assert!(initialized.root.join("dashboard.html").is_file());
-
-    let same_init = init_eval_store(InitStoreRequest {
-        root: None,
-        force: false,
-    })
-    .expect("idempotent init");
-    assert_eq!(same_init.root, initialized.root);
-
-    let replacement_root = temp.path().join("replacement-root");
-    let replace_without_force = init_eval_store(InitStoreRequest {
-        root: Some(replacement_root),
-        force: false,
-    })
-    .expect_err("changing root requires force");
-    assert!(replace_without_force.to_string().contains("--force"));
-
-    let default = run_evaluation(RunRequest {
-        config: Some(project_root.join("eval.toml")),
-        suite: Some("suite".to_string()),
-        agent: Some("fake-pass".to_string()),
-        run_id: Some("default-root".to_string()),
-        store_root: None,
-        output_root: None,
-    })
-    .expect("default root");
-    assert_eq!(
-        default.artifact_root,
-        initialized.root.join("runs/bad").join("default-root")
-    );
-    assert!(initialized.root.join("index.json").is_file());
-    assert!(default.artifact_root.join("report.html").is_file());
-    assert!(default.artifact_root.join("report.md").is_file());
-
-    let flag_root = temp.path().join("flag-root");
-    let by_flag = run_evaluation(RunRequest {
-        config: Some(project_root.join("eval.toml")),
-        suite: Some("suite".to_string()),
-        agent: Some("fake-pass".to_string()),
-        run_id: Some("flag-root".to_string()),
-        store_root: Some(flag_root.clone()),
-        output_root: None,
-    })
-    .expect("flag root");
-    assert_eq!(
-        by_flag.artifact_root,
-        flag_root.join("runs/bad").join("flag-root")
-    );
-
-    let env_root = temp.path().join("env-root");
-    {
-        let _env = set_env_var("PEVAL_ROOT", Some(&env_root));
-        let by_env = run_evaluation(RunRequest {
-            config: Some(project_root.join("eval.toml")),
-            suite: Some("suite".to_string()),
-            agent: Some("fake-pass".to_string()),
-            run_id: Some("env-root".to_string()),
-            store_root: None,
-            output_root: None,
-        })
-        .expect("env root");
-        assert_eq!(by_env.artifact_root, env_root.join("runs/bad/env-root"));
-    }
-
-    let bypass_root = temp.path().join("bypass-store");
-    let external = temp.path().join("external");
-    let bypass = run_evaluation(RunRequest {
-        config: Some(project_root.join("eval.toml")),
-        suite: Some("suite".to_string()),
-        agent: Some("fake-pass".to_string()),
-        run_id: Some("external-run".to_string()),
-        store_root: Some(bypass_root.clone()),
-        output_root: Some(external.clone()),
-    })
-    .expect("external run");
-    assert_eq!(bypass.artifact_root, external.join("external-run"));
-    assert!(
-        !bypass_root.join("index.json").exists(),
-        "explicit output-root should not register in EvalStore"
-    );
-
-    let legacy_root = temp.path().join("legacy-project");
-    fs::create_dir_all(&legacy_root).expect("legacy dir");
-    write_minimal_project(&legacy_root, 1, r#"agents = ["fake-pass"]"#);
-    fs::write(
-        legacy_root.join("eval.toml"),
-        "schema_version = 1\nname = \"legacy\"\noutput_root = \"legacy-runs\"\n",
+[[benchmarks]]
+id = "test-coding"
+path = "{}"
+"#,
+            fixture.join("benchmark.toml").display()
+        ),
     )
-    .expect("legacy manifest");
-    let namespace_store = temp.path().join("namespace-store");
-    let legacy = run_evaluation(RunRequest {
-        config: Some(legacy_root.join("eval.toml")),
-        suite: Some("suite".to_string()),
-        agent: Some("fake-pass".to_string()),
-        run_id: Some("legacy-run".to_string()),
-        store_root: Some(namespace_store.clone()),
-        output_root: None,
-    })
-    .expect("legacy run");
+    .expect("workspace registry");
+
+    let one_off =
+        load_one_off_benchmark("test-coding", Some(store_root.clone())).expect("one-off benchmark");
     assert_eq!(
-        legacy.artifact_root,
-        namespace_store.join("legacy-runs/legacy-run")
-    );
-    assert!(namespace_store.join("legacy-runs/latest.json").is_file());
-
-    fs::write(
-        legacy_root.join("eval.toml"),
-        "schema_version = 1\nname = \"legacy\"\noutput_root = \"../outside\"\n",
-    )
-    .expect("invalid namespace manifest");
-    let invalid = run_evaluation(RunRequest {
-        config: Some(legacy_root.join("eval.toml")),
-        suite: Some("suite".to_string()),
-        agent: Some("fake-pass".to_string()),
-        run_id: Some("invalid".to_string()),
-        store_root: Some(namespace_store),
-        output_root: None,
-    })
-    .expect_err("invalid namespace");
-    assert!(invalid.to_string().contains("output_root"));
-}
-
-#[test]
-pub(crate) fn eval_store_index_fallback_latest_dataset_import_and_dashboard() {
-    let _lock = ENV_LOCK.lock().expect("env lock");
-    let _env = set_env_var("PEVAL_ROOT", None);
-    let temp = tempfile::tempdir().expect("temp");
-    let store_root = temp.path().join("store");
-    let project = fixture_project();
-
-    let failed = run_evaluation(RunRequest {
-        config: Some(project.join("eval.toml")),
-        suite: Some("rust-swe".to_string()),
-        agent: None,
-        run_id: Some("store-failed".to_string()),
-        store_root: Some(store_root.clone()),
-        output_root: None,
-    })
-    .expect("failed run");
-    assert_eq!(failed.status, RunStatus::Failed);
-    let passed = run_evaluation(RunRequest {
-        config: Some(project.join("eval.toml")),
-        suite: Some("rust-swe".to_string()),
-        agent: Some("fake-pass".to_string()),
-        run_id: Some("store-passed".to_string()),
-        store_root: Some(store_root.clone()),
-        output_root: None,
-    })
-    .expect("passed run");
-    assert_eq!(passed.status, RunStatus::Passed);
-
-    let loaded = EvalProject::load(&project).expect("project");
-    let store = EvalStore::new(store_root.clone());
-    let namespace = loaded.namespace().expect("namespace");
-    let failed_latest = store
-        .resolve_run_selector(
-            Some(&namespace),
-            Path::new("latest"),
-            &RunSelectorFilters {
-                suite: Some("rust-swe".to_string()),
-                agent: None,
-                status: Some(RunStatusFilter::Failed),
-            },
-        )
-        .expect("latest failed");
-    assert_eq!(failed_latest, failed.artifact_root);
-
-    fs::write(store_root.join("index.json"), "{not-json").expect("corrupt index");
-    let fallback_runs = store.list_runs().expect("fallback scan");
-    assert!(fallback_runs.iter().any(|run| run.run_id == "store-failed"));
-    assert!(fallback_runs.iter().any(|run| run.run_id == "store-passed"));
-
-    let payload = temp.path().join("tasks.jsonl");
-    fs::write(&payload, "{\"prompt\":\"x\"}\n").expect("payload");
-    let dataset = import_dataset(DatasetImportRequest {
-        store_root: Some(store_root.clone()),
-        path: payload.clone(),
-        id: Some("GDPVal Mini".to_string()),
-        name: None,
-        kind: Some("gdpval".to_string()),
-        loader: Some("jsonl".to_string()),
-        split: Some("mini".to_string()),
-        sample_limit: Some(1),
-        cache_key: Some("gdpval-mini".to_string()),
-        license: Some("local".to_string()),
-        tags: vec!["fixture".to_string()],
-        notes: Some("local reference".to_string()),
-    })
-    .expect("dataset import");
-    assert_eq!(dataset.id, "gdpval_mini");
-    assert!(dataset.payload_exists);
-    assert!(
-        store_root
-            .join("datasets/gdpval_mini/dataset.toml")
-            .is_file()
+        one_off.agents["fake-pass"].fake.behavior,
+        FakeBehavior::Fail
     );
 
-    let dashboard = fs::read_to_string(store_root.join("dashboard.html")).expect("dashboard");
-    assert!(dashboard.contains("Evaluation results center"));
-    assert!(dashboard.contains("gdpval_mini"));
-    assert!(!dashboard.contains("scorer_finished"));
+    let eval = load_eval_config(&fixture.join("eval.toml"), Some(store_root.clone()))
+        .expect("eval config wins registry");
+    assert_eq!(eval.agents["fake-pass"].fake.behavior, FakeBehavior::Pass);
 
-    let report = fs::read_to_string(passed.artifact_root.join("report.html")).expect("report");
-    assert!(report.contains("Psychevo evaluation report"));
-    assert!(report.contains("trajectory"));
-    assert!(!report.contains("case execution started"));
-}
-
-#[test]
-pub(crate) fn scorer_failure_malformed_json_and_timeout_are_classified() {
-    let temp = tempfile::tempdir().expect("temp");
-    let project = create_scorer_project(temp.path());
-    let summary = run_evaluation(RunRequest {
-        config: Some(project.join("eval.toml")),
-        suite: Some("scorer-suite".to_string()),
-        agent: Some("fake-pass".to_string()),
-        run_id: Some("scorer-cases".to_string()),
-        store_root: None,
-        output_root: Some(temp.path().join("runs")),
-    })
-    .expect("run");
-    let statuses = summary
-        .cases
-        .iter()
-        .map(|case| (case.task_id.as_str(), case.status))
-        .collect::<BTreeMap<_, _>>();
-    assert_eq!(statuses["scorer-success"], CaseStatus::Passed);
-    assert_eq!(statuses["scorer-failure"], CaseStatus::ScorerFailed);
-    assert_eq!(statuses["scorer-malformed"], CaseStatus::ScorerFailed);
-    assert_eq!(statuses["scorer-timeout"], CaseStatus::Timeout);
-}
-
-#[test]
-pub(crate) fn psychevo_adapter_preserves_runtime_observation_events_in_trajectory() {
-    let temp = tempfile::tempdir().expect("temp");
-    let project = create_psychevo_trace_project(temp.path());
-    let summary = run_evaluation(RunRequest {
-        config: Some(project.join("eval.toml")),
-        suite: Some("trace-suite".to_string()),
-        agent: Some("psychevo-trace".to_string()),
-        run_id: Some("trace-run".to_string()),
-        store_root: Some(temp.path().join("store")),
-        output_root: None,
-    })
-    .expect("run");
-    assert_eq!(summary.status, RunStatus::Passed);
-    let trajectory = fs::read_to_string(
-        summary
-            .artifact_root
-            .join("cases/trace-suite__trace-task__psychevo-trace/trajectory.jsonl"),
-    )
-    .expect("trajectory");
-    assert!(trajectory.contains("\"kind\":\"psychevo_run_start\""));
-    assert!(trajectory.contains("\"kind\":\"psychevo_tool_execution_start\""));
-    assert!(trajectory.contains("\"raw_event\":{\"session_id\":\"trace-session\""));
-    assert!(trajectory.contains("agent stderr line"));
-}
-
-#[test]
-pub(crate) fn cli_smoke_covers_all_commands() {
-    let _lock = ENV_LOCK.lock().expect("env lock");
-    let _env = set_env_var("PEVAL_ROOT", None);
-    let temp = tempfile::tempdir().expect("temp");
-    let psychevo_home = temp.path().join("psychevo-home");
-    let user_home = temp.path().join("user-home");
-    fs::create_dir_all(&user_home).expect("user home");
-    let _psychevo_home = set_env_var("PSYCHEVO_HOME", Some(&psychevo_home));
-    let _home = set_env_var("HOME", Some(&user_home));
-
-    let project = fixture_project();
-    let config = project.join("eval.toml");
-    let store_root = temp.path().join("cli-store");
-
-    let init = run_cli_from([
-        "peval",
-        "init",
-        "--root",
-        store_root.to_str().unwrap(),
-        "--json",
-    ]);
-    assert_eq!(init.code, 0, "{}", init.stderr);
-    assert!(init.stdout.contains("cli-store"));
-
-    let removed_project = run_cli_from(["peval", "check", "--project", project.to_str().unwrap()]);
-    assert_eq!(removed_project.code, 2);
-
-    let doctor = run_cli_from(["peval", "doctor", "-c", config.to_str().unwrap(), "--json"]);
-    assert_eq!(doctor.code, 0, "{}", doctor.stderr);
-    let list = run_cli_from(["peval", "list", "-c", config.to_str().unwrap(), "--json"]);
-    assert_eq!(list.code, 0, "{}", list.stderr);
-    assert!(!list.stdout.to_ascii_lowercase().contains("csv"));
-    let check = run_cli_from([
+    let direct = run_cli_from([
         "peval",
         "check",
-        "-c",
-        config.to_str().unwrap(),
-        "--suite",
-        "rust-swe",
-        "--json",
-    ]);
-    assert_eq!(check.code, 0, "{}", check.stderr);
-    let run = run_cli_from([
-        "peval",
-        "run",
-        "-c",
-        config.to_str().unwrap(),
-        "--suite",
-        "rust-swe",
+        "--root",
+        store_root.to_str().expect("root"),
+        "--benchmark",
+        "test-coding",
         "--agent",
         "fake-pass",
-        "--run-id",
-        "cli-smoke",
-        "--output-root",
-        temp.path().to_str().unwrap(),
-        "--json",
-    ]);
-    assert_eq!(run.code, 0, "{}", run.stderr);
-    let run_root = temp.path().join("cli-smoke");
-    let failing_run = run_cli_from([
-        "peval",
-        "run",
-        "-c",
-        config.to_str().unwrap(),
-        "--suite",
+        "--task-set",
         "rust-swe",
-        "--run-id",
-        "cli-smoke-failing-suite",
-        "--output-root",
-        temp.path().to_str().unwrap(),
         "--json",
     ]);
-    assert_eq!(failing_run.code, 1);
-    assert!(failing_run.stdout.contains("\"failed_cases\": 1"));
-    let report = run_cli_from([
-        "peval",
-        "report",
-        "--run-root",
-        run_root.to_str().unwrap(),
-        "--format",
-        "json",
-    ]);
-    assert_eq!(report.code, 0, "{}", report.stderr);
-    let compare = run_cli_from([
-        "peval",
-        "compare",
-        run_root.to_str().unwrap(),
-        run_root.to_str().unwrap(),
-        "--json",
-    ]);
-    assert_eq!(compare.code, 0, "{}", compare.stderr);
-    let replay = run_cli_from([
-        "peval",
-        "replay",
-        "--run-root",
-        run_root.to_str().unwrap(),
-        "--json",
-    ]);
-    assert_eq!(replay.code, 0, "{}", replay.stderr);
+    assert_eq!(direct.code, 0, "stderr: {}", direct.stderr);
+    let payload: Value = serde_json::from_str(&direct.stdout).expect("direct json");
+    assert_eq!(payload["benchmark"], "test-coding");
+    assert_eq!(payload["cases"], 1);
 
-    let payload = temp.path().join("dataset.jsonl");
-    fs::write(&payload, "{\"prompt\":\"hello\"}\n").expect("dataset payload");
-    let dataset = run_cli_from([
+    let missing_agent = run_cli_from([
         "peval",
-        "dataset",
-        "import",
-        payload.to_str().unwrap(),
-        "--id",
-        "cli-data",
-        "--kind",
-        "jsonl",
-        "--json",
-    ]);
-    assert_eq!(dataset.code, 0, "{}", dataset.stderr);
-    assert!(dataset.stdout.contains("\"id\": \"cli-data\""));
-
-    let store_run = run_cli_from([
-        "peval",
-        "run",
-        "-c",
-        config.to_str().unwrap(),
-        "--suite",
+        "check",
+        "--root",
+        store_root.to_str().expect("root"),
+        "--benchmark",
+        "test-coding",
+        "--task-set",
         "rust-swe",
-        "--agent",
-        "fake-pass",
-        "--run-id",
-        "cli-store-run",
-        "--json",
     ]);
-    assert_eq!(store_run.code, 0, "{}", store_run.stderr);
+    assert_eq!(missing_agent.code, 1);
     assert!(
-        store_root
-            .join("runs/local-coding/cli-store-run/report.html")
-            .is_file()
+        missing_agent
+            .stderr
+            .contains("--benchmark requires an explicit --agent")
     );
-    assert!(store_root.join("dashboard.html").is_file());
-
-    let list_runs = run_cli_from(["peval", "list", "--kind", "runs", "--json"]);
-    assert_eq!(list_runs.code, 0, "{}", list_runs.stderr);
-    assert!(list_runs.stdout.contains("cli-store-run"));
-
-    let list_datasets = run_cli_from(["peval", "list", "--kind", "datasets", "--json"]);
-    assert_eq!(list_datasets.code, 0, "{}", list_datasets.stderr);
-    assert!(list_datasets.stdout.contains("cli-data"));
-
-    let latest_report = run_cli_from([
-        "peval",
-        "report",
-        "-c",
-        config.to_str().unwrap(),
-        "--run-root",
-        "latest",
-        "--agent",
-        "fake-pass",
-        "--status",
-        "passed",
-        "--format",
-        "json",
-    ]);
-    assert_eq!(latest_report.code, 0, "{}", latest_report.stderr);
-    assert!(
-        latest_report
-            .stdout
-            .contains("\"run_id\": \"cli-store-run\"")
-    );
-
-    let latest_compare = run_cli_from([
-        "peval",
-        "compare",
-        "latest",
-        "local-coding/cli-store-run",
-        "-c",
-        config.to_str().unwrap(),
-        "--agent",
-        "fake-pass",
-        "--status",
-        "passed",
-        "--json",
-    ]);
-    assert_eq!(latest_compare.code, 0, "{}", latest_compare.stderr);
-
-    let latest_replay = run_cli_from([
-        "peval",
-        "replay",
-        "--run-root",
-        "latest",
-        "--agent",
-        "fake-pass",
-        "--status",
-        "passed",
-        "--json",
-    ]);
-    assert_eq!(latest_replay.code, 0, "{}", latest_replay.stderr);
 }
 
-pub(crate) fn write_minimal_project(root: &Path, schema_version: u32, suite_extra: &str) {
-    fs::create_dir_all(root.join("agents")).expect("agents");
-    fs::create_dir_all(root.join("suites")).expect("suites");
-    fs::create_dir_all(root.join("tasks/task/workspace")).expect("workspace");
+#[test]
+pub(crate) fn duplicate_registry_ids_fail_in_their_own_layer() {
+    let temp = tempfile::tempdir().expect("temp");
+    let fixture = create_local_coding_eval(&temp.path().join("test-coding"));
     fs::write(
-        root.join("eval.toml"),
-        format!("schema_version = {schema_version}\nname = \"bad\"\n"),
-    )
-    .expect("project");
-    fs::write(
-        root.join("agents/fake-pass.toml"),
-        "schema_version = 1\nid = \"fake-pass\"\nkind = \"fake\"\n[fake]\nbehavior = \"pass\"\n",
-    )
-    .expect("agent");
-    fs::write(
-        root.join("suites/suite.toml"),
-        format!(
-            "schema_version = 1\nid = \"suite\"\n{}\ntasks = [\"../tasks/task/task.toml\"]\n",
-            suite_extra
-        ),
-    )
-    .expect("suite");
-    fs::write(
-            root.join("tasks/task/task.toml"),
-            "schema_version = 1\nid = \"task\"\n[prompt]\ntext = \"fix\"\n[workspace]\nsource = \"workspace\"\n[scorer]\ncommand = [\"sh\", \"score.sh\"]\n",
-        )
-        .expect("task");
-    fs::write(
-        root.join("tasks/task/score.sh"),
-        "echo '{\"schema_version\":1,\"passed\":true,\"score\":1.0,\"message\":\"ok\"}'\n",
-    )
-    .expect("score");
-}
+        fixture.join("duplicate-agents.eval.toml"),
+        r#"schema_version = 4
+id = "duplicate-agents"
+name = "duplicate agents"
 
-pub(crate) fn create_scorer_project(root: &Path) -> PathBuf {
-    fs::create_dir_all(root.join("agents")).expect("agents");
-    fs::create_dir_all(root.join("suites")).expect("suites");
-    fs::write(
-        root.join("eval.toml"),
-        "schema_version = 1\nname = \"scorer-project\"\n",
-    )
-    .expect("project");
-    fs::write(
-        root.join("agents/fake-pass.toml"),
-        "schema_version = 1\nid = \"fake-pass\"\nkind = \"fake\"\n[fake]\nbehavior = \"pass\"\n",
-    )
-    .expect("agent");
-    let tasks = [
-        (
-            "scorer-success",
-            "echo '{\"schema_version\":1,\"passed\":true,\"score\":1.0,\"message\":\"ok\"}'\n",
-        ),
-        ("scorer-failure", "echo scorer failed >&2\nexit 7\n"),
-        ("scorer-malformed", "echo not-json\n"),
-        ("scorer-timeout", "sleep 2\n"),
-    ];
-    let mut task_paths = Vec::new();
-    for (id, script) in tasks {
-        let dir = root.join("tasks").join(id);
-        fs::create_dir_all(dir.join("workspace")).expect("workspace");
-        fs::write(dir.join("workspace/README.md"), id).expect("readme");
-        fs::write(dir.join("score.sh"), script).expect("score");
-        let timeout = if id == "scorer-timeout" {
-            "timeout_seconds = 1\n"
-        } else {
-            ""
-        };
-        fs::write(
-                dir.join("task.toml"),
-                format!(
-                    "schema_version = 1\nid = \"{id}\"\n[prompt]\ntext = \"score\"\n[workspace]\nsource = \"workspace\"\n[scorer]\ncommand = [\"sh\", \"score.sh\"]\n{timeout}"
-                ),
-            )
-            .expect("task");
-        task_paths.push(format!("\"../tasks/{id}/task.toml\""));
-    }
-    fs::write(
-        root.join("suites/scorer.toml"),
-        format!(
-            "schema_version = 1\nid = \"scorer-suite\"\nagents = [\"fake-pass\"]\ntasks = [{}]\n",
-            task_paths.join(", ")
-        ),
-    )
-    .expect("suite");
-    root.to_path_buf()
-}
+[benchmark]
+path = "benchmark.toml"
 
-pub(crate) fn create_psychevo_trace_project(root: &Path) -> PathBuf {
-    fs::create_dir_all(root.join("agents")).expect("agents");
-    fs::create_dir_all(root.join("suites")).expect("suites");
-    let task_dir = root.join("tasks/trace-task");
-    fs::create_dir_all(task_dir.join("workspace")).expect("workspace");
-    fs::write(
-        root.join("eval.toml"),
-        "schema_version = 1\nname = \"trace-project\"\nallow_live = true\n",
-    )
-    .expect("project");
-    fs::write(
-            root.join("agents/psychevo-trace.toml"),
-            "schema_version = 1\nid = \"psychevo-trace\"\nkind = \"psychevo\"\n[psychevo]\ncommand = \"sh\"\nargs = [\"agent.sh\", \"{workspace}\", \"{prompt}\"]\n",
-        )
-        .expect("agent");
-    fs::write(
-            root.join("suites/trace.toml"),
-            "schema_version = 1\nid = \"trace-suite\"\nagents = [\"psychevo-trace\"]\ntasks = [\"../tasks/trace-task/task.toml\"]\n",
-        )
-        .expect("suite");
-    fs::write(
-            task_dir.join("task.toml"),
-            "schema_version = 1\nid = \"trace-task\"\n[prompt]\ntext = \"trace\"\n[workspace]\nsource = \"workspace\"\n[scorer]\ncommand = [\"sh\", \"score.sh\"]\n",
-        )
-        .expect("task");
-    fs::write(
-        task_dir.join("score.sh"),
-        "echo '{\"schema_version\":1,\"passed\":true,\"score\":1.0,\"message\":\"ok\"}'\n",
-    )
-    .expect("score");
-    fs::write(
-        task_dir.join("agent.sh"),
-        r#"#!/bin/sh
-printf '%s\n' '{"type":"run_start","session_id":"trace-session","workdir":"workspace"}'
-printf '%s\n' '{"type":"message_update","role":"assistant","delta":"editing"}'
-printf '%s\n' '{"type":"tool_execution_start","tool_name":"write","tool_call_id":"call-1"}'
-printf '%s\n' '{"type":"agent_end","outcome":"normal","final_answer":"done"}'
-echo "agent stderr line" >&2
+[select]
+agents = ["fake-pass"]
+task_sets = ["rust-swe"]
+
+[[agents]]
+id = "fake-pass"
+kind = "fake"
+fake = { behavior = "pass" }
+
+[[agents]]
+id = "fake-pass"
+kind = "fake"
+fake = { behavior = "fail" }
 "#,
     )
-    .expect("agent script");
+    .expect("duplicate eval");
+    let err = EvalProject::load(fixture.join("duplicate-agents.eval.toml"))
+        .expect_err("duplicate agent ids should fail");
+    assert!(format!("{err:#}").contains("duplicate agent id `fake-pass`"));
+}
+
+#[test]
+pub(crate) fn init_creates_v2_workspace_without_cache_or_dashboard() {
+    let temp = tempfile::tempdir().expect("temp");
+    let root = temp.path().join("evals");
+    let initialized = init_eval_store(InitStoreRequest {
+        root: Some(root.clone()),
+        make_default: false,
+        force: false,
+    })
+    .expect("init");
+
+    assert_eq!(initialized.schema_version, WORKSPACE_SCHEMA_VERSION);
+    assert_eq!(initialized.root, absolute_path(&root));
+    assert!(initialized.root.join("peval.toml").is_file());
+    assert!(initialized.root.join("runs").is_dir());
+    assert!(initialized.root.join("datasets").is_dir());
+    assert!(initialized.root.join("scripts").is_dir());
+    assert!(!initialized.root.join(".cache").exists());
+    assert!(!initialized.root.join("dashboard.html").exists());
+
+    let workspace = read_workspace_config(&initialized.root).expect("workspace config");
+    assert_eq!(workspace.schema_version, WORKSPACE_SCHEMA_VERSION);
+    assert!(workspace.agents.is_empty());
+    assert!(workspace.benchmarks.is_empty());
+}
+
+#[test]
+pub(crate) fn cell_runs_execute_reuse_and_overwrite() {
+    let temp = tempfile::tempdir().expect("temp");
+    let fixture = create_local_coding_eval(&temp.path().join("test-coding"));
+    let store_root = init_workspace(temp.path().join("evals"));
+
+    let first = run_evaluation(RunRequest {
+        config: Some(fixture.join("eval.toml")),
+        benchmark: None,
+        task_set: Some("rust-swe".to_string()),
+        task: None,
+        agent: None,
+        overwrite: false,
+        store_root: Some(store_root.clone()),
+        output_root: None,
+    })
+    .expect("first run");
+    assert_eq!(first.schema_version, ARTIFACT_SCHEMA_VERSION);
+    assert_eq!(first.benchmark, "test-coding");
+    assert_eq!(first.status, RunStatus::Failed);
+    assert_eq!(first.selected_cells, 2);
+    assert_eq!(first.executed_cells, 2);
+    assert_eq!(first.reused_cells, 0);
+    assert_eq!(first.passed_cells, 1);
+    assert_eq!(first.failed_cells, 1);
+    assert!(
+        first
+            .cells
+            .iter()
+            .all(|cell| cell.cell_root.join("run.json").is_file())
+    );
+    assert!(
+        first
+            .cells
+            .iter()
+            .all(|cell| cell.cell_root.join("trajectory.jsonl").is_file())
+    );
+    assert!(!store_root.join("index.json").exists());
+    assert!(!store_root.join(".cache").exists());
+    assert!(!store_root.join("dashboard.html").exists());
+
+    let second = run_evaluation(RunRequest {
+        config: Some(fixture.join("eval.toml")),
+        benchmark: None,
+        task_set: Some("rust-swe".to_string()),
+        task: None,
+        agent: None,
+        overwrite: false,
+        store_root: Some(store_root.clone()),
+        output_root: None,
+    })
+    .expect("second run");
+    assert_eq!(second.executed_cells, 0);
+    assert_eq!(second.reused_cells, 2);
+    assert!(
+        second
+            .cells
+            .iter()
+            .all(|cell| cell.action == CellRunAction::Reused)
+    );
+
+    let overwrite = run_evaluation(RunRequest {
+        config: Some(fixture.join("eval.toml")),
+        benchmark: None,
+        task_set: Some("rust-swe".to_string()),
+        task: None,
+        agent: Some("fake-pass".to_string()),
+        overwrite: true,
+        store_root: Some(store_root),
+        output_root: None,
+    })
+    .expect("overwrite");
+    assert_eq!(overwrite.status, RunStatus::Passed);
+    assert_eq!(overwrite.selected_cells, 1);
+    assert_eq!(overwrite.overwritten_cells, 1);
+    assert_eq!(overwrite.reused_cells, 0);
+}
+
+#[test]
+pub(crate) fn view_scopes_filters_formats_and_privacy_boundary() {
+    let temp = tempfile::tempdir().expect("temp");
+    let fixture = create_local_coding_eval(&temp.path().join("test-coding"));
+    let store_root = init_workspace(temp.path().join("evals"));
+    let run = run_evaluation(RunRequest {
+        config: Some(fixture.join("eval.toml")),
+        benchmark: None,
+        task_set: Some("rust-swe".to_string()),
+        task: None,
+        agent: None,
+        overwrite: false,
+        store_root: Some(store_root.clone()),
+        output_root: None,
+    })
+    .expect("run");
+
+    let markdown = run_view(ViewArgs {
+        config: Some(fixture.join("eval.toml")),
+        benchmark: None,
+        store_root: Some(store_root.clone()),
+        path: Some(PathBuf::from("runs/test-coding/fake-pass")),
+        task_set: None,
+        agent: None,
+        task: None,
+        status: Some(CaseStatusFilter::Passed),
+        group_by: vec!["agent,task-set".to_string()],
+        include: vec!["summary,matrix,usage".to_string()],
+        format: Some(ViewFormat::Markdown),
+        output: None,
+    })
+    .expect("markdown view");
+    assert!(markdown.stdout.contains("# peval view"));
+    assert!(markdown.stdout.contains("fake-pass"));
+    assert!(!markdown.stdout.contains("trajectory.jsonl"));
+    assert!(!markdown.stdout.contains("evaluator.stdout"));
+
+    let json = run_view(ViewArgs {
+        config: Some(fixture.join("eval.toml")),
+        benchmark: None,
+        store_root: Some(store_root.clone()),
+        path: None,
+        task_set: Some("rust-swe".to_string()),
+        agent: Some("fake-pass".to_string()),
+        task: None,
+        status: None,
+        group_by: Vec::new(),
+        include: vec!["summary,matrix".to_string()],
+        format: Some(ViewFormat::Json),
+        output: None,
+    })
+    .expect("json view");
+    let payload: Value = serde_json::from_str(&json.stdout).expect("view json");
+    assert_eq!(payload["schema_version"], VIEW_SCHEMA_VERSION);
+    assert_eq!(payload["summary"]["total_cells"], 1);
+    assert!(payload["matrix"][0]["artifact_root"].as_str().is_some());
+
+    let html_path = temp.path().join("view.html");
+    let html = run_view(ViewArgs {
+        config: Some(fixture.join("eval.toml")),
+        benchmark: None,
+        store_root: Some(store_root),
+        path: Some(run.cells[0].cell_root.clone()),
+        task_set: None,
+        agent: None,
+        task: None,
+        status: None,
+        group_by: Vec::new(),
+        include: vec!["summary,matrix".to_string()],
+        format: None,
+        output: Some(html_path.clone()),
+    })
+    .expect("html view");
+    assert_eq!(html.stdout, format!("wrote {}\n", html_path.display()));
+    let html = fs::read_to_string(html_path).expect("html file");
+    assert!(html.contains("<!doctype html>"));
+    assert!(!html.contains("trajectory.jsonl"));
+}
+
+#[test]
+pub(crate) fn removed_commands_and_flags_fail_at_cli_boundary() {
+    assert_eq!(run_cli_from(["peval", "report"]).code, 2);
+    assert_eq!(run_cli_from(["peval", "compare", "a", "b"]).code, 2);
+    assert_eq!(
+        run_cli_from(["peval", "replay", "--run-root", "latest"]).code,
+        2
+    );
+    assert_eq!(
+        run_cli_from(["peval", "run", "--run-id", "old-style"]).code,
+        2
+    );
+    assert_eq!(run_cli_from(["peval", "project", "list"]).code, 1);
+    assert_eq!(
+        run_cli_from(["peval", "check", "--project", "legacy"]).code,
+        2
+    );
+    assert_eq!(run_cli_from(["peval", "view", "latest"]).code, 2);
+    assert_eq!(run_cli_from(["peval", "list", "--kind", "runs"]).code, 2);
+    assert_eq!(
+        run_cli_from(["peval", "check", "--suite", "legacy"]).code,
+        2
+    );
+    assert_eq!(
+        run_cli_from(["peval", "view", "--group-by", "suite"]).code,
+        1
+    );
+    assert_eq!(run_cli_from(["peval", "list", "--kind", "suites"]).code, 2);
+}
+
+#[test]
+pub(crate) fn service_read_only_can_view_but_not_execute() {
+    let temp = tempfile::tempdir().expect("temp");
+    let fixture = create_local_coding_eval(&temp.path().join("test-coding"));
+    let store_root = init_workspace(temp.path().join("evals"));
+    run_evaluation(RunRequest {
+        config: Some(fixture.join("eval.toml")),
+        benchmark: None,
+        task_set: Some("rust-swe".to_string()),
+        task: None,
+        agent: Some("fake-pass".to_string()),
+        overwrite: false,
+        store_root: Some(store_root.clone()),
+        output_root: None,
+    })
+    .expect("seed run");
+
+    let service = EvalService::new(ServiceContext {
+        cwd: fixture.clone(),
+        env: BTreeMap::new(),
+        psychevo_home: Some(temp.path().join("psychevo-home")),
+        root_override: Some(store_root.clone()),
+        capabilities: ServiceCapabilities::read_only(),
+    });
+    let view = service
+        .view(ViewRequest {
+            config: Some(fixture.join("eval.toml")),
+            benchmark: None,
+            store_root: None,
+            path: None,
+            task_set: Some("rust-swe".to_string()),
+            agent: Some("fake-pass".to_string()),
+            task: None,
+            status: None,
+            group_by: vec![ViewGroupBy::Agent],
+            include: vec![ViewInclude::Summary, ViewInclude::Matrix],
+        })
+        .expect("read-only view");
+    assert_eq!(view.summary.total_cells, 1);
+    assert!(!store_root.join(".cache").exists());
+
+    let denied = service.run(RunRequest {
+        config: Some(fixture.join("eval.toml")),
+        benchmark: None,
+        task_set: Some("rust-swe".to_string()),
+        task: None,
+        agent: Some("fake-pass".to_string()),
+        overwrite: false,
+        store_root: None,
+        output_root: None,
+    });
+    assert_eq!(
+        denied.expect_err("execute denied").code,
+        "capability_denied"
+    );
+}
+
+#[test]
+pub(crate) fn unsupported_old_artifact_is_ignored_by_view_scan() {
+    let temp = tempfile::tempdir().expect("temp");
+    let fixture = create_local_coding_eval(&temp.path().join("test-coding"));
+    let store_root = init_workspace(temp.path().join("evals"));
+    fs::create_dir_all(store_root.join("runs/test-coding/legacy-run")).expect("legacy dir");
+    fs::write(
+        store_root.join("runs/test-coding/legacy-run/run.json"),
+        r#"{"schema_version":5,"benchmark":"old","benchmark_slug":"old","cell_key":"old","fingerprint":"old","cell_root":"old","started_at_ms":0,"finished_at_ms":0,"case":{}}"#,
+    )
+    .expect("legacy run");
+
+    let view = build_view(ViewRequest {
+        config: Some(fixture.join("eval.toml")),
+        benchmark: None,
+        store_root: Some(store_root),
+        path: None,
+        task_set: None,
+        agent: None,
+        task: None,
+        status: None,
+        group_by: Vec::new(),
+        include: vec![ViewInclude::Summary, ViewInclude::Matrix],
+    })
+    .expect("view ignores legacy");
+    assert_eq!(view.summary.total_cells, 0);
+}
+
+#[test]
+pub(crate) fn external_evaluators_check_but_do_not_run() {
+    let temp = tempfile::tempdir().expect("temp");
+    let root = temp.path().join("tau2-eval");
+    fs::create_dir_all(&root).expect("project root");
+    fs::write(
+        root.join("benchmark.toml"),
+        r#"schema_version = 4
+id = "tau2-declaration"
+name = "tau2-declaration"
+
+[evaluator]
+kind = "tau2"
+
+[evaluator.args]
+domain = "airline"
+
+[[task_sources]]
+path = "tasks.jsonl"
+format = "jsonl"
+
+[[task_sets]]
+id = "base"
+tasks = ["placeholder"]
+"#,
+    )
+    .expect("benchmark");
+    fs::write(
+        root.join("tasks.jsonl"),
+        r#"{"schema_version":4,"task_id":"placeholder","kind":"external","problem_statement":"placeholder","workspace":{"source":"."},"test_spec":{"checks":[]}}"#,
+    )
+    .expect("tasks");
+    fs::write(
+        root.join("eval.toml"),
+        r#"schema_version = 4
+id = "tau2-declaration-eval"
+name = "tau2 declaration eval"
+
+[benchmark]
+path = "benchmark.toml"
+
+[select]
+agents = ["fake-pass"]
+task_sets = ["base"]
+
+[[agents]]
+id = "fake-pass"
+kind = "fake"
+fake = { behavior = "pass" }
+"#,
+    )
+    .expect("eval");
+    let project = EvalProject::load(root.join("eval.toml")).expect("external project");
+    assert_eq!(project.evaluator.kind, EvaluatorKind::Tau2);
+    assert!(!project.evaluator.run_supported());
+    assert_eq!(
+        check_project(&project, None, None, None)
+            .expect("declaration-only check")
+            .len(),
+        0
+    );
+
+    let denied = EvalService::new(ServiceContext {
+        cwd: root.clone(),
+        env: BTreeMap::new(),
+        psychevo_home: Some(temp.path().join("psychevo-home")),
+        root_override: Some(init_workspace(temp.path().join("evals"))),
+        capabilities: ServiceCapabilities::all(),
+    })
+    .run(RunRequest {
+        config: Some(root.join("eval.toml")),
+        benchmark: None,
+        task_set: None,
+        task: None,
+        agent: None,
+        overwrite: false,
+        store_root: None,
+        output_root: None,
+    })
+    .expect_err("external evaluator run should fail");
+    assert_eq!(denied.code, "unsupported_evaluator");
+}
+
+pub(crate) fn init_workspace(root: PathBuf) -> PathBuf {
+    init_eval_store(InitStoreRequest {
+        root: Some(root.clone()),
+        make_default: false,
+        force: false,
+    })
+    .expect("init")
+    .root
+}
+
+pub(crate) fn create_local_coding_eval(root: &Path) -> PathBuf {
+    fs::create_dir_all(root).expect("project root");
+    fs::write(
+        root.join("benchmark.toml"),
+        r#"schema_version = 4
+id = "test-coding"
+name = "test-coding"
+
+[evaluator]
+kind = "local-coding"
+
+[[task_sources]]
+path = "tasks.jsonl"
+format = "jsonl"
+
+[[task_sets]]
+id = "rust-swe"
+tasks = ["rust-swe-add"]
+"#,
+    )
+    .expect("benchmark");
+    fs::write(
+        root.join("eval.toml"),
+        r#"schema_version = 4
+id = "test-coding-eval"
+name = "test-coding eval"
+
+[benchmark]
+path = "benchmark.toml"
+
+[select]
+agents = ["fake-pass", "fake-fail"]
+task_sets = ["rust-swe"]
+
+[[agents]]
+id = "fake-pass"
+kind = "fake"
+fake = { behavior = "pass" }
+
+[[agents]]
+id = "fake-fail"
+kind = "fake"
+fake = { behavior = "fail" }
+"#,
+    )
+    .expect("eval");
+    write_local_task(root, "rust-swe-add", "swe-style");
     root.to_path_buf()
+}
+
+pub(crate) fn write_local_task(root: &Path, id: &str, kind: &str) {
+    let dir = root.join("tasks").join(id);
+    fs::create_dir_all(dir.join("workspace")).expect("workspace");
+    fs::write(dir.join("workspace/status.txt"), "pending").expect("status");
+    fs::write(
+        root.join("tasks.jsonl"),
+        format!(
+            "{{\"schema_version\":4,\"task_id\":\"{id}\",\"kind\":\"{kind}\",\"dir\":\"tasks/{id}\",\"problem_statement\":\"complete {id}\",\"workspace\":{{\"source\":\"workspace\"}},\"test_spec\":{{\"checks\":[{{\"kind\":\"exact_file\",\"path\":\"status.txt\",\"expected\":\"fixed\"}}]}}}}\n"
+        ),
+    )
+    .expect("tasks jsonl");
 }
