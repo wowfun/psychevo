@@ -16,77 +16,86 @@ This attachment is part of [300 peval CLI](spec.md).
 
 ## Commands
 
-The first `peval` implementation exposes `init`, `doctor`, `list`, `check`,
-`run`, `report`, `compare`, `replay`, and `dataset`. Commands that need an
-evaluation config accept `--config/-c <path-to-eval.toml>` and otherwise
-discover `eval.toml` from process cwd. The former `--project` selector is not
-part of the public surface.
+The current `peval` implementation exposes `init`, `doctor`, `list`, `check`,
+`run`, `view`, and `dataset`. Commands that need an evaluation target accept
+`--config/-c <path-to-eval-config.toml>` or `--benchmark <id-or-path>`.
+Current-directory `eval.toml` discovery is a convenience for eval config files.
 
-`peval init [--root <dir>] [--force]` creates user-level evaluation store
-configuration at `$PSYCHEVO_HOME/peval.toml`. It defaults the root to
-`$HOME/.local/evals`, writes an absolute root path, creates the store skeleton,
-and is independent of `pevo init`. Re-running against the same root is
-idempotent; changing the root requires `--force`.
+`peval init [--root/-r <dir>] [--default] [--force]` creates or repairs a peval
+workspace. Without `--root`, it initializes the current directory. It creates
+`peval.toml`, `runs/`, `datasets/`, and `scripts/`, and copies missing
+workspace script templates without overwriting user-edited scripts. It does not
+create or edit `.gitignore`. `peval.toml` is a schema v2 registry config with
+empty agent and benchmark registries by default. `--default` records the
+workspace at `$PSYCHEVO_HOME/peval-config.toml`; changing that default requires
+`--force`. `peval init` is independent of `pevo init`.
+
+`peval project` is removed. Invocations fail clearly and tell users to select
+eval configs with `--config`, one-off benchmarks with `--benchmark`, and
+registry entries through eval, workspace, or user config files.
 
 `peval doctor` inspects local readiness. It checks installed commands,
 configured sidecar support, known agent preset readiness, Docker availability
 when requested, provider credential allowlists, and cache/output writability.
 It does not execute benchmark tasks.
 
-`peval list` enumerates discoverable suites, adapters, presets, reports, runs,
+`peval list` enumerates discoverable task sets, adapters, presets, view formats,
 datasets, or artifacts from configured locations. Listing is observational and
 must not download official datasets unless the user explicitly asks for remote
 refresh behavior in a later spec.
 
-`peval check` validates manifests and suite structure. It expands factors,
-validates schema versions, verifies scorer declarations, checks output paths,
-and resolves adapter readiness far enough to report setup problems. It is the
-default command for CI and local spec conformance because it stays offline.
+`peval check` validates eval configs or one-off benchmark selections. It
+resolves benchmark and agent registries, expands factors, validates schema
+versions, verifies evaluator declarations and typed task specs, checks output
+paths, and resolves adapter readiness far enough to report setup problems. It
+is the default command for CI and local spec conformance because it stays
+offline.
 
-`peval run` executes an expanded matrix. It records every case outcome,
-continues after per-case setup/runtime/scoring failures, and writes structured
-artifacts before generating optional report output.
+`peval run` executes or reuses an expanded matrix. It records every cell
+outcome, continues after per-cell setup/runtime/scoring failures, and writes a
+cell fact under `runs/<benchmark>/<agent-id>/<task-id>/<cell-key>/run.json`.
+The semantic cell key is derived from benchmark identity, task set, task and
+workspace content, evaluator, agent/adapter/model/options, factors, and artifact
+or runner version. Repeated runs reuse completed cells by default. Missing,
+malformed, setup-failed, and runtime-failed cells are retried. Completed
+failed, evaluator-failed, and timeout cells are reused because they are terminal
+evaluation facts. `--overwrite` reruns selected cells and replaces existing
+cell facts. `--run-id` is not supported.
 
-Run artifacts default to `<peval-root>/<namespace>/<run-id>` under the
-persistent evaluation store. The namespace comes from the evaluation config's
-safe store-relative `output_root`, or defaults to `runs/<project-slug>`. The run
-id is generated when omitted and may be supplied explicitly for deterministic
-local validation. `peval run` exits successfully only when all expanded cases
-pass; failure details remain available in structured artifacts and JSON or
-human output.
-
-`peval report` reads existing artifacts and renders reports. It accepts an
-explicit run artifact root, a store selector, or `latest`. `latest` resolves
-through the persistent store and may be filtered by suite, agent, and run
-status. When an evaluation config is available, `latest` is scoped to that
-config's namespace; otherwise it is global across the store. It never reruns
-agents or scorers.
-
-`peval compare` compares two or more existing run artifact roots or store
-selectors. Comparison uses structured summaries and case results, not ad hoc
-parsing of human logs. It is artifact-only and never runs setup, agents, or
-scorers.
-
-`peval replay` reads trajectories and artifacts to reconstruct execution for
-diagnosis. It accepts the same explicit-root and store-selector inputs as
-`report`. Replay is artifact-only and observational; it must not re-execute
-the agent or scorer.
+`peval view [--config PATH|--benchmark ID_OR_PATH] [--path PATH] [--task-set ID]
+[--agent ID] [--task ID] [--status STATUS] [--group-by agent,task,task-set,status]
+[-i/--include summary,matrix,usage] [--format json|markdown|html]
+[--output PATH]` renders dynamic logical views over cell facts. Without
+`--path`, the scope is the selected benchmark under `runs/<benchmark-id>`.
+With `--path`, the path may point at `runs/<benchmark>`,
+`runs/<benchmark>/<agent>`, `runs/<benchmark>/<agent>/<task>`, or a concrete
+cell directory, and filters are applied after path scoping. Format defaults to
+Markdown and is inferred from `.json`, `.md`, or `.html` output extensions when
+`--format` is omitted. JSON may include raw artifact paths. Markdown and HTML
+must not inline or list raw trajectory or log bodies.
 
 `peval dataset import <path>` registers a local benchmark payload in the
 persistent store. The first implementation records a manifest and references or
 links the source payload; it does not copy large datasets by default and does
 not download official benchmark data.
 
-`peval list --kind runs` and `peval list --kind datasets` are store-only and do
-not require an evaluation config. Suite, agent, task, and all-listing modes need
-an evaluation config because they report manifest-defined inventory.
+`peval list --kind datasets` is store-only and does not require an eval config.
+`peval list --kind agents|benchmarks` reads resolved registries. Task-set,
+task, and all-listing modes need a resolved benchmark from `--config` or
+`--benchmark`. Stored result inspection uses `peval view`, not `peval list
+--kind runs`.
 
 ## Machine Output
 
 Commands that support machine output should emit one parseable stream or
 document per invocation. Error JSON uses a stable error type and message, and
 should include the command phase when the failure came from readiness, manifest
-validation, execution, scoring, report rendering, or artifact loading.
+validation, execution, scoring, view rendering, or artifact loading.
+
+Machine errors are structured diagnostics. Diagnostics include a stable code,
+message, optional hint, severity, and source path when available. CLI JSON and
+future local Web surfaces should render diagnostics from the same service
+diagnostic model.
 
 ## Related Topics
 

@@ -47,17 +47,23 @@ The evaluation spec layers are:
 
 ## Terms
 
-An evaluation `suite` is a named collection of tasks and run configuration. A
-`task` is one benchmark unit with instructions, setup requirements, allowed
-environment behavior, and scoring expectations. A `candidate` is the evaluated
-agent or agent configuration. A `factor` is one matrix dimension, such as
-agent, prompt, model, toolset, skill, permission mode, or benchmark split.
+An evaluation `benchmark` is the stable task data, task-set inventory, and
+evaluator definition for something being measured. A `task-set` is a named
+benchmark split or curated task collection. A `task` is one benchmark unit with
+instructions or problem data, setup requirements, allowed environment behavior,
+and evaluator input. An `eval config` is a runnable plan that selects one
+benchmark, a bounded set of task-sets or tasks, and one or more candidates from
+registries or inline overrides. An `evaluator` is the benchmark-level mechanism
+that turns task data and an agent attempt into normalized score facts. A
+`candidate` is the evaluated agent or agent configuration. A `factor` is one
+matrix dimension, such as agent, prompt, model, toolset, skill, permission
+mode, or benchmark split.
 
-An evaluation `run` is one execution of an expanded matrix. A `case` is one
-expanded candidate/task/factor combination. An `attempt` is one execution of a
-case. A `score` is the normalized outcome produced by an oracle, scorer, or
-benchmark harness. A `trajectory` is the time-ordered event record used for
-analysis and replay.
+An evaluation `run` is one execution or reuse pass over selected semantic
+cells. A `case` is one expanded candidate/task/factor combination. An `attempt`
+is one execution of a case. A `score` is the normalized outcome produced by an
+evaluator-owned oracle, check, or official benchmark harness. A `trajectory` is
+the time-ordered event record used for analysis and replay.
 
 ## Dependency Boundaries
 

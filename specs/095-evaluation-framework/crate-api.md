@@ -12,7 +12,7 @@ This attachment is part of [095 Evaluation Framework](spec.md).
 - crate boundary
 - stable public type categories
 - runtime dependency boundary
-- extension points for adapters and reporters
+- extension points for adapters and view renderers
 
 Out of scope:
 
@@ -28,22 +28,26 @@ spawning the CLI.
 
 The core library surface should include types or traits for:
 
+- service context, service capabilities, and structured diagnostics
 - manifests and schema versions
-- suites, tasks, candidates, factors, cases, and attempts
-- runner requests and run results
+- task sets, tasks, candidates, factors, cases, and attempts
+- runner requests and cell execution summaries
 - environment providers
 - agent adapters
 - benchmark adapters
-- scorers
+- evaluators
 - collectors and trajectory events
-- artifact writers and report inputs
+- artifact writers and view inputs
 
-The first implementation exposes concrete public types for the controlled
-vertical slice: `EvalProject`, `SuiteManifest`, `AgentManifest`,
-`TaskManifest`, `RunRequest`, `RunSummary`, `CaseResult`, `ScoreResult`,
-`TrajectoryEvent`, `ReportRequest`, `CompareRequest`, and `ReplayRequest`.
-Additional helper types may remain module-private until another adapter or
-benchmark bridge needs them.
+The service facade is the preferred public API for product callers. Direct
+runner and renderer helper functions are implementation details unless a later
+spec explicitly promotes them. The current service surface exposes concrete
+request and DTO types for workspace initialization, registry resolution,
+readiness/list/check/run flows, datasets, and dynamic views.
+
+Persisted artifact types and view DTO types are distinct. Artifact documents are
+the physical source of truth. View DTOs are logical projections for CLI and
+future local Web surfaces and carry their own schema version.
 
 The public API is stable-priority. The first implementation may mark specific
 modules experimental, but persisted schema and core type meanings should be
@@ -57,7 +61,7 @@ through an explicit feature or module boundary.
 
 The framework may use workspace dependencies for serialization, TOML/JSON
 handling, async execution, temporary directories, process management, and
-report generation when those dependencies do not force runtime or CLI coupling.
+view generation when those dependencies do not force runtime or CLI coupling.
 
 ## API Behavior
 
@@ -67,10 +71,11 @@ Library callers should be able to:
 - expand a matrix without executing candidates
 - run deterministic local cases with fake adapters
 - write artifacts to a caller-selected output root
-- read artifacts for reporting or comparison
-- render HTML, Markdown, and JSON reports from stored artifacts
-- compare stored run artifact roots without executing agents or scorers
-- replay stored trajectory events without re-running a case
+- read artifacts for view rendering and comparison
+- render HTML, Markdown, and JSON views from stored artifacts
+- compare stored cell facts without executing agents or evaluators
+- build typed view models over existing cells without reading raw trajectory or
+  log bodies by default
 
 APIs that can execute live agents, contact providers, download official
 benchmark data, or spawn sidecar processes must make that behavior explicit in

@@ -10,9 +10,9 @@ This attachment is part of [090 Evaluation](spec.md).
 
 ## Scope
 
-- suite expansion into executable cases
+- task-set expansion into executable cases
 - attempt lifecycle
-- environment and scorer phases
+- environment and evaluator phases
 - generic failure classes
 - result aggregation boundaries
 
@@ -20,22 +20,22 @@ Out of scope:
 
 - command-line process behavior
 - concrete async runtime or Rust trait names
-- benchmark-specific setup or scoring commands
+- benchmark-specific evaluator checks or official harness commands
 
 ## Lifecycle
 
-An evaluation runner expands a suite into cases, prepares an environment for
-each case, executes the selected candidate, runs scoring, records artifacts,
-and aggregates results.
+An evaluation runner expands selected task sets and candidates into cases,
+prepares an environment for each case, executes the selected candidate, runs
+the selected evaluator, records artifacts, and aggregates results.
 
 The generic attempt lifecycle is:
 
-1. validate suite, candidate, factor, and task configuration
+1. validate task-set, candidate, factor, and task configuration
 2. prepare the environment
 3. start trajectory capture
 4. invoke the candidate
 5. collect final workspace or harness state needed for scoring
-6. run scorer or import benchmark score
+6. run evaluator checks or import benchmark score
 7. write structured result and trajectory artifacts
 8. release or retain environment resources according to retention policy
 
@@ -55,7 +55,7 @@ The runner records failures instead of discarding the case:
 - `setup_error`: configuration, dataset, dependency, or environment setup failed
 - `runtime_error`: the candidate process or native adapter failed during agent
   execution
-- `scoring_error`: scorer, oracle, or harness import failed after execution
+- `scoring_error`: evaluator, oracle, or harness import failed after execution
 - `timeout`: the case exceeded a configured bound
 - `cancelled`: caller or control plane stopped the run
 - `skipped`: the case was intentionally not executed

@@ -46,7 +46,7 @@ tasks.
 
 SWE-style tasks represent an issue statement and a repository base state. The
 candidate modifies the workspace. Scoring uses tests, an official harness, or a
-domain scorer. If an official harness expects a patch, the evaluation system
+domain evaluator. If an official harness expects a patch, the evaluation system
 may generate it temporarily without keeping it as a report artifact.
 
 ## Related Topics

@@ -7,9 +7,9 @@ Define deterministic validation for benchmark integrations.
 
 ## Scope
 
-- local suite loading
-- Harbor fixture import
-- SWE-bench fixture import
+- local task-set loading
+- Harbor sample import
+- SWE-bench sample import
 - official bridge gating
 
 Out of scope:
@@ -20,16 +20,21 @@ Out of scope:
 
 ## Deterministic Coverage
 
-Local integration tests should load task directories and JSONL prompt sources
-from fixtures, execute fake setup/scorer commands, and import scorer JSON.
+Local integration tests should load JSONL task sources and task workspaces from
+generated local projects, execute evaluator checks, and import evaluator
+results.
 
-Harbor tests should use stored fixture metadata and result payloads that cover
+At least one local integration test should cover the full path from compact
+manifest loading through fake candidate execution, evaluator scoring, artifact
+writing, and view rendering.
+
+Harbor tests should use stored sample metadata and result payloads that cover
 successful import, harness failure, missing artifact, unsupported schema, and
 skipped task behavior.
 
-SWE-bench tests should use local miniature repositories or synthetic fixture
+SWE-bench tests should use local miniature repositories or synthetic sample
 payloads. They should cover base-state preparation, temporary patch generation
-for scoring, scorer import, and confirmation that patch artifacts are not
+for scoring, evaluator import, and confirmation that patch artifacts are not
 retained by default.
 
 Official bridge tests that contact real registries, Hugging Face datasets,
@@ -41,4 +46,4 @@ default validation path.
 - [330 Local](local.md)
 - [330 Harbor](harbor.md)
 - [330 SWE-bench](swe-bench.md)
-- [355 Coding Fixtures](../355-coding-fixtures/spec.md)
+- [350 Coding Evaluation Testing](../350-coding-evaluation/testing.md)

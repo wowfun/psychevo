@@ -32,12 +32,13 @@ an existing CLI. Regardless of mechanism, it must report:
 - normalized lifecycle events when available
 - final status and final answer or equivalent terminal material
 
-Agent adapters must not own scoring. They may collect output needed by scorers,
-but the scorer or benchmark adapter owns pass/fail and numeric score decisions.
+Agent adapters must not own scoring. They may collect output needed by
+evaluators, but the evaluator or benchmark adapter owns pass/fail and numeric
+score decisions.
 
 ## Benchmark Adapters
 
-A benchmark adapter converts an external suite, dataset, or task directory into
+A benchmark adapter converts an external task set, dataset, or task directory into
 the common task model. It owns benchmark-specific metadata, setup requirements,
 and bridge rules to external harnesses.
 

@@ -32,10 +32,10 @@ The adapter owns evaluation-specific setup around runtime. Runtime itself must
 not gain benchmark orchestration, report rendering, or evaluation-matrix
 awareness for this adapter.
 
-The first implementation may ship only a manifest-visible Psychevo declaration
-and live smoke boundary. Real Psychevo execution is opt-in: `peval check` and
-`peval run` reject a Psychevo agent when the resolved project manifest has
-`allow_live = false`.
+The first implementation may shell through `pevo run` while preserving the
+manifest-visible Psychevo adapter identity. Deterministic validation configures
+`pevo run` against a local OpenAI-compatible mock provider; real provider
+validation uses the same adapter path with user-supplied provider credentials.
 
 ## Trajectory
 
@@ -53,12 +53,10 @@ Adding this adapter must not slow ordinary `pevo run`, `pevo tui`, or ACP
 startup. Evaluation hooks should be passive runtime outputs or explicitly
 enabled adapter calls.
 
-Live Psychevo smoke validation is owned by an explicit script outside the
-default test path: `scripts/eval/live-psychevo-smoke.sh`. It must verify the
-manifest live gate before invoking the real runtime/provider route. Smoke
-fixtures may wrap the real `pevo run` process to keep state isolated and to
-post-check the task workspace when a provider stream does not close cleanly;
-the structured evaluation scorer still decides whether the case passes.
+Psychevo adapter validation is an ordinary `peval run` against a selected
+benchmark task set and agent. Test runs use an isolated Psychevo home, database,
+and local mock provider; real runs may point at the user's configured provider.
+The structured evaluation evaluator still decides whether the case passes.
 
 ## Related Topics
 

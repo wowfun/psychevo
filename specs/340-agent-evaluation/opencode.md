@@ -21,6 +21,12 @@ hard-coded binary path. Presets may default to `opencode`, but the manifest can
 override command, arguments, working directory, environment, config root, and
 collector.
 
+The first implementation accepts an explicit command template and executes it
+through the shared wrapper adapter path. Deterministic tests use fake OpenCode
+commands that emit representative process or JSONL observations; real OpenCode
+installation, provider credentials, and live execution are outside the default
+validation path.
+
 Readiness checks should catch missing binaries, broken package installation,
 unavailable postinstall artifacts, missing provider mappings, and unsupported
 headless invocation modes before cases execute.

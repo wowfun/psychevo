@@ -18,7 +18,7 @@ This attachment is part of [330 Benchmark Integrations](spec.md).
 
 The SWE-bench bridge uses official dataset and harness paths when available.
 Dataset rows are translated into coding tasks with issue text, repository
-identity, base commit or base state, and scorer expectations.
+identity, base commit or base state, and evaluator expectations.
 
 The candidate modifies an isolated workspace. When the official harness expects
 a patch, the bridge may generate a temporary patch from the final workspace and

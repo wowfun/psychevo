@@ -9,16 +9,17 @@ This attachment is part of [350 Coding Evaluation](spec.md).
 
 ## Scope
 
-- scorer output contract for coding tasks
+- evaluator result contract for coding tasks
 - oracle and process metrics
 - diff-free coding report behavior
 - failure classification
 
-## Scorer Output
+## Evaluator Result
 
-Custom coding scorers use exit code plus JSON stdout. Exit code failure means
-the scorer itself failed. Successful scorer execution emits JSON with pass/fail,
-numeric score when available, metrics, and diagnostic details.
+Coding evaluators emit structured pass/fail, numeric score when available,
+metrics, and diagnostic details. Built-in local evaluators may execute typed
+checks such as function cases, exact-file checks, or local test commands they
+own; task rows do not supply arbitrary commands.
 
 The framework imports official harness results into the same score model even
 when the external harness uses its own native files or process output.
@@ -31,7 +32,8 @@ metrics look efficient.
 
 Process metrics are secondary and help explain behavior. Useful first-slice
 metrics include elapsed time, candidate status, timeout status, tool event
-counts when available, token or cost data when available, and scorer duration.
+counts when available, token or cost data when available, and evaluator
+duration.
 
 ## Diff-Free Reports
 
@@ -39,7 +41,7 @@ Coding evaluation does not persist patch or diff artifacts by default. Reports
 should omit changed-file and lines-changed metrics unless a later coding spec
 opts into collecting them without retaining raw patches.
 
-Failed workspaces may be retained for diagnosis according to fixture or runner
+Failed workspaces may be retained for diagnosis according to debug or runner
 policy. The retained workspace path is a local diagnostic pointer, not a
 shareable report artifact.
 
@@ -47,4 +49,4 @@ shareable report artifact.
 
 - [090 Artifacts](../090-evaluation/artifacts.md)
 - [350 Task Families](task-families.md)
-- [355 Coding Fixtures](../355-coding-fixtures/spec.md)
+- [350 Testing](testing.md)

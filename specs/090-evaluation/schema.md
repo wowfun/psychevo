@@ -28,14 +28,20 @@ field. The field identifies the document contract, not the Psychevo application
 version. Lower specs may define exact version strings, but must use a stable
 format that can be compared by readers.
 
+Schema versions are scoped by document class. Benchmark manifests, eval config
+manifests, registry configs, evaluator result JSON, run/case/trajectory
+artifacts, dataset indexes, and view DTOs evolve independently. A version bump
+for artifact facts must not force a benchmark, eval config, registry, or
+evaluator-result version bump unless those document contracts also changed.
+
 Readers must reject unsupported schema versions with a clear diagnostic. The
 first implementation slice does not require automatic migration or best-effort
 loading of older evaluation artifacts.
 
 Schema readers must not silently reinterpret one document class as another. A
-manifest, run summary, task result, trajectory, report index, or sidecar bridge
-payload must be distinguishable by document kind or by the surrounding file
-contract.
+benchmark manifest, eval config, registry config, run fact, task result,
+trajectory, report index, or sidecar bridge payload must be distinguishable by
+document kind or by the surrounding file contract.
 
 ## Formats
 
@@ -59,7 +65,15 @@ fields for forward compatibility only when the reader can ignore them without
 changing scoring, artifact retention, or safety behavior.
 
 Required fields must be validated before a run starts when they influence
-environment setup, agent execution, provider access, or scorer behavior.
+environment setup, agent execution, provider access, or evaluator behavior.
+
+The current artifact slice uses v6 for cell-level run facts and trajectory
+events. Benchmark manifests, eval configs, and task JSONL rows use v4.
+Workspace and user registry configs use v2. Evaluator result documents use v2,
+and view DTOs use v4. View DTOs are derived from cell facts rather than
+becoming the physical source of truth. Unsupported v2/v3/v4/v5 artifacts are
+ignored during current workspace scans and rejected by direct v6 artifact
+readers.
 
 ## Related Topics
 

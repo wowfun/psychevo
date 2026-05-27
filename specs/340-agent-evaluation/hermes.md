@@ -20,6 +20,12 @@ Hermes execution is adapter-driven from a manifest-resolved command. Presets
 may default to `hermes`, but command, arguments, environment, config root,
 working directory, and collector can be overridden.
 
+The first implementation accepts an explicit command template and executes it
+through the shared wrapper adapter path. Deterministic tests use fake Hermes
+commands that emit representative process or JSONL observations; real Hermes
+installation, provider credentials, and live execution are outside the default
+validation path.
+
 The first execution mode should support headless single-task prompts. If a
 Hermes version supports both final-text oneshot output and richer session
 exports, the adapter should prefer the richer source for trajectories while

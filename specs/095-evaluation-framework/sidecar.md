@@ -36,7 +36,7 @@ The framework treats Python, `uv`, benchmark packages, and sidecar dependencies
 as optional managed capabilities. Readiness checks report missing dependencies
 with clear installation or configuration guidance.
 
-Sidecar availability must not be required for local fake suites, manifest
+Sidecar availability must not be required for local fake task sets, manifest
 validation, artifact reading, or basic report rendering.
 
 ## Interface

@@ -26,7 +26,7 @@ selection, matrix expansion, output roots, artifact import, and report inputs.
 
 ## Results
 
-Harbor job artifacts and scorer outputs are imported into canonical case
+Harbor job artifacts and evaluator outputs are imported into canonical case
 results. Native Harbor logs may be retained as diagnostic artifacts, but report
 generation uses the imported structured result.
 

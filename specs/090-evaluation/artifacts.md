@@ -25,16 +25,27 @@ Out of scope:
 
 Evaluation artifacts are grouped into:
 
-- run summary documents
-- task or case result documents
+- cell-level run fact documents
 - trajectory event streams
-- scorer or harness logs
+- evaluator or harness logs
 - environment diagnostics
-- derived reports
+- derived views
 
-Structured run and case result documents are the source of truth for automated
-comparison. Reports are derived artifacts and must be reproducible from
-structured result inputs plus the report renderer version.
+Structured cell run facts are the source of truth for automated comparison,
+reporting, and reuse. A cell is one semantic benchmark/agent/task/factor
+combination. Views are derived from cell facts plus the view renderer version.
+
+Artifact v6 records are cell-oriented. Each cell fact separates benchmark
+identity, semantic fingerprint, stable case identity, candidate identity,
+task-set identity, expanded factors, terminal status, score, metrics, and
+artifact links. Views are logical projections over those facts and must not
+require reshaping the physical artifact layout.
+
+Metrics are part of structured cell facts. Duration, turns, tool calls,
+tool errors, token/cache usage, and optional cost are read from metrics fields.
+When an adapter cannot provide a value, the metric is unknown rather than
+fabricated. Aggregated view metrics are derived from cell metrics and should
+preserve unknown values where aggregation would be misleading.
 
 ## Trajectories
 
@@ -56,7 +67,7 @@ privacy boundary.
 
 ## Privacy
 
-Local run artifacts may retain raw prompts, model outputs, tool outputs, and
+Local cell artifacts may retain raw prompts, model outputs, tool outputs, and
 environment logs for debugging. Shareable reports must redact secrets,
 credential values, HTTP headers, provider keys, and non-allowlisted environment
 variables by default.
@@ -77,22 +88,30 @@ foundation artifacts. A domain spec must opt into storing them.
 
 ## Persistent Store
 
-Evaluation implementations may provide a user-level persistent store for run
-artifacts, dataset inventories, indexes, and derived dashboards. Store indexes
-are convenience artifacts; structured run summaries and case results remain the
-source of truth. Readers should recover by scanning run summaries when an index
-is missing or malformed.
+Evaluation implementations may provide a workspace for cell run artifacts,
+dataset inventories, and workspace scripts. Structured cell facts remain the
+source of truth. This slice intentionally has no workspace cache contract:
+readers scan cell facts directly. User-visible index, latest, dashboard, and
+per-invocation run summary files from older implementations are legacy derived
+artifacts, not authoritative data.
 
-Evaluation configs may map their results into a store-relative namespace such
-as `runs/<project-slug>`. Store-relative namespaces must not escape the store
-root. Explicit external output roots are per-run escape hatches, not persistent
-store locations.
+Eval configs map current results under
+`runs/<benchmark-id>/<agent-id>/<task-id>/<cell-key>/`. The cell identity does
+not include the eval config id or path, so separate eval configs can reuse the
+same semantic benchmark/agent/task/factor result. Store-relative paths must not
+escape the store root. Explicit external output roots are isolated escape
+hatches and do not participate in workspace reuse.
 
-Static dashboards may summarize run, case, and dataset metadata and link to
-local artifacts. They must not inline raw trajectory, prompt, model output,
-tool output, scorer log, or environment log bodies by default. Interactive
-filtering over already-rendered summaries is allowed when the same privacy
-boundary is preserved.
+`peval view` is the built-in reporting, comparison, and inspection surface. It
+may render Markdown, JSON, or HTML over selected cell facts. Markdown and HTML
+views must not inline or list raw trajectory, prompt, model output, tool
+output, evaluator log, or environment log bodies by default. JSON views may expose
+artifact paths so automation can inspect local files explicitly.
+
+Service and view APIs follow the same privacy boundary. Default views expose
+bounded summaries, not raw trajectory, prompt, model output, tool output,
+evaluator stdout/stderr, or full logs. Raw diagnostic reads require an explicit
+raw-access method or future capability gate.
 
 ## Related Topics
 

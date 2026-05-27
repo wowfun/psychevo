@@ -39,10 +39,15 @@ Agent evaluation adapters should prefer event streams or native session exports
 for trajectory capture. Stdout/stderr parsing is a fallback, not the preferred
 source of truth.
 
-Live adapter validation is opt-in. A checked-in local fixture may set
-`allow_live = true` only when a user explicitly requests real validation; the
-default deterministic test path must still cover and enforce the
-`allow_live = false` rejection behavior with isolated manifests.
+Wrapper adapters for OpenCode and Hermes are concrete adapter kinds, not fake
+agents. They share process execution, command-template expansion, isolated
+home/config handling, and lossy collector fallback internals while preserving
+their adapter identity in manifests, reports, diagnostics, and facts.
+
+Adapter validation uses the same command path as real usage. Deterministic
+tests configure local mock providers or fake wrapper commands; real provider
+validation remains opt-in through credentials and provider configuration, not a
+separate live gate.
 
 ## Attachments
 
