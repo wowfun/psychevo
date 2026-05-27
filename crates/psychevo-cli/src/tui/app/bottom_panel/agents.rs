@@ -168,6 +168,25 @@ impl TuiApp {
         Ok(false)
     }
 
+    pub(crate) fn handle_permission_approval_panel_click(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        index: usize,
+    ) -> Result<()> {
+        let Some(BottomPanel::PermissionApproval(mut panel)) = ui.bottom_panel.take() else {
+            return Ok(());
+        };
+        panel.selected = index.min(panel.options().len().saturating_sub(1));
+        let decision = match panel.select_outcome() {
+            PermissionApprovalOutcome::AllowOnce => PermissionApprovalDecision::allow_once(),
+            PermissionApprovalOutcome::AllowSession => PermissionApprovalDecision::allow_session(),
+            PermissionApprovalOutcome::AllowAlways => PermissionApprovalDecision::allow_always(),
+            PermissionApprovalOutcome::Deny => PermissionApprovalDecision::deny(),
+        };
+        ui.resolve_permission_approval(panel, decision);
+        Ok(())
+    }
+
     pub(crate) fn handle_clarify_panel_key(
         &mut self,
         ui: &mut FullscreenUi<'_>,

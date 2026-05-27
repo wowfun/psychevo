@@ -728,7 +728,7 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         usage: "/export [path] [-f|--format markdown|json] [-i|--include list]",
         summary: "write session export",
         help_detail: Some(
-            "Writes a local artifact; last-provider-request can expose hidden prompts and tool data.",
+            "Writes a local artifact; last-provider-request can expose hidden prompts and tool data; last-provider-response is normalized from persisted data.",
         ),
         surface: TUI_SLASH,
         group: COMMANDS,

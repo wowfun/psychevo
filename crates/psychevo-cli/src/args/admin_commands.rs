@@ -95,7 +95,7 @@ pub(crate) enum SessionCommand {
     ReloadContext(SessionIdArgs),
     #[command(
         about = "Export selected local session sections",
-        long_about = "Export selected local session sections from SQLite without contacting providers. The last-provider-request include is unredacted and may expose hidden prompts, project instructions, skill context, tool schemas, tool outputs, and image data URLs."
+        long_about = "Export selected local session sections from SQLite without contacting providers. The last-provider-request include is unredacted and may expose hidden prompts, project instructions, skill context, tool schemas, tool outputs, and image data URLs. The last-provider-response include is a normalized persisted response projection, not raw provider bytes."
     )]
     Export(SessionExportArgs),
     #[command(
@@ -160,7 +160,7 @@ pub(crate) struct SessionExportArgs {
         help = "Write the artifact to this path instead of stdout"
     )]
     pub(crate) output: Option<PathBuf>,
-    #[arg(short = 'i', long = "include", value_name = "LIST", value_parser = parse_export_include_arg, help = "Comma-separated sections: header/h, messages/m, reasoning/r, provider-input-evidence/pie, last-provider-request/lpr")]
+    #[arg(short = 'i', long = "include", value_name = "LIST", value_parser = parse_export_include_arg, help = "Comma-separated sections: header/h, messages/m, reasoning/r, provider-input-evidence/pie, last-provider-request/lpr, last-provider-response")]
     pub(crate) include: Option<String>,
 }
 
@@ -667,13 +667,20 @@ pub(crate) mod tests {
                 "--format",
                 "json",
                 "--include",
-                "messages,reasoning,provider-input-evidence,last-provider-request",
+                "messages,reasoning,provider-input-evidence,last-provider-request,last-provider-response",
             ])
             .is_ok()
         );
         assert!(
-            Cli::try_parse_from(["pevo", "session", "export", "latest", "-i", "h,m,r,pie,lpr",])
-                .is_ok()
+            Cli::try_parse_from([
+                "pevo",
+                "session",
+                "export",
+                "latest",
+                "-i",
+                "h,m,r,pie,lpr,last-provider-response",
+            ])
+            .is_ok()
         );
         assert!(Cli::try_parse_from(["pevo", "run", "-f", "json", "hello"]).is_ok());
         assert!(
@@ -715,6 +722,17 @@ pub(crate) mod tests {
             Cli::try_parse_from(["pevo", "session", "export", "latest", "--raw-requests"]).is_err()
         );
         assert!(
+            Cli::try_parse_from([
+                "pevo",
+                "session",
+                "export",
+                "latest",
+                "--include",
+                "last-raw-response",
+            ])
+            .is_err()
+        );
+        assert!(
             Cli::try_parse_from(["pevo", "session", "share", "latest", "--last-request"]).is_err()
         );
         assert!(
@@ -732,6 +750,17 @@ pub(crate) mod tests {
                 "latest",
                 "--include",
                 "last-provider-request",
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "pevo",
+                "session",
+                "share",
+                "latest",
+                "--include",
+                "last-provider-response",
             ])
             .is_err()
         );

@@ -528,7 +528,7 @@ pub(crate) async fn fullscreen_new_command_clears_context_usage_state() {
 }
 
 #[test]
-pub(crate) fn load_history_rehydrates_pending_write_tool_call() {
+pub(crate) fn load_history_marks_orphan_tool_call_interrupted_but_merges_result() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
@@ -581,9 +581,15 @@ pub(crate) fn load_history_rehydrates_pending_write_tool_call() {
 
     let mut ui = FullscreenUi::new(&app);
     app.load_current_session_history(&mut ui).expect("history");
-    assert!(ui.transcript.iter().any(|row| {
-        row.title == "write feeds/2026-05-10/hackernews-hot-06-42.md" && row.tool_started.is_some()
-    }));
+    let row = ui
+        .transcript
+        .iter()
+        .find(|row| row.title == "write feeds/2026-05-10/hackernews-hot-06-42.md")
+        .expect("write row");
+    assert_eq!(row.text, "interrupted");
+    assert!(row.interrupted);
+    assert!(row.tool_started.is_none());
+    assert!(ui.tool_rows.is_empty());
     assert!(
         ui.transcript
             .iter()
@@ -618,6 +624,82 @@ pub(crate) fn load_history_rehydrates_pending_write_tool_call() {
         "write feeds/2026-05-10/hackernews-hot-06-42.md"
     );
     assert!(rows[0].tool_started.is_none());
+}
+
+#[tokio::test]
+pub(crate) async fn load_history_keeps_unfinished_tool_call_active_with_live_owner() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let session_id = store
+        .create_session_with_metadata(
+            &app.workdir,
+            "tui",
+            "mimo-v2.5-pro",
+            "xiaomi-token-plan",
+            None,
+        )
+        .expect("session");
+    app.current_session = Some(session_id.clone());
+    let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
+    insert_tui_message(
+        &conn,
+        &session_id,
+        1,
+        "assistant",
+        1,
+        serde_json::json!({
+            "role": "assistant",
+            "content": [{
+                "type": "tool_call",
+                "id": "call_write_report",
+                "name": "write",
+                "arguments": {
+                    "path": "feeds/2026-05-10/hackernews-hot-06-42.md",
+                    "content": "report body"
+                },
+                "arguments_json": "{\"path\":\"feeds/2026-05-10/hackernews-hot-06-42.md\",\"content\":\"report body\"}",
+                "arguments_error": null,
+                "content_index": 0,
+                "call_index": 0
+            }],
+            "timestamp_ms": 1,
+            "finish_reason": "tool_calls",
+            "outcome": "normal",
+            "model": "mimo-v2.5-pro",
+            "provider": "xiaomi-token-plan"
+        }),
+    );
+
+    let mut ui = FullscreenUi::new(&app);
+    let (_tx, rx) = mpsc::unbounded_channel();
+    let task = tokio::spawn(async {
+        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::RunResult>>().await
+    });
+    let (control, _) = run_control();
+    ui.running = Some(RunningTurn {
+        session_id: Some(session_id.clone()),
+        control,
+        rx,
+        task: RunningTask::Agent(task),
+    });
+
+    app.load_current_session_history(&mut ui).expect("history");
+    let row = ui
+        .transcript
+        .iter()
+        .find(|row| row.title == "write feeds/2026-05-10/hackernews-hot-06-42.md")
+        .expect("write row");
+    assert_eq!(row.text, "preparing");
+    assert!(row.tool_started.is_some());
+    assert!(ui.tool_rows.contains_key(&tool_id_key("call_write_report")));
+
+    if let Some(running) = ui.running.take()
+        && let RunningTask::Agent(task) = running.task
+    {
+        task.abort();
+        let _ = task.await;
+    }
 }
 
 #[test]

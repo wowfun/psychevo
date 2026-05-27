@@ -123,6 +123,31 @@ impl PermissionRuntime {
         tool_name: &str,
         args: &Value,
     ) -> std::result::Result<(), ToolOutput> {
+        self.authorize_inner(tool_call_id, tool_name, args, None)
+            .await
+    }
+
+    pub(crate) async fn authorize_with_abort(
+        &self,
+        tool_call_id: &str,
+        tool_name: &str,
+        args: &Value,
+        abort: AbortSignal,
+    ) -> std::result::Result<(), ToolOutput> {
+        self.authorize_inner(tool_call_id, tool_name, args, Some(abort))
+            .await
+    }
+
+    pub(crate) async fn authorize_inner(
+        &self,
+        tool_call_id: &str,
+        tool_name: &str,
+        args: &Value,
+        abort: Option<AbortSignal>,
+    ) -> std::result::Result<(), ToolOutput> {
+        if abort.as_ref().is_some_and(AbortSignal::aborted) {
+            return Err(ToolOutput::error("aborted"));
+        }
         match self.evaluate(tool_name, args) {
             PermissionDecision::Allow => Ok(()),
             PermissionDecision::Deny {
@@ -184,15 +209,33 @@ impl PermissionRuntime {
                     allow_always,
                     timeout_secs,
                 };
-                let decision = if timeout_secs == 0 {
-                    handler.request_permission(request).await
-                } else {
-                    time::timeout(
+                let decision = match abort {
+                    Some(mut abort) if timeout_secs == 0 => {
+                        tokio::select! {
+                            biased;
+                            _ = abort.wait_for_abort() => return Err(ToolOutput::error("aborted")),
+                            decision = handler.request_permission(request) => decision,
+                        }
+                    }
+                    Some(mut abort) => {
+                        tokio::select! {
+                            biased;
+                            _ = abort.wait_for_abort() => return Err(ToolOutput::error("aborted")),
+                            decision = time::timeout(
+                                Duration::from_secs(timeout_secs),
+                                handler.request_permission(request),
+                            ) => {
+                                decision.unwrap_or_else(|_| crate::types::PermissionApprovalDecision::deny())
+                            }
+                        }
+                    }
+                    None if timeout_secs == 0 => handler.request_permission(request).await,
+                    None => time::timeout(
                         Duration::from_secs(timeout_secs),
                         handler.request_permission(request),
                     )
                     .await
-                    .unwrap_or_else(|_| crate::types::PermissionApprovalDecision::deny())
+                    .unwrap_or_else(|_| crate::types::PermissionApprovalDecision::deny()),
                 };
                 if reviewer == ApprovalsReviewer::Smart {
                     return match decision.outcome {
@@ -541,7 +584,10 @@ impl ToolBinding for PermissionTool {
         let runtime = self.runtime.clone();
         let tool = Arc::clone(&self.tool);
         Box::pin(async move {
-            if let Err(output) = runtime.authorize(&tool_call_id, tool.name(), &args).await {
+            if let Err(output) = runtime
+                .authorize_with_abort(&tool_call_id, tool.name(), &args, abort.clone())
+                .await
+            {
                 return output;
             }
             tool.execute(tool_call_id, args, abort).await
@@ -1030,15 +1076,7 @@ pub(crate) fn workspace_profile_decision(action: &PermissionAction) -> ActionPol
             suggested_rule: Some(format!("mcp:{server}/{tool}")),
             persistent_grants: action.persistent_grants(),
         },
-        PermissionAction::WebFetch { url } => {
-            let host = web_fetch_host(url).unwrap_or_else(|| url.to_string());
-            ActionPolicyEvaluation::Ask {
-                reason: format!("network access to `{host}` requires approval"),
-                matched_rule: None,
-                suggested_rule: Some(format!("network:{host}")),
-                persistent_grants: action.persistent_grants(),
-            }
-        }
+        PermissionAction::WebFetch { .. } => ActionPolicyEvaluation::Allow,
     }
 }
 

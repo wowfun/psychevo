@@ -2,7 +2,7 @@
 pub(crate) use super::*;
 
 #[test]
-pub(crate) fn loading_parent_history_restores_running_agent_open_from_edge() {
+pub(crate) fn loading_parent_history_links_orphan_agent_row_without_marking_running() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     write_tui_agent(
@@ -97,6 +97,9 @@ pub(crate) fn loading_parent_history_restores_running_agent_open_from_edge() {
         "general(General-purpose subagent for focused coding tasks.)"
     );
     assert_eq!(row.agent_target.as_deref(), Some(child.as_str()));
+    assert!(row.interrupted);
+    assert_eq!(row.text, "interrupted");
+    assert!(row.tool_started.is_none());
     let buffer = draw_fullscreen_for_test(&app, &mut ui, 120, 12);
     let text = buffer_text(&buffer);
     assert!(text.contains("Open"), "{text}");

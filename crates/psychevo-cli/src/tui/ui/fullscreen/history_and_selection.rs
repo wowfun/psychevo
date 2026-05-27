@@ -161,6 +161,17 @@ impl<'a> FullscreenUi<'a> {
         self.open_next_permission_approval();
     }
 
+    pub(crate) fn discard_permission_approvals_for_abort(&mut self) {
+        if let Some(BottomPanel::PermissionApproval(panel)) = self.bottom_panel.take() {
+            self.bottom_panel = panel.restore_panel();
+        }
+        self.active_permission_approval.take();
+        self.pending_permission_approvals.clear();
+        if let Some(rx) = &mut self.approval_rx {
+            while rx.try_recv().is_ok() {}
+        }
+    }
+
     pub(crate) fn refresh_sidebar(&mut self, app: &TuiApp) {
         let git = git_snapshot(&app.workdir);
         self.sidebar = SidebarSnapshot {
@@ -497,6 +508,25 @@ impl<'a> FullscreenUi<'a> {
         accounting: Option<&Value>,
         suppress_terminal_meta: bool,
     ) {
+        self.push_history_message_with_projection_options(
+            message,
+            usage,
+            metadata,
+            accounting,
+            suppress_terminal_meta,
+            None,
+        );
+    }
+
+    pub(crate) fn push_history_message_with_projection_options(
+        &mut self,
+        message: &Value,
+        usage: Option<&Value>,
+        metadata: Option<&Value>,
+        accounting: Option<&Value>,
+        suppress_terminal_meta: bool,
+        active_tool_call_ids: Option<&BTreeSet<String>>,
+    ) {
         if btw_inherited_message(metadata) {
             return;
         }
@@ -546,8 +576,12 @@ impl<'a> FullscreenUi<'a> {
                 }
                 self.add_sidebar_cost(accounting);
                 let keep_tool_calls_active = assistant_message_keeps_tool_calls_active(message);
+                let mut kept_any_tool_call_active = false;
                 for call in tool_calls {
-                    if keep_tool_calls_active {
+                    let keep_call_active = keep_tool_calls_active
+                        && active_tool_call_ids.is_none_or(|ids| ids.contains(&call.id));
+                    if keep_call_active {
+                        kept_any_tool_call_active = true;
                         self.push_history_active_tool_call(message, call);
                     } else {
                         self.push_history_interrupted_tool_call(call, metadata);
@@ -567,7 +601,7 @@ impl<'a> FullscreenUi<'a> {
                     self.transcript
                         .push(TranscriptRow::with_title(TranscriptKind::Meta, "", meta));
                 }
-                if !keep_tool_calls_active {
+                if !kept_any_tool_call_active {
                     self.history_prompt_started_ms = None;
                 }
             }

@@ -173,6 +173,8 @@ reports the written path.
 Export content is selected with `-i, --include <comma-separated-list>`. The
 export include vocabulary is `header` (`h`), `messages` (`m`), `reasoning`
 (`r`), `provider-input-evidence` (`pie`), and `last-provider-request` (`lpr`).
+It also supports `last-provider-response` for the latest persisted assistant
+response projection.
 If `--include` is
 omitted, the effective include set is `messages`. The include set is exact:
 `--include header` emits only header metadata, and
@@ -210,6 +212,13 @@ pruning/runtime options changed. Last-request reconstruction is unredacted and
 may expose hidden/system prompts, project instructions, skill context, tool
 schemas, tool outputs, reasoning adapter fields, and image data URLs when those
 inputs are reconstructable.
+`last_provider_response` contains the latest persisted assistant response before
+the current undo/revert boundary, derived from stored assistant message,
+usage, and allowlisted provider metadata. It is labeled `raw: false` and
+`reconstructed: true` because original provider SSE chunks and whole raw
+response bodies are not persisted. Reasoning blocks inside its `message` follow
+the same policy as transcript export: they are omitted unless `reasoning` is
+also included, and provider evidence metadata is not exported.
 
 `pevo session share <session|latest>` creates a local shareable Markdown
 artifact for the session and reports its filesystem path. This command is an
@@ -225,8 +234,9 @@ vocabulary is restricted to `header` (`h`), `messages` (`m`), `reasoning`
 effective include set is `messages`. `reasoning` expands to include `messages`.
 Future remote
 publishing may build on this artifact boundary with an opt-in command. `share`
-does not support `last-provider-request` or legacy raw provider request flags;
-provider request bodies are intentionally excluded from share artifacts.
+does not support `last-provider-request`, `last-provider-response`, or legacy
+raw provider request flags; provider request and response bodies are
+intentionally excluded from share artifacts.
 
 `pevo model` owns local model inspection, explicit default-model configuration,
 and explicit provider catalog fetches: `list`, `current`, `set`, and `fetch`.

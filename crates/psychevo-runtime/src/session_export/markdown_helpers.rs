@@ -106,6 +106,160 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn export_last_provider_response_uses_persisted_assistant_projection() {
+        let tmp = TempDir::new().expect("tmp");
+        let db = tmp.path().join("state.db");
+        let store = SqliteStore::open(&db).expect("store");
+        let session = store
+            .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+            .expect("session");
+        store
+            .append_message(&session, &user_text_message("first prompt"))
+            .expect("append user");
+        store
+            .append_message_with_metrics(
+                &session,
+                &Message::Assistant {
+                    content: vec![AssistantBlock::Text {
+                        text: "first answer".to_string(),
+                    }],
+                    timestamp_ms: 2,
+                    finish_reason: Some("stop".to_string()),
+                    outcome: Outcome::Normal,
+                    model: Some("old-model".to_string()),
+                    provider: Some("old-provider".to_string()),
+                },
+                Some(serde_json::json!({"input_tokens": 1})),
+                Some(serde_json::json!({"provider_response_id": "resp_old"})),
+            )
+            .expect("append first assistant");
+        store
+            .append_message_with_metrics(
+                &session,
+                &Message::Assistant {
+                    content: vec![AssistantBlock::Text {
+                        text: "latest answer".to_string(),
+                    }],
+                    timestamp_ms: 3,
+                    finish_reason: Some("stop".to_string()),
+                    outcome: Outcome::Normal,
+                    model: Some("mock-model".to_string()),
+                    provider: Some("mock".to_string()),
+                },
+                Some(serde_json::json!({"input_tokens": 2, "output_tokens": 3})),
+                Some(serde_json::json!({"provider_response_id": "resp_latest"})),
+            )
+            .expect("append latest assistant");
+
+        let artifact = render_session_export(
+            &store,
+            &session,
+            SessionExportOptions {
+                format: SessionExportFormat::Json,
+                include: SessionExportIncludeSet::from_values([
+                    SessionExportInclude::LastProviderResponse,
+                ]),
+                artifact_kind: SessionArtifactKind::Export,
+            },
+        )
+        .expect("export");
+        let value: Value = serde_json::from_str(&artifact.content).expect("json");
+        assert!(value.get("messages").is_none());
+        let response = &value["last_provider_response"];
+        assert_eq!(response["assistant_session_seq"], 3);
+        assert_eq!(response["provider"], "mock");
+        assert_eq!(response["model"], "mock-model");
+        assert_eq!(response["raw"], false);
+        assert_eq!(response["reconstructed"], true);
+        assert_eq!(response["source"], "persisted_assistant_message");
+        assert_eq!(
+            response["warnings"][0],
+            "Original provider response chunks are not persisted."
+        );
+        assert_eq!(response["message"]["content"][0]["text"], "latest answer");
+        assert_eq!(response["usage"]["input_tokens"], 2);
+        assert_eq!(response["metadata"]["provider_response_id"], "resp_latest");
+    }
+
+    #[test]
+    fn export_last_provider_response_respects_reasoning_include_policy() {
+        let tmp = TempDir::new().expect("tmp");
+        let db = tmp.path().join("state.db");
+        let store = SqliteStore::open(&db).expect("store");
+        let session = store
+            .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+            .expect("session");
+        store
+            .append_message_with_metrics(
+                &session,
+                &Message::Assistant {
+                    content: vec![
+                        AssistantBlock::Reasoning {
+                            text: "private chain".to_string(),
+                            provider_evidence: Some(serde_json::json!({"raw": true})),
+                        },
+                        AssistantBlock::Text {
+                            text: "visible answer".to_string(),
+                        },
+                    ],
+                    timestamp_ms: 1,
+                    finish_reason: Some("stop".to_string()),
+                    outcome: Outcome::Normal,
+                    model: Some("model".to_string()),
+                    provider: Some("provider".to_string()),
+                },
+                None,
+                None,
+            )
+            .expect("append assistant");
+
+        let without_reasoning = render_session_export(
+            &store,
+            &session,
+            SessionExportOptions {
+                format: SessionExportFormat::Json,
+                include: SessionExportIncludeSet::from_values([
+                    SessionExportInclude::LastProviderResponse,
+                ]),
+                artifact_kind: SessionArtifactKind::Export,
+            },
+        )
+        .expect("export without reasoning");
+        let value: Value = serde_json::from_str(&without_reasoning.content).expect("json");
+        let content = value["last_provider_response"]["message"]["content"]
+            .as_array()
+            .expect("content");
+        assert_eq!(content.len(), 1);
+        assert_eq!(content[0]["type"], "text");
+
+        let with_reasoning = render_session_export(
+            &store,
+            &session,
+            SessionExportOptions {
+                format: SessionExportFormat::Json,
+                include: SessionExportIncludeSet::new(
+                    [
+                        SessionExportInclude::Reasoning,
+                        SessionExportInclude::LastProviderResponse,
+                    ],
+                    SessionArtifactKind::Export,
+                )
+                .expect("include"),
+                artifact_kind: SessionArtifactKind::Export,
+            },
+        )
+        .expect("export with reasoning");
+        let value: Value = serde_json::from_str(&with_reasoning.content).expect("json");
+        let content = value["last_provider_response"]["message"]["content"]
+            .as_array()
+            .expect("content");
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "reasoning");
+        assert_eq!(content[0]["text"], "private chain");
+        assert!(content[0].get("provider_evidence").is_none());
+    }
+
+    #[test]
     fn export_last_provider_request_omits_tools_for_empty_effective_policy() {
         let tmp = TempDir::new().expect("tmp");
         let db = tmp.path().join("state.db");

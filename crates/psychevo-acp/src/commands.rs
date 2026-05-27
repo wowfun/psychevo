@@ -939,7 +939,9 @@ mod tests {
         SlashCommandEffect, SlashCommandParse, SlashCommandSurface,
         available_slash_commands_for_surface, parse_slash_command_line, slash_invocation_effect,
     };
-    use psychevo_runtime::{WorkspaceDiffFileStatus, WorkspaceDiffTruncation};
+    use psychevo_runtime::{
+        SessionExportInclude, WorkspaceDiffFileStatus, WorkspaceDiffTruncation,
+    };
 
     #[test]
     fn acp_advertises_diff_and_allows_it_during_active_turns() {
@@ -968,6 +970,30 @@ mod tests {
         )
         .expect("slash effect");
         assert_eq!(effect, SlashCommandEffect::Diff);
+    }
+
+    #[test]
+    fn acp_export_parses_last_provider_response_include() {
+        let parsed = parse_artifact_args(
+            "out.json -f json -i last-provider-response",
+            SessionArtifactKind::Export,
+        )
+        .expect("export args");
+        assert_eq!(parsed.format, Some(SessionExportFormat::Json));
+        assert!(parsed.path.as_deref() == Some(Path::new("out.json")));
+        assert!(parsed.include.is_some_and(|include| {
+            include.contains(SessionExportInclude::LastProviderResponse)
+        }));
+
+        let share = parse_artifact_args(
+            "share.md -i last-provider-response",
+            SessionArtifactKind::Share,
+        );
+        assert!(share.is_err());
+        assert!(
+            parse_artifact_args("out.json -i last-raw-response", SessionArtifactKind::Export)
+                .is_err()
+        );
     }
 
     #[test]

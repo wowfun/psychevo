@@ -204,9 +204,13 @@ created in the same time window. When `path` is relative, it resolves against
 the selected workdir. The command uses the same include semantics and section
 projection as `pevo session export`. The
 export include vocabulary is `header` (`h`), `messages` (`m`), `reasoning`
-(`r`), `provider-input-evidence` (`pie`), and `last-provider-request` (`lpr`).
+(`r`), `provider-input-evidence` (`pie`), `last-provider-request` (`lpr`),
+and `last-provider-response`.
 If `--include` is omitted, the effective include set is `messages`. The include
-set is exact, and `reasoning` expands to include `messages`. The command does
+set is exact, and `reasoning` expands to include `messages`.
+`last-provider-response` exports the latest persisted assistant response
+projection from stored message, usage, and metadata rows; it is not an exact raw
+provider payload because provider SSE chunks are not persisted. The command does
 not contact a provider, open an editor, or upload content. Fullscreen TUI
 reports success or failure in one command transcript row, and non-terminal
 scripted TUI prints the same bounded text.
@@ -219,8 +223,8 @@ filenames. It is intentionally a local packaging step only: it does not create a
 public link, call a remote share API, create a gist, or persist durable sharing
 state. The share include vocabulary is restricted to `header` (`h`), `messages`
 (`m`), `reasoning` (`r`), and `provider-input-evidence` (`pie`);
-`last-provider-request`, `-f`/`--format`, and legacy raw provider request flags
-are unsupported.
+`last-provider-request`, `last-provider-response`, `-f`/`--format`, and legacy
+raw provider request flags are unsupported.
 
 `/show-raw` toggles raw transcript visibility. `/show-raw on` and
 `/show-raw off` set it explicitly. It is a display-only mode and does not

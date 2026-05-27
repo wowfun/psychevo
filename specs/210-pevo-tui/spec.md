@@ -21,6 +21,8 @@ stdin/stdout, it keeps the deterministic line-by-line scripted behavior.
   `config.toml`
 - session resume, switching, archiving/deletion, titles, running-session list
   indicators, undo/redo-adjacent session behavior, and history loading
+- history-only reload treatment for unfinished tool calls, including
+  process-restart orphan rows that must not animate as live work
 - model, variant, mode, thinking visibility, raw transcript visibility, local
   stats, context-usage, and status state surfaces
 - explicit scoped default-model writes from the model picker

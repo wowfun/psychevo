@@ -169,8 +169,13 @@ de-duplicated token-prefix matches with decisions `allow`, `prompt`, and
 commands is handled by exec approval.
 
 Network permissions apply to built-in network-capable operations such as
-`web_fetch` and managed MCP HTTP/SSE access. Approval prompts default to the
-actual host. Configuration may express broader domain or wildcard policy.
+`web_fetch` and managed MCP HTTP/SSE access. The built-in `:workspace` profile
+allows `web_fetch` by default, matching the product stance that ordinary web
+research is a read operation; shell network risk remains covered by exec
+approval, and managed MCP/network services keep their own approval gates.
+Explicit profile network rules may still prompt or deny particular hosts.
+When a network action does prompt, approval prompts default to the actual host.
+Configuration may express broader domain or wildcard policy.
 
 Permission policy applies after tool visibility and before or during execution.
 A model-visible tool declaration says what the model may request, not what the

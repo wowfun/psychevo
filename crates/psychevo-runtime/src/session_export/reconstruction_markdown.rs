@@ -484,13 +484,17 @@ pub(crate) fn filter_tool_declarations(
 
 pub(crate) fn export_document<'a>(
     summary: &'a SessionSummary,
-    prompt_prefix: Option<ExportPromptPrefixValue>,
-    messages: &Option<Vec<ExportMessageRecord>>,
-    mailbox_events: Option<Vec<ExportMailboxEventValue>>,
-    evidence: Option<Vec<ExportPromptEvidence>>,
-    last_request: Option<ProviderRequestExport>,
+    sections: ExportSections,
     options: SessionExportOptions,
 ) -> ExportDocument<'a> {
+    let ExportSections {
+        prompt_prefix,
+        messages,
+        mailbox_events,
+        evidence,
+        last_request,
+        last_response,
+    } = sections;
     let header = options
         .include
         .contains(SessionExportInclude::Header)
@@ -519,7 +523,7 @@ pub(crate) fn export_document<'a>(
         });
     ExportDocument {
         header,
-        messages: messages.as_ref().map(|messages| {
+        messages: messages.map(|messages| {
             messages
                 .iter()
                 .map(|record| ExportMessageValue {
@@ -531,16 +535,13 @@ pub(crate) fn export_document<'a>(
         mailbox_events,
         provider_input_evidence: evidence.filter(|items| !items.is_empty()),
         last_provider_request: last_request,
+        last_provider_response: last_response,
     }
 }
 
 pub(crate) fn render_markdown(
     summary: &SessionSummary,
-    prompt_prefix: Option<&ExportPromptPrefixValue>,
-    messages: Option<&[ExportMessageRecord]>,
-    mailbox_events: Option<&[ExportMailboxEventValue]>,
-    evidence: Option<&Vec<ExportPromptEvidence>>,
-    last_request: Option<&ProviderRequestExport>,
+    sections: &ExportSections,
     options: &SessionExportOptions,
 ) -> String {
     let mut out = String::new();
@@ -573,12 +574,12 @@ pub(crate) fn render_markdown(
             &mut out,
             &format!("- include: `{}`", options.include.tokens().join(",")),
         );
-        if let Some(prefix) = prompt_prefix {
+        if let Some(prefix) = sections.prompt_prefix.as_ref() {
             push_line(&mut out, "");
             render_markdown_prompt_prefix(&mut out, prefix);
         }
     }
-    if let Some(messages) = messages {
+    if let Some(messages) = sections.messages.as_deref() {
         if !out.is_empty() {
             push_line(&mut out, "");
         }
@@ -588,7 +589,11 @@ pub(crate) fn render_markdown(
             render_markdown_message(&mut out, record);
         }
     }
-    if let Some(mailbox_events) = mailbox_events.filter(|items| !items.is_empty()) {
+    if let Some(mailbox_events) = sections
+        .mailbox_events
+        .as_deref()
+        .filter(|items| !items.is_empty())
+    {
         if !out.is_empty() {
             push_line(&mut out, "");
         }
@@ -610,7 +615,7 @@ pub(crate) fn render_markdown(
             push_fenced_json(&mut out, &event.payload);
         }
     }
-    if let Some(evidence) = evidence.filter(|items| !items.is_empty()) {
+    if let Some(evidence) = sections.evidence.as_ref().filter(|items| !items.is_empty()) {
         if !out.is_empty() {
             push_line(&mut out, "");
         }
@@ -668,7 +673,7 @@ pub(crate) fn render_markdown(
             push_line(&mut out, "");
         }
         push_line(&mut out, "## Reconstructed Last Provider Request");
-        if let Some(request) = last_request {
+        if let Some(request) = sections.last_request.as_ref() {
             push_line(&mut out, "");
             push_line(
                 &mut out,
@@ -704,6 +709,25 @@ pub(crate) fn render_markdown(
         } else {
             push_line(&mut out, "");
             push_line(&mut out, "_No reconstructed provider request available._");
+        }
+    }
+    if options
+        .include
+        .contains(SessionExportInclude::LastProviderResponse)
+    {
+        if !out.is_empty() {
+            push_line(&mut out, "");
+        }
+        push_line(&mut out, "## Normalized Last Provider Response");
+        if let Some(response) = sections.last_response.as_ref() {
+            push_line(&mut out, "");
+            push_fenced_json(
+                &mut out,
+                &serde_json::to_value(response).unwrap_or_else(|_| serde_json::json!({})),
+            );
+        } else {
+            push_line(&mut out, "");
+            push_line(&mut out, "_No persisted assistant response available._");
         }
     }
     out

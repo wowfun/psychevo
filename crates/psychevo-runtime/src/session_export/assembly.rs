@@ -47,6 +47,7 @@ pub enum SessionExportInclude {
     Reasoning,
     ProviderInputEvidence,
     LastProviderRequest,
+    LastProviderResponse,
 }
 
 impl SessionExportInclude {
@@ -57,6 +58,7 @@ impl SessionExportInclude {
             "reasoning" | "r" => Some(Self::Reasoning),
             "provider-input-evidence" | "pie" => Some(Self::ProviderInputEvidence),
             "last-provider-request" | "lpr" => Some(Self::LastProviderRequest),
+            "last-provider-response" => Some(Self::LastProviderResponse),
             _ => None,
         }
     }
@@ -68,6 +70,7 @@ impl SessionExportInclude {
             Self::Reasoning => "reasoning",
             Self::ProviderInputEvidence => "provider-input-evidence",
             Self::LastProviderRequest => "last-provider-request",
+            Self::LastProviderResponse => "last-provider-response",
         }
     }
 }
@@ -157,6 +160,13 @@ impl SessionExportIncludeSet {
                 "share artifacts do not support include value `last-provider-request`".to_string(),
             ));
         }
+        if artifact_kind == SessionArtifactKind::Share
+            && self.contains(SessionExportInclude::LastProviderResponse)
+        {
+            return Err(Error::Message(
+                "share artifacts do not support include value `last-provider-response`".to_string(),
+            ));
+        }
         Ok(())
     }
 }
@@ -164,7 +174,7 @@ impl SessionExportIncludeSet {
 pub(crate) fn include_usage_for_artifact(artifact_kind: SessionArtifactKind) -> &'static str {
     match artifact_kind {
         SessionArtifactKind::Export => {
-            "header,messages,reasoning,provider-input-evidence,last-provider-request"
+            "header,messages,reasoning,provider-input-evidence,last-provider-request,last-provider-response"
         }
         SessionArtifactKind::Share => "header,messages,reasoning,provider-input-evidence",
     }
@@ -196,6 +206,7 @@ pub struct SessionExportWriteResult {
 pub(crate) struct ExportMessageRecord {
     pub(crate) session_seq: i64,
     pub(crate) message: Message,
+    pub(crate) usage: Option<Value>,
     pub(crate) metadata: Option<Value>,
 }
 
@@ -211,6 +222,17 @@ pub(crate) struct ExportDocument<'a> {
     pub(crate) provider_input_evidence: Option<Vec<ExportPromptEvidence>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) last_provider_request: Option<ProviderRequestExport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) last_provider_response: Option<ProviderResponseExport>,
+}
+
+pub(crate) struct ExportSections {
+    pub(crate) prompt_prefix: Option<ExportPromptPrefixValue>,
+    pub(crate) messages: Option<Vec<ExportMessageRecord>>,
+    pub(crate) mailbox_events: Option<Vec<ExportMailboxEventValue>>,
+    pub(crate) evidence: Option<Vec<ExportPromptEvidence>>,
+    pub(crate) last_request: Option<ProviderRequestExport>,
+    pub(crate) last_response: Option<ProviderResponseExport>,
 }
 
 #[derive(Serialize)]
@@ -346,6 +368,20 @@ pub(crate) struct ProviderRequestExport {
     pub(crate) body: Value,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ProviderResponseExport {
+    pub(crate) assistant_session_seq: i64,
+    pub(crate) provider: String,
+    pub(crate) model: String,
+    pub(crate) raw: bool,
+    pub(crate) reconstructed: bool,
+    pub(crate) source: String,
+    pub(crate) warnings: Vec<String>,
+    pub(crate) message: Message,
+    pub(crate) usage: Value,
+    pub(crate) metadata: Value,
+}
+
 pub fn default_session_export_filename(
     session_id: &str,
     format: SessionExportFormat,
@@ -370,6 +406,19 @@ pub fn render_session_export(
     let include_reasoning = options.include.contains(SessionExportInclude::Reasoning);
     let messages = if include_messages {
         Some(load_export_messages(store, session_id, include_reasoning)?)
+    } else {
+        None
+    };
+    let last_response = if options
+        .include
+        .contains(SessionExportInclude::LastProviderResponse)
+    {
+        if let Some(messages) = messages.as_ref() {
+            latest_provider_response_from_messages(&summary, messages)
+        } else {
+            let response_messages = load_export_messages(store, session_id, include_reasoning)?;
+            latest_provider_response_from_messages(&summary, &response_messages)
+        }
     } else {
         None
     };
@@ -404,27 +453,19 @@ pub fn render_session_export(
         .collect::<Vec<_>>();
     let mailbox_events = (!mailbox_events.is_empty()).then_some(mailbox_events);
     let prompt_prefix = prompt_prefix_record.map(export_prompt_prefix_value);
+    let sections = ExportSections {
+        prompt_prefix,
+        messages,
+        mailbox_events,
+        evidence,
+        last_request,
+        last_response,
+    };
     let format = options.format;
     let content = match format {
-        SessionExportFormat::Markdown => render_markdown(
-            &summary,
-            prompt_prefix.as_ref(),
-            messages.as_deref(),
-            mailbox_events.as_deref(),
-            evidence.as_ref(),
-            last_request.as_ref(),
-            &options,
-        ),
+        SessionExportFormat::Markdown => render_markdown(&summary, &sections, &options),
         SessionExportFormat::Json => {
-            let document = export_document(
-                &summary,
-                prompt_prefix,
-                &messages,
-                mailbox_events,
-                evidence,
-                last_request,
-                options,
-            );
+            let document = export_document(&summary, sections, options);
             serde_json::to_string_pretty(&document)?
         }
     };
@@ -473,6 +514,7 @@ pub(crate) fn load_export_messages(
             Ok(ExportMessageRecord {
                 session_seq: record.session_seq,
                 message,
+                usage: record.usage,
                 metadata: record.metadata,
             })
         })
@@ -490,10 +532,43 @@ pub(crate) fn load_unfiltered_export_messages(
             Ok(ExportMessageRecord {
                 session_seq: record.session_seq,
                 message: record.message,
+                usage: record.usage,
                 metadata: record.metadata,
             })
         })
         .collect()
+}
+
+pub(crate) fn latest_provider_response_from_messages(
+    summary: &SessionSummary,
+    messages: &[ExportMessageRecord],
+) -> Option<ProviderResponseExport> {
+    messages.iter().rev().find_map(|record| {
+        let Message::Assistant {
+            model, provider, ..
+        } = &record.message
+        else {
+            return None;
+        };
+        Some(ProviderResponseExport {
+            assistant_session_seq: record.session_seq,
+            provider: provider.clone().unwrap_or_else(|| summary.provider.clone()),
+            model: model.clone().unwrap_or_else(|| summary.model.clone()),
+            raw: false,
+            reconstructed: true,
+            source: "persisted_assistant_message".to_string(),
+            warnings: vec!["Original provider response chunks are not persisted.".to_string()],
+            message: record.message.clone(),
+            usage: record
+                .usage
+                .clone()
+                .unwrap_or_else(|| serde_json::json!({})),
+            metadata: record
+                .metadata
+                .clone()
+                .unwrap_or_else(|| serde_json::json!({})),
+        })
+    })
 }
 
 pub(crate) fn export_prompt_prefix_value(record: PromptPrefixRecord) -> ExportPromptPrefixValue {

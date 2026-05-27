@@ -542,6 +542,61 @@ pub(crate) fn apply_clarify_declined_result(ui: &mut FullscreenUi<'_>) {
     );
 }
 
+#[tokio::test]
+pub(crate) async fn permission_approval_panel_mouse_click_resolves_each_option() {
+    assert_permission_click_outcome(0, PermissionApprovalOutcome::AllowOnce).await;
+    assert_permission_click_outcome(1, PermissionApprovalOutcome::AllowSession).await;
+    assert_permission_click_outcome(2, PermissionApprovalOutcome::AllowAlways).await;
+    assert_permission_click_outcome(3, PermissionApprovalOutcome::Deny).await;
+}
+
+async fn assert_permission_click_outcome(index: usize, expected: PermissionApprovalOutcome) {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    let (response, decision) = oneshot::channel();
+    ui.active_permission_approval = Some(response);
+    ui.bottom_panel = Some(BottomPanel::PermissionApproval(
+        PermissionApprovalPanel::new(
+            app.current_session.clone(),
+            PermissionApprovalRequest {
+                tool_call_id: "call_fetch".to_string(),
+                tool_name: "web_fetch".to_string(),
+                summary: "https://example.com/article".to_string(),
+                reason: "network access to `example.com` requires approval".to_string(),
+                matched_rule: None,
+                suggested_rule: Some("WebFetch(https://example.com/*)".to_string()),
+                allow_always: true,
+                timeout_secs: 0,
+            },
+            None,
+        ),
+    ));
+    let _ = draw_fullscreen_for_test(&app, &mut ui, 100, 24);
+    let area = ui
+        .last_bottom_panel_areas
+        .iter()
+        .find(|(row_index, _)| *row_index == index)
+        .map(|(_, area)| *area)
+        .expect("approval option row");
+
+    app.handle_fullscreen_mouse(
+        &mut ui,
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: area.x.saturating_add(2),
+            row: area.y,
+            modifiers: KeyModifiers::NONE,
+        },
+    )
+    .await
+    .expect("click approval option");
+
+    assert_eq!(decision.await.expect("approval decision").outcome, expected);
+    assert!(ui.active_permission_approval.is_none());
+    assert!(ui.bottom_panel.is_none());
+}
+
 pub(crate) fn clarify_request_event() -> RunStreamEvent {
     RunStreamEvent::ClarifyRequest(ClarifyRequestEvent {
         call_id: "call_clarify".to_string(),

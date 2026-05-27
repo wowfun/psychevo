@@ -615,6 +615,8 @@ impl TuiApp {
         ui.loaded_session_message_count = summaries.len();
         let summary_count = summaries.len();
         let suppress_latest_terminal_meta = ui.status_has_running(Some(session_id));
+        let active_tool_call_ids =
+            history_active_tool_call_ids_for_reload(ui, session_id, &summaries)?;
         let mut history_prompts = Vec::new();
         for (index, summary) in summaries.into_iter().enumerate() {
             let value = serde_json::to_value(summary.message)?;
@@ -623,12 +625,13 @@ impl TuiApp {
             {
                 history_prompts.push(text);
             }
-            ui.push_history_message_with_accounting_options(
+            ui.push_history_message_with_projection_options(
                 &value,
                 summary.usage.as_ref(),
                 summary.metadata.as_ref(),
                 summary.accounting.as_ref(),
                 suppress_latest_terminal_meta && index + 1 == summary_count,
+                Some(&active_tool_call_ids),
             );
         }
         let agent_catalog = self.current_agent_catalog();
@@ -668,6 +671,30 @@ pub(crate) fn live_agent_reload_due(last_check: Option<Instant>, now: Instant) -
         Some(last_check) => now.duration_since(last_check) >= LIVE_AGENT_RELOAD_POLL_INTERVAL,
         None => true,
     }
+}
+
+pub(crate) fn history_active_tool_call_ids_for_reload(
+    ui: &FullscreenUi<'_>,
+    session_id: &str,
+    summaries: &[TuiMessageSummary],
+) -> Result<BTreeSet<String>> {
+    let mut active = BTreeSet::new();
+    let live_owner = ui.status_has_running(Some(session_id));
+    for summary in summaries {
+        let value = serde_json::to_value(&summary.message)?;
+        if value.get("role").and_then(Value::as_str) == Some("tool_result") {
+            if let Some(tool_call_id) = value.get("tool_call_id").and_then(Value::as_str) {
+                active.insert(tool_call_id.to_string());
+            }
+            continue;
+        }
+        if live_owner && assistant_message_keeps_tool_calls_active(&value) {
+            for call in history_tool_calls_from_message(&value) {
+                active.insert(call.id);
+            }
+        }
+    }
+    Ok(active)
 }
 
 pub(crate) fn main_agent_default_metadata() -> Value {

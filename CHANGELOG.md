@@ -2,6 +2,9 @@
 
 ## 2026-05-26
 
+- Added normalized `last-provider-response` exports, default workspace
+  `web_fetch` access, and TUI fixes for permission approvals and orphaned tool
+  rows after restart.
 - Rebuilt `psychevo-eval` around service-backed benchmark, eval config, and
   registry resolution with `benchmark.toml`, manifest v4, artifact v6, and view
   schema v4.

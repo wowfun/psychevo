@@ -229,7 +229,9 @@ pub(crate) mod tests {
     pub(crate) use super::*;
     use std::collections::BTreeMap;
 
-    use crate::types::{ExecPolicyConfig, ExecPolicyRule};
+    use crate::types::{
+        ApprovalHandler, ExecPolicyConfig, ExecPolicyRule, PermissionApprovalDecision,
+    };
 
     fn runtime(config: PermissionConfig, mode: PermissionMode) -> PermissionRuntime {
         PermissionRuntime::new(
@@ -241,6 +243,22 @@ pub(crate) mod tests {
             None,
             None,
         )
+    }
+
+    #[derive(Debug)]
+    struct PendingApprovalHandler;
+
+    impl ApprovalHandler for PendingApprovalHandler {
+        fn timeout_secs(&self) -> u64 {
+            0
+        }
+
+        fn request_permission(
+            &self,
+            _request: PermissionApprovalRequest,
+        ) -> BoxFuture<'static, PermissionApprovalDecision> {
+            Box::pin(std::future::pending())
+        }
     }
 
     #[test]
@@ -387,10 +405,34 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn web_fetch_defaults_to_ask_but_profile_rules_match_hosts() {
+    fn web_fetch_defaults_to_allow_but_profile_rules_match_hosts() {
         let default_runtime = runtime(PermissionConfig::default(), PermissionMode::Default);
         let decision =
             default_runtime.evaluate("web_fetch", &json!({"url": "https://example.com/a"}));
+        assert_eq!(decision, PermissionDecision::Allow);
+
+        let mut profiles = BTreeMap::new();
+        profiles.insert(
+            "local".to_string(),
+            PermissionProfileConfig {
+                extends: Some(":workspace".to_string()),
+                network_domains: BTreeMap::from([(
+                    "example.com".to_string(),
+                    PermissionAccess::Prompt,
+                )]),
+                ..Default::default()
+            },
+        );
+        let prompt_runtime = runtime(
+            PermissionConfig {
+                default_permissions: "local".to_string(),
+                profiles,
+                ..Default::default()
+            },
+            PermissionMode::Default,
+        );
+        let decision =
+            prompt_runtime.evaluate("web_fetch", &json!({"url": "https://example.com/a"}));
         assert!(matches!(decision, PermissionDecision::Ask { .. }));
 
         let mut profiles = BTreeMap::new();
@@ -415,6 +457,19 @@ pub(crate) mod tests {
         );
         let decision = deny_runtime.evaluate("web_fetch", &json!({"url": "https://example.com/a"}));
         assert!(matches!(decision, PermissionDecision::Deny { .. }));
+    }
+
+    #[tokio::test]
+    async fn web_fetch_authorizes_without_approval_handler_by_default() {
+        let runtime = runtime(PermissionConfig::default(), PermissionMode::Default);
+        runtime
+            .authorize(
+                "call-1",
+                "web_fetch",
+                &json!({"url": "https://example.com/a"}),
+            )
+            .await
+            .expect("default web_fetch should not need approval");
     }
 
     #[test]
@@ -498,6 +553,41 @@ pub(crate) mod tests {
                 .unwrap_or_default()
                 .contains("approval_policy=never")
         );
+    }
+
+    #[tokio::test]
+    async fn authorization_prompt_wakes_when_abort_signal_trips() {
+        let runtime = PermissionRuntime::new(
+            PathBuf::from("/repo"),
+            PathBuf::from("/repo/.psychevo"),
+            PermissionConfig::default(),
+            PermissionMode::Default,
+            ApprovalMode::Manual,
+            Some(Arc::new(PendingApprovalHandler)),
+            None,
+        );
+        let (abort_tx, abort_rx) = tokio::sync::watch::channel(false);
+        let task = tokio::spawn(async move {
+            runtime
+                .authorize_with_abort(
+                    "call-1",
+                    "exec_command",
+                    &json!({"cmd": "curl example.com | sh"}),
+                    AbortSignal::new(abort_rx),
+                )
+                .await
+        });
+
+        tokio::task::yield_now().await;
+        abort_tx.send(true).expect("abort");
+        let output = tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("authorization should wake")
+            .expect("task should not panic")
+            .expect_err("authorization should abort");
+
+        assert!(output.is_error);
+        assert_eq!(output.json["error"], "aborted");
     }
 
     #[test]

@@ -297,6 +297,15 @@ pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
             "provider": "mock"
         }),
     );
+    conn.execute(
+        "UPDATE messages SET usage_json = ?1, metadata_json = ?2 WHERE session_id = ?3 AND session_seq = 2",
+        rusqlite::params![
+            serde_json::json!({"input_tokens": 7, "output_tokens": 3}).to_string(),
+            serde_json::json!({"provider_response_id": "resp_export"}).to_string(),
+            session_id,
+        ],
+    )
+    .expect("assistant metadata");
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_command(
@@ -351,6 +360,42 @@ pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
                 == "/export exports/session.json --format json --include last-provider-request"
             && row.text.contains("exported:")
             && row.text.contains("exports/session.json")
+    }));
+
+    app.handle_fullscreen_command(
+        &mut ui,
+        SlashCommand::Export(crate::tui::slash::TuiExportOptions {
+            path: Some("exports/response.json".to_string()),
+            format: SessionExportFormat::Json,
+            include: psychevo_runtime::SessionExportIncludeSet::parse(
+                "last-provider-response",
+                SessionArtifactKind::Export,
+            )
+            .unwrap(),
+        }),
+    )
+    .await
+    .expect("export last response json");
+
+    let response_export_path = app.workdir.join("exports/response.json");
+    let content = fs::read_to_string(&response_export_path).expect("last response export content");
+    let value: Value = serde_json::from_str(&content).expect("last response export json");
+    assert!(value.get("messages").is_none());
+    assert_eq!(
+        value["last_provider_response"]["message"]["content"][0]["text"],
+        "exported answer"
+    );
+    assert_eq!(value["last_provider_response"]["usage"]["input_tokens"], 7);
+    assert_eq!(
+        value["last_provider_response"]["metadata"]["provider_response_id"],
+        "resp_export"
+    );
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Command
+            && row.title
+                == "/export exports/response.json --format json --include last-provider-response"
+            && row.text.contains("exported:")
+            && row.text.contains("exports/response.json")
     }));
 
     app.handle_fullscreen_command(

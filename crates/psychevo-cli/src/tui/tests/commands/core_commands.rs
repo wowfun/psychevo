@@ -366,7 +366,7 @@ pub(crate) async fn fullscreen_help_command_opens_bottom_help_panel() {
     assert!(text.contains(
         "/export [path] [-f|--format markdown|json] [-i|--include list] - write session export"
     ));
-    assert!(text.contains("last-provider-request can expose hidden prompts"));
+    assert!(text.contains("last-provider-response is normalized"));
     assert!(text.contains("No custom commands available"));
     assert!(!text.contains("pevo run"));
 }

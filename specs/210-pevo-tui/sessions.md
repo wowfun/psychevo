@@ -26,6 +26,16 @@ evidence, but only from persisted message material that is already marked as
 reasoning and never by replaying provider wire fields as visible assistant
 text.
 
+When history contains an assistant tool-call message without persisted tool
+results, TUI may keep those tool rows live only when the current TUI process
+still owns the matching running turn for that session. After a process restart
+or any other history-only reload without a live owner, those orphaned tool
+calls render as interrupted historical evidence with no spinner or live
+elapsed timer. TUI does not automatically retry or resume those tool calls.
+If the orphaned call was an `Agent` call and persisted agent-edge metadata can
+identify the child session, the row may still expose the child `Open` action,
+but it remains an interrupted historical row rather than a running spinner.
+
 Fullscreen TUI may switch sessions while a turn is still running. Streamed
 events, status-line running state, queued input ownership, and `Esc`
 interruption are scoped to the session that owns the running turn. Events for a

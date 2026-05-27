@@ -11,12 +11,10 @@ impl<'a> FullscreenUi<'a> {
         }
         let mut used_edges = std::collections::BTreeSet::<usize>::new();
         for row in &mut self.transcript {
-            if row.tool_name.as_deref() != Some("Agent")
-                || row.agent_target.is_some()
-                || !active_tool_row(row)
-            {
+            if row.tool_name.as_deref() != Some("Agent") || row.agent_target.is_some() {
                 continue;
             }
+            let row_was_active = active_tool_row(row);
             let Some((edge_index, edge)) = matching_agent_edge(row, edges, &used_edges) else {
                 continue;
             };
@@ -25,12 +23,14 @@ impl<'a> FullscreenUi<'a> {
             if let Some(title) = agent_edge_title(edge, catalog) {
                 row.title = title;
             }
-            row.text = agent_child_status_text(
-                "Running",
-                row.agent_child_tool_uses,
-                row.agent_child_latest_tokens,
-            );
-            row.full_text = None;
+            if row_was_active {
+                row.text = agent_child_status_text(
+                    "Running",
+                    row.agent_child_tool_uses,
+                    row.agent_child_latest_tokens,
+                );
+                row.full_text = None;
+            }
         }
     }
 

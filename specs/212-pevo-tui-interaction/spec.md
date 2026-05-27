@@ -69,8 +69,15 @@ Approval panel defaults:
 - use a list-selection interaction with Up/Down or `j`/`k`, `Enter` to accept
   the highlighted option, `Esc` to cancel/deny, and direct action shortcuts
   `y`, `a`, `p`, and `d` where the current approval type exposes them
+- mouse clicks on approval option rows select and immediately resolve the
+  clicked option through the same decision path as keyboard confirmation
 - offer once, session, always, and deny choices when the backend request
   supports them; hidden or unsupported choices must not be rendered
+
+If a running turn is interrupted or the fullscreen TUI exits while approval is
+pending, TUI must release pending approval requests with a deny/abort decision
+so the suspended tool call can settle and persist an observable interrupted
+result instead of leaving background work or orphaned live rows behind.
 
 The `/approve` and `/deny` slash commands resolve the current pending approval
 or the most recent smart-review denial override. `/approve` accepts `once`,

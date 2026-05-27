@@ -241,14 +241,14 @@ pub(crate) mod tests {
         );
         assert_eq!(
             parse_slash_command(
-                "/export out.json --format json --include messages,reasoning,provider-input-evidence,last-provider-request"
+                "/export out.json --format json --include messages,reasoning,provider-input-evidence,last-provider-request,last-provider-response"
             )
             .unwrap(),
             Some(SlashCommand::Export(TuiExportOptions {
                 path: Some("out.json".to_string()),
                 format: SessionExportFormat::Json,
                 include: SessionExportIncludeSet::parse(
-                    "messages,reasoning,provider-input-evidence,last-provider-request",
+                    "messages,reasoning,provider-input-evidence,last-provider-request,last-provider-response",
                     SessionArtifactKind::Export,
                 )
                 .unwrap(),
@@ -320,6 +320,8 @@ pub(crate) mod tests {
         assert!(parse_slash_command("/share --last-request").is_err());
         assert!(parse_slash_command("/share --raw-requests").is_err());
         assert!(parse_slash_command("/share --include last-provider-request").is_err());
+        assert!(parse_slash_command("/share --include last-provider-response").is_err());
+        assert!(parse_slash_command("/export --include last-raw-response").is_err());
         assert!(parse_slash_command("/export --format yaml").is_err());
         assert!(parse_slash_command("/export a b").is_err());
     }
@@ -603,7 +605,7 @@ pub(crate) mod tests {
         assert!(help.contains(
             "/export [path] [-f|--format markdown|json] [-i|--include list] - write session export"
         ));
-        assert!(help.contains("last-provider-request can expose hidden prompts"));
+        assert!(help.contains("last-provider-response is normalized"));
         assert!(
             help.contains("/<skill-or-bundle> [args] - submit a skill or bundle (2 available)")
         );

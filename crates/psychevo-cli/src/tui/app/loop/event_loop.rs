@@ -85,6 +85,7 @@ impl TuiApp {
         }
         if let Some(running) = ui.running.take() {
             running.control.abort();
+            ui.discard_permission_approvals_for_abort();
             match running.task {
                 RunningTask::Agent(task) => {
                     let _ = task.await;
@@ -93,6 +94,8 @@ impl TuiApp {
                     let _ = task.await;
                 }
             }
+        } else {
+            ui.discard_permission_approvals_for_abort();
         }
         if let Some(task) = self.diff_task.take() {
             task.task.abort();
@@ -742,7 +745,14 @@ impl TuiApp {
                 self.handle_fullscreen_mouse_wheel(ui, mouse.column, mouse.row, 3);
             }
             MouseEventKind::Down(MouseButton::Left) => {
-                if matches!(ui.bottom_panel, Some(BottomPanel::Clarify(_))) {
+                if matches!(ui.bottom_panel, Some(BottomPanel::PermissionApproval(_))) {
+                    if let Some(index) = ui.bottom_panel_hit(mouse.column, mouse.row) {
+                        ui.clear_selection();
+                        self.handle_permission_approval_panel_click(ui, index)?;
+                    } else {
+                        ui.clear_selection();
+                    }
+                } else if matches!(ui.bottom_panel, Some(BottomPanel::Clarify(_))) {
                     if let Some(index) = ui.bottom_panel_hit(mouse.column, mouse.row) {
                         ui.clear_selection();
                         self.handle_clarify_panel_click(ui, index)?;

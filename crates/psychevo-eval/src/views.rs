@@ -4,7 +4,7 @@ use crate::*;
 pub(crate) fn build_view(request: ViewRequest) -> Result<ViewReport> {
     let store = EvalStore::resolve(request.store_root.clone())?;
     let (scope, benchmark) = if let Some(path) = &request.path {
-        let scope = resolve_view_scope_path(&store.root, &path);
+        let scope = resolve_view_scope_path(&store.root, path);
         let benchmark = infer_benchmark_from_scope(&store.root, &scope);
         (scope, benchmark)
     } else {

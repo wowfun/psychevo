@@ -22,7 +22,7 @@ pub(crate) async fn run_live_internal(
     }
     let loaded = load_run_config(&options, &workdir)?;
     let permission_mode = options.permission_mode.unwrap_or_default();
-    let approval_mode = options.approval_mode.unwrap_or_else(|| {
+    let approval_mode = options.approval_mode.unwrap_or({
         match loaded.config.permissions.approvals_reviewer {
             crate::types::ApprovalsReviewer::User => crate::types::ApprovalMode::Manual,
             crate::types::ApprovalsReviewer::Smart => crate::types::ApprovalMode::Smart,
