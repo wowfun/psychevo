@@ -17,7 +17,6 @@ product-level environment variables.
 - global Psychevo home layout
 - `pevo init`
 - `pevo run`
-- `pevo smoke` product positioning
 - `pevo tui` product positioning
 - `pevo acp` product positioning
 - `pevo skill` product positioning
@@ -70,7 +69,6 @@ Implemented first-slice commands:
 
 - `pevo init`
 - `pevo run`
-- `pevo smoke`
 - `pevo tui`
 - `pevo acp`
 - `pevo skill`
@@ -117,10 +115,6 @@ child to a main session.
 CLI output keeps the same split as the TUI: `inspect` and `logs` are
 observational, while `attach`, `send`, `resume`, and `close` are explicit
 control operations.
-
-`pevo smoke` is a deterministic development and validation harness. It keeps
-its explicit fake-provider flags and is not redesigned as a live-provider
-product entrypoint in this topic.
 
 `pevo tui` owns interactive terminal projection. It accepts `--debug` for
 TUI-local debug projections such as usage parts and allowlisted provider

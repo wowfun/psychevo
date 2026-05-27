@@ -108,8 +108,8 @@ default:
 - `exec_command`
 - `write_stdin`
 
-The same working-directory containment and tool JSON contracts used by
-`pevo smoke` apply to `pevo run`.
+The same working-directory containment and tool JSON contracts used by the
+runtime tool layer apply to `pevo run`.
 
 When skills are enabled, `pevo run` may add skill adjunct tools and a compact
 skill index as defined by [055 Skills](../055-skills/spec.md). `--no-skills`

@@ -25,28 +25,6 @@ pub enum SmokeControl {
 }
 
 #[derive(Debug, Clone)]
-pub struct SmokeOptions {
-    pub state: StateRuntime,
-    pub workdir: PathBuf,
-    pub session: Option<String>,
-    pub prompt: Option<String>,
-    pub max_context_messages: Option<usize>,
-    pub control: SmokeControl,
-    pub reset: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct SmokeResult {
-    pub session_id: String,
-    pub outcome: Outcome,
-    pub final_answer: String,
-    pub db_path: PathBuf,
-    pub workdir: PathBuf,
-    pub tool_failures: usize,
-    pub expected_control_outcome: Option<Outcome>,
-}
-
-#[derive(Debug, Clone)]
 pub struct RunOptions {
     pub state: StateRuntime,
     pub workdir: PathBuf,

@@ -22,7 +22,6 @@ pub(crate) mod run;
 pub(crate) mod session_export;
 pub(crate) mod session_lookup;
 pub(crate) mod skills;
-pub(crate) mod smoke;
 pub(crate) mod snapshot;
 pub(crate) mod state_runtime;
 pub(crate) mod stats;
@@ -101,7 +100,6 @@ pub use skills::{
     set_skill_config_value, set_skill_enabled, skill_context_messages, target_skills_dir,
     view_skill_value, write_skill_file,
 };
-pub use smoke::run_smoke;
 pub use state_runtime::StateRuntime;
 pub use stats::usage_stats;
 pub use store::{AgentEdgeRecord, AgentEdgeStatus};
@@ -122,9 +120,9 @@ pub use types::{
     RunControl, RunControlHandle, RunMode, RunOptions, RunResult, RunStreamEvent, RunStreamSink,
     RunWarning, SanitizedMessageSummary, ScopedCustomProviderInput, SelectedAgent,
     SessionExportMessageSummary, SessionRedoResult, SessionSummary, SessionUndoOptions,
-    SessionUndoResult, SmokeControl, SmokeOptions, SmokeResult, StatsOptions,
-    TUI_DISPLAY_METADATA_KEY, TuiMessageSummary, USER_SHELL_METADATA_KEY, UserShellContextOptions,
-    UserShellOptions, UserShellResult, run_control,
+    SessionUndoResult, SmokeControl, StatsOptions, TUI_DISPLAY_METADATA_KEY, TuiMessageSummary,
+    USER_SHELL_METADATA_KEY, UserShellContextOptions, UserShellOptions, UserShellResult,
+    run_control,
 };
 pub use undo::{redo_session, undo_session};
 pub use user_shell::run_user_shell_command_streaming_controlled;

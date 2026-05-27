@@ -66,6 +66,7 @@ impl Default for ToolRuntimeContext {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn coding_core_tools(workdir: &Path) -> Vec<Arc<dyn ToolBinding>> {
     coding_core_tools_for_mode(workdir, RunMode::Default)
 }

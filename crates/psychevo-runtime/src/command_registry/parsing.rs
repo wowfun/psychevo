@@ -42,17 +42,6 @@ pub const CLI_COMMANDS: &[CliCommandSpec] = &[
         status: CommandStatus::Active,
     },
     CliCommandSpec {
-        canonical: "smoke",
-        aliases: &[],
-        usage: "pevo smoke",
-        summary: "run deterministic fake-provider smoke behavior",
-        surface: PEVO_CLI,
-        group: COMMANDS,
-        argument_kind: CommandArgumentKind::RequiredValue,
-        output_kind: CommandOutputKind::ProcessResult,
-        status: CommandStatus::Active,
-    },
-    CliCommandSpec {
         canonical: "tui",
         aliases: &[],
         usage: "pevo tui [message..]",
@@ -648,7 +637,7 @@ pub(crate) mod tests {
         assert_eq!(
             names,
             [
-                "init", "run", "smoke", "tui", "acp", "agent", "skill", "tool", "session", "model",
+                "init", "run", "tui", "acp", "agent", "skill", "tool", "session", "model",
                 "config", "auth", "stats", "context",
             ]
         );

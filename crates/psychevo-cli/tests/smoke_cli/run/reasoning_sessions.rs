@@ -616,48 +616,8 @@ pub(crate) fn cli_run_continue_reuses_latest_matching_run_session() {
 }
 
 #[test]
-pub(crate) fn cli_run_continue_ignores_smoke_sessions() {
-    let server = MockSseServer::start(vec![sse_text("run")]);
-    let temp = tempdir().expect("temp");
-    let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
-    let smoke = pevo_cmd(temp.path())
-        .args([
-            "smoke",
-            "--db",
-            db.to_str().expect("db"),
-            "--workdir",
-            workdir.to_str().expect("workdir"),
-        ])
-        .output()
-        .expect("smoke");
-    assert!(smoke.status.success());
-
-    let config = write_run_config(&temp.path().join("config"), &server.base_url);
-    let run = isolated_run_cmd(temp.path(), &config, &db)
-        .args([
-            "run",
-            "--dir",
-            workdir.to_str().expect("workdir"),
-            "--continue",
-            "hello",
-        ])
-        .output()
-        .expect("run");
-    assert!(
-        run.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&run.stderr)
-    );
-    let conn = Connection::open(&db).expect("db");
-    let sessions: i64 = conn
-        .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
-        .expect("sessions");
-    assert_eq!(sessions, 2);
-}
-
-#[test]
 pub(crate) fn cli_stats_reports_current_workdir_and_json() {
+    let server = MockSseServer::start(vec![sse_text("stats")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = temp.path().join("work");
@@ -667,17 +627,12 @@ pub(crate) fn cli_stats_reports_current_workdir_and_json() {
         "stderr: {}",
         String::from_utf8_lossy(&init.stderr)
     );
-    let smoke = pevo_cmd(temp.path())
-        .args([
-            "smoke",
-            "--db",
-            db.to_str().expect("db"),
-            "--workdir",
-            workdir.to_str().expect("workdir"),
-        ])
+    let config = write_run_config(&temp.path().join("config"), &server.base_url);
+    let run = isolated_run_cmd(temp.path(), &config, &db)
+        .args(["run", "--dir", workdir.to_str().expect("workdir"), "hello"])
         .output()
-        .expect("smoke");
-    assert!(smoke.status.success());
+        .expect("run");
+    assert!(run.status.success());
 
     let stats = pevo_cmd(temp.path())
         .env("PSYCHEVO_DB", &db)

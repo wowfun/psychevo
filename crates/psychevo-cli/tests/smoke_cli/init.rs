@@ -223,33 +223,3 @@ pub(crate) fn cli_init_reset_state_backs_up_existing_sqlite_files() {
         .expect("user_version");
     assert_eq!(user_version, 12);
 }
-
-#[test]
-pub(crate) fn cli_smoke_preserves_deterministic_harness_flags() {
-    let temp = tempdir().expect("temp");
-    let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
-    let output = pevo_cmd(temp.path())
-        .args([
-            "smoke",
-            "--db",
-            db.to_str().expect("db"),
-            "--workdir",
-            workdir.to_str().expect("workdir"),
-            "--prompt",
-            "read write edit exec_command",
-        ])
-        .output()
-        .expect("pevo smoke");
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8(output.stdout).expect("stdout");
-    assert!(stdout.contains("outcome: normal"));
-    assert_eq!(
-        std::fs::read_to_string(workdir.join(".psychevo-smoke/generated.txt")).expect("generated"),
-        "written by psychevo smoke\n"
-    );
-}

@@ -21,7 +21,6 @@ use commands::model::run_model_command;
 use commands::run::run_run_command;
 use commands::session::run_session_command;
 use commands::skills::run_skills_command;
-use commands::smoke::run_smoke_command;
 use commands::stats::run_stats_command;
 use commands::tool::run_tool_command;
 
@@ -48,7 +47,6 @@ pub(crate) async fn run() -> Result<ExitCode> {
         Commands::Agent(args) => run_agent_command(args).await,
         Commands::Skill(args) => run_skills_command(args),
         Commands::Tool(args) => run_tool_command(args),
-        Commands::Smoke(args) => run_smoke_command(args).await,
         Commands::Run(args) => run_run_command(args).await,
         Commands::Stats(args) => run_stats_command(args),
         Commands::Context(args) => run_context_command(args),

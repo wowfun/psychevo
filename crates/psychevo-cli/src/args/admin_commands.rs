@@ -495,14 +495,6 @@ pub(crate) struct AuthSetArgs {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 #[value(rename_all = "kebab-case")]
-pub(crate) enum ControlArg {
-    None,
-    StopAfterTurn,
-    AbortOnAgentStart,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-#[value(rename_all = "kebab-case")]
 pub(crate) enum VariantArg {
     None,
     Minimal,
@@ -551,16 +543,6 @@ pub(crate) enum RunFormatArg {
 pub(crate) enum SessionExportFormatArg {
     Markdown,
     Json,
-}
-
-impl From<ControlArg> for SmokeControl {
-    fn from(value: ControlArg) -> Self {
-        match value {
-            ControlArg::None => SmokeControl::None,
-            ControlArg::StopAfterTurn => SmokeControl::StopAfterTurn,
-            ControlArg::AbortOnAgentStart => SmokeControl::AbortOnAgentStart,
-        }
-    }
 }
 
 impl VariantArg {

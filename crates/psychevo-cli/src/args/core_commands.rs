@@ -22,11 +22,6 @@ pub(crate) enum Commands {
     #[command(about = "List and configure local toolsets")]
     Tool(ToolArgs),
     #[command(
-        about = "Run deterministic fake-provider smoke behavior",
-        long_about = "Run deterministic fake-provider smoke behavior for development and validation. This command uses explicit local db/workdir paths and does not contact live providers."
-    )]
-    Smoke(SmokeArgs),
-    #[command(
         about = "Run one coding-agent turn",
         long_about = "Run one coding-agent turn through the configured provider. The turn can read stdin, use local tools in the selected workdir, write session state to SQLite, and include discovered or explicit skills unless disabled."
     )]
@@ -65,44 +60,6 @@ pub(crate) struct InitArgs {
         help = "Back up existing SQLite state files and create a fresh state database"
     )]
     pub(crate) reset_state: bool,
-}
-
-#[derive(Debug, Parser)]
-pub(crate) struct SmokeArgs {
-    #[arg(
-        long,
-        value_name = "PATH",
-        help = "SQLite database path for deterministic smoke state"
-    )]
-    pub(crate) db: PathBuf,
-    #[arg(
-        long,
-        value_name = "DIR",
-        help = "Workdir used by the fake-provider smoke run"
-    )]
-    pub(crate) workdir: PathBuf,
-    #[arg(
-        long,
-        value_name = "ID",
-        help = "Existing smoke session id to continue"
-    )]
-    pub(crate) session: Option<String>,
-    #[arg(
-        long,
-        value_name = "TEXT",
-        help = "Prompt text for the fake-provider turn"
-    )]
-    pub(crate) prompt: Option<String>,
-    #[arg(
-        long,
-        value_name = "N",
-        help = "Maximum prior messages to include in fake context"
-    )]
-    pub(crate) max_context_messages: Option<usize>,
-    #[arg(long, value_enum, default_value_t = ControlArg::None, help = "Inject deterministic control behavior into the smoke run")]
-    pub(crate) control: ControlArg,
-    #[arg(long, help = "Reset smoke state before running")]
-    pub(crate) reset: bool,
 }
 
 #[derive(Debug, Parser)]

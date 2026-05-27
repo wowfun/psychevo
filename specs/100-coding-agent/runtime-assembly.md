@@ -12,10 +12,10 @@ independently numbered spec and does not define a stable public Rust API.
 ## Scope
 
 - first-slice runtime assembly for `coding-agent`
-- session create/resume behavior used by the smoke entrypoint
+- session create/resume behavior used by deterministic runtime harnesses
 - session create/resume behavior used by the live run entrypoint
 - context history selection
-- FakeProvider smoke scenario selection
+- FakeProvider deterministic scenario selection
 - Chat-compatible live provider assembly
 - control signal wiring
 - project instruction discovery for AGENTS-named files
@@ -32,12 +32,12 @@ Runtime assembles one accepted coding-agent invocation from:
 
 - a resolved session boundary
 - a resolved working directory
-- a deterministic `FakeProvider` for smoke or a resolved Chat-compatible
+- a deterministic `FakeProvider` for tests or a resolved Chat-compatible
   provider for live run
 - the `coding-core` toolset
 - an event sink that persists `message_end` events to SQLite
 - optional context message limit
-- optional stop or abort control mode for smoke validation
+- optional stop or abort control mode for deterministic runtime validation
 
 If the session cannot be created or resumed, runtime rejects before
 `agent_start`. If the working directory or required toolset cannot be assembled,
@@ -45,7 +45,7 @@ runtime rejects before `agent_start`.
 
 ## Session Selection
 
-The smoke entrypoint supports:
+Deterministic runtime harnesses support:
 
 - create when no session id is supplied
 - resume by explicit session id
@@ -114,33 +114,19 @@ creating an AGENTS-named symlink.
 Project instruction content is bounded by a total runtime budget. Content that
 exceeds the budget is truncated and marked in the model-visible context.
 
-## Smoke Scenario
-
-The smoke prompt is deterministic:
-
-- omitted prompt becomes `smoke`
-- prompt text with no tool names produces a text-only assistant answer
-- prompt text containing `read`, `write`, `edit`, or `exec_command` selects those tools
-  in prompt occurrence order
-- `read` selection emits two read calls to exercise parallel tool execution
-
-The smoke harness only touches `.psychevo-smoke/` under the workdir. `--reset`
-cleans files listed in `.psychevo-smoke/manifest.json` before the run and does
-not remove unknown files.
-
 ## Live Run Provider
 
 The live run entrypoint uses provider/model resolution from
 [120 Provider Registry](../120-provider-registry/spec.md). Runtime receives a
 concrete provider configuration and assembles the same coding-agent toolset and
-SQLite persistence sink used by smoke.
+SQLite persistence sink used by deterministic runtime harnesses.
 
 Live run does not use deterministic fake scripts. It sends caller prompt input
 and retained session history to the resolved Chat-compatible provider.
 
 ## Control Signals
 
-The smoke entrypoint exposes:
+Deterministic runtime validation can exercise these internal control modes:
 
 - `none`
 - `stop-after-turn`
