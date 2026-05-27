@@ -1,177 +1,161 @@
 # peval CLI Workflows
 
-`peval` commands work with evaluation projects rooted at `eval.toml`. Commands
-that inspect or run a project accept `--config/-c <path>`. Commands that read
-or write the persistent store accept `--root <dir>` or `PEVAL_ROOT`.
+`peval` works with three local concepts:
+
+- a workspace, initialized by `peval init`, which stores `runs/`, `datasets/`,
+  workspace registries, and helper scripts
+- benchmarks rooted at `benchmark.toml`, which own task data, task sets, and
+  evaluator semantics
+- eval configs selected with `--config/-c`, which choose one benchmark, agents,
+  and task filters for a runnable plan
+
+Commands that read or write the workspace accept `--root/-r <dir>` or
+`PEVAL_ROOT`. Without either, `peval` discovers a current-or-parent workspace,
+then the default workspace recorded in `$PSYCHEVO_HOME/peval-config.toml`.
 
 ## Init
 
-Create a user-level store configuration:
+```bash
+mkdir -p ~/psychevo-evals/local
+cd ~/psychevo-evals/local
+peval init --default
+```
+
+`peval init` creates missing workspace files and directories. It does not create
+or modify `.gitignore`, `.cache`, or `dashboard.html`.
+
+## Config Selection
+
+Primary path:
 
 ```bash
-peval init
+peval check --config evals/pidx.eval.toml --json
 ```
 
-Use a custom store root:
-
-```bash
-peval init --root "$HOME/evals"
-```
-
-Changing an existing `$PSYCHEVO_HOME/peval.toml` root requires `--force`.
-
-## Doctor
-
-Inspect the selected project and store:
-
-```bash
-peval doctor --config crates/psychevo-eval/fixtures/local-coding/eval.toml --json
-```
-
-Expected shape:
-
-```json
-{
-  "project": "local-coding",
-  "allow_live": true,
-  "fake_adapter": "available",
-  "psychevo_adapter": "manifest-gated",
-  "suites": 3
-}
-```
-
-`doctor` does not execute benchmark tasks.
-
-## List
-
-List project inventory:
-
-```bash
-peval list --config crates/psychevo-eval/fixtures/local-coding/eval.toml --kind suites
-peval list --config crates/psychevo-eval/fixtures/local-coding/eval.toml --kind agents --json
-```
-
-List store inventory:
-
-```bash
-peval list --kind runs
-peval list --kind datasets --json
-```
-
-Store-only listing needs an initialized store, `--root`, or `PEVAL_ROOT`.
-
-## Check
-
-Validate manifests and matrix expansion without running candidates:
-
-```bash
-peval check --config crates/psychevo-eval/fixtures/local-coding/eval.toml --json
-```
-
-Filter the matrix:
+One-off benchmark path:
 
 ```bash
 peval check \
-  --config crates/psychevo-eval/fixtures/local-coding/eval.toml \
-  --suite rust-swe \
-  --agent fake-pass
-```
-
-Use `check` before a live run. It verifies structure and live gates without
-calling a provider.
-
-## Run
-
-Run an evaluation matrix:
-
-```bash
-peval run \
-  --config crates/psychevo-eval/fixtures/local-coding/eval.toml \
-  --suite rust-swe \
-  --agent fake-pass
-```
-
-Use `--json` when another process will parse the result:
-
-```bash
-peval run \
-  --config crates/psychevo-eval/fixtures/local-coding/eval.toml \
-  --suite rust-swe \
-  --agent fake-pass \
+  --benchmark /path/to/psychevo/crates/psychevo-eval/benchmarks/pidx-coding/benchmark.toml \
+  --agent psychevo \
+  --task-set base \
+  --task patch-add \
   --json
 ```
 
-Expected shape:
+When `--benchmark` is an id, it is resolved from eval, workspace, then user
+registry config. Direct `--benchmark` use always requires `--agent` and at
+least one task selector. The named agent must already exist in workspace or user
+registry config because direct benchmark selection has no inline eval layer.
+
+## Doctor And List
+
+```bash
+peval doctor --config evals/pidx.eval.toml --json
+peval list --config evals/pidx.eval.toml --kind task-sets
+peval list --config evals/pidx.eval.toml --kind agents --json
+peval list --kind benchmarks --root ~/psychevo-evals/local --json
+peval list --kind datasets --json
+```
+
+Stored result inspection uses `peval view`, not `peval list --kind runs`.
+
+## Check
+
+```bash
+peval check --config evals/pidx.eval.toml --json
+peval check --config evals/pidx.eval.toml --task-set base --agent psychevo --json
+```
+
+`check` validates config loading, registry resolution, and matrix expansion
+without running candidates or calling providers.
+
+## Run
+
+```bash
+peval run \
+  --config evals/pidx.eval.toml \
+  --task-set base \
+  --agent psychevo \
+  --json
+```
+
+Expected JSON shape:
 
 ```json
 {
-  "run_id": "<run-id>",
+  "schema_version": 6,
+  "benchmark": "pidx-coding",
+  "selected_cells": 1,
+  "executed_cells": 1,
+  "reused_cells": 0,
+  "overwritten_cells": 0,
+  "retried_cells": 0,
+  "passed_cells": 1,
+  "failed_cells": 0,
   "status": "passed",
-  "artifact_root": "<peval-root>/runs/local-coding/<run-id>",
-  "passed_cases": 1,
-  "failed_cases": 0,
-  "total_cases": 1
+  "cells": [
+    {
+      "cell_key": "base__patch-add__psychevo__...",
+      "cell_root": "<workspace>/runs/pidx-coding/psychevo/patch-add/<cell-key>",
+      "action": "executed"
+    }
+  ]
 }
 ```
 
-`peval run` exits with status `0` only when every selected case passes. It
-continues after per-case failures and writes artifacts before exiting.
+Repeated runs reuse completed cells when their semantic fingerprint still
+matches. Missing, malformed, setup-failed, and runtime-failed cells are retried.
+Use `--overwrite` to rerun selected cells and replace their cell directories.
+`--run-id` is no longer supported.
 
-Use `--output-root <dir>` for one-off output outside the persistent store:
-
-```bash
-peval run --config eval.toml --output-root /tmp/peval-runs
-```
-
-That run writes `/tmp/peval-runs/<run-id>` and does not update the store index.
-
-## Report
-
-Render a stored run:
+Use `--output-root <dir>` for isolated one-off output outside workspace reuse:
 
 ```bash
-peval report --run-root latest --format markdown
-peval report --run-root latest --format html --output report.html
-peval report --run-root latest --format json
+peval run --config evals/pidx.eval.toml --output-root /tmp/peval-runs --json
 ```
 
-Scope `latest` through a config, suite, agent, or status:
+## View
+
+Render the selected benchmark:
 
 ```bash
-peval report \
-  --config crates/psychevo-eval/fixtures/local-coding/eval.toml \
-  --run-root latest \
-  --suite rust-swe \
-  --agent fake-pass
+peval view --config evals/pidx.eval.toml -i summary,matrix --format markdown
+peval view --config evals/pidx.eval.toml -i summary,matrix,usage --format json
+peval view --config evals/pidx.eval.toml --output view.html
 ```
 
-`report` reads artifacts. It does not rerun candidates or scorers.
-
-## Compare
-
-Compare two stored runs or artifact roots:
+Scope by path and then filter:
 
 ```bash
-peval compare latest /path/to/older/run --json
+peval view --path runs/pidx-coding/psychevo --status passed
+peval view --config evals/pidx.eval.toml --task-set base --agent psychevo --task patch-add
+peval view --config evals/pidx.eval.toml --group-by agent,task-set,status --format markdown
 ```
 
-Comparison uses structured summaries and case records. It does not parse
-terminal logs.
+`-i/--include` accepts comma-separated values and may be repeated. The default
+is `summary,matrix`; add `usage` when you want token/cache/cost columns. If
+`--format` is omitted, `--output .json`, `.md`, or `.html` selects the format;
+without `--output`, Markdown is used.
 
-## Replay
+Markdown output:
 
-Replay stored trajectory events:
+```markdown
+# peval view
 
-```bash
-peval replay --run-root latest
-peval replay --run-root latest --case <case-id> --json
+## Summary
+
+- cells: 1
+- passed: 1
+- failed: 0
+- status: Passed
 ```
 
-Replay is for diagnosis. It reads artifacts and does not execute the agent.
+JSON output has its own view DTO schema version. JSON may include artifact
+paths; Markdown and HTML do not inline or list raw trajectory or evaluator log
+bodies.
 
 ## Dataset Import
-
-Register a local dataset payload:
 
 ```bash
 peval dataset import ./data/tasks.jsonl \
@@ -182,5 +166,12 @@ peval dataset import ./data/tasks.jsonl \
   --json
 ```
 
-The first implementation records a dataset manifest in the store. It does not
-download benchmark data.
+The first implementation records a dataset manifest in the workspace. It does
+not download benchmark data.
+
+## Removed Surfaces
+
+`peval project`, `peval report`, `peval compare`, `peval replay`, `latest`,
+`--run-id`, `--project`, `--suite`, `peval list --kind suites`, and
+`peval list --kind runs` belonged to older layouts. Use `--config` or
+`--benchmark`, `--task-set`, and `peval view` over cell facts instead.

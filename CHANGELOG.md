@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-05-26
+
+- Rebuilt `psychevo-eval` around service-backed benchmark, eval config, and
+  registry resolution with `benchmark.toml`, manifest v4, artifact v6, and view
+  schema v4.
+- Changed `peval run` to write reusable cell facts under
+  `runs/<benchmark>/<agent>/<task>/<cell-key>/`, with `peval view` as the
+  reporting surface and `--overwrite` for selected reruns.
+- Removed legacy project, suite, run-root, cache, dashboard, task-local script,
+  and live-smoke helper surfaces in favor of task sets, evaluators, eval
+  configs, and workspace/user registries.
+- Added the `pidx-coding` benchmark, deterministic generated test projects,
+  black-box CLI coverage, and fake OpenCode/Hermes wrapper adapter tests.
+- Removed `pevo smoke`; deterministic validation now uses test harnesses and
+  live evaluation uses explicit `peval` eval configs through selected adapters.
+- Updated evaluation specs, docs, README, and repo-local peval dev workspace
+  guidance for `.local/.psychevo-dev` and `.local/evals-dev`.
+
 ## 2026-05-25
 
 - Reworked permission approvals around the new profile-based config schema,

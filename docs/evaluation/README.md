@@ -1,13 +1,11 @@
 # Evaluation Guide
 
-Use `peval` to check evaluation projects, run candidate agents, and review
-local reports. It is the command-line surface for `psychevo-eval`.
+Use `peval` to check eval configs, run or reuse agent/task cells, and review
+local artifacts. The checked-in seed benchmark is
+`crates/psychevo-eval/benchmarks/pidx-coding/`.
 
-The current implementation supports local fixture projects, fake candidates,
-the Psychevo live adapter, store-backed run indexes, reports, comparisons,
-replay, and local dataset records. Benchmark integrations and richer adapter
-surfaces are specified under `specs/`, but this guide stays on behavior you can
-run today.
+`peval` is for agent-behavior evaluation. It does not replace Psychevo's normal
+wide or narrow validation paths.
 
 ## Install
 
@@ -17,125 +15,110 @@ From a checkout, install both product CLIs:
 sh scripts/install.sh --with-peval
 ```
 
-From the hosted install script:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/wowfun/psychevo/main/scripts/install.sh | sh -s -- --with-peval
-```
-
-The installer verifies `pevo --help` and `peval --help`. It runs `pevo init`
-unless you pass `--no-init`; it does not run `peval init`.
-
-From a source checkout without installing, use Cargo:
+From source without installing, use Cargo:
 
 ```bash
 cargo run -p psychevo-eval --bin peval -- --help
 ```
 
-In the examples below, replace `peval` with
-`cargo run -p psychevo-eval --bin peval --` when you have not installed the
-binary.
+## Create A Workspace
 
-## Set Up The Store
-
-Initialize the evaluation store:
+A peval root is an evaluation workspace. It stores reusable cell runs, datasets,
+workspace registry entries, and local helper scripts:
 
 ```bash
-peval init
+mkdir -p ~/psychevo-evals/local
+cd ~/psychevo-evals/local
+peval init --default
 ```
 
-By default this writes `$PSYCHEVO_HOME/peval.toml` and points the store at
-`$HOME/.local/evals`. Store-backed commands also accept `--root <dir>` or the
-`PEVAL_ROOT` environment variable:
+This creates or repairs:
 
-```bash
-PEVAL_ROOT="$PWD/.local/evals" peval list --kind runs --json
-peval run --root "$PWD/.local/evals" --config crates/psychevo-eval/fixtures/local-coding/eval.toml
+```text
+peval.toml
+scripts/
+runs/
+datasets/
 ```
 
-Use an explicit root when you want a workspace-local or CI-local store. Use
-`peval init` when you want a normal user-level store.
+`peval.toml` is a schema v2 workspace registry config. User-wide defaults and
+registries live in `$PSYCHEVO_HOME/peval-config.toml`. Older workspaces may
+still contain `index.json`, `latest.json`, `.cache/`, `dashboard.html`, or v2
+`summary.json` files; current `peval run` and `peval view` ignore them.
 
-## First Local Run
+## First Eval Config
 
-The repository includes a deterministic local fixture project:
+Benchmarks define stable task data in `benchmark.toml`. Eval configs define a
+runnable plan: which benchmark, which agents, and which tasks to select.
+
+Use the seed template directly from the repository:
 
 ```bash
-peval check --config crates/psychevo-eval/fixtures/local-coding/eval.toml --json
+config=/path/to/psychevo/crates/psychevo-eval/templates/pidx-psychevo-patch-add.eval.toml
+peval check \
+  --config "$config" \
+  --json
+```
+
+For repeated local work, copy an eval config into your workspace, commonly under
+`evals/`, and edit it there. You can also use `--benchmark <id-or-path>` for a
+one-off run, but then you must pass `--agent` plus `--task-set` or `--task`.
+
+## First Check
+
+`check` validates config loading, registry resolution, and matrix expansion. It
+does not call providers or run agent commands:
+
+```bash
+peval check --config "$config" --task-set base --agent psychevo --json
 ```
 
 Expected shape:
 
 ```json
 {
-  "cases": 6,
-  "project": "local-coding",
+  "cases": 1,
+  "benchmark": "pidx-coding",
   "status": "ok"
 }
 ```
 
-Run one passing local case:
+## First Run
+
+Running executes or reuses selected semantic cells. Each cell is stored under
+`runs/<benchmark>/<agent-id>/<task-id>/<cell-key>/`:
 
 ```bash
-peval run \
-  --config crates/psychevo-eval/fixtures/local-coding/eval.toml \
-  --suite rust-swe \
-  --agent fake-pass
+peval run --config "$config" --task-set base --agent psychevo --json
 ```
 
-Human output includes the run id, status, artifact root, and case counts:
+Repeated runs skip completed matching cells. Use `--overwrite` to rerun selected
+cells and replace their cell directories.
 
-```text
-run <run-id>: Passed
-artifact root: <peval-root>/runs/local-coding/<run-id>
-cases: 1 passed / 0 failed / 1 total
-```
+## Review Results
 
-The full default matrix includes `fake-fail`, so it exits with status `1` by
-design. Use that path when you want report and failure diagnostics.
-
-## First Live Run
-
-Live Psychevo evaluation uses the real `pevo run` path and may call a provider.
-Confirm your normal Psychevo configuration first:
+`peval view` is the built-in reporting, comparison, and inspection surface:
 
 ```bash
-pevo model current
-pevo run "hello"
+peval view --config "$config" -i summary,matrix,usage --format markdown
+peval view --config "$config" --group-by agent,task --format json
+peval view --config "$config" --output /tmp/peval-view.html
 ```
 
-Then run the live smoke helper:
+Scope by path or filters:
 
 ```bash
-scripts/eval/live-psychevo-smoke.sh
+peval view --root ~/psychevo-evals/local --path runs/pidx-coding/psychevo
+peval view --config "$config" --task-set base --agent psychevo --status passed
 ```
 
-The helper uses `crates/psychevo-eval/fixtures/local-coding` by default,
-selects the `rust-swe` suite and `psychevo-live` agent, creates an isolated
-temporary `PSYCHEVO_HOME` and `PSYCHEVO_DB`, and writes evaluation artifacts
-under `PEVAL_ROOT` or `<repo>/.local/evals`.
-
-See [Live Psychevo Evaluation](live-psychevo.md) for the fixture smoke path and
-a custom live evaluation tutorial.
-
-## Review Artifacts
-
-Each run writes a `summary.json`, `report.md`, and `report.html` under the
-artifact root:
-
-```bash
-peval report --run-root latest --format markdown
-peval report --run-root latest --format html --output /tmp/peval-report.html
-peval replay --run-root latest --json
-```
-
-`latest` resolves through the persistent store. Add `--config`, `--suite`, or
-`--agent` when you want a narrower selector.
+Markdown and HTML views do not inline raw trajectories or evaluator logs. JSON
+may include artifact paths for explicit follow-up inspection.
 
 ## More Detail
 
 - [peval CLI Workflows](peval-cli.md)
-- [Authoring Evaluation Projects](authoring.md)
+- [Authoring Eval Configs And Benchmarks](authoring.md)
 - [Live Psychevo Evaluation](live-psychevo.md)
 - Specs: [peval CLI](../../specs/300-peval-cli/spec.md),
   [evaluation framework](../../specs/095-evaluation-framework/spec.md),

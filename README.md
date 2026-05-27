@@ -30,7 +30,7 @@ sessions, model/provider configuration, and usage/context inspection. Use
 | Permissions | Runtime permissions combine policy rules, config, and interactive approvals before sensitive actions run. |
 | MCP | MCP servers can contribute tools through configured or client-provided sources, while Psychevo keeps runtime permission checks in charge. |
 | Usage, context, and compaction | `pevo stats`, `pevo context`, session history, and compaction support help track cost, context pressure, and long-running work. |
-| Evaluation | `peval` checks evaluation manifests, runs local and live candidate matrices, writes artifacts, and renders reports. |
+| Evaluation | `peval` initializes evaluation workspaces, resolves benchmark/eval/registry configs, runs or reuses cell-level local/live matrices, writes artifact v6 facts, and renders views. |
 
 ## Not Yet
 
@@ -137,8 +137,7 @@ pevo run -m deepseek/deepseek-chat "inspect the CLI entrypoints"
 | `pevo auth ...` | Inspect credential status and store provider API keys from stdin. |
 | `pevo stats` | Show local token and estimated-cost statistics from SQLite state. |
 | `pevo context --session <id\|latest>` | Inspect local context-window usage for a session. |
-| `pevo smoke --db <path> --workdir <path>` | Run the deterministic fake-provider validation harness. |
-| `peval ...` | Check, run, report, compare, and replay evaluation work. |
+| `peval ...` | Initialize evaluation workspaces, check eval configs or benchmarks, run reusable cells, and view evaluation work. |
 
 Run `pevo <command> --help` or `peval <command> --help` for flags.
 
@@ -157,7 +156,7 @@ Run `pevo <command> --help` or `peval <command> --help` for flags.
 | `psychevo-runtime` | Coding-agent runtime assembly, provider/model resolution, context, tools, persistence, skills, agents, permissions, and usage accounting. |
 | `psychevo-acp` | ACP server packaging and runtime bridge used by `pevo acp`. |
 | `psychevo-cli` | The `pevo` command-line entrypoint and fullscreen terminal UI. |
-| `psychevo-eval` | The `peval` evaluation CLI, local fixture runner, artifact store, reports, and dataset inventory. |
+| `psychevo-eval` | The `peval` evaluation CLI and `EvalService` layer, workspace/user registries, benchmark runner, cell artifact store, views, and dataset inventory. |
 
 ## Development
 

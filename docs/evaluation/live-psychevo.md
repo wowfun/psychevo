@@ -1,12 +1,12 @@
 # Live Psychevo Evaluation
 
 Live evaluation runs the real Psychevo runtime through `pevo run`. It may call
-your configured provider. Use it when you want to evaluate the current product
-behavior, not only deterministic fake agents.
+your configured provider. Use it when you want to evaluate current product
+behavior, not only deterministic test harnesses.
 
 ## Prerequisites
 
-Confirm `pevo` works before invoking `peval` live runs:
+Confirm `pevo` works before invoking live runs:
 
 ```bash
 pevo model current
@@ -19,133 +19,128 @@ Install `peval` if needed:
 sh scripts/install.sh --with-peval
 ```
 
-Initialize an evaluation store or choose one explicitly:
+Create or choose a peval workspace:
 
 ```bash
-peval init
-export PEVAL_ROOT="$PWD/.local/evals"
+mkdir -p ~/psychevo-evals/live
+peval init --root ~/psychevo-evals/live --default
 ```
 
-`PEVAL_ROOT` overrides the user-level store for the current shell.
+Use `PSYCHEVO_HOME`, `PSYCHEVO_DB`, or `PSYCHEVO_CONFIG` when a run needs
+isolated state or credentials.
 
-## Fixture Smoke
+## Seed Benchmark Run
 
-Run the repository live smoke:
+From a Psychevo checkout, copy or reference the seed live template:
 
 ```bash
-scripts/eval/live-psychevo-smoke.sh
+mkdir -p ~/psychevo-evals/live/evals
+cp crates/psychevo-eval/templates/pidx-psychevo-patch-add.eval.toml \
+  ~/psychevo-evals/live/evals/pidx-live.eval.toml
 ```
 
-The script defaults to:
+If you move the copied file away from the repository, update its `[benchmark]`
+path to the absolute path of
+`crates/psychevo-eval/benchmarks/pidx-coding/benchmark.toml`.
 
-- project: `crates/psychevo-eval/fixtures/local-coding`
-- suite: `rust-swe`
-- agent: `psychevo-live`
-- run id: `live-psychevo-smoke`
-
-Override those values:
+Check the selected Psychevo matrix:
 
 ```bash
-PEVAL_LIVE_SUITE=rust-swe \
-PEVAL_LIVE_AGENT=psychevo-live \
-PEVAL_LIVE_RUN_ID=my-live-smoke \
-PEVAL_ROOT="$PWD/.local/evals" \
-scripts/eval/live-psychevo-smoke.sh crates/psychevo-eval/fixtures/local-coding
+peval check \
+  --root ~/psychevo-evals/live \
+  --config ~/psychevo-evals/live/evals/pidx-live.eval.toml \
+  --json
 ```
 
-The helper creates a temporary `PSYCHEVO_HOME` and `PSYCHEVO_DB`, but it can
-reuse your real `PSYCHEVO_CONFIG` when set. If `PSYCHEVO_CONFIG` is empty and
-`$PSYCHEVO_HOME/config.toml` exists before isolation, the helper points
-`PSYCHEVO_CONFIG` at that config file.
+Run it:
 
-## Custom Live Project
+```bash
+peval run \
+  --root ~/psychevo-evals/live \
+  --config ~/psychevo-evals/live/evals/pidx-live.eval.toml \
+  --json
+```
 
-Create this project layout:
+The Psychevo adapter uses the current `pevo` executable and selected Psychevo
+configuration.
+
+## Custom Live Benchmark
+
+Create this benchmark and eval layout:
 
 ```text
-my-live-eval/
-  eval.toml
-  agents/
-    psychevo-live.toml
-  suites/
-    rust-swe.toml
-  tasks/
-    rust-swe-add/
-      task.toml
-      workspace/
-        Cargo.toml
-        src/lib.rs
-      scripts/
-        score.sh
-        psychevo-live-wrapper.sh
+my-live/
+  benchmark/
+    benchmark.toml
+    tasks.jsonl
+    tasks/
+      rust-swe-add/
+        workspace/
+          Cargo.toml
+          src/lib.rs
+  my-live.eval.toml
 ```
 
-`eval.toml`:
+`benchmark/benchmark.toml`:
 
 ```toml
-schema_version = 1
-name = "my-live-eval"
-output_root = "runs/my-live-eval"
-allow_live = true
+schema_version = 4
+id = "my-live-coding"
+name = "My live coding benchmark"
+
+[evaluator]
+kind = "local-coding"
+
+[[task_sources]]
+path = "tasks.jsonl"
+format = "jsonl"
+
+[[task_sets]]
+id = "base"
+name = "Base"
+tasks = ["rust-swe-add"]
 ```
 
-`agents/psychevo-live.toml`:
+`my-live.eval.toml`:
 
 ```toml
-schema_version = 1
-id = "psychevo-live"
-name = "Psychevo live adapter"
+schema_version = 4
+id = "my-live-psychevo"
+name = "My live Psychevo eval"
+
+[benchmark]
+path = "benchmark/benchmark.toml"
+
+[select]
+agents = ["psychevo"]
+task_sets = ["base"]
+tasks = ["rust-swe-add"]
+
+[[agents]]
+id = "psychevo"
+name = "Psychevo"
 kind = "psychevo"
-
-[psychevo]
-command = "sh"
-args = [
-  "scripts/psychevo-live-wrapper.sh",
-  "{workspace}",
-  "{prompt}",
-]
 ```
 
-`suites/rust-swe.toml`:
+`benchmark/tasks.jsonl`:
 
-```toml
-schema_version = 1
-id = "rust-swe"
-name = "Local Rust SWE-style fixture"
-description = "Repair a tiny Rust crate with a live Psychevo run."
-agents = ["psychevo-live"]
-tasks = ["../tasks/rust-swe-add/task.toml"]
+```jsonl
+{"schema_version":4,"task_id":"rust-swe-add","name":"Repair the add function","kind":"swe-style","dir":"tasks/rust-swe-add","problem_statement":"The local Rust crate has a failing unit test because add subtracts instead of adding. Fix the implementation so the tests pass.","workspace":{"source":"workspace"},"test_spec":{"checks":[{"kind":"cargo_test","timeout_seconds":30}]}}
 ```
 
-`tasks/rust-swe-add/task.toml`:
-
-```toml
-schema_version = 1
-id = "rust-swe-add"
-name = "Repair the add function"
-kind = "swe-style"
-
-[prompt]
-text = "The local Rust crate has a failing unit test because add subtracts instead of adding. Fix the implementation so the tests pass."
-
-[workspace]
-source = "workspace"
-
-[scorer]
-command = ["sh", "scripts/score.sh"]
-timeout_seconds = 30
-```
-
-`tasks/rust-swe-add/workspace/Cargo.toml`:
+`benchmark/tasks/rust-swe-add/workspace/Cargo.toml`:
 
 ```toml
 [package]
 name = "rust-swe-add"
 version = "0.1.0"
 edition = "2024"
+
+[lib]
+path = "src/lib.rs"
 ```
 
-`tasks/rust-swe-add/workspace/src/lib.rs`:
+`benchmark/tasks/rust-swe-add/workspace/src/lib.rs`:
 
 ```rust
 pub fn add(left: i32, right: i32) -> i32 {
@@ -163,90 +158,50 @@ mod tests {
 }
 ```
 
-`tasks/rust-swe-add/scripts/score.sh`:
-
-```sh
-#!/usr/bin/env sh
-set -eu
-
-if cargo test --quiet >peval-score.stdout 2>peval-score.stderr; then
-    printf '%s\n' '{"schema_version":1,"passed":true,"score":1.0,"message":"cargo test passed","details":{"scorer":"cargo-test"}}'
-else
-    printf '%s\n' '{"schema_version":1,"passed":false,"score":0.0,"message":"cargo test failed","details":{"scorer":"cargo-test"}}'
-    cat peval-score.stderr >&2 || true
-fi
-```
-
-`tasks/rust-swe-add/scripts/psychevo-live-wrapper.sh`:
-
-```sh
-#!/usr/bin/env sh
-set -eu
-
-workspace="$1"
-prompt="$2"
-timeout_seconds="${PEVAL_LIVE_PEVO_TIMEOUT_SECONDS:-75}"
-
-cd "$workspace"
-timeout -k 5 "$timeout_seconds" pevo run \
-    --dir "$workspace" \
-    --format json \
-    --variant none \
-    --dangerously-skip-permissions \
-    --no-skills \
-    --no-agents \
-    "$prompt"
-```
-
-Make scripts executable if your checkout preserves executable bits poorly:
+Check and run:
 
 ```bash
-chmod +x my-live-eval/tasks/rust-swe-add/scripts/*.sh
-```
-
-Check, then run:
-
-```bash
-peval check --config my-live-eval/eval.toml --suite rust-swe --agent psychevo-live
-peval run --config my-live-eval/eval.toml --suite rust-swe --agent psychevo-live --json
+peval check --root ~/psychevo-evals/live --config "$PWD/my-live/my-live.eval.toml"
+peval run --root ~/psychevo-evals/live --config "$PWD/my-live/my-live.eval.toml" --json
 ```
 
 Expected JSON shape:
 
 ```json
 {
-  "run_id": "<run-id>",
+  "schema_version": 6,
+  "selected_cells": 1,
+  "executed_cells": 1,
+  "reused_cells": 0,
   "status": "passed",
-  "artifact_root": "<peval-root>/runs/my-live-eval/<run-id>",
-  "total_cases": 1
+  "cells": [
+    {
+      "action": "executed"
+    }
+  ]
 }
 ```
 
 ## Review A Live Run
 
-Render the latest report:
+Render views over stored cell facts:
 
 ```bash
-peval report --config my-live-eval/eval.toml --run-root latest --format markdown
-peval report --config my-live-eval/eval.toml --run-root latest --format html --output live-report.html
+peval view --root ~/psychevo-evals/live --config "$PWD/my-live/my-live.eval.toml" -i summary,matrix,usage --format markdown
+peval view --root ~/psychevo-evals/live --config "$PWD/my-live/my-live.eval.toml" --output live-view.html
+peval view --root ~/psychevo-evals/live --path runs/my-live-coding/psychevo --format json
 ```
 
-Replay stored trajectory events:
-
-```bash
-peval replay --config my-live-eval/eval.toml --run-root latest --json
-```
-
-A failed live run can still produce useful artifacts. Start with
-`summary.json`, then read `report.md`, scorer logs, and trajectory links from
-the artifact root.
+A failed live run can still produce useful artifacts. Start with `peval view`,
+then inspect the relevant cell directory's `run.json`, `evaluator.stdout`,
+`evaluator.stderr`, and `trajectory.jsonl` when you need raw diagnostics.
 
 ## Safety Checks
 
-- Keep `allow_live = false` until the project should run real agents.
 - Use `peval check` before `peval run`.
-- Use `PEVAL_ROOT` or `--root` when you want an isolated evaluation store.
-- Use a temporary `PSYCHEVO_HOME` and `PSYCHEVO_DB` when a wrapper should not
-  touch normal user state.
-- Keep provider credentials in Psychevo config or `.env` files; do not write
-  keys into evaluation manifests.
+- Use a dedicated workspace, `PEVAL_ROOT`, or `--root` for isolated evaluation
+  artifacts.
+- Set `PSYCHEVO_HOME` and `PSYCHEVO_DB` when a run should not touch normal user
+  state.
+- Keep provider credentials in Psychevo config or `.env` files; do not write keys
+  into benchmark manifests or eval configs.
