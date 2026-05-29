@@ -29,30 +29,41 @@ credentials.
 `peval run` coverage may execute fake agents and local evaluators only.
 
 View tests should assert structured view data, redaction behavior, JSON artifact
-paths, and Markdown/HTML omission of raw trajectory and log bodies. They should
+paths, and HTML omission of raw trajectory and log bodies. They should
 avoid brittle snapshots of full HTML when structured comparison can cover the
 same behavior. Include parsing coverage must verify `-i all`, mixed
 `summary,all`, duplicate include de-duplication, stable expanded ordering, and
 JSON reports serializing the expanded include list. Diagnostic view coverage
 must verify artifact indexes, bounded timeline/log previews, derived ATIF v1.7,
-analysis cache discovery, diff file precedence, and trajectory-diff fallback
-without executing providers or agents.
+view schema v11 Trial prompt references, compact `trajectory` plus
+`trajectory_meta`, removed `atif` include diagnostics, flat leaderboard aggregate/task/trial
+rows, leaderboard enum-column multi-select filtering and numeric-column sorting
+controls, latest MatrixCell representative selection, status-colored heatmap
+cells when the selected metric is missing, prompt-unavailable compatibility,
+fine-grained ACP trajectory steps, optional system prompt steps, step
+duration/elapsed derivation from event timestamps, non-collapsible redacted
+system/reasoning HTML blocks, de-duplicated Run/Result/Files trajectory panels,
+HTML/JSON-only view formats, analysis cache
+discovery, diff file precedence, and trajectory-diff fallback without executing
+providers or agents.
 
 Persistent-workspace tests should verify `peval init`, `peval init --default`,
 `$PSYCHEVO_HOME/peval-config.toml` default workspace loading, `--root/-r`,
 `PEVAL_ROOT`, current-or-parent workspace discovery, registry precedence,
 explicit `--output-root` bypass behavior, safe workspace-relative cell layout,
 artifact-scan-backed views, config-free dataset listing, dataset import/listing,
-and view rendering without embedding raw trajectory or log bodies. Tests should
-assert that current code does not create visible
+root-level default `*.eval.toml` templates, unique `*.eval.toml` config
+discovery, ambiguous template diagnostics, and view rendering without embedding
+raw trajectory or log bodies. Tests should assert that current code does not
+create visible
 workspace `index.json`, namespace `latest.json`, hidden `.cache` indexes, or
 `dashboard.html`, and that legacy visible files are ignored and left untouched.
 
 Service-backed tests should verify service context isolation from process cwd
 and environment, read/write/execute capability enforcement, structured
-diagnostics in CLI JSON outputs, `peval view` include parsing and
-Markdown/JSON/HTML rendering, artifact v7 readers, old artifact scan skipping,
-and benchmark/eval config/evaluator-result readers.
+diagnostics in CLI JSON outputs, `peval view` include parsing and JSON/HTML
+rendering, artifact v7 readers, old artifact scan skipping, and
+benchmark/eval config/evaluator-result readers.
 
 Black-box integration tests under `crates/psychevo-eval/tests/` should cover
 public CLI contracts that users rely on. The checked-in `pidx-coding` benchmark

@@ -14,17 +14,19 @@ This attachment is part of [340 Agent Evaluation](spec.md).
 - config isolation and credential allowlists
 - trajectory collection and export strategy
 
-## Wrapper Strategy
+## ACP Profile
 
-Hermes execution is adapter-driven from a manifest-resolved command. Presets
-may default to `hermes`, but command, arguments, environment, config root,
-working directory, and collector can be overridden.
+The public Hermes evaluation path is `kind = "hermes-acp"`. It starts
+`hermes-acp` through the shared ACP adapter. The legacy `kind = "hermes"`
+wrapper path is removed.
 
-The first implementation accepts an explicit command template and executes it
-through the shared wrapper adapter path. Deterministic tests use fake Hermes
-commands that emit representative process or JSONL observations; real Hermes
-installation, provider credentials, and live execution are outside the default
-validation path.
+Hermes execution is adapter-driven from manifest-resolved ACP configuration.
+The default install follows the ACP registry shape with
+`uvx hermes-agent[acp]==0.15.1 hermes-acp`, while command, arguments,
+environment, install strategy, version, and cache behavior can be overridden.
+Deterministic tests use fake ACP fixture commands; real Hermes installation,
+provider credentials, and live execution are outside the default validation
+path.
 
 The first execution mode should support headless single-task prompts. If a
 Hermes version supports both final-text oneshot output and richer session
@@ -33,9 +35,9 @@ keeping final answer parsing simple.
 
 ## Isolation
 
-Hermes runs use an isolated home/profile/config root by default. Provider keys,
-model settings, skills, toolsets, and yolo or approval behavior must be
-manifest-visible when they influence a run.
+Hermes runs use an isolated home/profile/config root by default, including
+`HERMES_HOME`. Provider keys, model settings, skills, toolsets, and approval
+behavior must be manifest-visible when they influence a run.
 
 ## Trajectory
 

@@ -320,7 +320,7 @@ pub(crate) fn run_or_read_analysis(
     if path.is_file() && !overwrite {
         return Ok(serde_json::from_str(&fs::read_to_string(&path)?)?);
     }
-    let refs = view_trial(cell).artifact_refs;
+    let refs = view_trial(cell, &cell.cell_root).artifact_refs;
     let input_fingerprint = analysis_input_fingerprint(cell, resolved, &refs);
     let prompt = analysis_prompt(cell, resolved, &refs)?;
     let raw = invoke_analysis_agent(agent, cell, resolved, &prompt)?;
@@ -354,7 +354,7 @@ pub(crate) fn invalid_analysis_result(
     resolved: &ResolvedAnalysis,
     error: String,
 ) -> AnalysisJson {
-    let refs = view_trial(cell).artifact_refs;
+    let refs = view_trial(cell, &cell.cell_root).artifact_refs;
     AnalysisJson {
         schema_version: ANALYSIS_SCHEMA_VERSION,
         status: "invalid_output".to_string(),
@@ -390,7 +390,7 @@ pub(crate) fn analysis_prompt(
     resolved: &ResolvedAnalysis,
     refs: &[ViewDataRef],
 ) -> Result<String> {
-    let trajectory = build_trajectory_report(cell);
+    let trajectory = build_trajectory_bundle(cell).meta;
     let diff = build_diff_report(cell);
     let context = json!({
         "trial_key": trial_key(cell),
@@ -423,9 +423,15 @@ pub(crate) fn invoke_analysis_agent(
     match agent.kind {
         AgentKind::Fake => Ok(fake_analysis_output(cell, resolved)),
         AgentKind::Command => invoke_command_analysis_agent(agent, cell, prompt),
-        _ => bail!(
-            "analysis currently supports fake and command peval agents; `{}` is {:?}",
-            agent.id,
+        AgentKind::Acp
+        | AgentKind::PsychevoAcp
+        | AgentKind::OpencodeAcp
+        | AgentKind::HermesAcp
+        | AgentKind::HumanInLoop
+        | AgentKind::Psychevo
+        | AgentKind::Opencode
+        | AgentKind::Hermes => bail!(
+            "analysis agent kind `{:?}` is not supported; configure a command analysis agent",
             agent.kind
         ),
     }

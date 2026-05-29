@@ -14,11 +14,13 @@ This attachment is part of [340 Agent Evaluation](spec.md).
 - event and artifact collection
 - runtime impact limits
 
-## Native Adapter
+## ACP Profile
 
-The Psychevo adapter should use stable runtime APIs instead of shelling through
-`pevo` when the required runtime capability is available. The adapter maps
-manifest fields to runtime options explicitly:
+The public Psychevo evaluation path is `kind = "psychevo-acp"`. It starts a
+Psychevo ACP stdio server and evaluates it through the shared ACP adapter. The
+legacy `kind = "psychevo"` wrapper path is removed.
+
+The profile maps manifest fields to ACP setup explicitly:
 
 - model and reasoning effort
 - run mode and permission mode
@@ -26,26 +28,26 @@ manifest fields to runtime options explicitly:
 - skills and skill disabling
 - MCP server inputs
 - toolset policy when exposed by runtime
-- isolated database, workdir, config path, and inherited environment
+- host database, workdir, config path, and inherited environment by default
 
-The adapter owns evaluation-specific setup around runtime. Runtime itself must
-not gain benchmark orchestration, report rendering, or evaluation-matrix
-awareness for this adapter.
-
-The first implementation may shell through `pevo run` while preserving the
-manifest-visible Psychevo adapter identity. Deterministic validation configures
-`pevo run` against a local OpenAI-compatible mock provider; real provider
-validation uses the same adapter path with user-supplied provider credentials.
+For host-run benchmarks the profile defaults to the same Psychevo home, config,
+database, provider credentials, and environment that `pevo acp` would use from
+the shell. Eval manifests may explicitly override `PSYCHEVO_HOME`,
+`PSYCHEVO_DB`, or `PSYCHEVO_CONFIG` for isolated test runs. For
+container-backed benchmarks the profile first uses an explicit manifest `pevo`
+path when present. Otherwise it may build the workspace `pevo` binary on the
+host and copy it into the container. The server runs with per-run
+container-local `PSYCHEVO_HOME`, `PSYCHEVO_DB`, and `PSYCHEVO_CONFIG`.
 
 ## Trajectory
 
-Psychevo trajectory capture should use runtime stream events and session export
-data where needed. The collector records normalized events and preserves the
-runtime session id as diagnostic metadata.
+Psychevo trajectory capture uses ACP notifications, prompt responses, and
+Psychevo-specific ACP metadata where available. The collector records
+normalized events and preserves the ACP session id as diagnostic metadata.
 
-The adapter may read Psychevo's local SQLite state for the isolated evaluation
-database. It must not inspect the user's normal Psychevo state unless the
-manifest explicitly points at that state.
+The host adapter may read Psychevo's normal local SQLite state when the
+manifest does not request an isolated state path. Isolated test runs must set
+explicit state paths and must not inspect the user's normal Psychevo state.
 
 ## Performance Boundary
 

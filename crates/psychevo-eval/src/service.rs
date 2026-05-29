@@ -39,11 +39,6 @@ impl EvalDiagnostic {
         }
         Self::error("peval_error", message)
     }
-
-    pub fn with_hint(mut self, hint: impl Into<String>) -> Self {
-        self.hint = Some(hint.into());
-        self
-    }
 }
 
 impl std::fmt::Display for EvalDiagnostic {
@@ -79,6 +74,7 @@ impl ServiceCapabilities {
         }
     }
 
+    #[cfg(test)]
     pub fn read_only() -> Self {
         Self {
             read: true,
@@ -251,6 +247,44 @@ impl EvalService {
                 .output_root
                 .map(|path| self.context.resolve_path(&path)),
             include_artifacts: request.include_artifacts,
+        })
+        .map_err(EvalDiagnostic::from_error)
+    }
+
+    pub fn create_task_env(
+        &self,
+        request: TaskEnvCreateRequest,
+    ) -> ServiceResult<TaskEnvCreateResult> {
+        self.require(ServiceCapability::Read)?;
+        self.require(ServiceCapability::Write)?;
+        let config = request
+            .config
+            .map(|path| self.context.resolve_path(&path))
+            .or_else(|| {
+                request
+                    .benchmark
+                    .is_none()
+                    .then(|| self.context.cwd.clone())
+            });
+        create_task_env(TaskEnvCreateRequest {
+            config,
+            benchmark: request.benchmark,
+            task_set: request.task_set,
+            task: request.task,
+            store_root: self.context.effective_root(request.store_root),
+        })
+        .map_err(EvalDiagnostic::from_error)
+    }
+
+    pub fn verify_task_env(
+        &self,
+        request: TaskEnvVerifyRequest,
+    ) -> ServiceResult<TaskEnvVerifyResult> {
+        self.require(ServiceCapability::Execute)?;
+        self.require(ServiceCapability::Write)?;
+        verify_task_env(TaskEnvVerifyRequest {
+            env_root: self.context.resolve_path(&request.env_root),
+            duration_seconds: request.duration_seconds,
         })
         .map_err(EvalDiagnostic::from_error)
     }

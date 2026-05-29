@@ -2,8 +2,24 @@
 
 ## 2026-05-29
 
+- Added configurable pevo project context discovery, `pevo run` overrides, and
+  shared runtime prompt workdir handling across CLI, TUI, agents, compaction,
+  and ACP paths.
+- Added ACP-profile evaluation adapters, a Rust-native Docker Compose runner
+  for Harbor/Terminal-Bench tasks, and a `peval init` template built around host
+  Pidx plus `psychevo-acp`.
+- Split `psychevo-eval` into schema/store, runner, view, CLI, and lifecycle-test
+  modules while keeping `peval` behavior and report schemas unchanged.
+- Evolved `peval view`/`peval serve` through report schemas v8-v12 with
+  transparent ACP trajectories, grouped transcript steps, leaderboard-driven
+  heatmaps, de-duplicated evidence, compact Trial panels, and HTML/JSON reports.
+- Refined schema v12 trajectory metadata and HTML with corrected Step spans,
+  separated model/tool timing, message-only collapsed previews, cleaner Step
+  metrics, clearer tool counts, and model labels from ACP runtime metadata.
+- Added `peval env create` and `peval env verify` for local human-in-loop task
+  environments, plus local HTML workbench prototypes for the next report UI.
 - Expanded `peval` with typed source manifests, Harbor-style task directories,
-  schema v7 Trial/MatrixCell views, local `serve`, and cached Trial analysis.
+  schema v8 Trial/MatrixCell views, local `serve`, and cached Trial analysis.
 - Tightened ACP, auth, provider, and exec-permission surfaces, including
   protocol V1 reporting, `no_auth` providers, and structured exec rules.
 - Fixed fullscreen TUI yielded command rows to keep their original command title

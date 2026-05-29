@@ -1,5 +1,3 @@
-#![allow(unused_imports)]
-
 pub(crate) use std::collections::{BTreeMap, BTreeSet};
 pub(crate) use std::env;
 pub(crate) use std::ffi::OsString;
@@ -16,27 +14,30 @@ pub(crate) use serde::{Deserialize, Serialize};
 pub(crate) use serde_json::{Value, json};
 pub(crate) use uuid::Uuid;
 
-mod schema_store;
-#[allow(unused_imports)]
-pub use schema_store::*;
+mod schema;
+pub(crate) use schema::*;
+
+mod store;
+pub(crate) use store::*;
+
 mod runner;
-#[allow(unused_imports)]
-pub use runner::*;
+pub(crate) use runner::*;
+
 mod reporting;
-#[allow(unused_imports)]
-pub use reporting::*;
+pub(crate) use reporting::*;
+
 mod views;
-#[allow(unused_imports)]
-pub use views::*;
+pub(crate) use views::*;
+
 mod service;
-#[allow(unused_imports)]
-pub use service::*;
+pub(crate) use service::*;
+
 mod serve;
-#[allow(unused_imports)]
-pub use serve::*;
+pub(crate) use serve::*;
+
 mod analysis;
-#[allow(unused_imports)]
-pub use analysis::*;
+pub(crate) use analysis::*;
+
 mod cli;
-#[allow(unused_imports)]
-pub use cli::*;
+pub(crate) use cli::*;
+pub use cli::{CliOutcome, run_cli_from};

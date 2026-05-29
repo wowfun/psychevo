@@ -91,7 +91,10 @@ Runtime observation maps to ACP session updates:
 
 - assistant text progress becomes agent message chunks
 - reasoning progress becomes agent thought chunks
-- tool lifecycle events become tool call and tool call update records
+- pending tool-call argument progress becomes pending tool call update records
+  when the runtime exposes it, so clients can distinguish model generation of a
+  tool request from local tool execution
+- tool execution lifecycle events become tool call and tool call update records
 - final outcomes become ACP stop reasons
 - cancellation maps to runtime abort
 

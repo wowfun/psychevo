@@ -10,6 +10,28 @@ pub(crate) fn send_runtime_event_update(
         return;
     };
     match event_type {
+        "tool_call_pending" => {
+            let call_id = value
+                .get("tool_call_id")
+                .and_then(Value::as_str)
+                .unwrap_or("tool");
+            let tool_name = value
+                .get("tool_name")
+                .and_then(Value::as_str)
+                .unwrap_or("tool");
+            send_session_update(
+                cx,
+                session_id.clone(),
+                SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                    call_id.to_string(),
+                    ToolCallUpdateFields::new()
+                        .title(tool_title(tool_name))
+                        .kind(tool_kind(tool_name))
+                        .status(ToolCallStatus::Pending)
+                        .raw_input(tool_call_pending_raw_input(&value)),
+                )),
+            );
+        }
         "tool_execution_start" => {
             let call_id = value
                 .get("tool_call_id")
@@ -69,6 +91,20 @@ pub(crate) fn send_runtime_event_update(
             );
         }
         _ => {}
+    }
+}
+
+pub(crate) fn tool_call_pending_raw_input(value: &Value) -> Value {
+    let arguments_json = value
+        .get("arguments_json")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    match serde_json::from_str::<Value>(arguments_json) {
+        Ok(parsed) => parsed,
+        Err(_) => json!({
+            "arguments_json": arguments_json,
+            "partial": true,
+        }),
     }
 }
 
@@ -821,6 +857,25 @@ pub(crate) mod tests {
         assert_eq!(usage.cached_read_tokens, Some(2));
         assert_eq!(usage.thought_tokens, Some(1));
         assert_eq!(usage.total_tokens, 16);
+    }
+
+    #[test]
+    fn tool_call_pending_raw_input_preserves_partial_arguments() {
+        assert_eq!(
+            tool_call_pending_raw_input(&json!({
+                "arguments_json": "{\"path\":\"add.py\"",
+            })),
+            json!({
+                "arguments_json": "{\"path\":\"add.py\"",
+                "partial": true,
+            })
+        );
+        assert_eq!(
+            tool_call_pending_raw_input(&json!({
+                "arguments_json": "{\"path\":\"add.py\"}",
+            })),
+            json!({ "path": "add.py" })
+        );
     }
 
     #[test]

@@ -6,7 +6,8 @@ psychevo_self_edit: deny
 # 340. Agent Evaluation
 
 Define concrete agent evaluation adapters for the first comparison set:
-Psychevo, command, ACP, OpenCode, and Hermes.
+command, generic ACP, and built-in ACP profiles for Psychevo, OpenCode, and
+Hermes.
 
 ## Scope
 
@@ -39,21 +40,35 @@ Agent evaluation adapters should prefer event streams or native session exports
 for trajectory capture. Stdout/stderr parsing is a fallback, not the preferred
 source of truth.
 
-Wrapper adapters for OpenCode and Hermes are concrete adapter kinds, not fake
-agents. They share process execution, command-template expansion, isolated
-home/config handling, and lossy collector fallback internals while preserving
-their adapter identity in manifests, reports, diagnostics, and facts.
-
 The `command` adapter is the local process baseline for host-run benchmarks.
 It starts the configured command in the task workspace, expands prompt and path
 templates, and imports optional JSONL stdout events.
 
 The `acp` adapter is a generic ACP stdio client. It starts the configured ACP
 server command, performs initialize/session setup, sends the task prompt through
-`session/prompt`, records ACP notifications as trajectory events, and treats a
-successful prompt response as agent completion. Deterministic tests may use a
-local ACP fixture process; real provider validation remains opt-in through the
-configured ACP server.
+`session/prompt`, records raw ACP JSONL and normalized trajectory events, and
+treats a successful prompt response as agent completion. It must use
+initialize capability negotiation before optional model, mode, or permission
+requests and must fail clearly when requested capabilities are unavailable.
+Deterministic tests may use a local ACP fixture process; real provider
+validation remains opt-in through the configured ACP server.
+
+`psychevo-acp`, `opencode-acp`, and `hermes-acp` are public ACP profile kinds.
+They normalize to the generic ACP adapter at execution time while preserving
+their manifest-visible profile identity in reports. Their configuration reuses
+`[agents.acp]`. The legacy `psychevo`, `opencode`, and `hermes` wrapper kinds
+are removed interfaces and should fail with migration guidance.
+
+ACP profiles support `preinstalled`, `install_command`, and profile-default
+install strategies. Container-backed benchmarks run ACP servers inside the
+task container. Host-installed OpenCode or Hermes binaries may be used to
+prepare container caches, but real benchmark execution must not run those ACP
+servers on the host. Host-run `psychevo-acp` inherits the user's normal
+Psychevo config, credentials, and environment by default so local live evals use
+the same provider setup as `pevo acp`; manifests may still override
+`PSYCHEVO_HOME`, `PSYCHEVO_DB`, or `PSYCHEVO_CONFIG` explicitly. Container
+`psychevo-acp` runs, and host/container OpenCode or Hermes profile runs, use
+per-run state directories for home/config/cache isolation.
 
 Adapter validation uses the same command path as real usage. Deterministic
 tests configure local mock providers or fake wrapper commands; real provider

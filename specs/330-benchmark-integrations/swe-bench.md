@@ -20,16 +20,27 @@ The SWE-bench bridge uses official dataset and harness paths when available.
 Dataset rows are translated into coding tasks with issue text, repository
 identity, base commit or base state, and evaluator expectations.
 
-The candidate modifies an isolated workspace. When the official harness expects
-a patch, the bridge may generate a temporary patch from the final workspace and
-pass it to the harness. That patch is not retained as a report artifact unless
-a later coding spec opts into raw patch retention.
+The ACP candidate runs in a containerized authoring environment rooted at the
+official SWE-bench workdir, normally `/testbed`. The prompt contains the
+instance problem statement plus minimal workdir instructions. It must not
+include hidden tests, `FAIL_TO_PASS`, or `PASS_TO_PASS`.
+
+After the ACP agent finishes, the bridge collects `git diff` from the authoring
+container as the candidate patch. Official scoring runs in a fresh verifier
+container through the local SWE-bench Python harness by applying that patch and
+running the official eval script. This separates agent side effects from the
+official verifier environment while preserving SWE-bench scoring semantics.
+
+Dataset access is local-first. Reading an existing local dataset or cache is
+allowed by default; HuggingFace or other network downloads require explicit
+opt-in.
 
 ## Results
 
 Official harness outcomes are imported into the common score model with task
 identity, benchmark split, harness metadata, pass/fail result, and diagnostic
-details. Harness logs may be kept locally as diagnostic artifacts.
+details. The generated candidate patch, official harness logs, raw ACP JSONL,
+and normalized trajectory are local diagnostic artifacts.
 
 Real SWE-bench data access and full split execution are opt-in. The default
 behavior for live official runs is a small sample or explicit task limit.
