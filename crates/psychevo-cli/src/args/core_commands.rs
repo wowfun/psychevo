@@ -51,7 +51,13 @@ pub(crate) enum Commands {
 }
 
 #[derive(Debug, Parser)]
-pub(crate) struct AcpArgs {}
+pub(crate) struct AcpArgs {
+    #[arg(
+        long,
+        help = "Print provider setup guidance instead of starting the ACP server"
+    )]
+    pub(crate) setup: bool,
+}
 
 #[derive(Debug, Parser)]
 pub(crate) struct InitArgs {

@@ -54,7 +54,13 @@ pub(crate) async fn run() -> Result<ExitCode> {
         Commands::Model(args) => run_model_command(args).await,
         Commands::Config(args) => run_config_command(args),
         Commands::Auth(args) => run_auth_command(args),
-        Commands::Acp(_args) => {
+        Commands::Acp(args) => {
+            if args.setup {
+                println!(
+                    "Run `pevo auth setup --provider <id> --model <model> --base-url <url> --api-key-stdin` or add `--no-auth` for explicit no-auth providers."
+                );
+                return Ok(ExitCode::SUCCESS);
+            }
             psychevo_acp::run_stdio(psychevo_acp::AcpOptions::from_env()).await?;
             Ok(ExitCode::SUCCESS)
         }

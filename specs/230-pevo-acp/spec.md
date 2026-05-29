@@ -43,6 +43,11 @@ updates, or session behavior.
 Process help should describe `pevo acp` as the Agent Client Protocol stdio
 server for ACP-speaking editors and clients.
 
+`psychevo-acp --setup` and `pevo acp --setup` run the shared Psychevo provider
+setup flow and exit instead of starting the stdio server. ACP terminal auth
+advertises the same setup path with `args = ["--setup"]`, so clients can launch
+the agent binary for out-of-band setup and then retry initialize/authenticate.
+
 ## Process Setup
 
 The ACP server uses the same product path conventions as the `pevo` CLI:
@@ -70,9 +75,19 @@ metadata, persistence, and evidence.
 `psychevo-acp` may keep transport-local state for active ACP sessions and
 in-flight cancellation handles. That state is not durable session evidence.
 
+ACP request handling must return protocol version `V1` in initialize
+responses, advertise only implemented optional capabilities, and avoid
+placeholder logout support. Runtime usage, accounting, turns, warnings, and
+context-window updates are projected according to [027 ACP](../027-acp/spec.md)
+without mutating the durable transcript.
+
 `psychevo-acp` sends ACP command availability after the client receives or can
 apply the ACP session id. It also handles supported slash-command prompts
 locally before invoking the model-backed runtime path.
+
+Only a prompt consisting of a single text block is eligible for ACP slash
+command handling. Prompts with attachments or multiple blocks are passed through
+to runtime as ordered user content.
 
 Local observational commands such as `/diff` are resolved entirely inside the
 ACP transport. `/diff` uses the shared runtime workspace diff collector and
@@ -84,6 +99,16 @@ or durable session evidence.
 ## Attachments
 
 - [Testing](testing.md) defines acceptance scenarios and validation expectations.
+
+## Setup
+
+ACP setup is implemented by shared runtime setup services rather than by ACP
+protocol code. The setup command supports explicit provider/model, custom
+OpenAI-compatible base URLs, API key stdin, API key env references, explicit
+no-auth providers, global/local scopes, optional catalog fetch, labels, and
+JSON summary output. `--api-key-stdin` must reject TTY stdin. JSON summaries
+must not contain secrets and may include a `warnings` array for non-fatal
+conditions such as unconfirmed models or non-loopback no-auth URLs.
 
 ## Related Topics
 

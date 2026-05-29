@@ -408,49 +408,39 @@ impl PsychevoAcpAgent {
         ))
     }
 
-    pub(crate) fn auth_methods(&self) -> Vec<AuthMethod> {
+    pub(crate) fn auth_methods(&self, terminal_auth: bool) -> Vec<AuthMethod> {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let options = RunOptions {
-            state: self.state.clone(),
-            workdir: cwd,
-            snapshot_root: None,
-            session: None,
-            continue_latest: false,
-            prompt: String::new(),
-            image_inputs: Vec::new(),
-            extract_prompt_image_sources: false,
-            prompt_display: None,
-            max_context_messages: None,
-            config_path: self.options.config_path.clone(),
-            model: None,
-            reasoning_effort: None,
-            include_reasoning: false,
-            mode: RunMode::Default,
-            permission_mode: None,
-            approval_mode: None,
-            approval_handler: None,
-            clarify_enabled: false,
-            inherited_env: Some(self.options.inherited_env.clone()),
-            agent: None,
-            no_agents: false,
-            no_skills: false,
-            skill_inputs: Vec::new(),
-            mcp_servers: Vec::new(),
-        };
-        model_catalog_providers(&options)
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|provider| provider.api_key_env)
-            .collect::<std::collections::BTreeSet<_>>()
-            .into_iter()
-            .map(|env_name| {
-                AuthMethod::EnvVar(AuthMethodEnvVar::new(
-                    format!("env:{env_name}"),
-                    env_name.clone(),
-                    vec![AuthEnvVar::new(env_name.clone()).label(env_name)],
-                ))
-            })
-            .collect()
+        let options = self.probe_run_options(cwd, None);
+        let selected_provider = selected_configured_model(&options)
+            .ok()
+            .flatten()
+            .map(|model| model.provider);
+        let providers = model_catalog_providers(&options).unwrap_or_default();
+        let mut methods = Vec::new();
+        if let Some(provider_id) = selected_provider
+            && let Some(provider) = providers
+                .iter()
+                .find(|provider| provider.provider == provider_id && provider.fetchable())
+        {
+            methods.push(AuthMethod::Agent(
+                AuthMethodAgent::new(
+                    provider.provider.clone(),
+                    format!("{} credentials", provider.display_label),
+                )
+                .description(format!(
+                    "Use configured credentials for {}.",
+                    provider.display_label
+                )),
+            ));
+        }
+        if terminal_auth {
+            methods.push(AuthMethod::Terminal(
+                AuthMethodTerminal::new(TERMINAL_SETUP_AUTH_METHOD_ID, "Psychevo setup")
+                    .description("Configure Psychevo provider credentials in a terminal.")
+                    .args(vec!["--setup".to_string()]),
+            ));
+        }
+        methods
     }
 }
 
@@ -460,6 +450,7 @@ pub(crate) enum SlashPromptAction {
     RunPrompt(String),
 }
 
+pub(crate) const TERMINAL_SETUP_AUTH_METHOD_ID: &str = "psychevo-setup";
 pub(crate) const ACP_COMMAND_ADVERTISEMENT_LIMIT: usize = 100;
 
 pub(crate) fn acp_command_capabilities()

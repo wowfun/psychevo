@@ -49,7 +49,10 @@ owns the protocol mapping, not the product process that hosts it.
 
 ACP session ids identify active ACP session actors. Each actor maps to a
 Psychevo runtime session id once runtime creates or loads the backing session.
-New ACP sessions use source `acp` for runtime persistence.
+New ACP sessions use source `acp` for runtime persistence. A newly created ACP
+session may remain transport-local until the first model-backed prompt creates
+the durable runtime session; the ACP id must remain stable for the client and
+must be linked to the runtime id once that id exists.
 
 `session/new` creates a runtime session boundary for the selected cwd,
 provider, model, mode, permissions, and ACP-supplied MCP sources. `session/load`
@@ -58,14 +61,31 @@ lists Psychevo sessions visible to the requested cwd. `session/close` closes
 the ACP actor and aborts any active invocation for that actor.
 
 Session history replay uses sanitized runtime messages and ACP session updates.
-Replay is presentation, not new evidence.
+Replay is presentation, not new evidence. `session/load` must replay history
+before returning the load response. Replay is best effort: corrupt, older, or
+unsupported message shapes produce visible placeholder updates and a structured
+`_meta.psychevo.replay_warnings` summary instead of failing the load when the
+runtime session itself exists.
 
 ## Prompting And Observation
 
-ACP prompt content is converted into runtime prompt text plus supported image
-inputs. Text content is preserved in order. Image content maps to runtime image
-inputs when the source is usable. Embedded resources degrade to explicit text
-context when runtime cannot preserve their original resource type.
+ACP prompt content is converted into ordered runtime user content blocks. Text
+content is preserved in order. A single text block that starts with `/` may be
+handled as an ACP slash command; prompts with multiple blocks, images, or
+resources are model prompts even when a text block starts with `/`.
+
+Image content maps to runtime image blocks when the source is usable. Image
+data becomes a data URL; non-empty image URIs pass through as image URLs.
+Image file resources use the runtime image pipeline. Audio and unsupported
+resources degrade to explicit visible text.
+
+Text resource links use the ACP client filesystem read capability first when
+the client advertises it, then local file reading as a fallback. Client reads
+use a fixed line limit, and all text resources are capped at 512 KiB after
+decoding. Remote HTTP(S) resource links are not fetched proactively and degrade
+to a visible resource-link note. Resource handling records prompt-scoped
+summaries in runtime context evidence; text that is actually inlined for the
+model is persisted in the user message for new runs.
 
 Runtime observation maps to ACP session updates:
 
@@ -76,6 +96,17 @@ Runtime observation maps to ACP session updates:
 - cancellation maps to runtime abort
 
 ACP observation must not rewrite durable runtime transcript content.
+
+Runtime usage and accounting are projected at the ACP prompt boundary. When the
+ACP SDK exposes unstable usage fields, Psychevo sends `PromptResponse.usage`
+for provider token usage and puts Psychevo-specific accounting, turns, and
+warnings under `_meta.psychevo`. ACP `UsageUpdate` is reserved for context
+window snapshots and cumulative session cost; its tokens are not added to
+provider usage. Provider-reported total tokens are authoritative when present;
+otherwise totals are `input + output` and do not double-count reasoning or
+cache subcategories. If multiple runtime model turns drain under one ACP
+prompt response, numeric accounting fields are summed and inconsistent pricing
+source or tier strings become `mixed`.
 
 ## Commands
 
@@ -149,21 +180,31 @@ executing the shared command effect.
 
 ## Authentication
 
-ACP `initialize` advertises provider authentication methods derived from
-Psychevo's configured provider catalog. Environment-variable methods verify
-that the required variable is present. Agent methods may use existing Psychevo
-auth storage APIs to persist provider API keys.
+ACP `initialize` advertises provider authentication methods derived from the
+current effective model provider. A ready provider is advertised as an agent
+auth method. Terminal setup auth is advertised only when the client declares
+terminal auth support. ACP does not advertise environment-variable auth
+methods. If no provider is ready and no supported terminal setup path exists,
+`session/new` fails with `auth_required`.
 
 Authentication is provider configuration. It must not bypass runtime model
 selection, permission policy, or capability selection.
 
-Logout may remove Psychevo-managed stored credentials. It must not mutate host
-environment variables.
+Logout is advertised only when the ACP server implements the logout request. It
+must not be advertised as a placeholder.
 
 ## Model, Mode, And Config Projection
 
 ACP may expose model selection, mode selection, and session config options when
 runtime can honor those inputs for future prompts in the same ACP session.
+
+ACP initializes and loads sessions with a model state derived from local config
+and cache-first model metadata. It must not fetch provider catalogs during ACP
+initialize, new-session, or load-session. The current selected model is always
+included in the available model list, synthesized when it is absent from local
+catalogs. ACP model ids use `provider/model`; bare model ids are accepted for
+model switching only when they unambiguously resolve to one configured
+provider.
 
 Mode and config updates change ACP session state first. The next runtime
 invocation receives the resolved state through normal runtime inputs. Unsupported
@@ -183,6 +224,12 @@ runtime MCP naming contract.
 
 MCP startup and tool execution remain local runtime actions. They do not imply
 ACP client filesystem or terminal delegation.
+
+ACP advertises only MCP transports that are supported by the runtime bridge.
+The first slice advertises HTTP MCP support and accepts stdio declarations
+without advertising SSE or ACP-over-ACP. Unsupported MCP transports or startup
+failures produce structured `_meta.psychevo.mcp_warnings` and visible guidance,
+but they do not fail session creation or prompting by themselves.
 
 ## Permissions
 

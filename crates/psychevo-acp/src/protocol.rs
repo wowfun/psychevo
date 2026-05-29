@@ -72,22 +72,39 @@ pub(crate) fn send_runtime_event_update(
     }
 }
 
-pub(crate) fn prompt_parts(prompt: Vec<ContentBlock>) -> (String, Vec<ImageInput>) {
+pub(crate) fn single_text_prompt(prompt: &[ContentBlock]) -> Option<&str> {
+    match prompt {
+        [ContentBlock::Text(content)] => Some(content.text.as_str()),
+        _ => None,
+    }
+}
+
+pub(crate) fn prompt_parts(prompt: Vec<ContentBlock>, cwd: &Path) -> (String, Vec<ImageInput>) {
     let mut text = Vec::new();
     let mut images = Vec::new();
     for block in prompt {
         match block {
             ContentBlock::Text(content) => text.push(content.text),
             ContentBlock::Image(content) => {
-                if let Some(uri) = content.uri {
-                    if uri.starts_with("http://") || uri.starts_with("https://") {
-                        images.push(ImageInput::ImageUrl(uri));
-                    } else {
-                        text.push(format!("[image: {uri}]"));
-                    }
+                if let Some(uri) = content.uri.filter(|uri| !uri.trim().is_empty()) {
+                    images.push(ImageInput::ImageUrl(uri));
+                } else if !content.data.trim().is_empty() {
+                    images.push(ImageInput::ImageUrl(format!(
+                        "data:{};base64,{}",
+                        content.mime_type, content.data
+                    )));
                 } else {
-                    text.push("[embedded image omitted]".to_string());
+                    text.push("[image omitted: empty ACP image block]".to_string());
                 }
+            }
+            ContentBlock::ResourceLink(link) => {
+                process_resource_link(link, cwd, &mut text, &mut images)
+            }
+            ContentBlock::Resource(resource) => {
+                process_embedded_resource(resource, &mut text, &mut images)
+            }
+            ContentBlock::Audio(_) => {
+                text.push("[audio omitted: Psychevo ACP does not support audio input]".to_string());
             }
             other => {
                 if let Ok(serialized) = serde_json::to_string(&other) {
@@ -97,6 +114,484 @@ pub(crate) fn prompt_parts(prompt: Vec<ContentBlock>) -> (String, Vec<ImageInput
         }
     }
     (text.join("\n\n"), images)
+}
+
+fn process_embedded_resource(
+    resource: agent_client_protocol::schema::EmbeddedResource,
+    text: &mut Vec<String>,
+    images: &mut Vec<ImageInput>,
+) {
+    match resource.resource {
+        agent_client_protocol::schema::EmbeddedResourceResource::TextResourceContents(resource) => {
+            text.push(format!(
+                "[resource: {}]\n{}",
+                resource.uri,
+                capped_text_resource(resource.text)
+            ));
+        }
+        agent_client_protocol::schema::EmbeddedResourceResource::BlobResourceContents(resource) => {
+            let mime_type = resource
+                .mime_type
+                .as_deref()
+                .unwrap_or("application/octet-stream");
+            if mime_type.starts_with("image/") && !resource.blob.trim().is_empty() {
+                images.push(ImageInput::ImageUrl(format!(
+                    "data:{mime_type};base64,{}",
+                    resource.blob
+                )));
+            } else {
+                text.push(format!(
+                    "[resource omitted: embedded blob {} has unsupported MIME type {}]",
+                    resource.uri, mime_type
+                ));
+            }
+        }
+        _ => {
+            text.push("[resource omitted: unsupported embedded ACP resource]".to_string());
+        }
+    }
+}
+
+fn process_resource_link(
+    link: agent_client_protocol::schema::ResourceLink,
+    cwd: &Path,
+    text: &mut Vec<String>,
+    images: &mut Vec<ImageInput>,
+) {
+    if is_remote_uri(&link.uri) {
+        text.push(format!(
+            "[resource omitted: remote ResourceLink was not fetched: {}]",
+            link.uri
+        ));
+        return;
+    }
+    let Some(path) = local_resource_path(&link.uri, cwd) else {
+        text.push(format!(
+            "[resource omitted: unsupported ResourceLink URI: {}]",
+            link.uri
+        ));
+        return;
+    };
+    let mime_type = link.mime_type.as_deref().unwrap_or_default();
+    if mime_type.starts_with("image/") {
+        images.push(ImageInput::LocalPath(path));
+        return;
+    }
+    match read_capped_text_resource(&path) {
+        Ok(contents) => text.push(format!("[resource: {}]\n{}", link.uri, contents)),
+        Err(err) => text.push(format!(
+            "[resource omitted: failed to read {}: {err}]",
+            link.uri
+        )),
+    }
+}
+
+const ACP_TEXT_RESOURCE_MAX_BYTES: usize = 512 * 1024;
+const ACP_TEXT_RESOURCE_MAX_LINES: usize = 2_000;
+
+fn capped_text_resource(value: String) -> String {
+    truncate_text_resource(&value)
+}
+
+fn read_capped_text_resource(path: &Path) -> std::io::Result<String> {
+    let bytes = std::fs::read(path)?;
+    let truncated_by_bytes = bytes.len() > ACP_TEXT_RESOURCE_MAX_BYTES;
+    let slice = &bytes[..bytes.len().min(ACP_TEXT_RESOURCE_MAX_BYTES)];
+    let mut text = String::from_utf8_lossy(slice).into_owned();
+    if truncated_by_bytes {
+        text.push_str("\n[truncated: ACP text resource byte cap reached]");
+    }
+    Ok(truncate_text_resource(&text))
+}
+
+fn truncate_text_resource(value: &str) -> String {
+    let mut lines = value
+        .lines()
+        .take(ACP_TEXT_RESOURCE_MAX_LINES)
+        .collect::<Vec<_>>();
+    let truncated_by_lines = value.lines().count() > ACP_TEXT_RESOURCE_MAX_LINES;
+    let mut text = lines.join("\n");
+    if truncated_by_lines {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str("[truncated: ACP text resource line cap reached]");
+    }
+    lines.clear();
+    text
+}
+
+fn is_remote_uri(uri: &str) -> bool {
+    uri.starts_with("http://") || uri.starts_with("https://")
+}
+
+fn local_resource_path(uri: &str, cwd: &Path) -> Option<PathBuf> {
+    let value = uri.trim();
+    if value.is_empty() {
+        return None;
+    }
+    let path = if let Some(rest) = value.strip_prefix("file://") {
+        PathBuf::from(rest)
+    } else if value.contains("://") {
+        return None;
+    } else {
+        PathBuf::from(value)
+    };
+    Some(if path.is_absolute() {
+        path
+    } else {
+        cwd.join(path)
+    })
+}
+
+#[derive(Debug, Default, Clone)]
+pub(crate) struct AcpUsageAccumulator {
+    input_tokens: u64,
+    output_tokens: u64,
+    total_tokens: u64,
+    thought_tokens: u64,
+    cached_read_tokens: u64,
+    cached_write_tokens: u64,
+    has_usage: bool,
+    turns: u64,
+    accounting: AcpAccountingAccumulator,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Default, Clone)]
+struct AcpAccountingAccumulator {
+    context_input_tokens: Option<u64>,
+    billable_input_tokens: Option<u64>,
+    billable_output_tokens: Option<u64>,
+    reasoning_tokens: Option<u64>,
+    cache_read_tokens: Option<u64>,
+    cache_write_tokens: Option<u64>,
+    reported_total_tokens: Option<u64>,
+    estimated_cost_nanodollars: Option<i64>,
+    pricing_source: Option<String>,
+    pricing_tier: Option<String>,
+}
+
+impl AcpUsageAccumulator {
+    pub(crate) fn record_stream_event(&mut self, event: &RunStreamEvent) {
+        match event {
+            RunStreamEvent::Event(value) => self.record_runtime_value(value),
+            RunStreamEvent::Scoped { event, .. } => self.record_stream_event(event),
+            RunStreamEvent::ReasoningDelta { .. }
+            | RunStreamEvent::ReasoningEnd
+            | RunStreamEvent::ClarifyRequest(_)
+            | RunStreamEvent::ClarifyResolved(_) => {}
+        }
+    }
+
+    pub(crate) fn add_warning(&mut self, warning: impl Into<String>) {
+        let warning = warning.into();
+        if !warning.trim().is_empty() && !self.warnings.contains(&warning) {
+            self.warnings.push(warning);
+        }
+    }
+
+    pub(crate) fn to_usage(&self) -> Option<Usage> {
+        if self.has_usage {
+            let mut usage = Usage::new(self.total_tokens, self.input_tokens, self.output_tokens);
+            if self.thought_tokens > 0 {
+                usage = usage.thought_tokens(self.thought_tokens);
+            }
+            if self.cached_read_tokens > 0 {
+                usage = usage.cached_read_tokens(self.cached_read_tokens);
+            }
+            if self.cached_write_tokens > 0 {
+                usage = usage.cached_write_tokens(self.cached_write_tokens);
+            }
+            Some(usage)
+        } else {
+            self.accounting.synthesized_usage()
+        }
+    }
+
+    pub(crate) fn response_meta(&self) -> Option<serde_json::Map<String, Value>> {
+        let mut psychevo = serde_json::Map::new();
+        if self.turns > 0 {
+            psychevo.insert("turns".to_string(), Value::from(self.turns));
+        }
+        if let Some(accounting) = self.accounting.public_json() {
+            psychevo.insert("accounting".to_string(), accounting);
+        }
+        if !self.warnings.is_empty() {
+            psychevo.insert("warnings".to_string(), json!(self.warnings));
+        }
+        if psychevo.is_empty() {
+            None
+        } else {
+            let mut meta = serde_json::Map::new();
+            meta.insert("psychevo".to_string(), Value::Object(psychevo));
+            Some(meta)
+        }
+    }
+
+    pub(crate) fn cumulative_cost_usd(&self) -> Option<f64> {
+        self.accounting
+            .estimated_cost_nanodollars
+            .map(|value| value as f64 / 1_000_000_000.0)
+    }
+
+    fn record_runtime_value(&mut self, value: &Value) {
+        let Some(event_type) = value.get("type").and_then(Value::as_str) else {
+            return;
+        };
+        match event_type {
+            "turn_start" => {
+                self.turns = self.turns.saturating_add(1);
+            }
+            "warning" => {
+                if let Some(message) = value.get("message").and_then(Value::as_str) {
+                    self.add_warning(message);
+                }
+            }
+            "message_end" => {
+                self.record_usage(value.get("usage"));
+                self.record_accounting(value.get("accounting"));
+            }
+            _ => {}
+        }
+    }
+
+    fn record_usage(&mut self, usage: Option<&Value>) {
+        let Some(usage) = usage else {
+            return;
+        };
+        self.has_usage = true;
+        let input = usage_u64(
+            usage,
+            &["input_tokens", "prompt_tokens", "context_input_tokens"],
+        )
+        .unwrap_or(0);
+        let output = usage_u64(usage, &["output_tokens", "completion_tokens"]).unwrap_or(0);
+        let total = usage_u64(usage, &["total_tokens", "reported_total_tokens"])
+            .unwrap_or_else(|| input.saturating_add(output));
+        self.input_tokens = self.input_tokens.saturating_add(input);
+        self.output_tokens = self.output_tokens.saturating_add(output);
+        self.total_tokens = self.total_tokens.saturating_add(total);
+        self.thought_tokens = self
+            .thought_tokens
+            .saturating_add(usage_u64(usage, &["thought_tokens", "reasoning_tokens"]).unwrap_or(0));
+        self.cached_read_tokens = self.cached_read_tokens.saturating_add(
+            usage_u64(
+                usage,
+                &[
+                    "cached_read_tokens",
+                    "cache_read_tokens",
+                    "cached_tokens",
+                    "cached_input_tokens",
+                ],
+            )
+            .unwrap_or(0),
+        );
+        self.cached_write_tokens = self.cached_write_tokens.saturating_add(
+            usage_u64(
+                usage,
+                &[
+                    "cached_write_tokens",
+                    "cache_write_tokens",
+                    "cache_creation_input_tokens",
+                    "cache_written_tokens",
+                ],
+            )
+            .unwrap_or(0),
+        );
+    }
+
+    fn record_accounting(&mut self, accounting: Option<&Value>) {
+        let Some(accounting) = accounting else {
+            return;
+        };
+        self.accounting.record(accounting);
+    }
+}
+
+impl AcpAccountingAccumulator {
+    fn record(&mut self, value: &Value) {
+        add_optional_u64(
+            &mut self.context_input_tokens,
+            value_u64(value, "context_input_tokens"),
+        );
+        add_optional_u64(
+            &mut self.billable_input_tokens,
+            value_u64(value, "billable_input_tokens"),
+        );
+        add_optional_u64(
+            &mut self.billable_output_tokens,
+            value_u64(value, "billable_output_tokens"),
+        );
+        add_optional_u64(
+            &mut self.reasoning_tokens,
+            value_u64(value, "reasoning_tokens"),
+        );
+        add_optional_u64(
+            &mut self.cache_read_tokens,
+            value_u64(value, "cache_read_tokens"),
+        );
+        add_optional_u64(
+            &mut self.cache_write_tokens,
+            value_u64(value, "cache_write_tokens"),
+        );
+        add_optional_u64(
+            &mut self.reported_total_tokens,
+            value_u64(value, "reported_total_tokens"),
+        );
+        add_optional_i64(
+            &mut self.estimated_cost_nanodollars,
+            value_i64(value, "estimated_cost_nanodollars"),
+        );
+        merge_optional_string(
+            &mut self.pricing_source,
+            value.get("pricing_source").and_then(Value::as_str),
+        );
+        merge_optional_string(
+            &mut self.pricing_tier,
+            value.get("pricing_tier").and_then(Value::as_str),
+        );
+    }
+
+    fn public_json(&self) -> Option<Value> {
+        let mut object = serde_json::Map::new();
+        insert_optional(
+            &mut object,
+            "context_input_tokens",
+            self.context_input_tokens,
+        );
+        insert_optional(
+            &mut object,
+            "billable_input_tokens",
+            self.billable_input_tokens,
+        );
+        insert_optional(
+            &mut object,
+            "billable_output_tokens",
+            self.billable_output_tokens,
+        );
+        insert_optional(&mut object, "reasoning_tokens", self.reasoning_tokens);
+        insert_optional(&mut object, "cache_read_tokens", self.cache_read_tokens);
+        insert_optional(&mut object, "cache_write_tokens", self.cache_write_tokens);
+        insert_optional(
+            &mut object,
+            "reported_total_tokens",
+            self.reported_total_tokens,
+        );
+        if let Some(value) = self.estimated_cost_nanodollars {
+            object.insert("estimated_cost_nanodollars".to_string(), Value::from(value));
+        }
+        if let Some(value) = &self.pricing_source {
+            object.insert("pricing_source".to_string(), Value::String(value.clone()));
+        }
+        if let Some(value) = &self.pricing_tier {
+            object.insert("pricing_tier".to_string(), Value::String(value.clone()));
+        }
+        (!object.is_empty()).then_some(Value::Object(object))
+    }
+
+    fn synthesized_usage(&self) -> Option<Usage> {
+        if !self.has_token_data() {
+            return None;
+        }
+        let cache_read = self.cache_read_tokens.unwrap_or(0);
+        let cache_write = self.cache_write_tokens.unwrap_or(0);
+        let reasoning = self.reasoning_tokens.unwrap_or(0);
+        let input = self
+            .context_input_tokens
+            .or_else(|| {
+                self.billable_input_tokens
+                    .map(|value| value.saturating_add(cache_read).saturating_add(cache_write))
+            })
+            .unwrap_or(0);
+        let output = self
+            .billable_output_tokens
+            .unwrap_or(0)
+            .saturating_add(reasoning);
+        let total = self
+            .reported_total_tokens
+            .unwrap_or_else(|| input.saturating_add(output));
+        let mut usage = Usage::new(total, input, output);
+        if reasoning > 0 {
+            usage = usage.thought_tokens(reasoning);
+        }
+        if cache_read > 0 {
+            usage = usage.cached_read_tokens(cache_read);
+        }
+        if cache_write > 0 {
+            usage = usage.cached_write_tokens(cache_write);
+        }
+        Some(usage)
+    }
+
+    fn has_token_data(&self) -> bool {
+        self.context_input_tokens.is_some()
+            || self.billable_input_tokens.is_some()
+            || self.billable_output_tokens.is_some()
+            || self.reasoning_tokens.is_some()
+            || self.cache_read_tokens.is_some()
+            || self.cache_write_tokens.is_some()
+            || self.reported_total_tokens.is_some()
+    }
+}
+
+fn usage_u64(value: &Value, keys: &[&str]) -> Option<u64> {
+    keys.iter().find_map(|key| value_u64(value, key))
+}
+
+fn value_u64(value: &Value, key: &str) -> Option<u64> {
+    value.get(key).and_then(|value| {
+        value
+            .as_u64()
+            .or_else(|| value.as_i64().and_then(|value| u64::try_from(value).ok()))
+            .or_else(|| {
+                value
+                    .as_str()
+                    .and_then(|value| value.trim().parse::<u64>().ok())
+            })
+    })
+}
+
+fn value_i64(value: &Value, key: &str) -> Option<i64> {
+    value.get(key).and_then(|value| {
+        value
+            .as_i64()
+            .or_else(|| value.as_u64().and_then(|value| i64::try_from(value).ok()))
+            .or_else(|| {
+                value
+                    .as_str()
+                    .and_then(|value| value.trim().parse::<i64>().ok())
+            })
+    })
+}
+
+fn add_optional_u64(field: &mut Option<u64>, value: Option<u64>) {
+    if let Some(value) = value {
+        *field = Some(field.unwrap_or(0).saturating_add(value));
+    }
+}
+
+fn add_optional_i64(field: &mut Option<i64>, value: Option<i64>) {
+    if let Some(value) = value {
+        *field = Some(field.unwrap_or(0).saturating_add(value));
+    }
+}
+
+fn merge_optional_string(field: &mut Option<String>, value: Option<&str>) {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return;
+    };
+    match field {
+        None => *field = Some(value.to_string()),
+        Some(current) if current == value || current == "mixed" => {}
+        Some(current) => *current = "mixed".to_string(),
+    }
+}
+
+fn insert_optional(object: &mut serde_json::Map<String, Value>, key: &str, value: Option<u64>) {
+    if let Some(value) = value {
+        object.insert(key.to_string(), Value::from(value));
+    }
 }
 
 pub(crate) fn acp_mcp_servers(servers: Vec<McpServer>) -> Vec<McpServerInput> {
@@ -286,13 +781,17 @@ pub(crate) mod tests {
 
     #[test]
     fn converts_prompt_text_and_http_images() {
-        let (text, images) = prompt_parts(vec![
-            ContentBlock::Text(agent_client_protocol::schema::TextContent::new("hello")),
-            ContentBlock::Image(
-                agent_client_protocol::schema::ImageContent::new("", "image/png")
-                    .uri("https://example.com/a.png"),
-            ),
-        ]);
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let (text, images) = prompt_parts(
+            vec![
+                ContentBlock::Text(agent_client_protocol::schema::TextContent::new("hello")),
+                ContentBlock::Image(
+                    agent_client_protocol::schema::ImageContent::new("", "image/png")
+                        .uri("https://example.com/a.png"),
+                ),
+            ],
+            &cwd,
+        );
         assert_eq!(text, "hello");
         assert_eq!(
             images,
@@ -300,6 +799,28 @@ pub(crate) mod tests {
                 "https://example.com/a.png".to_string()
             )]
         );
+    }
+
+    #[test]
+    fn synthesizes_usage_from_runtime_accounting() {
+        let mut usage = AcpUsageAccumulator::default();
+        usage.record_stream_event(&RunStreamEvent::Event(json!({
+            "type": "message_end",
+            "accounting": {
+                "billable_input_tokens": 8,
+                "billable_output_tokens": 5,
+                "cache_read_tokens": 2,
+                "reasoning_tokens": 1,
+                "reported_total_tokens": 16,
+            },
+        })));
+
+        let usage = usage.to_usage().expect("usage");
+        assert_eq!(usage.input_tokens, 10);
+        assert_eq!(usage.output_tokens, 6);
+        assert_eq!(usage.cached_read_tokens, Some(2));
+        assert_eq!(usage.thought_tokens, Some(1));
+        assert_eq!(usage.total_tokens, 16);
     }
 
     #[test]
