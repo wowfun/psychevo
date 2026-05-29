@@ -140,6 +140,7 @@ pub struct CustomProviderInput {
     pub label: String,
     pub base_url: String,
     pub api_key: Option<String>,
+    pub no_auth: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -151,6 +152,7 @@ pub struct ScopedCustomProviderInput {
     pub api_key_env: Option<String>,
     pub api_key: Option<String>,
     pub require_api_key: bool,
+    pub no_auth: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -388,14 +390,58 @@ impl ExecPolicyDecision {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExecPolicyPatternToken {
+    Single(String),
+    Alternatives(Vec<String>),
+}
+
+impl ExecPolicyPatternToken {
+    pub fn matches(&self, value: &str) -> bool {
+        match self {
+            Self::Single(expected) => expected == value,
+            Self::Alternatives(values) => values.iter().any(|expected| expected == value),
+        }
+    }
+
+    pub fn alternatives(&self) -> &[String] {
+        match self {
+            Self::Single(value) => std::slice::from_ref(value),
+            Self::Alternatives(values) => values,
+        }
+    }
+}
+
+impl From<String> for ExecPolicyPatternToken {
+    fn from(value: String) -> Self {
+        Self::Single(value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecPolicyExample {
+    pub raw: String,
+    pub tokens: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecPolicyRule {
-    pub prefix: Vec<String>,
+    pub prefix: Vec<ExecPolicyPatternToken>,
     pub decision: ExecPolicyDecision,
+    pub justification: Option<String>,
+    pub match_examples: Vec<ExecPolicyExample>,
+    pub not_match_examples: Vec<ExecPolicyExample>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecPolicyHostExecutable {
+    pub name: String,
+    pub paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ExecPolicyConfig {
     pub rules: Vec<ExecPolicyRule>,
+    pub host_executables: Vec<ExecPolicyHostExecutable>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

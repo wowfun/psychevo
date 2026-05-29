@@ -55,6 +55,7 @@ pub fn config_provider_list_value(options: &RunOptions, scope: ConfigScope) -> R
                 "label": provider_label(provider, Some(entry)),
                 "base_url": entry.options.base_url,
                 "api_key_env": entry.options.api_key_env,
+                "no_auth": entry.options.no_auth,
                 "models": entry.models.keys().cloned().collect::<Vec<_>>(),
             })
         })
@@ -145,21 +146,27 @@ pub fn auth_status_value(options: &RunOptions, provider: Option<&str>) -> Result
             return Err(Error::Config(format!("unknown provider: {provider}")));
         }
         let base_url = provider_base_url(&provider, config_entry, &loaded.env);
-        let api_key_env = first_string([
-            config_entry.and_then(|entry| entry.options.api_key_env.clone()),
-            built_in.and_then(|provider| {
-                provider
-                    .api_key_envs
-                    .iter()
-                    .find(|key| env_value(&loaded.env, key).is_some())
-                    .or_else(|| provider.api_key_envs.first())
-                    .map(|key| (*key).to_string())
-            }),
-        ]);
+        let explicit_no_auth = config_entry.is_some_and(|entry| entry.options.no_auth);
+        let api_key_env = (!explicit_no_auth)
+            .then(|| {
+                first_string([
+                    config_entry.and_then(|entry| entry.options.api_key_env.clone()),
+                    built_in.and_then(|provider| {
+                        provider
+                            .api_key_envs
+                            .iter()
+                            .find(|key| env_value(&loaded.env, key).is_some())
+                            .or_else(|| provider.api_key_envs.first())
+                            .map(|key| (*key).to_string())
+                    }),
+                ])
+            })
+            .flatten();
         let credential_present = api_key_env
             .as_deref()
             .is_some_and(|key| env_value(&loaded.env, key).is_some());
-        let no_auth = base_url.as_deref().is_some_and(is_loopback_base_url)
+        let no_auth = explicit_no_auth
+            || base_url.as_deref().is_some_and(is_loopback_base_url)
             || built_in.is_some_and(|provider| provider.allow_no_auth);
         let status = if credential_present {
             "present"

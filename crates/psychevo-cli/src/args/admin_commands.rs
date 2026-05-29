@@ -426,6 +426,12 @@ pub(crate) struct ConfigProviderAddArgs {
     )]
     pub(crate) api_key_stdin: bool,
     #[arg(
+        long = "no-auth",
+        conflicts_with_all = ["api_key_env", "api_key_stdin"],
+        help = "Configure the provider without API-key authentication"
+    )]
+    pub(crate) no_auth: bool,
+    #[arg(
         short = 'g',
         long = "global",
         conflicts_with = "local",
@@ -452,6 +458,8 @@ pub(crate) struct AuthArgs {
 pub(crate) enum AuthCommand {
     #[command(about = "Show provider credential status without printing secrets")]
     Status(AuthStatusArgs),
+    #[command(about = "Configure a provider and default model")]
+    Setup(AuthSetupArgs),
     #[command(
         about = "Read and store a provider API key",
         long_about = "Read a provider API key from stdin and write it to the selected .env scope. Raw API keys are never accepted as argv values or printed in command output."
@@ -463,6 +471,48 @@ pub(crate) enum AuthCommand {
 pub(crate) struct AuthStatusArgs {
     #[arg(value_name = "PROVIDER", help = "Optional provider id to inspect")]
     pub(crate) provider: Option<String>,
+    #[arg(long, help = "Emit structured JSON instead of human text")]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct AuthSetupArgs {
+    #[arg(long, value_name = "PROVIDER", help = "Provider id to configure")]
+    pub(crate) provider: String,
+    #[arg(long, value_name = "MODEL", help = "Model id for the provider")]
+    pub(crate) model: String,
+    #[arg(
+        long = "base-url",
+        value_name = "URL",
+        help = "OpenAI-compatible base URL"
+    )]
+    pub(crate) base_url: Option<String>,
+    #[arg(
+        long = "api-kind",
+        default_value = "openai-compatible",
+        help = "Provider API kind; only openai-compatible is supported"
+    )]
+    pub(crate) api_kind: String,
+    #[arg(long, value_name = "ENV", help = "API key environment variable name")]
+    pub(crate) api_key_env: Option<String>,
+    #[arg(long = "api-key-stdin", help = "Read one API key from piped stdin")]
+    pub(crate) api_key_stdin: bool,
+    #[arg(
+        long = "no-auth",
+        conflicts_with_all = ["api_key_env", "api_key_stdin"],
+        help = "Configure provider without API-key authentication"
+    )]
+    pub(crate) no_auth: bool,
+    #[arg(short = 'g', long = "global", conflicts_with = "local")]
+    pub(crate) global: bool,
+    #[arg(long, conflicts_with = "global")]
+    pub(crate) local: bool,
+    #[arg(long = "fetch", conflicts_with = "no_fetch", default_value_t = false)]
+    pub(crate) fetch: bool,
+    #[arg(long = "no-fetch")]
+    pub(crate) no_fetch: bool,
+    #[arg(long, value_name = "TEXT", help = "Provider label")]
+    pub(crate) label: Option<String>,
     #[arg(long, help = "Emit structured JSON instead of human text")]
     pub(crate) json: bool,
 }

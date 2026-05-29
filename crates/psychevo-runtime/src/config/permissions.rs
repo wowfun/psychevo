@@ -38,9 +38,40 @@ pub(crate) fn permission_config_value(config: &PermissionConfig) -> Value {
         .rules
         .iter()
         .map(|rule| {
-            json!({
-                "prefix": rule.prefix,
+            let mut value = json!({
+                "prefix": exec_prefix_value(&rule.prefix),
                 "decision": rule.decision.as_str(),
+            });
+            if let Some(justification) = &rule.justification {
+                value["justification"] = Value::String(justification.clone());
+            }
+            if !rule.match_examples.is_empty() {
+                value["match"] = Value::Array(
+                    rule.match_examples
+                        .iter()
+                        .map(|example| Value::String(example.raw.clone()))
+                        .collect(),
+                );
+            }
+            if !rule.not_match_examples.is_empty() {
+                value["not_match"] = Value::Array(
+                    rule.not_match_examples
+                        .iter()
+                        .map(|example| Value::String(example.raw.clone()))
+                        .collect(),
+                );
+            }
+            value
+        })
+        .collect::<Vec<_>>();
+    let host_executables = config
+        .exec_policy
+        .host_executables
+        .iter()
+        .map(|host| {
+            json!({
+                "name": host.name.clone(),
+                "paths": host.paths.clone(),
             })
         })
         .collect::<Vec<_>>();
@@ -65,6 +96,7 @@ pub(crate) fn permission_config_value(config: &PermissionConfig) -> Value {
         "profiles": profiles,
         "exec_policy": {
             "rules": rules,
+            "host_executables": host_executables,
         },
     })
 }
@@ -74,6 +106,23 @@ pub(crate) fn access_map_value(values: &BTreeMap<String, PermissionAccess>) -> V
         values
             .iter()
             .map(|(key, value)| (key.clone(), Value::String(value.as_str().to_string())))
+            .collect(),
+    )
+}
+
+pub(crate) fn exec_prefix_value(prefix: &[ExecPolicyPatternToken]) -> Value {
+    Value::Array(
+        prefix
+            .iter()
+            .map(|token| match token {
+                ExecPolicyPatternToken::Single(value) => Value::String(value.clone()),
+                ExecPolicyPatternToken::Alternatives(values) => Value::Array(
+                    values
+                        .iter()
+                        .map(|value| Value::String(value.clone()))
+                        .collect(),
+                ),
+            })
             .collect(),
     )
 }
@@ -101,12 +150,10 @@ pub fn append_local_permission_rule(
     let kind = validate_permission_rule_kind(kind)?;
     let rule = normalize_permission_rule(rule)?;
     match parse_legacy_rule_for_mutation(&rule) {
-        LegacyPermissionMutation::Exec(prefix) => append_local_exec_policy_rule(
-            config_dir,
-            &prefix,
-            permission_decision_for_legacy_kind(kind),
-            rule,
-        ),
+        LegacyPermissionMutation::Exec(_) => Err(Error::Config(
+            "ExecCommand(...) permission mutations are deprecated; edit [[exec_policy.rules]] in config.toml or allow the command permanently from the approval UI"
+                .to_string(),
+        )),
         LegacyPermissionMutation::Skill(key) => {
             append_local_skill_grant(config_dir, &key, access_for_legacy_kind(kind), rule)
         }
@@ -221,13 +268,7 @@ pub fn append_local_exec_policy_rule(
             value
                 .get("prefix")
                 .and_then(Value::as_array)
-                .map(|values| {
-                    values
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .map(str::to_string)
-                        .collect::<Vec<_>>()
-                })
+                .map(|values| exec_prefix_strings_from_value(values))
                 .as_ref()
                 == Some(&prefix.to_vec())
                 && value.get("decision").and_then(Value::as_str) == Some(decision.as_str())
@@ -251,10 +292,12 @@ pub fn remove_local_permission_rule(
     let kind = validate_permission_rule_kind(kind)?;
     let rule = normalize_permission_rule(rule)?;
     let mutation = parse_legacy_rule_for_mutation(&rule);
-    mutate_local_config(config_dir, kind, rule.clone(), |parsed| match mutation {
-        LegacyPermissionMutation::Exec(ref prefix) => {
-            remove_exec_policy_rule(parsed, prefix, permission_decision_for_legacy_kind(kind))
-        }
+    mutate_local_config(config_dir, kind, rule.clone(), |parsed| {
+        match mutation {
+        LegacyPermissionMutation::Exec(_) => Err(Error::Config(
+            "ExecCommand(...) permission mutations are deprecated; edit [[exec_policy.rules]] in config.toml"
+                .to_string(),
+        )),
         LegacyPermissionMutation::Skill(ref key) => remove_profile_access(
             parsed,
             &["permissions", "local", "tools", "skills"],
@@ -274,6 +317,7 @@ pub fn remove_local_permission_rule(
             access_for_legacy_kind(kind),
         ),
         LegacyPermissionMutation::Unsupported => Ok(false),
+    }
     })
 }
 
@@ -360,6 +404,7 @@ pub(crate) fn set_string_entry(
     Ok(true)
 }
 
+#[allow(dead_code)]
 pub(crate) fn remove_exec_policy_rule(
     parsed: &mut Value,
     prefix: &[String],
@@ -378,13 +423,7 @@ pub(crate) fn remove_exec_policy_rule(
         let same_prefix = value
             .get("prefix")
             .and_then(Value::as_array)
-            .map(|values| {
-                values
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_string)
-                    .collect::<Vec<_>>()
-            })
+            .map(|values| exec_prefix_strings_from_value(values))
             .as_ref()
             == Some(&prefix.to_vec());
         let same_decision =
@@ -392,6 +431,20 @@ pub(crate) fn remove_exec_policy_rule(
         !(same_prefix && same_decision)
     });
     Ok(rules.len() != before)
+}
+
+pub(crate) fn exec_prefix_strings_from_value(values: &[Value]) -> Vec<String> {
+    values
+        .iter()
+        .filter_map(|value| match value {
+            Value::String(raw) => Some(raw.clone()),
+            Value::Array(alternatives) => alternatives
+                .first()
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            _ => None,
+        })
+        .collect()
 }
 
 pub(crate) fn remove_profile_access(
@@ -484,6 +537,7 @@ pub(crate) fn web_fetch_host(value: &str) -> Option<String> {
         .map(str::to_ascii_lowercase)
 }
 
+#[allow(dead_code)]
 pub(crate) fn permission_decision_for_legacy_kind(kind: &str) -> ExecPolicyDecision {
     match kind {
         "allow" => ExecPolicyDecision::Allow,
@@ -528,17 +582,36 @@ pub(crate) mod permission_rule_tests {
     pub(crate) use super::*;
 
     #[test]
-    fn permission_rule_mutations_write_new_schema_and_skip_duplicates() {
+    fn legacy_exec_permission_mutation_is_deprecated() {
         let temp = tempfile::tempdir().expect("temp");
         let config_dir = temp.path().join(".psychevo");
 
-        let added =
-            append_local_permission_allow_rule(config_dir.clone(), "ExecCommand(cargo test *)")
-                .expect("append");
+        let err = append_local_permission_allow_rule(config_dir, "ExecCommand(cargo test *)")
+            .expect_err("legacy exec mutation should fail");
+        assert!(err.to_string().contains("[[exec_policy.rules]]"));
+    }
+
+    #[test]
+    fn exec_policy_rule_mutations_write_new_schema_and_skip_duplicates() {
+        let temp = tempfile::tempdir().expect("temp");
+        let config_dir = temp.path().join(".psychevo");
+
+        let prefix = vec!["cargo".to_string(), "test".to_string()];
+        let added = append_local_exec_policy_rule(
+            config_dir.clone(),
+            &prefix,
+            ExecPolicyDecision::Allow,
+            "exec:cargo test".to_string(),
+        )
+        .expect("append");
         assert!(added.changed);
-        let duplicate =
-            append_local_permission_allow_rule(config_dir.clone(), "ExecCommand(cargo test *)")
-                .expect("duplicate append");
+        let duplicate = append_local_exec_policy_rule(
+            config_dir.clone(),
+            &prefix,
+            ExecPolicyDecision::Allow,
+            "exec:cargo test".to_string(),
+        )
+        .expect("duplicate append");
         assert!(!duplicate.changed);
 
         let config_path = config_dir.join(CONFIG_FILE_NAME);
@@ -547,13 +620,6 @@ pub(crate) mod permission_rule_tests {
         assert!(text.contains("\"cargo\""));
         assert!(text.contains("\"test\""));
         assert!(text.contains("decision = \"allow\""));
-
-        let removed =
-            remove_local_permission_rule(config_dir, "allow", "ExecCommand(cargo test *)")
-                .expect("remove");
-        assert!(removed.changed);
-        let text = fs::read_to_string(config_path).expect("config");
-        assert!(!text.contains("prefix = [\"cargo\", \"test\"]"));
     }
 
     #[test]
@@ -617,8 +683,17 @@ pub(crate) mod permission_rule_tests {
             "exec_policy": {
                 "rules": [
                     {
-                        "prefix": ["cargo", "test"],
+                        "prefix": ["git", ["status", "diff"]],
                         "decision": "allow",
+                        "justification": "read-only git inspection",
+                        "match": ["git status --short"],
+                        "not_match": ["git push"],
+                    },
+                ],
+                "host_executables": [
+                    {
+                        "name": "git",
+                        "paths": ["/usr/bin/git"],
                     },
                 ],
             },
@@ -634,6 +709,10 @@ pub(crate) mod permission_rule_tests {
         assert!(config.permissions.allow_login_shell);
         assert_eq!(config.permissions.auto_review.timeout_secs, 5);
         assert_eq!(config.permissions.exec_policy.rules.len(), 1);
+        assert_eq!(
+            config.permissions.exec_policy.host_executables[0].paths,
+            vec!["/usr/bin/git".to_string()]
+        );
         let local = config.permissions.profiles.get("local").expect("local");
         assert_eq!(
             local.filesystem.get("/tmp/shared"),
@@ -659,5 +738,22 @@ pub(crate) mod permission_rule_tests {
         }))
         .expect_err("granular without matrix should fail");
         assert!(err.to_string().contains("requires [approval.granular]"));
+    }
+
+    #[test]
+    fn exec_policy_self_test_failures_are_config_errors() {
+        let err = parse_run_config(json!({
+            "exec_policy": {
+                "rules": [
+                    {
+                        "prefix": ["git", "status"],
+                        "decision": "allow",
+                        "match": ["git push"],
+                    },
+                ],
+            },
+        }))
+        .expect_err("bad match example should fail");
+        assert!(err.to_string().contains("does not match prefix"));
     }
 }

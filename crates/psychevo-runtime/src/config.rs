@@ -11,10 +11,10 @@ pub(crate) use crate::paths::canonical_workdir;
 pub(crate) use crate::types::{
     ApprovalPolicy, ApprovalsReviewer, AutoReviewConfig, ConfigScope, ConfiguredModel,
     CustomProviderInput, CustomProviderResult, ExecPolicyConfig, ExecPolicyDecision,
-    ExecPolicyRule, GranularApprovalConfig, ModelCapabilities, ModelCatalogEntry,
-    ModelCatalogProvider, ModelCost, ModelCostTier, ModelLimits, ModelMetadata,
-    ModelMetadataCacheTarget, PermissionAccess, PermissionConfig, PermissionProfileConfig, RunMode,
-    RunOptions, ScopedCustomProviderInput,
+    ExecPolicyExample, ExecPolicyHostExecutable, ExecPolicyPatternToken, ExecPolicyRule,
+    GranularApprovalConfig, ModelCapabilities, ModelCatalogEntry, ModelCatalogProvider, ModelCost,
+    ModelCostTier, ModelLimits, ModelMetadata, ModelMetadataCacheTarget, PermissionAccess,
+    PermissionConfig, PermissionProfileConfig, RunMode, RunOptions, ScopedCustomProviderInput,
 };
 
 #[derive(Debug, Clone, Default)]

@@ -93,6 +93,7 @@ Configuration may define:
   status surfaces
 - per-provider `options.base_url`
 - per-provider `options.api_key_env`
+- per-provider `options.no_auth`
 - per-provider `models` map keyed by configured model id
 - optional model `reasoning_effort` as the first-slice model thinking
   intensity hint. Valid values are `none`, `minimal`, `low`, `medium`, `high`,
@@ -146,6 +147,13 @@ Configuration must not contain raw API keys. Credentials are resolved from the
 local environment map through `api_key_env` or built-in credential environment
 variable candidates.
 
+`options.no_auth = true` explicitly marks a provider as requiring no bearer
+credential. It conflicts with `options.api_key_env`. It is accepted for
+user-defined providers and for built-in providers whose registry entry permits
+no-auth use. Explicit no-auth may target any base URL, including non-loopback
+URLs, but setup and config diagnostics should warn on non-loopback no-auth
+because requests will be sent without an Authorization header.
+
 Provider labels are display-only. They do not change provider identity,
 selection, config merge keys, or the `provider/model` model-spec form.
 
@@ -157,6 +165,13 @@ credential variable is stored in `options.api_key_env`; raw API keys must be
 written only to `.env` files, never TOML configuration. CLI provider/auth
 writes default to the current workdir local scope and use `-g`/`--global` for
 the global scope.
+
+Shared setup flows may initialize a minimal config file before writing provider
+settings. When `PSYCHEVO_CONFIG` points at one file, setup writes provider and
+model configuration to that file. Local credential writes use the config file's
+parent directory; global credential writes use `$PSYCHEVO_HOME`. Scope flags do
+not override the `PSYCHEVO_CONFIG` target for configuration and should emit a
+warning when the requested scope cannot affect the config file path.
 
 Interactive clients and CLI model commands may explicitly set the scoped
 default model by writing the top-level `model` field in the selected scope's

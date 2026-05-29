@@ -1,4 +1,4 @@
-pub(crate) use std::collections::{BTreeSet, HashSet};
+pub(crate) use std::collections::{BTreeSet, HashSet, VecDeque};
 pub(crate) use std::path::{Component, Path, PathBuf};
 pub(crate) use std::sync::{Arc, Mutex};
 pub(crate) use std::time::Duration;
@@ -14,9 +14,9 @@ pub(crate) use crate::config::{
     append_local_network_grant_with_extends, append_local_skill_grant_with_extends,
 };
 pub(crate) use crate::types::{
-    ApprovalMode, ApprovalPolicy, ApprovalsReviewer, ExecPolicyDecision, PermissionAccess,
-    PermissionApprovalOutcome, PermissionApprovalRequest, PermissionConfig, PermissionMode,
-    PermissionProfileConfig,
+    ApprovalMode, ApprovalPolicy, ApprovalsReviewer, ExecPolicyDecision, ExecPolicyPatternToken,
+    PermissionAccess, PermissionApprovalOutcome, PermissionApprovalRequest, PermissionConfig,
+    PermissionMode, PermissionProfileConfig,
 };
 
 #[allow(unused_imports)]
@@ -26,6 +26,10 @@ pub(crate) use super::*;
 mod runtime;
 #[allow(unused_imports)]
 pub use runtime::*;
+#[path = "permissions/shell.rs"]
+mod shell;
+#[allow(unused_imports)]
+pub use shell::*;
 #[path = "permissions/rules.rs"]
 mod rules;
 #[allow(unused_imports)]

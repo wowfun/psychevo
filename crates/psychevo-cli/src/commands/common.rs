@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::io::{self, Read};
+use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
@@ -77,6 +77,11 @@ pub(crate) fn scoped_label(global: bool) -> &'static str {
 pub(crate) fn read_secret_from_stdin(required: bool) -> Result<Option<String>> {
     if !required {
         return Ok(None);
+    }
+    if io::stdin().is_terminal() {
+        return Err(anyhow!(
+            "--api-key-stdin requires piped stdin; interactive secret input is unavailable here"
+        ));
     }
     let mut secret = String::new();
     io::stdin().read_to_string(&mut secret)?;

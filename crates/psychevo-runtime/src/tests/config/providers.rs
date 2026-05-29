@@ -584,6 +584,7 @@ model = "deepseek/deepseek-chat"
         label: "Xiaomi Token Plan CN".to_string(),
         base_url: "https://token-plan-cn.xiaomimimo.com/v1/".to_string(),
         api_key: Some("secret-key".to_string()),
+        no_auth: false,
     })
     .expect("create provider");
 
@@ -724,6 +725,7 @@ pub(crate) fn create_global_custom_provider_reuses_existing_env_without_overwrit
         label: "Xiaomi Token Plan CN".to_string(),
         base_url: "https://token-plan-cn.xiaomimimo.com/v1".to_string(),
         api_key: Some("new-key".to_string()),
+        no_auth: false,
     })
     .expect("create provider");
 
@@ -752,6 +754,7 @@ pub(crate) fn create_global_custom_provider_rejects_duplicates_aliases_and_raw_k
         label: "Custom One".to_string(),
         base_url: "https://api.example/v1".to_string(),
         api_key: Some("key".to_string()),
+        no_auth: false,
     })
     .expect_err("duplicate");
     assert!(duplicate.to_string().contains("already exists"));
@@ -762,6 +765,7 @@ pub(crate) fn create_global_custom_provider_rejects_duplicates_aliases_and_raw_k
         label: "Mimo".to_string(),
         base_url: "https://api.example/v1".to_string(),
         api_key: Some("key".to_string()),
+        no_auth: false,
     })
     .expect_err("alias");
     assert!(alias.to_string().contains("collides"));
@@ -772,6 +776,7 @@ pub(crate) fn create_global_custom_provider_rejects_duplicates_aliases_and_raw_k
         label: "Custom Two".to_string(),
         base_url: "https://api.example/v1".to_string(),
         api_key: None,
+        no_auth: false,
     })
     .expect_err("missing key");
     assert!(

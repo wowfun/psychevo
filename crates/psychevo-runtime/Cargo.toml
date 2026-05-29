@@ -27,6 +27,8 @@ thiserror.workspace = true
 tiktoken.workspace = true
 tokio.workspace = true
 toml.workspace = true
+tree-sitter.workspace = true
+tree-sitter-bash.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]

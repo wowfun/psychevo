@@ -18,6 +18,7 @@ pub(crate) struct ConfigProviderEntry {
 pub(crate) struct ConfigProviderOptions {
     pub(crate) base_url: Option<String>,
     pub(crate) api_key_env: Option<String>,
+    pub(crate) no_auth: bool,
 }
 
 #[derive(Debug, Clone, Default)]

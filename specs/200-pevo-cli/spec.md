@@ -125,6 +125,8 @@ turn provider metadata into transcript content.
 `pevo acp` runs the ACP stdio server. It is equivalent to the
 `psychevo-acp` binary and delegates behavior to the ACP crate instead of
 implementing protocol handling in `psychevo-cli`.
+`pevo acp --setup` runs provider setup and exits without starting the stdio
+server. It accepts the same setup flags as `pevo auth setup`.
 
 `pevo skill` owns the singular skill hub/config/list/view router. With no
 subcommand it shows help. `list` and `view` are read operations; `audit`
@@ -139,6 +141,16 @@ scanner, hub, bundle, curator, and provenance semantics belong to
 `pevo stats` owns local token and estimated-cost reporting from the SQLite
 state database. It does not contact providers, refresh catalogs, or reconcile
 provider invoices.
+
+`pevo auth setup` owns interactive and non-interactive provider setup. It may
+write provider/model config, selected model metadata, and scoped `.env`
+credentials. It supports provider/model selection, custom OpenAI-compatible
+base URLs, `--api-key-stdin`, `--api-key-env`, explicit `--no-auth`, scope
+flags, catalog fetch controls, labels, and JSON summary output. Noninteractive
+mode is selected by key setup flags or non-TTY stdio; missing required inputs
+fail instead of prompting. `--api-key-stdin` must reject TTY stdin for all auth
+commands so secrets are not visibly echoed. JSON output is a secret-free summary
+with warnings for non-fatal conditions.
 
 `pevo tool` owns local tool and toolset inspection and configuration. `list`
 shows built-in and user-defined toolsets, effective mode enablement, and

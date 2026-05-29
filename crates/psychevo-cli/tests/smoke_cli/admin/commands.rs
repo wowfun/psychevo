@@ -201,15 +201,18 @@ decision = "prompt"
         ])
         .output()
         .expect("permissions remove");
-    assert!(
-        removed.status.success(),
-        "stderr: {}",
+    assert!(!removed.status.success());
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&removed.stdout),
         String::from_utf8_lossy(&removed.stderr)
     );
-    let value: Value = serde_json::from_slice(&removed.stdout).expect("json");
-    assert_eq!(value["changed"], true);
+    assert!(
+        combined.contains("[[exec_policy.rules]]"),
+        "output: {combined}"
+    );
     let config = std::fs::read_to_string(workdir.join(".psychevo/config.toml")).expect("config");
-    assert!(!config.contains("\"npm\""));
+    assert!(config.contains("\"npm\""));
     assert!(config.contains("\"cargo\""));
 }
 

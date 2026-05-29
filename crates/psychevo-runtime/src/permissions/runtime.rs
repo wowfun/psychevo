@@ -12,8 +12,25 @@ pub(crate) struct PermissionRuntimeInner {
     pub(crate) mode: PermissionMode,
     pub(crate) config: PermissionConfig,
     pub(crate) session_grants: Mutex<HashSet<String>>,
+    pub(crate) pending_approvals: Mutex<VecDeque<String>>,
+    pub(crate) approval_events: Mutex<Vec<ApprovalLifecycleEvent>>,
     pub(crate) approval_handler: Option<Arc<dyn crate::types::ApprovalHandler>>,
     pub(crate) smart_approval_handler: Option<Arc<dyn crate::types::ApprovalHandler>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ApprovalLifecycleEvent {
+    Requested {
+        tool_call_id: String,
+        tool_name: String,
+    },
+    Resolved {
+        tool_call_id: String,
+        outcome: PermissionApprovalOutcome,
+    },
+    Aborted {
+        tool_call_id: String,
+    },
 }
 
 #[allow(dead_code)]
@@ -61,6 +78,32 @@ pub(crate) enum PersistentPermissionGrant {
     },
 }
 
+pub(crate) struct PendingApprovalGuard {
+    runtime: PermissionRuntime,
+    tool_call_id: String,
+    finished: bool,
+}
+
+impl PendingApprovalGuard {
+    pub(crate) fn finish(&mut self, outcome: PermissionApprovalOutcome) {
+        if self.finished {
+            return;
+        }
+        self.finished = true;
+        self.runtime
+            .finish_pending_approval(&self.tool_call_id, Some(outcome));
+    }
+}
+
+impl Drop for PendingApprovalGuard {
+    fn drop(&mut self) {
+        if !self.finished {
+            self.runtime
+                .finish_pending_approval(&self.tool_call_id, None);
+        }
+    }
+}
+
 impl PermissionRuntime {
     pub(crate) fn new(
         workdir: PathBuf,
@@ -78,6 +121,8 @@ impl PermissionRuntime {
                 mode,
                 config,
                 session_grants: Mutex::new(HashSet::new()),
+                pending_approvals: Mutex::new(VecDeque::new()),
+                approval_events: Mutex::new(Vec::new()),
                 approval_handler,
                 smart_approval_handler,
             }),
@@ -209,6 +254,7 @@ impl PermissionRuntime {
                     allow_always,
                     timeout_secs,
                 };
+                let mut pending_approval = self.start_pending_approval(&request);
                 let decision = match abort {
                     Some(mut abort) if timeout_secs == 0 => {
                         tokio::select! {
@@ -237,6 +283,7 @@ impl PermissionRuntime {
                     .await
                     .unwrap_or_else(|_| crate::types::PermissionApprovalDecision::deny()),
                 };
+                pending_approval.finish(decision.outcome);
                 if reviewer == ApprovalsReviewer::Smart {
                     return match decision.outcome {
                         PermissionApprovalOutcome::AllowOnce
@@ -330,6 +377,73 @@ impl PermissionRuntime {
         if let Ok(mut grants) = self.inner.session_grants.lock() {
             grants.insert(key);
         }
+    }
+
+    pub(crate) fn start_pending_approval(
+        &self,
+        request: &PermissionApprovalRequest,
+    ) -> PendingApprovalGuard {
+        if let Ok(mut pending) = self.inner.pending_approvals.lock() {
+            pending.push_back(request.tool_call_id.clone());
+        }
+        if let Ok(mut events) = self.inner.approval_events.lock() {
+            events.push(ApprovalLifecycleEvent::Requested {
+                tool_call_id: request.tool_call_id.clone(),
+                tool_name: request.tool_name.clone(),
+            });
+        }
+        PendingApprovalGuard {
+            runtime: self.clone(),
+            tool_call_id: request.tool_call_id.clone(),
+            finished: false,
+        }
+    }
+
+    pub(crate) fn finish_pending_approval(
+        &self,
+        tool_call_id: &str,
+        outcome: Option<PermissionApprovalOutcome>,
+    ) {
+        if let Ok(mut pending) = self.inner.pending_approvals.lock()
+            && let Some(index) = pending.iter().position(|value| value == tool_call_id)
+        {
+            pending.remove(index);
+        }
+        if let Ok(mut events) = self.inner.approval_events.lock() {
+            match outcome {
+                Some(outcome) => events.push(ApprovalLifecycleEvent::Resolved {
+                    tool_call_id: tool_call_id.to_string(),
+                    outcome,
+                }),
+                None => events.push(ApprovalLifecycleEvent::Aborted {
+                    tool_call_id: tool_call_id.to_string(),
+                }),
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn clear_pending_approval_state(&self) {
+        let pending = self
+            .inner
+            .pending_approvals
+            .lock()
+            .map(|mut pending| pending.drain(..).collect::<Vec<_>>())
+            .unwrap_or_default();
+        if let Ok(mut events) = self.inner.approval_events.lock() {
+            for tool_call_id in pending {
+                events.push(ApprovalLifecycleEvent::Aborted { tool_call_id });
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn approval_lifecycle_events(&self) -> Vec<ApprovalLifecycleEvent> {
+        self.inner
+            .approval_events
+            .lock()
+            .map(|events| events.clone())
+            .unwrap_or_default()
     }
 
     pub(crate) fn has_session_grant(&self, key: &str) -> bool {
@@ -440,9 +554,157 @@ impl PermissionRuntime {
         if let Some(decision) = self.exec_policy_decision(action) {
             return decision;
         }
+        if let Some(decision) = self.exec_safety_decision(action) {
+            return decision;
+        }
         let default_permissions = self.inner.config.default_permissions.as_str();
         self.profile_decision(default_permissions, action, &mut BTreeSet::new())
             .unwrap_or_else(|| builtin_profile_decision(":workspace", action))
+    }
+
+    pub(crate) fn exec_safety_decision(
+        &self,
+        action: &PermissionAction,
+    ) -> Option<ActionPolicyEvaluation> {
+        let PermissionAction::ExecCommand {
+            command,
+            normalized,
+            workdir,
+        } = action
+        else {
+            return None;
+        };
+        if workdir
+            .as_ref()
+            .is_some_and(|target| !target.within_workdir)
+        {
+            return Some(ActionPolicyEvaluation::Ask {
+                reason: "command workdir outside accepted workdir requires approval".to_string(),
+                matched_rule: None,
+                suggested_rule: action.suggested_rule(),
+                persistent_grants: action.persistent_grants(),
+            });
+        }
+        if let Some(reason) = dangerous_bash_reason(normalized) {
+            return Some(ActionPolicyEvaluation::Ask {
+                reason,
+                matched_rule: None,
+                suggested_rule: action.suggested_rule(),
+                persistent_grants: action.persistent_grants(),
+            });
+        }
+        let tokens = command_tokens(command);
+        if tokens.is_empty() {
+            return None;
+        }
+        if let Some(inline) = inline_interpreter_review(command, &tokens) {
+            return match inline {
+                InlineInterpreterReview::LiteralFileReads(paths)
+                    if self.file_reads_allowed_by_active_profile(&paths) =>
+                {
+                    Some(ActionPolicyEvaluation::Allow)
+                }
+                InlineInterpreterReview::LiteralFileReads(paths) => {
+                    Some(ActionPolicyEvaluation::Ask {
+                        reason: format!(
+                            "inline interpreter reads outside current filesystem permissions: {}",
+                            paths.join(", ")
+                        ),
+                        matched_rule: None,
+                        suggested_rule: action.suggested_rule(),
+                        persistent_grants: action.persistent_grants(),
+                    })
+                }
+                InlineInterpreterReview::NeedsApproval(reason) => {
+                    Some(ActionPolicyEvaluation::Ask {
+                        reason,
+                        matched_rule: None,
+                        suggested_rule: action.suggested_rule(),
+                        persistent_grants: action.persistent_grants(),
+                    })
+                }
+            };
+        }
+        if is_known_safe_command(&tokens) {
+            return Some(ActionPolicyEvaluation::Allow);
+        }
+        if self.active_profile_is_read_only() {
+            return Some(ActionPolicyEvaluation::Ask {
+                reason: "exec action requires approval under :read-only".to_string(),
+                matched_rule: None,
+                suggested_rule: action.suggested_rule(),
+                persistent_grants: action.persistent_grants(),
+            });
+        }
+        if !self.active_profile_is_configured() {
+            return None;
+        }
+        Some(ActionPolicyEvaluation::Allow)
+    }
+
+    pub(crate) fn file_reads_allowed_by_active_profile(&self, paths: &[String]) -> bool {
+        if paths.is_empty() {
+            return false;
+        }
+        let targets = paths
+            .iter()
+            .map(|path| file_target(&self.inner.workdir, path))
+            .collect::<Vec<_>>();
+        if targets
+            .iter()
+            .any(|target| protected_read_reason(target).is_some())
+        {
+            return false;
+        }
+        let action = PermissionAction::File {
+            tool: "read".to_string(),
+            paths: targets,
+            mutating: false,
+        };
+        matches!(
+            self.profile_decision(
+                self.inner.config.default_permissions.as_str(),
+                &action,
+                &mut BTreeSet::new()
+            ),
+            Some(ActionPolicyEvaluation::Allow)
+        )
+    }
+
+    pub(crate) fn active_profile_is_read_only(&self) -> bool {
+        self.profile_extends_builtin(self.inner.config.default_permissions.as_str(), ":read-only")
+    }
+
+    pub(crate) fn active_profile_is_configured(&self) -> bool {
+        let profile = self.inner.config.default_permissions.as_str();
+        profile.starts_with(':') || self.inner.config.profiles.contains_key(profile)
+    }
+
+    pub(crate) fn profile_extends_builtin(&self, profile_name: &str, builtin: &str) -> bool {
+        if profile_name == builtin {
+            return true;
+        }
+        if profile_name.starts_with(':') {
+            return false;
+        }
+        let mut seen = BTreeSet::new();
+        let mut current = profile_name;
+        while seen.insert(current.to_string()) {
+            let Some(profile) = self.inner.config.profiles.get(current) else {
+                return false;
+            };
+            let Some(parent) = profile.extends.as_deref() else {
+                return builtin == ":workspace";
+            };
+            if parent == builtin {
+                return true;
+            }
+            if parent.starts_with(':') {
+                return false;
+            }
+            current = parent;
+        }
+        false
     }
 
     pub(crate) fn exec_policy_decision(
@@ -459,17 +721,22 @@ impl PermissionRuntime {
         let mut prompt: Option<&crate::types::ExecPolicyRule> = None;
         let mut allow: Option<&crate::types::ExecPolicyRule> = None;
         for rule in &self.inner.config.exec_policy.rules {
-            if !exec_prefix_matches(&rule.prefix, &tokens) {
+            if !exec_prefix_matches(
+                &rule.prefix,
+                &tokens,
+                Some(&self.inner.config.exec_policy.host_executables),
+            ) {
                 continue;
             }
+            let prefix = exec_prefix_label(&rule.prefix);
             match rule.decision {
                 ExecPolicyDecision::Deny => {
                     return Some(ActionPolicyEvaluation::Deny {
-                        reason: format!(
-                            "blocked by exec_policy prefix `{}`",
-                            rule.prefix.join(" ")
-                        ),
-                        matched_rule: Some(format!("exec_policy:{}", rule.prefix.join(" "))),
+                        reason: rule
+                            .justification
+                            .clone()
+                            .unwrap_or_else(|| format!("blocked by exec_policy prefix `{prefix}`")),
+                        matched_rule: Some(format!("exec_policy:{prefix}")),
                     });
                 }
                 ExecPolicyDecision::Prompt => prompt = Some(rule),
@@ -477,12 +744,13 @@ impl PermissionRuntime {
             }
         }
         if let Some(rule) = prompt {
+            let prefix = exec_prefix_label(&rule.prefix);
             return Some(ActionPolicyEvaluation::Ask {
-                reason: format!(
-                    "exec_policy prefix `{}` requires approval",
-                    rule.prefix.join(" ")
-                ),
-                matched_rule: Some(format!("exec_policy:{}", rule.prefix.join(" "))),
+                reason: rule
+                    .justification
+                    .clone()
+                    .unwrap_or_else(|| format!("exec_policy prefix `{prefix}` requires approval")),
+                matched_rule: Some(format!("exec_policy:{prefix}")),
                 suggested_rule: Some(format!("exec:{}", tokens.join(" "))),
                 persistent_grants: action.persistent_grants(),
             });
@@ -753,7 +1021,13 @@ impl PermissionAction {
 
     pub(crate) fn session_key(&self) -> String {
         match self {
-            Self::ExecCommand { normalized, .. } => format!("exec_command:{normalized}"),
+            Self::ExecCommand {
+                command,
+                normalized,
+                ..
+            } => exec_grant_prefix(command)
+                .map(|prefix| format!("exec_policy:{}", prefix.join(" ")))
+                .unwrap_or_else(|| format!("exec_command:{normalized}")),
             Self::File { tool, paths, .. } => format!(
                 "{tool}:{}",
                 paths
@@ -771,7 +1045,9 @@ impl PermissionAction {
 
     pub(crate) fn suggested_rule(&self) -> Option<String> {
         match self {
-            Self::ExecCommand { command, .. } => Some(format!("ExecCommand({command})")),
+            Self::ExecCommand { command, .. } => exec_grant_prefix(command)
+                .map(|prefix| format!("exec:{}", prefix.join(" ")))
+                .or_else(|| Some(format!("ExecCommand({command})"))),
             Self::File { .. } => None,
             Self::Skill { tool, action } => {
                 Some(format!("{}({action})", permission_rule_tool(tool)))
@@ -797,7 +1073,7 @@ impl PermissionAction {
     pub(crate) fn persistent_grants(&self) -> Vec<PersistentPermissionGrant> {
         match self {
             Self::ExecCommand { command, .. } => {
-                let prefix = command_tokens(command);
+                let prefix = exec_grant_prefix(command).unwrap_or_else(|| command_tokens(command));
                 (!prefix.is_empty())
                     .then_some(PersistentPermissionGrant::Exec {
                         prefix,
@@ -1300,16 +1576,99 @@ pub(crate) fn web_fetch_host(value: &str) -> Option<String> {
 }
 
 pub(crate) fn command_tokens(command: &str) -> Vec<String> {
-    command
-        .split_whitespace()
-        .map(str::trim)
-        .filter(|token| !token.is_empty())
-        .map(str::to_string)
-        .collect()
+    shell_command_tokens(command).unwrap_or_default()
 }
 
-pub(crate) fn exec_prefix_matches(prefix: &[String], tokens: &[String]) -> bool {
-    prefix.len() <= tokens.len() && prefix.iter().zip(tokens).all(|(left, right)| left == right)
+pub(crate) fn exec_prefix_matches(
+    prefix: &[ExecPolicyPatternToken],
+    tokens: &[String],
+    host_executables: Option<&[crate::types::ExecPolicyHostExecutable]>,
+) -> bool {
+    if prefix.len() > tokens.len() || prefix.is_empty() {
+        return false;
+    }
+    if prefix
+        .iter()
+        .zip(tokens)
+        .all(|(pattern, token)| pattern.matches(token))
+    {
+        return true;
+    }
+    let Some(host_executables) = host_executables else {
+        return false;
+    };
+    let Some(first_token) = tokens.first() else {
+        return false;
+    };
+    if !Path::new(first_token).is_absolute() {
+        return false;
+    }
+    let Some(basename) = shell_basename(first_token) else {
+        return false;
+    };
+    let first_pattern = &prefix[0];
+    if !first_pattern.matches(&basename) {
+        return false;
+    }
+    if !host_executable_allows_path(host_executables, &basename, first_token) {
+        return false;
+    }
+    prefix
+        .iter()
+        .skip(1)
+        .zip(tokens.iter().skip(1))
+        .all(|(pattern, token)| pattern.matches(token))
+}
+
+pub(crate) fn exec_prefix_label(prefix: &[ExecPolicyPatternToken]) -> String {
+    prefix
+        .iter()
+        .map(|token| match token {
+            ExecPolicyPatternToken::Single(value) => value.clone(),
+            ExecPolicyPatternToken::Alternatives(values) => format!("[{}]", values.join("|")),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+pub(crate) fn host_executable_allows_path(
+    host_executables: &[crate::types::ExecPolicyHostExecutable],
+    name: &str,
+    path: &str,
+) -> bool {
+    match host_executables.iter().find(|host| host.name == name) {
+        Some(host) => host.paths.iter().any(|allowed| allowed == path),
+        None => true,
+    }
+}
+
+pub(crate) fn exec_grant_prefix(command: &str) -> Option<Vec<String>> {
+    let direct = command_tokens(command);
+    if direct.is_empty() {
+        return None;
+    }
+    if let Some(commands) = shell_lc_word_only_commands(&direct) {
+        return commands
+            .into_iter()
+            .find(|command| !is_known_safe_command(command))
+            .and_then(|command| risky_command_prefix(&command));
+    }
+    risky_command_prefix(&direct)
+}
+
+pub(crate) fn risky_command_prefix(command: &[String]) -> Option<Vec<String>> {
+    if command.is_empty() {
+        return None;
+    }
+    if is_inline_interpreter_tokens(command) {
+        return Some(command.iter().take(2).cloned().collect());
+    }
+    if shell_basename(&command[0]).as_deref() == Some("git")
+        && let Some((_index, subcommand)) = git_subcommand(command)
+    {
+        return Some(vec![command[0].clone(), subcommand.to_string()]);
+    }
+    Some(command.iter().take(command.len().min(2)).cloned().collect())
 }
 
 pub(crate) fn permission_rule_tool(tool: &str) -> &str {

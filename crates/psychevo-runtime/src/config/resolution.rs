@@ -234,22 +234,28 @@ pub(crate) fn resolve_one_provider(
         reasoning_effort
     };
 
-    let api_key_env = first_string([
-        config_entry.and_then(|entry| entry.options.api_key_env.clone()),
-        built_in.and_then(|provider| {
-            provider
-                .api_key_envs
-                .iter()
-                .find(|key| env_value(&loaded.env, key).is_some())
-                .or_else(|| provider.api_key_envs.first())
-                .map(|key| (*key).to_string())
-        }),
-    ]);
+    let explicit_no_auth = config_entry.is_some_and(|entry| entry.options.no_auth);
+    let api_key_env = (!explicit_no_auth)
+        .then(|| {
+            first_string([
+                config_entry.and_then(|entry| entry.options.api_key_env.clone()),
+                built_in.and_then(|provider| {
+                    provider
+                        .api_key_envs
+                        .iter()
+                        .find(|key| env_value(&loaded.env, key).is_some())
+                        .or_else(|| provider.api_key_envs.first())
+                        .map(|key| (*key).to_string())
+                }),
+            ])
+        })
+        .flatten();
     let api_key = api_key_env
         .as_deref()
         .and_then(|key| env_value(&loaded.env, key))
         .or_else(|| {
-            let allow_no_auth = built_in.is_some_and(|provider| provider.allow_no_auth)
+            let allow_no_auth = explicit_no_auth
+                || built_in.is_some_and(|provider| provider.allow_no_auth)
                 || is_loopback_base_url(&base_url);
             allow_no_auth.then(|| "not-needed".to_string())
         });

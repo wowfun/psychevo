@@ -18,17 +18,22 @@ pub(crate) fn catalog_provider_for(
     }
     let display_label = provider_label(&provider, config_entry);
     let base_url = provider_base_url(&provider, config_entry, &loaded.env);
-    let api_key_env = first_string([
-        config_entry.and_then(|entry| entry.options.api_key_env.clone()),
-        built_in.and_then(|provider| {
-            provider
-                .api_key_envs
-                .iter()
-                .find(|key| env_value(&loaded.env, key).is_some())
-                .or_else(|| provider.api_key_envs.first())
-                .map(|key| (*key).to_string())
-        }),
-    ]);
+    let explicit_no_auth = config_entry.is_some_and(|entry| entry.options.no_auth);
+    let api_key_env = (!explicit_no_auth)
+        .then(|| {
+            first_string([
+                config_entry.and_then(|entry| entry.options.api_key_env.clone()),
+                built_in.and_then(|provider| {
+                    provider
+                        .api_key_envs
+                        .iter()
+                        .find(|key| env_value(&loaded.env, key).is_some())
+                        .or_else(|| provider.api_key_envs.first())
+                        .map(|key| (*key).to_string())
+                }),
+            ])
+        })
+        .flatten();
     let Some(base_url) = base_url else {
         return Some(ModelCatalogProvider {
             provider,
@@ -44,8 +49,9 @@ pub(crate) fn catalog_provider_for(
     let api_key = api_key_env
         .as_deref()
         .and_then(|key| env_value(&loaded.env, key));
-    let no_auth_allowed =
-        built_in.is_some_and(|provider| provider.allow_no_auth) || is_loopback_base_url(&base_url);
+    let no_auth_allowed = explicit_no_auth
+        || built_in.is_some_and(|provider| provider.allow_no_auth)
+        || is_loopback_base_url(&base_url);
     let no_auth = api_key.is_none() && no_auth_allowed;
     let missing_credentials = (api_key.is_none() && !no_auth_allowed).then(|| {
         api_key_env

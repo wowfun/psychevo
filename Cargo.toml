@@ -17,6 +17,7 @@ license = "MIT"
 [workspace.dependencies]
 anyhow = "1.0"
 agent-client-protocol = { version = "=0.12.1", features = ["unstable"] }
+axum = { version = "0.8", features = ["ws"] }
 base64 = "0.22.1"
 bytes = "1.9"
 clap = { version = "4.5", features = ["derive"] }
@@ -46,8 +47,10 @@ supports-color = "3.0.2"
 tempfile = "3.15"
 thiserror = "2.0"
 tiktoken = "3.1.4"
-tokio = { version = "1.42", features = ["rt-multi-thread", "macros", "sync", "process", "time", "io-util"] }
+tokio = { version = "1.42", features = ["rt-multi-thread", "macros", "sync", "process", "time", "io-util", "net", "signal"] }
 tokio-util = { version = "0.7", features = ["compat"] }
 toml = "0.8"
+tree-sitter = "0.25.10"
+tree-sitter-bash = "0.25"
 unicode-width = "0.2"
 uuid = { version = "1.11", features = ["v7", "serde"] }

@@ -332,6 +332,7 @@ pub(crate) fn add_provider(
         api_key_env: args.api_key_env.clone(),
         require_api_key: args.api_key_env.is_none() && api_key.is_none(),
         api_key,
+        no_auth: args.no_auth,
     })?;
     let value = json!({
         "scope": scoped_label(args.global),
@@ -339,6 +340,7 @@ pub(crate) fn add_provider(
         "label": result.label,
         "base_url": result.base_url,
         "api_key_env": result.api_key_env,
+        "no_auth": args.no_auth,
         "wrote_api_key": result.wrote_api_key,
         "reused_existing_api_key": result.reused_existing_api_key,
     });
@@ -451,13 +453,7 @@ pub(crate) fn print_permissions_list(value: &Value, as_json: bool) -> Result<()>
             for rule in rules {
                 let prefix = rule["prefix"]
                     .as_array()
-                    .map(|values| {
-                        values
-                            .iter()
-                            .filter_map(Value::as_str)
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    })
+                    .map(|values| format_exec_prefix(values))
                     .unwrap_or_else(|| "-".to_string());
                 println!(
                     "  {} -> {}",
@@ -468,6 +464,25 @@ pub(crate) fn print_permissions_list(value: &Value, as_json: bool) -> Result<()>
         }
     }
     Ok(())
+}
+
+pub(crate) fn format_exec_prefix(values: &[Value]) -> String {
+    values
+        .iter()
+        .filter_map(|value| match value {
+            Value::String(raw) => Some(raw.clone()),
+            Value::Array(alternatives) => Some(format!(
+                "[{}]",
+                alternatives
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join("|")
+            )),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 pub(crate) fn config_scope(args: &ConfigShowArgs) -> ConfigScope {

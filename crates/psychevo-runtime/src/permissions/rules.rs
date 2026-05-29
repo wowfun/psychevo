@@ -52,14 +52,6 @@ pub(crate) fn dangerous_bash_reason(command: &str) -> Option<String> {
     {
         return Some("downloaded shell installer requires approval".to_string());
     }
-    if command.contains("python -c")
-        || command.contains("python3 -c")
-        || command.contains("node -e")
-        || command.contains("perl -e")
-        || command.contains("ruby -e")
-    {
-        return Some("inline interpreter execution requires approval".to_string());
-    }
     for (needle, reason) in dangerous {
         if command.contains(needle) {
             if needle == "find " && !command.contains("-delete") {
@@ -95,6 +87,384 @@ pub(crate) fn pipe_to_shell(command: &str) -> bool {
         || command.contains("| bash")
         || command.contains("|sh")
         || command.contains("|bash")
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum InlineInterpreterReview {
+    LiteralFileReads(Vec<String>),
+    NeedsApproval(String),
+}
+
+pub(crate) fn is_known_safe_command(command: &[String]) -> bool {
+    if is_safe_to_call_with_exec(command) {
+        return true;
+    }
+    shell_lc_word_only_commands(command).is_some_and(|commands| {
+        !commands.is_empty()
+            && commands
+                .iter()
+                .all(|command| is_safe_to_call_with_exec(command))
+    })
+}
+
+pub(crate) fn is_safe_to_call_with_exec(command: &[String]) -> bool {
+    let Some(cmd) = command.first().and_then(|raw| shell_basename(raw)) else {
+        return false;
+    };
+    match cmd.as_str() {
+        "cat" | "cd" | "cut" | "echo" | "false" | "grep" | "head" | "ls" | "pwd" | "tail"
+        | "true" | "wc" | "which" | "whoami" => true,
+        "rg" => safe_rg_args(&command[1..]),
+        "sed" => safe_sed_args(&command[1..]),
+        "git" => safe_git_command(command),
+        _ => false,
+    }
+}
+
+pub(crate) fn inline_interpreter_review(
+    raw_command: &str,
+    command: &[String],
+) -> Option<InlineInterpreterReview> {
+    if let Some(review) = inline_interpreter_tokens_review(command) {
+        return Some(review);
+    }
+    if let Some(commands) = shell_lc_word_only_commands(command) {
+        let mut paths = Vec::new();
+        for command in commands {
+            match inline_interpreter_tokens_review(&command) {
+                Some(InlineInterpreterReview::LiteralFileReads(mut next)) => {
+                    paths.append(&mut next);
+                }
+                Some(InlineInterpreterReview::NeedsApproval(reason)) => {
+                    return Some(InlineInterpreterReview::NeedsApproval(reason));
+                }
+                None => {}
+            }
+        }
+        if !paths.is_empty() {
+            paths.sort();
+            paths.dedup();
+            return Some(InlineInterpreterReview::LiteralFileReads(paths));
+        }
+    }
+    if contains_inline_interpreter(raw_command) {
+        return Some(InlineInterpreterReview::NeedsApproval(
+            "inline interpreter execution requires approval".to_string(),
+        ));
+    }
+    None
+}
+
+pub(crate) fn is_inline_interpreter_tokens(command: &[String]) -> bool {
+    inline_interpreter_script(command).is_some()
+}
+
+pub(crate) fn inline_interpreter_tokens_review(
+    command: &[String],
+) -> Option<InlineInterpreterReview> {
+    let (interpreter, script) = inline_interpreter_script(command)?;
+    if matches!(interpreter.as_str(), "python" | "python3") {
+        return Some(match literal_python_file_reads(script) {
+            Ok(paths) => InlineInterpreterReview::LiteralFileReads(paths),
+            Err(reason) => InlineInterpreterReview::NeedsApproval(reason),
+        });
+    }
+    Some(InlineInterpreterReview::NeedsApproval(
+        "inline interpreter execution requires approval".to_string(),
+    ))
+}
+
+pub(crate) fn inline_interpreter_script(command: &[String]) -> Option<(String, &str)> {
+    let interpreter = command.first().and_then(|raw| shell_basename(raw))?;
+    let flag = command.get(1).map(String::as_str)?;
+    let script = command.get(2).map(String::as_str)?;
+    match (interpreter.as_str(), flag) {
+        ("python" | "python3", "-c") | ("node", "-e") | ("perl", "-e") | ("ruby", "-e") => {
+            Some((interpreter, script))
+        }
+        _ => None,
+    }
+}
+
+pub(crate) fn contains_inline_interpreter(command: &str) -> bool {
+    ["python -c", "python3 -c", "node -e", "perl -e", "ruby -e"]
+        .iter()
+        .any(|needle| command.contains(needle))
+}
+
+pub(crate) fn literal_python_file_reads(script: &str) -> std::result::Result<Vec<String>, String> {
+    let lowered = script.to_ascii_lowercase();
+    for risky in [
+        "subprocess",
+        "os.system",
+        "socket",
+        "requests",
+        "urllib",
+        "http.client",
+        "eval(",
+        "exec(",
+        "__import__",
+        ".write(",
+        "write_text",
+        "write_bytes",
+        "remove(",
+        "unlink(",
+        "rmtree",
+        "rename(",
+        "replace(",
+        "chmod(",
+        "chown(",
+        "mkdir(",
+        "makedirs(",
+    ] {
+        if lowered.contains(risky) {
+            return Err(format!(
+                "inline Python contains `{risky}` and requires approval"
+            ));
+        }
+    }
+    let mut paths = literal_open_read_paths(script)?;
+    paths.extend(literal_pathlib_read_paths(script)?);
+    paths.sort();
+    paths.dedup();
+    if paths.is_empty() {
+        return Err(
+            "inline Python could not be statically reduced to literal file reads".to_string(),
+        );
+    }
+    Ok(paths)
+}
+
+pub(crate) fn literal_open_read_paths(script: &str) -> std::result::Result<Vec<String>, String> {
+    let mut paths = Vec::new();
+    let mut offset = 0usize;
+    while let Some(found) = script[offset..].find("open(") {
+        let start = offset + found + "open(".len();
+        let Some((path, after_path)) = parse_literal_string_at(script, start) else {
+            return Err("inline Python open() path is not a literal string".to_string());
+        };
+        if python_open_mode_is_mutating(script, after_path) {
+            return Err("inline Python open() uses a mutating mode".to_string());
+        }
+        paths.push(path);
+        offset = after_path;
+    }
+    Ok(paths)
+}
+
+pub(crate) fn literal_pathlib_read_paths(script: &str) -> std::result::Result<Vec<String>, String> {
+    let mut paths = Vec::new();
+    let mut offset = 0usize;
+    while let Some(found) = script[offset..].find("Path(") {
+        let start = offset + found + "Path(".len();
+        let Some((path, after_path)) = parse_literal_string_at(script, start) else {
+            return Err("inline Python Path() argument is not a literal string".to_string());
+        };
+        let rest = &script[after_path..script.len().min(after_path + 80)];
+        if rest.contains(".read_text(") || rest.contains(".read_bytes(") {
+            paths.push(path);
+        } else {
+            return Err("inline Python Path() is not a recognized read".to_string());
+        }
+        offset = after_path;
+    }
+    Ok(paths)
+}
+
+pub(crate) fn parse_literal_string_at(script: &str, start: usize) -> Option<(String, usize)> {
+    let bytes = script.as_bytes();
+    let mut index = start;
+    while bytes.get(index).is_some_and(u8::is_ascii_whitespace) {
+        index += 1;
+    }
+    let quote = *bytes.get(index)?;
+    if quote != b'\'' && quote != b'"' {
+        return None;
+    }
+    index += 1;
+    let value_start = index;
+    let mut escaped = false;
+    while let Some(byte) = bytes.get(index).copied() {
+        if escaped {
+            escaped = false;
+        } else if byte == b'\\' {
+            escaped = true;
+        } else if byte == quote {
+            return Some((script[value_start..index].to_string(), index + 1));
+        }
+        index += 1;
+    }
+    None
+}
+
+pub(crate) fn python_open_mode_is_mutating(script: &str, after_path: usize) -> bool {
+    let end = script[after_path..]
+        .find(')')
+        .map(|index| after_path + index)
+        .unwrap_or(script.len());
+    let args = script[after_path..end].to_ascii_lowercase();
+    [
+        "'w'", "\"w\"", "'a'", "\"a\"", "'x'", "\"x\"", "'w+", "\"w+", "'a+", "\"a+", "'x+", "\"x+",
+    ]
+    .iter()
+    .any(|needle| args.contains(needle))
+        || args.contains("mode='w")
+        || args.contains("mode=\"w")
+        || args.contains("mode='a")
+        || args.contains("mode=\"a")
+        || args.contains("mode='x")
+        || args.contains("mode=\"x")
+        || args.contains('+')
+}
+
+pub(crate) fn safe_rg_args(args: &[String]) -> bool {
+    !args.iter().any(|arg| {
+        matches!(
+            arg.as_str(),
+            "--pre" | "--hostname-bin" | "--search-zip" | "-z"
+        ) || arg.starts_with("--pre=")
+            || arg.starts_with("--hostname-bin=")
+    })
+}
+
+pub(crate) fn safe_sed_args(args: &[String]) -> bool {
+    args.len() <= 3
+        && args.first().map(String::as_str) == Some("-n")
+        && args
+            .get(1)
+            .map(String::as_str)
+            .is_some_and(is_valid_sed_n_arg)
+}
+
+pub(crate) fn safe_git_command(command: &[String]) -> bool {
+    let Some((index, subcommand)) = git_subcommand(command) else {
+        return false;
+    };
+    if git_has_unsafe_global_option(&command[1..index]) {
+        return false;
+    }
+    let args = &command[index + 1..];
+    match subcommand {
+        "status" | "log" | "diff" | "show" => git_args_are_read_only(args),
+        "branch" => git_args_are_read_only(args) && git_branch_is_read_only(args),
+        _ => false,
+    }
+}
+
+pub(crate) fn git_subcommand(command: &[String]) -> Option<(usize, &str)> {
+    if command
+        .first()
+        .and_then(|raw| shell_basename(raw))
+        .as_deref()
+        != Some("git")
+    {
+        return None;
+    }
+    let mut skip_next = false;
+    for (index, arg) in command.iter().enumerate().skip(1) {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        let arg = arg.as_str();
+        if matches!(
+            arg,
+            "-C" | "-c"
+                | "--config-env"
+                | "--exec-path"
+                | "--git-dir"
+                | "--namespace"
+                | "--super-prefix"
+                | "--work-tree"
+        ) {
+            skip_next = true;
+            continue;
+        }
+        if arg.starts_with("-C")
+            || arg.starts_with("-c")
+            || arg.starts_with("--config-env=")
+            || arg.starts_with("--exec-path=")
+            || arg.starts_with("--git-dir=")
+            || arg.starts_with("--namespace=")
+            || arg.starts_with("--super-prefix=")
+            || arg.starts_with("--work-tree=")
+        {
+            continue;
+        }
+        if arg == "--" || arg.starts_with('-') {
+            continue;
+        }
+        return matches!(arg, "status" | "log" | "diff" | "show" | "branch")
+            .then_some((index, arg));
+    }
+    None
+}
+
+pub(crate) fn git_has_unsafe_global_option(args: &[String]) -> bool {
+    args.iter().any(|arg| {
+        matches!(
+            arg.as_str(),
+            "-C" | "-c"
+                | "-p"
+                | "--config-env"
+                | "--exec-path"
+                | "--git-dir"
+                | "--namespace"
+                | "--paginate"
+                | "--super-prefix"
+                | "--work-tree"
+        ) || arg.starts_with("-C")
+            || arg.starts_with("-c")
+            || arg.starts_with("--config-env=")
+            || arg.starts_with("--exec-path=")
+            || arg.starts_with("--git-dir=")
+            || arg.starts_with("--namespace=")
+            || arg.starts_with("--super-prefix=")
+            || arg.starts_with("--work-tree=")
+    })
+}
+
+pub(crate) fn git_args_are_read_only(args: &[String]) -> bool {
+    !args.iter().any(|arg| {
+        matches!(
+            arg.as_str(),
+            "--output" | "--ext-diff" | "--textconv" | "--exec"
+        ) || arg.starts_with("--output=")
+            || arg.starts_with("--exec=")
+    })
+}
+
+pub(crate) fn git_branch_is_read_only(args: &[String]) -> bool {
+    if args.is_empty() {
+        return true;
+    }
+    let mut saw_read_only = false;
+    for arg in args {
+        match arg.as_str() {
+            "--list" | "-l" | "--show-current" | "-a" | "--all" | "-r" | "--remotes" | "-v"
+            | "-vv" | "--verbose" => saw_read_only = true,
+            raw if raw.starts_with("--format=") => saw_read_only = true,
+            _ => return false,
+        }
+    }
+    saw_read_only
+}
+
+pub(crate) fn is_valid_sed_n_arg(value: &str) -> bool {
+    let Some(core) = value.strip_suffix('p') else {
+        return false;
+    };
+    let parts = core.split(',').collect::<Vec<_>>();
+    match parts.as_slice() {
+        [single] => !single.is_empty() && single.chars().all(|ch| ch.is_ascii_digit()),
+        [start, end] => {
+            !start.is_empty()
+                && !end.is_empty()
+                && start.chars().all(|ch| ch.is_ascii_digit())
+                && end.chars().all(|ch| ch.is_ascii_digit())
+        }
+        _ => false,
+    }
 }
 
 pub(crate) fn action_summary(tool_name: &str, args: &Value) -> String {
@@ -245,6 +615,19 @@ pub(crate) mod tests {
         )
     }
 
+    fn exec_rule(prefix: &[&str], decision: ExecPolicyDecision) -> ExecPolicyRule {
+        ExecPolicyRule {
+            prefix: prefix
+                .iter()
+                .map(|value| ExecPolicyPatternToken::Single((*value).to_string()))
+                .collect(),
+            decision,
+            justification: None,
+            match_examples: Vec::new(),
+            not_match_examples: Vec::new(),
+        }
+    }
+
     #[derive(Debug)]
     struct PendingApprovalHandler;
 
@@ -277,19 +660,11 @@ pub(crate) mod tests {
             PermissionConfig {
                 exec_policy: ExecPolicyConfig {
                     rules: vec![
-                        ExecPolicyRule {
-                            prefix: vec!["cargo".to_string(), "publish".to_string()],
-                            decision: ExecPolicyDecision::Allow,
-                        },
-                        ExecPolicyRule {
-                            prefix: vec!["cargo".to_string(), "publish".to_string()],
-                            decision: ExecPolicyDecision::Prompt,
-                        },
-                        ExecPolicyRule {
-                            prefix: vec!["cargo".to_string(), "publish".to_string()],
-                            decision: ExecPolicyDecision::Deny,
-                        },
+                        exec_rule(&["cargo", "publish"], ExecPolicyDecision::Allow),
+                        exec_rule(&["cargo", "publish"], ExecPolicyDecision::Prompt),
+                        exec_rule(&["cargo", "publish"], ExecPolicyDecision::Deny),
                     ],
+                    ..Default::default()
                 },
                 ..Default::default()
             },
@@ -370,20 +745,104 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn known_safe_exec_is_allowed_under_read_only_profile() {
+        let runtime = runtime(
+            PermissionConfig {
+                default_permissions: ":read-only".to_string(),
+                ..Default::default()
+            },
+            PermissionMode::Default,
+        );
+        let decision = runtime.evaluate("exec_command", &json!({"cmd": "rg TODO src"}));
+        assert_eq!(decision, PermissionDecision::Allow);
+
+        let decision = runtime.evaluate("exec_command", &json!({"cmd": "cargo check"}));
+        assert!(matches!(decision, PermissionDecision::Ask { .. }));
+    }
+
+    #[test]
+    fn inline_python_literal_file_read_reuses_filesystem_grant() {
+        let mut profiles = BTreeMap::new();
+        profiles.insert(
+            "local".to_string(),
+            PermissionProfileConfig {
+                extends: Some(":workspace".to_string()),
+                filesystem: BTreeMap::from([(
+                    "/tmp/hn_stories_data.json".to_string(),
+                    PermissionAccess::Read,
+                )]),
+                ..Default::default()
+            },
+        );
+        let runtime = runtime(
+            PermissionConfig {
+                default_permissions: "local".to_string(),
+                profiles,
+                ..Default::default()
+            },
+            PermissionMode::Default,
+        );
+        let command = r#"python3 -c "import json
+with open('/tmp/hn_stories_data.json', 'r') as f:
+    data = json.load(f)
+print(len(data))""#;
+        let decision = runtime.evaluate("exec_command", &json!({"cmd": command}));
+        assert_eq!(decision, PermissionDecision::Allow);
+    }
+
+    #[test]
+    fn inline_python_ungranted_or_mutating_cases_prompt() {
+        let runtime = runtime(PermissionConfig::default(), PermissionMode::Default);
+        for command in [
+            r#"python3 -c "path='/tmp/hn_stories_data.json'; print(open(path).read())""#,
+            r#"python3 -c "open('/tmp/hn_stories_data.json', 'w').write('x')""#,
+            r#"python3 -c "import subprocess; subprocess.run(['pwd'])""#,
+            r#"node -e "console.log('x')""#,
+        ] {
+            let decision = runtime.evaluate("exec_command", &json!({"cmd": command}));
+            assert!(
+                matches!(decision, PermissionDecision::Ask { .. }),
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
     fn legacy_bash_rules_do_not_match_exec_command() {
         let runtime = runtime(
             PermissionConfig {
                 exec_policy: ExecPolicyConfig {
-                    rules: vec![ExecPolicyRule {
-                        prefix: vec!["Bash".to_string(), "cargo".to_string()],
-                        decision: ExecPolicyDecision::Deny,
-                    }],
+                    rules: vec![exec_rule(&["Bash", "cargo"], ExecPolicyDecision::Deny)],
+                    ..Default::default()
                 },
                 ..Default::default()
             },
             PermissionMode::Default,
         );
         let decision = runtime.evaluate("exec_command", &json!({"cmd": "cargo publish --dry-run"}));
+        assert!(!matches!(decision, PermissionDecision::Deny { .. }));
+    }
+
+    #[test]
+    fn exec_policy_host_executable_path_controls_basename_fallback() {
+        let rule = exec_rule(&["git", "status"], ExecPolicyDecision::Deny);
+        let runtime = runtime(
+            PermissionConfig {
+                exec_policy: ExecPolicyConfig {
+                    rules: vec![rule],
+                    host_executables: vec![crate::types::ExecPolicyHostExecutable {
+                        name: "git".to_string(),
+                        paths: vec!["/usr/bin/git".to_string()],
+                    }],
+                },
+                ..Default::default()
+            },
+            PermissionMode::Default,
+        );
+        let decision = runtime.evaluate("exec_command", &json!({"cmd": "/usr/bin/git status"}));
+        assert!(matches!(decision, PermissionDecision::Deny { .. }));
+
+        let decision = runtime.evaluate("exec_command", &json!({"cmd": "/tmp/git status"}));
         assert!(!matches!(decision, PermissionDecision::Deny { .. }));
     }
 
@@ -566,9 +1025,10 @@ pub(crate) mod tests {
             Some(Arc::new(PendingApprovalHandler)),
             None,
         );
+        let runtime_for_task = runtime.clone();
         let (abort_tx, abort_rx) = tokio::sync::watch::channel(false);
         let task = tokio::spawn(async move {
-            runtime
+            runtime_for_task
                 .authorize_with_abort(
                     "call-1",
                     "exec_command",
@@ -588,6 +1048,18 @@ pub(crate) mod tests {
 
         assert!(output.is_error);
         assert_eq!(output.json["error"], "aborted");
+        assert_eq!(
+            runtime.approval_lifecycle_events(),
+            vec![
+                ApprovalLifecycleEvent::Requested {
+                    tool_call_id: "call-1".to_string(),
+                    tool_name: "exec_command".to_string(),
+                },
+                ApprovalLifecycleEvent::Aborted {
+                    tool_call_id: "call-1".to_string(),
+                },
+            ]
+        );
     }
 
     #[test]

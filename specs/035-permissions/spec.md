@@ -118,6 +118,17 @@ extends = ":workspace"
 [[exec_policy.rules]]
 prefix = ["git", "pull"]
 decision = "allow"
+justification = "project workflow uses git pull before local sync"
+match = ["git pull --ff-only"]
+not_match = ["git push"]
+
+[[exec_policy.rules]]
+prefix = ["git", ["status", "diff", "show"]]
+decision = "allow"
+
+[[exec_policy.host_executables]]
+name = "git"
+paths = ["/usr/bin/git", "/opt/homebrew/bin/git"]
 ```
 
 Legacy global configuration fields `permission_mode`, `approval_mode`,
@@ -139,7 +150,9 @@ user approval writes through a capability-specific adapter:
 
 - filesystem and network grants write the current project's `local` profile;
   if missing, Psychevo creates it and sets `default_permissions = "local"`.
-- exec grants append de-duplicated `[[exec_policy.rules]]` entries.
+- exec grants append de-duplicated `[[exec_policy.rules]]` entries using
+  parsed command prefixes rather than whitespace fragments from the raw shell
+  text.
 - MCP grants write to the server/tool definition layer where the server was
   defined.
 - skill grants write to the active profile tools section.
@@ -163,19 +176,52 @@ The current workdir is no longer the hard boundary for file tools; it is the
 default workspace root used by built-in profiles. A profile grant may authorize
 an absolute path outside the workdir, while protected denies still win.
 
-Exec commands are evaluated by `exec_policy.rules`. Rules are ordered
-de-duplicated token-prefix matches with decisions `allow`, `prompt`, and
-`deny`. Shell network access is not host-intercepted; network risk in shell
-commands is handled by exec approval.
+Exec commands are evaluated in three layers:
+
+1. hard/protected deny and background-process deny
+2. configured `exec_policy.rules`
+3. command safety classification for known-safe, dangerous, and unknown
+
+`exec_policy.rules` are parsed token-prefix rules with decisions `allow`,
+`prompt`, and `deny`. A prefix token may be either a string or a list of string
+alternatives. Optional `justification` is user-facing rationale. Optional
+`match` and `not_match` entries are load-time self-tests; they are tokenized
+and validated when configuration loads, and any failed self-test rejects the
+configuration. They are not runtime conditions.
+
+`exec_policy.host_executables` may define executable basenames and allowed
+absolute paths. When enabled for a name, an absolute executable path matches a
+basename rule only if the path is listed for that name. If no host executable
+entry exists for a basename, basename fallback may match an absolute path to
+that basename.
+
+Known-safe exec commands are read-only exploration commands and safe shell
+compositions of those commands, including a bounded Codex-style subset such as
+`pwd`, `ls`, `cat`, `wc`, `rg`, `sed -n`, and read-only `git` subcommands.
+Known-safe exec is allowed by `:workspace` and `:read-only` profiles unless a
+hard deny or explicit policy rule overrides it. Dangerous commands require
+approval or denial according to the active approval policy. Unknown commands
+inside `:workspace` may run only when they are not high-capability unknowns.
+
+Inline interpreters such as `python -c`, `python3 -c`, `node -e`, `perl -e`,
+and `ruby -e` are high-capability unknowns rather than blanket dangerous
+commands. First-slice resource-aware auto-allow is limited to inline scripts
+that can be statically recognized as literal file reads and whose literal paths
+are already allowed by filesystem permissions. Inline scripts with dynamic
+paths, writes, subprocess/process control, network access, `eval`, or otherwise
+unrecognized behavior require approval. Shell network access is not
+host-intercepted; network risk in shell commands is handled by exec approval.
 
 Network permissions apply to built-in network-capable operations such as
 `web_fetch` and managed MCP HTTP/SSE access. The built-in `:workspace` profile
 allows `web_fetch` by default, matching the product stance that ordinary web
 research is a read operation; shell network risk remains covered by exec
 approval, and managed MCP/network services keep their own approval gates.
-Explicit profile network rules may still prompt or deny particular hosts.
-When a network action does prompt, approval prompts default to the actual host.
-Configuration may express broader domain or wildcard policy.
+Explicit profile network rules are still evaluated first: `deny` blocks and
+`prompt` asks even though the default for `web_fetch` is allow. Explicit
+`allow` records trust for the host or domain. When a network action does
+prompt, approval prompts default to the actual host. Configuration may express
+broader domain or wildcard policy.
 
 Permission policy applies after tool visibility and before or during execution.
 A model-visible tool declaration says what the model may request, not what the
@@ -194,6 +240,13 @@ Approval choices are:
 The original tool call is suspended while approval is pending. Allow decisions
 resume the original call; deny decisions return an explicit permission-denied
 error instructing the model not to retry the same operation.
+
+The runtime keeps an in-process FIFO of pending approval requests. Approval
+request and response hooks may observe a request before it is shown and after
+it resolves; hooks must not be required for the approval result and must not
+write durable transcript events. Session cleanup, TUI exit, and abort paths
+must release all pending approvals with deny/abort semantics and wake suspended
+tool calls.
 
 Session grants are scoped to one runtime session. `allow always` persists
 through the relevant adapter only when the action supports persistent grants.
@@ -222,8 +275,14 @@ recent smart denial with `/approve once|session|always`.
 - Legacy global permission fields are rejected with migration diagnostics.
 - `granular` requires all current family booleans to be explicit.
 - Bash dangerous-command detection covers representative recursive delete,
-  shell-pipe installer, interpreter inline execution, destructive git, process
-  kill, service, permission, and SQL destructive commands.
+  shell-pipe installer, destructive git, process kill, service, permission,
+  and SQL destructive commands.
+- Known-safe command classification covers representative read-only commands
+  and safe shell compositions.
+- Inline interpreter classification allows only literal already-authorized file
+  reads without prompting; unrecognized inline behavior prompts.
+- `exec_policy.rules` support token alternatives, `justification`,
+  `match`/`not_match` self-tests, and host executable path resolution.
 - Filesystem grants match canonical paths inside or outside the workdir.
 - No-handler approval paths fail closed.
 - `approval_policy = "never"` denies prompt-level actions without showing UI.

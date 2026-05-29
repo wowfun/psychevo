@@ -412,20 +412,28 @@ pub(crate) fn parse_exec_policy_config(value: &Value) -> Result<ExecPolicyConfig
     let object = value
         .as_object()
         .ok_or_else(|| Error::Config("exec_policy must be an object".to_string()))?;
-    let Some(rules) = object.get("rules") else {
-        return Ok(ExecPolicyConfig::default());
-    };
-    let rules = rules
-        .as_array()
-        .ok_or_else(|| Error::Config("exec_policy.rules must be an array".to_string()))?;
+    let host_executables = object
+        .get("host_executables")
+        .map(parse_host_executables)
+        .transpose()?
+        .unwrap_or_default();
+    let rules = object
+        .get("rules")
+        .map(|value| {
+            value
+                .as_array()
+                .ok_or_else(|| Error::Config("exec_policy.rules must be an array".to_string()))
+        })
+        .transpose()?
+        .cloned()
+        .unwrap_or_default();
     let mut out = Vec::new();
     for (index, value) in rules.iter().enumerate() {
         let object = value.as_object().ok_or_else(|| {
             Error::Config(format!("exec_policy.rules[{index}] must be an object"))
         })?;
-        let prefix = string_array_field(
-            object,
-            "prefix",
+        let prefix = exec_policy_prefix_field(
+            object.get("prefix"),
             &format!("exec_policy.rules[{index}].prefix"),
         )?;
         if prefix.is_empty() {
@@ -440,9 +448,233 @@ pub(crate) fn parse_exec_policy_config(value: &Value) -> Result<ExecPolicyConfig
                     "exec_policy.rules[{index}].decision must be allow, prompt, or deny"
                 ))
             })?;
-        out.push(ExecPolicyRule { prefix, decision });
+        let justification = optional_string_field(object, "justification")?;
+        let match_examples = exec_policy_examples_field(
+            object.get("match"),
+            &format!("exec_policy.rules[{index}].match"),
+        )?;
+        let not_match_examples = exec_policy_examples_field(
+            object.get("not_match"),
+            &format!("exec_policy.rules[{index}].not_match"),
+        )?;
+        let rule = ExecPolicyRule {
+            prefix,
+            decision,
+            justification,
+            match_examples,
+            not_match_examples,
+        };
+        validate_exec_policy_rule_examples(&rule, index, &host_executables)?;
+        out.push(rule);
     }
-    Ok(ExecPolicyConfig { rules: out })
+    Ok(ExecPolicyConfig {
+        rules: out,
+        host_executables,
+    })
+}
+
+pub(crate) fn exec_policy_prefix_field(
+    value: Option<&Value>,
+    path: &str,
+) -> Result<Vec<ExecPolicyPatternToken>> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let values = value
+        .as_array()
+        .ok_or_else(|| Error::Config(format!("{path} must be an array")))?;
+    values
+        .iter()
+        .enumerate()
+        .map(|(index, value)| match value {
+            Value::String(raw) => non_empty_string(raw, &format!("{path}[{index}]"))
+                .map(ExecPolicyPatternToken::Single),
+            Value::Array(alternatives) => {
+                let alternatives = alternatives
+                    .iter()
+                    .enumerate()
+                    .map(|(alt_index, value)| {
+                        value
+                            .as_str()
+                            .ok_or_else(|| {
+                                Error::Config(format!(
+                                    "{path}[{index}][{alt_index}] must be a string"
+                                ))
+                            })
+                            .and_then(|raw| {
+                                non_empty_string(raw, &format!("{path}[{index}][{alt_index}]"))
+                            })
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                if alternatives.is_empty() {
+                    return Err(Error::Config(format!(
+                        "{path}[{index}] alternatives must not be empty"
+                    )));
+                }
+                Ok(ExecPolicyPatternToken::Alternatives(alternatives))
+            }
+            _ => Err(Error::Config(format!(
+                "{path}[{index}] must be a string or array of strings"
+            ))),
+        })
+        .collect()
+}
+
+pub(crate) fn exec_policy_examples_field(
+    value: Option<&Value>,
+    path: &str,
+) -> Result<Vec<ExecPolicyExample>> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    match value {
+        Value::String(_) => Ok(vec![exec_policy_example(value, path)?]),
+        Value::Array(values) => {
+            if values.iter().all(Value::is_string)
+                && (values.len() == 1
+                    || values
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .any(|value| value.chars().any(char::is_whitespace)))
+            {
+                return values
+                    .iter()
+                    .enumerate()
+                    .map(|(index, value)| exec_policy_example(value, &format!("{path}[{index}]")))
+                    .collect();
+            }
+            if values.iter().all(Value::is_string) {
+                return Ok(vec![exec_policy_example(value, path)?]);
+            }
+            values
+                .iter()
+                .enumerate()
+                .map(|(index, value)| exec_policy_example(value, &format!("{path}[{index}]")))
+                .collect()
+        }
+        _ => Err(Error::Config(format!(
+            "{path} must be a string, token array, or array of examples"
+        ))),
+    }
+}
+
+pub(crate) fn exec_policy_example(value: &Value, path: &str) -> Result<ExecPolicyExample> {
+    match value {
+        Value::String(raw) => {
+            let raw = non_empty_string(raw, path)?;
+            let tokens = crate::permissions::shell_command_tokens(&raw).ok_or_else(|| {
+                Error::Config(format!("{path} must be a parseable single shell command"))
+            })?;
+            Ok(ExecPolicyExample { raw, tokens })
+        }
+        Value::Array(values) => {
+            let tokens = values
+                .iter()
+                .enumerate()
+                .map(|(index, value)| {
+                    value
+                        .as_str()
+                        .ok_or_else(|| {
+                            Error::Config(format!("{path}[{index}] entries must be strings"))
+                        })
+                        .and_then(|raw| non_empty_string(raw, &format!("{path}[{index}]")))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            if tokens.is_empty() {
+                return Err(Error::Config(format!("{path} must not be empty")));
+            }
+            Ok(ExecPolicyExample {
+                raw: tokens.join(" "),
+                tokens,
+            })
+        }
+        _ => Err(Error::Config(format!(
+            "{path} must be a string or token array"
+        ))),
+    }
+}
+
+pub(crate) fn validate_exec_policy_rule_examples(
+    rule: &ExecPolicyRule,
+    index: usize,
+    host_executables: &[ExecPolicyHostExecutable],
+) -> Result<()> {
+    for example in &rule.match_examples {
+        if !crate::permissions::exec_prefix_matches(
+            &rule.prefix,
+            &example.tokens,
+            Some(host_executables),
+        ) {
+            return Err(Error::Config(format!(
+                "exec_policy.rules[{index}].match example `{}` does not match prefix",
+                example.raw
+            )));
+        }
+    }
+    for example in &rule.not_match_examples {
+        if crate::permissions::exec_prefix_matches(
+            &rule.prefix,
+            &example.tokens,
+            Some(host_executables),
+        ) {
+            return Err(Error::Config(format!(
+                "exec_policy.rules[{index}].not_match example `{}` matches prefix",
+                example.raw
+            )));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn parse_host_executables(value: &Value) -> Result<Vec<ExecPolicyHostExecutable>> {
+    let values = value.as_array().ok_or_else(|| {
+        Error::Config("exec_policy.host_executables must be an array".to_string())
+    })?;
+    values
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let object = value.as_object().ok_or_else(|| {
+                Error::Config(format!(
+                    "exec_policy.host_executables[{index}] must be an object"
+                ))
+            })?;
+            let name = optional_string_field(object, "name")?.ok_or_else(|| {
+                Error::Config(format!(
+                    "exec_policy.host_executables[{index}].name is required"
+                ))
+            })?;
+            if name.contains('/') || name.contains('\\') {
+                return Err(Error::Config(format!(
+                    "exec_policy.host_executables[{index}].name must be a basename"
+                )));
+            }
+            let paths = string_array_field(
+                object,
+                "paths",
+                &format!("exec_policy.host_executables[{index}].paths"),
+            )?;
+            if paths.is_empty() {
+                return Err(Error::Config(format!(
+                    "exec_policy.host_executables[{index}].paths must not be empty"
+                )));
+            }
+            if paths.iter().any(|path| !Path::new(path).is_absolute()) {
+                return Err(Error::Config(format!(
+                    "exec_policy.host_executables[{index}].paths entries must be absolute paths"
+                )));
+            }
+            Ok(ExecPolicyHostExecutable { name, paths })
+        })
+        .collect()
+}
+
+pub(crate) fn non_empty_string(raw: &str, path: &str) -> Result<String> {
+    raw.trim()
+        .to_string()
+        .is_empty()
+        .then(|| Error::Config(format!("{path} must be a non-empty string")))
+        .map_or_else(|| Ok(raw.trim().to_string()), Err)
 }
 
 pub(crate) fn validate_permission_profile_name(value: &str) -> Result<()> {
@@ -520,6 +752,12 @@ pub(crate) fn parse_config_provider_entry(
         }
         entry.options.base_url = optional_string_field(options, "base_url")?;
         entry.options.api_key_env = optional_string_field(options, "api_key_env")?;
+        entry.options.no_auth = optional_bool_field(options, "no_auth")?.unwrap_or(false);
+        if entry.options.no_auth && entry.options.api_key_env.is_some() {
+            return Err(Error::Config(format!(
+                "provider.{name}.options no_auth conflicts with api_key_env"
+            )));
+        }
     }
     if let Some(models) = object.get("models") {
         let models = models
