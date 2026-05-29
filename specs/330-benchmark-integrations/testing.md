@@ -20,8 +20,8 @@ Out of scope:
 
 ## Deterministic Coverage
 
-Local integration tests should load JSONL task sources and task workspaces from
-generated local projects, execute evaluator checks, and import evaluator
+Local integration tests should load v5 `peval_agent` task directories from
+generated local projects, execute verifier checks, and import evaluator
 results.
 
 At least one local integration test should cover the full path from compact
@@ -36,6 +36,9 @@ SWE-bench tests should use local miniature repositories or synthetic sample
 payloads. They should cover base-state preparation, temporary patch generation
 for scoring, evaluator import, and confirmation that patch artifacts are not
 retained by default.
+
+Tau2 tests should use local dry-run ACP/MCP fixtures with isolated per-case
+state. They must not contact a live Tau2 service during default validation.
 
 Official bridge tests that contact real registries, Hugging Face datasets,
 Docker harnesses, or network services must be explicitly gated outside the

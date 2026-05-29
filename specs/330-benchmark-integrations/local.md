@@ -3,7 +3,7 @@ name: 330. Local Benchmark Integration Attachment
 psychevo_self_edit: deny
 ---
 
-Define local task-set and task behavior.
+Define local `peval_agent` task behavior.
 
 This attachment is part of [330 Benchmark Integrations](spec.md).
 
@@ -11,8 +11,7 @@ This attachment is part of [330 Benchmark Integrations](spec.md).
 
 - local path benchmark sources
 - task directory expectations
-- local evaluator-backed task data
-- JSONL prompt/task sources for prompt A/B
+- local verifier-backed task data
 
 ## Local Task Sets
 
@@ -24,30 +23,31 @@ claims. Checked-in user-facing benchmark projects live under
 `crates/psychevo-eval/benchmarks/` and must be runnable as normal peval
 benchmarks through eval configs.
 
-A local task source is a JSONL task file plus optional task-owned directories.
-Task directories may contain starting workspaces or non-executable data.
-Executable evaluator or fake-agent scripts are not task-owned source files in the
-current local layout.
+`sources.peval_agent` scans task-owned directories under its configured path.
+Each task directory contains `task.toml`, `instruction.md`, `environment/`, and
+`tests/test.sh`.
 
 Current local benchmarks are discovered through `benchmark.toml`. The benchmark
-manifest declares the benchmark-level evaluator, task sources, and task sets.
-Agent definitions and runnable selections live in eval configs or registry
-configs. JSONL task sources contain one task row per benchmark unit; task-owned
-workspaces remain under `tasks/<task-id>/`.
+manifest declares typed sources and source-local sets. Agent definitions and
+runnable selections live in eval configs or registry configs. Canonical task ids
+are `source-id/native-task-id`; the full source set is `source-id`, and nested
+sets are `source-id/set-id`.
 
 ## Task Content
 
 A local task should provide:
 
 - task identity
-- problem statement or instruction data
-- initial workspace source
-- evaluator-specific typed `test_spec`
+- instruction data
+- initial workspace source in `environment/`
+- verifier script in `tests/test.sh`
 - timeout and environment requirements when they differ from task-set defaults
 
-Local evaluator checks produce normalized evaluator results. Task rows must not
-declare arbitrary commands; command execution is owned by the evaluator
-implementation.
+The local runner copies `environment/` into an isolated workspace, runs the
+selected agent with that workspace as cwd, then runs `tests/test.sh` from the
+workspace cwd. Verifier exit status produces normalized pass/fail results.
+Optional `$PEVAL_LOGS/verifier/result.json` or `reward.txt` files may refine
+score and diagnostics.
 
 Local test and benchmark workspaces should be tiny, self-contained, and fast.
 They should not need network access, package installation from remote

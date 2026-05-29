@@ -72,39 +72,39 @@ Create this benchmark and eval layout:
 my-live/
   benchmark/
     benchmark.toml
-    tasks.jsonl
     tasks/
       rust-swe-add/
-        workspace/
+        task.toml
+        instruction.md
+        environment/
           Cargo.toml
           src/lib.rs
+        tests/test.sh
   my-live.eval.toml
 ```
 
 `benchmark/benchmark.toml`:
 
 ```toml
-schema_version = 4
+schema_version = 5
 id = "my-live-coding"
 name = "My live coding benchmark"
 
-[evaluator]
-kind = "local-coding"
+[[sources.peval_agent]]
+id = "local"
+path = "tasks"
+verifier_timeout_seconds = 600
 
-[[task_sources]]
-path = "tasks.jsonl"
-format = "jsonl"
-
-[[task_sets]]
+[[sources.peval_agent.sets]]
 id = "base"
 name = "Base"
-tasks = ["rust-swe-add"]
+include = ["rust-swe-add"]
 ```
 
 `my-live.eval.toml`:
 
 ```toml
-schema_version = 4
+schema_version = 5
 id = "my-live-psychevo"
 name = "My live Psychevo eval"
 
@@ -113,8 +113,8 @@ path = "benchmark/benchmark.toml"
 
 [select]
 agents = ["psychevo"]
-task_sets = ["base"]
-tasks = ["rust-swe-add"]
+sets = ["local/base"]
+tasks = ["local/rust-swe-add"]
 
 [[agents]]
 id = "psychevo"
@@ -122,13 +122,23 @@ name = "Psychevo"
 kind = "psychevo"
 ```
 
-`benchmark/tasks.jsonl`:
+`benchmark/tasks/rust-swe-add/task.toml`:
 
-```jsonl
-{"schema_version":4,"task_id":"rust-swe-add","name":"Repair the add function","kind":"swe-style","dir":"tasks/rust-swe-add","problem_statement":"The local Rust crate has a failing unit test because add subtracts instead of adding. Fix the implementation so the tests pass.","workspace":{"source":"workspace"},"test_spec":{"checks":[{"kind":"cargo_test","timeout_seconds":30}]}}
+```toml
+name = "Repair the add function"
+kind = "swe-style"
+
+[verifier]
+timeout_seconds = 30
 ```
 
-`benchmark/tasks/rust-swe-add/workspace/Cargo.toml`:
+`benchmark/tasks/rust-swe-add/instruction.md`:
+
+```markdown
+The local Rust crate has a failing unit test because add subtracts instead of adding. Fix the implementation so the tests pass.
+```
+
+`benchmark/tasks/rust-swe-add/environment/Cargo.toml`:
 
 ```toml
 [package]
@@ -140,7 +150,7 @@ edition = "2024"
 path = "src/lib.rs"
 ```
 
-`benchmark/tasks/rust-swe-add/workspace/src/lib.rs`:
+`benchmark/tasks/rust-swe-add/environment/src/lib.rs`:
 
 ```rust
 pub fn add(left: i32, right: i32) -> i32 {
@@ -158,6 +168,12 @@ mod tests {
 }
 ```
 
+`benchmark/tasks/rust-swe-add/tests/test.sh`:
+
+```bash
+cargo test --quiet
+```
+
 Check and run:
 
 ```bash
@@ -169,7 +185,7 @@ Expected JSON shape:
 
 ```json
 {
-  "schema_version": 6,
+  "schema_version": 7,
   "selected_cells": 1,
   "executed_cells": 1,
   "reused_cells": 0,
@@ -189,6 +205,7 @@ Render views over stored cell facts:
 ```bash
 peval view --root ~/psychevo-evals/live --config "$PWD/my-live/my-live.eval.toml" -i summary,matrix,usage --format markdown
 peval view --root ~/psychevo-evals/live --config "$PWD/my-live/my-live.eval.toml" --output live-view.html
+peval view --root ~/psychevo-evals/live --config "$PWD/my-live/my-live.eval.toml" -o
 peval view --root ~/psychevo-evals/live --path runs/my-live-coding/psychevo --format json
 ```
 

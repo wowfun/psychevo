@@ -1,0 +1,5 @@
+name = "Repair the add function"
+kind = "swe-style"
+
+[verifier]
+timeout_seconds = 30

@@ -1,17 +1,26 @@
-schema_version = 4
-id = "pidx-fake-patch-add"
-name = "pidx fake patch-add"
+schema_version = 5
+id = "pidx-command-patch-add"
+name = "pidx command patch-add"
 
 [benchmark]
 path = "../benchmarks/pidx-coding/benchmark.toml"
 
 [select]
-agents = ["fake-pass"]
-task_sets = ["base"]
-tasks = ["patch-add"]
+agents = ["local-solver"]
+sets = ["pidx/smoke"]
+tasks = ["pidx/patch-add"]
 
 [[agents]]
-id = "fake-pass"
-name = "Fake pass"
-kind = "fake"
-fake = { behavior = "pass" }
+id = "local-solver"
+name = "Local solver"
+kind = "command"
+
+[agents.command]
+command = "sh"
+args = ["-c", """
+cat > add.py <<'PY'
+def add(a, b):
+    return a + b
+PY
+"""]
+timeout_seconds = 600

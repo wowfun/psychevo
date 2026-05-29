@@ -67,12 +67,12 @@ changing scoring, artifact retention, or safety behavior.
 Required fields must be validated before a run starts when they influence
 environment setup, agent execution, provider access, or evaluator behavior.
 
-The current artifact slice uses v6 for cell-level run facts and trajectory
-events. Benchmark manifests, eval configs, and task JSONL rows use v4.
-Workspace and user registry configs use v2. Evaluator result documents use v2,
-and view DTOs use v4. View DTOs are derived from cell facts rather than
+The current artifact slice uses v8 for cell-level run facts and trajectory
+events. Benchmark manifests and eval configs use v5. Workspace and user
+registry configs use v2. Evaluator result documents use v2, and view DTOs use
+v6. View DTOs are derived from cell facts rather than
 becoming the physical source of truth. Unsupported v2/v3/v4/v5 artifacts are
-ignored during current workspace scans and rejected by direct v6 artifact
+ignored during current workspace scans and rejected by direct v8 artifact
 readers.
 
 ## Related Topics

@@ -31,6 +31,12 @@ pub use views::*;
 mod service;
 #[allow(unused_imports)]
 pub use service::*;
+mod serve;
+#[allow(unused_imports)]
+pub use serve::*;
+mod analysis;
+#[allow(unused_imports)]
+pub use analysis::*;
 mod cli;
 #[allow(unused_imports)]
 pub use cli::*;

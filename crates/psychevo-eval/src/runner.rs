@@ -86,12 +86,6 @@ pub(crate) fn run_evaluation(request: RunRequest) -> Result<RunExecutionSummary>
         request.benchmark.as_deref(),
         request.store_root.clone(),
     )?;
-    if !project.evaluator.run_supported() {
-        bail!(
-            "unsupported_evaluator: evaluator kind `{:?}` is not executable yet",
-            project.evaluator.kind
-        );
-    }
     let cases = expand_matrix(
         &project,
         request.task_set.as_deref(),
@@ -106,29 +100,21 @@ pub(crate) fn run_evaluation(request: RunRequest) -> Result<RunExecutionSummary>
     }
 
     let explicit_output = request.output_root.is_some();
-    let store = if explicit_output {
-        None
+    let output_store = if let Some(path) = request.output_root {
+        EvalStore::new(resolve_cli_path(&path)?)
     } else {
-        Some(EvalStore::resolve(request.store_root)?)
+        EvalStore::resolve(request.store_root)?
     };
-    let output_base = if let Some(path) = request.output_root {
-        resolve_cli_path(&path)?.join("runs").join(project.slug())
-    } else if let Some(store) = &store {
-        store.cell_runs_root(&project)
-    } else {
-        unreachable!("explicit output-root is the only non-store run path")
-    };
+    let output_base = output_store.cell_runs_root(&project);
     fs::create_dir_all(&output_base)
         .with_context(|| format!("failed to create {}", output_base.display()))?;
+    let artifact_includes = resolved_artifact_includes(&project, &request.include_artifacts);
 
     let mut cells = Vec::new();
     for case in cases {
         let fingerprint = cell_fingerprint(&project, &case)?;
-        let cell_key = cell_key(&case, &fingerprint);
-        let cell_root = output_base
-            .join(sanitize_id(&case.agent.id))
-            .join(sanitize_id(&case.task.id))
-            .join(&cell_key);
+        let cell_key = cell_key(&fingerprint);
+        let cell_root = output_store.cell_root(&project, &case, &cell_key);
         let mut action = CellRunAction::Executed;
         if !explicit_output
             && !request.overwrite
@@ -153,7 +139,14 @@ pub(crate) fn run_evaluation(request: RunRequest) -> Result<RunExecutionSummary>
         } else if !explicit_output && cell_root.exists() {
             action = CellRunAction::Retried;
         }
-        let cell = execute_cell(&project, case, &cell_root, &cell_key, &fingerprint)?;
+        let cell = execute_cell(
+            &project,
+            case,
+            &cell_root,
+            &cell_key,
+            &fingerprint,
+            &artifact_includes,
+        )?;
         cells.push(RunExecutionCell {
             cell_key: cell.cell_key,
             fingerprint: cell.fingerprint,
@@ -206,12 +199,29 @@ pub(crate) fn run_evaluation(request: RunRequest) -> Result<RunExecutionSummary>
     })
 }
 
+pub(crate) fn resolved_artifact_includes(
+    project: &EvalProject,
+    cli_includes: &[String],
+) -> BTreeSet<String> {
+    project
+        .artifacts
+        .include
+        .iter()
+        .chain(cli_includes.iter())
+        .flat_map(|value| value.split(','))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_lowercase())
+        .collect()
+}
+
 pub(crate) fn execute_cell(
     project: &EvalProject,
     case: CasePlan,
     cell_root: &Path,
     cell_key: &str,
     fingerprint: &str,
+    artifact_includes: &BTreeSet<String>,
 ) -> Result<CellRun> {
     let parent = cell_root
         .parent()
@@ -224,7 +234,7 @@ pub(crate) fn execute_cell(
     }
     fs::create_dir_all(&temp).with_context(|| format!("failed to create {}", temp.display()))?;
     let started_at_ms = now_ms();
-    let result = run_case(&temp, case)?;
+    let result = run_case(&temp, case, artifact_includes)?;
     let finished_at_ms = now_ms();
     let cell = CellRun {
         schema_version: ARTIFACT_SCHEMA_VERSION,
@@ -252,31 +262,29 @@ pub(crate) fn execute_cell(
     read_cell_run(cell_root)
 }
 
-pub(crate) fn cell_key(case: &CasePlan, fingerprint: &str) -> String {
-    let short = fingerprint.chars().take(16).collect::<String>();
-    sanitize_id(&format!(
-        "{}__{}__{}__{}",
-        case.task_set.id, case.task.id, case.agent.id, short
-    ))
+pub(crate) fn cell_key(fingerprint: &str) -> String {
+    fingerprint.chars().take(16).collect::<String>()
 }
 
 pub(crate) fn cell_fingerprint(project: &EvalProject, case: &CasePlan) -> Result<String> {
     let workspace_source = resolve_relative(&case.task.dir, &case.task.workspace.source);
     let payload = json!({
         "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
-        "runner": "psychevo-eval-cell-v6",
+        "runner": "psychevo-eval-cell-v8",
         "benchmark": {
             "id": &project.benchmark_id,
             "name": &project.benchmark_name,
             "slug": project.slug(),
         },
-        "evaluator": &project.evaluator,
         "task_set": {
             "id": &case.task_set.id,
         },
         "task": {
             "id": &case.task.id,
             "kind": &case.task.kind,
+            "source_kind": case.task.source_kind,
+            "source_id": &case.task.source_id,
+            "native_id": &case.task.native_id,
             "definition": serde_json::to_value(&case.task)?,
             "prompt": task_prompt(&case.task)?,
             "workspace": workspace_tree_hash(&workspace_source)?,
@@ -286,6 +294,8 @@ pub(crate) fn cell_fingerprint(project: &EvalProject, case: &CasePlan) -> Result
             "kind": case.agent.kind,
             "model": agent_model(&case.agent),
             "fake": &case.agent.fake,
+            "command": &case.agent.command,
+            "acp": &case.agent.acp,
             "psychevo": &case.agent.psychevo,
             "opencode": &case.agent.opencode,
             "hermes": &case.agent.hermes,
@@ -407,7 +417,11 @@ pub(crate) fn import_dataset(request: DatasetImportRequest) -> Result<DatasetEnt
     read_dataset_entry(&dataset_dir.join("dataset.toml"))
 }
 
-pub(crate) fn run_case(artifact_root: &Path, case: CasePlan) -> Result<CaseResult> {
+pub(crate) fn run_case(
+    artifact_root: &Path,
+    case: CasePlan,
+    artifact_includes: &BTreeSet<String>,
+) -> Result<CaseResult> {
     let started = Instant::now();
     fs::create_dir_all(artifact_root)
         .with_context(|| format!("failed to create {}", artifact_root.display()))?;
@@ -415,6 +429,11 @@ pub(crate) fn run_case(artifact_root: &Path, case: CasePlan) -> Result<CaseResul
     let trajectory_rel = PathBuf::from("trajectory.jsonl");
     let stdout_rel = PathBuf::from("evaluator.stdout");
     let stderr_rel = PathBuf::from("evaluator.stderr");
+    let logs_dir = artifact_root.join("logs");
+    fs::create_dir_all(logs_dir.join("agent"))
+        .with_context(|| format!("failed to create {}", logs_dir.join("agent").display()))?;
+    fs::create_dir_all(logs_dir.join("verifier"))
+        .with_context(|| format!("failed to create {}", logs_dir.join("verifier").display()))?;
 
     let mut events = Vec::new();
     push_event(
@@ -448,67 +467,69 @@ pub(crate) fn run_case(artifact_root: &Path, case: CasePlan) -> Result<CaseResul
         json!({ "workspace_source": workspace_source }),
     );
 
-    let (status, score) = if let Err(err) = run_agent(&case, workspace_temp.path(), &mut events) {
-        let score = ScoreResult {
-            schema_version: EVALUATOR_RESULT_SCHEMA_VERSION,
-            passed: false,
-            score: None,
-            message: format!("{err:#}"),
-            details: Value::Null,
-        };
-        push_event(
-            &mut events,
-            &case.case_id,
-            "agent_failed",
-            &score.message,
-            Value::Null,
-        );
-        fs::write(artifact_root.join(&stdout_rel), "").with_context(|| {
-            format!(
-                "failed to write {}",
-                artifact_root.join(&stdout_rel).display()
-            )
-        })?;
-        fs::write(artifact_root.join(&stderr_rel), score.message.as_bytes()).with_context(
-            || {
-                format!(
-                    "failed to write {}",
-                    artifact_root.join(&stderr_rel).display()
-                )
-            },
-        )?;
-        (CaseStatus::RuntimeFailed, score)
-    } else {
-        let (case_status, evaluator_score, evaluator_stdout, evaluator_stderr) =
-            run_evaluator(&case, workspace_temp.path()).context("failed to run evaluator")?;
-        fs::write(artifact_root.join(&stdout_rel), evaluator_stdout.as_bytes()).with_context(
-            || {
+    let (status, score) =
+        if let Err(err) = run_agent(&case, workspace_temp.path(), &logs_dir, &mut events) {
+            let score = ScoreResult {
+                schema_version: EVALUATOR_RESULT_SCHEMA_VERSION,
+                passed: false,
+                score: None,
+                message: format!("{err:#}"),
+                details: Value::Null,
+            };
+            push_event(
+                &mut events,
+                &case.case_id,
+                "agent_failed",
+                &score.message,
+                Value::Null,
+            );
+            fs::write(artifact_root.join(&stdout_rel), "").with_context(|| {
                 format!(
                     "failed to write {}",
                     artifact_root.join(&stdout_rel).display()
                 )
-            },
-        )?;
-        fs::write(artifact_root.join(&stderr_rel), evaluator_stderr.as_bytes()).with_context(
-            || {
-                format!(
-                    "failed to write {}",
-                    artifact_root.join(&stderr_rel).display()
-                )
-            },
-        )?;
-        push_event(
-            &mut events,
-            &case.case_id,
-            "evaluator_finished",
-            &evaluator_score.message,
-            json!({
-                "status": case_status,
-                "passed": evaluator_score.passed,
-            }),
-        );
-        (case_status, evaluator_score)
-    };
+            })?;
+            fs::write(artifact_root.join(&stderr_rel), score.message.as_bytes()).with_context(
+                || {
+                    format!(
+                        "failed to write {}",
+                        artifact_root.join(&stderr_rel).display()
+                    )
+                },
+            )?;
+            (CaseStatus::RuntimeFailed, score)
+        } else {
+            let (case_status, evaluator_score, evaluator_stdout, evaluator_stderr) =
+                run_task_verifier(&case, workspace_temp.path(), &logs_dir)
+                    .context("failed to run task verifier")?;
+            fs::write(artifact_root.join(&stdout_rel), evaluator_stdout.as_bytes()).with_context(
+                || {
+                    format!(
+                        "failed to write {}",
+                        artifact_root.join(&stdout_rel).display()
+                    )
+                },
+            )?;
+            fs::write(artifact_root.join(&stderr_rel), evaluator_stderr.as_bytes()).with_context(
+                || {
+                    format!(
+                        "failed to write {}",
+                        artifact_root.join(&stderr_rel).display()
+                    )
+                },
+            )?;
+            push_event(
+                &mut events,
+                &case.case_id,
+                "evaluator_finished",
+                &evaluator_score.message,
+                json!({
+                    "status": case_status,
+                    "passed": evaluator_score.passed,
+                }),
+            );
+            (case_status, evaluator_score)
+        };
 
     push_event(
         &mut events,
@@ -518,8 +539,23 @@ pub(crate) fn run_case(artifact_root: &Path, case: CasePlan) -> Result<CaseResul
         json!({ "status": status }),
     );
     let duration_ms = started.elapsed().as_millis();
-    let metrics = collect_case_metrics(&events, duration_ms);
+    let observed = collect_case_observability(&events, duration_ms);
+    let metrics = observed.metrics;
+    let warnings = observed.warnings;
     write_jsonl(&artifact_root.join(&trajectory_rel), &events)?;
+    if artifact_includes.contains("workspace") {
+        let retained_workspace = artifact_root.join("workspace");
+        if retained_workspace.exists() {
+            fs::remove_dir_all(&retained_workspace)
+                .with_context(|| format!("failed to remove {}", retained_workspace.display()))?;
+        }
+        copy_dir(workspace_temp.path(), &retained_workspace).with_context(|| {
+            format!(
+                "failed to retain workspace artifact at {}",
+                retained_workspace.display()
+            )
+        })?;
+    }
 
     let result = CaseResult {
         schema_version: ARTIFACT_SCHEMA_VERSION,
@@ -545,6 +581,7 @@ pub(crate) fn run_case(artifact_root: &Path, case: CasePlan) -> Result<CaseResul
         score,
         duration_ms,
         metrics,
+        warnings,
         artifacts: CaseArtifacts {
             result: result_rel.clone(),
             trajectory: trajectory_rel,
@@ -555,166 +592,55 @@ pub(crate) fn run_case(artifact_root: &Path, case: CasePlan) -> Result<CaseResul
     Ok(result)
 }
 
-pub(crate) fn run_evaluator(
+pub(crate) fn run_task_verifier(
     case: &CasePlan,
     workspace: &Path,
+    logs_dir: &Path,
 ) -> Result<(CaseStatus, ScoreResult, String, String)> {
-    let mut stderr = String::new();
-    let mut details = Vec::new();
-    for check in &case.task.test_spec.checks {
-        let outcome = run_local_coding_check(check, workspace)?;
-        if !outcome.stderr.is_empty() {
-            stderr.push_str(&outcome.stderr);
-            if !stderr.ends_with('\n') {
-                stderr.push('\n');
-            }
-        }
-        details.push(outcome.detail);
-        if outcome.status != CaseStatus::Passed {
-            let score = evaluator_score(
-                outcome.status,
-                outcome.message,
-                json!({ "checks": details }),
-            );
-            let stdout = serde_json::to_string(&score)?;
-            return Ok((outcome.status, score, stdout, stderr));
+    match case.task.source_kind {
+        TaskSourceKind::PevalAgent => run_peval_agent_verifier(case, workspace, logs_dir),
+        TaskSourceKind::Harbor | TaskSourceKind::SweBench | TaskSourceKind::Tau2 => {
+            bail!(
+                "source kind `{:?}` requires an official bridge and is not executable by the local runner",
+                case.task.source_kind
+            )
         }
     }
-    let score = evaluator_score(
-        CaseStatus::Passed,
-        "all evaluator checks passed".to_string(),
-        json!({ "checks": details }),
-    );
-    let stdout = serde_json::to_string(&score)?;
-    Ok((CaseStatus::Passed, score, stdout, stderr))
 }
 
-#[derive(Debug)]
-pub(crate) struct LocalCheckOutcome {
-    pub status: CaseStatus,
-    pub message: String,
-    pub stderr: String,
-    pub detail: Value,
-}
-
-pub(crate) fn run_local_coding_check(
-    check: &LocalCodingCheck,
+pub(crate) fn run_peval_agent_verifier(
+    case: &CasePlan,
     workspace: &Path,
-) -> Result<LocalCheckOutcome> {
-    match check {
-        LocalCodingCheck::ExactFile { path, expected } => {
-            let actual_path = resolve_relative(workspace, path);
-            let actual = fs::read_to_string(&actual_path).unwrap_or_default();
-            let passed = actual == *expected;
-            Ok(LocalCheckOutcome {
-                status: if passed {
-                    CaseStatus::Passed
-                } else {
-                    CaseStatus::Failed
-                },
-                message: if passed {
-                    format!("exact file check passed for {}", path.display())
-                } else {
-                    format!("exact file check failed for {}", path.display())
-                },
-                stderr: String::new(),
-                detail: json!({
-                    "kind": "exact_file",
-                    "path": path,
-                    "passed": passed,
-                }),
-            })
-        }
-        LocalCodingCheck::CargoTest { timeout_seconds } => {
-            let outcome = run_process(
-                &CommandManifest {
-                    command: vec![
-                        "cargo".to_string(),
-                        "test".to_string(),
-                        "--quiet".to_string(),
-                    ],
-                    timeout_seconds: *timeout_seconds,
-                },
-                workspace,
-                workspace,
-            )?;
-            let status = if outcome.timed_out {
-                CaseStatus::Timeout
-            } else if outcome.success {
-                CaseStatus::Passed
-            } else {
-                CaseStatus::Failed
-            };
-            Ok(LocalCheckOutcome {
-                status,
-                message: match status {
-                    CaseStatus::Passed => "cargo test passed".to_string(),
-                    CaseStatus::Timeout => "cargo test timed out".to_string(),
-                    _ => "cargo test failed".to_string(),
-                },
-                stderr: outcome.stderr,
-                detail: json!({
-                    "kind": "cargo_test",
-                    "passed": status == CaseStatus::Passed,
-                    "exit_code": outcome.code,
-                    "timed_out": outcome.timed_out,
-                }),
-            })
-        }
-        LocalCodingCheck::PythonFunctionCases {
-            module,
-            function,
-            cases,
-            timeout_seconds,
-        } => run_python_function_cases(workspace, module, function, cases, *timeout_seconds),
+    logs_dir: &Path,
+) -> Result<(CaseStatus, ScoreResult, String, String)> {
+    let script = case.task.dir.join("tests").join("test.sh");
+    if !script.is_file() {
+        bail!(
+            "task `{}` verifier script does not exist: {}",
+            case.task.id,
+            script.display()
+        );
     }
-}
-
-pub(crate) fn run_python_function_cases(
-    workspace: &Path,
-    module: &Path,
-    function: &str,
-    cases: &[PythonFunctionCase],
-    timeout_seconds: Option<u64>,
-) -> Result<LocalCheckOutcome> {
-    let payload = json!({
-        "module": module,
-        "function": function,
-        "cases": cases,
-    });
-    let script = r#"
-import importlib.util
-import json
-import os
-import sys
-
-payload = json.loads(os.environ["PEVAL_PYTHON_FUNCTION_CASES"])
-spec = importlib.util.spec_from_file_location("peval_target", payload["module"])
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-func = getattr(module, payload["function"])
-for index, case in enumerate(payload["cases"]):
-    actual = func(*case.get("args", []), **case.get("kwargs", {}))
-    expected = case["expected"]
-    if actual != expected:
-        print(
-            f"case {index} failed: expected {expected!r}, got {actual!r}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-"#;
-    let mut command = Command::new("python3");
+    let verifier_logs = logs_dir.join("verifier");
+    fs::create_dir_all(&verifier_logs)
+        .with_context(|| format!("failed to create {}", verifier_logs.display()))?;
+    let mut command = Command::new("sh");
     command
-        .arg("-c")
-        .arg(script)
+        .arg(&script)
         .current_dir(workspace)
-        .env(
-            "PEVAL_PYTHON_FUNCTION_CASES",
-            serde_json::to_string(&payload)?,
-        )
+        .env("PEVAL_WORKSPACE", workspace)
+        .env("PEVAL_TASK_DIR", &case.task.dir)
+        .env("PEVAL_LOGS", logs_dir)
+        .env("PEVAL_TASK_ID", &case.task.id)
+        .env("PEVAL_NATIVE_TASK_ID", &case.task.native_id)
+        .env("PEVAL_SOURCE_ID", &case.task.source_id)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let outcome = wait_for_command(command, timeout_seconds.map(Duration::from_secs), workspace)?;
+    let timeout = case
+        .task
+        .verifier_timeout_seconds
+        .unwrap_or(default_agent_timeout_seconds());
+    let outcome = wait_for_command(command, Some(Duration::from_secs(timeout)), workspace)?;
     let status = if outcome.timed_out {
         CaseStatus::Timeout
     } else if outcome.success {
@@ -722,37 +648,77 @@ for index, case in enumerate(payload["cases"]):
     } else {
         CaseStatus::Failed
     };
-    Ok(LocalCheckOutcome {
-        status,
-        message: match status {
-            CaseStatus::Passed => format!("python function cases passed for {function}"),
-            CaseStatus::Timeout => format!("python function cases timed out for {function}"),
-            _ => format!("python function cases failed for {function}"),
-        },
-        stderr: outcome.stderr,
-        detail: json!({
-            "kind": "python_function_cases",
-            "module": module,
-            "function": function,
-            "cases": cases.len(),
-            "passed": status == CaseStatus::Passed,
-            "timed_out": outcome.timed_out,
-        }),
-    })
+    let default_message = match status {
+        CaseStatus::Passed => "verifier passed".to_string(),
+        CaseStatus::Timeout => "verifier timed out".to_string(),
+        _ => "verifier failed".to_string(),
+    };
+    let mut score = import_verifier_score(&verifier_logs, status, default_message, &outcome)?;
+    if status != CaseStatus::Passed {
+        score.passed = false;
+    }
+    if score.score.is_none() {
+        score.score = Some(if score.passed { 1.0 } else { 0.0 });
+    }
+    let stdout = serde_json::to_string(&score)?;
+    Ok((status, score, stdout, outcome.stderr))
 }
 
-pub(crate) fn evaluator_score(status: CaseStatus, message: String, details: Value) -> ScoreResult {
-    ScoreResult {
+pub(crate) fn import_verifier_score(
+    verifier_logs: &Path,
+    status: CaseStatus,
+    default_message: String,
+    outcome: &ProcessOutcome,
+) -> Result<ScoreResult> {
+    let result_json = verifier_logs.join("result.json");
+    if result_json.is_file() {
+        let raw = fs::read_to_string(&result_json)
+            .with_context(|| format!("failed to read {}", result_json.display()))?;
+        let value: Value = serde_json::from_str(&raw)
+            .with_context(|| format!("failed to parse {}", result_json.display()))?;
+        let passed = value
+            .get("passed")
+            .and_then(Value::as_bool)
+            .unwrap_or(status == CaseStatus::Passed);
+        let score = value.get("score").and_then(Value::as_f64);
+        let message = value
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or(&default_message)
+            .to_string();
+        let details = value
+            .get("details")
+            .cloned()
+            .unwrap_or_else(|| json!({ "imported_from": result_json }));
+        return Ok(ScoreResult {
+            schema_version: EVALUATOR_RESULT_SCHEMA_VERSION,
+            passed,
+            score,
+            message,
+            details,
+        });
+    }
+
+    let reward = verifier_logs.join("reward.txt");
+    let score = if reward.is_file() {
+        fs::read_to_string(&reward)
+            .ok()
+            .and_then(|raw| raw.trim().parse::<f64>().ok())
+    } else {
+        None
+    };
+    Ok(ScoreResult {
         schema_version: EVALUATOR_RESULT_SCHEMA_VERSION,
         passed: status == CaseStatus::Passed,
-        score: Some(if status == CaseStatus::Passed {
-            1.0
-        } else {
-            0.0
+        score,
+        message: default_message,
+        details: json!({
+            "exit_code": outcome.code,
+            "timed_out": outcome.timed_out,
+            "stdout_bytes": outcome.stdout.len(),
+            "stderr_bytes": outcome.stderr.len(),
         }),
-        message,
-        details,
-    }
+    })
 }
 
 pub(crate) fn failure_class(status: CaseStatus, score: &ScoreResult) -> Option<String> {
@@ -774,6 +740,8 @@ pub(crate) fn failure_class(status: CaseStatus, score: &ScoreResult) -> Option<S
 
 pub(crate) fn agent_model(agent: &AgentManifest) -> Option<String> {
     match agent.kind {
+        AgentKind::Command => agent.command.model.clone(),
+        AgentKind::Acp => agent.acp.model.clone(),
         AgentKind::Psychevo => agent.psychevo.model.clone(),
         AgentKind::Opencode => agent.opencode.model.clone(),
         AgentKind::Hermes => agent.hermes.model.clone(),
@@ -781,34 +749,81 @@ pub(crate) fn agent_model(agent: &AgentManifest) -> Option<String> {
     }
 }
 
+pub(crate) struct CaseObservability {
+    pub(crate) metrics: CaseMetrics,
+    pub(crate) warnings: Vec<String>,
+}
+
+#[allow(dead_code)]
 pub(crate) fn collect_case_metrics(events: &[TrajectoryEvent], duration_ms: u128) -> CaseMetrics {
+    collect_case_observability(events, duration_ms).metrics
+}
+
+pub(crate) fn collect_case_observability(
+    events: &[TrajectoryEvent],
+    duration_ms: u128,
+) -> CaseObservability {
     let mut metrics = CaseMetrics {
         duration_ms,
         ..CaseMetrics::default()
     };
     let mut turns = 0_u64;
     let mut usage = UsageAccumulator::default();
+    let mut warnings = Vec::new();
+    let mut tool_error_ids = BTreeSet::new();
+    let acp_windowed = events
+        .iter()
+        .any(|event| event.kind == "acp_agent_prompt_started");
+    let mut in_acp_prompt = !acp_windowed;
     for event in events {
-        if event.kind.ends_with("turn_start") {
+        if event.kind == "acp_agent_prompt_started" {
+            in_acp_prompt = true;
+            continue;
+        }
+        if acp_windowed && !in_acp_prompt {
+            continue;
+        }
+        if event.kind == "acp_session_update" {
+            collect_acp_session_update_metrics(
+                event,
+                &mut metrics,
+                &mut usage,
+                &mut warnings,
+                &mut tool_error_ids,
+            );
+        } else if event.kind == "acp_agent_prompt_finished" {
+            if let Some(prompt_result) = event.data.get("prompt_result") {
+                usage.add_from_value(prompt_result);
+                collect_psychevo_meta(prompt_result, &mut warnings, &mut turns);
+            }
+            in_acp_prompt = false;
+        } else if event.kind.ends_with("turn_start") {
             turns += 1;
-        }
-        if event.kind.ends_with("tool_execution_start") {
+        } else if event.kind.ends_with("tool_execution_start") {
             metrics.tool_calls += 1;
-        }
-        if event.kind.ends_with("tool_execution_end") && event_indicates_tool_error(event) {
-            metrics.tool_errors += 1;
+        } else if event.kind.ends_with("tool_execution_end") && event_indicates_tool_error(event) {
+            if let Some(id) = tool_call_id_for_event(event) {
+                if tool_error_ids.insert(id) {
+                    metrics.tool_errors += 1;
+                }
+            } else {
+                metrics.tool_errors += 1;
+            }
         }
         if let Some(raw) = event.data.get("raw_event") {
             usage.add_from_value(raw);
+            collect_warning(raw, &mut warnings);
         } else {
             usage.add_from_value(&event.data);
+            collect_warning(&event.data, &mut warnings);
         }
     }
     metrics.turns = (turns > 0).then_some(turns);
-    let (usage, cost) = usage.finish();
+    let (usage, accounting, cost) = usage.finish();
     metrics.usage = usage;
+    metrics.accounting = accounting;
     metrics.cost = cost;
-    metrics
+    CaseObservability { metrics, warnings }
 }
 
 #[derive(Default)]
@@ -827,38 +842,118 @@ pub(crate) struct UsageAccumulator {
     has_reasoning: bool,
     has_total: bool,
     has_cost: bool,
+    has_cumulative_cost: bool,
+    accounting: AccountingAccumulator,
 }
 
 impl UsageAccumulator {
     pub(crate) fn add_from_value(&mut self, value: &Value) {
+        let mut saw_usage = false;
         if let Some(accounting) = value.get("accounting") {
-            self.add_tokens(accounting);
-            self.add_cost(accounting);
+            self.add_accounting(accounting);
         }
         if let Some(usage) = value.get("usage") {
-            self.add_tokens(usage);
+            saw_usage = self.has_usage_tokens();
+            self.add_usage_tokens(usage);
+            saw_usage = saw_usage || self.has_usage_tokens();
             self.add_cost(usage);
+        }
+        if let Some(psychevo) = value.get("_meta").and_then(|meta| meta.get("psychevo"))
+            && let Some(accounting) = psychevo.get("accounting")
+        {
+            self.add_accounting(accounting);
+            if !saw_usage {
+                self.add_usage_from_accounting(accounting);
+            }
+        }
+        if let Some(accounting) = value.get("accounting")
+            && !saw_usage
+        {
+            self.add_usage_from_accounting(accounting);
+        }
+        if let Some(cost) = value.get("cost") {
+            self.add_cumulative_cost(cost);
         }
         self.add_cost(value);
     }
 
-    pub(crate) fn add_tokens(&mut self, value: &Value) {
-        self.add_field(value, "billable_input_tokens", "input");
+    pub(crate) fn add_usage_tokens(&mut self, value: &Value) {
         self.add_field(value, "input_tokens", "input");
+        self.add_field(value, "inputTokens", "input");
         self.add_field(value, "prompt_tokens", "input");
-        self.add_field(value, "billable_output_tokens", "output");
         self.add_field(value, "output_tokens", "output");
+        self.add_field(value, "outputTokens", "output");
         self.add_field(value, "completion_tokens", "output");
+        self.add_field(value, "cached_read_tokens", "cache_read");
+        self.add_field(value, "cachedReadTokens", "cache_read");
         self.add_field(value, "cache_read_tokens", "cache_read");
         self.add_field(value, "cached_input_tokens", "cache_read");
+        self.add_field(value, "cached_tokens", "cache_read");
+        self.add_field(value, "cached_write_tokens", "cache_write");
+        self.add_field(value, "cachedWriteTokens", "cache_write");
         self.add_field(value, "cache_write_tokens", "cache_write");
+        self.add_field(value, "thought_tokens", "reasoning");
+        self.add_field(value, "thoughtTokens", "reasoning");
         self.add_field(value, "reasoning_tokens", "reasoning");
         self.add_field(value, "reported_total_tokens", "total");
         self.add_field(value, "total_tokens", "total");
+        self.add_field(value, "totalTokens", "total");
+    }
+
+    pub(crate) fn add_usage_from_accounting(&mut self, value: &Value) {
+        let cache_read = value.get("cache_read_tokens").and_then(json_u64);
+        let cache_write = value.get("cache_write_tokens").and_then(json_u64);
+        let reasoning = value.get("reasoning_tokens").and_then(json_u64);
+        let input = value
+            .get("context_input_tokens")
+            .and_then(json_u64)
+            .or_else(|| {
+                value
+                    .get("billable_input_tokens")
+                    .and_then(json_u64)
+                    .map(|amount| {
+                        amount
+                            .saturating_add(cache_read.unwrap_or(0))
+                            .saturating_add(cache_write.unwrap_or(0))
+                    })
+            });
+        let output = value
+            .get("billable_output_tokens")
+            .and_then(json_u64)
+            .map(|amount| amount.saturating_add(reasoning.unwrap_or(0)));
+        self.add_amount(input, "input");
+        self.add_amount(output, "output");
+        self.add_amount(cache_read, "cache_read");
+        self.add_amount(cache_write, "cache_write");
+        self.add_amount(reasoning, "reasoning");
+        self.add_amount(
+            value.get("reported_total_tokens").and_then(json_u64),
+            "total",
+        );
+    }
+
+    pub(crate) fn add_accounting(&mut self, value: &Value) {
+        self.accounting.add(value);
+        if let Some(nanodollars) = value.get("estimated_cost_nanodollars").and_then(json_i64) {
+            let amount = nanodollars as f64 / 1_000_000_000.0;
+            if self.has_cumulative_cost {
+                self.cost_usd = self.cost_usd.max(amount);
+            } else {
+                self.cost_usd += amount;
+            }
+            self.has_cost = true;
+        }
     }
 
     pub(crate) fn add_field(&mut self, value: &Value, field: &str, target: &str) {
-        let Some(amount) = value.get(field).and_then(Value::as_u64) else {
+        let Some(amount) = value.get(field).and_then(json_u64) else {
+            return;
+        };
+        self.add_amount(Some(amount), target);
+    }
+
+    fn add_amount(&mut self, amount: Option<u64>, target: &str) {
+        let Some(amount) = amount else {
             return;
         };
         match target {
@@ -890,6 +985,15 @@ impl UsageAccumulator {
         }
     }
 
+    fn has_usage_tokens(&self) -> bool {
+        self.has_input
+            || self.has_output
+            || self.has_cache_read
+            || self.has_cache_write
+            || self.has_reasoning
+            || self.has_total
+    }
+
     pub(crate) fn add_cost(&mut self, value: &Value) {
         for field in ["amount_usd", "cost_usd", "total_cost_usd"] {
             if let Some(amount) = value.get(field).and_then(Value::as_f64) {
@@ -897,14 +1001,36 @@ impl UsageAccumulator {
                 self.has_cost = true;
             }
         }
+        if value
+            .get("currency")
+            .and_then(Value::as_str)
+            .is_none_or(|currency| currency.eq_ignore_ascii_case("USD"))
+            && let Some(amount) = value.get("amount").and_then(Value::as_f64)
+        {
+            self.cost_usd += amount;
+            self.has_cost = true;
+        }
     }
 
-    pub(crate) fn finish(self) -> (UsageMetrics, CostMetrics) {
-        let computed_total = self.input_tokens
-            + self.output_tokens
-            + self.cache_read_tokens
-            + self.cache_write_tokens
-            + self.reasoning_tokens;
+    pub(crate) fn add_cumulative_cost(&mut self, value: &Value) {
+        if value
+            .get("currency")
+            .and_then(Value::as_str)
+            .is_none_or(|currency| currency.eq_ignore_ascii_case("USD"))
+            && let Some(amount) = value.get("amount").and_then(Value::as_f64)
+        {
+            self.cost_usd = if self.has_cost {
+                self.cost_usd.max(amount)
+            } else {
+                amount
+            };
+            self.has_cost = true;
+            self.has_cumulative_cost = true;
+        }
+    }
+
+    pub(crate) fn finish(self) -> (UsageMetrics, AccountingMetrics, CostMetrics) {
+        let computed_total = self.input_tokens + self.output_tokens;
         (
             UsageMetrics {
                 input_tokens: self.has_input.then_some(self.input_tokens),
@@ -925,11 +1051,183 @@ impl UsageAccumulator {
                     None
                 },
             },
+            self.accounting.finish(),
             CostMetrics {
                 amount_usd: self.has_cost.then_some(self.cost_usd),
                 source: self.has_cost.then(|| "event_usage".to_string()),
             },
         )
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct AccountingAccumulator {
+    metrics: AccountingMetrics,
+}
+
+impl AccountingAccumulator {
+    pub(crate) fn add(&mut self, value: &Value) {
+        add_accounting_u64(
+            &mut self.metrics.context_input_tokens,
+            value.get("context_input_tokens").and_then(json_u64),
+        );
+        add_accounting_u64(
+            &mut self.metrics.billable_input_tokens,
+            value.get("billable_input_tokens").and_then(json_u64),
+        );
+        add_accounting_u64(
+            &mut self.metrics.billable_output_tokens,
+            value.get("billable_output_tokens").and_then(json_u64),
+        );
+        add_accounting_u64(
+            &mut self.metrics.reasoning_tokens,
+            value.get("reasoning_tokens").and_then(json_u64),
+        );
+        add_accounting_u64(
+            &mut self.metrics.cache_read_tokens,
+            value.get("cache_read_tokens").and_then(json_u64),
+        );
+        add_accounting_u64(
+            &mut self.metrics.cache_write_tokens,
+            value.get("cache_write_tokens").and_then(json_u64),
+        );
+        add_accounting_u64(
+            &mut self.metrics.reported_total_tokens,
+            value.get("reported_total_tokens").and_then(json_u64),
+        );
+        add_accounting_i64(
+            &mut self.metrics.estimated_cost_nanodollars,
+            value.get("estimated_cost_nanodollars").and_then(json_i64),
+        );
+        merge_accounting_string(
+            &mut self.metrics.pricing_source,
+            value.get("pricing_source").and_then(Value::as_str),
+        );
+        merge_accounting_string(
+            &mut self.metrics.pricing_tier,
+            value.get("pricing_tier").and_then(Value::as_str),
+        );
+    }
+
+    pub(crate) fn finish(self) -> AccountingMetrics {
+        self.metrics
+    }
+}
+
+pub(crate) fn collect_acp_session_update_metrics(
+    event: &TrajectoryEvent,
+    metrics: &mut CaseMetrics,
+    usage: &mut UsageAccumulator,
+    warnings: &mut Vec<String>,
+    tool_error_ids: &mut BTreeSet<String>,
+) {
+    let Some(update) = acp_update_value(event) else {
+        return;
+    };
+    match update.get("sessionUpdate").and_then(Value::as_str) {
+        Some("tool_call") => metrics.tool_calls += 1,
+        Some("tool_call_update") => {
+            if update
+                .get("status")
+                .and_then(Value::as_str)
+                .is_some_and(|status| status.eq_ignore_ascii_case("failed"))
+            {
+                let id = update
+                    .get("toolCallId")
+                    .or_else(|| update.get("tool_call_id"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("tool")
+                    .to_string();
+                if tool_error_ids.insert(id) {
+                    metrics.tool_errors += 1;
+                }
+            }
+        }
+        Some("usage_update") => usage.add_from_value(update),
+        _ => collect_warning(update, warnings),
+    }
+}
+
+pub(crate) fn acp_update_value(event: &TrajectoryEvent) -> Option<&Value> {
+    event.data.get("raw_event")?.get("params")?.get("update")
+}
+
+pub(crate) fn collect_psychevo_meta(value: &Value, warnings: &mut Vec<String>, turns: &mut u64) {
+    let Some(psychevo) = value.get("_meta").and_then(|meta| meta.get("psychevo")) else {
+        return;
+    };
+    if let Some(meta_turns) = psychevo.get("turns").and_then(json_u64) {
+        *turns = turns.saturating_add(meta_turns);
+    }
+    if let Some(items) = psychevo.get("warnings").and_then(Value::as_array) {
+        for item in items {
+            if let Some(message) = item.as_str() {
+                push_warning(warnings, message);
+            } else if let Some(message) = item.get("message").and_then(Value::as_str) {
+                push_warning(warnings, message);
+            }
+        }
+    }
+}
+
+pub(crate) fn collect_warning(value: &Value, warnings: &mut Vec<String>) {
+    let event_type = value.get("type").and_then(Value::as_str);
+    if matches!(event_type, Some("warning"))
+        && let Some(message) = value.get("message").and_then(Value::as_str)
+    {
+        push_warning(warnings, message);
+    }
+}
+
+pub(crate) fn push_warning(warnings: &mut Vec<String>, message: &str) {
+    let message = message.trim();
+    if !message.is_empty() && !warnings.iter().any(|warning| warning == message) {
+        warnings.push(message.to_string());
+    }
+}
+
+pub(crate) fn tool_call_id_for_event(event: &TrajectoryEvent) -> Option<String> {
+    let raw = event.data.get("raw_event").unwrap_or(&event.data);
+    raw.get("tool_call_id")
+        .or_else(|| raw.get("toolCallId"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+pub(crate) fn json_u64(value: &Value) -> Option<u64> {
+    value
+        .as_u64()
+        .or_else(|| value.as_i64().and_then(|value| u64::try_from(value).ok()))
+        .or_else(|| value.as_str().and_then(|value| value.parse::<u64>().ok()))
+}
+
+pub(crate) fn json_i64(value: &Value) -> Option<i64> {
+    value
+        .as_i64()
+        .or_else(|| value.as_u64().and_then(|value| i64::try_from(value).ok()))
+        .or_else(|| value.as_str().and_then(|value| value.parse::<i64>().ok()))
+}
+
+pub(crate) fn add_accounting_u64(target: &mut Option<u64>, value: Option<u64>) {
+    if let Some(value) = value {
+        *target = Some(target.unwrap_or_default() + value);
+    }
+}
+
+pub(crate) fn add_accounting_i64(target: &mut Option<i64>, value: Option<i64>) {
+    if let Some(value) = value {
+        *target = Some(target.unwrap_or_default() + value);
+    }
+}
+
+pub(crate) fn merge_accounting_string(target: &mut Option<String>, value: Option<&str>) {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return;
+    };
+    match target {
+        None => *target = Some(value.to_string()),
+        Some(current) if current == value || current == "mixed" => {}
+        Some(current) => *current = "mixed".to_string(),
     }
 }
 
@@ -959,6 +1257,7 @@ pub(crate) fn aggregate_run_metrics(cases: &[CaseResult], duration_ms: u128) -> 
     let mut has_total = false;
     let mut total_turns = 0_u64;
     let mut has_turns = false;
+    let mut accounting = AccountingAccumulator::default();
     let mut metrics = RunMetrics {
         duration_ms,
         ..RunMetrics::default()
@@ -1000,6 +1299,7 @@ pub(crate) fn aggregate_run_metrics(cases: &[CaseResult], duration_ms: u128) -> 
             &mut has_total,
             case.metrics.usage.total_tokens,
         );
+        accounting.add(&serde_json::to_value(&case.metrics.accounting).unwrap_or_default());
         if let Some(amount) = case.metrics.cost.amount_usd {
             metrics.cost.amount_usd = Some(metrics.cost.amount_usd.unwrap_or_default() + amount);
             metrics.cost.source = Some("case_metrics".to_string());
@@ -1007,6 +1307,7 @@ pub(crate) fn aggregate_run_metrics(cases: &[CaseResult], duration_ms: u128) -> 
     }
     metrics.total_turns = has_turns.then_some(total_turns);
     metrics.usage = usage;
+    metrics.accounting = accounting.finish();
     metrics
 }
 
@@ -1020,6 +1321,7 @@ pub(crate) fn add_optional_u64(target: &mut Option<u64>, seen: &mut bool, value:
 pub(crate) fn run_agent(
     case: &CasePlan,
     workspace: &Path,
+    logs_dir: &Path,
     events: &mut Vec<TrajectoryEvent>,
 ) -> Result<()> {
     match case.agent.kind {
@@ -1047,6 +1349,8 @@ pub(crate) fn run_agent(
             );
             Ok(())
         }
+        AgentKind::Command => run_command_agent(case, workspace, logs_dir, events),
+        AgentKind::Acp => run_acp_agent(case, workspace, logs_dir, events),
         AgentKind::Psychevo => {
             let prompt = task_prompt(&case.task)?;
             push_event(
@@ -1097,6 +1401,444 @@ pub(crate) fn run_agent(
             &case.case_id,
         ),
     }
+}
+
+pub(crate) fn run_command_agent(
+    case: &CasePlan,
+    workspace: &Path,
+    logs_dir: &Path,
+    events: &mut Vec<TrajectoryEvent>,
+) -> Result<()> {
+    let prompt = task_prompt(&case.task)?;
+    let command =
+        case.agent.command.command.clone().with_context(|| {
+            format!("command agent `{}` does not declare command", case.agent.id)
+        })?;
+    let prompt_dir = workspace.join(".peval");
+    fs::create_dir_all(&prompt_dir)
+        .with_context(|| format!("failed to create {}", prompt_dir.display()))?;
+    let prompt_file = prompt_dir.join("prompt.md");
+    fs::write(&prompt_file, prompt.as_bytes())
+        .with_context(|| format!("failed to write {}", prompt_file.display()))?;
+    let args = case
+        .agent
+        .command
+        .args
+        .iter()
+        .map(|arg| render_agent_template(arg, workspace, &case.task.dir, &prompt, &prompt_file))
+        .collect::<Vec<_>>();
+    push_event(
+        events,
+        &case.case_id,
+        "command_agent_started",
+        "command agent started",
+        json!({
+            "agent": case.agent.id,
+            "task": case.task.id,
+        }),
+    );
+    let mut process = Command::new(resolve_command_part(&command, &case.task.dir));
+    for arg in args {
+        process.arg(resolve_command_part(&arg, &case.task.dir));
+    }
+    process
+        .current_dir(workspace)
+        .env("PEVAL_WORKSPACE", workspace)
+        .env("PEVAL_TASK_DIR", &case.task.dir)
+        .env("PEVAL_LOGS", logs_dir)
+        .env("PEVAL_TASK_ID", &case.task.id)
+        .env("PEVAL_NATIVE_TASK_ID", &case.task.native_id)
+        .env("PEVAL_SOURCE_ID", &case.task.source_id)
+        .env("PEVAL_PROMPT_FILE", &prompt_file)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let output = wait_for_command(
+        process,
+        Some(Duration::from_secs(case.agent.command.timeout_seconds)),
+        workspace,
+    )?;
+    append_wrapper_process_events(events, &case.case_id, "command", &output);
+    push_event(
+        events,
+        &case.case_id,
+        "command_agent_finished",
+        "command agent finished",
+        json!({
+            "exit_code": output.code,
+            "stdout_bytes": output.stdout.len(),
+            "stderr_bytes": output.stderr.len(),
+            "timed_out": output.timed_out,
+        }),
+    );
+    if output.success {
+        Ok(())
+    } else {
+        bail!("command agent `{}` failed", case.agent.id)
+    }
+}
+
+pub(crate) fn run_acp_agent(
+    case: &CasePlan,
+    workspace: &Path,
+    logs_dir: &Path,
+    events: &mut Vec<TrajectoryEvent>,
+) -> Result<()> {
+    let prompt = task_prompt(&case.task)?;
+    let command = case
+        .agent
+        .acp
+        .command
+        .clone()
+        .with_context(|| format!("ACP agent `{}` does not declare command", case.agent.id))?;
+    let prompt_dir = workspace.join(".peval");
+    fs::create_dir_all(&prompt_dir)
+        .with_context(|| format!("failed to create {}", prompt_dir.display()))?;
+    let prompt_file = prompt_dir.join("prompt.md");
+    fs::write(&prompt_file, prompt.as_bytes())
+        .with_context(|| format!("failed to write {}", prompt_file.display()))?;
+    let args = case
+        .agent
+        .acp
+        .args
+        .iter()
+        .map(|arg| render_agent_template(arg, workspace, &case.task.dir, &prompt, &prompt_file))
+        .collect::<Vec<_>>();
+
+    push_event(
+        events,
+        &case.case_id,
+        "acp_agent_started",
+        "ACP agent stdio session started",
+        json!({
+            "agent": case.agent.id,
+            "task": case.task.id,
+        }),
+    );
+
+    let mut process = Command::new(resolve_command_part(&command, &case.task.dir));
+    for arg in args {
+        process.arg(resolve_command_part(&arg, &case.task.dir));
+    }
+    process
+        .current_dir(workspace)
+        .env("PEVAL_WORKSPACE", workspace)
+        .env("PEVAL_TASK_DIR", &case.task.dir)
+        .env("PEVAL_LOGS", logs_dir)
+        .env("PEVAL_TASK_ID", &case.task.id)
+        .env("PEVAL_NATIVE_TASK_ID", &case.task.native_id)
+        .env("PEVAL_SOURCE_ID", &case.task.source_id)
+        .env("PEVAL_PROMPT_FILE", &prompt_file)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = process.spawn().with_context(|| {
+        format!(
+            "failed to spawn ACP agent `{}` in {}",
+            case.agent.id,
+            workspace.display()
+        )
+    })?;
+    let mut stdin = child.stdin.take().context("ACP agent stdin unavailable")?;
+    let stdout = child
+        .stdout
+        .take()
+        .context("ACP agent stdout unavailable")?;
+    let stderr = child
+        .stderr
+        .take()
+        .context("ACP agent stderr unavailable")?;
+    let (stdout_tx, stdout_rx) = std::sync::mpsc::channel::<String>();
+    let stdout_reader = thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            let line = line.unwrap_or_default();
+            if stdout_tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let stderr_reader = thread::spawn(move || {
+        let mut stderr = stderr;
+        let mut content = String::new();
+        let _ = std::io::Read::read_to_string(&mut stderr, &mut content);
+        content
+    });
+
+    let deadline = Instant::now() + Duration::from_secs(case.agent.acp.timeout_seconds);
+    let mut next_id = 1_u64;
+    acp_send(
+        &mut stdin,
+        next_id,
+        "initialize",
+        json!({
+            "protocolVersion": 1,
+            "clientCapabilities": {},
+            "clientInfo": {
+                "name": "psychevo-eval",
+                "version": env!("CARGO_PKG_VERSION"),
+            },
+        }),
+    )?;
+    let _ = acp_recv_response(
+        &mut stdin,
+        &stdout_rx,
+        next_id,
+        deadline,
+        events,
+        &case.case_id,
+    )?;
+    next_id += 1;
+
+    acp_send(
+        &mut stdin,
+        next_id,
+        "session/new",
+        json!({
+            "cwd": workspace,
+            "mcpServers": [],
+        }),
+    )?;
+    let session = acp_recv_response(
+        &mut stdin,
+        &stdout_rx,
+        next_id,
+        deadline,
+        events,
+        &case.case_id,
+    )?;
+    let session_id = session
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .context("ACP session/new response missing sessionId")?
+        .to_string();
+    next_id += 1;
+
+    if let Some(mode) = &case.agent.acp.mode {
+        acp_send(
+            &mut stdin,
+            next_id,
+            "session/set_mode",
+            json!({
+                "sessionId": session_id,
+                "modeId": mode,
+            }),
+        )?;
+        let _ = acp_recv_response(
+            &mut stdin,
+            &stdout_rx,
+            next_id,
+            deadline,
+            events,
+            &case.case_id,
+        )?;
+        next_id += 1;
+    }
+    if let Some(model) = &case.agent.acp.model {
+        acp_send(
+            &mut stdin,
+            next_id,
+            "session/set_model",
+            json!({
+                "sessionId": session_id,
+                "modelId": model,
+            }),
+        )?;
+        let _ = acp_recv_response(
+            &mut stdin,
+            &stdout_rx,
+            next_id,
+            deadline,
+            events,
+            &case.case_id,
+        )?;
+        next_id += 1;
+    }
+
+    push_event(
+        events,
+        &case.case_id,
+        "acp_agent_prompt_started",
+        "ACP agent prompt started",
+        json!({
+            "session_id": session_id,
+            "prompt_bytes": prompt.len(),
+        }),
+    );
+    acp_send(
+        &mut stdin,
+        next_id,
+        "session/prompt",
+        json!({
+            "sessionId": session_id,
+            "prompt": [
+                {
+                    "type": "text",
+                    "text": prompt,
+                }
+            ],
+        }),
+    )?;
+    let prompt_result = acp_recv_response(
+        &mut stdin,
+        &stdout_rx,
+        next_id,
+        deadline,
+        events,
+        &case.case_id,
+    )?;
+    push_event(
+        events,
+        &case.case_id,
+        "acp_agent_prompt_finished",
+        "ACP agent prompt finished",
+        json!({ "prompt_result": prompt_result.clone() }),
+    );
+    drop(stdin);
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = stdout_reader.join();
+    let stderr = stderr_reader.join().unwrap_or_default();
+    for line in stderr.lines().filter(|line| !line.trim().is_empty()) {
+        push_event(
+            events,
+            &case.case_id,
+            "acp_stderr_line",
+            "ACP agent stderr line",
+            json!({ "line": line }),
+        );
+    }
+    push_event(
+        events,
+        &case.case_id,
+        "acp_agent_finished",
+        "ACP agent stdio session finished",
+        json!({ "prompt_result": prompt_result }),
+    );
+    Ok(())
+}
+
+pub(crate) fn acp_send(
+    stdin: &mut std::process::ChildStdin,
+    id: u64,
+    method: &str,
+    params: Value,
+) -> Result<()> {
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": method,
+        "params": params,
+    });
+    std::io::Write::write_all(stdin, serde_json::to_string(&request)?.as_bytes())?;
+    std::io::Write::write_all(stdin, b"\n")?;
+    std::io::Write::flush(stdin)?;
+    Ok(())
+}
+
+pub(crate) fn acp_recv_response(
+    stdin: &mut std::process::ChildStdin,
+    stdout_rx: &std::sync::mpsc::Receiver<String>,
+    id: u64,
+    deadline: Instant,
+    events: &mut Vec<TrajectoryEvent>,
+    case_id: &str,
+) -> Result<Value> {
+    loop {
+        let now = Instant::now();
+        if now >= deadline {
+            bail!("ACP agent timed out waiting for response id {id}");
+        }
+        let line = stdout_rx
+            .recv_timeout(deadline.saturating_duration_since(now))
+            .with_context(|| format!("ACP agent did not produce response id {id}"))?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let raw = match serde_json::from_str::<Value>(&line) {
+            Ok(raw) => raw,
+            Err(err) => {
+                push_event(
+                    events,
+                    case_id,
+                    "acp_stdout_line",
+                    "ACP agent stdout line",
+                    json!({ "line": line, "parse_error": err.to_string() }),
+                );
+                continue;
+            }
+        };
+        if raw.get("id").and_then(Value::as_u64) == Some(id) && raw.get("method").is_none() {
+            if let Some(error) = raw.get("error") {
+                bail!("ACP agent returned error for id {id}: {error}");
+            }
+            return Ok(raw.get("result").cloned().unwrap_or(Value::Null));
+        }
+        if raw.get("method").and_then(Value::as_str) == Some("session/request_permission")
+            && raw.get("id").is_some()
+        {
+            acp_send_response(
+                stdin,
+                raw.get("id").cloned().unwrap_or(Value::Null),
+                json!({
+                    "outcome": {
+                        "outcome": "selected",
+                        "optionId": "allow_once",
+                    }
+                }),
+            )?;
+            push_event(
+                events,
+                case_id,
+                "acp_permission_allowed",
+                "ACP permission request allowed once",
+                json!({ "raw_event": raw }),
+            );
+            continue;
+        }
+        let kind = if raw.get("method").and_then(Value::as_str) == Some("session/update") {
+            "acp_session_update"
+        } else if raw.get("method").is_some() {
+            "acp_notification"
+        } else {
+            "acp_unexpected_response"
+        };
+        push_event(
+            events,
+            case_id,
+            kind,
+            "ACP agent protocol message",
+            json!({ "raw_event": raw }),
+        );
+    }
+}
+
+pub(crate) fn acp_send_response(
+    stdin: &mut std::process::ChildStdin,
+    id: Value,
+    result: Value,
+) -> Result<()> {
+    let response = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": result,
+    });
+    std::io::Write::write_all(stdin, serde_json::to_string(&response)?.as_bytes())?;
+    std::io::Write::write_all(stdin, b"\n")?;
+    std::io::Write::flush(stdin)?;
+    Ok(())
+}
+
+pub(crate) fn render_agent_template(
+    value: &str,
+    workspace: &Path,
+    task_dir: &Path,
+    prompt: &str,
+    prompt_file: &Path,
+) -> String {
+    value
+        .replace("{workspace}", &workspace.display().to_string())
+        .replace("{task_dir}", &task_dir.display().to_string())
+        .replace("{prompt_file}", &prompt_file.display().to_string())
+        .replace("{prompt}", prompt)
 }
 
 pub(crate) fn apply_fake_pass_fixes(task: &TaskManifest, workspace: &Path) -> Result<Vec<PathBuf>> {
@@ -1442,6 +2184,8 @@ pub(crate) fn validate_case(case: &CasePlan) -> Result<()> {
     reject_unsupported(case.agent.schema_version, &case.agent.manifest_path)?;
     reject_unsupported(case.task.schema_version, &case.task.manifest_path)?;
     match case.agent.kind {
+        AgentKind::Command => validate_command_agent(&case.agent, &case.task.dir)?,
+        AgentKind::Acp => validate_acp_agent(&case.agent, &case.task.dir)?,
         AgentKind::Opencode => {
             validate_wrapper_command("opencode", &case.agent.opencode, &case.task.dir)?
         }
@@ -1449,6 +2193,14 @@ pub(crate) fn validate_case(case: &CasePlan) -> Result<()> {
             validate_wrapper_command("hermes", &case.agent.hermes, &case.task.dir)?
         }
         AgentKind::Fake | AgentKind::Psychevo => {}
+    }
+    if case.task.source_kind != TaskSourceKind::PevalAgent {
+        bail!(
+            "incompatible_source_agent: task `{}` comes from source kind `{:?}`, which requires an official bridge and is incompatible with local agent kind `{:?}`",
+            case.task.id,
+            case.task.source_kind,
+            case.agent.kind
+        );
     }
     let workspace_source = resolve_relative(&case.task.dir, &case.task.workspace.source);
     if !workspace_source.is_dir() {
@@ -1458,57 +2210,66 @@ pub(crate) fn validate_case(case: &CasePlan) -> Result<()> {
             workspace_source.display()
         );
     }
-    validate_local_coding_test_spec(&case.task)?;
+    validate_peval_agent_task(&case.task)?;
     Ok(())
 }
 
-pub(crate) fn validate_local_coding_test_spec(task: &TaskManifest) -> Result<()> {
-    if task.test_spec.checks.is_empty() {
-        bail!("task `{}` test_spec declares no checks", task.id);
+pub(crate) fn validate_command_agent(agent: &AgentManifest, dir: &Path) -> Result<()> {
+    let command = agent.command.command.clone().with_context(|| {
+        format!(
+            "command agent `{}` must declare [agents.command].command",
+            agent.id
+        )
+    })?;
+    let mut parts = vec![command];
+    parts.extend(agent.command.args.clone());
+    validate_command(
+        &CommandManifest {
+            command: parts,
+            timeout_seconds: Some(agent.command.timeout_seconds),
+        },
+        dir,
+        "command agent command",
+    )
+}
+
+pub(crate) fn validate_acp_agent(agent: &AgentManifest, dir: &Path) -> Result<()> {
+    let command =
+        agent.acp.command.clone().with_context(|| {
+            format!("ACP agent `{}` must declare [agents.acp].command", agent.id)
+        })?;
+    let mut parts = vec![command];
+    parts.extend(agent.acp.args.clone());
+    validate_command(
+        &CommandManifest {
+            command: parts,
+            timeout_seconds: Some(agent.acp.timeout_seconds),
+        },
+        dir,
+        "ACP agent command",
+    )
+}
+
+pub(crate) fn validate_peval_agent_task(task: &TaskManifest) -> Result<()> {
+    let task_toml = task.dir.join("task.toml");
+    let instruction = task.dir.join("instruction.md");
+    let environment = task.dir.join("environment");
+    let verifier = task.dir.join("tests").join("test.sh");
+    if !task_toml.is_file() {
+        bail!("task `{}` missing task.toml", task.id);
     }
-    for check in &task.test_spec.checks {
-        match check {
-            LocalCodingCheck::PythonFunctionCases {
-                module,
-                function,
-                cases,
-                ..
-            } => {
-                if function.trim().is_empty() {
-                    bail!(
-                        "task `{}` python_function_cases has empty function",
-                        task.id
-                    );
-                }
-                if cases.is_empty() {
-                    bail!("task `{}` python_function_cases declares no cases", task.id);
-                }
-                let path = resolve_relative(&task.dir, &task.workspace.source).join(module);
-                if !path.is_file() {
-                    bail!(
-                        "task `{}` python module does not exist: {}",
-                        task.id,
-                        path.display()
-                    );
-                }
-            }
-            LocalCodingCheck::ExactFile { path, .. } => {
-                if path.as_os_str().is_empty() {
-                    bail!("task `{}` exact_file path is empty", task.id);
-                }
-            }
-            LocalCodingCheck::CargoTest { .. } => {
-                let manifest =
-                    resolve_relative(&task.dir, &task.workspace.source).join("Cargo.toml");
-                if !manifest.is_file() {
-                    bail!(
-                        "task `{}` cargo_test requires Cargo.toml at {}",
-                        task.id,
-                        manifest.display()
-                    );
-                }
-            }
-        }
+    let raw = fs::read_to_string(&task_toml)
+        .with_context(|| format!("failed to read {}", task_toml.display()))?;
+    let _: toml::Value =
+        toml::from_str(&raw).with_context(|| format!("failed to parse {}", task_toml.display()))?;
+    if !instruction.is_file() {
+        bail!("task `{}` missing instruction.md", task.id);
+    }
+    if !environment.is_dir() {
+        bail!("task `{}` missing environment/", task.id);
+    }
+    if !verifier.is_file() {
+        bail!("task `{}` missing tests/test.sh", task.id);
     }
     Ok(())
 }
@@ -1640,7 +2401,7 @@ pub(crate) fn load_eval_config(path: &Path, store_root: Option<PathBuf>) -> Resu
         benchmark_name: benchmark.name,
         schema_version: config.schema_version,
         output_root: config.output_root,
-        evaluator: benchmark.evaluator,
+        artifacts: config.artifacts,
         agents,
         task_sets,
         tasks,
@@ -1687,7 +2448,7 @@ pub(crate) fn load_one_off_benchmark(
         benchmark_name: benchmark.name,
         schema_version: MANIFEST_SCHEMA_VERSION,
         output_root: None,
-        evaluator: benchmark.evaluator,
+        artifacts: ArtifactSelection::default(),
         agents: registry.agents,
         task_sets: benchmark.task_sets,
         tasks: benchmark.tasks,
@@ -1819,11 +2580,11 @@ pub(crate) fn select_benchmark_tasks(
     BTreeMap<String, TaskManifest>,
 )> {
     let selected_tasks = selection.tasks.iter().cloned().collect::<BTreeSet<_>>();
-    let mut task_sets = if selection.task_sets.is_empty() {
+    let mut task_sets = if selection.sets.is_empty() {
         benchmark.task_sets.clone()
     } else {
         let mut out = BTreeMap::new();
-        for id in &selection.task_sets {
+        for id in &selection.sets {
             let task_set = benchmark
                 .task_sets
                 .get(id)
@@ -1921,6 +2682,9 @@ pub(crate) fn read_eval_config_manifest(path: &Path) -> Result<EvalConfigManifes
         id: slugify(&raw.id),
         name: raw.name.unwrap_or_else(|| raw.id.clone()),
         output_root: raw.output_root,
+        artifacts: raw.artifacts,
+        analysis: raw.analysis,
+        reports: raw.reports,
         benchmark: raw.benchmark,
         selection: raw.select,
         agents: raw.agents,
@@ -1932,109 +2696,607 @@ pub(crate) fn validate_eval_selection(selection: &EvalSelection, path: &Path) ->
     if selection.agents.is_empty() {
         bail!("{} select.agents must not be empty", path.display());
     }
-    if selection.task_sets.is_empty() && selection.tasks.is_empty() {
+    if selection.sets.is_empty() && selection.tasks.is_empty() {
         bail!(
-            "{} select.task_sets or select.tasks must declare at least one item",
+            "{} select.sets or select.tasks must declare at least one item",
             path.display()
         );
     }
     Ok(())
 }
 
-pub(crate) fn load_task_sources(
+type LoadedBenchmarkSources = (
+    Vec<BenchmarkSourceSummary>,
+    BTreeMap<String, TaskSetManifest>,
+    BTreeMap<String, TaskManifest>,
+);
+
+pub(crate) fn load_benchmark_sources(
     root: &Path,
-    sources: &[TaskSourceManifest],
-) -> Result<BTreeMap<String, TaskManifest>> {
+    manifest_path: &Path,
+    sources: BenchmarkSources,
+) -> Result<LoadedBenchmarkSources> {
     if sources.is_empty() {
+        bail!("no sources declared in {}", manifest_path.display());
+    }
+    let mut seen_sources = BTreeSet::new();
+    let mut summaries = Vec::new();
+    let mut task_sets = BTreeMap::new();
+    let mut tasks = BTreeMap::new();
+
+    for source in sources.peval_agent {
+        let source_id = unique_source_id(&source.id, &mut seen_sources, manifest_path)?;
+        summaries.push(BenchmarkSourceSummary {
+            id: source_id.clone(),
+            kind: TaskSourceKind::PevalAgent,
+        });
+        let source_root = resolve_relative(root, &source.path);
+        let loaded = load_directory_source(
+            &source_id,
+            TaskSourceKind::PevalAgent,
+            &source_root,
+            manifest_path,
+            source.verifier_timeout_seconds,
+        )
+        .with_context(|| format!("failed to load peval_agent source `{source_id}`"))?;
+        insert_loaded_source(
+            &mut task_sets,
+            &mut tasks,
+            &source_id,
+            manifest_path,
+            loaded,
+            source.sets,
+        )?;
+    }
+
+    for source in sources.harbor {
+        let source_id = unique_source_id(&source.id, &mut seen_sources, manifest_path)?;
+        summaries.push(BenchmarkSourceSummary {
+            id: source_id.clone(),
+            kind: TaskSourceKind::Harbor,
+        });
+        let source_root = resolve_relative(&resolve_relative(root, &source.root), &source.path);
+        let loaded = load_directory_source(
+            &source_id,
+            TaskSourceKind::Harbor,
+            &source_root,
+            manifest_path,
+            None,
+        )
+        .with_context(|| format!("failed to load harbor source `{source_id}`"))?;
+        insert_loaded_source(
+            &mut task_sets,
+            &mut tasks,
+            &source_id,
+            manifest_path,
+            loaded,
+            source.sets,
+        )?;
+    }
+
+    for source in sources.swe_bench {
+        let source_id = unique_source_id(&source.id, &mut seen_sources, manifest_path)?;
+        summaries.push(BenchmarkSourceSummary {
+            id: source_id.clone(),
+            kind: TaskSourceKind::SweBench,
+        });
+        let loaded = load_declared_official_source(
+            &source_id,
+            TaskSourceKind::SweBench,
+            manifest_path,
+            resolve_relative(root, &source.root),
+            format!("{}:{}", source.dataset, source.split),
+        )?;
+        insert_loaded_source(
+            &mut task_sets,
+            &mut tasks,
+            &source_id,
+            manifest_path,
+            loaded,
+            source.sets,
+        )?;
+    }
+
+    for source in sources.tau2 {
+        let source_id = unique_source_id(&source.id, &mut seen_sources, manifest_path)?;
+        summaries.push(BenchmarkSourceSummary {
+            id: source_id.clone(),
+            kind: TaskSourceKind::Tau2,
+        });
+        let mut native = source.domain.clone();
+        if let Some(split) = source.split {
+            native.push('-');
+            native.push_str(&split);
+        }
+        if let Some(task_set) = source.task_set {
+            native.push('-');
+            native.push_str(&task_set);
+        }
+        let loaded = load_declared_official_source(
+            &source_id,
+            TaskSourceKind::Tau2,
+            manifest_path,
+            resolve_relative(root, &source.root),
+            native,
+        )?;
+        insert_loaded_source(
+            &mut task_sets,
+            &mut tasks,
+            &source_id,
+            manifest_path,
+            loaded,
+            source.sets,
+        )?;
+    }
+
+    if task_sets.is_empty() {
         bail!(
-            "no task_sources declared in {}",
-            root.join("benchmark.toml").display()
+            "sources did not declare any sets in {}",
+            manifest_path.display()
         );
     }
-    let mut tasks = BTreeMap::new();
-    for source in sources {
-        match source.format {
-            TaskSourceFormat::Jsonl => {
-                let path = resolve_relative(root, &source.path);
-                load_jsonl_tasks(&path, &mut tasks)?;
-            }
-        }
-    }
     if tasks.is_empty() {
-        bail!("task sources did not declare any tasks");
+        bail!(
+            "sources did not declare any tasks in {}",
+            manifest_path.display()
+        );
     }
-    Ok(tasks)
+    Ok((summaries, task_sets, tasks))
 }
 
-pub(crate) fn load_jsonl_tasks(
-    path: &Path,
-    tasks: &mut BTreeMap<String, TaskManifest>,
-) -> Result<()> {
-    let file =
-        fs::File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
-    let source_dir = path
-        .parent()
-        .with_context(|| format!("task source has no parent: {}", path.display()))?;
-    for (index, line) in BufReader::new(file).lines().enumerate() {
-        let line_number = index + 1;
-        let line =
-            line.with_context(|| format!("failed to read {} line {line_number}", path.display()))?;
-        if line.trim().is_empty() {
+pub(crate) struct LoadedSource {
+    native_ids: Vec<String>,
+    tasks: BTreeMap<String, TaskManifest>,
+}
+
+pub(crate) fn unique_source_id(
+    id: &str,
+    seen_sources: &mut BTreeSet<String>,
+    manifest_path: &Path,
+) -> Result<String> {
+    let source_id = slugify(id);
+    if !seen_sources.insert(source_id.clone()) {
+        bail!(
+            "duplicate source id `{}` in {}",
+            source_id,
+            manifest_path.display()
+        );
+    }
+    Ok(source_id)
+}
+
+pub(crate) fn load_directory_source(
+    source_id: &str,
+    source_kind: TaskSourceKind,
+    source_root: &Path,
+    manifest_path: &Path,
+    default_timeout: Option<u64>,
+) -> Result<LoadedSource> {
+    if !source_root.is_dir() {
+        bail!("source directory does not exist: {}", source_root.display());
+    }
+    let mut native_ids = Vec::new();
+    let mut tasks = BTreeMap::new();
+    for entry in fs::read_dir(source_root)
+        .with_context(|| format!("failed to read {}", source_root.display()))?
+    {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
             continue;
         }
-        let raw: RawTaskRecord = serde_json::from_str(&line)
-            .with_context(|| format!("failed to parse {} line {line_number}", path.display()))?;
-        reject_unsupported(raw.schema_version, path)
-            .with_context(|| format!("invalid task `{}` in {}", raw.task_id, path.display()))?;
-        let task_dir = raw
-            .dir
-            .as_ref()
-            .map(|dir| resolve_relative(source_dir, dir))
-            .unwrap_or_else(|| source_dir.to_path_buf());
+        let native_id = entry.file_name().to_string_lossy().to_string();
+        let task_dir = entry.path();
+        if source_kind == TaskSourceKind::PevalAgent {
+            validate_task_directory_files(&task_dir)
+                .with_context(|| format!("invalid task `{native_id}`"))?;
+        }
+        let task_toml = task_dir.join("task.toml");
+        let task_value = if task_toml.is_file() {
+            let raw = fs::read_to_string(&task_toml)
+                .with_context(|| format!("failed to read {}", task_toml.display()))?;
+            Some(
+                toml::from_str::<toml::Value>(&raw)
+                    .with_context(|| format!("failed to parse {}", task_toml.display()))?,
+            )
+        } else {
+            None
+        };
+        let instruction = task_dir.join("instruction.md");
+        let problem_statement = if instruction.is_file() {
+            fs::read_to_string(&instruction)
+                .with_context(|| format!("failed to read {}", instruction.display()))?
+        } else {
+            format!("Run official source task `{native_id}`.")
+        };
+        let canonical_id = canonical_task_id(source_id, &native_id);
         let task = TaskManifest {
-            schema_version: raw.schema_version,
-            id: raw.task_id,
-            name: raw.name,
-            kind: raw.kind,
-            problem_statement: raw.problem_statement,
-            workspace: raw.workspace,
-            test_spec: raw.test_spec,
-            manifest_path: path.to_path_buf(),
+            schema_version: MANIFEST_SCHEMA_VERSION,
+            id: canonical_id.clone(),
+            name: task_value
+                .as_ref()
+                .and_then(|value| value.get("name"))
+                .and_then(toml::Value::as_str)
+                .map(str::to_string),
+            kind: task_value
+                .as_ref()
+                .and_then(|value| value.get("kind"))
+                .and_then(toml::Value::as_str)
+                .unwrap_or(match source_kind {
+                    TaskSourceKind::PevalAgent => "coding",
+                    TaskSourceKind::Harbor => "harbor",
+                    TaskSourceKind::SweBench => "swe-bench",
+                    TaskSourceKind::Tau2 => "tau2",
+                })
+                .to_string(),
+            problem_statement,
+            workspace: WorkspaceManifest {
+                source: PathBuf::from("environment"),
+            },
+            test_spec: TestSpecManifest { checks: Vec::new() },
+            source_kind,
+            source_id: source_id.to_string(),
+            native_id: native_id.clone(),
+            verifier_timeout_seconds: task_value
+                .as_ref()
+                .and_then(read_task_verifier_timeout)
+                .or(default_timeout),
+            manifest_path: manifest_path.to_path_buf(),
             dir: task_dir,
         };
-        if tasks.insert(task.id.clone(), task).is_some() {
-            bail!("duplicate task id in task sources");
+        native_ids.push(native_id);
+        if tasks.insert(canonical_id, task).is_some() {
+            bail!("duplicate task id in source `{source_id}`");
         }
+    }
+    native_ids.sort();
+    if native_ids.is_empty() {
+        bail!("source `{source_id}` did not declare any task directories");
+    }
+    Ok(LoadedSource { native_ids, tasks })
+}
+
+pub(crate) fn load_declared_official_source(
+    source_id: &str,
+    source_kind: TaskSourceKind,
+    manifest_path: &Path,
+    root: PathBuf,
+    native_id: String,
+) -> Result<LoadedSource> {
+    let native_id = slugify(&native_id);
+    let canonical_id = canonical_task_id(source_id, &native_id);
+    let task = TaskManifest {
+        schema_version: MANIFEST_SCHEMA_VERSION,
+        id: canonical_id.clone(),
+        name: None,
+        kind: match source_kind {
+            TaskSourceKind::PevalAgent => "coding",
+            TaskSourceKind::Harbor => "harbor",
+            TaskSourceKind::SweBench => "swe-bench",
+            TaskSourceKind::Tau2 => "tau2",
+        }
+        .to_string(),
+        problem_statement: format!("Run official {:?} task `{native_id}`.", source_kind),
+        workspace: WorkspaceManifest {
+            source: PathBuf::from("."),
+        },
+        test_spec: TestSpecManifest { checks: Vec::new() },
+        source_kind,
+        source_id: source_id.to_string(),
+        native_id: native_id.clone(),
+        verifier_timeout_seconds: None,
+        manifest_path: manifest_path.to_path_buf(),
+        dir: root,
+    };
+    Ok(LoadedSource {
+        native_ids: vec![native_id],
+        tasks: BTreeMap::from([(canonical_id, task)]),
+    })
+}
+
+pub(crate) fn insert_loaded_source(
+    task_sets: &mut BTreeMap<String, TaskSetManifest>,
+    tasks: &mut BTreeMap<String, TaskManifest>,
+    source_id: &str,
+    manifest_path: &Path,
+    loaded: LoadedSource,
+    sets: Vec<SourceSetManifest>,
+) -> Result<()> {
+    let native_ids = loaded.native_ids;
+    for (task_id, task) in loaded.tasks {
+        if tasks.insert(task_id.clone(), task).is_some() {
+            bail!("duplicate canonical task id `{task_id}`");
+        }
+    }
+    let all_tasks = native_ids
+        .iter()
+        .map(|native_id| canonical_task_id(source_id, native_id))
+        .collect::<Vec<_>>();
+    insert_task_set(
+        task_sets,
+        TaskSetManifest {
+            schema_version: MANIFEST_SCHEMA_VERSION,
+            id: source_id.to_string(),
+            name: Some(source_id.to_string()),
+            description: None,
+            tasks: all_tasks,
+            manifest_path: manifest_path.to_path_buf(),
+        },
+    )?;
+    for set in sets {
+        let set_id = format!("{source_id}/{}", slugify(&set.id));
+        let selected = filter_source_set(source_id, &native_ids, &set);
+        if selected.is_empty() {
+            bail!("source set `{set_id}` selected no tasks");
+        }
+        insert_task_set(
+            task_sets,
+            TaskSetManifest {
+                schema_version: MANIFEST_SCHEMA_VERSION,
+                id: set_id,
+                name: set.name,
+                description: set.description,
+                tasks: selected,
+                manifest_path: manifest_path.to_path_buf(),
+            },
+        )?;
     }
     Ok(())
 }
 
-pub(crate) fn collect_task_set_manifests(
-    raw_task_sets: Vec<TaskSetManifest>,
-    manifest_path: &Path,
-    tasks: &BTreeMap<String, TaskManifest>,
-) -> Result<BTreeMap<String, TaskSetManifest>> {
-    let mut task_sets = BTreeMap::new();
-    for mut task_set in raw_task_sets {
-        reject_unsupported(task_set.schema_version, manifest_path)?;
-        task_set.manifest_path = manifest_path.to_path_buf();
-        if task_set.tasks.is_empty() {
-            bail!("task set `{}` does not declare any tasks", task_set.id);
-        }
-        for task_id in &task_set.tasks {
-            if !tasks.contains_key(task_id) {
-                bail!(
-                    "task set `{}` references unknown task `{task_id}`",
-                    task_set.id
-                );
+pub(crate) fn insert_task_set(
+    task_sets: &mut BTreeMap<String, TaskSetManifest>,
+    task_set: TaskSetManifest,
+) -> Result<()> {
+    if task_sets.insert(task_set.id.clone(), task_set).is_some() {
+        bail!("duplicate set id");
+    }
+    Ok(())
+}
+
+pub(crate) fn filter_source_set(
+    source_id: &str,
+    native_ids: &[String],
+    set: &SourceSetManifest,
+) -> Vec<String> {
+    let include_all = set.include.is_empty();
+    let mut selected = native_ids
+        .iter()
+        .filter(|native_id| {
+            (include_all
+                || set
+                    .include
+                    .iter()
+                    .any(|pattern| glob_match(pattern, native_id)))
+                && !set
+                    .exclude
+                    .iter()
+                    .any(|pattern| glob_match(pattern, native_id))
+        })
+        .map(|native_id| canonical_task_id(source_id, native_id))
+        .collect::<Vec<_>>();
+    selected.sort();
+    if let Some(limit) = set.limit {
+        selected.truncate(limit);
+    }
+    selected
+}
+
+pub(crate) fn canonical_task_id(source_id: &str, native_id: &str) -> String {
+    format!("{}/{}", source_id, native_id)
+}
+
+pub(crate) fn validate_task_directory_files(task_dir: &Path) -> Result<()> {
+    let task_toml = task_dir.join("task.toml");
+    let instruction = task_dir.join("instruction.md");
+    let environment = task_dir.join("environment");
+    let verifier = task_dir.join("tests").join("test.sh");
+    if !task_toml.is_file() {
+        bail!("missing task.toml");
+    }
+    let raw = fs::read_to_string(&task_toml)
+        .with_context(|| format!("failed to read {}", task_toml.display()))?;
+    let _: toml::Value =
+        toml::from_str(&raw).with_context(|| format!("failed to parse {}", task_toml.display()))?;
+    if !instruction.is_file() {
+        bail!("missing instruction.md");
+    }
+    if !environment.is_dir() {
+        bail!("missing environment/");
+    }
+    if !verifier.is_file() {
+        bail!("missing tests/test.sh");
+    }
+    Ok(())
+}
+
+pub(crate) fn read_task_verifier_timeout(value: &toml::Value) -> Option<u64> {
+    value
+        .get("verifier")
+        .and_then(|verifier| {
+            verifier
+                .get("timeout_seconds")
+                .or_else(|| verifier.get("timeout_sec"))
+        })
+        .and_then(toml::Value::as_integer)
+        .and_then(|value| u64::try_from(value).ok())
+}
+
+pub(crate) fn glob_match(pattern: &str, value: &str) -> bool {
+    fn inner(pattern: &[u8], value: &[u8]) -> bool {
+        match pattern.split_first() {
+            None => value.is_empty(),
+            Some((&b'*', rest)) => {
+                inner(rest, value) || (!value.is_empty() && inner(pattern, &value[1..]))
             }
-        }
-        if task_sets.insert(task_set.id.clone(), task_set).is_some() {
-            bail!("duplicate task set id");
+            Some((&b'?', rest)) => !value.is_empty() && inner(rest, &value[1..]),
+            Some((&expected, rest)) => value
+                .split_first()
+                .is_some_and(|(&actual, tail)| actual == expected && inner(rest, tail)),
         }
     }
-    if task_sets.is_empty() {
-        bail!("no task_sets declared in {}", manifest_path.display());
+    inner(pattern.as_bytes(), value.as_bytes())
+}
+
+#[cfg(test)]
+mod metrics_tests {
+    use super::*;
+
+    fn event(sequence: u64, kind: &str, data: Value) -> TrajectoryEvent {
+        TrajectoryEvent {
+            schema_version: ARTIFACT_SCHEMA_VERSION,
+            sequence,
+            case_id: "case".to_string(),
+            kind: kind.to_string(),
+            message: kind.to_string(),
+            timestamp_ms: 0,
+            data,
+        }
     }
-    Ok(task_sets)
+
+    fn acp_update(sequence: u64, update: Value) -> TrajectoryEvent {
+        event(
+            sequence,
+            "acp_session_update",
+            json!({
+                "raw_event": {
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": "s",
+                        "update": update,
+                    },
+                },
+            }),
+        )
+    }
+
+    #[test]
+    fn acp_metrics_collect_prompt_response_usage_accounting_and_warnings() {
+        let events = vec![
+            event(0, "acp_agent_started", json!({})),
+            event(1, "acp_agent_prompt_started", json!({})),
+            acp_update(
+                2,
+                json!({
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "call-1",
+                    "title": "Tool",
+                }),
+            ),
+            acp_update(
+                3,
+                json!({
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "call-1",
+                    "status": "failed",
+                }),
+            ),
+            acp_update(
+                4,
+                json!({
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "call-1",
+                    "status": "failed",
+                }),
+            ),
+            acp_update(
+                5,
+                json!({
+                    "sessionUpdate": "usage_update",
+                    "used": 512,
+                    "size": 4096,
+                    "cost": {
+                        "amount": 0.12,
+                        "currency": "USD",
+                    },
+                }),
+            ),
+            event(
+                6,
+                "acp_agent_prompt_finished",
+                json!({
+                    "prompt_result": {
+                        "stopReason": "end_turn",
+                        "usage": {
+                            "inputTokens": 10,
+                            "outputTokens": 5,
+                            "cachedReadTokens": 2,
+                            "totalTokens": 15,
+                        },
+                        "_meta": {
+                            "psychevo": {
+                                "turns": 2,
+                                "warnings": ["MCP server degraded"],
+                                "accounting": {
+                                    "context_input_tokens": 10,
+                                    "billable_input_tokens": 8,
+                                    "billable_output_tokens": 5,
+                                    "cache_read_tokens": 2,
+                                    "reported_total_tokens": 15,
+                                    "estimated_cost_nanodollars": 120000000,
+                                    "pricing_source": "fixture",
+                                    "pricing_tier": "standard",
+                                },
+                            },
+                        },
+                    },
+                }),
+            ),
+            event(7, "acp_agent_finished", json!({ "ignored": true })),
+        ];
+
+        let observed = collect_case_observability(&events, 123);
+        assert_eq!(observed.metrics.duration_ms, 123);
+        assert_eq!(observed.metrics.tool_calls, 1);
+        assert_eq!(observed.metrics.tool_errors, 1);
+        assert_eq!(observed.metrics.turns, Some(2));
+        assert_eq!(observed.metrics.usage.input_tokens, Some(10));
+        assert_eq!(observed.metrics.usage.output_tokens, Some(5));
+        assert_eq!(observed.metrics.usage.cache_read_tokens, Some(2));
+        assert_eq!(observed.metrics.usage.total_tokens, Some(15));
+        assert_eq!(
+            observed.metrics.accounting.estimated_cost_nanodollars,
+            Some(120000000)
+        );
+        assert_eq!(
+            observed.metrics.accounting.pricing_source.as_deref(),
+            Some("fixture")
+        );
+        assert_eq!(observed.metrics.cost.amount_usd, Some(0.12));
+        assert_eq!(observed.warnings, vec!["MCP server degraded"]);
+    }
+
+    #[test]
+    fn acp_metrics_synthesizes_usage_from_accounting_without_prompt_usage() {
+        let events = vec![
+            event(0, "acp_agent_prompt_started", json!({})),
+            event(
+                1,
+                "acp_agent_prompt_finished",
+                json!({
+                    "prompt_result": {
+                        "stopReason": "end_turn",
+                        "_meta": {
+                            "psychevo": {
+                                "accounting": {
+                                    "billable_input_tokens": 8,
+                                    "billable_output_tokens": 5,
+                                    "cache_read_tokens": 2,
+                                    "reasoning_tokens": 1,
+                                    "reported_total_tokens": 16,
+                                },
+                            },
+                        },
+                    },
+                }),
+            ),
+        ];
+
+        let observed = collect_case_observability(&events, 50);
+        assert_eq!(observed.metrics.usage.input_tokens, Some(10));
+        assert_eq!(observed.metrics.usage.output_tokens, Some(6));
+        assert_eq!(observed.metrics.usage.cache_read_tokens, Some(2));
+        assert_eq!(observed.metrics.usage.reasoning_tokens, Some(1));
+        assert_eq!(observed.metrics.usage.total_tokens, Some(16));
+    }
 }

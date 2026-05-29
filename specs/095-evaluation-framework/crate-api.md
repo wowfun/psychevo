@@ -76,6 +76,13 @@ Library callers should be able to:
 - compare stored cell facts without executing agents or evaluators
 - build typed view models over existing cells without reading raw trajectory or
   log bodies by default
+- load report profiles from eval, workspace, and user config layers
+- derive bounded timelines and ATIF trajectories from local trajectory event
+  streams on demand
+- serve local read-only viewer APIs over cell facts and explicit diagnostic
+  artifact reads
+- run explicit cached analysis actions through configured peval agents when a
+  caller grants execute/write capabilities
 
 APIs that can execute live agents, contact providers, download official
 benchmark data, or spawn sidecar processes must make that behavior explicit in

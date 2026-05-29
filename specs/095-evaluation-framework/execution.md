@@ -66,7 +66,8 @@ caller requested a strict fail-fast mode.
 ## Artifacts
 
 Each executable cell writes a structured `run.json` fact, trajectory artifact,
-and diagnostic logs under `runs/<benchmark>/<agent-id>/<task-id>/<cell-key>/`.
+and diagnostic logs under
+`runs/<benchmark>/<agent-id>/<task-id>/<short-fingerprint>/`.
 Derived views are generated from those artifacts rather than from live agent
 state.
 
@@ -80,12 +81,13 @@ The CLI-selected evaluation store root is a peval workspace. It is supplied
 with `--root/-r`, read from `PEVAL_ROOT`, discovered from the current directory
 or a parent directory containing workspace `peval.toml`, or read from
 `$PSYCHEVO_HOME/peval-config.toml` after `peval init --default`.
-Run facts default to `<workspace>/runs/<benchmark>/<agent-id>/<task-id>/<cell-key>`.
+Run facts default to
+`<workspace>/runs/<benchmark>/<agent-id>/<task-id>/<short-fingerprint>`.
 An explicit per-run output root is an escape hatch and does not participate in
 workspace reuse.
 
-The workspace may maintain `datasets/`, `runs/`, and workspace-owned scripts.
-Cell facts are the source of truth. This slice has no cache contract and no
+The workspace may maintain `datasets/`, `runs/`, `views/`, and workspace-owned
+scripts. Cell facts are the source of truth. This slice has no cache contract and no
 generated static dashboard. Existing visible `index.json`,
 namespace-level `latest.json`, `dashboard.html`, or v2 per-invocation
 `summary.json` files are legacy derived artifacts and must not be required for

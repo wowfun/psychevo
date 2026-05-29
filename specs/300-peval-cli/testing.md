@@ -31,7 +31,12 @@ credentials.
 View tests should assert structured view data, redaction behavior, JSON artifact
 paths, and Markdown/HTML omission of raw trajectory and log bodies. They should
 avoid brittle snapshots of full HTML when structured comparison can cover the
-same behavior.
+same behavior. Include parsing coverage must verify `-i all`, mixed
+`summary,all`, duplicate include de-duplication, stable expanded ordering, and
+JSON reports serializing the expanded include list. Diagnostic view coverage
+must verify artifact indexes, bounded timeline/log previews, derived ATIF v1.7,
+analysis cache discovery, diff file precedence, and trajectory-diff fallback
+without executing providers or agents.
 
 Persistent-workspace tests should verify `peval init`, `peval init --default`,
 `$PSYCHEVO_HOME/peval-config.toml` default workspace loading, `--root/-r`,
@@ -46,7 +51,7 @@ workspace `index.json`, namespace `latest.json`, hidden `.cache` indexes, or
 Service-backed tests should verify service context isolation from process cwd
 and environment, read/write/execute capability enforcement, structured
 diagnostics in CLI JSON outputs, `peval view` include parsing and
-Markdown/JSON/HTML rendering, artifact v6 readers, old artifact scan skipping,
+Markdown/JSON/HTML rendering, artifact v7 readers, old artifact scan skipping,
 and benchmark/eval config/evaluator-result readers.
 
 Black-box integration tests under `crates/psychevo-eval/tests/` should cover

@@ -35,17 +35,23 @@ Structured cell run facts are the source of truth for automated comparison,
 reporting, and reuse. A cell is one semantic benchmark/agent/task/factor
 combination. Views are derived from cell facts plus the view renderer version.
 
-Artifact v6 records are cell-oriented. Each cell fact separates benchmark
+Artifact v8 records are cell-oriented. Each cell fact separates benchmark
 identity, semantic fingerprint, stable case identity, candidate identity,
 task-set identity, expanded factors, terminal status, score, metrics, and
 artifact links. Views are logical projections over those facts and must not
 require reshaping the physical artifact layout.
 
 Metrics are part of structured cell facts. Duration, turns, tool calls,
-tool errors, token/cache usage, and optional cost are read from metrics fields.
-When an adapter cannot provide a value, the metric is unknown rather than
-fabricated. Aggregated view metrics are derived from cell metrics and should
-preserve unknown values where aggregation would be misleading.
+tool errors, token/cache usage, provider accounting, and optional cost are read
+from metrics fields. When an adapter cannot provide a value, the metric is
+unknown rather than fabricated. Aggregated view metrics are derived from cell
+metrics and should preserve unknown values where aggregation would be
+misleading.
+
+Cell facts may include non-fatal `warnings`. Warnings record adapter or
+contract diagnostics such as lossy usage extraction, missing optional updates,
+or degraded capability inputs. They do not change score or terminal status by
+themselves.
 
 ## Trajectories
 
@@ -96,22 +102,27 @@ per-invocation run summary files from older implementations are legacy derived
 artifacts, not authoritative data.
 
 Eval configs map current results under
-`runs/<benchmark-id>/<agent-id>/<task-id>/<cell-key>/`. The cell identity does
+`runs/<benchmark-id>/<agent-id>/<task-id>/<short-fingerprint>/`. The cell identity does
 not include the eval config id or path, so separate eval configs can reuse the
 same semantic benchmark/agent/task/factor result. Store-relative paths must not
 escape the store root. Explicit external output roots are isolated escape
 hatches and do not participate in workspace reuse.
 
 `peval view` is the built-in reporting, comparison, and inspection surface. It
-may render Markdown, JSON, or HTML over selected cell facts. Markdown and HTML
-views must not inline or list raw trajectory, prompt, model output, tool
-output, evaluator log, or environment log bodies by default. JSON views may expose
-artifact paths so automation can inspect local files explicitly.
+may render Markdown, JSON, or HTML over selected cell facts. Static Markdown and
+HTML views must not inline raw trajectory, prompt, model output, tool output,
+evaluator log, or environment log bodies by default. JSON views may expose
+artifact paths and derived summaries so automation can inspect local files
+explicitly. Local server/detail endpoints are explicit diagnostic reads and may
+show full local bodies after containment, redaction, and size checks.
 
 Service and view APIs follow the same privacy boundary. Default views expose
 bounded summaries, not raw trajectory, prompt, model output, tool output,
 evaluator stdout/stderr, or full logs. Raw diagnostic reads require an explicit
-raw-access method or future capability gate.
+raw-access method or local viewer endpoint. Derived ATIF trajectories,
+timelines, analysis files, and discovered diffs are views over existing cell
+artifacts; adding them must not change artifact reuse semantics unless a later
+artifact schema explicitly opts in.
 
 ## Related Topics
 

@@ -1,4 +1,4 @@
-schema_version = 4
+schema_version = 5
 id = "pidx-psychevo-patch-add"
 name = "pidx Psychevo patch-add"
 
@@ -7,8 +7,8 @@ path = "../benchmarks/pidx-coding/benchmark.toml"
 
 [select]
 agents = ["psychevo"]
-task_sets = ["base"]
-tasks = ["patch-add"]
+sets = ["pidx/smoke"]
+tasks = ["pidx/patch-add"]
 
 [[agents]]
 id = "psychevo"

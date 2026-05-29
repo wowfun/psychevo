@@ -34,8 +34,8 @@ impl EvalDiagnostic {
 
     pub fn from_error(err: anyhow::Error) -> Self {
         let message = format!("{err:#}");
-        if let Some(rest) = message.strip_prefix("unsupported_evaluator:") {
-            return Self::error("unsupported_evaluator", rest.trim().to_string());
+        if let Some(rest) = message.strip_prefix("incompatible_source_agent:") {
+            return Self::error("incompatible_source_agent", rest.trim().to_string());
         }
         Self::error("peval_error", message)
     }
@@ -250,6 +250,7 @@ impl EvalService {
             output_root: request
                 .output_root
                 .map(|path| self.context.resolve_path(&path)),
+            include_artifacts: request.include_artifacts,
         })
         .map_err(EvalDiagnostic::from_error)
     }
@@ -259,6 +260,7 @@ impl EvalService {
         build_view(ViewRequest {
             config: request.config.map(|path| self.context.resolve_path(&path)),
             benchmark: request.benchmark,
+            report: request.report,
             store_root: self.context.effective_root(request.store_root),
             path: request.path,
             task_set: request.task_set,
@@ -269,6 +271,22 @@ impl EvalService {
             include: request.include,
         })
         .map_err(EvalDiagnostic::from_error)
+    }
+
+    pub fn analysis_status(&self, request: &ViewRequest) -> ServiceResult<AnalysisStatus> {
+        self.require(ServiceCapability::Read)?;
+        analysis_status(self, request)
+    }
+
+    pub fn analyze_trial(&self, request: AnalysisTrialRequest) -> ServiceResult<AnalysisJson> {
+        analyze_trial(self, request)
+    }
+
+    pub fn analyze_failed_batch(
+        &self,
+        request: AnalysisBatchRequest,
+    ) -> ServiceResult<Vec<AnalysisJson>> {
+        analyze_failed_batch(self, request)
     }
 
     pub fn dataset_import(&self, request: DatasetImportRequest) -> ServiceResult<DatasetEntry> {

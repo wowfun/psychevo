@@ -16,7 +16,7 @@ fn write_pidx_eval_config(root: &std::path::Path) -> PathBuf {
     std::fs::write(
         &config,
         format!(
-            r#"schema_version = 4
+            r#"schema_version = 5
 id = "pidx-coding-cli"
 name = "pidx coding CLI"
 
@@ -25,7 +25,7 @@ path = "{}"
 
 [select]
 agents = ["psychevo", "opencode", "hermes"]
-task_sets = ["base"]
+sets = ["pidx"]
 
 [[agents]]
 id = "psychevo"
@@ -73,10 +73,8 @@ fn pidx_coding_check_is_public_cli_contract() {
     );
 
     let json: Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    assert_eq!(json["schema_version"], 4);
+    assert_eq!(json["schema_version"], 5);
     assert_eq!(json["benchmark"], "pidx-coding");
-    assert_eq!(json["evaluator"]["kind"], "local-coding");
-    assert_eq!(json["evaluator"]["run_supported"], true);
     assert_eq!(json["status"], "ok");
     assert_eq!(json["cases"], 9);
 }
@@ -93,7 +91,7 @@ fn pidx_coding_check_filters_single_adapter_matrix() {
         .arg("--config")
         .arg(config)
         .arg("--task-set")
-        .arg("base")
+        .arg("pidx")
         .arg("--agent")
         .arg("psychevo")
         .arg("--json")
@@ -107,10 +105,8 @@ fn pidx_coding_check_filters_single_adapter_matrix() {
     );
 
     let json: Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    assert_eq!(json["schema_version"], 4);
+    assert_eq!(json["schema_version"], 5);
     assert_eq!(json["benchmark"], "pidx-coding");
-    assert_eq!(json["evaluator"]["kind"], "local-coding");
-    assert_eq!(json["evaluator"]["run_supported"], true);
     assert_eq!(json["status"], "ok");
     assert_eq!(json["cases"], 3);
 }

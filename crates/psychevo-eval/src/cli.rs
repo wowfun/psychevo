@@ -83,7 +83,7 @@ pub(crate) fn now_ms() -> u128 {
 pub(crate) fn reject_unsupported(schema_version: u32, path: &Path) -> Result<()> {
     if schema_version != MANIFEST_SCHEMA_VERSION {
         bail!(
-            "{} uses unsupported schema_version {}; supported schema_version is {}",
+            "{} uses unsupported schema_version {}; supported schema_version is {}. v4 benchmark, eval, and task manifests are no longer supported; see docs/evaluation/authoring.md for v5 authoring.",
             path.display(),
             schema_version,
             MANIFEST_SCHEMA_VERSION
@@ -159,6 +159,8 @@ pub(crate) enum Commands {
     Run(RunArgs),
     #[command(about = "Render dynamic views over stored cell artifacts")]
     View(ViewArgs),
+    #[command(about = "Serve the local peval workspace viewer")]
+    Serve(ServeArgs),
     #[command(subcommand, about = "Manage local evaluation datasets")]
     Dataset(DatasetCommands),
 }
@@ -274,6 +276,8 @@ pub(crate) struct SelectArgs {
     #[arg(long)]
     pub(crate) task: Option<String>,
     #[arg(long)]
+    pub(crate) live: bool,
+    #[arg(long)]
     pub(crate) json: bool,
 }
 
@@ -295,6 +299,8 @@ pub(crate) struct RunArgs {
     pub(crate) overwrite: bool,
     #[arg(long, value_name = "DIR")]
     pub(crate) output_root: Option<PathBuf>,
+    #[arg(long = "include", value_name = "ITEMS")]
+    pub(crate) include: Vec<String>,
     #[arg(long)]
     pub(crate) json: bool,
 }
@@ -305,6 +311,8 @@ pub(crate) struct ViewArgs {
     pub(crate) config: Option<PathBuf>,
     #[arg(long = "benchmark", value_name = "ID_OR_PATH")]
     pub(crate) benchmark: Option<String>,
+    #[arg(long = "report", value_name = "KEY")]
+    pub(crate) report: Option<String>,
     #[arg(short = 'r', long = "root", value_name = "DIR")]
     pub(crate) store_root: Option<PathBuf>,
     #[arg(long, value_name = "PATH")]
@@ -323,8 +331,34 @@ pub(crate) struct ViewArgs {
     pub(crate) include: Vec<String>,
     #[arg(long, value_enum)]
     pub(crate) format: Option<ViewFormat>,
+    #[arg(short = 'o', long, value_name = "PATH", num_args = 0..=1)]
+    pub(crate) output: Option<Option<PathBuf>>,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct ServeArgs {
+    #[arg(short = 'c', long = "config", value_name = "PATH")]
+    pub(crate) config: Option<PathBuf>,
+    #[arg(long = "benchmark", value_name = "ID_OR_PATH")]
+    pub(crate) benchmark: Option<String>,
+    #[arg(long = "report", value_name = "KEY")]
+    pub(crate) report: Option<String>,
+    #[arg(short = 'r', long = "root", value_name = "DIR")]
+    pub(crate) store_root: Option<PathBuf>,
     #[arg(long, value_name = "PATH")]
-    pub(crate) output: Option<PathBuf>,
+    pub(crate) path: Option<PathBuf>,
+    #[arg(long = "task-set")]
+    pub(crate) task_set: Option<String>,
+    #[arg(long)]
+    pub(crate) agent: Option<String>,
+    #[arg(long)]
+    pub(crate) task: Option<String>,
+    #[arg(long, value_enum)]
+    pub(crate) status: Option<CaseStatusFilter>,
+    #[arg(long, default_value = "127.0.0.1")]
+    pub(crate) host: std::net::IpAddr,
+    #[arg(long, default_value_t = 0)]
+    pub(crate) port: u16,
 }
 
 #[derive(Debug, Parser)]
@@ -412,8 +446,13 @@ pub(crate) fn command_wants_json(command: &Commands) -> bool {
         Commands::List(args) => args.json,
         Commands::Check(args) => args.json,
         Commands::Run(args) => args.json,
-        Commands::View(args) => effective_view_format(args.format, args.output.as_deref())
-            .is_ok_and(|format| format == ViewFormat::Json),
+        Commands::View(args) => effective_view_format(
+            args.format,
+            args.output.as_ref().and_then(|output| output.as_deref()),
+            matches!(args.output, Some(None)),
+        )
+        .is_ok_and(|format| format == ViewFormat::Json),
+        Commands::Serve(_) => false,
         Commands::Dataset(DatasetCommands::Import(args)) => args.json,
     }
 }
@@ -427,6 +466,7 @@ pub(crate) fn dispatch_cli(cli: Cli) -> Result<CliOutcome> {
         Commands::Check(args) => run_check(args),
         Commands::Run(args) => run_run(args),
         Commands::View(args) => run_view(args),
+        Commands::Serve(args) => run_serve_command(args),
         Commands::Dataset(args) => run_dataset(args),
     }
 }
@@ -488,13 +528,11 @@ pub(crate) fn run_doctor(args: ProjectArgs) -> Result<CliOutcome> {
         "benchmark": &project.benchmark_id,
         "root": &project.benchmark_root,
         "eval_root": &store.root,
-        "evaluator": {
-            "kind": project.evaluator.kind,
-            "run_supported": project.evaluator.run_supported(),
-        },
         "agents": project.agents.len(),
-        "task_sets": project.task_sets.len(),
+        "sets": project.task_sets.len(),
         "fake_adapter": "available",
+        "command_adapter": "available",
+        "acp_adapter": "wrapper",
         "psychevo_adapter": "wrapper",
         "opencode_adapter": "wrapper",
         "hermes_adapter": "wrapper",
@@ -572,7 +610,7 @@ pub(crate) fn run_list(args: ListArgs) -> Result<CliOutcome> {
         "schema_version": SCHEMA_VERSION,
         "eval_root": eval_root,
         "benchmarks": registry_benchmarks,
-        "task_sets": project.as_ref().map(|project| project.task_sets.values().map(|task_set| json!({
+        "sets": project.as_ref().map(|project| project.task_sets.values().map(|task_set| json!({
             "id": &task_set.id,
             "name": &task_set.name,
             "tasks": &task_set.tasks,
@@ -666,11 +704,8 @@ pub(crate) fn run_check(args: SelectArgs) -> Result<CliOutcome> {
         "schema_version": SCHEMA_VERSION,
         "eval": project.name,
         "benchmark": project.benchmark_id,
-        "evaluator": {
-            "kind": project.evaluator.kind,
-            "run_supported": project.evaluator.run_supported(),
-        },
         "cases": cases.len(),
+        "live": args.live,
         "status": "ok",
     });
     if args.json {
@@ -691,6 +726,7 @@ pub(crate) fn run_run(args: RunArgs) -> Result<CliOutcome> {
             overwrite: args.overwrite,
             store_root: args.store_root,
             output_root: args.output_root,
+            include_artifacts: args.include,
         })
         .map_err(anyhow::Error::new)?;
     let code = if summary.status == RunStatus::Passed {
@@ -725,11 +761,17 @@ pub(crate) fn run_run(args: RunArgs) -> Result<CliOutcome> {
 
 pub(crate) fn run_view(args: ViewArgs) -> Result<CliOutcome> {
     let service = process_service()?;
-    let format = effective_view_format(args.format, args.output.as_deref())?;
+    let output = args.output.clone();
+    let format = effective_view_format(
+        args.format,
+        output.as_ref().and_then(|output| output.as_deref()),
+        matches!(output, Some(None)),
+    )?;
     let view = service
         .view(ViewRequest {
             config: args.config,
             benchmark: args.benchmark,
+            report: args.report,
             store_root: args.store_root,
             path: args.path,
             task_set: args.task_set,
@@ -741,13 +783,46 @@ pub(crate) fn run_view(args: ViewArgs) -> Result<CliOutcome> {
         })
         .map_err(anyhow::Error::new)?;
     let rendered = render_view(&view, format)?;
-    if let Some(output) = args.output {
+    let output = match output {
+        Some(Some(path)) => Some(path),
+        Some(None) => Some(default_view_output_path(&view, format)?),
+        None => None,
+    };
+    if let Some(output) = output {
+        if let Some(parent) = output
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
         fs::write(&output, rendered.as_bytes())
             .with_context(|| format!("failed to write {}", output.display()))?;
         Ok(success(format!("wrote {}\n", output.display())))
     } else {
         Ok(success(rendered))
     }
+}
+
+pub(crate) fn run_serve_command(args: ServeArgs) -> Result<CliOutcome> {
+    let service = process_service()?;
+    run_serve_blocking(
+        service,
+        ServeOptions {
+            config: args.config,
+            benchmark: args.benchmark,
+            report: args.report,
+            store_root: args.store_root,
+            path: args.path,
+            task_set: args.task_set,
+            agent: args.agent,
+            task: args.task,
+            status: args.status,
+            host: args.host,
+            port: args.port,
+        },
+    )?;
+    Ok(success(String::new()))
 }
 
 pub(crate) fn run_dataset(args: DatasetCommands) -> Result<CliOutcome> {
@@ -793,12 +868,20 @@ pub(crate) fn parse_view_includes(values: &[String]) -> Result<Vec<ViewInclude>>
             .map(str::trim)
             .filter(|item| !item.is_empty())
         {
-            let include = ViewInclude::from_str(item, true)
-                .map_err(|err| anyhow::anyhow!("invalid view include `{item}`: {err}"))?;
-            includes.push(include);
+            if item.eq_ignore_ascii_case("all") {
+                includes.extend(all_view_includes());
+            } else {
+                let include = ViewInclude::from_str(item, true)
+                    .map_err(|err| anyhow::anyhow!("invalid view include `{item}`: {err}"))?;
+                includes.push(include);
+            }
         }
     }
-    Ok(includes)
+    Ok(includes
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect())
 }
 
 pub(crate) fn parse_view_groups(values: &[String]) -> Result<Vec<ViewGroupBy>> {
@@ -824,12 +907,17 @@ pub(crate) fn parse_view_groups(values: &[String]) -> Result<Vec<ViewGroupBy>> {
 pub(crate) fn effective_view_format(
     explicit: Option<ViewFormat>,
     output: Option<&Path>,
+    default_output: bool,
 ) -> Result<ViewFormat> {
     if let Some(format) = explicit {
         return Ok(format);
     }
     let Some(output) = output else {
-        return Ok(ViewFormat::Markdown);
+        return Ok(if default_output {
+            ViewFormat::Html
+        } else {
+            ViewFormat::Markdown
+        });
     };
     match output
         .extension()
@@ -841,6 +929,40 @@ pub(crate) fn effective_view_format(
         Some("html") | Some("htm") => Ok(ViewFormat::Html),
         Some("md") | Some("markdown") => Ok(ViewFormat::Markdown),
         _ => Ok(ViewFormat::Markdown),
+    }
+}
+
+pub(crate) fn default_view_output_path(view: &ViewReport, format: ViewFormat) -> Result<PathBuf> {
+    let runs_root = view.scope.workspace_root.join("runs");
+    let relative_scope = view.scope.path.strip_prefix(&runs_root).with_context(|| {
+        format!(
+            "default view output requires a scope under {}; pass -o PATH for external paths",
+            runs_root.display()
+        )
+    })?;
+    if relative_scope.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
+        bail!(
+            "default view output requires a normalized scope under {}; pass -o PATH",
+            runs_root.display()
+        );
+    }
+    let mut output = view.scope.workspace_root.join("views");
+    if !relative_scope.as_os_str().is_empty() {
+        output = output.join(relative_scope);
+    }
+    Ok(output.join(format!("index.{}", view_format_extension(format))))
+}
+
+pub(crate) fn view_format_extension(format: ViewFormat) -> &'static str {
+    match format {
+        ViewFormat::Json => "json",
+        ViewFormat::Markdown => "md",
+        ViewFormat::Html => "html",
     }
 }
 

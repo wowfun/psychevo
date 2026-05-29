@@ -1,16 +1,14 @@
-schema_version = 4
+schema_version = 5
 id = "pidx-coding"
 name = "pidx-coding"
 
-[evaluator]
-kind = "local-coding"
+[[sources.peval_agent]]
+id = "pidx"
+path = "tasks"
+verifier_timeout_seconds = 600
 
-[[task_sources]]
-path = "tasks.jsonl"
-format = "jsonl"
-
-[[task_sets]]
-id = "base"
-name = "Base pidx coding"
+[[sources.peval_agent.sets]]
+id = "smoke"
+name = "Smoke pidx coding"
 description = "Small deterministic coding tasks for cross-agent comparison."
-tasks = ["patch-add", "tool-state", "rust-swe-add"]
+include = ["patch-add", "tool-state"]

@@ -28,11 +28,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 #[allow(unused_imports)]
 use uuid::Uuid;
 
-pub const MANIFEST_SCHEMA_VERSION: u32 = 4;
+pub const MANIFEST_SCHEMA_VERSION: u32 = 5;
 pub const EVALUATOR_RESULT_SCHEMA_VERSION: u32 = 2;
-pub const ARTIFACT_SCHEMA_VERSION: u32 = 6;
+pub const ARTIFACT_SCHEMA_VERSION: u32 = 8;
 pub const INDEX_SCHEMA_VERSION: u32 = 1;
-pub const VIEW_SCHEMA_VERSION: u32 = 4;
+pub const VIEW_SCHEMA_VERSION: u32 = 7;
 pub const WORKSPACE_SCHEMA_VERSION: u32 = 2;
 pub const SCHEMA_VERSION: u32 = MANIFEST_SCHEMA_VERSION;
 
@@ -48,7 +48,7 @@ pub struct EvalProject {
     pub benchmark_name: String,
     pub schema_version: u32,
     pub output_root: Option<PathBuf>,
-    pub evaluator: EvaluatorManifest,
+    pub artifacts: ArtifactSelection,
     pub agents: BTreeMap<String, AgentManifest>,
     pub task_sets: BTreeMap<String, TaskSetManifest>,
     pub tasks: BTreeMap<String, TaskManifest>,
@@ -62,51 +62,31 @@ pub struct BenchmarkManifest {
     pub schema_version: u32,
     pub id: String,
     pub name: String,
-    pub evaluator: EvaluatorManifest,
+    pub sources: Vec<BenchmarkSourceSummary>,
     pub task_sets: BTreeMap<String, TaskSetManifest>,
     pub tasks: BTreeMap<String, TaskManifest>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EvalSelection {
     #[serde(default)]
     pub agents: Vec<String>,
     #[serde(default)]
-    pub task_sets: Vec<String>,
+    pub sets: Vec<String>,
     #[serde(default)]
     pub tasks: Vec<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ArtifactSelection {
+    #[serde(default)]
+    pub include: Vec<String>,
+}
+
 impl EvalSelection {
     pub fn is_empty(&self) -> bool {
-        self.agents.is_empty() && self.task_sets.is_empty() && self.tasks.is_empty()
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EvaluatorManifest {
-    pub kind: EvaluatorKind,
-    #[serde(default)]
-    pub args: BTreeMap<String, Value>,
-}
-
-impl EvaluatorManifest {
-    pub fn run_supported(&self) -> bool {
-        self.kind.run_supported()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum EvaluatorKind {
-    LocalCoding,
-    Tau2,
-    SweBench,
-}
-
-impl EvaluatorKind {
-    pub fn run_supported(self) -> bool {
-        matches!(self, Self::LocalCoding)
+        self.agents.is_empty() && self.sets.is_empty() && self.tasks.is_empty()
     }
 }
 
@@ -121,6 +101,10 @@ pub struct AgentManifest {
     #[serde(default)]
     pub fake: FakeAgentOptions,
     #[serde(default)]
+    pub command: CommandAgentOptions,
+    #[serde(default)]
+    pub acp: AcpAgentOptions,
+    #[serde(default)]
     pub psychevo: PsychevoAgentOptions,
     #[serde(default)]
     pub opencode: WrapperAgentOptions,
@@ -134,6 +118,8 @@ pub struct AgentManifest {
 #[serde(rename_all = "kebab-case")]
 pub enum AgentKind {
     Fake,
+    Command,
+    Acp,
     Psychevo,
     Opencode,
     Hermes,
@@ -174,6 +160,60 @@ pub struct PsychevoAgentOptions {
     pub model: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandAgentOptions {
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default = "default_agent_timeout_seconds")]
+    pub timeout_seconds: u64,
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+impl Default for CommandAgentOptions {
+    fn default() -> Self {
+        Self {
+            command: None,
+            args: Vec::new(),
+            timeout_seconds: default_agent_timeout_seconds(),
+            model: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcpAgentOptions {
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default = "default_agent_timeout_seconds")]
+    pub timeout_seconds: u64,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
+    pub permission: Option<String>,
+}
+
+impl Default for AcpAgentOptions {
+    fn default() -> Self {
+        Self {
+            command: None,
+            args: Vec::new(),
+            timeout_seconds: default_agent_timeout_seconds(),
+            model: None,
+            mode: None,
+            permission: None,
+        }
+    }
+}
+
+pub(crate) fn default_agent_timeout_seconds() -> u64 {
+    600
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WrapperAgentOptions {
     #[serde(default)]
@@ -201,6 +241,22 @@ pub struct TaskSetManifest {
     pub manifest_path: PathBuf,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskSourceKind {
+    #[default]
+    PevalAgent,
+    Harbor,
+    SweBench,
+    Tau2,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BenchmarkSourceSummary {
+    pub id: String,
+    pub kind: TaskSourceKind,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskManifest {
     #[serde(default = "current_manifest_schema_version")]
@@ -214,6 +270,14 @@ pub struct TaskManifest {
     pub problem_statement: String,
     pub workspace: WorkspaceManifest,
     pub test_spec: TestSpecManifest,
+    #[serde(default)]
+    pub source_kind: TaskSourceKind,
+    #[serde(default)]
+    pub source_id: String,
+    #[serde(default)]
+    pub native_id: String,
+    #[serde(default)]
+    pub verifier_timeout_seconds: Option<u64>,
     #[serde(skip)]
     pub manifest_path: PathBuf,
     #[serde(skip)]
@@ -293,6 +357,7 @@ pub struct RunRequest {
     pub overwrite: bool,
     pub store_root: Option<PathBuf>,
     pub output_root: Option<PathBuf>,
+    pub include_artifacts: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -397,6 +462,8 @@ pub struct CaseResult {
     pub duration_ms: u128,
     #[serde(default)]
     pub metrics: CaseMetrics,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
     pub artifacts: CaseArtifacts,
 }
 
@@ -433,6 +500,8 @@ pub struct RunMetrics {
     #[serde(default)]
     pub usage: UsageMetrics,
     #[serde(default)]
+    pub accounting: AccountingMetrics,
+    #[serde(default)]
     pub cost: CostMetrics,
 }
 
@@ -445,6 +514,8 @@ pub struct CaseMetrics {
     pub turns: Option<u64>,
     #[serde(default)]
     pub usage: UsageMetrics,
+    #[serde(default)]
+    pub accounting: AccountingMetrics,
     #[serde(default)]
     pub cost: CostMetrics,
 }
@@ -471,6 +542,30 @@ pub struct CostMetrics {
     pub amount_usd: Option<f64>,
     #[serde(default)]
     pub source: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountingMetrics {
+    #[serde(default)]
+    pub context_input_tokens: Option<u64>,
+    #[serde(default)]
+    pub billable_input_tokens: Option<u64>,
+    #[serde(default)]
+    pub billable_output_tokens: Option<u64>,
+    #[serde(default)]
+    pub reasoning_tokens: Option<u64>,
+    #[serde(default)]
+    pub cache_read_tokens: Option<u64>,
+    #[serde(default)]
+    pub cache_write_tokens: Option<u64>,
+    #[serde(default)]
+    pub reported_total_tokens: Option<u64>,
+    #[serde(default)]
+    pub estimated_cost_nanodollars: Option<i64>,
+    #[serde(default)]
+    pub pricing_source: Option<String>,
+    #[serde(default)]
+    pub pricing_tier: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -535,6 +630,7 @@ pub struct TrajectoryEvent {
 pub struct ViewRequest {
     pub config: Option<PathBuf>,
     pub benchmark: Option<String>,
+    pub report: Option<String>,
     pub store_root: Option<PathBuf>,
     pub path: Option<PathBuf>,
     pub task_set: Option<String>,
@@ -552,6 +648,28 @@ pub enum ViewInclude {
     Summary,
     Matrix,
     Usage,
+    Warnings,
+    Artifacts,
+    Trajectory,
+    Atif,
+    Logs,
+    Analysis,
+    Diff,
+}
+
+pub(crate) fn all_view_includes() -> Vec<ViewInclude> {
+    vec![
+        ViewInclude::Summary,
+        ViewInclude::Matrix,
+        ViewInclude::Usage,
+        ViewInclude::Warnings,
+        ViewInclude::Artifacts,
+        ViewInclude::Trajectory,
+        ViewInclude::Atif,
+        ViewInclude::Logs,
+        ViewInclude::Analysis,
+        ViewInclude::Diff,
+    ]
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
@@ -605,8 +723,16 @@ pub struct ViewReport {
     pub scope: ViewScope,
     pub summary: ViewSummary,
     pub groups: Vec<ViewGroupRow>,
-    pub matrix: Vec<ViewMatrixRow>,
+    pub matrix: ViewMatrix,
+    pub trials: Vec<ViewTrial>,
     pub usage: Vec<ViewUsageRow>,
+    pub warnings: Vec<ViewWarningRow>,
+    pub artifacts: Vec<ViewArtifactIndex>,
+    pub trajectory: Vec<ViewTrajectoryReport>,
+    pub atif: Vec<ViewAtifReport>,
+    pub logs: Vec<ViewLogIndex>,
+    pub analysis: Vec<ViewAnalysisReport>,
+    pub diff: Vec<ViewDiffReport>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -618,20 +744,32 @@ pub struct ViewScope {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ViewSummary {
-    pub total_cells: usize,
-    pub passed_cells: usize,
-    pub failed_cells: usize,
+    pub total_trials: usize,
+    pub passed_trials: usize,
+    pub failed_trials: usize,
     pub status: RunStatus,
     pub metrics: RunMetrics,
 }
 
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ViewMatrix {
+    pub task_axis: Vec<ViewMatrixAxisEntry>,
+    pub agent_axis: Vec<ViewMatrixAxisEntry>,
+    pub cells: Vec<ViewMatrixCell>,
+}
+
 #[derive(Debug, Clone, Serialize)]
-pub struct ViewMatrixRow {
+pub struct ViewMatrixAxisEntry {
+    pub id: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ViewMatrixCell {
     pub benchmark: String,
-    pub cell_key: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub artifact_root: Option<PathBuf>,
-    pub case_id: String,
+    pub matrix_cell_key: String,
+    pub trial_keys: Vec<String>,
+    pub representative_trial_key: String,
     pub task_set_id: String,
     pub task_id: String,
     pub task_family: String,
@@ -647,9 +785,44 @@ pub struct ViewMatrixRow {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ViewTrial {
+    pub benchmark: String,
+    pub trial_key: String,
+    pub matrix_cell_key: String,
+    pub case_id: String,
+    pub task_set_id: String,
+    pub task_id: String,
+    pub task_family: String,
+    pub agent_id: String,
+    pub adapter: AgentKind,
+    pub status: CaseStatus,
+    pub failure_class: Option<String>,
+    pub score: Option<f64>,
+    pub duration_ms: u128,
+    pub turns: Option<u64>,
+    pub tool_calls: u64,
+    pub tool_errors: u64,
+    pub artifact_refs: Vec<ViewDataRef>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ViewDataRef {
+    pub kind: String,
+    pub label: String,
+    pub relative_path: PathBuf,
+    pub mime: String,
+    pub size_bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified_ms: Option<u128>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ViewUsageRow {
     pub benchmark: String,
-    pub cell_key: String,
+    pub trial_key: String,
+    pub matrix_cell_key: String,
     pub case_id: String,
     pub agent_id: String,
     pub input_tokens: Option<u64>,
@@ -659,15 +832,270 @@ pub struct ViewUsageRow {
     pub reasoning_tokens: Option<u64>,
     pub total_tokens: Option<u64>,
     pub cost_usd: Option<f64>,
+    pub accounting: AccountingMetrics,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ViewWarningRow {
+    pub benchmark: String,
+    pub trial_key: String,
+    pub matrix_cell_key: String,
+    pub case_id: String,
+    pub agent_id: String,
+    pub warning: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ViewGroupRow {
     pub key: String,
-    pub total_cells: usize,
-    pub passed_cells: usize,
-    pub failed_cells: usize,
+    pub total_trials: usize,
+    pub passed_trials: usize,
+    pub failed_trials: usize,
     pub status: RunStatus,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ViewArtifactIndex {
+    pub benchmark: String,
+    pub trial_key: String,
+    pub matrix_cell_key: String,
+    pub files: Vec<ViewArtifactFile>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ViewArtifactFile {
+    #[serde(flatten)]
+    pub data_ref: ViewDataRef,
+    pub previewable: bool,
+    pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inline_data_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ViewTrajectoryReport {
+    pub benchmark: String,
+    pub trial_key: String,
+    pub matrix_cell_key: String,
+    pub data_ref: ViewDataRef,
+    pub total_events: usize,
+    pub unmapped_events: usize,
+    pub total_steps: usize,
+    pub duration_ms: u128,
+    pub tool_calls: u64,
+    pub tool_errors: u64,
+    pub token_total: Option<u64>,
+    pub cost_usd: Option<f64>,
+    pub steps: Vec<ViewTrajectoryStep>,
+    pub graph: ViewTrajectoryGraph,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ViewTrajectoryStep {
+    pub step_id: u64,
+    pub source: String,
+    pub label: String,
+    pub summary: String,
+    pub tool_names: Vec<String>,
+    pub tool_error: bool,
+    pub duration_ms: Option<u128>,
+    pub token_total: Option<u64>,
+    pub cost_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_preview: Option<String>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ViewTrajectoryGraph {
+    pub nodes: Vec<ViewTrajectoryGraphNode>,
+    pub edges: Vec<ViewTrajectoryGraphEdge>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ViewTrajectoryGraphNode {
+    pub id: String,
+    pub step_id: u64,
+    pub label: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ViewTrajectoryGraphEdge {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ViewAtifReport {
+    pub benchmark: String,
+    pub trial_key: String,
+    pub matrix_cell_key: String,
+    pub trajectory: AtifTrajectory,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AtifTrajectory {
+    pub schema_version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trajectory_id: Option<String>,
+    pub agent: AtifAgent,
+    pub steps: Vec<AtifStep>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub final_metrics: Option<AtifFinalMetrics>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AtifAgent {
+    pub name: String,
+    pub version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AtifStep {
+    pub step_id: u64,
+    pub source: String,
+    pub message: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<AtifToolCall>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observation: Option<AtifObservation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metrics: Option<AtifMetrics>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub llm_call_count: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AtifToolCall {
+    pub tool_call_id: String,
+    pub function_name: String,
+    pub arguments: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AtifObservation {
+    pub results: Vec<AtifObservationResult>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AtifObservationResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AtifMetrics {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completion_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cached_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turns: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_errors: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<UsageMetrics>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accounting: Option<AccountingMetrics>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AtifFinalMetrics {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_prompt_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_completion_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_cached_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_cost_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_turns: Option<u64>,
+    pub total_tool_calls: u64,
+    pub total_tool_errors: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<UsageMetrics>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accounting: Option<AccountingMetrics>,
+    pub total_steps: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ViewLogIndex {
+    pub benchmark: String,
+    pub trial_key: String,
+    pub matrix_cell_key: String,
+    pub files: Vec<ViewArtifactFile>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ViewAnalysisReport {
+    pub benchmark: String,
+    pub trial_key: String,
+    pub matrix_cell_key: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub json_ref: Option<ViewDataRef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub json_preview: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ViewDiffReport {
+    pub benchmark: String,
+    pub trial_key: String,
+    pub matrix_cell_key: String,
+    pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_ref: Option<ViewDataRef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
+    pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -761,6 +1189,10 @@ pub struct PevalGlobalConfig {
     #[serde(default)]
     pub default_workspace: Option<PathBuf>,
     #[serde(default)]
+    pub analysis: Option<PevalAnalysisConfig>,
+    #[serde(default)]
+    pub reports: BTreeMap<String, PevalReportProfile>,
+    #[serde(default)]
     pub agents: Vec<AgentManifest>,
     #[serde(default)]
     pub benchmarks: Vec<RegistryBenchmark>,
@@ -771,6 +1203,8 @@ impl Default for PevalGlobalConfig {
         Self {
             schema_version: WORKSPACE_SCHEMA_VERSION,
             default_workspace: None,
+            analysis: None,
+            reports: BTreeMap::new(),
             agents: Vec::new(),
             benchmarks: Vec::new(),
         }
@@ -784,6 +1218,10 @@ pub struct PevalWorkspaceConfig {
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
+    pub analysis: Option<PevalAnalysisConfig>,
+    #[serde(default)]
+    pub reports: BTreeMap<String, PevalReportProfile>,
+    #[serde(default)]
     pub agents: Vec<AgentManifest>,
     #[serde(default)]
     pub benchmarks: Vec<RegistryBenchmark>,
@@ -795,10 +1233,48 @@ impl Default for PevalWorkspaceConfig {
             schema_version: WORKSPACE_SCHEMA_VERSION,
             kind: "workspace".to_string(),
             name: None,
+            analysis: None,
+            reports: BTreeMap::new(),
             agents: Vec::new(),
             benchmarks: Vec::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PevalReportProfile {
+    #[serde(default)]
+    pub analysis: Option<PevalAnalysisConfig>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PevalAnalysisConfig {
+    #[serde(default)]
+    pub agent: Option<String>,
+    #[serde(default)]
+    pub concurrency: Option<usize>,
+    #[serde(default)]
+    pub rubric_path: Option<PathBuf>,
+    #[serde(default)]
+    pub rubric: Option<PevalAnalysisRubric>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PevalAnalysisRubric {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub checks: Vec<PevalAnalysisRubricCheck>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PevalAnalysisRubricCheck {
+    pub name: String,
+    pub guidance: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -815,6 +1291,9 @@ pub(crate) struct EvalConfigManifest {
     pub(crate) id: String,
     pub(crate) name: String,
     pub(crate) output_root: Option<PathBuf>,
+    pub(crate) artifacts: ArtifactSelection,
+    pub(crate) analysis: Option<PevalAnalysisConfig>,
+    pub(crate) reports: BTreeMap<String, PevalReportProfile>,
     pub(crate) benchmark: BenchmarkReference,
     pub(crate) selection: EvalSelection,
     pub(crate) agents: Vec<AgentManifest>,
@@ -831,6 +1310,12 @@ pub(crate) struct RawEvalConfigManifest {
     pub(crate) name: Option<String>,
     #[serde(default)]
     pub(crate) output_root: Option<PathBuf>,
+    #[serde(default)]
+    pub(crate) artifacts: ArtifactSelection,
+    #[serde(default)]
+    pub(crate) analysis: Option<PevalAnalysisConfig>,
+    #[serde(default)]
+    pub(crate) reports: BTreeMap<String, PevalReportProfile>,
     pub(crate) benchmark: BenchmarkReference,
     pub(crate) select: EvalSelection,
     #[serde(default)]
@@ -855,45 +1340,97 @@ pub(crate) struct RawBenchmarkManifestSerde {
     pub(crate) id: String,
     #[serde(default)]
     pub(crate) name: Option<String>,
-    pub(crate) evaluator: EvaluatorManifest,
     #[serde(default)]
-    pub(crate) task_sources: Vec<TaskSourceManifest>,
-    #[serde(default)]
-    pub(crate) task_sets: Vec<TaskSetManifest>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskSourceManifest {
-    pub path: PathBuf,
-    #[serde(default = "default_task_source_format")]
-    pub format: TaskSourceFormat,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum TaskSourceFormat {
-    Jsonl,
-}
-
-pub(crate) fn default_task_source_format() -> TaskSourceFormat {
-    TaskSourceFormat::Jsonl
+    pub(crate) sources: BenchmarkSources,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct RawTaskRecord {
-    #[serde(default = "current_manifest_schema_version")]
+pub(crate) struct ManifestVersion {
     pub(crate) schema_version: u32,
-    pub(crate) task_id: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct BenchmarkSources {
+    #[serde(default)]
+    pub(crate) peval_agent: Vec<PevalAgentSourceManifest>,
+    #[serde(default)]
+    pub(crate) harbor: Vec<HarborSourceManifest>,
+    #[serde(default)]
+    pub(crate) swe_bench: Vec<SweBenchSourceManifest>,
+    #[serde(default)]
+    pub(crate) tau2: Vec<Tau2SourceManifest>,
+}
+
+impl BenchmarkSources {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.peval_agent.is_empty()
+            && self.harbor.is_empty()
+            && self.swe_bench.is_empty()
+            && self.tau2.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PevalAgentSourceManifest {
+    pub(crate) id: String,
+    pub(crate) path: PathBuf,
+    #[serde(default)]
+    pub(crate) verifier_timeout_seconds: Option<u64>,
+    #[serde(default)]
+    pub(crate) sets: Vec<SourceSetManifest>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct HarborSourceManifest {
+    pub(crate) id: String,
+    pub(crate) root: PathBuf,
+    pub(crate) path: PathBuf,
+    #[serde(default)]
+    pub(crate) sets: Vec<SourceSetManifest>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SweBenchSourceManifest {
+    pub(crate) id: String,
+    pub(crate) root: PathBuf,
+    pub(crate) dataset: String,
+    pub(crate) split: String,
+    #[serde(default)]
+    pub(crate) sets: Vec<SourceSetManifest>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Tau2SourceManifest {
+    pub(crate) id: String,
+    pub(crate) root: PathBuf,
+    pub(crate) domain: String,
+    #[serde(default)]
+    pub(crate) split: Option<String>,
+    #[serde(default)]
+    pub(crate) task_set: Option<String>,
+    #[serde(default)]
+    pub(crate) sets: Vec<SourceSetManifest>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SourceSetManifest {
+    pub(crate) id: String,
     #[serde(default)]
     pub(crate) name: Option<String>,
-    #[serde(default = "default_task_kind")]
-    pub(crate) kind: String,
     #[serde(default)]
-    pub(crate) dir: Option<PathBuf>,
-    pub(crate) problem_statement: String,
-    pub(crate) workspace: WorkspaceManifest,
-    pub(crate) test_spec: TestSpecManifest,
+    pub(crate) description: Option<String>,
+    #[serde(default)]
+    pub(crate) include: Vec<String>,
+    #[serde(default)]
+    pub(crate) exclude: Vec<String>,
+    #[serde(default)]
+    pub(crate) limit: Option<usize>,
 }
 
 pub(crate) fn default_eval_id() -> String {
@@ -944,28 +1481,26 @@ impl BenchmarkManifest {
             .parent()
             .context("benchmark.toml has no parent directory")?
             .to_path_buf();
-        let raw: RawBenchmarkManifestSerde = read_toml(&manifest_path)?;
-        reject_unsupported(raw.schema_version, &manifest_path)?;
-        let tasks = if !raw.evaluator.run_supported()
-            && raw.task_sources.is_empty()
-            && raw.task_sets.is_empty()
-        {
-            BTreeMap::new()
-        } else {
-            load_task_sources(&root, &raw.task_sources)?
-        };
-        let task_sets = if !raw.evaluator.run_supported() && raw.task_sets.is_empty() {
-            BTreeMap::new()
-        } else {
-            collect_task_set_manifests(raw.task_sets, &manifest_path, &tasks)?
-        };
+        let manifest_raw = fs::read_to_string(&manifest_path)
+            .with_context(|| format!("failed to read {}", manifest_path.display()))?;
+        let version: ManifestVersion = toml::from_str(&manifest_raw).with_context(|| {
+            format!(
+                "failed to parse schema_version in {}",
+                manifest_path.display()
+            )
+        })?;
+        reject_unsupported(version.schema_version, &manifest_path)?;
+        let raw: RawBenchmarkManifestSerde = toml::from_str(&manifest_raw)
+            .with_context(|| format!("failed to parse {}", manifest_path.display()))?;
+        let (sources, task_sets, tasks) =
+            load_benchmark_sources(&root, &manifest_path, raw.sources)?;
         Ok(BenchmarkManifest {
             root,
             manifest_path,
             schema_version: raw.schema_version,
             id: slugify(&raw.id),
             name: raw.name.unwrap_or(raw.id),
-            evaluator: raw.evaluator,
+            sources,
             task_sets,
             tasks,
         })
@@ -1174,9 +1709,6 @@ pub(crate) fn check_project(
     task_filter: Option<&str>,
     agent_filter: Option<&str>,
 ) -> Result<Vec<CaseResult>> {
-    if !project.evaluator.run_supported() {
-        return Ok(Vec::new());
-    }
     let cases = expand_matrix(project, task_set_filter, task_filter, agent_filter)?;
     for case in &cases {
         validate_case(case)?;
@@ -1194,12 +1726,7 @@ pub(crate) fn check_project(
             candidate: CandidateIdentity {
                 agent_id: case.agent.id.clone(),
                 adapter: case.agent.kind,
-                model: match case.agent.kind {
-                    AgentKind::Psychevo => case.agent.psychevo.model.clone(),
-                    AgentKind::Opencode => case.agent.opencode.model.clone(),
-                    AgentKind::Hermes => case.agent.hermes.model.clone(),
-                    AgentKind::Fake => None,
-                },
+                model: agent_model(&case.agent),
             },
             factors: CaseFactors::default(),
             case_id: case.case_id,
@@ -1218,6 +1745,7 @@ pub(crate) fn check_project(
             },
             duration_ms: 0,
             metrics: CaseMetrics::default(),
+            warnings: Vec::new(),
             artifacts: CaseArtifacts {
                 result: PathBuf::new(),
                 trajectory: PathBuf::new(),

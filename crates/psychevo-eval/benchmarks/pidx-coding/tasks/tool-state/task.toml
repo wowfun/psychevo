@@ -1,0 +1,5 @@
+name = "Record ordered tool state"
+kind = "stateful-tool-use"
+
+[verifier]
+timeout_seconds = 5

@@ -1,0 +1,5 @@
+name = "Repair the add helper"
+kind = "coding-patch"
+
+[verifier]
+timeout_seconds = 5

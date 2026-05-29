@@ -11,7 +11,7 @@ Define the first user-facing coding benchmark used by `psychevo-eval`.
 
 - `pidx-coding` benchmark inventory
 - benchmark-only manifest and task inventory
-- deterministic `local-coding` evaluator checks
+- deterministic `peval_agent` verifier scripts
 - view diagnostics for coding observability
 
 ## Benchmark Inventory
@@ -27,15 +27,21 @@ for cross-agent evaluation:
 - `swe-style`: issue-to-patch workflow judged by local tests
 
 Benchmark tasks must be tiny and self-contained. Users explicitly select the
-`base` task set and agent they intend to run; no-filter benchmark runs are not
-the documented path.
+`pidx` source set or the nested `pidx/smoke` set and agent they intend to run;
+no-filter benchmark runs are not the documented path.
 
-The benchmark manifest is `benchmark.toml` with `schema_version = 4`, an
-explicit benchmark id, and `[evaluator] kind = "local-coding"`. Task rows use
-schema v4 with `task_id`, `problem_statement`, `workspace`, and
-`test_spec.checks`. Task directories may contain initial workspaces or
-non-executable task data only; task-local `scripts/`, evaluator commands, and
-fake agent commands are not part of the benchmark source layout.
+The benchmark manifest is `benchmark.toml` with `schema_version = 5`, an
+explicit benchmark id, and `[[sources.peval_agent]] id = "pidx"`. Each task is
+a Harbor-like directory under `tasks/<native-task-id>/` containing:
+
+- `task.toml`, which must parse as TOML
+- `instruction.md`, which is the prompt shown to the agent
+- `environment/`, copied into an isolated workspace
+- `tests/test.sh`, the local verifier run from the workspace cwd
+
+Canonical task ids are `pidx/patch-add`, `pidx/tool-state`, and
+`pidx/rust-swe-add`. The `pidx/smoke` set includes the tiny Python and stateful
+tasks for fast local checks.
 
 Checked-in eval configs under `crates/psychevo-eval/templates/` are templates
 for users or tests to copy into a workspace. They are not benchmark source

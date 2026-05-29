@@ -5,13 +5,13 @@ psychevo_self_edit: deny
 
 # 340. Agent Evaluation
 
-Define concrete agent evaluation adapters for the first comparison set: Psychevo,
-OpenCode, and Hermes.
+Define concrete agent evaluation adapters for the first comparison set:
+Psychevo, command, ACP, OpenCode, and Hermes.
 
 ## Scope
 
 - shared fairness rules for agent evaluation adapters
-- preset and manifest behavior for the first three agents
+- preset and manifest behavior for built-in public agent kinds
 - event collection and result normalization expectations
 - readiness diagnostics for local agent executables and configs
 
@@ -43,6 +43,17 @@ Wrapper adapters for OpenCode and Hermes are concrete adapter kinds, not fake
 agents. They share process execution, command-template expansion, isolated
 home/config handling, and lossy collector fallback internals while preserving
 their adapter identity in manifests, reports, diagnostics, and facts.
+
+The `command` adapter is the local process baseline for host-run benchmarks.
+It starts the configured command in the task workspace, expands prompt and path
+templates, and imports optional JSONL stdout events.
+
+The `acp` adapter is a generic ACP stdio client. It starts the configured ACP
+server command, performs initialize/session setup, sends the task prompt through
+`session/prompt`, records ACP notifications as trajectory events, and treats a
+successful prompt response as agent completion. Deterministic tests may use a
+local ACP fixture process; real provider validation remains opt-in through the
+configured ACP server.
 
 Adapter validation uses the same command path as real usage. Deterministic
 tests configure local mock providers or fake wrapper commands; real provider

@@ -38,6 +38,7 @@ This creates or repairs:
 peval.toml
 scripts/
 runs/
+views/
 datasets/
 ```
 
@@ -86,7 +87,7 @@ Expected shape:
 ## First Run
 
 Running executes or reuses selected semantic cells. Each cell is stored under
-`runs/<benchmark>/<agent-id>/<task-id>/<cell-key>/`:
+`runs/<benchmark>/<agent-id>/<task-id>/<short-fingerprint>/`:
 
 ```bash
 peval run --config "$config" --task-set base --agent psychevo --json
@@ -103,6 +104,7 @@ cells and replace their cell directories.
 peval view --config "$config" -i summary,matrix,usage --format markdown
 peval view --config "$config" --group-by agent,task --format json
 peval view --config "$config" --output /tmp/peval-view.html
+peval view --config "$config" -o
 ```
 
 Scope by path or filters:

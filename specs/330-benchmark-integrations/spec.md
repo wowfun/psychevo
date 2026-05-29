@@ -6,13 +6,15 @@ psychevo_self_edit: deny
 # 330. Benchmark Integrations
 
 Define concrete benchmark source integrations. The first set covers local
-task sets, Harbor/Terminal-Bench style tasks, and SWE-bench style tasks.
+`peval_agent` tasks, Harbor/Terminal-Bench style tasks, SWE-bench style tasks,
+and Tau2 tasks.
 
 ## Scope
 
-- local task-set layout
+- local `peval_agent` task layout
 - Harbor bridge expectations
 - SWE-bench bridge expectations
+- Tau2 bridge expectations
 - benchmark source normalization into domain task families
 
 Out of scope:
@@ -26,12 +28,30 @@ Out of scope:
 
 Benchmark integrations translate source-specific data into the selected domain
 task model before execution. Source metadata such as benchmark name, split,
-task id, upstream commit, harness version, and native evaluator identity should
-be retained in case results.
+native task id, upstream commit, harness version, and native evaluator identity
+should be retained in case results.
+
+Every typed source contributes a full source set whose id is the source id.
+Nested sets are declared below the source and normalize to `source-id/set-id`.
+Canonical task ids are always `source-id/native-task-id`; source-local filters
+match native ids before prefixing.
+
+`peval_agent` is the only built-in host runner. It copies each task's
+`environment/` directory to an isolated workspace, runs the selected local
+agent in that workspace, and then runs `tests/test.sh` from the workspace cwd.
+Task `task.toml` files are required and must parse as TOML, but the directory
+name remains the native task id.
 
 Official benchmark integrations may delegate setup or scoring to official
 harnesses. Delegated output becomes canonical only after import into
 `psychevo-eval` result documents.
+
+`harbor`, `swe_bench`, and `tau2` source declarations opt into official bridge
+behavior. Default validation is local and deterministic; network/provider
+probes, data downloads, and live service checks require an explicit live mode
+or source-level opt-in. `peval check` may verify selected local tool
+dependencies such as `uv` or Docker, but it must not download benchmark data by
+default.
 
 ## Dataset Inventory
 
