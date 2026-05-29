@@ -828,9 +828,9 @@ impl TuiApp {
                     BottomPanel::Clarify(panel) => {
                         panel.desired_height().min(bottom_panel_height(main.height))
                     }
-                    BottomPanel::PermissionApproval(panel) => {
-                        panel.desired_height().min(bottom_panel_height(main.height))
-                    }
+                    BottomPanel::PermissionApproval(panel) => panel
+                        .desired_height(main.width)
+                        .min(main.height.saturating_sub(5).max(8)),
                     _ => bottom_panel_height(main.height),
                 })
                 .unwrap_or_else(|| bottom_panel_height(main.height));

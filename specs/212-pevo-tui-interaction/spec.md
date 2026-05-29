@@ -73,6 +73,12 @@ Approval panel defaults:
   clicked option through the same decision path as keyboard confirmation
 - offer once, session, always, and deny choices when the backend request
   supports them; hidden or unsupported choices must not be rendered
+- compute panel height from the terminal-wrapped detail text, not just the
+  logical source lines, so long tool/action/grant details do not hide approval
+  options
+- grow the bottom panel enough to show every available approval option when
+  terminal space permits; when the wrapped content is taller than the available
+  space, keep the full detail text and make the panel scroll internally
 
 If a running turn is interrupted or the fullscreen TUI exits while approval is
 pending, TUI must release pending approval requests with a deny/abort decision

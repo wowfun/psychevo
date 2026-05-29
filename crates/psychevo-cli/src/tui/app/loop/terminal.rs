@@ -164,6 +164,7 @@ pub(crate) fn scroll_bottom_panel(panel: &mut BottomPanel, amount: isize) {
     match panel {
         BottomPanel::Help(panel) => panel.scroll_by(amount),
         BottomPanel::Models(panel) if panel.tab == ModelTab::Info => panel.scroll_info_by(amount),
+        BottomPanel::PermissionApproval(panel) => panel.scroll_by(amount),
         BottomPanel::ProviderWizard(_) => {}
         _ => panel.selection_mut().move_selection(amount),
     }

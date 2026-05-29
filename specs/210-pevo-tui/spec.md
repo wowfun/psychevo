@@ -34,6 +34,8 @@ stdin/stdout, it keeps the deterministic line-by-line scripted behavior.
 - live exec-session rendering for yielded `exec_command` processes, including
   background output updates and interruption cleanup within the current runtime
   process
+- wrap-aware bottom approval panels that preserve all approval choices even
+  when long tool/action/grant details wrap across many terminal rows
 - shared ownership boundaries for the rendered TUI surface, interaction model,
   sessions, state, and validation
 

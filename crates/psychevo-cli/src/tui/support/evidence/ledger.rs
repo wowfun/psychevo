@@ -64,8 +64,13 @@ pub(crate) fn tool_title(tool: &str, value: &Value) -> String {
     let args = value.get("args").unwrap_or(&Value::Null);
     let result = value.get("result").unwrap_or(&Value::Null);
     let display = tool_display_spec(tool, value);
-    let detail = title_detail_from_keys(&display.title_arg_keys, args)
-        .or_else(|| title_detail_from_keys(&display.title_result_keys, result));
+    let detail = title_detail_from_keys(&display.title_arg_keys, args).or_else(|| {
+        if tool == "exec_command" {
+            None
+        } else {
+            title_detail_from_keys(&display.title_result_keys, result)
+        }
+    });
     tool_name_title(tool, detail.as_deref())
 }
 

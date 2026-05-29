@@ -542,7 +542,7 @@ pub(crate) mod tests {
         assert_eq!(slash_menu_items("/model")[0].description, "configure model");
         let mode = slash_menu_items("/mode");
         assert_eq!(mode[0].command, "/mode");
-        assert_eq!(mode[0].description, "set runtime permission mode");
+        assert_eq!(mode[0].description, "set collaboration mode");
         let variant = slash_menu_items("/var");
         assert_eq!(variant[0].command, "/variant");
         assert_eq!(variant[0].description, "set reasoning effort");

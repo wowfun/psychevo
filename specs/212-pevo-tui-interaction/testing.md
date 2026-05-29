@@ -147,6 +147,11 @@ Required interaction coverage:
 - Shared bottom selection pane Up/Down navigation wraps between first and last
   visible rows for sessions, model selection, and variant selection; Home/End
   remain direct first/last jumps.
+- Permission approval bottom panel coverage: mouse clicks on allow once,
+  session, always, and deny resolve the clicked option; long wrapped
+  tool/action/grant details grow the panel until all options are visible when
+  space permits; over-height details preserve content through internal
+  scrolling instead of hiding options.
 - `/agents Running` coverage for cap-state rendering, Pause/Resume spawning,
   and Stop subtree semantics. `/agents Available` coverage for disabled/error
   definition rows, `Use as main`, `Default main agent`, active/shadowed rows,

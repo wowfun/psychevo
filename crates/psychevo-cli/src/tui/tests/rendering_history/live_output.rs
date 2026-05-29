@@ -116,6 +116,10 @@ pub(crate) fn yielded_exec_session_stays_active_and_merges_live_poll_output() {
     let exec_idx = ui.exec_session_rows[&42];
     assert!(active_tool_row(&ui.transcript[exec_idx]));
     assert_eq!(ui.transcript[exec_idx].text, "start");
+    assert_eq!(
+        ui.transcript[exec_idx].title,
+        "exec_command printf start; sleep 1; printf done"
+    );
 
     ui.apply_stream_event(
         RunStreamEvent::Event(serde_json::json!({

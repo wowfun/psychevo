@@ -550,6 +550,37 @@ pub(crate) async fn permission_approval_panel_mouse_click_resolves_each_option()
     assert_permission_click_outcome(3, PermissionApprovalOutcome::Deny).await;
 }
 
+#[test]
+pub(crate) fn permission_approval_panel_wraps_details_without_hiding_options() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.bottom_panel = Some(BottomPanel::PermissionApproval(
+        PermissionApprovalPanel::new(
+            app.current_session.clone(),
+            PermissionApprovalRequest {
+                tool_call_id: "call_exec".to_string(),
+                tool_name: "exec_command".to_string(),
+                summary: "python3 -c \"import json; with open('/tmp/hn_stories_data.json', 'r') as f: data = json.load(f); print(data)\"".to_string(),
+                reason: "inline interpreter execution requires approval".to_string(),
+                matched_rule: None,
+                suggested_rule: Some("exec:python3 -c \"import json; with open('/tmp/hn_stories_data.json', 'r') as f: data = json.load(f); print(data)\"".to_string()),
+                allow_always: true,
+                timeout_secs: 0,
+            },
+            None,
+        ),
+    ));
+
+    let _ = draw_fullscreen_for_test(&app, &mut ui, 100, 24);
+    let option_indices = ui
+        .last_bottom_panel_areas
+        .iter()
+        .map(|(index, _area)| *index)
+        .collect::<Vec<_>>();
+    assert_eq!(option_indices, vec![0, 1, 2, 3]);
+}
+
 async fn assert_permission_click_outcome(index: usize, expected: PermissionApprovalOutcome) {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);

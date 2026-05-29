@@ -152,12 +152,20 @@ pub(crate) fn render_permission_approval_panel(
         .as_deref()
         .map(short_session)
         .unwrap_or("current");
-    let mut lines = vec![
+    let mut entries: Vec<(Option<usize>, Line<'static>)> = Vec::new();
+    entries.push((
+        None,
         Line::from(Span::styled(
             format!("Permission required  source: {source}"),
             theme.accent_style().add_modifier(Modifier::BOLD),
         )),
+    ));
+    entries.push((
+        None,
         Line::from(Span::styled(panel.request.reason.clone(), Style::default())),
+    ));
+    entries.push((
+        None,
         Line::from(Span::styled(
             format!(
                 "tool: {}  action: {}",
@@ -165,32 +173,22 @@ pub(crate) fn render_permission_approval_panel(
             ),
             theme.dim_style(),
         )),
-    ];
+    ));
     if let Some(rule) = &panel.request.matched_rule {
-        lines.push(Line::from(Span::styled(
-            format!("matched: {rule}"),
-            theme.dim_style(),
-        )));
+        entries.push((
+            None,
+            Line::from(Span::styled(format!("matched: {rule}"), theme.dim_style())),
+        ));
     }
     if let Some(rule) = &panel.request.suggested_rule {
-        lines.push(Line::from(Span::styled(
-            format!("grant: {rule}"),
-            theme.dim_style(),
-        )));
+        entries.push((
+            None,
+            Line::from(Span::styled(format!("grant: {rule}"), theme.dim_style())),
+        ));
     }
-    lines.push(Line::from(""));
+    entries.push((None, Line::from("")));
 
     for (index, (_outcome, label, description)) in panel.options().iter().enumerate() {
-        let row_y = inner.y.saturating_add(lines.len() as u16);
-        row_areas.push((
-            index,
-            Rect {
-                x: inner.x,
-                y: row_y,
-                width: inner.width,
-                height: 1,
-            },
-        ));
         let selected = index == panel.selected;
         let marker = if selected { "›" } else { " " };
         let key = match *label {
@@ -204,24 +202,90 @@ pub(crate) fn render_permission_approval_panel(
         } else {
             Style::default()
         };
-        lines.push(Line::from(vec![
-            Span::styled(format!("{marker} [{key}] "), theme.dim_style()),
-            Span::styled((*label).to_string(), style),
-            Span::styled("  ", theme.dim_style()),
-            Span::styled((*description).to_string(), theme.dim_style()),
-        ]));
+        entries.push((
+            Some(index),
+            Line::from(vec![
+                Span::styled(format!("{marker} [{key}] "), theme.dim_style()),
+                Span::styled((*label).to_string(), style),
+                Span::styled("  ", theme.dim_style()),
+                Span::styled((*description).to_string(), theme.dim_style()),
+            ]),
+        ));
     }
 
-    lines.push(Line::from(""));
+    entries.push((None, Line::from("")));
     if let Some(notice) = &panel.notice {
-        lines.push(Line::from(Span::styled(notice.clone(), theme.dim_style())));
+        entries.push((
+            None,
+            Line::from(Span::styled(notice.clone(), theme.dim_style())),
+        ));
     }
-    lines.push(Line::from(Span::styled(
-        "↑/↓ or j/k select | enter confirm | y once | a session | p permanent | d/esc deny",
-        theme.dim_style(),
-    )));
+    entries.push((
+        None,
+        Line::from(Span::styled(
+            "↑/↓ or j/k select | enter confirm | y once | a session | p permanent | d/esc deny",
+            theme.dim_style(),
+        )),
+    ));
 
-    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+    let mut visual_y = 0u16;
+    let total_height = entries.iter().fold(0u16, |height, (_index, line)| {
+        height.saturating_add(line_wrapped_height(line, inner.width))
+    });
+    let max_scroll = total_height.saturating_sub(inner.height);
+    panel.scroll = panel.scroll.min(max_scroll);
+    for (index, line) in &entries {
+        let row_height = line_wrapped_height(line, inner.width);
+        if let Some(index) = index
+            && let Some(area) = visible_wrapped_row_area(inner, visual_y, row_height, panel.scroll)
+        {
+            row_areas.push((*index, area));
+        }
+        visual_y = visual_y.saturating_add(row_height);
+    }
+    let lines = entries
+        .into_iter()
+        .map(|(_index, line)| line)
+        .collect::<Vec<_>>();
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .scroll((panel.scroll, 0)),
+        inner,
+    );
+}
+
+pub(crate) fn line_wrapped_height(line: &Line<'_>, width: u16) -> u16 {
+    let width = usize::from(width.max(1));
+    let display_width = line
+        .spans
+        .iter()
+        .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+        .sum::<usize>();
+    display_width.div_ceil(width).max(1) as u16
+}
+
+pub(crate) fn visible_wrapped_row_area(
+    inner: Rect,
+    visual_y: u16,
+    height: u16,
+    scroll: u16,
+) -> Option<Rect> {
+    let row_start = visual_y;
+    let row_end = visual_y.saturating_add(height);
+    let viewport_start = scroll;
+    let viewport_end = scroll.saturating_add(inner.height);
+    if row_end <= viewport_start || row_start >= viewport_end {
+        return None;
+    }
+    let visible_start = row_start.max(viewport_start);
+    let visible_end = row_end.min(viewport_end);
+    Some(Rect {
+        x: inner.x,
+        y: inner.y.saturating_add(visible_start.saturating_sub(scroll)),
+        width: inner.width,
+        height: visible_end.saturating_sub(visible_start).max(1),
+    })
 }
 
 pub(crate) fn render_clarify_panel(

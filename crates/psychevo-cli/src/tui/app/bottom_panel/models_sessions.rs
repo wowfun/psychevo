@@ -450,6 +450,7 @@ impl TuiApp {
             label: panel.label.clone(),
             base_url: panel.base_url.clone(),
             api_key,
+            no_auth: false,
         });
         let result = match result {
             Ok(result) => result,

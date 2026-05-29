@@ -330,6 +330,7 @@ impl PermissionApprovalPanel {
             session_id,
             request,
             selected: 0,
+            scroll: 0,
             previous_panel: previous_panel.map(Box::new),
             notice: None,
         }
@@ -363,11 +364,45 @@ impl PermissionApprovalPanel {
         options
     }
 
-    pub(crate) fn desired_height(&self) -> u16 {
-        let detail_rows = u16::from(self.request.matched_rule.is_some())
-            + u16::from(self.request.suggested_rule.is_some())
-            + u16::from(self.notice.is_some());
-        (7 + self.options().len() as u16 + detail_rows).max(10)
+    pub(crate) fn desired_height(&self, width: u16) -> u16 {
+        let inner_width = width.saturating_sub(4).max(1);
+        let wrapped_rows = [
+            format!(
+                "Permission required  source: {}",
+                self.session_id.as_deref().unwrap_or("current")
+            ),
+            self.request.reason.clone(),
+            format!(
+                "tool: {}  action: {}",
+                self.request.tool_name, self.request.summary
+            ),
+            self.request
+                .matched_rule
+                .as_ref()
+                .map(|rule| format!("matched: {rule}"))
+                .unwrap_or_default(),
+            self.request
+                .suggested_rule
+                .as_ref()
+                .map(|rule| format!("grant: {rule}"))
+                .unwrap_or_default(),
+            self.notice.clone().unwrap_or_default(),
+            "↑/↓ or j/k select | enter confirm | y once | a session | p permanent | d/esc deny"
+                .to_string(),
+        ]
+        .into_iter()
+        .filter(|line| !line.is_empty())
+        .map(|line| wrapped_height(&line, inner_width))
+        .sum::<u16>();
+        (self.options().len() as u16 + wrapped_rows + 4).max(10)
+    }
+
+    pub(crate) fn scroll_by(&mut self, amount: isize) {
+        if amount.is_negative() {
+            self.scroll = self.scroll.saturating_sub(amount.unsigned_abs() as u16);
+        } else {
+            self.scroll = self.scroll.saturating_add(amount as u16);
+        }
     }
 
     pub(crate) fn move_selection(&mut self, delta: isize) {
@@ -385,6 +420,12 @@ impl PermissionApprovalPanel {
     pub(crate) fn restore_panel(self) -> Option<BottomPanel> {
         self.previous_panel.map(|panel| *panel)
     }
+}
+
+pub(crate) fn wrapped_height(text: &str, width: u16) -> u16 {
+    let width = usize::from(width.max(1));
+    let display_width = UnicodeWidthStr::width(text);
+    display_width.div_ceil(width).max(1) as u16
 }
 
 pub(crate) fn char_count(value: &str) -> usize {
