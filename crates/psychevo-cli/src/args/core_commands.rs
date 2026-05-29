@@ -126,6 +126,20 @@ pub(crate) struct RunArgs {
     )]
     pub(crate) dangerously_skip_permissions: bool,
     #[arg(
+        long = "project-context",
+        value_enum,
+        value_name = "MODE",
+        conflicts_with = "isolated",
+        help = "Override project instruction discovery: git-root, cwd, or off"
+    )]
+    pub(crate) project_context: Option<ProjectContextArg>,
+    #[arg(
+        long,
+        conflicts_with = "project_context",
+        help = "Alias for --project-context cwd"
+    )]
+    pub(crate) isolated: bool,
+    #[arg(
         long,
         value_name = "NAME_OR_PATH",
         conflicts_with = "no_agents",

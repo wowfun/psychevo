@@ -36,12 +36,31 @@ pub(crate) fn parse_run_config(value: Value) -> Result<RunConfig> {
     if let Some(lsp) = object.get("lsp") {
         config.lsp = parse_lsp_config(lsp)?;
     }
+    if let Some(project_context) = object.get("project_context") {
+        config.project_context = parse_project_context_config(project_context)?;
+    }
     config.permissions = parse_permission_config(object)?;
     if let Some(tools) = object.get("tools") {
         config.tools = parse_tool_selection_config(tools)?;
     }
     if let Some(toolsets) = object.get("toolsets") {
         config.toolsets = parse_custom_toolsets(toolsets)?;
+    }
+    Ok(config)
+}
+
+pub(crate) fn parse_project_context_config(value: &Value) -> Result<ProjectContextConfig> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| Error::Config("project_context must be an object".to_string()))?;
+    let mut config = ProjectContextConfig::default();
+    if let Some(instructions) = optional_string_field(object, "instructions")? {
+        config.instructions =
+            ProjectContextInstructionMode::parse(&instructions).ok_or_else(|| {
+                Error::Config(
+                    "project_context.instructions must be git-root, cwd, or off".to_string(),
+                )
+            })?;
     }
     Ok(config)
 }

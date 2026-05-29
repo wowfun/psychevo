@@ -39,6 +39,8 @@ Out of scope:
 - optional `--include-reasoning`
 - optional `--permission-mode <default|acceptEdits|plan|dontAsk|bypassPermissions>`
 - optional `--dangerously-skip-permissions`
+- optional `--project-context <git-root|cwd|off>`
+- optional `--isolated`
 - optional `--no-skills`
 - repeatable optional `--skill <name-or-path>`
 
@@ -67,6 +69,25 @@ the SQLite path and is an environment-only control.
 `pevo run` normally requires an initialized `PSYCHEVO_HOME`. When both
 `PSYCHEVO_CONFIG` and `PSYCHEVO_DB` are set, scripts and tests may bypass
 global home initialization.
+
+## Project Context
+
+`pevo run` always makes the canonical runtime workdir visible to the model as
+runtime environment context. This context explains that relative paths resolve
+from that workdir and that absolute paths remain subject to the normal
+permission gates.
+
+Project instruction discovery defaults to the configured
+`[project_context].instructions` value, or `git-root` when unset.
+`git-root` preserves the existing behavior of loading AGENTS/project
+instructions from the discovered Git root through the workdir. `cwd` loads only
+instruction files in the canonical workdir. `off` suppresses project
+instruction injection.
+
+`--project-context <git-root|cwd|off>` overrides configuration for the
+invocation. `--isolated` is an alias for `--project-context cwd`. Supplying
+both is a usage error. These options change model-visible project context only;
+they do not change permission profiles, sandbox policy, or approval behavior.
 
 ## Model and Variant
 

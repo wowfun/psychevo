@@ -37,6 +37,7 @@ pub struct RunOptions {
     pub prompt_display: Option<PromptDisplayMetadata>,
     pub max_context_messages: Option<usize>,
     pub config_path: Option<PathBuf>,
+    pub project_context_override: Option<ProjectContextInstructionMode>,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub include_reasoning: bool,
@@ -177,6 +178,15 @@ pub enum RunMode {
     Plan,
     #[default]
     Default,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProjectContextInstructionMode {
+    #[default]
+    GitRoot,
+    Cwd,
+    Off,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -545,6 +555,25 @@ impl RunMode {
         match value {
             "plan" => Some(Self::Plan),
             "default" => Some(Self::Default),
+            _ => None,
+        }
+    }
+}
+
+impl ProjectContextInstructionMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::GitRoot => "git-root",
+            Self::Cwd => "cwd",
+            Self::Off => "off",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "git-root" | "git_root" => Some(Self::GitRoot),
+            "cwd" => Some(Self::Cwd),
+            "off" => Some(Self::Off),
             _ => None,
         }
     }

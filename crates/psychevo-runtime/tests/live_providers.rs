@@ -41,6 +41,7 @@ pub(crate) async fn run_live_read_tool(provider: &str) {
         prompt_display: None,
         max_context_messages: None,
         config_path: None,
+        project_context_override: None,
         model: None,
         reasoning_effort: None,
         include_reasoning: true,

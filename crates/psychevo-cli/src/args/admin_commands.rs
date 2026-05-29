@@ -569,6 +569,14 @@ pub(crate) enum PermissionModeArg {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 #[value(rename_all = "kebab-case")]
+pub(crate) enum ProjectContextArg {
+    GitRoot,
+    Cwd,
+    Off,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[value(rename_all = "kebab-case")]
 pub(crate) enum PermissionRuleKindArg {
     Allow,
     Ask,
@@ -623,6 +631,16 @@ impl PermissionModeArg {
             Self::AcceptEdits => PermissionMode::AcceptEdits,
             Self::DontAsk => PermissionMode::DontAsk,
             Self::BypassPermissions => PermissionMode::BypassPermissions,
+        }
+    }
+}
+
+impl ProjectContextArg {
+    pub(crate) fn mode(self) -> ProjectContextInstructionMode {
+        match self {
+            Self::GitRoot => ProjectContextInstructionMode::GitRoot,
+            Self::Cwd => ProjectContextInstructionMode::Cwd,
+            Self::Off => ProjectContextInstructionMode::Off,
         }
     }
 }
@@ -738,6 +756,19 @@ pub(crate) mod tests {
         );
         assert!(
             Cli::try_parse_from(["pevo", "run", "--dangerously-skip-permissions", "hello"]).is_ok()
+        );
+        assert!(Cli::try_parse_from(["pevo", "run", "--project-context", "cwd", "hello"]).is_ok());
+        assert!(Cli::try_parse_from(["pevo", "run", "--isolated", "hello"]).is_ok());
+        assert!(
+            Cli::try_parse_from([
+                "pevo",
+                "run",
+                "--isolated",
+                "--project-context",
+                "off",
+                "hello"
+            ])
+            .is_err()
         );
         assert!(
             Cli::try_parse_from(["pevo", "agent", "run", "reviewer", "-f", "json", "hello"])

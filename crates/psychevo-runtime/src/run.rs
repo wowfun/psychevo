@@ -26,7 +26,10 @@ pub(crate) use crate::compaction::{
     CompactSessionOptions, CompactionReason, compact_session, is_context_overflow_error,
     load_projected_messages,
 };
-pub(crate) use crate::config::{ResolvedRunProvider, load_run_config, resolve_run_provider};
+pub(crate) use crate::config::{
+    ResolvedRunProvider, load_project_context_instruction_mode, load_run_config,
+    resolve_run_provider,
+};
 pub(crate) use crate::context_usage::{
     ContextRecorder, ContextRecordingProvider, LiveContextProfile, context_counting_metadata,
 };

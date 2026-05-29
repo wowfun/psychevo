@@ -143,6 +143,7 @@ pub(crate) async fn run_agent(args: AgentRunArgs) -> Result<ExitCode> {
         prompt_display: None,
         max_context_messages: None,
         config_path,
+        project_context_override: None,
         model: args.model.clone(),
         reasoning_effort: args.variant.map(|variant| variant.as_str().to_string()),
         include_reasoning: false,

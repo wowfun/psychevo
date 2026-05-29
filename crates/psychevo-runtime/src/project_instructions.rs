@@ -3,7 +3,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
-use crate::types::RunWarning;
+use crate::types::{ProjectContextInstructionMode, RunWarning};
 
 pub(crate) const PROJECT_INSTRUCTION_MAX_BYTES: usize = 32 * 1024;
 pub(crate) const TRUNCATION_MARKER: &str = "\n\n[truncated: project instruction budget exhausted]";
@@ -71,8 +71,14 @@ pub(crate) const CLAUDE_CANDIDATES: &[ClaudeCandidate] = &[
     },
 ];
 
-pub(crate) fn load_project_instructions(workdir: &Path) -> Result<ProjectInstructionLoad> {
-    let search_dirs = project_instruction_search_dirs(workdir);
+pub(crate) fn load_project_instructions(
+    workdir: &Path,
+    mode: ProjectContextInstructionMode,
+) -> Result<ProjectInstructionLoad> {
+    if mode == ProjectContextInstructionMode::Off {
+        return Ok(ProjectInstructionLoad::default());
+    }
+    let search_dirs = project_instruction_search_dirs(workdir, mode);
     let warnings = claude_migration_warnings(&search_dirs)?;
     let fragments = load_instruction_fragments(&search_dirs)?;
     Ok(ProjectInstructionLoad {
@@ -81,7 +87,13 @@ pub(crate) fn load_project_instructions(workdir: &Path) -> Result<ProjectInstruc
     })
 }
 
-pub(crate) fn project_instruction_search_dirs(workdir: &Path) -> Vec<PathBuf> {
+pub(crate) fn project_instruction_search_dirs(
+    workdir: &Path,
+    mode: ProjectContextInstructionMode,
+) -> Vec<PathBuf> {
+    if mode == ProjectContextInstructionMode::Cwd {
+        return vec![workdir.to_path_buf()];
+    }
     let Some(root) = project_root(workdir) else {
         return vec![workdir.to_path_buf()];
     };
@@ -238,6 +250,7 @@ pub(crate) fn is_regular_file(path: &Path) -> Result<bool> {
 #[cfg(test)]
 pub(crate) mod tests {
     pub(crate) use super::*;
+    use crate::types::ProjectContextInstructionMode;
     use tempfile::tempdir;
 
     #[test]
@@ -251,7 +264,8 @@ pub(crate) mod tests {
         fs::write(nested.join(".psychevo/AGENTS.md"), "psychevo").expect("psychevo");
         fs::write(nested.join("AGENTS.local.md"), "local").expect("local");
 
-        let loaded = load_project_instructions(&nested).expect("loaded");
+        let loaded = load_project_instructions(&nested, ProjectContextInstructionMode::GitRoot)
+            .expect("loaded");
 
         let names = loaded
             .fragments
@@ -283,7 +297,8 @@ pub(crate) mod tests {
         fs::write(parent.join("AGENTS.md"), "upstream-only").expect("parent");
         fs::write(child.join("AGENTS.md"), "child").expect("child");
 
-        let loaded = load_project_instructions(&child).expect("loaded");
+        let loaded = load_project_instructions(&child, ProjectContextInstructionMode::GitRoot)
+            .expect("loaded");
 
         assert_eq!(loaded.fragments.len(), 1);
         assert!(loaded.fragments[0].content.contains("child"));
@@ -298,7 +313,8 @@ pub(crate) mod tests {
         fs::create_dir(root.join(".git")).expect("git");
         fs::write(root.join("AGENTS.local.md"), "   \n").expect("empty");
 
-        let loaded = load_project_instructions(&root).expect("loaded");
+        let loaded = load_project_instructions(&root, ProjectContextInstructionMode::GitRoot)
+            .expect("loaded");
 
         assert!(loaded.fragments.is_empty());
     }
@@ -315,7 +331,8 @@ pub(crate) mod tests {
         )
         .expect("agents");
 
-        let loaded = load_project_instructions(&root).expect("loaded");
+        let loaded = load_project_instructions(&root, ProjectContextInstructionMode::GitRoot)
+            .expect("loaded");
 
         assert_eq!(loaded.fragments.len(), 1);
         assert!(loaded.fragments[0].truncated);
@@ -336,7 +353,8 @@ pub(crate) mod tests {
         fs::write(root.join("CLAUDE.local.md"), "claude local").expect("claude local");
         fs::write(root.join(".claude/CLAUDE.md"), "claude dir").expect("claude dir");
 
-        let loaded = load_project_instructions(&root).expect("loaded");
+        let loaded = load_project_instructions(&root, ProjectContextInstructionMode::GitRoot)
+            .expect("loaded");
 
         assert!(loaded.fragments.is_empty());
         assert_eq!(loaded.warnings.len(), 3);
@@ -357,11 +375,46 @@ pub(crate) mod tests {
         fs::write(root.join("CLAUDE.md"), "claude").expect("claude");
         fs::write(root.join("AGENTS.md"), "agents").expect("agents");
 
-        let loaded = load_project_instructions(&root).expect("loaded");
+        let loaded = load_project_instructions(&root, ProjectContextInstructionMode::GitRoot)
+            .expect("loaded");
 
         assert!(loaded.warnings.is_empty());
         assert_eq!(loaded.fragments.len(), 1);
         assert!(loaded.fragments[0].content.contains("agents"));
         assert!(!loaded.fragments[0].content.contains("claude"));
+    }
+
+    #[test]
+    fn cwd_mode_only_loads_current_workdir_instructions() {
+        let temp = tempdir().expect("temp");
+        let root = temp.path().join("repo");
+        let nested = root.join("task");
+        fs::create_dir_all(&nested).expect("dirs");
+        fs::create_dir(root.join(".git")).expect("git");
+        fs::write(root.join("AGENTS.md"), "repo-root").expect("root agents");
+        fs::write(nested.join("AGENTS.md"), "task-only").expect("task agents");
+
+        let loaded =
+            load_project_instructions(&nested, ProjectContextInstructionMode::Cwd).expect("loaded");
+
+        assert_eq!(loaded.fragments.len(), 1);
+        assert!(loaded.fragments[0].content.contains("task-only"));
+        assert!(!loaded.fragments[0].content.contains("repo-root"));
+    }
+
+    #[test]
+    fn off_mode_skips_instructions_and_claude_warnings() {
+        let temp = tempdir().expect("temp");
+        let root = temp.path().join("repo");
+        fs::create_dir_all(&root).expect("root");
+        fs::create_dir(root.join(".git")).expect("git");
+        fs::write(root.join("AGENTS.md"), "agents").expect("agents");
+        fs::write(root.join("CLAUDE.md"), "claude").expect("claude");
+
+        let loaded =
+            load_project_instructions(&root, ProjectContextInstructionMode::Off).expect("loaded");
+
+        assert!(loaded.fragments.is_empty());
+        assert!(loaded.warnings.is_empty());
     }
 }

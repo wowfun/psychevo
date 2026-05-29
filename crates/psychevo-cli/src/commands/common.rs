@@ -37,6 +37,7 @@ pub(crate) fn base_run_options(
         prompt_display: None,
         max_context_messages: None,
         config_path: env_path("PSYCHEVO_CONFIG", env_map, cwd)?,
+        project_context_override: None,
         model: None,
         reasoning_effort: None,
         include_reasoning: false,

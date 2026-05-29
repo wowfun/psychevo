@@ -217,6 +217,7 @@ pub(crate) fn load_effective_tui_slash_config(
         prompt_display: None,
         max_context_messages: None,
         config_path,
+        project_context_override: None,
         model: None,
         reasoning_effort: None,
         include_reasoning: false,

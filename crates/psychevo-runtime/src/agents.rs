@@ -40,8 +40,9 @@ pub(crate) use crate::store::{
 };
 pub(crate) use crate::tools::{ToolRuntimeContext, coding_core_tools_for_mode_with_selection};
 pub(crate) use crate::types::{
-    ApprovalHandler, ApprovalMode, ModelMetadata, PermissionConfig, PermissionMode, RunMode,
-    RunStreamEvent, RunStreamSink, SelectedAgent, SessionSummary, SmokeControl,
+    ApprovalHandler, ApprovalMode, ModelMetadata, PermissionConfig, PermissionMode,
+    ProjectContextInstructionMode, RunMode, RunStreamEvent, RunStreamSink, SelectedAgent,
+    SessionSummary, SmokeControl,
 };
 
 #[allow(unused_imports)]

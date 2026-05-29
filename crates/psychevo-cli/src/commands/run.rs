@@ -8,7 +8,7 @@ use futures::future::BoxFuture;
 use psychevo_ai::Outcome;
 use psychevo_runtime::{
     ApprovalHandler, PermissionApprovalDecision, PermissionApprovalRequest, PermissionMode,
-    RunMode, RunOptions, StateRuntime, run_live,
+    ProjectContextInstructionMode, RunMode, RunOptions, StateRuntime, run_live,
 };
 
 use crate::args::{PermissionModeArg, RunArgs, RunFormatArg};
@@ -72,6 +72,11 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
     let permission_mode = mode_arg
         .map(PermissionModeArg::permission_mode)
         .filter(|mode| *mode != PermissionMode::Default);
+    let project_context_override = if args.isolated {
+        Some(ProjectContextInstructionMode::Cwd)
+    } else {
+        args.project_context.map(|mode| mode.mode())
+    };
     let approval_handler = interactive_approval_handler();
     let state = StateRuntime::open(&db_path)?;
 
@@ -87,6 +92,7 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
         prompt_display: None,
         max_context_messages: None,
         config_path,
+        project_context_override,
         model: args.model.clone(),
         reasoning_effort: args.variant.map(|variant| variant.as_str().to_string()),
         include_reasoning: args.include_reasoning,

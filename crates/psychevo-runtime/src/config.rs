@@ -14,7 +14,8 @@ pub(crate) use crate::types::{
     ExecPolicyExample, ExecPolicyHostExecutable, ExecPolicyPatternToken, ExecPolicyRule,
     GranularApprovalConfig, ModelCapabilities, ModelCatalogEntry, ModelCatalogProvider, ModelCost,
     ModelCostTier, ModelLimits, ModelMetadata, ModelMetadataCacheTarget, PermissionAccess,
-    PermissionConfig, PermissionProfileConfig, RunMode, RunOptions, ScopedCustomProviderInput,
+    PermissionConfig, PermissionProfileConfig, ProjectContextInstructionMode, RunMode, RunOptions,
+    ScopedCustomProviderInput,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -24,6 +25,7 @@ pub(crate) struct RunConfig {
     pub(crate) compression: CompressionConfig,
     pub(crate) permissions: PermissionConfig,
     pub(crate) lsp: LspConfig,
+    pub(crate) project_context: ProjectContextConfig,
     pub(crate) tools: ToolSelectionConfig,
     pub(crate) toolsets: BTreeMap<String, CustomToolsetConfig>,
 }

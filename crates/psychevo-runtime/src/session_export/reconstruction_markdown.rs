@@ -387,6 +387,7 @@ pub(crate) fn reconstructed_tool_declarations(
             generation_metadata: json_value_object_with_model_metadata(metadata),
             workdir: workdir.to_path_buf(),
             mode,
+            project_context_mode: Default::default(),
             permission_config: Default::default(),
             lsp: Default::default(),
             permission_mode: Default::default(),

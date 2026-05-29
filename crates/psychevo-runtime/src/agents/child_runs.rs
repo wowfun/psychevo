@@ -504,6 +504,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     let tool_declarations_hash = tool_declarations_hash(&tools);
     let prompt_assembly = assemble_child_prompt_prefix(
         child.context.mode,
+        &child.context.workdir,
         &child.agent,
         &child.context.model_metadata.capabilities,
         !tools.is_empty(),
@@ -526,6 +527,10 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         "skill_catalog_visible": false,
         "project_instructions_visible": false,
         "project_instructions_role": serde_json::Value::Null,
+        "project_context": {
+            "instructions": child.context.project_context_mode.as_str(),
+        },
+        "workdir": child.context.workdir.display().to_string(),
     });
     let prefix_record = prompt_prefix_record(PromptPrefixRecordInput {
         session_id: &child_session,
@@ -560,6 +565,8 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         "skill_catalog_visible": prefix_metadata.get("skill_catalog_visible").cloned().unwrap_or_default(),
         "project_instructions_visible": prefix_metadata.get("project_instructions_visible").cloned().unwrap_or_default(),
         "project_instructions_role": prefix_metadata.get("project_instructions_role").cloned().unwrap_or_default(),
+        "project_context": prefix_metadata.get("project_context").cloned().unwrap_or_default(),
+        "workdir": prefix_metadata.get("workdir").cloned().unwrap_or_default(),
     });
     let prompt_context_evidence = context_evidence_for_request(
         &prompt_assembly.prompt_instructions,

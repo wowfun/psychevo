@@ -13,7 +13,6 @@ pub(crate) async fn run_live_internal(
     if options.prompt.trim().is_empty() && options.image_inputs.is_empty() {
         return Err(Error::Message("prompt is empty".to_string()));
     }
-    let project_instructions = load_project_instructions(&workdir)?;
 
     if options.no_agents && options.agent.is_some() {
         return Err(Error::Config(
@@ -21,6 +20,8 @@ pub(crate) async fn run_live_internal(
         ));
     }
     let loaded = load_run_config(&options, &workdir)?;
+    let project_context_mode = loaded.config.project_context.instructions;
+    let project_instructions = load_project_instructions(&workdir, project_context_mode)?;
     let permission_mode = options.permission_mode.unwrap_or_default();
     let approval_mode = options.approval_mode.unwrap_or({
         match loaded.config.permissions.approvals_reviewer {
@@ -121,6 +122,10 @@ pub(crate) async fn run_live_internal(
                         "mode": options.mode.as_str(),
                         "permission_mode": permission_mode.as_str(),
                         "approval_mode": approval_mode.as_str(),
+                        "project_context": {
+                            "instructions": project_context_mode.as_str(),
+                        },
+                        "workdir": workdir.display().to_string(),
                         "selected_agent": selected_agent_summary.clone(),
                     })),
                 )?,
@@ -144,6 +149,10 @@ pub(crate) async fn run_live_internal(
                     "mode": options.mode.as_str(),
                     "permission_mode": permission_mode.as_str(),
                     "approval_mode": approval_mode.as_str(),
+                    "project_context": {
+                        "instructions": project_context_mode.as_str(),
+                    },
+                    "workdir": workdir.display().to_string(),
                     "selected_agent": selected_agent_summary.clone(),
                 })),
             )?,
@@ -185,6 +194,9 @@ pub(crate) async fn run_live_internal(
         "mode": options.mode.as_str(),
         "permission_mode": permission_mode.as_str(),
         "approval_mode": approval_mode.as_str(),
+        "project_context": {
+            "instructions": project_context_mode.as_str(),
+        },
         "selected_agent": selected_agent_summary.clone(),
         "agents_enabled": !options.no_agents,
         "agent_count": agent_catalog.agents.len(),
@@ -262,6 +274,7 @@ pub(crate) async fn run_live_internal(
             generation_metadata: generation_metadata.clone(),
             workdir: workdir.clone(),
             mode: options.mode,
+            project_context_mode,
             permission_config: loaded.config.permissions.clone(),
             lsp: loaded.config.lsp.clone(),
             permission_mode,
@@ -356,6 +369,10 @@ pub(crate) async fn run_live_internal(
         "mode": options.mode.as_str(),
         "permission_mode": permission_mode.as_str(),
         "approval_mode": approval_mode.as_str(),
+        "project_context": {
+            "instructions": project_context_mode.as_str(),
+        },
+        "workdir": workdir.display().to_string(),
         "selected_agent": selected_agent_summary.clone(),
         "agents_enabled": !options.no_agents,
         "effective_tools": effective_tool_names,
@@ -382,6 +399,7 @@ pub(crate) async fn run_live_internal(
     let (prompt_assembly, prompt_prefix_record) = if needs_prefix_rebuild {
         let assembly = assemble_main_prompt_prefix(
             options.mode,
+            &workdir,
             selected_agent.as_ref(),
             &prompt_agents,
             &prompt_skills,
@@ -446,6 +464,8 @@ pub(crate) async fn run_live_internal(
         "skill_catalog_visible": prefix_metadata.get("skill_catalog_visible").cloned().unwrap_or_default(),
         "project_instructions_visible": prefix_metadata.get("project_instructions_visible").cloned().unwrap_or_default(),
         "project_instructions_role": prefix_metadata.get("project_instructions_role").cloned().unwrap_or_default(),
+        "project_context": prefix_metadata.get("project_context").cloned().unwrap_or_default(),
+        "workdir": prefix_metadata.get("workdir").cloned().unwrap_or_default(),
     });
     let sink = Arc::new(PersistenceSink {
         store: store.clone(),
@@ -765,6 +785,8 @@ pub(crate) fn prompt_prefix_invalidation_reason(
         "skill_catalog_visible",
         "project_instructions_visible",
         "project_instructions_role",
+        "project_context",
+        "workdir",
     ] {
         if metadata.get(key).unwrap_or(&serde_json::Value::Null)
             != expected_metadata

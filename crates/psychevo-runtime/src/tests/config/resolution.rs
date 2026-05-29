@@ -204,6 +204,79 @@ pub(crate) fn config_jsonc_is_ignored_when_toml_exists() {
 }
 
 #[test]
+pub(crate) fn project_context_config_parses_and_cli_override_wins() {
+    let temp = tempdir().expect("temp");
+    let mut options = base_options(&temp);
+    let config_dir = home_dir(&temp);
+    fs::create_dir_all(&config_dir).expect("config dir");
+    write_config(
+        config_dir.join("config.toml"),
+        r#"
+[project_context]
+instructions = "cwd"
+"#,
+    )
+    .expect("toml config");
+
+    let workdir = canonical_workdir(&options.workdir).expect("workdir");
+    let loaded = load_run_config(&options, &workdir).expect("config");
+    assert_eq!(
+        loaded.config.project_context.instructions,
+        ProjectContextInstructionMode::Cwd
+    );
+
+    options.project_context_override = Some(ProjectContextInstructionMode::Off);
+    let loaded = load_run_config(&options, &workdir).expect("override");
+    assert_eq!(
+        loaded.config.project_context.instructions,
+        ProjectContextInstructionMode::Off
+    );
+}
+
+#[test]
+pub(crate) fn project_context_lightweight_load_does_not_require_home_config() {
+    let temp = tempdir().expect("temp");
+    let options = base_options(&temp);
+    let workdir = canonical_workdir(&options.workdir).expect("workdir");
+    fs::create_dir_all(workdir.join(".psychevo")).expect("project config dir");
+    write_config(
+        workdir.join(".psychevo/config.toml"),
+        r#"
+[project_context]
+instructions = "cwd"
+"#,
+    )
+    .expect("project config");
+
+    let mode = load_project_context_instruction_mode(&options, &workdir).expect("mode");
+    assert_eq!(mode, ProjectContextInstructionMode::Cwd);
+    assert!(load_run_config(&options, &workdir).is_err());
+}
+
+#[test]
+pub(crate) fn invalid_project_context_config_is_rejected() {
+    let temp = tempdir().expect("temp");
+    let options = base_options(&temp);
+    let config_dir = home_dir(&temp);
+    fs::create_dir_all(&config_dir).expect("config dir");
+    write_config(
+        config_dir.join("config.toml"),
+        r#"
+[project_context]
+instructions = "repo-root"
+"#,
+    )
+    .expect("toml config");
+
+    let workdir = canonical_workdir(&options.workdir).expect("workdir");
+    let err = load_run_config(&options, &workdir).expect_err("invalid context mode");
+    assert!(
+        err.to_string()
+            .contains("project_context.instructions must be git-root, cwd, or off")
+    );
+}
+
+#[test]
 pub(crate) fn reasoning_effort_values_are_validated_and_none_disables() {
     let temp = tempdir().expect("temp");
     let mut options = base_options(&temp);

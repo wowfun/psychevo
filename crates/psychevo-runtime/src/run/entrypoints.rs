@@ -56,6 +56,39 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
         .inherited_env
         .clone()
         .unwrap_or_else(|| std::env::vars().collect());
+    let project_context_options = RunOptions {
+        state: options.state.clone(),
+        workdir: workdir.clone(),
+        snapshot_root: None,
+        session: Some(summary.id.clone()),
+        continue_latest: false,
+        prompt: String::new(),
+        image_inputs: Vec::new(),
+        extract_prompt_image_sources: true,
+        prompt_display: None,
+        max_context_messages: None,
+        config_path: options.config_path.clone(),
+        project_context_override: None,
+        model: Some(format!("{}/{}", summary.provider, summary.model)),
+        reasoning_effort: metadata
+            .get("reasoning_effort")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        include_reasoning: false,
+        mode,
+        permission_mode: None,
+        approval_mode: None,
+        approval_handler: None,
+        clarify_enabled: false,
+        inherited_env: Some(env.clone()),
+        agent: None,
+        no_agents: options.no_agents,
+        no_skills: options.no_skills,
+        skill_inputs: Vec::new(),
+        mcp_servers: Vec::new(),
+    };
+    let project_context_mode =
+        load_project_context_instruction_mode(&project_context_options, &workdir)?;
     let agents_home = resolve_agents_home(&env, &workdir)?;
     let agent_input = options
         .agent
@@ -91,7 +124,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
         no_skills: options.no_skills,
     };
     let skill_catalog = discover_skills(&skill_options)?;
-    let project_instructions = load_project_instructions(&workdir)?;
+    let project_instructions = load_project_instructions(&workdir, project_context_mode)?;
     let model_metadata = session_model_metadata(&metadata);
     let agent_tools = if !options.no_agents {
         let provider: Arc<dyn GenerationProvider> = Arc::new(OpenAiChatProvider::new(
@@ -129,6 +162,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
             }),
             workdir: workdir.clone(),
             mode,
+            project_context_mode,
             permission_config: PermissionConfig::default(),
             lsp: Default::default(),
             permission_mode: Default::default(),
@@ -199,6 +233,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
     let selected_agent_summary = selected_agent_for_result(selected_agent.as_ref());
     let assembly = assemble_main_prompt_prefix(
         mode,
+        &workdir,
         selected_agent.as_ref(),
         &prompt_agents,
         &prompt_skills,
@@ -224,6 +259,10 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
             "skill_catalog_visible": !prompt_skills.is_empty(),
             "project_instructions_visible": !prompt_project_instructions.is_empty(),
             "project_instructions_role": project_instructions_role,
+            "project_context": {
+                "instructions": project_context_mode.as_str(),
+            },
+            "workdir": workdir.display().to_string(),
         })),
     });
     let record = store.upsert_session_prompt_prefix(record)?;
@@ -261,6 +300,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         prompt_display: None,
         max_context_messages: None,
         config_path: options.config_path.clone(),
+        project_context_override: None,
         model: options.model.clone(),
         reasoning_effort: options.reasoning_effort.clone(),
         include_reasoning: false,
@@ -370,6 +410,10 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
                 "mode": options.mode.as_str(),
                 "permission_mode": permission_mode.as_str(),
                 "approval_mode": approval_mode.as_str(),
+                "project_context": {
+                    "instructions": loaded.config.project_context.instructions.as_str(),
+                },
+                "workdir": workdir.display().to_string(),
                 "selected_agent": selected_parent_summary,
             })),
         )?
@@ -394,6 +438,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         }),
         workdir,
         mode: options.mode,
+        project_context_mode: loaded.config.project_context.instructions,
         permission_config: loaded.config.permissions.clone(),
         lsp: loaded.config.lsp.clone(),
         permission_mode,

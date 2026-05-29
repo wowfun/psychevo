@@ -271,6 +271,39 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
         .inherited_env
         .clone()
         .unwrap_or_else(|| std::env::vars().collect());
+    let project_context_options = RunOptions {
+        state: options.state.clone(),
+        workdir: workdir.clone(),
+        snapshot_root: None,
+        session: Some(summary.id.clone()),
+        continue_latest: false,
+        prompt: "context estimate".to_string(),
+        image_inputs: Vec::new(),
+        extract_prompt_image_sources: true,
+        prompt_display: None,
+        max_context_messages: None,
+        config_path: options.config_path.clone(),
+        project_context_override: None,
+        model: Some(format!("{}/{}", summary.provider, summary.model)),
+        reasoning_effort: session_metadata
+            .get("reasoning_effort")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        include_reasoning: false,
+        mode,
+        permission_mode: None,
+        approval_mode: None,
+        approval_handler: None,
+        clarify_enabled: false,
+        inherited_env: Some(env.clone()),
+        agent: None,
+        no_agents: false,
+        no_skills: false,
+        skill_inputs: Vec::new(),
+        mcp_servers: Vec::new(),
+    };
+    let project_context_mode =
+        load_project_context_instruction_mode(&project_context_options, &workdir)?;
     let skills_home = resolve_skills_home(&env, &workdir)?;
     let skill_options = SkillDiscoveryOptions {
         home: skills_home,
@@ -290,6 +323,14 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
             "prompt_semantic_role": "base_policy",
         },
     })];
+    request_messages.push(json!({
+        "role": "system",
+        "content": runtime_environment_prompt(&workdir),
+        "metadata": {
+            "prompt_slot": "runtime_environment",
+            "prompt_semantic_role": "base_policy",
+        },
+    }));
     if !skills_prompt.trim().is_empty() {
         request_messages.push(json!({
             "role": "system",
@@ -300,7 +341,7 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
             },
         }));
     }
-    let project_instructions = load_project_instructions(&workdir)?;
+    let project_instructions = load_project_instructions(&workdir, project_context_mode)?;
     for (index, fragment) in project_instructions.fragments.iter().enumerate() {
         request_messages.push(json!({
             "role": "system",
@@ -325,7 +366,8 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
         tools: tool_declarations(&tools),
         metadata: json!({
             "context_counting": {
-                "system_prompt_message_count": 1,
+                "system_prompt_message_count": 2,
+                "base_policy_message_count": 2,
                 "skill_index_message_count": if catalog.skills.is_empty() { 0 } else { 1 },
                 "previous_message_count": messages.len(),
                 "project_instruction_context_message_count": 0,
@@ -606,6 +648,7 @@ pub(crate) fn configured_context_limit(
         prompt_display: None,
         max_context_messages: None,
         config_path: options.config_path.clone(),
+        project_context_override: None,
         model: Some(format!("{provider}/{model}")),
         reasoning_effort: None,
         include_reasoning: false,

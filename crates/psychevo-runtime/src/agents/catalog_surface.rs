@@ -237,6 +237,7 @@ pub(crate) struct AgentToolContext {
     pub(crate) generation_metadata: Value,
     pub(crate) workdir: PathBuf,
     pub(crate) mode: RunMode,
+    pub(crate) project_context_mode: ProjectContextInstructionMode,
     pub(crate) permission_config: PermissionConfig,
     pub(crate) lsp: LspConfig,
     pub(crate) permission_mode: PermissionMode,

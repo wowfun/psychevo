@@ -40,6 +40,11 @@ evidence, and accounting are defined by the
 [Prompt Assembly Attachment](prompt-assembly.md). Exact prompt wording remains
 outside this spec.
 
+Runtime environment context is instruction context that tells the model the
+canonical runtime workdir and the path-resolution boundary for local tools. It
+is model-visible for every agent invocation and is distinct from permission or
+sandbox enforcement.
+
 Runtime-owned model prompt text should be maintained as embedded template
 resources owned by the runtime implementation. Moving prompt text into template
 resources must not change the semantic ordering of prompt slots, provider-role
@@ -59,6 +64,13 @@ These are semantic categories, not required prompt sections or provider fields.
 Context projection is the runtime-owned selection and transformation of available inputs into model context for one generation request. The projection boundary is per agent invocation and may differ for each generation request inside that invocation.
 
 Runtime assembles model context before invoking generation.
+
+Project instruction discovery is configurable separately from tool permissions.
+The default policy follows the project root to workdir hierarchy. A cwd-only
+policy limits discovery to the canonical workdir, and an off policy suppresses
+project instruction injection. These policies change model-visible project
+context only; they do not widen or narrow filesystem, shell, network, or
+approval behavior.
 
 Context projection may combine instruction context, loop-visible context, attached context, summary context, capability-supplied context candidates, session continuity inputs, memory recall candidates, and generic resource facts. These are source categories, not required sections or provider fields. [008 Session Continuity](../008-session-continuity/spec.md) defines session continuity inputs. [009 Resource Surface](../009-resource-surface/spec.md) defines resource facts and resource gates. [010 Memory System](../010-memory-system/spec.md) defines memory recall candidates. [050 Capability Extensions](../050-capability-extensions/spec.md) defines source and contribution boundaries for capability-supplied candidates.
 

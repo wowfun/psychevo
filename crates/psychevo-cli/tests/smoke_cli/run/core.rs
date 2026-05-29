@@ -220,6 +220,7 @@ pub(crate) fn cli_run_child_agent_session_exports_prefix_and_last_request() {
         prefix_slots,
         vec![
             "base/mode".to_string(),
+            "runtime_environment".to_string(),
             "selected_child_agent".to_string(),
             "child_agent_control".to_string(),
         ]
@@ -254,7 +255,7 @@ pub(crate) fn cli_run_child_agent_session_exports_prefix_and_last_request() {
     );
     let value: Value = serde_json::from_slice(&export.stdout).expect("json export");
     assert_eq!(
-        value["header"]["prompt_prefix"]["slots"][1]["slot"],
+        value["header"]["prompt_prefix"]["slots"][2]["slot"],
         "selected_child_agent"
     );
     let exported_messages = value["last_provider_request"]["body"]["messages"]
@@ -264,6 +265,11 @@ pub(crate) fn cli_run_child_agent_session_exports_prefix_and_last_request() {
         message["content"]
             .as_str()
             .is_some_and(|content| content.contains("Child agent: translate"))
+    }));
+    assert!(exported_messages.iter().any(|message| {
+        message["content"]
+            .as_str()
+            .is_some_and(|content| content.contains("Current working directory:"))
     }));
     assert!(exported_messages.iter().any(|message| {
         message["content"]
@@ -798,11 +804,6 @@ pub(crate) fn cli_run_injects_agents_project_instructions_without_persisting_as_
             (
                 "system".to_string(),
                 "prefix_prompt_instructions".to_string(),
-                2
-            ),
-            (
-                "system".to_string(),
-                "prefix_prompt_instructions".to_string(),
                 3
             ),
             (
@@ -810,6 +811,61 @@ pub(crate) fn cli_run_injects_agents_project_instructions_without_persisting_as_
                 "prefix_prompt_instructions".to_string(),
                 4
             ),
+            (
+                "system".to_string(),
+                "prefix_prompt_instructions".to_string(),
+                5
+            ),
         ]
+    );
+}
+
+#[test]
+pub(crate) fn cli_run_project_context_cwd_ignores_repo_root_agents() {
+    let server = MockSseServer::start(vec![sse_text("cwd final")]);
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let repo = temp.path().join("repo");
+    let workdir = repo.join("task");
+    std::fs::create_dir_all(workdir.join(".psychevo")).expect("dirs");
+    std::fs::create_dir(repo.join(".git")).expect("git");
+    std::fs::write(repo.join("AGENTS.md"), "Use repo-root workflow.").expect("root agents");
+    std::fs::write(workdir.join("AGENTS.md"), "Use task workflow.").expect("task agents");
+    let config = write_run_config(&temp.path().join("config"), &server.base_url);
+    let output = isolated_run_cmd(temp.path(), &config, &db)
+        .args([
+            "run",
+            "--dir",
+            workdir.to_str().expect("workdir"),
+            "--project-context",
+            "cwd",
+            "--format",
+            "json",
+            "do it",
+        ])
+        .output()
+        .expect("pevo run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let system_messages = system_contents(&server.request_json(0));
+    assert!(
+        system_messages
+            .iter()
+            .any(|message| message.contains("Current working directory:")
+                && message.contains(workdir.to_str().expect("workdir utf8")))
+    );
+    assert!(
+        system_messages
+            .iter()
+            .any(|message| message.contains("Use task workflow."))
+    );
+    assert!(
+        !system_messages
+            .iter()
+            .any(|message| message.contains("Use repo-root workflow."))
     );
 }

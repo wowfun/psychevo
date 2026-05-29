@@ -12,10 +12,11 @@ pub(crate) use serde::{Deserialize, Serialize};
 pub(crate) use serde_json::{Value, json};
 
 pub(crate) use crate::compaction::load_projected_messages;
-pub(crate) use crate::config::selected_configured_model;
+pub(crate) use crate::config::{load_project_context_instruction_mode, selected_configured_model};
 pub(crate) use crate::error::{Error, Result};
 pub(crate) use crate::paths::canonical_workdir;
 pub(crate) use crate::project_instructions::load_project_instructions;
+pub(crate) use crate::prompt_assembly::runtime_environment_prompt;
 pub(crate) use crate::prompt_templates;
 pub(crate) use crate::skills::{
     SkillDiscoveryOptions, discover_skills, format_skills_for_prompt, resolve_skills_home,
@@ -23,7 +24,7 @@ pub(crate) use crate::skills::{
 pub(crate) use crate::state_runtime::StateRuntime;
 pub(crate) use crate::tool_surface::tool_declarations;
 pub(crate) use crate::tools::{coding_core_tools_for_mode, mode_instruction, skill_tools_for_mode};
-pub(crate) use crate::types::RunMode;
+pub(crate) use crate::types::{RunMode, RunOptions};
 
 #[allow(unused_imports)]
 pub(crate) use super::*;

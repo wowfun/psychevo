@@ -74,6 +74,11 @@ impl Default for LspConfig {
 }
 
 #[derive(Debug, Clone, Default)]
+pub(crate) struct ProjectContextConfig {
+    pub(crate) instructions: ProjectContextInstructionMode,
+}
+
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ToolSelectionConfig {
     pub(crate) modes: BTreeMap<String, ToolModeConfig>,
 }
@@ -226,10 +231,49 @@ pub(crate) const BUILT_IN_PROVIDERS: &[BuiltInProvider] = &[
 
 pub(crate) fn load_run_config(options: &RunOptions, workdir: &Path) -> Result<LoadedRunConfig> {
     let loaded = load_config_value(options, workdir)?;
+    let mut config = parse_run_config(loaded.value)?;
+    if let Some(mode) = options.project_context_override {
+        config.project_context.instructions = mode;
+    }
     Ok(LoadedRunConfig {
-        config: parse_run_config(loaded.value)?,
+        config,
         env: loaded.env,
     })
+}
+
+pub(crate) fn load_project_context_instruction_mode(
+    options: &RunOptions,
+    workdir: &Path,
+) -> Result<ProjectContextInstructionMode> {
+    if let Some(mode) = options.project_context_override {
+        return Ok(mode);
+    }
+    let env_map = options
+        .inherited_env
+        .clone()
+        .unwrap_or_else(|| env::vars().collect());
+    let mut value = json!({});
+
+    if let Some(config_path) = resolve_config_path(options, &env_map)? {
+        deep_merge(&mut value, load_toml_config_file(&config_path, true)?);
+    } else {
+        if let Ok(home) = resolve_psychevo_home(&env_map) {
+            deep_merge(
+                &mut value,
+                load_toml_config_file(&home.join(CONFIG_FILE_NAME), false)?,
+            );
+        }
+        deep_merge(
+            &mut value,
+            load_toml_config_file(&workdir.join(".psychevo").join(CONFIG_FILE_NAME), false)?,
+        );
+    }
+
+    value
+        .get("project_context")
+        .map(parse_project_context_config)
+        .transpose()
+        .map(|config| config.unwrap_or_default().instructions)
 }
 
 pub(crate) fn load_config_value(options: &RunOptions, workdir: &Path) -> Result<LoadedConfigValue> {

@@ -52,19 +52,22 @@ For one accepted main-session turn, runtime assembles model context in this
 normative order:
 
 1. base/mode
-2. selected main agent
-3. agent catalog
-4. skill index
-5. AGENTS/project context
-6. history
-7. turn-scoped hints and selected skill body
-8. current prompt
+2. runtime environment
+3. selected main agent
+4. agent catalog
+5. skill index
+6. AGENTS/project context
+7. history
+8. turn-scoped hints and selected skill body
+9. current prompt
 
-`base/mode`, selected main agent, agent catalog, skill index, and
-AGENTS/project context are instruction slots. AGENTS/project context is policy
-context rather than user task input and is placed before retained history to
-keep the prefix stable. Selected skill bodies and required `@agent` call hints
-are turn-scoped and appear after history and before the current prompt.
+`base/mode`, runtime environment, selected main agent, agent catalog, skill
+index, and AGENTS/project context are instruction slots. Runtime environment
+context identifies the canonical workdir and path-resolution boundary for model
+planning; it is not a permission grant. AGENTS/project context is policy context
+rather than user task input and is placed before retained history to keep the
+prefix stable. Selected skill bodies and required `@agent` call hints are
+turn-scoped and appear after history and before the current prompt.
 
 Provider projection must preserve the semantic separation between instruction
 slots, contextual-user project context, retained transcript history,
@@ -113,8 +116,8 @@ silently applying the latest full text.
 
 Runtime lazily creates a missing prefix snapshot on the next accepted turn
 using the current config and files. Current sessions do not automatically
-refresh when AGENTS, agent, or skill files change. The stable prefix is rebuilt
-only by:
+refresh when workdir context, AGENTS, agent, or skill files change. The stable
+prefix is rebuilt only by:
 
 - TUI `/refresh`
 - non-TUI `/reload-context`
@@ -141,6 +144,9 @@ AGENTS/project context uses the same provider-role fallback as
 developer-policy slots. Selected skill bodies and required `@agent` call hints
 remain turn-scoped and are not part of the session-stable prefix.
 
+Runtime environment uses the same developer-policy provider-role fallback as
+other runtime-owned instruction slots.
+
 ## Usage Categories
 
 Context usage projections use these top-level categories:
@@ -156,7 +162,8 @@ Context usage projections use these top-level categories:
 
 Selected-agent text is counted as `developer_prompt`, not as skills. Skill
 index entries and AGENTS/project instructions are counted as
-`developer_prompt`; selected skill body text is counted as `turn_context`.
+`developer_prompt`; runtime environment is counted as `base_policy`; selected
+skill body text is counted as `turn_context`.
 
 ## Export And Share
 

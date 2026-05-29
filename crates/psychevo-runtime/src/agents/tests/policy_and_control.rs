@@ -742,6 +742,7 @@ pub(crate) fn empty_tools_suppresses_agent_and_skill_prompt_catalogs() {
     };
     let assembly = crate::prompt_assembly::assemble_main_prompt_prefix(
         RunMode::Default,
+        &PathBuf::from("/tmp/repo"),
         Some(&agent),
         &prompt_agents,
         &prompt_skills,
@@ -774,6 +775,30 @@ pub(crate) fn empty_tools_suppresses_agent_and_skill_prompt_catalogs() {
 }
 
 #[test]
+pub(crate) fn prompt_prefix_includes_runtime_workdir_environment() {
+    let workdir = PathBuf::from("/tmp/repo/task");
+    let assembly = crate::prompt_assembly::assemble_main_prompt_prefix(
+        RunMode::Default,
+        &workdir,
+        None,
+        &[],
+        &[],
+        &[],
+        &Default::default(),
+        true,
+    );
+
+    let environment_slot = assembly
+        .prefix_slots
+        .iter()
+        .find(|slot| slot.slot == "runtime_environment")
+        .expect("runtime environment slot");
+    assert_eq!(environment_slot.semantic_role, "base_policy");
+    assert!(environment_slot.content.contains("/tmp/repo/task"));
+    assert!(environment_slot.content.contains("Relative file paths"));
+}
+
+#[test]
 pub(crate) fn project_instructions_are_developer_prompt_slots_with_system_fallback() {
     let fragment = crate::project_instructions::ProjectInstructionFragment {
             source_name: "AGENTS.md".to_string(),
@@ -792,6 +817,7 @@ pub(crate) fn project_instructions_are_developer_prompt_slots_with_system_fallba
     };
     let developer_assembly = crate::prompt_assembly::assemble_main_prompt_prefix(
         RunMode::Default,
+        &PathBuf::from("/tmp/repo"),
         None,
         &[],
         &[],
@@ -819,6 +845,7 @@ pub(crate) fn project_instructions_are_developer_prompt_slots_with_system_fallba
 
     let fallback_assembly = crate::prompt_assembly::assemble_main_prompt_prefix(
         RunMode::Default,
+        &PathBuf::from("/tmp/repo"),
         None,
         &[],
         &[],

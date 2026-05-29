@@ -10,8 +10,8 @@ pub(crate) use std::time::{Duration, Instant};
 
 pub(crate) use crate::config::{
     ResolvedRunProvider, create_global_custom_provider, custom_provider_api_key_env,
-    fetch_model_catalog_with_client, load_run_config, model_catalog_endpoint,
-    model_catalog_providers, resolve_run_provider, set_default_model,
+    fetch_model_catalog_with_client, load_project_context_instruction_mode, load_run_config,
+    model_catalog_endpoint, model_catalog_providers, resolve_run_provider, set_default_model,
     set_default_model_with_reasoning,
 };
 pub(crate) use crate::events::{PersistenceSink, project_agent_event, project_run_stream_event};
@@ -19,7 +19,8 @@ pub(crate) use crate::paths::canonical_workdir;
 pub(crate) use crate::run::{SESSION_TITLE_MAX_CHARS, ensure_new_tui_session_title};
 pub(crate) use crate::snapshot::SnapshotStore;
 pub(crate) use crate::types::{
-    MessageAccounting, ModelCost, ModelCostTier, ModelMetadata, SelectedAgent,
+    MessageAccounting, ModelCost, ModelCostTier, ModelMetadata, ProjectContextInstructionMode,
+    SelectedAgent,
 };
 pub(crate) use psychevo_agent_core::{
     AgentEvent, AssistantBlock, EventSink, Message, ToolDisplaySpec,
@@ -43,6 +44,7 @@ pub(crate) fn base_options(temp: &tempfile::TempDir) -> RunOptions {
         prompt_display: None,
         max_context_messages: None,
         config_path: None,
+        project_context_override: None,
         model: None,
         reasoning_effort: None,
         include_reasoning: false,

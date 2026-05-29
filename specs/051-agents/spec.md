@@ -115,6 +115,9 @@ agent, while an explicit default setting clears the selected agent for that
 session. Runtime projections for each invocation should still record the
 resolved selected agent, when any, so replay can identify which main-session
 agent produced a turn.
+Refreshing the selected-agent prompt prefix for an existing session must not
+require provider credentials or a provider-ready home config; it may read only
+the lightweight project context policy needed for prompt assembly.
 
 Selected agents specialize an invocation; they do not bypass capability,
 resource, context, session, or runtime-mode constraints. The selected agent may

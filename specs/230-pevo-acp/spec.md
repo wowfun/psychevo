@@ -72,6 +72,13 @@ Runtime remains the owner of session coordination, model resolution, tool
 surface assembly, capability source normalization, permission policy, command
 metadata, persistence, and evidence.
 
+ACP sessions use the same runtime project context configuration as `pevo run`.
+The server does not add ACP-specific project-context protocol fields. Workspace
+`.psychevo/config.toml` may set `[project_context].instructions` to `git-root`,
+`cwd`, or `off`; runtime applies that setting when assembling prompt prefixes
+for ACP prompts. Runtime environment context still exposes the ACP session cwd
+to the model.
+
 `psychevo-acp` may keep transport-local state for active ACP sessions and
 in-flight cancellation handles. That state is not durable session evidence.
 

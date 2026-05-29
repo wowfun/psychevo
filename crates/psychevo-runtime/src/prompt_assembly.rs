@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::Arc;
 
 use psychevo_agent_core::ToolBinding;
@@ -85,6 +86,7 @@ impl PrefixSlotInput {
 
 pub(crate) fn assemble_main_prompt_prefix(
     mode: RunMode,
+    workdir: &Path,
     selected_agent: Option<&AgentDefinition>,
     agents: &[AgentDefinition],
     skills: &[Skill],
@@ -111,6 +113,11 @@ pub(crate) fn assemble_main_prompt_prefix(
     order += 1;
     prompt_instructions.push(instruction_from_slot(&mode_slot));
     prefix_slots.push(mode_slot);
+
+    let environment_slot = runtime_environment_slot(order, developer_role, workdir);
+    order += 1;
+    prompt_instructions.push(instruction_from_slot(&environment_slot));
+    prefix_slots.push(environment_slot);
 
     if let Some(agent) = selected_agent {
         let selected_slot = prefix_slot(
@@ -203,6 +210,7 @@ pub(crate) fn assemble_main_prompt_prefix(
 
 pub(crate) fn assemble_child_prompt_prefix(
     mode: RunMode,
+    workdir: &Path,
     selected_agent: &AgentDefinition,
     capabilities: &ModelCapabilities,
     tools_available: bool,
@@ -226,6 +234,11 @@ pub(crate) fn assemble_child_prompt_prefix(
     order += 1;
     prompt_instructions.push(instruction_from_slot(&mode_slot));
     prefix_slots.push(mode_slot);
+
+    let environment_slot = runtime_environment_slot(order, developer_role, workdir);
+    order += 1;
+    prompt_instructions.push(instruction_from_slot(&environment_slot));
+    prefix_slots.push(environment_slot);
 
     let selected_slot = prefix_slot(
         PrefixSlotInput::new(
@@ -488,6 +501,35 @@ pub(crate) fn stable_hash_hex(text: &str) -> String {
 
 pub(crate) fn format_project_instruction_prompt(fragment: &ProjectInstructionFragment) -> String {
     prompt_templates::project_context(&fragment.content)
+}
+
+pub(crate) fn runtime_environment_slot(
+    order: usize,
+    developer_role: &str,
+    workdir: &Path,
+) -> PromptPrefixSlotRecord {
+    prefix_slot(
+        PrefixSlotInput::new(
+            "runtime_environment",
+            "base",
+            "base_policy",
+            developer_role,
+            order,
+            runtime_environment_prompt(workdir),
+        )
+        .source(
+            "runtime",
+            "environment",
+            Some(workdir.display().to_string()),
+        ),
+    )
+}
+
+pub(crate) fn runtime_environment_prompt(workdir: &Path) -> String {
+    format!(
+        "Runtime environment:\n- Current working directory: {}\n- Relative file paths in tool calls resolve against this working directory.\n- Absolute paths are only usable when permitted by the active filesystem and resource gates.",
+        workdir.display()
+    )
 }
 
 pub(crate) fn developer_provider_role(capabilities: &ModelCapabilities) -> &'static str {

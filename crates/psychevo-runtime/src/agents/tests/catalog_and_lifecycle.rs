@@ -56,6 +56,7 @@ Coordinate.
             generation_metadata: json!({}),
             workdir: tmp.path().to_path_buf(),
             mode: RunMode::Default,
+            project_context_mode: Default::default(),
             permission_config: PermissionConfig::default(),
             lsp: Default::default(),
             permission_mode: PermissionMode::Default,
