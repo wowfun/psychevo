@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-05-29
+
+- Expanded `peval` with typed source manifests, Harbor-style task directories,
+  schema v7 Trial/MatrixCell views, local `serve`, and cached Trial analysis.
+- Tightened ACP, auth, provider, and exec-permission surfaces, including
+  protocol V1 reporting, `no_auth` providers, and structured exec rules.
+- Fixed fullscreen TUI yielded command rows to keep their original command title
+  across output and poll updates.
+
 ## 2026-05-26
 
 - Added normalized `last-provider-response` exports, default workspace
