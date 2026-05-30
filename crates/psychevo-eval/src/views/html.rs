@@ -200,6 +200,26 @@ function shadeFor(cell, visible) {
 function trialFor(trialKey) {
   return trajectoryMetaFor(trialKey);
 }
+function trialKeyInCell(cell, trialKey) {
+  return !!trialKey && (cell?.trial_keys || []).includes(trialKey);
+}
+function matrixCellForTrial(trialKey) {
+  return (state.view?.comparison?.matrix?.cells || []).find(cell => trialKeyInCell(cell, trialKey)) || null;
+}
+function selectedTrialInVisibleCells(visible) {
+  return visible.some(cell => trialKeyInCell(cell, state.selectedTrial));
+}
+function hasMultiTrialMatrixCell() {
+  return (state.view?.comparison?.matrix?.cells || []).some(cell => (cell.trial_keys || []).length > 1);
+}
+function trialOrdinal(trialKey) {
+  const cell = matrixCellForTrial(trialKey);
+  const index = (cell?.trial_keys || []).indexOf(trialKey);
+  return index >= 0 ? index + 1 : null;
+}
+function shortTrialKey(trialKey) {
+  return String(trialKey || "").replace(/:t\d+$/, "").slice(0, 8) || "-";
+}
 function trajectoryFor(trialKey) {
   return (state.view?.trajectory || []).find(trajectory => trajectory.trajectory_id === trialKey);
 }
@@ -292,7 +312,7 @@ function renderMatrix() {
   const tasks = matrix.task_axis || [];
   const agents = matrix.agent_axis || [];
   const visible = visibleCells();
-  if (!visible.some(cell => cell.representative_trial_key === state.selectedTrial)) {
+  if (!selectedTrialInVisibleCells(visible)) {
     state.selectedTrial = visible[0]?.representative_trial_key || state.view.trajectory_meta?.[0]?.trial_key || null;
     state.selectedStepId = null;
   }
@@ -310,14 +330,17 @@ function renderMatrix() {
       }
       const shade = shadeFor(cell, visible);
       const value = metricValue(cell);
-      cells.push(`<button class="cell ${statusClass(cell.status, cell.failure_class)} ${shade} ${cell.representative_trial_key === state.selectedTrial ? "selected" : ""}" type="button" data-trial="${esc(cell.representative_trial_key)}"><strong>${esc(formatMetric(value))}</strong><span>${esc(cell.status)} / ${esc(cell.representative_trial_key.replace(/:t001$/, ""))}<br>${fmtMs(cell.duration_ms)}</span></button>`);
+      cells.push(`<button class="cell ${statusClass(cell.status, cell.failure_class)} ${shade} ${trialKeyInCell(cell, state.selectedTrial) ? "selected" : ""}" type="button" data-trial="${esc(cell.representative_trial_key)}"><strong>${esc(formatMetric(value))}</strong><span>${esc(cell.status)} / ${esc(cell.representative_trial_key.replace(/:t001$/, ""))}<br>${fmtMs(cell.duration_ms)}</span></button>`);
     });
   });
   $("matrix").innerHTML = cells.join("");
   document.querySelectorAll("[data-trial]").forEach(button => {
     button.addEventListener("click", () => {
-      state.selectedTrial = button.dataset.trial;
-      state.selectedStepId = null;
+      const cell = visible.find(item => item.representative_trial_key === button.dataset.trial);
+      if (!trialKeyInCell(cell, state.selectedTrial)) {
+        state.selectedTrial = button.dataset.trial;
+        state.selectedStepId = null;
+      }
       renderMatrix();
       renderTrace();
     });
@@ -343,12 +366,14 @@ function renderTrace() {
   const trajectoryMeta = trajectoryMetaFor(trial.trial_key);
   const model = trajectory?.agent?.model_name || "-";
   const agentName = trajectory?.agent?.name || "-";
+  const siblingSwitcher = renderTrialSiblingSwitcher(trial.trial_key);
   $("trace").innerHTML = `
     <div class="trace-head">
       <div>
         <p class="eyebrow">selected trial trajectory</p>
         <h2 id="trace-title" class="trace-title"><span>${esc(trial.task_id)}</span><code>${esc(trial.trial_key)}</code></h2>
       </div>
+      ${siblingSwitcher}
     </div>
     <h3>Run</h3>
     ${infoGrid([
@@ -378,11 +403,42 @@ function renderTrace() {
     ${renderStepsHeader(trajectory, trajectoryMeta)}
     <div class="step-list" id="step-list">${trajectory ? (trajectory.steps || []).map(step => renderStep(step, trajectoryMeta)).join("") : `<p class="copy">No trajectory include for this Trial.</p>`}</div>
   `;
+  bindTrialSwitcher();
   bindStepControls();
   document.querySelectorAll("#step-list .step").forEach(row => {
     row.addEventListener("click", () => {
       state.selectedStepId = Number(row.dataset.step);
       document.querySelectorAll("#step-list .step").forEach(item => item.classList.toggle("selected-step", Number(item.dataset.step) === state.selectedStepId));
+    });
+  });
+}
+function renderTrialSiblingSwitcher(trialKey) {
+  const cell = matrixCellForTrial(trialKey);
+  const trialKeys = cell?.trial_keys || [];
+  if (trialKeys.length <= 1) return "";
+  return `<div class="trial-switcher" aria-label="Trials in selected matrix cell">${trialKeys.map((key, index) => {
+    const trial = trialFor(key);
+    const active = key === trialKey;
+    const latest = key === cell.representative_trial_key;
+    const title = [
+      key,
+      trial?.matrix_cell_key ? `cell ${trial.matrix_cell_key}` : "",
+      trial?.started_at_ms ? `started ${fmtDate(trial.started_at_ms)}` : "",
+      trial?.duration_ms !== undefined ? `duration ${fmtMs(trial.duration_ms)}` : "",
+      trial?.status ? `status ${trial.status}` : ""
+    ].filter(Boolean).join(" / ");
+    return `<button class="trial-switch ${active ? "active" : ""}" type="button" data-switch-trial="${esc(key)}" title="${esc(title)}"><span>#${index + 1}</span>${latest ? `<em>latest</em>` : ""}</button>`;
+  }).join("")}</div>`;
+}
+function bindTrialSwitcher() {
+  document.querySelectorAll("[data-switch-trial]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.stopPropagation();
+      state.selectedTrial = button.dataset.switchTrial;
+      state.selectedStepId = null;
+      renderLeaderboard();
+      renderMatrix();
+      renderTrace();
     });
   });
 }
@@ -616,8 +672,8 @@ function leaderboardComparisonRows(entries) {
       average_score: task.average_score,
       average_duration_ms: task.average_duration_ms,
       trial_keys: task.trial_keys || [],
-      total_tokens: sumOptional(taskTrials.map(trial => trialTotalTokens(trial.trial_key))),
-      total_cost_usd: sumOptional(taskTrials.map(trial => trialCost(trial.trial_key)))
+      average_tokens: averageOptional(taskTrials.map(trial => trialTotalTokens(trial.trial_key))),
+      average_cost_usd: averageOptional(taskTrials.map(trial => trialCost(trial.trial_key)))
     };
   }));
 }
@@ -640,6 +696,10 @@ function leaderboardTrialRows(entries) {
 function sumOptional(values) {
   const numeric = values.filter(value => value !== null && value !== undefined && !Number.isNaN(Number(value))).map(Number);
   return numeric.length ? numeric.reduce((sum, value) => sum + value, 0) : null;
+}
+function averageOptional(values) {
+  const numeric = values.filter(value => value !== null && value !== undefined && !Number.isNaN(Number(value))).map(Number);
+  return numeric.length ? numeric.reduce((sum, value) => sum + value, 0) / numeric.length : null;
 }
 function notesForKeys(trialKeys) {
   const keys = new Set((trialKeys || []).filter(Boolean));
@@ -677,8 +737,8 @@ function comparisonColumns(rows = []) {
     { key: "pass_rate", label: "Pass Rate", width: "104px", type: "number", numeric: true, sortable: true, value: row => row.pass_rate, format: pct },
     { key: "average_score", label: "Score", width: "88px", type: "number", numeric: true, sortable: true, value: row => row.average_score, format: fmtScore },
     { key: "average_duration_ms", label: "Duration", width: "104px", type: "number", numeric: true, sortable: true, value: row => row.average_duration_ms, format: fmtMs },
-    { key: "total_tokens", label: "Tokens", width: "100px", type: "number", numeric: true, sortable: true, value: row => row.total_tokens, format: fmtNum },
-    { key: "total_cost_usd", label: "Cost", width: "92px", type: "number", numeric: true, sortable: true, value: row => row.total_cost_usd, format: fmtCost },
+    { key: "average_tokens", label: "Tokens", width: "100px", type: "number", numeric: true, sortable: true, value: row => row.average_tokens, format: fmtNum },
+    { key: "average_cost_usd", label: "Cost", width: "92px", type: "number", numeric: true, sortable: true, value: row => row.average_cost_usd, format: fmtCost },
     { key: "notes", label: "Notes", width: "180px", value: row => notesSummaryForKeys(row.trial_keys || []), html: row => renderNotesCell(row.trial_keys || []), cellTitle: row => notesFullTextForKeys(row.trial_keys || []) }
   ];
   if (hasVisibleVariant(rows)) columns.unshift(variantColumn());
@@ -695,8 +755,26 @@ function trialColumns(rows = []) {
     { key: "total_tokens", label: "Tokens", width: "100px", type: "number", numeric: true, sortable: true, value: row => row.total_tokens, format: fmtNum },
     { key: "notes", label: "Notes", width: "220px", value: row => notesSummaryForKeys([row.trial_key]), html: row => renderNotesCell([row.trial_key]), cellTitle: row => notesFullTextForKeys([row.trial_key]) }
   ];
+  if (hasMultiTrialMatrixCell()) columns.unshift(trialIdentityColumn());
   if (hasVisibleVariant(rows)) columns.unshift(variantColumn());
   return columns;
+}
+function trialIdentityColumn() {
+  return {
+    key: "trial_identity",
+    label: "Trial",
+    width: "110px",
+    value: row => {
+      const ordinal = trialOrdinal(row.trial_key);
+      return ordinal ? `#${ordinal} ${shortTrialKey(row.trial_key)}` : shortTrialKey(row.trial_key);
+    },
+    html: row => {
+      const ordinal = trialOrdinal(row.trial_key);
+      const latest = matrixCellForTrial(row.trial_key)?.representative_trial_key === row.trial_key;
+      return `<span class="trial-id-chip">${ordinal ? `#${ordinal}` : "-"}<code>${esc(shortTrialKey(row.trial_key))}</code>${latest ? `<em>latest</em>` : ""}</span>`;
+    },
+    cellTitle: row => row.trial_key || ""
+  };
 }
 function tableControls(tableKey) {
   state.tables[tableKey] ||= { sort: null, direction: "asc", filters: {} };

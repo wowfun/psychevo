@@ -361,6 +361,69 @@ command = {{ command = "sh", args = ["{}"], model = "test-model" }}
     assert!(html.stdout.contains("data-row-trial"));
     assert!(html.stdout.contains("clickable-row"));
     assert!(html.stdout.contains("selected-row"));
+    assert!(
+        html.stdout
+            .contains("function trialKeyInCell(cell, trialKey)")
+    );
+    assert!(
+        html.stdout
+            .contains("function selectedTrialInVisibleCells(visible)")
+    );
+    assert!(
+        html.stdout
+            .contains("if (!selectedTrialInVisibleCells(visible))")
+    );
+    assert!(
+        html.stdout
+            .contains("trialKeyInCell(cell, state.selectedTrial) ? \"selected\"")
+    );
+    assert!(
+        html.stdout
+            .contains("if (!trialKeyInCell(cell, state.selectedTrial))")
+    );
+    assert!(html.stdout.contains(
+        "const cell = visible.find(item => item.representative_trial_key === button.dataset.trial)"
+    ));
+    assert!(
+        !html.stdout.contains(
+            "visible.some(cell => cell.representative_trial_key === state.selectedTrial)"
+        )
+    );
+    assert!(
+        html.stdout
+            .contains("renderTrialSiblingSwitcher(trial.trial_key)")
+    );
+    assert!(html.stdout.contains("class=\"trial-switcher\""));
+    assert!(html.stdout.contains("data-switch-trial"));
+    assert!(html.stdout.contains("bindTrialSwitcher"));
+    assert!(html.stdout.contains("trialKeys.length <= 1"));
+    assert!(html.stdout.contains("hasMultiTrialMatrixCell"));
+    assert!(
+        html.stdout
+            .contains("columns.unshift(trialIdentityColumn())")
+    );
+    assert!(html.stdout.contains("trial-id-chip"));
+    assert!(html.stdout.contains("function averageOptional(values)"));
+    assert!(
+        html.stdout
+            .contains("average_tokens: averageOptional(taskTrials.map")
+    );
+    assert!(
+        html.stdout
+            .contains("average_cost_usd: averageOptional(taskTrials.map")
+    );
+    assert!(
+        !html
+            .stdout
+            .contains("total_tokens: sumOptional(taskTrials.map")
+    );
+    assert!(
+        !html
+            .stdout
+            .contains("total_cost_usd: sumOptional(taskTrials.map")
+    );
+    assert!(html.stdout.contains("key: \"average_tokens\""));
+    assert!(html.stdout.contains("key: \"average_cost_usd\""));
     assert!(html.stdout.contains("renderSelectedEvidence(trial)"));
     assert!(html.stdout.contains("Score Details"));
     assert!(html.stdout.contains("Usage Breakdown"));

@@ -11,6 +11,8 @@
   comparison rows, no report-wide Evidence Ledger, compact tables, Trial-only
   notes/analysis/evidence, improved Step rails, expand/collapse controls, and
   one-decimal timing displays.
+- Fixed multi-Trial `peval view` cells so users can switch sibling Trials and
+  flat comparison rows average repeated-Trial token and cost values.
 - Fixed ACP tool execution timing by carrying runtime timings through ACP
   `_meta`, preserving timing source in view JSON, and rendering `tool exec`
   inline with tool names.

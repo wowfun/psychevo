@@ -78,6 +78,23 @@ grouped by `agent_id` plus model name and, in multi-path mode, variant id.
 Default ranking orders by pass rate or score descending, then by average
 duration ascending, then by tokens and cost ascending.
 
+HTML renderers keep matrix cells aggregated when `trial_keys` contains more
+than one Trial, but selected-Trial state is exact. Heatmap selected state and
+visibility checks use membership in `trial_keys`, not only the
+`representative_trial_key`. Clicking a heatmap cell chooses the representative
+Trial for that cell; clicking a Trial details row chooses that exact Trial. The
+selected-Trial panel shows a compact sibling switcher for all Trials in the
+current matrix cell when there is more than one, and the Trial details table
+adds a short Trial identity column only for reports that contain a multi-Trial
+matrix cell.
+
+The HTML Agent / Model Comparison table is a per-task comparison projection.
+Its score, duration, token, and cost columns use per-Trial averages for the
+row, so repeated Trials in the same matrix cell do not inflate token or cost
+values. Machine-readable leaderboard entry totals may still expose summed
+token and cost fields for overall accounting, and the Trial details table shows
+exact single-Trial values.
+
 `annotations` contains report notes, Trial notes, and cached analysis. Manual
 notes come from cell-local `notes.md` files or repeatable
 `--note INDEX=TEXT` CLI entries, are report-only metadata, and never mutate

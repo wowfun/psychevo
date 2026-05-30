@@ -155,6 +155,17 @@ right-side `step <duration>` and `elapsed <duration>` chips.
 Leaderboard tables render Variant only when the current rows contain a real
 variant; single-scope reports without path variants hide that column and its
 filter instead of showing repeated `-` values.
+When a matrix cell contains multiple Trial keys, HTML reports keep the heatmap
+cell aggregated but preserve exact Trial selection. A selected Trial remains
+selected while it is contained in a visible matrix cell's `trial_keys`, even if
+it is not the cell's `representative_trial_key`. The selected-Trial header
+shows a compact sibling switcher for the other Trials in the same matrix cell,
+and Trial details rows expose a short Trial identity column only when such
+multi-Trial cells exist.
+The flat Agent / Model Comparison table is a per-task comparison view: score,
+duration, tokens, and cost columns use per-Trial averages for the row instead
+of summing repeated Trials in the same matrix cell. The Trial details table
+continues to show exact single-Trial values.
 The selected Trial Steps header offers one-click expand and collapse controls
 for the current Trial's step details without changing report filters or
 selection state outside the step list.

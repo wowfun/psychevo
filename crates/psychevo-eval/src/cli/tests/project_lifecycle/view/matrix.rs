@@ -71,6 +71,13 @@ pub(crate) fn view_matrix_uses_latest_trial_and_leaderboard_keeps_all_trials() {
     assert_eq!(comparison.leaderboard.entries[0].total_trials, 2);
     assert_eq!(comparison.leaderboard.entries[0].successes, 1);
     assert_eq!(comparison.leaderboard.entries[0].trial_keys.len(), 2);
+
+    let html = render_view_html(&view);
+    assert!(html.contains(&trial_key(&latest)));
+    assert!(html.contains("0000000000000000:t001"));
+    assert!(html.contains("function selectedTrialInVisibleCells(visible)"));
+    assert!(html.contains("renderTrialSiblingSwitcher(trial.trial_key)"));
+    assert!(html.contains("trialIdentityColumn"));
 }
 
 #[test]
