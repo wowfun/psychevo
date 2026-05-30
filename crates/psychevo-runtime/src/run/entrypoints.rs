@@ -200,6 +200,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
         lsp: Default::default(),
         allow_login_shell: false,
         stream_events: None,
+        env: BTreeMap::new(),
         path_prefixes: Vec::new(),
         tool_selection: Default::default(),
         custom_toolsets: BTreeMap::new(),
@@ -231,16 +232,16 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
         .then(|| developer_provider_role(&model_metadata.capabilities).to_string());
     let tool_declarations_hash = tool_declarations_hash(&tools);
     let selected_agent_summary = selected_agent_for_result(selected_agent.as_ref());
-    let assembly = assemble_main_prompt_prefix(
+    let assembly = assemble_main_prompt_prefix(MainPromptPrefixInput {
         mode,
-        &workdir,
-        selected_agent.as_ref(),
-        &prompt_agents,
-        &prompt_skills,
-        prompt_project_instructions,
-        &model_metadata.capabilities,
-        !tools.is_empty(),
-    );
+        workdir: &workdir,
+        selected_agent: selected_agent.as_ref(),
+        agents: &prompt_agents,
+        skills: &prompt_skills,
+        project_instruction_fragments: prompt_project_instructions,
+        capabilities: &model_metadata.capabilities,
+        tools_available: !tools.is_empty(),
+    });
     let record = prompt_prefix_record(PromptPrefixRecordInput {
         session_id: &summary.id,
         provider: &summary.provider,

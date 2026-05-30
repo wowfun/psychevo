@@ -91,8 +91,10 @@ pub(crate) mod write_tool_tests {
                     enabled: false,
                     ..Default::default()
                 },
+                lsp_manager: default_lsp_manager(),
                 allow_login_shell: false,
                 stream_events: None,
+                env: BTreeMap::new(),
                 path_prefixes: Vec::new(),
             },
         )
@@ -107,8 +109,10 @@ pub(crate) mod write_tool_tests {
                     enabled: false,
                     ..Default::default()
                 },
+                lsp_manager: default_lsp_manager(),
                 allow_login_shell: false,
                 stream_events: None,
+                env: BTreeMap::new(),
                 path_prefixes: Vec::new(),
             },
         )

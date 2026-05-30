@@ -53,8 +53,10 @@ pub(crate) async fn exec_command_prepends_managed_tool_path() {
         crate::tools::ToolRuntimeContext {
             task_id: "exec-path-test".to_string(),
             lsp: crate::config::LspConfig::default(),
+            lsp_manager: crate::tools::write_support::default_lsp_manager(),
             allow_login_shell: false,
             stream_events: None,
+            env: BTreeMap::new(),
             path_prefixes: vec![tools_dir],
         },
     );

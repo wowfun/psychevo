@@ -741,14 +741,16 @@ pub(crate) fn empty_tools_suppresses_agent_and_skill_prompt_catalogs() {
         Vec::new()
     };
     let assembly = crate::prompt_assembly::assemble_main_prompt_prefix(
-        RunMode::Default,
-        &PathBuf::from("/tmp/repo"),
-        Some(&agent),
-        &prompt_agents,
-        &prompt_skills,
-        &[],
-        &Default::default(),
-        !tools.is_empty(),
+        crate::prompt_assembly::MainPromptPrefixInput {
+            mode: RunMode::Default,
+            workdir: &PathBuf::from("/tmp/repo"),
+            selected_agent: Some(&agent),
+            agents: &prompt_agents,
+            skills: &prompt_skills,
+            project_instruction_fragments: &[],
+            capabilities: &Default::default(),
+            tools_available: !tools.is_empty(),
+        },
     );
 
     assert!(tools.is_empty());
@@ -778,14 +780,16 @@ pub(crate) fn empty_tools_suppresses_agent_and_skill_prompt_catalogs() {
 pub(crate) fn prompt_prefix_includes_runtime_workdir_environment() {
     let workdir = PathBuf::from("/tmp/repo/task");
     let assembly = crate::prompt_assembly::assemble_main_prompt_prefix(
-        RunMode::Default,
-        &workdir,
-        None,
-        &[],
-        &[],
-        &[],
-        &Default::default(),
-        true,
+        crate::prompt_assembly::MainPromptPrefixInput {
+            mode: RunMode::Default,
+            workdir: &workdir,
+            selected_agent: None,
+            agents: &[],
+            skills: &[],
+            project_instruction_fragments: &[],
+            capabilities: &Default::default(),
+            tools_available: true,
+        },
     );
 
     let environment_slot = assembly
@@ -816,14 +820,16 @@ pub(crate) fn project_instructions_are_developer_prompt_slots_with_system_fallba
         ..Default::default()
     };
     let developer_assembly = crate::prompt_assembly::assemble_main_prompt_prefix(
-        RunMode::Default,
-        &PathBuf::from("/tmp/repo"),
-        None,
-        &[],
-        &[],
-        std::slice::from_ref(&fragment),
-        &developer_caps,
-        true,
+        crate::prompt_assembly::MainPromptPrefixInput {
+            mode: RunMode::Default,
+            workdir: &PathBuf::from("/tmp/repo"),
+            selected_agent: None,
+            agents: &[],
+            skills: &[],
+            project_instruction_fragments: std::slice::from_ref(&fragment),
+            capabilities: &developer_caps,
+            tools_available: true,
+        },
     );
     assert!(
         developer_assembly
@@ -844,14 +850,16 @@ pub(crate) fn project_instructions_are_developer_prompt_slots_with_system_fallba
     );
 
     let fallback_assembly = crate::prompt_assembly::assemble_main_prompt_prefix(
-        RunMode::Default,
-        &PathBuf::from("/tmp/repo"),
-        None,
-        &[],
-        &[],
-        &[fragment],
-        &Default::default(),
-        true,
+        crate::prompt_assembly::MainPromptPrefixInput {
+            mode: RunMode::Default,
+            workdir: &PathBuf::from("/tmp/repo"),
+            selected_agent: None,
+            agents: &[],
+            skills: &[],
+            project_instruction_fragments: &[fragment],
+            capabilities: &Default::default(),
+            tools_available: true,
+        },
     );
     let fallback_slot = fallback_assembly
         .prefix_slots

@@ -473,8 +473,10 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         ToolRuntimeContext {
             task_id: child_session.clone(),
             lsp: child.context.lsp.clone(),
+            lsp_manager: crate::tools::write_support::default_lsp_manager(),
             allow_login_shell: child.context.permission_config.allow_login_shell,
             stream_events: child.context.stream_events.clone(),
+            env: child.context.env.clone(),
             path_prefixes: child.context.path_prefixes.clone(),
         },
         &child.context.tool_selection,

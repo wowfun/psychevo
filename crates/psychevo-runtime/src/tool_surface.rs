@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -44,6 +45,7 @@ pub(crate) struct ToolSurfaceAssembly {
     pub(crate) lsp: LspConfig,
     pub(crate) allow_login_shell: bool,
     pub(crate) stream_events: Option<RunStreamSink>,
+    pub(crate) env: BTreeMap<String, String>,
     pub(crate) path_prefixes: Vec<PathBuf>,
     pub(crate) tool_selection: ToolSelectionConfig,
     pub(crate) custom_toolsets: std::collections::BTreeMap<String, CustomToolsetConfig>,
@@ -60,8 +62,10 @@ pub(crate) fn assemble_tool_surface(input: ToolSurfaceAssembly) -> Vec<Arc<dyn T
         ToolRuntimeContext {
             task_id: input.task_id,
             lsp: input.lsp.clone(),
+            lsp_manager: crate::tools::write_support::default_lsp_manager(),
             allow_login_shell: input.allow_login_shell,
             stream_events: input.stream_events.clone(),
+            env: input.env.clone(),
             path_prefixes: input.path_prefixes.clone(),
         },
         &input.tool_selection,

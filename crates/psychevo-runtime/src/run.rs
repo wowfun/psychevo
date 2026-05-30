@@ -41,10 +41,10 @@ pub(crate) use crate::paths::canonical_workdir;
 pub(crate) use crate::permissions::PermissionRuntime;
 pub(crate) use crate::project_instructions::load_project_instructions;
 pub(crate) use crate::prompt_assembly::{
-    PROMPT_PREFIX_NOTICE_METADATA_KEY, PromptPrefixRecordInput, assemble_main_prompt_prefix,
-    assembly_from_prefix_record, context_evidence_for_request, developer_provider_role,
-    prompt_prefix_record, skill_contextual_user_messages, tool_declarations_hash,
-    turn_prefix_notice_instruction, turn_required_agent_instruction,
+    MainPromptPrefixInput, PROMPT_PREFIX_NOTICE_METADATA_KEY, PromptPrefixRecordInput,
+    assemble_main_prompt_prefix, assembly_from_prefix_record, context_evidence_for_request,
+    developer_provider_role, prompt_prefix_record, skill_contextual_user_messages,
+    tool_declarations_hash, turn_prefix_notice_instruction, turn_required_agent_instruction,
 };
 pub(crate) use crate::prompt_image::prompt_message_from_inputs_with_options;
 pub(crate) use crate::prompt_templates;

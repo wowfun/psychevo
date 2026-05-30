@@ -352,6 +352,7 @@ pub(crate) fn reconstructed_tool_declarations(
         lsp: Default::default(),
         allow_login_shell: false,
         stream_events: None,
+        env: BTreeMap::new(),
         path_prefixes: Vec::new(),
         tool_selection: Default::default(),
         custom_toolsets: BTreeMap::new(),

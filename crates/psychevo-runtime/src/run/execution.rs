@@ -330,6 +330,7 @@ pub(crate) async fn run_live_internal(
         lsp: loaded.config.lsp.clone(),
         allow_login_shell: loaded.config.permissions.allow_login_shell,
         stream_events: stream_events.clone(),
+        env: loaded.env.clone(),
         path_prefixes: managed_tools.path_prefixes.clone(),
         tool_selection: loaded.config.tools.clone(),
         custom_toolsets: loaded.config.toolsets.clone(),
@@ -397,16 +398,16 @@ pub(crate) async fn run_live_internal(
     let needs_prefix_rebuild =
         created_session || stored_prefix.is_none() || invalidation_reason.is_some();
     let (prompt_assembly, prompt_prefix_record) = if needs_prefix_rebuild {
-        let assembly = assemble_main_prompt_prefix(
-            options.mode,
-            &workdir,
-            selected_agent.as_ref(),
-            &prompt_agents,
-            &prompt_skills,
-            prompt_project_instructions,
-            &resolved.metadata.capabilities,
-            !tools.is_empty(),
-        );
+        let assembly = assemble_main_prompt_prefix(MainPromptPrefixInput {
+            mode: options.mode,
+            workdir: &workdir,
+            selected_agent: selected_agent.as_ref(),
+            agents: &prompt_agents,
+            skills: &prompt_skills,
+            project_instruction_fragments: prompt_project_instructions,
+            capabilities: &resolved.metadata.capabilities,
+            tools_available: !tools.is_empty(),
+        });
         let reason = if created_session {
             "new_session".to_string()
         } else {

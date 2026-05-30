@@ -49,8 +49,10 @@ pub(crate) fn default_exec_max_output_tokens() -> usize {
 pub(crate) struct ToolRuntimeContext {
     pub(crate) task_id: String,
     pub(crate) lsp: LspConfig,
+    pub(crate) lsp_manager: Arc<crate::tools::write_support::LspManager>,
     pub(crate) allow_login_shell: bool,
     pub(crate) stream_events: Option<RunStreamSink>,
+    pub(crate) env: BTreeMap<String, String>,
     pub(crate) path_prefixes: Vec<PathBuf>,
 }
 
@@ -59,8 +61,10 @@ impl Default for ToolRuntimeContext {
         Self {
             task_id: "default".to_string(),
             lsp: LspConfig::default(),
+            lsp_manager: crate::tools::write_support::default_lsp_manager(),
             allow_login_shell: false,
             stream_events: None,
+            env: BTreeMap::new(),
             path_prefixes: Vec::new(),
         }
     }

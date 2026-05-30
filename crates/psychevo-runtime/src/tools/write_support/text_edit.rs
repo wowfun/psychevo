@@ -31,7 +31,6 @@ pub(crate) struct LspBaseline {
 }
 
 pub(crate) type FuzzyStrategy = fn(&str, &str) -> Vec<MatchRange>;
-pub(crate) type LspAutoCommand<'a> = Option<(&'a str, &'a [&'a str])>;
 
 pub(crate) struct EditSuccess {
     pub(crate) diff: String,

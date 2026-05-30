@@ -84,16 +84,28 @@ impl PrefixSlotInput {
     }
 }
 
-pub(crate) fn assemble_main_prompt_prefix(
-    mode: RunMode,
-    workdir: &Path,
-    selected_agent: Option<&AgentDefinition>,
-    agents: &[AgentDefinition],
-    skills: &[Skill],
-    project_instruction_fragments: &[ProjectInstructionFragment],
-    capabilities: &ModelCapabilities,
-    tools_available: bool,
-) -> MainPromptAssembly {
+pub(crate) struct MainPromptPrefixInput<'a> {
+    pub(crate) mode: RunMode,
+    pub(crate) workdir: &'a Path,
+    pub(crate) selected_agent: Option<&'a AgentDefinition>,
+    pub(crate) agents: &'a [AgentDefinition],
+    pub(crate) skills: &'a [Skill],
+    pub(crate) project_instruction_fragments: &'a [ProjectInstructionFragment],
+    pub(crate) capabilities: &'a ModelCapabilities,
+    pub(crate) tools_available: bool,
+}
+
+pub(crate) fn assemble_main_prompt_prefix(input: MainPromptPrefixInput<'_>) -> MainPromptAssembly {
+    let MainPromptPrefixInput {
+        mode,
+        workdir,
+        selected_agent,
+        agents,
+        skills,
+        project_instruction_fragments,
+        capabilities,
+        tools_available,
+    } = input;
     let developer_role = developer_provider_role(capabilities);
     let mut order = 0usize;
     let mut prompt_instructions = Vec::new();

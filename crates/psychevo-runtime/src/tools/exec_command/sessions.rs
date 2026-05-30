@@ -180,8 +180,10 @@ pub(crate) async fn exec_command_tool_impl(
         ToolRuntimeContext {
             task_id: "default".to_string(),
             lsp: LspConfig::default(),
+            lsp_manager: default_lsp_manager(),
             allow_login_shell,
             stream_events: None,
+            env: BTreeMap::new(),
             path_prefixes: Vec::new(),
         },
         "exec_command".to_string(),

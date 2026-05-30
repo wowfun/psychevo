@@ -18,8 +18,10 @@ pub(crate) async fn exec_command_yielded_session_emits_background_lifecycle_even
         crate::tools::ToolRuntimeContext {
             task_id: "exec-lifecycle-test".to_string(),
             lsp: crate::config::LspConfig::default(),
+            lsp_manager: crate::tools::write_support::default_lsp_manager(),
             allow_login_shell: false,
             stream_events: Some(stream),
+            env: BTreeMap::new(),
             path_prefixes: Vec::new(),
         },
     );
@@ -90,8 +92,10 @@ pub(crate) async fn interrupt_exec_sessions_for_task_emits_interrupted_finish() 
         crate::tools::ToolRuntimeContext {
             task_id: "exec-interrupt-test".to_string(),
             lsp: crate::config::LspConfig::default(),
+            lsp_manager: crate::tools::write_support::default_lsp_manager(),
             allow_login_shell: false,
             stream_events: Some(stream),
+            env: BTreeMap::new(),
             path_prefixes: Vec::new(),
         },
     );
