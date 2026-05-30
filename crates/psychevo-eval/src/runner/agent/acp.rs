@@ -120,14 +120,16 @@ pub(crate) fn run_acp_agent(
         }),
     )?;
     let initialize_result = acp_recv_response(
-        &mut stdin,
-        &mut raw_log,
-        &stdout_rx,
+        AcpResponseInput {
+            stdin: &mut stdin,
+            raw_log: &mut raw_log,
+            stdout_rx: &stdout_rx,
+            deadline,
+            events,
+            case_id: &case.case_id,
+            permission: case.agent.acp.permission.as_deref().unwrap_or("allow_once"),
+        },
         next_id,
-        deadline,
-        events,
-        &case.case_id,
-        case.agent.acp.permission.as_deref().unwrap_or("allow_once"),
     )?;
     validate_requested_acp_capabilities(&case.agent, &initialize_result)?;
     next_id += 1;
@@ -143,14 +145,16 @@ pub(crate) fn run_acp_agent(
         }),
     )?;
     let session = acp_recv_response(
-        &mut stdin,
-        &mut raw_log,
-        &stdout_rx,
+        AcpResponseInput {
+            stdin: &mut stdin,
+            raw_log: &mut raw_log,
+            stdout_rx: &stdout_rx,
+            deadline,
+            events,
+            case_id: &case.case_id,
+            permission: case.agent.acp.permission.as_deref().unwrap_or("allow_once"),
+        },
         next_id,
-        deadline,
-        events,
-        &case.case_id,
-        case.agent.acp.permission.as_deref().unwrap_or("allow_once"),
     )?;
     let session_id = session
         .get("sessionId")
@@ -171,14 +175,16 @@ pub(crate) fn run_acp_agent(
             }),
         )?;
         let _ = acp_recv_response(
-            &mut stdin,
-            &mut raw_log,
-            &stdout_rx,
+            AcpResponseInput {
+                stdin: &mut stdin,
+                raw_log: &mut raw_log,
+                stdout_rx: &stdout_rx,
+                deadline,
+                events,
+                case_id: &case.case_id,
+                permission: case.agent.acp.permission.as_deref().unwrap_or("allow_once"),
+            },
             next_id,
-            deadline,
-            events,
-            &case.case_id,
-            case.agent.acp.permission.as_deref().unwrap_or("allow_once"),
         )?;
         next_id += 1;
     }
@@ -194,14 +200,16 @@ pub(crate) fn run_acp_agent(
             }),
         )?;
         let _ = acp_recv_response(
-            &mut stdin,
-            &mut raw_log,
-            &stdout_rx,
+            AcpResponseInput {
+                stdin: &mut stdin,
+                raw_log: &mut raw_log,
+                stdout_rx: &stdout_rx,
+                deadline,
+                events,
+                case_id: &case.case_id,
+                permission: case.agent.acp.permission.as_deref().unwrap_or("allow_once"),
+            },
             next_id,
-            deadline,
-            events,
-            &case.case_id,
-            case.agent.acp.permission.as_deref().unwrap_or("allow_once"),
         )?;
         next_id += 1;
     }
@@ -232,14 +240,16 @@ pub(crate) fn run_acp_agent(
         }),
     )?;
     let prompt_result = acp_recv_response(
-        &mut stdin,
-        &mut raw_log,
-        &stdout_rx,
+        AcpResponseInput {
+            stdin: &mut stdin,
+            raw_log: &mut raw_log,
+            stdout_rx: &stdout_rx,
+            deadline,
+            events,
+            case_id: &case.case_id,
+            permission: case.agent.acp.permission.as_deref().unwrap_or("allow_once"),
+        },
         next_id,
-        deadline,
-        events,
-        &case.case_id,
-        case.agent.acp.permission.as_deref().unwrap_or("allow_once"),
     )?;
     push_event(
         events,
@@ -493,16 +503,26 @@ pub(crate) fn acp_send_logged(
     Ok(())
 }
 
-pub(crate) fn acp_recv_response(
-    stdin: &mut std::process::ChildStdin,
-    raw_log: &mut dyn std::io::Write,
-    stdout_rx: &std::sync::mpsc::Receiver<String>,
-    id: u64,
-    deadline: Instant,
-    events: &mut Vec<TrajectoryEvent>,
-    case_id: &str,
-    permission: &str,
-) -> Result<Value> {
+pub(crate) struct AcpResponseInput<'a> {
+    pub(crate) stdin: &'a mut std::process::ChildStdin,
+    pub(crate) raw_log: &'a mut dyn std::io::Write,
+    pub(crate) stdout_rx: &'a std::sync::mpsc::Receiver<String>,
+    pub(crate) deadline: Instant,
+    pub(crate) events: &'a mut Vec<TrajectoryEvent>,
+    pub(crate) case_id: &'a str,
+    pub(crate) permission: &'a str,
+}
+
+pub(crate) fn acp_recv_response(input: AcpResponseInput<'_>, id: u64) -> Result<Value> {
+    let AcpResponseInput {
+        stdin,
+        raw_log,
+        stdout_rx,
+        deadline,
+        events,
+        case_id,
+        permission,
+    } = input;
     loop {
         let now = Instant::now();
         if now >= deadline {

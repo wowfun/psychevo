@@ -102,11 +102,10 @@ command = {{ command = "sh", args = ["{}"], model = "test-model" }}
     assert!(!json.stdout.contains("\"cell_key\""));
     assert_eq!(payload["schema_version"], VIEW_SCHEMA_VERSION);
     assert!(
-        payload["leaderboard"]["entries"]
+        !payload["leaderboard"]["entries"]
             .as_array()
             .expect("leaderboard entries")
-            .len()
-            >= 1
+            .is_empty()
     );
     assert_eq!(payload["leaderboard"]["entries"][0]["total_trials"], 1);
     assert_eq!(payload["leaderboard"]["entries"][0]["successes"], 1);

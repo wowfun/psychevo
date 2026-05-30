@@ -216,19 +216,14 @@ impl Default for AcpAgentOptions {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AcpInstallStrategy {
+    #[default]
     ProfileDefault,
     Preinstalled,
     InstallCommand,
     CopyBinary,
-}
-
-impl Default for AcpInstallStrategy {
-    fn default() -> Self {
-        Self::ProfileDefault
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

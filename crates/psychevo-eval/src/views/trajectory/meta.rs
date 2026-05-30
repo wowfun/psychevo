@@ -316,6 +316,26 @@ pub(crate) fn observation_result_is_error(result: &AtifObservationResult) -> boo
         })
 }
 
+pub(crate) fn trajectory_graph_from_steps(steps: &[ViewTrajectoryStepMeta]) -> ViewTrajectoryGraph {
+    let nodes = steps
+        .iter()
+        .map(|step| ViewTrajectoryGraphNode {
+            id: format!("step-{}", step.step_id),
+            step_id: step.step_id,
+            label: step.label.clone(),
+            source: step.source.clone(),
+        })
+        .collect::<Vec<_>>();
+    let edges = nodes
+        .windows(2)
+        .map(|window| ViewTrajectoryGraphEdge {
+            from: window[0].id.clone(),
+            to: window[1].id.clone(),
+        })
+        .collect();
+    ViewTrajectoryGraph { nodes, edges }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -424,24 +444,4 @@ mod tests {
             llm_call_count: None,
         }
     }
-}
-
-pub(crate) fn trajectory_graph_from_steps(steps: &[ViewTrajectoryStepMeta]) -> ViewTrajectoryGraph {
-    let nodes = steps
-        .iter()
-        .map(|step| ViewTrajectoryGraphNode {
-            id: format!("step-{}", step.step_id),
-            step_id: step.step_id,
-            label: step.label.clone(),
-            source: step.source.clone(),
-        })
-        .collect::<Vec<_>>();
-    let edges = nodes
-        .windows(2)
-        .map(|window| ViewTrajectoryGraphEdge {
-            from: window[0].id.clone(),
-            to: window[1].id.clone(),
-        })
-        .collect();
-    ViewTrajectoryGraph { nodes, edges }
 }

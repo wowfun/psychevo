@@ -305,14 +305,16 @@ pub(crate) fn run_acp_agent_in_container(
         }),
     )?;
     let initialize_result = acp_recv_response(
-        &mut stdin,
-        &mut raw_log,
-        &stdout_rx,
+        AcpResponseInput {
+            stdin: &mut stdin,
+            raw_log: &mut raw_log,
+            stdout_rx: &stdout_rx,
+            deadline,
+            events,
+            case_id: &case.case_id,
+            permission: case.agent.acp.permission.as_deref().unwrap_or("allow_once"),
+        },
         next_id,
-        deadline,
-        events,
-        &case.case_id,
-        case.agent.acp.permission.as_deref().unwrap_or("allow_once"),
     )?;
     validate_requested_acp_capabilities(&case.agent, &initialize_result)?;
     next_id += 1;
@@ -328,14 +330,16 @@ pub(crate) fn run_acp_agent_in_container(
         }),
     )?;
     let session = acp_recv_response(
-        &mut stdin,
-        &mut raw_log,
-        &stdout_rx,
+        AcpResponseInput {
+            stdin: &mut stdin,
+            raw_log: &mut raw_log,
+            stdout_rx: &stdout_rx,
+            deadline,
+            events,
+            case_id: &case.case_id,
+            permission: case.agent.acp.permission.as_deref().unwrap_or("allow_once"),
+        },
         next_id,
-        deadline,
-        events,
-        &case.case_id,
-        case.agent.acp.permission.as_deref().unwrap_or("allow_once"),
     )?;
     let session_id = session
         .get("sessionId")
@@ -356,14 +360,16 @@ pub(crate) fn run_acp_agent_in_container(
             }),
         )?;
         let _ = acp_recv_response(
-            &mut stdin,
-            &mut raw_log,
-            &stdout_rx,
+            AcpResponseInput {
+                stdin: &mut stdin,
+                raw_log: &mut raw_log,
+                stdout_rx: &stdout_rx,
+                deadline,
+                events,
+                case_id: &case.case_id,
+                permission: case.agent.acp.permission.as_deref().unwrap_or("allow_once"),
+            },
             next_id,
-            deadline,
-            events,
-            &case.case_id,
-            case.agent.acp.permission.as_deref().unwrap_or("allow_once"),
         )?;
         next_id += 1;
     }
@@ -379,14 +385,16 @@ pub(crate) fn run_acp_agent_in_container(
             }),
         )?;
         let _ = acp_recv_response(
-            &mut stdin,
-            &mut raw_log,
-            &stdout_rx,
+            AcpResponseInput {
+                stdin: &mut stdin,
+                raw_log: &mut raw_log,
+                stdout_rx: &stdout_rx,
+                deadline,
+                events,
+                case_id: &case.case_id,
+                permission: case.agent.acp.permission.as_deref().unwrap_or("allow_once"),
+            },
             next_id,
-            deadline,
-            events,
-            &case.case_id,
-            case.agent.acp.permission.as_deref().unwrap_or("allow_once"),
         )?;
         next_id += 1;
     }
@@ -417,14 +425,16 @@ pub(crate) fn run_acp_agent_in_container(
         }),
     )?;
     let prompt_result = acp_recv_response(
-        &mut stdin,
-        &mut raw_log,
-        &stdout_rx,
+        AcpResponseInput {
+            stdin: &mut stdin,
+            raw_log: &mut raw_log,
+            stdout_rx: &stdout_rx,
+            deadline,
+            events,
+            case_id: &case.case_id,
+            permission: case.agent.acp.permission.as_deref().unwrap_or("allow_once"),
+        },
         next_id,
-        deadline,
-        events,
-        &case.case_id,
-        case.agent.acp.permission.as_deref().unwrap_or("allow_once"),
     )?;
     push_event(
         events,
