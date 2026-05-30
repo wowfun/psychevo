@@ -61,7 +61,11 @@ The baseline is final-fact persistence. Implementations may persist intermediate
 Per-message metadata may carry durable metric facts for the message they
 annotate. For tool-result messages, implementations may persist tool execution
 duration such as `elapsed_ms` in the message metadata so interfaces can restore
-completed tool timing without replaying live execution events.
+completed tool timing without replaying live execution events. Protocol bridges
+may also preserve runtime tool timing in protocol extension metadata, such as
+ACP `_meta.psychevo.toolTiming`, so downstream report projections can recover
+actual tool execution duration without treating an entire agent step as tool
+execution time.
 
 ## Retrieval Boundary
 

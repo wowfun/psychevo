@@ -24,11 +24,15 @@ The physical layout remains a cell directory, but the public view model calls a
 single execution fact a Trial and a comparison position a MatrixCell.
 
 `peval view` is the built-in static reporting, comparison, and inspection
-surface. It projects selected cell facts into summary, matrix, usage, artifact,
-trajectory, trajectory metadata, log, analysis, diff, and grouped views. The
-default scope is the selected benchmark. `--path` may narrow the input to a
-benchmark, agent, task, or exact cell directory, and filters are applied after
-path scoping.
+surface. It projects selected cell facts into a deduplicated core plus
+role-based projections: `core`, `comparison`, `annotations`, and
+`attachments`. The default scope is the selected benchmark. `--path/-p` may be
+repeated to compare explicit path selections. Each selected path may narrow the input to a
+benchmark, agent, task, or exact cell directory. The path is a view-only
+variant group; descendant cells inherit the group's automatic path label.
+Filters are applied after all selected path groups are expanded and unioned.
+Any explicit path that resolves to zero cell facts fails before filtering, and
+the same cell must not be selected by multiple explicit path groups.
 
 Report profiles are optional named view definitions declared as
 `[reports.<key>]` in eval, workspace, or user config. The first supported
@@ -42,33 +46,45 @@ reads. Markdown view generation is removed; callers that request `markdown`,
 `md`, or an `.md`/`.markdown` output path receive a clear error that points to
 HTML and JSON.
 `-i all` is a parser-level alias for the complete static diagnostic report:
-`summary,matrix,usage,warnings,artifacts,trajectory,trajectory-meta,analysis`.
-`timeline`, `atif`, `logs`, and `diff` are removed from the public include
-surface; requesting them is a clear error rather than an alias. `atif` fails
-with guidance to use `trajectory`. View DTOs serialize the expanded list and
-use view schema v12 for the Trial,
-MatrixCell, trajectory, and trajectory metadata sections.
+`core,comparison,annotations,attachments`. With no explicit include, the
+default is `core,comparison,annotations`. Legacy section include names
+(`summary`, `matrix`, `usage`, `warnings`, `artifacts`, `trajectory`,
+`trajectory-meta`, `notes`, and `analysis`) are removed from the public include
+surface in schema v17 and fail clearly with guidance to the role-based include
+names. `timeline`, `atif`, `logs`, and `diff` also fail clearly.
 
-Schema v12 top-level JSON contains `summary`, `matrix`, `leaderboard`, `trials`,
-`trajectory`, `trajectory_meta`, and section arrays keyed by `trial_key`:
-`artifacts` and `analysis`. Artifacts contain only absolute path lists plus an
-optional error. `matrix` contains task and agent
-axes plus cells. Each MatrixCell has `matrix_cell_key`, `trial_keys`, and
-representative metric values from the latest Trial for the task/agent/model
-identity. Each Trial has deterministic `trial_key = "<matrix_cell_key>:t001"`
-for the current single-attempt cell layout. Public DTOs must not serialize the
-legacy `cell_key` field or absolute cell-root paths in static JSON/HTML. Trial
-DTOs include run timestamps, candidate model, relative cell-root locator, score
-pass/message/details, and a bounded redacted prompt preview when a prompt
-artifact is retained.
+Schema v17 top-level JSON always contains `schema_version`, expanded
+`includes`, `scope`, `path_selections`, `trajectory`, and `trajectory_meta`.
+When included, `comparison`, `annotations`, and `attachments` are role-based
+sections keyed by `trial_key`. `trajectory` is standard ATIF v1.7 and is the
+authority for transcript content plus ATIF metrics such as token, tool, turn,
+and cost totals. `trajectory_meta` is the peval sidecar for information ATIF
+cannot express: Trial identity, variant, relative cell root, result status,
+score, score details, warnings, started/finished timing, source
+`trajectory.jsonl` reference, event counts, prompt unavailability, derivation
+errors, and per-step timing/truncation/tool-status hints.
 
-The schema v12 `leaderboard` is a first-class machine-readable report section.
-Entries are grouped by `agent_id` plus model name. Aggregate rows expose total
-trials, successes, pass rate, average score, average duration, total tokens,
-total cost, task breakdown, and trial rows. Default ranking orders by pass rate
-or score descending, then by average duration ascending, then by tokens and
-cost ascending. Trial detail rows are represented by `trial_keys`; renderers
-join those keys against the top-level `trials` array.
+`comparison` contains `summary`, `groups`, `matrix`, `leaderboard`, and
+`default_metric`. These are projections over core Trials and must carry only
+axis/group identities, aggregate values, metric values, and `trial_keys`.
+Single-Trial facts are resolved by joining those keys against
+`trajectory_meta` and `trajectory.final_metrics`. Matrix cells include
+`matrix_cell_key`, `trial_keys`, `representative_trial_key`, axes, optional
+variant id/label, and comparison metric values. `default_metric` is the first
+initial heatmap metric, in UI metric order `score`, `duration`, `tokens`,
+`tools`, `turns`, whose numeric values are not all identical across visible
+matrix cells. If no metric varies, it is `score`. Leaderboard entries are
+grouped by `agent_id` plus model name and, in multi-path mode, variant id.
+Default ranking orders by pass rate or score descending, then by average
+duration ascending, then by tokens and cost ascending.
+
+`annotations` contains report notes, Trial notes, and cached analysis. Manual
+notes come from cell-local `notes.md` files or repeatable
+`--note INDEX=TEXT` CLI entries, are report-only metadata, and never mutate
+`run.json` or `analysis.json`. `--note 0=TEXT` creates report notes;
+`--note N=TEXT` for `N >= 1` targets the one-based Trial index in the current
+filtered view. `attachments` contains artifact `ViewDataRef` values keyed by
+`trial_key`; static JSON and HTML omit absolute paths.
 
 Physical references are represented as `ViewDataRef` values with `kind`,
 `label`, `relative_path`, `mime`, `size_bytes`, and available hash or mtime
@@ -84,17 +100,14 @@ use an explicit output path.
 
 A view should show the selected matrix shape, pass/fail counts, setup and
 runtime failures, scores, duration, model/candidate identifiers, cost or usage
-when available, and status aggregation. View renderers read metrics from the
-structured metrics fields. They do not recalculate token usage, cost, duration,
-turn counts, or tool counts from human logs.
+when available, and status aggregation. View renderers read metrics from ATIF
+metrics and peval sidecar result fields. They do not recalculate token usage,
+cost, duration, turn counts, or tool counts from human logs.
 
-Usage and accounting are separate projections. Usage shows provider token
-counts and cost. Accounting shows the runtime accounting mirror fields when any
-cell provides them. When no accounting data exists, the accounting section is
-omitted rather than filled with placeholder values.
-
-Warnings are a separate report section when present. Warnings are read from
-cell facts and do not change pass/fail aggregation.
+Usage and accounting are ATIF metric data. Comparison tables may aggregate
+those values, but they must not duplicate per-Trial usage rows. Warnings are
+part of the `trajectory_meta` result sidecar for the relevant Trial and do not
+change pass/fail aggregation.
 
 Each new run retains the task prompt as `prompt.md` in the cell root so views do
 not require retaining the whole workspace to show the user-visible task input.
@@ -124,23 +137,24 @@ observations are grouped into the current agent transcript step by
 represent visible transcript rows (`user`, explicit `system`, and `agent`
 rows), while tool-call and tool-error counts remain separate metrics. When the original
 prompt is not retained, derived ATIF remains structurally valid and records
-prompt unavailability in trajectory metadata. View schema v12 treats
-`trajectory` as standard ATIF v1.7 data and moves peval-only UI hints into
-`trajectory_meta`. Metadata contains the trajectory `data_ref`, total events,
-unmapped events, grouped step count, system/reasoning exposure flags, per-step
-label/summary/timing/truncation/tool-status hints, and the optional step graph.
+prompt unavailability in trajectory metadata. View schema v17 treats
+`trajectory` as standard ATIF v1.7 data and moves only ATIF gaps into
+`trajectory_meta`. Metadata contains the trajectory `data_ref`, source event
+counts, prompt unavailability, Trial identity/result/locator fields, and
+per-step timing/truncation/tool-status hints. It does not repeat step source,
+label, summary, tool names, token totals, cost, tool counts, system/reasoning
+exposure, or graph fields that renderers can derive from ATIF.
 Step counts represent visible transcript rows (`user`, explicit `system`, and
 `agent` rows), while tool-call and tool-error counts remain separate metrics.
 Reports should render complete trajectory visuals up to roughly 50 Trials or
 1000 steps; above that threshold they degrade to summaries, references, and
 bounded expansion.
 
-ATIF keeps the `ATIF-v1.7` schema string and must not carry peval-only
-producer fields such as view labels, event counts, raw source metadata,
-tool-status titles, or UI timings. Step metrics, final metrics, structured cell
-metrics, and the view usage/accounting sections must agree for normalized
-values. HTML renders evidence as an always visible ledger and does not collapse
-message, reasoning, or evidence blocks.
+ATIF keeps the `ATIF-v1.7` schema string and must not carry peval-only producer
+fields such as view labels, event counts, raw source metadata, tool-status
+titles, or UI timings. ATIF final metrics are the authority for normalized
+token, tool, turn, and cost values. HTML renders only selected-Trial evidence;
+it does not render a report-wide evidence ledger.
 
 ## Redaction
 
@@ -159,7 +173,8 @@ cache writes.
 ## Comparison
 
 Comparison is a view query over cell facts. Grouping and matrix projection align
-cells by canonical benchmark, task-set, task, factor, and candidate identity. They
+cells by canonical benchmark, task-set, task, factor, candidate identity, and
+view-derived path variant identity when explicit path groups are selected. They
 should surface missing cells, regressions, improvements, setup/runtime/scoring
 failures, and usage deltas without rerunning agents or evaluators.
 
@@ -170,7 +185,7 @@ primary metric. Hover and detail views expose status, duration, usage, cost,
 turns, tool calls, and failure class.
 
 `peval serve` is a Harbor-inspired local workspace viewer, but it uses peval
-terms and schema v12 data. It defaults to the whole workspace, lazy-loads
+terms and schema v17 data. It defaults to the whole workspace, lazy-loads
 benchmark and Trial details, writes only analysis cache files, and protects
 file routes with localhost binding, a generated token, containment checks,
 MIME checks, and a 1 MiB raw/detail limit. The built-in UI uses offline local
@@ -210,41 +225,100 @@ usage totals; ACP agents that expose only final prompt usage show total tokens
 in Result and Usage evidence, while individual Step rows omit unavailable token
 cues. The collapsed Step row preview uses only the Step message content, not
 reasoning, tool-call, or observation summaries; when a Step has no message
-content, the preview is `(Empty Message)`. Step duration represents the current
+content, the preview is `(No Message)`. The collapsed row rail shows `N/M tools`
+as its own chip, shows ordered `tool name + execution time` labels as a
+separate chip, keeps any token count on the left, then shows only the `step span
+/ elapsed` information on the far right with one-decimal second precision. Step
+span and elapsed render as separate chips labeled `step <duration>` and
+`elapsed <duration>`; `tool` timing remains absent from the collapsed rail.
+Expanded Steps do not render a separate Metrics block; Tool Calls show `tool
+exec` directly after the tool name when execution duration is available. Step duration represents the current
 Step's observed span, using an explicit grouped-step end timestamp when the
 adapter exposes one; it must not display the gap since the previous Step as the
 current Step's duration. Expanding a row reveals ordinary non-collapsible
-Reasoning, Message or System Prompt, Tool Calls, Observations, and Metrics
-blocks when those fields exist. Step Metrics omit unavailable key/value pairs
-rather than rendering placeholder dashes. ACP adapters should surface pending
+Reasoning, Message or System Prompt, Tool Calls, and Observations blocks when
+those fields exist. ACP adapters should surface pending
 tool-call argument generation separately from tool execution start/end when the
-underlying runtime exposes it. Report renderers label `step span` separately
-from `tool time`; a long model interval before a tool call must not be presented
-as a long tool execution. System Prompt appears
+underlying runtime exposes it. `psychevo-acp` carries runtime timing through
+ACP `_meta.psychevo.toolTiming.startedAtMs` and `elapsedMs`; v17 trajectory
+metadata prefers that elapsed runtime timing for `tool exec` and marks the
+duration source as `runtime_meta`. When old trajectory data lacks that metadata,
+reports keep the existing ACP event timestamp fallback and mark the source as
+`event_timestamps`. Report renderers label `step span` separately from `tool
+exec`; a long model interval before a tool call must not be presented as a long
+tool execution. System Prompt appears
 only for explicitly exposed system/system_prompt/system_message events and is
 never synthesized from hidden runtime instructions. Artifact entries should not
 emphasize file sizes unless file-size diagnosis is the selected task. Desktop
 is the primary layout target; narrow screens remain a readable single-column
 report.
 
-The HTML workbench also renders the schema v12 leaderboard as flat comparison
+The HTML workbench also renders the schema v17 comparison leaderboard as flat comparison
 tables rather than per-agent/model groups. The default aggregate table has one
 row per agent/model/task breakdown so runs can be compared horizontally, and a
 single global Trial details table remains expandable below it. Leaderboard
 tables align columns across header, filter, and body rows. Enumerated identity
-columns such as agent, model, task, family, status, and cell root support
-compact multi-select exact filtering only. No selected values means all values
-are visible. Numeric result columns such as rank, trial counts, success counts,
-resolution rate, score, duration, tokens, and cost support sorting only, with a
-visibly distinct sort direction indicator. Result headers use compact labels
-and fixed numeric column widths so the label and sort indicator do not wrap into
-each other. The old diagnostic sections are reduced to an always-visible,
-de-duplicated Evidence Ledger for `-i all`, rather than competing with the
-primary leaderboard, matrix, trajectory, and outcome surfaces. The Evidence
-Ledger orders derived analysis before raw artifact paths. Artifacts render as
-absolute path lists only; logs and diff are not separate report sections.
-Single-Trial evidence tables omit repeated Trial identity columns; multi-Trial
-tables may show short Trial identifiers.
+columns such as agent, model, task, family, and status support compact
+multi-select exact filtering only. No selected values means all values are
+visible. Numeric result columns such as trial counts, success counts, pass rate,
+score, duration, tokens, and cost support sorting only, with a visibly distinct
+sort direction indicator. Result headers use compact labels and fixed numeric
+column widths so the label and sort indicator do not wrap into each other.
+All HTML duration presentations, including heatmap metric values, table
+duration cells, selected-Trial duration summaries, expanded tool generation
+timing, tool execution timing, and Step rail `step`/`elapsed` chips, use seconds
+with one decimal place. Unknown durations render `-`; values above one minute
+may use minute-plus-seconds notation while preserving one decimal on seconds.
+The selected-Trial Run summary follows Harbor's wall-clock model and displays
+wall duration from `finished_at_ms - started_at_ms`, falling back to stored
+Trial duration only when timestamps are unavailable. This prevents the Run
+summary from comparing a monotonic case metric against wall-clock trajectory
+elapsed values. Matrix cells, leaderboards, and sorting still use the stored
+case metric duration.
+The Variant column is conditional: aggregate and Trial details tables render it
+only when at least one visible row has a real path variant id or label. Reports
+without explicit path variants must not show an all-`-` Variant column or
+filter control.
+Report-wide row-count status bars are omitted. Both aggregate and Trial details
+table body rows are clickable and update the selected Trial panel. The Trial
+details table omits long path columns; selected Trial metadata such as the cell
+root is shown below the tables instead.
+The selected Trial Steps header provides one-click Expand all and Collapse all
+controls for that Trial's transcript rows. These controls only change the
+current step list's `<details>` state; they do not alter table expansion,
+filters, selected metric, or report data.
+
+The old report-wide diagnostic sections are not rendered as an Evidence Ledger
+in HTML, even for `-i all`. Included annotations and attachments remain in the
+JSON DTO, and HTML projects only the currently selected Trial's supplemental
+evidence into the selected Trial panel. That panel must not repeat information
+already shown in its Run and Result summaries; supplemental evidence covers
+cell root, score details, warnings, and artifacts for the selected Trial only.
+Usage breakdown is read from ATIF final metrics rather than a separate usage
+section. Artifacts render with compact relative labels and avoid layout-breaking
+absolute paths in the main table surface. Logs and diff are not separate report
+sections.
+
+Manual notes are lightweight human commentary for static reports. A cell may
+contain `notes.md`; when the `annotations` include is active, its Markdown text is
+read only from the cell root, bounded to the same 1 MiB text limit as other
+view previews, and exposed as a `ViewNoteReport` with `trial_key`, `source`,
+`label`, `markdown`, and optional `source_ref`. `peval view --note INDEX=TEXT`
+adds temporary CLI notes for this render only. Index `0` creates a report-level
+note exposed in `report_notes`; indexes `1..N` target the current filtered
+Trial order exposed by the view and fail clearly when out of range. If both
+`notes.md` and CLI notes apply to the same Trial, `notes.md` renders first and
+CLI notes append in argument order. HTML renders report notes beneath the title,
+Trial notes in the comparison tables' final `Notes` column with hoverable full
+text, and the selected Trial's notes in the Trial panel. Table note summaries
+and selected Trial notes display note text only; source labels, `notes.md`
+prefixes, and Trial keys are not shown as note headers. HTML renders supported
+Markdown after escaping raw HTML so scripts and unsafe links are not executed.
+
+Cached Trial analysis remains a derived artifact but is not rendered as a
+standalone Evidence Ledger section. When analysis is included, the selected
+Trial panel shows that Trial's cached analysis status and summary; missing
+analysis renders a compact "No cached analysis." placeholder.
 
 Analysis is a cached derived artifact, not a cell fact. `[analysis]` provides
 defaults and `[reports.<key>.analysis]` may override them through eval,

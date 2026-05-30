@@ -4,6 +4,19 @@
 
 - Made `edit`/`write` LSP diagnostics best-effort with background client reuse,
   managed npm installs, and no hot-path `npx`.
+- Added multi-path `peval view` comparisons and lightweight manual notes,
+  including report-level notes, Trial notes, path variants, and selection-hash
+  output paths.
+- Reworked `peval view` HTML around selected-Trial inspection with clickable
+  comparison rows, no report-wide Evidence Ledger, compact tables, Trial-only
+  notes/analysis/evidence, improved Step rails, expand/collapse controls, and
+  one-decimal timing displays.
+- Fixed ACP tool execution timing by carrying runtime timings through ACP
+  `_meta`, preserving timing source in view JSON, and rendering `tool exec`
+  inline with tool names.
+- Refactored `peval view` schema v17 around role-based includes
+  `core,comparison,annotations,attachments`, standard ATIF trajectories, and
+  peval-only `trajectory_meta` sidecars.
 - Fixed clippy blockers across ACP eval, trajectory metadata, prompt assembly,
   and view tests.
 

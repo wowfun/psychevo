@@ -102,32 +102,46 @@ command hash, and platform. Cache keys must not include provider credentials or
 other secrets. If `peval run` later misses a prepared cache, it may fall back
 to per-trial agent installation and record the cache miss.
 
-`peval view [--config PATH|--benchmark ID_OR_PATH] [--report KEY] [--path PATH]...
+`peval view [--config PATH|--benchmark ID_OR_PATH] [--report KEY] [--path/-p PATH]...
 [--task-set ID]
 [--agent ID] [--task ID] [--status STATUS] [--group-by agent,task,task-set,status]
-[-i/--include all|summary,matrix,usage,warnings,artifacts,trajectory,trajectory-meta,analysis]
+[-i/--include all|core|comparison|annotations|attachments]
+[--note INDEX=TEXT]...
 [--format json|html]
 [-o|--output [PATH]]` renders dynamic logical views over cell facts. Without
 `--path`, the scope is the selected benchmark under `runs/<benchmark-id>`.
-With `--path`, the path may point at `runs/<benchmark>`,
+With one or more `--path/-p` values, each path may point at `runs/<benchmark>`,
 `runs/<benchmark>/<agent>`, `runs/<benchmark>/<agent>/<task>`, or a concrete
-cell directory. Filters are applied after path scoping. `--report KEY` selects
-the optional report profile used by analysis overrides. Format defaults to HTML
-and is inferred from `.json` or `.html` output extensions when `--format` is
-omitted and an explicit output path is present. Markdown output is removed; `md`,
-`markdown`, `.md`, and `.markdown` requests fail with guidance to use HTML or
-JSON. With `-o` or
-`--output` and no path, views mirror the selected `runs/` scope under
-`<workspace>/views/`. JSON exposes schema v12 Trial/MatrixCell/leaderboard DTOs and
-structured data references rather than legacy public `cell_key` fields. Static
-JSON stays summary plus references by default; artifacts are exposed only as
-absolute local path lists. HTML may inline trajectory data needed for
-visualization, while artifacts remain path-only evidence.
-`-i all` expands to every include in the documented order and may be mixed with
-specific include names; duplicate includes are removed before rendering.
-`timeline`, `atif`, `logs`, and `diff` are removed from the include grammar and
-fail clearly. Callers should use `trajectory`, which now carries the standard
-ATIF trajectory, plus `trajectory-meta` for peval UI hints.
+cell directory. Each explicit path is a selection group with an automatic
+variant label derived from its workspace-relative path. A path that resolves to
+zero cell facts fails before filters are applied, and a cell selected by
+multiple path groups is an error. Filters are applied after the selected path
+groups are unioned. `--report KEY` selects the optional report profile used by
+analysis overrides. `--note 0=TEXT` attaches report-level manual Markdown notes
+to the top of the report. `--note N=TEXT` for `N >= 1` attaches notes to the
+one-based Trial index in the current filtered view; out-of-range indexes fail
+clearly, and repeated notes append in CLI order after any cell-local
+`notes.md`. Format defaults to HTML and is inferred from `.json` or
+`.html` output extensions when `--format` is omitted and an explicit output
+path is present. Markdown output is removed; `md`, `markdown`, `.md`, and
+`.markdown` requests fail with guidance to use HTML or JSON. With `-o` or
+`--output` and no path, default and single-path views mirror the selected
+`runs/` scope under `<workspace>/views/`; multi-path views write under
+`<workspace>/views/selections/<stable-selection-hash>/`. JSON exposes schema
+v17 role-based DTOs. The top-level `trajectory` array carries standard ATIF
+v1.7 data, and top-level `trajectory_meta` carries peval sidecar records for
+ATIF gaps such as Trial identity, result, locator, source event counts, and
+timing/truncation hints. `comparison` contains summary, groups, matrix,
+leaderboard, and default metric projections; `annotations` contains report
+notes, Trial notes, and cached analysis; `attachments` contains artifact data
+references. With no explicit include, the default is
+`core,comparison,annotations`. `-i all` expands to
+`core,comparison,annotations,attachments` and may be mixed with specific
+include names; duplicate includes are removed before rendering. Legacy include
+names such as `summary`, `matrix`, `usage`, `warnings`, `artifacts`,
+`trajectory`, `trajectory-meta`, `notes`, and `analysis` are removed from the
+v17 include grammar and fail clearly with guidance to the role-based include
+names. `timeline`, `atif`, `logs`, and `diff` also fail clearly.
 
 `peval serve [--config PATH|--benchmark ID_OR_PATH] [--report KEY] [--path PATH]
 [--task-set ID] [--agent ID] [--task ID] [--status STATUS]

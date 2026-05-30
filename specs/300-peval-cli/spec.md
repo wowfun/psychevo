@@ -120,24 +120,51 @@ multiple matches as ambiguous.
 
 `peval view` rendering is part of the local CLI surface. Formatting or
 lint-only maintenance must preserve view semantics while keeping renderers
-compatible with deterministic workspace validation. View schema v12 is the
-Trial/MatrixCell public DTO. It keeps artifact schema v8 and the existing
-physical run layout unchanged while renaming public cell identity to
-`matrix_cell_key` and `trial_key`.
+compatible with deterministic workspace validation. View schema v17 is a
+deduplicated report DTO. Its core data is the top-level `trajectory` array of
+standard ATIF v1.7 trajectories plus top-level `trajectory_meta` peval sidecar
+records keyed by `trial_key`. Other sections are role-based projections or
+extensions keyed by `trial_key`, and must not duplicate data that is already
+expressible by ATIF or by the sidecar.
 `peval view -i all` is a special include alias for the complete static
-diagnostic report. It expands to
-`summary,matrix,usage,warnings,artifacts,trajectory,trajectory-meta,analysis`
-in that stable order. `timeline`, `atif`, `logs`, and `diff` are not supported
-include aliases in v12 and must fail clearly. The alias is not serialized in
-view DTOs; JSON reports expose the expanded include list. Trajectory step
+diagnostic report. It expands to `core,comparison,annotations,attachments` in
+that stable order. With no explicit include, `peval view` defaults to
+`core,comparison,annotations`. Legacy section includes such as `summary`,
+`matrix`, `usage`, `warnings`, `artifacts`, and `trajectory-meta` are removed
+from v17 and must fail clearly with guidance to the role-based include names.
+`timeline`, `atif`, `logs`, and `diff` remain unsupported include aliases and
+must fail clearly. The alias is not serialized in view DTOs; JSON reports
+expose the expanded include list. HTML reports do not render a report-wide
+Evidence Ledger; annotation and attachment data feed the selected Trial panel
+and remain available in the JSON DTO. Trajectory step
 timing metadata must describe the displayed step itself; grouped ACP steps use
 their observed start/end span when available instead of labeling the gap from
 the previous transcript row as the current row's duration. Expanded step blocks
-render explicit reasoning before message content, and step metrics omit
-unavailable key/value pairs instead of displaying placeholder dashes. Step span,
+render explicit reasoning before message content, and do not render a separate
+expanded Metrics block. Step span,
 tool-call argument generation, and tool execution are distinct timings; HTML
-rows and Metrics blocks must label step span separately and must not imply that
-a long agent span is tool execution time.
+rows must label step span separately and must not imply that
+a long agent span is tool execution time. Tool execution duration is displayed
+next to the tool name as `tool exec`. For ACP-backed `psychevo` agents, runtime tool timing may be
+carried in ACP `_meta.psychevo.toolTiming`; view schema v17 exposes whether
+tool execution duration came from runtime metadata or from legacy event
+timestamp fallback. Collapsed Step rows use `(No Message)` when no visible
+message text exists, show tool count and `tool name + execution time` as
+separate left-side chips, keep token counts on the left, and show separate
+right-side `step <duration>` and `elapsed <duration>` chips.
+Leaderboard tables render Variant only when the current rows contain a real
+variant; single-scope reports without path variants hide that column and its
+filter instead of showing repeated `-` values.
+The selected Trial Steps header offers one-click expand and collapse controls
+for the current Trial's step details without changing report filters or
+selection state outside the step list.
+HTML report duration displays use seconds with one decimal place consistently
+across heatmap values, tables, selected-Trial summaries, expanded tool timing,
+and step rails.
+Following Harbor's viewer timing model, the selected-Trial Run summary derives
+its wall duration from `finished_at_ms - started_at_ms`, so it shares the same
+wall-clock basis as trajectory step elapsed values. Comparison tables and
+heatmap duration metrics may continue to use the stored case metric duration.
 
 `peval serve` is the local workspace viewer for stored Trial facts. It opens
 the whole workspace by default, with config, benchmark, path, agent, task, and
