@@ -61,19 +61,28 @@ command = {{ command = "sh", args = ["{}"], model = "test-model" }}
         "a".repeat(2 * 1024 * 1024)
     );
     fs::write(cell_root.join("logs/big.log"), big_log).expect("big log");
+    fs::write(
+        cell_root.join("notes.md"),
+        "## Human note\nPersistent <script>evil()</script>\n- kept with the cell\n",
+    )
+    .expect("notes");
 
     let json = run_view(ViewArgs {
         config: Some(fixture.join("eval.toml")),
         benchmark: None,
         report: None,
         store_root: Some(store_root.clone()),
-        path: Some(cell_root.clone()),
+        paths: vec![cell_root.clone()],
         task_set: None,
         agent: None,
         task: None,
         status: None,
         group_by: Vec::new(),
         include: vec!["all".to_string()],
+        notes: vec![
+            "0=Report **context**".to_string(),
+            "1=CLI **note** with a=b".to_string(),
+        ],
         format: Some(ViewFormat::Json),
         output: None,
     })
@@ -82,73 +91,74 @@ command = {{ command = "sh", args = ["{}"], model = "test-model" }}
     assert_eq!(payload["schema_version"], VIEW_SCHEMA_VERSION);
     assert_eq!(
         payload["includes"],
-        json!([
-            "summary",
-            "matrix",
-            "usage",
-            "warnings",
-            "artifacts",
-            "trajectory",
-            "trajectory-meta",
-            "analysis"
-        ])
+        json!(["core", "comparison", "annotations", "attachments"])
     );
     assert!(payload.get("logs").is_none());
     assert!(payload.get("diff").is_none());
+    assert!(payload.get("trials").is_none());
+    assert!(payload.get("usage").is_none());
+    assert!(payload.get("warnings").is_none());
+    assert!(payload.get("artifacts").is_none());
+    assert!(payload.get("summary").is_none());
+    assert!(payload.get("matrix").is_none());
+    assert!(payload.get("leaderboard").is_none());
+    assert!(payload.get("default_metric").is_none());
     assert!(json.stdout.contains("\"trial_key\""));
     assert!(json.stdout.contains("\"matrix_cell_key\""));
     assert!(!json.stdout.contains("\"atif\""));
-    assert!(payload["trials"][0].get("cell_root").is_none());
+    assert!(payload["trajectory_meta"][0].get("cell_root").is_none());
     assert!(!json.stdout.contains("\"cell_key\""));
     assert_eq!(payload["schema_version"], VIEW_SCHEMA_VERSION);
     assert!(
-        !payload["leaderboard"]["entries"]
+        !payload["comparison"]["leaderboard"]["entries"]
             .as_array()
             .expect("leaderboard entries")
             .is_empty()
     );
-    assert_eq!(payload["leaderboard"]["entries"][0]["total_trials"], 1);
-    assert_eq!(payload["leaderboard"]["entries"][0]["successes"], 1);
+    assert_eq!(
+        payload["comparison"]["leaderboard"]["entries"][0]["total_trials"],
+        1
+    );
+    assert_eq!(
+        payload["comparison"]["leaderboard"]["entries"][0]["successes"],
+        1
+    );
     assert!(
-        payload["trials"][0]["trial_key"]
+        payload["trajectory_meta"][0]["trial_key"]
             .as_str()
             .unwrap()
             .ends_with(":t001")
     );
     assert!(
-        payload["matrix"]["cells"][0]["trial_keys"]
+        payload["comparison"]["matrix"]["cells"][0]["trial_keys"]
             .as_array()
             .unwrap()
             .len()
             == 1
     );
-    let artifact_paths = payload["artifacts"][0]["paths"]
+    let artifact_refs = payload["attachments"]["artifacts"][0]["refs"]
         .as_array()
-        .expect("artifact paths");
-    assert!(artifact_paths.len() > 3);
+        .expect("artifact refs");
+    assert!(artifact_refs.len() > 3);
+    assert!(artifact_refs.iter().all(|artifact| {
+        !Path::new(artifact["relative_path"].as_str().expect("path string")).is_absolute()
+    }));
     assert!(
-        artifact_paths
-            .iter()
-            .all(|path| Path::new(path.as_str().expect("path string")).is_absolute())
-    );
-    assert!(payload["artifacts"][0].get("files").is_none());
-    assert_eq!(
-        payload["trials"][0]["prompt_ref"]["relative_path"],
-        "prompt.md"
+        payload["attachments"]["artifacts"][0]
+            .get("paths")
+            .is_none()
     );
     assert!(
-        payload["trials"][0]["cell_root_relative"]
+        payload["trajectory_meta"][0]["cell_root_relative"]
             .as_str()
             .expect("cell root relative")
             .starts_with("runs/")
     );
-    assert_eq!(payload["trials"][0]["score_passed"], true);
-    assert!(payload["trials"][0]["score_message"].as_str().is_some());
+    assert_eq!(payload["trajectory_meta"][0]["score_passed"], true);
     assert!(
-        payload["trials"][0]["prompt_preview"]
+        payload["trajectory_meta"][0]["score_message"]
             .as_str()
-            .expect("prompt preview")
-            .contains("complete rust-swe-add")
+            .is_some()
     );
     assert_eq!(payload["trajectory"][0]["schema_version"], "ATIF-v1.7");
     assert_eq!(
@@ -157,7 +167,7 @@ command = {{ command = "sh", args = ["{}"], model = "test-model" }}
     );
     assert_eq!(
         payload["trajectory"][0]["trajectory_id"],
-        payload["trials"][0]["trial_key"]
+        payload["trajectory_meta"][0]["trial_key"]
     );
     assert_eq!(
         payload["trajectory"][0]["final_metrics"]["total_prompt_tokens"],
@@ -208,14 +218,22 @@ command = {{ command = "sh", args = ["{}"], model = "test-model" }}
     );
     assert_eq!(
         payload["trajectory_meta"][0]["trial_key"],
-        payload["trials"][0]["trial_key"]
+        payload["trajectory"][0]["trajectory_id"]
     );
     assert_eq!(
         payload["trajectory_meta"][0]["data_ref"]["relative_path"],
         "trajectory.jsonl"
     );
-    assert_eq!(payload["trajectory_meta"][0]["system_exposed"], true);
-    assert_eq!(payload["trajectory_meta"][0]["reasoning_exposed"], true);
+    assert!(
+        payload["trajectory_meta"][0]
+            .get("system_exposed")
+            .is_none()
+    );
+    assert!(
+        payload["trajectory_meta"][0]
+            .get("reasoning_exposed")
+            .is_none()
+    );
     assert!(
         payload["trajectory"][0]["steps"]
             .as_array()
@@ -223,14 +241,34 @@ command = {{ command = "sh", args = ["{}"], model = "test-model" }}
             .iter()
             .all(|step| step.get("extra").is_none() && step.get("llm_call_count").is_none())
     );
-    assert!(payload["usage"][0].get("benchmark").is_none());
-    assert!(payload["usage"][0].get("matrix_cell_key").is_none());
-    assert!(payload["usage"][0].get("agent_id").is_none());
-    assert!(payload["artifacts"][0].get("benchmark").is_none());
-    assert!(payload["artifacts"][0].get("matrix_cell_key").is_none());
     assert_eq!(
-        payload["analysis"][0]["status"], "missing",
+        payload["annotations"]["analysis"][0]["status"], "missing",
         "analysis should not run providers"
+    );
+    let report_notes = payload["annotations"]["report_notes"]
+        .as_array()
+        .expect("report notes");
+    assert_eq!(report_notes.len(), 1);
+    assert_eq!(report_notes[0]["label"], "Report note 1");
+    assert_eq!(report_notes[0]["markdown"], "Report **context**");
+    let notes = payload["annotations"]["notes"].as_array().expect("notes");
+    assert_eq!(notes.len(), 2);
+    assert_eq!(notes[0]["source"], "cell");
+    assert_eq!(notes[0]["label"], "notes.md");
+    assert_eq!(notes[0]["source_ref"]["kind"], "note");
+    assert!(
+        notes[0]["markdown"]
+            .as_str()
+            .expect("cell note")
+            .contains("Persistent <script>evil()</script>")
+    );
+    assert_eq!(notes[1]["source"], "cli");
+    assert_eq!(notes[1]["label"], "CLI note 1");
+    assert!(
+        notes[1]["markdown"]
+            .as_str()
+            .expect("cli note")
+            .contains("a=b")
     );
 
     let html = run_view(ViewArgs {
@@ -238,13 +276,17 @@ command = {{ command = "sh", args = ["{}"], model = "test-model" }}
         benchmark: None,
         report: None,
         store_root: Some(store_root.clone()),
-        path: Some(cell_root.clone()),
+        paths: vec![cell_root.clone()],
         task_set: None,
         agent: None,
         task: None,
         status: None,
         group_by: Vec::new(),
         include: vec!["all".to_string()],
+        notes: vec![
+            "0=Report **context**".to_string(),
+            "1=CLI **note** with a=b".to_string(),
+        ],
         format: Some(ViewFormat::Html),
         output: None,
     })
@@ -256,6 +298,17 @@ command = {{ command = "sh", args = ["{}"], model = "test-model" }}
     assert!(html.stdout.contains("agent / model"));
     assert!(html.stdout.contains("test-model"));
     assert!(html.stdout.contains("trajectory_meta"));
+    assert!(html.stdout.contains("Report note 1"));
+    assert!(html.stdout.contains("Report **context**"));
+    assert!(html.stdout.contains("Notes"));
+    assert!(html.stdout.contains("CLI **note** with a=b"));
+    assert!(html.stdout.contains("renderSelectedNotes(trial.trial_key)"));
+    assert!(
+        html.stdout
+            .contains("renderSelectedAnalysis(trial.trial_key)")
+    );
+    assert!(!html.stdout.contains("Manual Notes"));
+    assert!(!html.stdout.contains("<script>evil()"));
     assert!(!html.stdout.contains("id=\"search\""));
     assert!(!html.stdout.contains("status-filter"));
     assert!(!html.stdout.contains("task-filter"));
@@ -273,6 +326,16 @@ command = {{ command = "sh", args = ["{}"], model = "test-model" }}
     assert!(html.stdout.contains("Agent / Model Comparison"));
     assert!(html.stdout.contains("leaderboard-aggregate"));
     assert!(html.stdout.contains("Pass Rate"));
+    assert!(html.stdout.contains("hasVisibleVariant"));
+    assert!(html.stdout.contains("comparisonColumns(comparisonRows)"));
+    assert!(html.stdout.contains("trialColumns(trialRows)"));
+    assert!(html.stdout.contains("columns.unshift(variantColumn())"));
+    assert!(html.stdout.contains("title=\"${esc(column.label)}\""));
+    assert!(
+        html.stdout
+            .contains("cellTitle: row => notesFullTextForKeys")
+    );
+    assert!(html.stdout.contains("note-snippet"));
     assert!(!html.stdout.contains("Resolution Rate"));
     assert!(html.stdout.contains("filterable"));
     assert!(html.stdout.contains("sortable"));
@@ -281,41 +344,138 @@ command = {{ command = "sh", args = ["{}"], model = "test-model" }}
     assert!(html.stdout.contains("data-table-filter"));
     assert!(html.stdout.contains("multi-filter"));
     assert!(html.stdout.contains("data-filter-value"));
+    assert!(html.stdout.contains("renderStepsHeader"));
+    assert!(html.stdout.contains("bindStepControls"));
+    assert!(html.stdout.contains("data-step-action=\"expand\""));
+    assert!(html.stdout.contains("data-step-action=\"collapse\""));
+    assert!(html.stdout.contains("Expand all"));
+    assert!(html.stdout.contains("Collapse all"));
+    assert!(html.stdout.contains(".steps-head"));
+    assert!(html.stdout.contains(".step-toggle-button"));
     assert!(html.stdout.contains("&#9650;"));
     assert!(html.stdout.contains("&#9660;"));
     assert!(html.stdout.contains("missing-metric"));
-    assert!(html.stdout.contains("Evidence Ledger"));
+    assert!(!html.stdout.contains("Evidence Ledger"));
+    assert!(!html.stdout.contains("Showing ${filtered.length}"));
+    assert!(!html.stdout.contains("table-meta"));
+    assert!(html.stdout.contains("data-row-trial"));
+    assert!(html.stdout.contains("clickable-row"));
+    assert!(html.stdout.contains("selected-row"));
+    assert!(html.stdout.contains("renderSelectedEvidence(trial)"));
+    assert!(html.stdout.contains("Score Details"));
+    assert!(html.stdout.contains("Usage Breakdown"));
+    assert!(html.stdout.contains("Cell Root"));
+    assert!(html.stdout.contains("Artifacts"));
+    assert!(
+        !html
+            .stdout
+            .contains("{ key: \"cell_root_relative\", label: \"Cell Root\"")
+    );
+    assert!(!html.stdout.contains("{ key: \"rank\", label: \"Rank\""));
     assert!(
         html.stdout
-            .find("${renderAnalysisEvidence(view.analysis || [])}")
-            .expect("analysis evidence invocation")
-            < html
-                .stdout
-                .find("${renderArtifactsEvidence(view.artifacts || [])}")
-                .expect("artifacts evidence invocation")
+            .contains("notes.map(note => String(note.markdown || \"\").trim())")
     );
-    assert!(html.stdout.contains("Absolute Path"));
+    assert!(!html.stdout.contains("note.label || note.source"));
+    assert!(
+        html.stdout
+            .contains("<article class=\"manual-note\"><div class=\"note-body\">")
+    );
+    assert!(
+        !html
+            .stdout
+            .contains("renderNotesEvidence(view.notes || [])")
+    );
+    assert!(
+        !html
+            .stdout
+            .contains("renderAnalysisEvidence(view.analysis || [])")
+    );
+    assert!(
+        !html
+            .stdout
+            .contains("${renderArtifactsEvidence(view.artifacts || [])}")
+    );
+    assert!(!html.stdout.contains("Absolute Path"));
     assert!(!html.stdout.contains("<th>Kind</th>"));
     assert!(!html.stdout.contains("<th>MIME</th>"));
     assert!(!html.stdout.contains("<th>Bytes</th>"));
     assert!(!html.stdout.contains("Logs"));
     assert!(!html.stdout.contains("Diff"));
-    assert!(html.stdout.contains("Scoring"));
+    assert!(!html.stdout.contains("Scoring"));
     assert!(html.stdout.contains("Reasoning"));
     assert!(html.stdout.contains("Tool Calls"));
     assert!(html.stdout.contains("tool success / total"));
     assert!(html.stdout.contains("renderStepRail(step, meta)"));
-    assert!(html.stdout.contains("renderStepMetrics(step, meta)"));
+    assert!(!html.stdout.contains("renderStepMetrics(step, meta)"));
+    assert!(!html.stdout.contains("<h4>Metrics</h4>"));
     assert!(html.stdout.contains("renderToolTiming(toolMeta)"));
-    assert!(html.stdout.contains("stepToolExecutionMs(meta)"));
+    assert!(html.stdout.contains("renderToolNameChip(tool, toolMeta)"));
+    assert!(html.stdout.contains("toolExecutionText(toolMeta)"));
     assert!(html.stdout.contains("hasMetricValue"));
-    assert!(html.stdout.contains("step span"));
-    assert!(html.stdout.contains("tool time"));
     assert!(
         html.stdout
+            .contains("const fmtMs = value => fmtDurationMs(value);")
+    );
+    assert!(
+        html.stdout
+            .contains("const fmtRailMs = value => fmtDurationMs(value);")
+    );
+    assert!(html.stdout.contains("function fmtDurationMs(value)"));
+    assert!(html.stdout.contains("function trialWallDurationMs(trial)"));
+    assert!(
+        html.stdout
+            .contains("trial.finished_at_ms) - Number(trial.started_at_ms)")
+    );
+    assert!(
+        html.stdout
+            .contains("[\"wall duration\", fmtMs(trialWallDurationMs(trial))]")
+    );
+    assert!(html.stdout.contains("seconds.toFixed(1)"));
+    assert!(!html.stdout.contains("\"<1s\""));
+    assert!(
+        !html
+            .stdout
+            .contains("const fmtMs = value => value === null")
+    );
+    assert!(html.stdout.contains("step span"));
+    assert!(html.stdout.contains("tool exec"));
+    assert!(!html.stdout.contains("tool time"));
+    assert!(html.stdout.contains("fmtRailMs(meta?.duration_ms)"));
+    assert!(html.stdout.contains("fmtRailMs(meta?.elapsed_ms)"));
+    assert!(html.stdout.contains("stepToolLabels(step, meta)"));
+    assert!(html.stdout.contains("rail-tools"));
+    assert!(html.stdout.contains("rail-time"));
+    assert!(html.stdout.contains("rail-chip-tools"));
+    assert!(html.stdout.contains("rail-chip-tool-list"));
+    assert!(html.stdout.contains("rail-chip-step-time"));
+    assert!(html.stdout.contains("rail-chip-elapsed-time"));
+    assert!(html.stdout.contains("title=\"step span\""));
+    assert!(
+        html.stdout
+            .contains("step ${esc(fmtRailMs(meta?.duration_ms))}")
+    );
+    assert!(
+        html.stdout
+            .contains("elapsed ${esc(fmtRailMs(meta?.elapsed_ms))}")
+    );
+    assert!(!html.stdout.contains("step span / elapsed"));
+    assert!(html.stdout.contains("rail-chip-tokens"));
+    assert!(
+        html.stdout
+            .contains("${esc(toolCallRatio(toolCalls, toolErrors))} tools")
+    );
+    assert!(html.stdout.contains("${esc(text)}"));
+    assert!(
+        !html
+            .stdout
             .contains("tools ${toolCallRatio(toolCalls, toolErrors)}")
     );
     assert!(!html.stdout.contains("duration ${fmtMs(meta.duration_ms)}"));
+    assert!(!html.stdout.contains("step ${fmtMs(meta.duration_ms)}"));
+    assert!(!html.stdout.contains("elapsed ${fmtMs(meta.elapsed_ms)}"));
+    assert!(!html.stdout.contains("tool ${fmtMs(toolExecutionMs)}"));
+    assert!(!html.stdout.contains("stepToolExecutionMs(meta)"));
     assert!(
         html.stdout
             .find("if (step.reasoning_content)")
@@ -325,7 +485,8 @@ command = {{ command = "sh", args = ["{}"], model = "test-model" }}
                 .find("const message = valuePreview(step.message);")
                 .expect("message rendered")
     );
-    assert!(html.stdout.contains("(Empty Message)"));
+    assert!(html.stdout.contains("(No Message)"));
+    assert!(!html.stdout.contains("(Empty Message)"));
     assert!(!html.stdout.contains("meta?.summary ||"));
     assert!(
         !html
@@ -357,7 +518,7 @@ command = {{ command = "sh", args = ["{}"], model = "test-model" }}
     assert!(html.stdout.contains("follow visible policy"));
     assert!(html.stdout.contains("message-block"));
     assert!(html.stdout.contains("reasoning-block"));
-    assert!(html.stdout.contains("<section class=\"evidence-ledger\""));
+    assert!(!html.stdout.contains("<section class=\"evidence-ledger\""));
     assert!(
         html.stdout
             .contains("<div class=\"step-body\">${renderStepBlocks(step, meta)}</div>")
@@ -399,20 +560,16 @@ command = {{ command = "sh", args = ["{}"], model = "test-model" }}
         benchmark: None,
         report: None,
         store_root: Some(store_root),
-        path: Some(cell_root.clone()),
+        paths: vec![cell_root.clone()],
         task_set: None,
         agent: None,
         task: None,
         status: None,
         group_by: Vec::new(),
-        include: vec![
-            ViewInclude::Summary,
-            ViewInclude::Trajectory,
-            ViewInclude::TrajectoryMeta,
-        ],
+        include: vec![ViewInclude::Core],
+        notes: Vec::new(),
     })
     .expect("legacy prompt view");
-    assert!(legacy_prompt_view.trials[0].prompt_ref.is_none());
     assert!(legacy_prompt_view.trajectory_meta[0].prompt_unavailable);
     assert_eq!(
         legacy_prompt_view.trajectory[0].steps[1].message.as_str(),
@@ -433,4 +590,44 @@ command = {{ command = "sh", args = ["{}"], model = "test-model" }}
             .duration_ms
             .is_none()
     );
+}
+
+#[test]
+pub(crate) fn view_cli_notes_fail_for_out_of_range_index() {
+    let temp = tempfile::tempdir().expect("temp");
+    let fixture = create_local_coding_eval(&temp.path().join("test-coding"));
+    let store_root = init_workspace(temp.path().join("evals"));
+    run_evaluation(RunRequest {
+        config: Some(fixture.join("eval.toml")),
+        benchmark: None,
+        task_set: Some("local/rust-swe".to_string()),
+        task: None,
+        agent: Some("fake-pass".to_string()),
+        overwrite: false,
+        store_root: Some(store_root.clone()),
+        output_root: None,
+        include_artifacts: Vec::new(),
+    })
+    .expect("run");
+
+    let err = run_view(ViewArgs {
+        config: Some(fixture.join("eval.toml")),
+        benchmark: None,
+        report: None,
+        store_root: Some(store_root),
+        paths: Vec::new(),
+        task_set: Some("local/rust-swe".to_string()),
+        agent: Some("fake-pass".to_string()),
+        task: None,
+        status: None,
+        group_by: Vec::new(),
+        include: vec!["annotations".to_string()],
+        notes: vec!["2=missing trial".to_string()],
+        format: Some(ViewFormat::Json),
+        output: None,
+    })
+    .expect_err("out of range note fails");
+    let message = format!("{err:#}");
+    assert!(message.contains("view note index 2 is out of range"));
+    assert!(message.contains("1 visible Trials"));
 }

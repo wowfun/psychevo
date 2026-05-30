@@ -48,13 +48,14 @@ kind = "fake"
         benchmark: None,
         report: Some("focused".to_string()),
         store_root: None,
-        path: None,
+        paths: Vec::new(),
         task_set: Some("local/rust-swe".to_string()),
         agent: Some("fake-pass".to_string()),
         task: None,
         status: None,
         group_by: Vec::new(),
         include: all_view_includes(),
+        notes: Vec::new(),
     };
     let status = service.analysis_status(&view).expect("analysis status");
     assert!(status.enabled, "{status:?}");
@@ -156,16 +157,24 @@ pub(crate) fn service_read_only_can_view_but_not_execute() {
             benchmark: None,
             report: None,
             store_root: None,
-            path: None,
+            paths: Vec::new(),
             task_set: Some("local/rust-swe".to_string()),
             agent: Some("fake-pass".to_string()),
             task: None,
             status: None,
             group_by: vec![ViewGroupBy::Agent],
-            include: vec![ViewInclude::Summary, ViewInclude::Matrix],
+            include: vec![ViewInclude::Comparison],
+            notes: Vec::new(),
         })
         .expect("read-only view");
-    assert_eq!(view.summary.total_trials, 1);
+    assert_eq!(
+        view.comparison
+            .as_ref()
+            .expect("comparison")
+            .summary
+            .total_trials,
+        1
+    );
     assert!(!store_root.join(".cache").exists());
 
     let denied = service.run(RunRequest {
@@ -202,14 +211,22 @@ pub(crate) fn unsupported_old_artifact_is_ignored_by_view_scan() {
         benchmark: None,
         report: None,
         store_root: Some(store_root),
-        path: None,
+        paths: Vec::new(),
         task_set: None,
         agent: None,
         task: None,
         status: None,
         group_by: Vec::new(),
-        include: vec![ViewInclude::Summary, ViewInclude::Matrix],
+        include: vec![ViewInclude::Comparison],
+        notes: Vec::new(),
     })
     .expect("view ignores legacy");
-    assert_eq!(view.summary.total_trials, 0);
+    assert_eq!(
+        view.comparison
+            .as_ref()
+            .expect("comparison")
+            .summary
+            .total_trials,
+        0
+    );
 }

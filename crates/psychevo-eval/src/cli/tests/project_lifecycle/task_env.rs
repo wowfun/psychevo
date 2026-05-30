@@ -83,16 +83,25 @@ pub(crate) fn task_env_create_verify_and_view_human_in_loop_trial() {
         benchmark: None,
         report: None,
         store_root: Some(store_root.clone()),
-        path: None,
+        paths: Vec::new(),
         task_set: Some("local/rust-swe".to_string()),
         agent: Some("human-in-loop".to_string()),
         task: None,
         status: None,
         group_by: Vec::new(),
-        include: vec![ViewInclude::Summary, ViewInclude::Matrix],
+        include: vec![ViewInclude::Comparison],
+        notes: Vec::new(),
     })
     .expect("empty view");
-    assert_eq!(empty_view.summary.total_trials, 0);
+    assert_eq!(
+        empty_view
+            .comparison
+            .as_ref()
+            .expect("comparison")
+            .summary
+            .total_trials,
+        0
+    );
 
     fs::write(created.workspace.join("status.txt"), "fixed").expect("fix workspace");
     let verified = service
@@ -123,19 +132,20 @@ pub(crate) fn task_env_create_verify_and_view_human_in_loop_trial() {
         benchmark: None,
         report: None,
         store_root: Some(store_root.clone()),
-        path: None,
+        paths: Vec::new(),
         task_set: Some("local/rust-swe".to_string()),
         agent: Some("human-in-loop".to_string()),
         task: None,
         status: None,
         group_by: Vec::new(),
         include: all_view_includes(),
+        notes: Vec::new(),
     })
     .expect("view");
-    assert_eq!(view.summary.total_trials, 1);
-    assert_eq!(view.leaderboard.entries[0].agent_id, "human-in-loop");
-    assert_eq!(view.matrix.cells[0].agent_id, "human-in-loop");
-    assert_eq!(view.trials[0].agent_id, "human-in-loop");
+    let comparison = view.comparison.as_ref().expect("comparison");
+    assert_eq!(comparison.summary.total_trials, 1);
+    assert_eq!(comparison.leaderboard.entries[0].agent_id, "human-in-loop");
+    assert_eq!(comparison.matrix.cells[0].agent_id, "human-in-loop");
     assert_eq!(view.trajectory[0].agent.name, "human-in-loop");
 
     let verified_again = service

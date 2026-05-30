@@ -106,37 +106,30 @@ timeout_seconds = 10
         benchmark: None,
         report: None,
         store_root: Some(init_workspace(temp.path().join("view-evals"))),
-        path: Some(run.cells[0].cell_root.clone()),
+        paths: vec![run.cells[0].cell_root.clone()],
         task_set: None,
         agent: None,
         task: None,
         status: None,
         group_by: Vec::new(),
-        include: vec![
-            ViewInclude::Summary,
-            ViewInclude::Matrix,
-            ViewInclude::Trajectory,
-            ViewInclude::TrajectoryMeta,
-        ],
+        include: vec![ViewInclude::Core, ViewInclude::Comparison],
+        notes: Vec::new(),
     })
     .expect("acp view");
     let atif = &view.trajectory[0];
     let meta = &view.trajectory_meta[0];
-    assert_eq!(view.trials[0].model_name.as_deref(), Some("runtime-model"));
+    let comparison = view.comparison.as_ref().expect("comparison");
     assert_eq!(
-        view.matrix.cells[0].model_name.as_deref(),
+        comparison.matrix.cells[0].model_name.as_deref(),
         Some("runtime-model")
     );
     assert_eq!(
-        view.leaderboard.entries[0].model_name.as_deref(),
+        comparison.leaderboard.entries[0].model_name.as_deref(),
         Some("runtime-model")
     );
     assert_eq!(atif.agent.model_name.as_deref(), Some("runtime-model"));
     assert_eq!(atif.schema_version, "ATIF-v1.7");
-    assert_eq!(
-        atif.trajectory_id.as_deref(),
-        Some(view.trials[0].trial_key.as_str())
-    );
+    assert_eq!(atif.trajectory_id.as_deref(), Some(meta.trial_key.as_str()));
     assert_eq!(atif.steps.len(), 3);
     assert_eq!(
         atif.final_metrics
@@ -217,7 +210,6 @@ timeout_seconds = 10
     );
 
     assert_eq!(atif.session_id.as_deref(), Some("mock-session"));
-    assert_eq!(meta.total_steps, 3);
     assert_eq!(meta.steps.len(), atif.steps.len());
     assert!(
         atif.steps
