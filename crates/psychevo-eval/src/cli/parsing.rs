@@ -11,11 +11,9 @@ pub(crate) fn parse_view_includes(values: &[String]) -> Result<Vec<ViewInclude>>
         {
             if item.eq_ignore_ascii_case("all") {
                 includes.extend(all_view_includes());
-            } else if item.eq_ignore_ascii_case("atif") {
-                anyhow::bail!("view include `atif` was removed in schema v12; use `trajectory`");
-            } else if item.eq_ignore_ascii_case("logs") || item.eq_ignore_ascii_case("diff") {
+            } else if is_removed_view_include(item) {
                 anyhow::bail!(
-                    "view include `{}` was removed in schema v12; use `artifacts` for local artifact paths",
+                    "view include `{}` is not supported in schema v17; use role-based includes `core`, `comparison`, `annotations`, `attachments`, or `all`",
                     item
                 );
             } else {
@@ -30,6 +28,26 @@ pub(crate) fn parse_view_includes(values: &[String]) -> Result<Vec<ViewInclude>>
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect())
+}
+
+fn is_removed_view_include(item: &str) -> bool {
+    [
+        "summary",
+        "matrix",
+        "usage",
+        "warnings",
+        "artifacts",
+        "trajectory",
+        "trajectory-meta",
+        "notes",
+        "analysis",
+        "timeline",
+        "atif",
+        "logs",
+        "diff",
+    ]
+    .iter()
+    .any(|removed| item.eq_ignore_ascii_case(removed))
 }
 
 pub(crate) fn parse_view_groups(values: &[String]) -> Result<Vec<ViewGroupBy>> {
@@ -50,6 +68,24 @@ pub(crate) fn parse_view_groups(values: &[String]) -> Result<Vec<ViewGroupBy>> {
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect())
+}
+
+pub(crate) fn parse_view_notes(values: &[String]) -> Result<Vec<ViewNoteInput>> {
+    values
+        .iter()
+        .map(|value| {
+            let (index, markdown) = value.split_once('=').with_context(|| {
+                format!("view note `{value}` must use INDEX=TEXT where 0 is report-level and 1..N target visible Trials")
+            })?;
+            let index = index.trim().parse::<usize>().with_context(|| {
+                format!("view note `{value}` has invalid note index")
+            })?;
+            Ok(ViewNoteInput {
+                index,
+                markdown: markdown.to_string(),
+            })
+        })
+        .collect()
 }
 
 pub(crate) fn effective_view_format(
@@ -80,6 +116,21 @@ pub(crate) fn effective_view_format(
 }
 
 pub(crate) fn default_view_output_path(view: &ViewReport, format: ViewFormat) -> Result<PathBuf> {
+    if view.path_selections.len() > 1 {
+        let selection_paths = view
+            .path_selections
+            .iter()
+            .map(|selection| selection.path.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        let key = stable_hash_hex(&serde_json::to_string(&selection_paths)?);
+        return Ok(view
+            .scope
+            .workspace_root
+            .join("views")
+            .join("selections")
+            .join(key)
+            .join(format!("index.{}", view_format_extension(format))));
+    }
     let runs_root = view.scope.workspace_root.join("runs");
     let relative_scope = view.scope.path.strip_prefix(&runs_root).with_context(|| {
         format!(

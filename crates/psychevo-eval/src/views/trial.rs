@@ -7,7 +7,7 @@ pub(crate) fn workspace_relative_path(root: &Path, path: &Path) -> PathBuf {
         .unwrap_or_else(|_| path.to_path_buf())
 }
 
-pub(crate) fn view_trial(cell: &CellRun, workspace_root: &Path) -> ViewTrial {
+pub(crate) fn view_trial(cell: &ViewCell, workspace_root: &Path) -> ViewTrial {
     let (prompt_ref, prompt_preview, prompt_truncated) = prompt_preview(cell);
     let artifact_refs = [
         cell.case.artifacts.trajectory.as_path(),
@@ -21,9 +21,11 @@ pub(crate) fn view_trial(cell: &CellRun, workspace_root: &Path) -> ViewTrial {
     .collect();
     ViewTrial {
         benchmark: cell.benchmark.clone(),
-        trial_key: trial_key(cell),
-        matrix_cell_key: matrix_cell_key(cell),
+        trial_key: view_trial_key(cell),
+        matrix_cell_key: view_matrix_cell_key(cell),
         cell_root_relative: workspace_relative_path(workspace_root, &cell.cell_root),
+        variant_id: cell.variant_id.clone(),
+        variant_label: cell.variant_label.clone(),
         case_id: cell.case.case_id.clone(),
         started_at_ms: cell.started_at_ms,
         finished_at_ms: cell.finished_at_ms,
@@ -57,52 +59,20 @@ pub(crate) fn view_trial(cell: &CellRun, workspace_root: &Path) -> ViewTrial {
     }
 }
 
-pub(crate) fn view_usage_row(cell: &CellRun) -> ViewUsageRow {
-    ViewUsageRow {
-        trial_key: trial_key(cell),
-        input_tokens: cell.case.metrics.usage.input_tokens,
-        output_tokens: cell.case.metrics.usage.output_tokens,
-        cache_read_tokens: cell.case.metrics.usage.cache_read_tokens,
-        cache_write_tokens: cell.case.metrics.usage.cache_write_tokens,
-        reasoning_tokens: cell.case.metrics.usage.reasoning_tokens,
-        total_tokens: cell.case.metrics.usage.total_tokens,
-        cost_usd: cell.case.metrics.cost.amount_usd,
-        accounting: cell.case.metrics.accounting.clone(),
-    }
+pub(crate) fn view_trial_for_cell(cell: &CellRun, workspace_root: &Path) -> ViewTrial {
+    view_trial(&ViewCell::unselected(cell.clone()), workspace_root)
 }
 
-pub(crate) fn view_warning_rows(cell: &CellRun) -> Vec<ViewWarningRow> {
-    cell.case
-        .warnings
-        .iter()
-        .map(|warning| ViewWarningRow {
-            trial_key: trial_key(cell),
-            warning: warning.clone(),
-        })
-        .collect()
-}
-
-pub(crate) fn build_artifact_index(cell: &CellRun) -> ViewArtifactIndex {
+pub(crate) fn build_attachment_report(cell: &ViewCell) -> ViewAttachmentReport {
     match list_artifact_files(&cell.cell_root, ArtifactFileMode::Artifact) {
-        Ok(files) => {
-            let paths = files
-                .into_iter()
-                .filter_map(|file| {
-                    cell.cell_root
-                        .join(file.data_ref.relative_path)
-                        .canonicalize()
-                        .ok()
-                })
-                .collect();
-            ViewArtifactIndex {
-                trial_key: trial_key(cell),
-                paths,
-                error: None,
-            }
-        }
-        Err(err) => ViewArtifactIndex {
-            trial_key: trial_key(cell),
-            paths: Vec::new(),
+        Ok(files) => ViewAttachmentReport {
+            trial_key: view_trial_key(cell),
+            refs: files.into_iter().map(|file| file.data_ref).collect(),
+            error: None,
+        },
+        Err(err) => ViewAttachmentReport {
+            trial_key: view_trial_key(cell),
+            refs: Vec::new(),
             error: Some(format!("{err:#}")),
         },
     }

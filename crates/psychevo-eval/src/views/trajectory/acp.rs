@@ -89,12 +89,7 @@ pub(crate) fn derive_acp_atif_steps(
                     tool_call_id,
                     function_name,
                     arguments,
-                    extra: Some(json!({
-                        "status": update.get("status").cloned().unwrap_or(Value::Null),
-                        "title": update.get("title").cloned().unwrap_or(Value::Null),
-                        "timestamp_ms": event.timestamp_ms,
-                        "execution_start_timestamp_ms": event.timestamp_ms,
-                    })),
+                    extra: Some(acp_tool_call_extra(update, event.timestamp_ms)),
                 });
             }
             Some("tool_call_update") => {
@@ -144,6 +139,9 @@ pub(crate) fn derive_acp_atif_steps(
                     &mut next_step_id,
                     event.timestamp_ms,
                 );
+                if let Some(tool_call_id) = tool_call_id.as_deref() {
+                    step.merge_tool_call_extra(tool_call_id, acp_tool_duration_extra(update));
+                }
                 step.observation_results.push(AtifObservationResult {
                     source_call_id: tool_call_id,
                     content: Some(content),
@@ -220,6 +218,17 @@ impl AcpGroupedStep {
         self.tool_calls.push(tool_call);
     }
 
+    fn merge_tool_call_extra(&mut self, tool_call_id: &str, incoming: Option<Value>) {
+        let Some(tool_call) = self
+            .tool_calls
+            .iter_mut()
+            .find(|existing| existing.tool_call_id == tool_call_id)
+        else {
+            return;
+        };
+        tool_call.extra = merge_tool_call_extra(tool_call.extra.take(), incoming);
+    }
+
     fn into_atif_step(self) -> AtifStep {
         AtifStep {
             step_id: self.step_id,
@@ -294,6 +303,34 @@ pub(crate) fn acp_tool_update_is_pending(update: &Value) -> bool {
         .is_some_and(|status| status.eq_ignore_ascii_case("pending"))
         && update.get("rawOutput").is_none()
         && update.get("content").is_none()
+}
+
+pub(crate) fn acp_tool_call_extra(update: &Value, timestamp_ms: Option<u128>) -> Value {
+    let execution_start_ms = acp_tool_timing_u128(update, "startedAtMs").or(timestamp_ms);
+    json!({
+        "status": update.get("status").cloned().unwrap_or(Value::Null),
+        "title": update.get("title").cloned().unwrap_or(Value::Null),
+        "timestamp_ms": timestamp_ms,
+        "execution_start_timestamp_ms": execution_start_ms,
+    })
+}
+
+pub(crate) fn acp_tool_duration_extra(update: &Value) -> Option<Value> {
+    acp_tool_timing_u128(update, "elapsedMs").map(|elapsed_ms| {
+        json!({
+            "execution_duration_ms": elapsed_ms,
+            "execution_duration_source": "runtime_meta",
+        })
+    })
+}
+
+pub(crate) fn acp_tool_timing_u128(update: &Value, key: &str) -> Option<u128> {
+    update
+        .get("_meta")
+        .and_then(|meta| meta.get("psychevo"))
+        .and_then(|psychevo| psychevo.get("toolTiming"))
+        .and_then(|timing| timing.get(key))
+        .and_then(json_u128)
 }
 
 pub(crate) fn merge_tool_call_extra(
@@ -395,6 +432,67 @@ mod tests {
             observation.results[0].extra.as_ref().unwrap()["timestamp_ms"],
             json!(2_005)
         );
+    }
+
+    #[test]
+    fn acp_runtime_tool_timing_meta_preserves_execution_duration() {
+        let steps = derive_acp_atif_steps(
+            1,
+            &[
+                acp_update(
+                    1,
+                    1_000,
+                    json!({
+                        "sessionUpdate": "agent_thought_chunk",
+                        "content": { "type": "text", "text": "Need edit." },
+                    }),
+                ),
+                acp_update(
+                    2,
+                    2_000,
+                    json!({
+                        "sessionUpdate": "tool_call",
+                        "toolCallId": "call-1",
+                        "kind": "edit",
+                        "status": "in_progress",
+                        "title": "Tool: edit",
+                        "rawInput": { "path": "add.py" },
+                        "_meta": {
+                            "psychevo": {
+                                "toolTiming": {
+                                    "source": "psychevo_runtime",
+                                    "startedAtMs": 1_995
+                                }
+                            }
+                        }
+                    }),
+                ),
+                acp_update(
+                    3,
+                    2_000,
+                    json!({
+                        "sessionUpdate": "tool_call_update",
+                        "toolCallId": "call-1",
+                        "status": "completed",
+                        "title": "Tool: edit",
+                        "rawOutput": { "success": true },
+                        "_meta": {
+                            "psychevo": {
+                                "toolTiming": {
+                                    "source": "psychevo_runtime",
+                                    "elapsedMs": 321
+                                }
+                            }
+                        }
+                    }),
+                ),
+            ],
+        );
+
+        let tool_extra = steps[0].tool_calls[0].extra.as_ref().expect("tool extra");
+        assert_eq!(tool_extra["execution_start_timestamp_ms"], json!(1_995));
+        assert_eq!(tool_extra["execution_duration_ms"], json!(321));
+        assert_eq!(tool_extra["execution_duration_source"], "runtime_meta");
     }
 
     fn acp_update(sequence: u64, timestamp_ms: u128, update: Value) -> TrajectoryEvent {

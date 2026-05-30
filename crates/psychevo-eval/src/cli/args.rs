@@ -227,8 +227,8 @@ pub(crate) struct ViewArgs {
     pub(crate) report: Option<String>,
     #[arg(short = 'r', long = "root", value_name = "DIR")]
     pub(crate) store_root: Option<PathBuf>,
-    #[arg(long, value_name = "PATH")]
-    pub(crate) path: Option<PathBuf>,
+    #[arg(short = 'p', long = "path", value_name = "PATH")]
+    pub(crate) paths: Vec<PathBuf>,
     #[arg(long = "task-set")]
     pub(crate) task_set: Option<String>,
     #[arg(long)]
@@ -241,6 +241,8 @@ pub(crate) struct ViewArgs {
     pub(crate) group_by: Vec<String>,
     #[arg(short = 'i', long = "include", value_name = "ITEMS")]
     pub(crate) include: Vec<String>,
+    #[arg(long = "note", value_name = "INDEX=TEXT")]
+    pub(crate) notes: Vec<String>,
     #[arg(long, value_enum)]
     pub(crate) format: Option<ViewFormat>,
     #[arg(short = 'o', long, value_name = "PATH", num_args = 0..=1)]

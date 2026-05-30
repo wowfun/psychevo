@@ -7,39 +7,38 @@ pub struct ViewRequest {
     pub benchmark: Option<String>,
     pub report: Option<String>,
     pub store_root: Option<PathBuf>,
-    pub path: Option<PathBuf>,
+    pub paths: Vec<PathBuf>,
     pub task_set: Option<String>,
     pub agent: Option<String>,
     pub task: Option<String>,
     pub status: Option<CaseStatusFilter>,
     pub group_by: Vec<ViewGroupBy>,
     pub include: Vec<ViewInclude>,
+    pub notes: Vec<ViewNoteInput>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ViewNoteInput {
+    pub index: usize,
+    pub markdown: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "kebab-case")]
 #[clap(rename_all = "kebab-case")]
 pub enum ViewInclude {
-    Summary,
-    Matrix,
-    Usage,
-    Warnings,
-    Artifacts,
-    Trajectory,
-    TrajectoryMeta,
-    Analysis,
+    Core,
+    Comparison,
+    Annotations,
+    Attachments,
 }
 
 pub(crate) fn all_view_includes() -> Vec<ViewInclude> {
     vec![
-        ViewInclude::Summary,
-        ViewInclude::Matrix,
-        ViewInclude::Usage,
-        ViewInclude::Warnings,
-        ViewInclude::Artifacts,
-        ViewInclude::Trajectory,
-        ViewInclude::TrajectoryMeta,
-        ViewInclude::Analysis,
+        ViewInclude::Core,
+        ViewInclude::Comparison,
+        ViewInclude::Annotations,
+        ViewInclude::Attachments,
     ]
 }
 
@@ -91,17 +90,36 @@ pub struct ViewReport {
     pub schema_version: u32,
     pub includes: Vec<ViewInclude>,
     pub scope: ViewScope,
+    pub path_selections: Vec<ViewPathSelection>,
+    pub trajectory: Vec<AtifTrajectory>,
+    pub trajectory_meta: Vec<ViewTrajectoryMetaReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comparison: Option<ViewComparisonReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub annotations: Option<ViewAnnotationsReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attachments: Option<ViewAttachmentsReport>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ViewComparisonReport {
+    pub default_metric: String,
     pub summary: ViewSummary,
     pub groups: Vec<ViewGroupRow>,
     pub matrix: ViewMatrix,
     pub leaderboard: ViewLeaderboard,
-    pub trials: Vec<ViewTrial>,
-    pub usage: Vec<ViewUsageRow>,
-    pub warnings: Vec<ViewWarningRow>,
-    pub artifacts: Vec<ViewArtifactIndex>,
-    pub trajectory: Vec<AtifTrajectory>,
-    pub trajectory_meta: Vec<ViewTrajectoryMetaReport>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ViewAnnotationsReport {
+    pub report_notes: Vec<ViewReportNote>,
+    pub notes: Vec<ViewNoteReport>,
     pub analysis: Vec<ViewAnalysisReport>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ViewAttachmentsReport {
+    pub artifacts: Vec<ViewAttachmentReport>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -109,6 +127,14 @@ pub struct ViewScope {
     pub workspace_root: PathBuf,
     pub path: PathBuf,
     pub benchmark: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ViewPathSelection {
+    pub id: String,
+    pub label: String,
+    pub path: PathBuf,
+    pub cell_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -140,6 +166,10 @@ pub struct ViewMatrixCell {
     pub trial_keys: Vec<String>,
     pub representative_trial_key: String,
     pub agent_axis_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variant_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variant_label: Option<String>,
     pub task_set_id: String,
     pub task_id: String,
     pub task_family: String,
@@ -162,6 +192,10 @@ pub struct ViewTrial {
     pub trial_key: String,
     pub matrix_cell_key: String,
     pub cell_root_relative: PathBuf,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variant_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variant_label: Option<String>,
     pub case_id: String,
     pub started_at_ms: u128,
     pub finished_at_ms: u128,
@@ -215,6 +249,10 @@ pub struct ViewLeaderboardEntry {
     pub agent_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variant_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variant_label: Option<String>,
     pub total_trials: usize,
     pub successes: usize,
     pub failures: usize,
@@ -295,6 +333,14 @@ pub struct ViewArtifactIndex {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ViewAttachmentReport {
+    pub trial_key: String,
+    pub refs: Vec<ViewDataRef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ViewArtifactFile {
     #[serde(flatten)]
     pub data_ref: ViewDataRef,
@@ -309,20 +355,33 @@ pub struct ViewArtifactFile {
 #[derive(Debug, Clone, Serialize)]
 pub struct ViewTrajectoryMetaReport {
     pub trial_key: String,
+    pub matrix_cell_key: String,
+    pub benchmark: String,
+    pub cell_root_relative: PathBuf,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variant_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variant_label: Option<String>,
+    pub case_id: String,
+    pub task_set_id: String,
+    pub task_id: String,
+    pub task_family: String,
+    pub adapter: AgentKind,
+    pub started_at_ms: u128,
+    pub finished_at_ms: u128,
+    pub duration_ms: u128,
+    pub status: CaseStatus,
+    pub failure_class: Option<String>,
+    pub score_passed: bool,
+    pub score: Option<f64>,
+    pub score_message: String,
+    pub score_details: Value,
+    pub warnings: Vec<String>,
     pub data_ref: ViewDataRef,
     pub total_events: usize,
     pub unmapped_events: usize,
-    pub total_steps: usize,
-    pub duration_ms: u128,
-    pub tool_calls: u64,
-    pub tool_errors: u64,
-    pub token_total: Option<u64>,
-    pub cost_usd: Option<f64>,
     pub prompt_unavailable: bool,
-    pub system_exposed: bool,
-    pub reasoning_exposed: bool,
     pub steps: Vec<ViewTrajectoryStepMeta>,
-    pub graph: ViewTrajectoryGraph,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -330,10 +389,6 @@ pub struct ViewTrajectoryMetaReport {
 #[derive(Debug, Clone, Serialize)]
 pub struct ViewTrajectoryStepMeta {
     pub step_id: u64,
-    pub source: String,
-    pub label: String,
-    pub summary: String,
-    pub tool_names: Vec<String>,
     pub tool_calls: Vec<ViewTrajectoryToolMeta>,
     pub observations: Vec<ViewTrajectoryObservationMeta>,
     pub tool_error: bool,
@@ -342,18 +397,6 @@ pub struct ViewTrajectoryStepMeta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub elapsed_ms: Option<u128>,
     pub duration_ms: Option<u128>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub prompt_tokens: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub completion_tokens: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cached_tokens: Option<u64>,
-    pub token_total: Option<u64>,
-    pub cost_usd: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub llm_call_count: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data_preview: Option<String>,
     pub truncated: bool,
@@ -374,6 +417,8 @@ pub struct ViewTrajectoryToolMeta {
     pub generation_duration_ms: Option<u128>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub execution_duration_ms: Option<u128>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_duration_source: Option<String>,
     pub truncated: bool,
 }
 
@@ -538,6 +583,22 @@ pub struct ViewAnalysisReport {
     pub json_preview: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ViewReportNote {
+    pub label: String,
+    pub markdown: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ViewNoteReport {
+    pub trial_key: String,
+    pub source: String,
+    pub label: String,
+    pub markdown: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_ref: Option<ViewDataRef>,
 }
 
 #[derive(Debug, Clone, Serialize)]

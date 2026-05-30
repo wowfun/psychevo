@@ -296,13 +296,14 @@ impl EvalService {
             benchmark: request.benchmark,
             report: request.report,
             store_root: self.context.effective_root(request.store_root),
-            path: request.path,
+            paths: request.paths,
             task_set: request.task_set,
             agent: request.agent,
             task: request.task,
             status: request.status,
             group_by: request.group_by,
             include: request.include,
+            notes: request.notes,
         })
         .map_err(EvalDiagnostic::from_error)
     }

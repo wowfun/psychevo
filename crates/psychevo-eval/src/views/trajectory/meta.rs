@@ -51,11 +51,6 @@ pub(crate) fn view_trajectory_step(
     elapsed_ms: Option<u128>,
     duration_ms: Option<u128>,
 ) -> ViewTrajectoryStepMeta {
-    let tool_names = step
-        .tool_calls
-        .iter()
-        .map(|tool| tool.function_name.clone())
-        .collect::<Vec<_>>();
     let tool_error = step
         .observation
         .as_ref()
@@ -82,49 +77,14 @@ pub(crate) fn view_trajectory_step(
         .iter()
         .map(|tool| view_trajectory_tool_meta(tool, &observations))
         .collect::<Vec<_>>();
-    let raw_summary = atif_step_summary(step);
-    let (summary, truncated) = truncate_chars_with_flag(
-        &redact_preview_text(&raw_summary),
-        TRAJECTORY_DATA_PREVIEW_CHARS,
-    );
-    let token_total = step.metrics.as_ref().and_then(|metrics| {
-        let values = [
-            metrics.prompt_tokens,
-            metrics.completion_tokens,
-            metrics.cached_tokens,
-            metrics.usage.as_ref().and_then(|usage| usage.total_tokens),
-        ];
-        let total = values.into_iter().flatten().sum::<u64>();
-        (total > 0).then_some(total)
-    });
     ViewTrajectoryStepMeta {
         step_id: step.step_id,
-        source: step.source.clone(),
-        label: trajectory_step_label(step, &tool_names),
-        summary,
-        tool_names,
         tool_calls,
         observations,
         tool_error,
         timestamp_ms,
         elapsed_ms,
         duration_ms,
-        prompt_tokens: step
-            .metrics
-            .as_ref()
-            .and_then(|metrics| metrics.prompt_tokens),
-        completion_tokens: step
-            .metrics
-            .as_ref()
-            .and_then(|metrics| metrics.completion_tokens),
-        cached_tokens: step
-            .metrics
-            .as_ref()
-            .and_then(|metrics| metrics.cached_tokens),
-        token_total,
-        cost_usd: step.metrics.as_ref().and_then(|metrics| metrics.cost_usd),
-        model_name: atif_step_model_name(step),
-        llm_call_count: step.llm_call_count,
         data_preview: step
             .extra
             .as_ref()
@@ -136,7 +96,7 @@ pub(crate) fn view_trajectory_step(
                 )
                 .0
             }),
-        truncated: truncated || message_truncated || reasoning_truncated,
+        truncated: message_truncated || reasoning_truncated,
     }
 }
 
@@ -148,6 +108,7 @@ pub(crate) fn view_trajectory_tool_meta(
     let (_, truncated) = redacted_preview(&raw);
     let timestamp_ms = extra_u128(tool.extra.as_ref(), "timestamp_ms");
     let execution_start_ms = extra_u128(tool.extra.as_ref(), "execution_start_timestamp_ms");
+    let runtime_execution_duration_ms = extra_u128(tool.extra.as_ref(), "execution_duration_ms");
     let observation_timestamp_ms = observations
         .iter()
         .find(|observation| {
@@ -157,6 +118,17 @@ pub(crate) fn view_trajectory_tool_meta(
                 .is_some_and(|id| id == tool.tool_call_id)
         })
         .and_then(|observation| observation.timestamp_ms);
+    let fallback_execution_duration_ms = execution_start_ms
+        .zip(observation_timestamp_ms)
+        .map(|(execution_start, finished)| finished.saturating_sub(execution_start));
+    let (execution_duration_ms, execution_duration_source) =
+        if let Some(duration_ms) = runtime_execution_duration_ms {
+            (Some(duration_ms), Some("runtime_meta".to_string()))
+        } else if let Some(duration_ms) = fallback_execution_duration_ms {
+            (Some(duration_ms), Some("event_timestamps".to_string()))
+        } else {
+            (None, None)
+        };
     ViewTrajectoryToolMeta {
         tool_call_id: tool.tool_call_id.clone(),
         status: extra_string(tool.extra.as_ref(), "status"),
@@ -166,9 +138,8 @@ pub(crate) fn view_trajectory_tool_meta(
         generation_duration_ms: timestamp_ms
             .zip(execution_start_ms)
             .map(|(start, execution_start)| execution_start.saturating_sub(start)),
-        execution_duration_ms: execution_start_ms
-            .zip(observation_timestamp_ms)
-            .map(|(execution_start, finished)| finished.saturating_sub(execution_start)),
+        execution_duration_ms,
+        execution_duration_source,
         truncated,
     }
 }
@@ -223,14 +194,6 @@ pub(crate) fn atif_step_end_timestamp_ms(step: &AtifStep) -> Option<u128> {
         .and_then(json_u128)
 }
 
-pub(crate) fn atif_step_model_name(step: &AtifStep) -> Option<String> {
-    step.extra
-        .as_ref()
-        .and_then(|extra| extra.get("model_name"))
-        .and_then(Value::as_str)
-        .map(str::to_string)
-}
-
 pub(crate) fn extra_string(extra: Option<&Value>, key: &str) -> Option<String> {
     extra
         .and_then(|extra| extra.get(key))
@@ -250,61 +213,6 @@ pub(crate) fn json_u128(value: &Value) -> Option<u128> {
         .or_else(|| value.as_str().and_then(|value| value.parse().ok()))
 }
 
-pub(crate) fn trajectory_step_label(step: &AtifStep, tool_names: &[String]) -> String {
-    if !tool_names.is_empty() {
-        return format!("tools: {}", tool_names.join(", "));
-    }
-    match step.source.as_str() {
-        "user" => "user prompt".to_string(),
-        "agent" => "agent step".to_string(),
-        other => other.to_string(),
-    }
-}
-
-pub(crate) fn atif_step_summary(step: &AtifStep) -> String {
-    let mut parts = Vec::new();
-    if let Some(text) = step.message.as_str()
-        && !text.trim().is_empty()
-    {
-        parts.push(text.trim().to_string());
-    }
-    if let Some(reasoning) = &step.reasoning_content
-        && !reasoning.trim().is_empty()
-    {
-        parts.push(format!("reasoning: {}", reasoning.trim()));
-    }
-    if !step.tool_calls.is_empty() {
-        parts.push(format!(
-            "tool calls: {}",
-            step.tool_calls
-                .iter()
-                .map(|tool| tool.function_name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-    if let Some(observation) = &step.observation {
-        let observation_text = observation
-            .results
-            .iter()
-            .filter_map(|result| result.content.as_ref())
-            .filter_map(|content| match content {
-                Value::String(text) => Some(text.clone()),
-                value => serde_json::to_string(value).ok(),
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        if !observation_text.trim().is_empty() {
-            parts.push(format!("observation: {}", observation_text.trim()));
-        }
-    }
-    if parts.is_empty() {
-        step.source.clone()
-    } else {
-        parts.join("\n")
-    }
-}
-
 pub(crate) fn observation_result_is_error(result: &AtifObservationResult) -> bool {
     result
         .extra
@@ -314,26 +222,6 @@ pub(crate) fn observation_result_is_error(result: &AtifObservationResult) -> boo
         .is_some_and(|status| {
             status.eq_ignore_ascii_case("error") || status.eq_ignore_ascii_case("failed")
         })
-}
-
-pub(crate) fn trajectory_graph_from_steps(steps: &[ViewTrajectoryStepMeta]) -> ViewTrajectoryGraph {
-    let nodes = steps
-        .iter()
-        .map(|step| ViewTrajectoryGraphNode {
-            id: format!("step-{}", step.step_id),
-            step_id: step.step_id,
-            label: step.label.clone(),
-            source: step.source.clone(),
-        })
-        .collect::<Vec<_>>();
-    let edges = nodes
-        .windows(2)
-        .map(|window| ViewTrajectoryGraphEdge {
-            from: window[0].id.clone(),
-            to: window[1].id.clone(),
-        })
-        .collect();
-    ViewTrajectoryGraph { nodes, edges }
 }
 
 #[cfg(test)]
@@ -420,6 +308,66 @@ mod tests {
         assert_eq!(steps[0].duration_ms, Some(1_005));
         assert_eq!(steps[0].tool_calls[0].generation_duration_ms, Some(900));
         assert_eq!(steps[0].tool_calls[0].execution_duration_ms, Some(5));
+        assert_eq!(
+            steps[0].tool_calls[0].execution_duration_source.as_deref(),
+            Some("event_timestamps")
+        );
+    }
+
+    #[test]
+    fn tool_timing_meta_prefers_runtime_execution_duration() {
+        let atif = AtifTrajectory {
+            schema_version: "ATIF-v1.7".to_string(),
+            session_id: Some("session".to_string()),
+            trajectory_id: Some("trial:t001".to_string()),
+            agent: AtifAgent {
+                name: "agent".to_string(),
+                version: "test".to_string(),
+                model_name: None,
+                extra: None,
+            },
+            steps: vec![AtifStep {
+                step_id: 1,
+                source: "agent".to_string(),
+                message: Value::String(String::new()),
+                reasoning_content: Some("Need edit.".to_string()),
+                tool_calls: vec![AtifToolCall {
+                    tool_call_id: "call-1".to_string(),
+                    function_name: "edit".to_string(),
+                    arguments: json!({ "path": "add.py" }),
+                    extra: Some(json!({
+                        "timestamp_ms": 1_100,
+                        "execution_start_timestamp_ms": 2_000,
+                        "execution_duration_ms": 321,
+                        "execution_duration_source": "runtime_meta",
+                    })),
+                }],
+                observation: Some(AtifObservation {
+                    results: vec![AtifObservationResult {
+                        source_call_id: Some("call-1".to_string()),
+                        content: Some(json!({ "success": true })),
+                        extra: Some(json!({ "timestamp_ms": 2_000 })),
+                    }],
+                }),
+                metrics: None,
+                extra: Some(json!({
+                    "timestamp_ms": 1_000,
+                    "end_timestamp_ms": 2_000,
+                })),
+                llm_call_count: Some(1),
+            }],
+            notes: None,
+            final_metrics: None,
+            extra: None,
+        };
+
+        let steps = view_trajectory_steps(&atif);
+
+        assert_eq!(steps[0].tool_calls[0].execution_duration_ms, Some(321));
+        assert_eq!(
+            steps[0].tool_calls[0].execution_duration_source.as_deref(),
+            Some("runtime_meta")
+        );
     }
 
     fn timed_step(

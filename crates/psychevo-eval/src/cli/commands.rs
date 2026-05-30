@@ -387,13 +387,14 @@ pub(crate) fn run_view(args: ViewArgs) -> Result<CliOutcome> {
             benchmark: args.benchmark,
             report: args.report,
             store_root: args.store_root,
-            path: args.path,
+            paths: args.paths,
             task_set: args.task_set,
             agent: args.agent,
             task: args.task,
             status: args.status,
             group_by: parse_view_groups(&args.group_by)?,
             include: parse_view_includes(&args.include)?,
+            notes: parse_view_notes(&args.notes)?,
         })
         .map_err(anyhow::Error::new)?;
     let rendered = render_view(&view, format)?;

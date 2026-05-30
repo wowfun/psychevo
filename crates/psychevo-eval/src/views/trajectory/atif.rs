@@ -1,7 +1,10 @@
 #[allow(unused_imports)]
 use super::*;
 
-pub(crate) fn derive_atif_trajectory(cell: &CellRun, events: &[TrajectoryEvent]) -> AtifTrajectory {
+pub(crate) fn derive_atif_trajectory(
+    cell: &ViewCell,
+    events: &[TrajectoryEvent],
+) -> AtifTrajectory {
     let prompt = retained_prompt(cell).ok().flatten();
     let prompt_unavailable = prompt.is_none();
     let mut steps = Vec::new();
@@ -41,8 +44,8 @@ pub(crate) fn derive_atif_trajectory(cell: &CellRun, events: &[TrajectoryEvent])
         "case_id": cell.case.case_id,
         "task_set_id": cell.case.task_set_id,
         "task_id": cell.case.task_id,
-        "matrix_cell_key": matrix_cell_key(cell),
-        "trial_key": trial_key(cell),
+        "matrix_cell_key": view_matrix_cell_key(cell),
+        "trial_key": view_trial_key(cell),
     });
     if prompt_unavailable {
         extra["prompt_unavailable"] = Value::Bool(true);
@@ -51,7 +54,7 @@ pub(crate) fn derive_atif_trajectory(cell: &CellRun, events: &[TrajectoryEvent])
     AtifTrajectory {
         schema_version: "ATIF-v1.7".to_string(),
         session_id: trajectory_session_id(cell, events),
-        trajectory_id: Some(trial_key(cell)),
+        trajectory_id: Some(view_trial_key(cell)),
         agent: AtifAgent {
             name: cell.case.agent_id.clone(),
             version: env!("CARGO_PKG_VERSION").to_string(),

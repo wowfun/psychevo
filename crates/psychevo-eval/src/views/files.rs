@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
 use super::*;
 
-pub(crate) fn build_analysis_report(cell: &CellRun) -> ViewAnalysisReport {
+pub(crate) fn build_analysis_report(cell: &ViewCell) -> ViewAnalysisReport {
     let json = artifact_file_from_relative(
         &cell.cell_root,
         Path::new("analysis.json"),
@@ -15,12 +15,116 @@ pub(crate) fn build_analysis_report(cell: &CellRun) -> ViewAnalysisReport {
         .and_then(|file| file.preview.as_deref())
         .and_then(analysis_summary_from_preview);
     ViewAnalysisReport {
-        trial_key: trial_key(cell),
+        trial_key: view_trial_key(cell),
         status,
         json_ref: json.as_ref().map(|file| file.data_ref.clone()),
         json_preview: json.and_then(|file| file.preview),
         summary,
     }
+}
+
+pub(crate) fn build_note_reports(
+    cells: &[ViewCell],
+    cli_notes: &[ViewNoteInput],
+) -> Result<Vec<ViewNoteReport>> {
+    let mut notes_by_index = BTreeMap::<usize, Vec<(usize, String)>>::new();
+    let mut cell_note_position = 0;
+    for note in cli_notes {
+        if note.index == 0 {
+            continue;
+        }
+        cell_note_position += 1;
+        if note.index > cells.len() {
+            bail!(
+                "view note index {} is out of range for {} visible Trials",
+                note.index,
+                cells.len()
+            );
+        }
+        notes_by_index
+            .entry(note.index - 1)
+            .or_default()
+            .push((cell_note_position, note.markdown.clone()));
+    }
+
+    let mut out = Vec::new();
+    for (index, cell) in cells.iter().enumerate() {
+        if let Some((markdown, source_ref)) = read_cell_note(cell)? {
+            out.push(ViewNoteReport {
+                trial_key: view_trial_key(cell),
+                source: "cell".to_string(),
+                label: "notes.md".to_string(),
+                markdown,
+                source_ref: Some(source_ref),
+            });
+        }
+        for (position, markdown) in notes_by_index.remove(&index).unwrap_or_default() {
+            out.push(ViewNoteReport {
+                trial_key: view_trial_key(cell),
+                source: "cli".to_string(),
+                label: format!("CLI note {position}"),
+                markdown,
+                source_ref: None,
+            });
+        }
+    }
+    Ok(out)
+}
+
+pub(crate) fn build_report_notes(cli_notes: &[ViewNoteInput]) -> Vec<ViewReportNote> {
+    let mut report_note_position = 0;
+    cli_notes
+        .iter()
+        .filter(|note| note.index == 0)
+        .map(|note| {
+            report_note_position += 1;
+            ViewReportNote {
+                label: format!("Report note {report_note_position}"),
+                markdown: note.markdown.clone(),
+            }
+        })
+        .collect()
+}
+
+fn read_cell_note(cell: &ViewCell) -> Result<Option<(String, ViewDataRef)>> {
+    let relative = Path::new("notes.md");
+    let path = cell.cell_root.join(relative);
+    if !path.exists() {
+        return Ok(None);
+    }
+    if !path.is_file() {
+        bail!("manual note {} is not a file", path.display());
+    }
+    let canonical_root = fs::canonicalize(&cell.cell_root)
+        .with_context(|| format!("failed to canonicalize {}", cell.cell_root.display()))?;
+    let canonical_path = fs::canonicalize(&path)
+        .with_context(|| format!("failed to canonicalize {}", path.display()))?;
+    if !canonical_path.starts_with(&canonical_root) {
+        bail!(
+            "manual note {} escapes cell root {}",
+            canonical_path.display(),
+            canonical_root.display()
+        );
+    }
+    let metadata = fs::metadata(&canonical_path)
+        .with_context(|| format!("failed to stat {}", canonical_path.display()))?;
+    if metadata.len() > VIEW_TEXT_PREVIEW_BYTES as u64 {
+        bail!(
+            "manual note {} exceeds the 1 MiB view limit",
+            path.display()
+        );
+    }
+    let bytes = fs::read(&canonical_path)
+        .with_context(|| format!("failed to read manual note {}", path.display()))?;
+    if bytes.contains(&0) {
+        bail!("manual note {} is not valid text", path.display());
+    }
+    let text = String::from_utf8(bytes)
+        .with_context(|| format!("manual note {} is not valid UTF-8", path.display()))?;
+    let mut source_ref = data_ref_for_canonical(&canonical_path, relative)?;
+    source_ref.kind = "note".to_string();
+    source_ref.label = "notes.md".to_string();
+    Ok(Some((redact_preview_text(&text), source_ref)))
 }
 
 pub(crate) fn build_diff_report(cell: &CellRun) -> ViewDiffReport {
@@ -353,6 +457,9 @@ pub(crate) fn read_text_preview(path: &Path) -> Result<(Option<String>, bool, bo
 }
 
 pub(crate) fn artifact_kind(path: &Path) -> String {
+    if path == Path::new("notes.md") {
+        return "note".to_string();
+    }
     if path == Path::new("run.json") {
         return "run".to_string();
     }

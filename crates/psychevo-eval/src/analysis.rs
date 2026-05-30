@@ -117,7 +117,9 @@ pub fn analyze_failed_batch(
             format!("analysis agent `{agent_id}` was not found"),
         )
     })?;
-    let (_, _, _, cells) = load_view_cells(&view).map_err(EvalDiagnostic::from_error)?;
+    let cells = load_view_cells(&view)
+        .map_err(EvalDiagnostic::from_error)?
+        .cells;
     let concurrency = resolved.config.concurrency.unwrap_or(4).max(1);
     let mut out = Vec::new();
     let failed = cells
@@ -155,13 +157,14 @@ fn contextualize_analysis_view(service: &EvalService, request: ViewRequest) -> V
         benchmark: request.benchmark,
         report: request.report,
         store_root: context.effective_root(request.store_root),
-        path: request.path,
+        paths: request.paths,
         task_set: request.task_set,
         agent: request.agent,
         task: request.task,
         status: request.status,
         group_by: request.group_by,
         include: request.include,
+        notes: request.notes,
     }
 }
 
@@ -303,10 +306,11 @@ pub(crate) fn resolve_rubric(
 }
 
 pub(crate) fn find_trial_cell(view: &ViewRequest, key: &str) -> Result<CellRun> {
-    let (_, _, _, cells) = load_view_cells(view)?;
-    cells
+    load_view_cells(view)?
+        .cells
         .into_iter()
-        .find(|cell| trial_key(cell) == key)
+        .find(|cell| view_trial_key(cell) == key)
+        .map(|cell| cell.cell)
         .with_context(|| format!("trial `{key}` not found in current view"))
 }
 
@@ -320,7 +324,7 @@ pub(crate) fn run_or_read_analysis(
     if path.is_file() && !overwrite {
         return Ok(serde_json::from_str(&fs::read_to_string(&path)?)?);
     }
-    let refs = view_trial(cell, &cell.cell_root).artifact_refs;
+    let refs = view_trial_for_cell(cell, &cell.cell_root).artifact_refs;
     let input_fingerprint = analysis_input_fingerprint(cell, resolved, &refs);
     let prompt = analysis_prompt(cell, resolved, &refs)?;
     let raw = invoke_analysis_agent(agent, cell, resolved, &prompt)?;
@@ -354,7 +358,7 @@ pub(crate) fn invalid_analysis_result(
     resolved: &ResolvedAnalysis,
     error: String,
 ) -> AnalysisJson {
-    let refs = view_trial(cell, &cell.cell_root).artifact_refs;
+    let refs = view_trial_for_cell(cell, &cell.cell_root).artifact_refs;
     AnalysisJson {
         schema_version: ANALYSIS_SCHEMA_VERSION,
         status: "invalid_output".to_string(),
@@ -390,7 +394,8 @@ pub(crate) fn analysis_prompt(
     resolved: &ResolvedAnalysis,
     refs: &[ViewDataRef],
 ) -> Result<String> {
-    let trajectory = build_trajectory_bundle(cell).meta;
+    let view_cell = ViewCell::unselected(cell.clone());
+    let trajectory = build_trajectory_bundle(&view_cell, &cell.cell_root).meta;
     let diff = build_diff_report(cell);
     let context = json!({
         "trial_key": trial_key(cell),

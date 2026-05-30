@@ -34,17 +34,18 @@ impl ServeOptions {
             benchmark: self.benchmark.clone(),
             report: self.report.clone(),
             store_root: self.store_root.clone(),
-            path: self.path.clone(),
+            paths: self.path.clone().into_iter().collect(),
             task_set: self.task_set.clone(),
             agent: self.agent.clone(),
             task: self.task.clone(),
             status: self.status,
             group_by: Vec::new(),
             include: all_view_includes(),
+            notes: Vec::new(),
         };
-        if request.config.is_none() && request.benchmark.is_none() && request.path.is_none() {
+        if request.config.is_none() && request.benchmark.is_none() && request.paths.is_empty() {
             let store = service.store(request.store_root.clone())?;
-            request.path = Some(store.root.join("runs"));
+            request.paths.push(store.root.join("runs"));
         }
         Ok(request)
     }

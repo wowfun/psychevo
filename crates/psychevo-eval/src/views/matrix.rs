@@ -9,42 +9,62 @@ pub(crate) fn trial_key(cell: &CellRun) -> String {
     format!("{}:t001", matrix_cell_key(cell))
 }
 
-pub(crate) fn agent_axis_id(cell: &CellRun) -> String {
-    match effective_model_name(cell).as_deref() {
+pub(crate) fn view_matrix_cell_key(cell: &ViewCell) -> String {
+    match cell.variant_id.as_deref() {
+        Some(variant) => format!("{variant}:{}", cell.cell_key),
+        None => matrix_cell_key(cell),
+    }
+}
+
+pub(crate) fn view_trial_key(cell: &ViewCell) -> String {
+    format!("{}:t001", view_matrix_cell_key(cell))
+}
+
+pub(crate) fn agent_axis_id(cell: &ViewCell) -> String {
+    let candidate = match effective_model_name(cell).as_deref() {
         Some(model) if !model.trim().is_empty() => {
             format!("{}::{}", cell.case.agent_id, model.trim())
         }
         _ => cell.case.agent_id.clone(),
+    };
+    match cell.variant_id.as_deref() {
+        Some(variant) => format!("{variant}::{candidate}"),
+        None => candidate,
     }
 }
 
-pub(crate) fn agent_axis_label(cell: &CellRun) -> String {
-    match effective_model_name(cell).as_deref() {
+pub(crate) fn agent_axis_label(cell: &ViewCell) -> String {
+    let candidate = match effective_model_name(cell).as_deref() {
         Some(model) if !model.trim().is_empty() => {
             format!("{} / {}", cell.case.agent_id, model.trim())
         }
         _ => cell.case.agent_id.clone(),
+    };
+    match cell.variant_label.as_deref() {
+        Some(variant) => format!("{variant} / {candidate}"),
+        None => candidate,
     }
 }
 
-pub(crate) fn cell_identity_key(cell: &CellRun) -> (String, String, String) {
+pub(crate) fn cell_identity_key(cell: &ViewCell) -> (String, String, String, String) {
     (
         cell.case.task_id.clone(),
         cell.case.agent_id.clone(),
         effective_model_name(cell).unwrap_or_default(),
+        cell.variant_id.clone().unwrap_or_default(),
     )
 }
 
-pub(crate) fn latest_cell<'a>(left: &'a CellRun, right: &'a CellRun) -> &'a CellRun {
+pub(crate) fn latest_cell<'a>(left: &'a ViewCell, right: &'a ViewCell) -> &'a ViewCell {
     let left_key = (left.finished_at_ms, left.started_at_ms, &left.cell_key);
     let right_key = (right.finished_at_ms, right.started_at_ms, &right.cell_key);
     if right_key > left_key { right } else { left }
 }
 
-pub(crate) fn build_view_matrix(cells: &[CellRun]) -> ViewMatrix {
+pub(crate) fn build_view_matrix(cells: &[ViewCell]) -> ViewMatrix {
     let mut task_axis = BTreeMap::<String, ViewMatrixAxisEntry>::new();
     let mut agent_axis = BTreeMap::<String, ViewMatrixAxisEntry>::new();
-    let mut grouped = BTreeMap::<(String, String, String), Vec<&CellRun>>::new();
+    let mut grouped = BTreeMap::<(String, String, String, String), Vec<&ViewCell>>::new();
     for cell in cells {
         task_axis
             .entry(cell.case.task_id.clone())
@@ -79,10 +99,12 @@ pub(crate) fn build_view_matrix(cells: &[CellRun]) -> ViewMatrix {
             .unwrap_or(trials[0]);
         matrix_cells.push(ViewMatrixCell {
             benchmark: representative.benchmark.clone(),
-            matrix_cell_key: matrix_cell_key(representative),
-            trial_keys: trials.iter().map(|cell| trial_key(cell)).collect(),
-            representative_trial_key: trial_key(representative),
+            matrix_cell_key: view_matrix_cell_key(representative),
+            trial_keys: trials.iter().map(|cell| view_trial_key(cell)).collect(),
+            representative_trial_key: view_trial_key(representative),
             agent_axis_id: agent_axis_id(representative),
+            variant_id: representative.variant_id.clone(),
+            variant_label: representative.variant_label.clone(),
             task_set_id: representative.case.task_set_id.clone(),
             task_id: representative.case.task_id.clone(),
             task_family: representative.case.task_family.clone(),
@@ -105,20 +127,59 @@ pub(crate) fn build_view_matrix(cells: &[CellRun]) -> ViewMatrix {
     }
 }
 
-pub(crate) fn build_view_leaderboard(cells: &[CellRun]) -> ViewLeaderboard {
-    let mut groups = BTreeMap::<(String, String), Vec<&CellRun>>::new();
+pub(crate) fn default_heatmap_metric(cells: &[ViewCell]) -> String {
+    ["score", "duration", "tokens", "tools", "turns"]
+        .into_iter()
+        .find(|metric| {
+            metric_varies(
+                cells
+                    .iter()
+                    .filter_map(|cell| heatmap_metric_value(cell, metric)),
+            )
+        })
+        .unwrap_or("score")
+        .to_string()
+}
+
+fn heatmap_metric_value(cell: &ViewCell, metric: &str) -> Option<f64> {
+    match metric {
+        "score" => cell.case.score.score,
+        "duration" => Some(cell.case.metrics.duration_ms as f64),
+        "tokens" => cell
+            .case
+            .metrics
+            .usage
+            .total_tokens
+            .map(|value| value as f64),
+        "tools" => Some(cell.case.metrics.tool_calls as f64),
+        "turns" => cell.case.metrics.turns.map(|value| value as f64),
+        _ => None,
+    }
+}
+
+fn metric_varies(values: impl Iterator<Item = f64>) -> bool {
+    let mut values = values.filter(|value| value.is_finite());
+    let Some(first) = values.next() else {
+        return false;
+    };
+    values.any(|value| value != first)
+}
+
+pub(crate) fn build_view_leaderboard(cells: &[ViewCell]) -> ViewLeaderboard {
+    let mut groups = BTreeMap::<(String, String, String), Vec<&ViewCell>>::new();
     for cell in cells {
         groups
             .entry((
                 cell.case.agent_id.clone(),
                 effective_model_name(cell).unwrap_or_default(),
+                cell.variant_id.clone().unwrap_or_default(),
             ))
             .or_default()
             .push(cell);
     }
     let mut entries = groups
         .into_iter()
-        .map(|((agent_id, model_name), mut trials)| {
+        .map(|((agent_id, model_name, variant_id), mut trials)| {
             trials.sort_by(|left, right| {
                 (
                     left.case.task_id.as_str(),
@@ -151,11 +212,13 @@ pub(crate) fn build_view_leaderboard(cells: &[CellRun]) -> ViewLeaderboard {
             let total_cost_usd =
                 sum_optional_f64(trials.iter().map(|cell| cell.case.metrics.cost.amount_usd));
             let tasks = leaderboard_tasks(&trials);
-            let trial_keys = trials.iter().map(|cell| trial_key(cell)).collect();
+            let trial_keys = trials.iter().map(|cell| view_trial_key(cell)).collect();
             ViewLeaderboardEntry {
                 rank: 0,
                 agent_id,
                 model_name: non_empty_string(model_name),
+                variant_id: non_empty_string(variant_id),
+                variant_label: trials.first().and_then(|cell| cell.variant_label.clone()),
                 total_trials,
                 successes,
                 failures: total_trials.saturating_sub(successes),
@@ -176,8 +239,8 @@ pub(crate) fn build_view_leaderboard(cells: &[CellRun]) -> ViewLeaderboard {
     ViewLeaderboard { entries }
 }
 
-pub(crate) fn leaderboard_tasks(trials: &[&CellRun]) -> Vec<ViewLeaderboardTask> {
-    let mut tasks = BTreeMap::<String, Vec<&CellRun>>::new();
+pub(crate) fn leaderboard_tasks(trials: &[&ViewCell]) -> Vec<ViewLeaderboardTask> {
+    let mut tasks = BTreeMap::<String, Vec<&ViewCell>>::new();
     for cell in trials {
         tasks
             .entry(cell.case.task_id.clone())
@@ -207,7 +270,7 @@ pub(crate) fn leaderboard_tasks(trials: &[&CellRun]) -> Vec<ViewLeaderboardTask>
                         .iter()
                         .map(|cell| cell.case.metrics.duration_ms as f64),
                 ),
-                trial_keys: cells.iter().map(|cell| trial_key(cell)).collect(),
+                trial_keys: cells.iter().map(|cell| view_trial_key(cell)).collect(),
             }
         })
         .collect()
@@ -224,6 +287,7 @@ pub(crate) fn compare_leaderboard_entries(
         .then_with(|| compare_option_f64_asc(left.total_cost_usd, right.total_cost_usd))
         .then_with(|| left.agent_id.cmp(&right.agent_id))
         .then_with(|| left.model_name.cmp(&right.model_name))
+        .then_with(|| left.variant_id.cmp(&right.variant_id))
 }
 
 pub(crate) fn ratio(numerator: usize, denominator: usize) -> f64 {
