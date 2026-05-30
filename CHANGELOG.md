@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-05-30
+
+- Made `edit`/`write` LSP diagnostics best-effort with background client reuse,
+  managed npm installs, and no hot-path `npx`.
+- Fixed clippy blockers across ACP eval, trajectory metadata, prompt assembly,
+  and view tests.
+
 ## 2026-05-29
 
 - Added configurable pevo project context discovery, `pevo run` overrides, and
