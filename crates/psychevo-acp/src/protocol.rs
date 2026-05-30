@@ -6,10 +6,15 @@ pub(crate) fn send_runtime_event_update(
     session_id: &SessionId,
     value: Value,
 ) {
-    let Some(event_type) = value.get("type").and_then(Value::as_str) else {
+    let Some(update) = runtime_event_session_update(&value) else {
         return;
     };
-    match event_type {
+    send_session_update(cx, session_id.clone(), update);
+}
+
+pub(crate) fn runtime_event_session_update(value: &Value) -> Option<SessionUpdate> {
+    let event_type = value.get("type").and_then(Value::as_str)?;
+    let update = match event_type {
         "tool_call_pending" => {
             let call_id = value
                 .get("tool_call_id")
@@ -19,18 +24,14 @@ pub(crate) fn send_runtime_event_update(
                 .get("tool_name")
                 .and_then(Value::as_str)
                 .unwrap_or("tool");
-            send_session_update(
-                cx,
-                session_id.clone(),
-                SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
-                    call_id.to_string(),
-                    ToolCallUpdateFields::new()
-                        .title(tool_title(tool_name))
-                        .kind(tool_kind(tool_name))
-                        .status(ToolCallStatus::Pending)
-                        .raw_input(tool_call_pending_raw_input(&value)),
-                )),
-            );
+            SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                call_id.to_string(),
+                ToolCallUpdateFields::new()
+                    .title(tool_title(tool_name))
+                    .kind(tool_kind(tool_name))
+                    .status(ToolCallStatus::Pending)
+                    .raw_input(tool_call_pending_raw_input(value)),
+            ))
         }
         "tool_execution_start" => {
             let call_id = value
@@ -42,16 +43,15 @@ pub(crate) fn send_runtime_event_update(
                 .and_then(Value::as_str)
                 .unwrap_or("tool");
             let args = value.get("args").cloned();
-            send_session_update(
-                cx,
-                session_id.clone(),
-                SessionUpdate::ToolCall(
-                    ToolCall::new(call_id.to_string(), tool_title(tool_name))
-                        .kind(tool_kind(tool_name))
-                        .status(ToolCallStatus::InProgress)
-                        .raw_input(args),
-                ),
-            );
+            let mut tool_call = ToolCall::new(call_id.to_string(), tool_title(tool_name))
+                .kind(tool_kind(tool_name))
+                .status(ToolCallStatus::InProgress)
+                .raw_input(args);
+            if let Some(meta) = tool_timing_meta("startedAtMs", value.get("started_at_ms").cloned())
+            {
+                tool_call = tool_call.meta(meta);
+            }
+            SessionUpdate::ToolCall(tool_call)
         }
         "tool_execution_end" => {
             let call_id = value
@@ -73,25 +73,44 @@ pub(crate) fn send_runtime_event_update(
                 .filter(|text| !text.is_empty())
                 .map(|text| vec![ToolCallContent::from(text)])
                 .unwrap_or_default();
-            send_session_update(
-                cx,
-                session_id.clone(),
-                SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
-                    call_id.to_string(),
-                    ToolCallUpdateFields::new()
-                        .title(tool_title(tool_name))
-                        .status(if failed {
-                            ToolCallStatus::Failed
-                        } else {
-                            ToolCallStatus::Completed
-                        })
-                        .content(content)
-                        .raw_output(result),
-                )),
+            let mut update = ToolCallUpdate::new(
+                call_id.to_string(),
+                ToolCallUpdateFields::new()
+                    .title(tool_title(tool_name))
+                    .status(if failed {
+                        ToolCallStatus::Failed
+                    } else {
+                        ToolCallStatus::Completed
+                    })
+                    .content(content)
+                    .raw_output(result),
             );
+            if let Some(meta) = tool_timing_meta("elapsedMs", value.get("elapsed_ms").cloned()) {
+                update = update.meta(meta);
+            }
+            SessionUpdate::ToolCallUpdate(update)
         }
-        _ => {}
-    }
+        _ => return None,
+    };
+    Some(update)
+}
+
+pub(crate) fn tool_timing_meta(
+    field_name: &str,
+    field_value: Option<Value>,
+) -> Option<serde_json::Map<String, Value>> {
+    let field_value = field_value?;
+    let mut timing = serde_json::Map::new();
+    timing.insert(
+        "source".to_string(),
+        Value::String("psychevo_runtime".to_string()),
+    );
+    timing.insert(field_name.to_string(), field_value);
+    let mut psychevo = serde_json::Map::new();
+    psychevo.insert("toolTiming".to_string(), Value::Object(timing));
+    let mut meta = serde_json::Map::new();
+    meta.insert("psychevo".to_string(), Value::Object(psychevo));
+    Some(meta)
 }
 
 pub(crate) fn tool_call_pending_raw_input(value: &Value) -> Value {
@@ -875,6 +894,53 @@ pub(crate) mod tests {
                 "arguments_json": "{\"path\":\"add.py\"}",
             })),
             json!({ "path": "add.py" })
+        );
+    }
+
+    #[test]
+    fn runtime_tool_execution_start_includes_timing_meta() {
+        let update = runtime_event_session_update(&json!({
+            "type": "tool_execution_start",
+            "tool_call_id": "call-1",
+            "tool_name": "edit",
+            "args": { "path": "add.py" },
+            "started_at_ms": 1_234,
+        }))
+        .expect("session update");
+
+        let SessionUpdate::ToolCall(tool_call) = update else {
+            panic!("expected tool call update");
+        };
+        assert_eq!(
+            tool_call.meta.as_ref().expect("meta")["psychevo"]["toolTiming"],
+            json!({
+                "source": "psychevo_runtime",
+                "startedAtMs": 1_234,
+            })
+        );
+    }
+
+    #[test]
+    fn runtime_tool_execution_end_includes_timing_meta() {
+        let update = runtime_event_session_update(&json!({
+            "type": "tool_execution_end",
+            "tool_call_id": "call-1",
+            "tool_name": "edit",
+            "result": { "success": true },
+            "outcome": "normal",
+            "elapsed_ms": 321,
+        }))
+        .expect("session update");
+
+        let SessionUpdate::ToolCallUpdate(update) = update else {
+            panic!("expected tool call update");
+        };
+        assert_eq!(
+            update.meta.as_ref().expect("meta")["psychevo"]["toolTiming"],
+            json!({
+                "source": "psychevo_runtime",
+                "elapsedMs": 321,
+            })
         );
     }
 
