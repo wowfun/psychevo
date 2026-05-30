@@ -124,6 +124,12 @@ Successful writes return a JSON object with stable fields:
 - `warning`: optional stale-content or partial-read warning
 - `error`: failure explanation when the write fails
 
+Lint and LSP diagnostics are post-write feedback. They must not change the
+write result into a failure when the file write itself succeeded. LSP
+diagnostics are best-effort enrichment: missing, unavailable, installing,
+timed-out, or failed language servers must not block the hot path of a
+successful write.
+
 ## `edit`
 
 `edit` modifies existing text content in the working context.
@@ -149,6 +155,11 @@ Successful edits return a JSON object with stable fields:
 - `warning`: optional stale-content or partial-read warning
 - `error`: failure explanation when the edit fails
 
+Lint and LSP diagnostics are post-edit feedback. They must not turn an
+otherwise successful edit into a failure. LSP diagnostics are best-effort
+enrichment and may be omitted when a language server is missing, installing,
+broken, timed out, or not configured for the edited file.
+
 Ambiguous matches, not-found targets, no-change edits, stale content conflicts,
 partial-read overwrite risk, sibling-agent write conflicts, and resource-denied
 writes must be observable in the JSON result. Same-resource mutations must be
@@ -161,6 +172,20 @@ block per changed file. Update, add, and delete blocks include `diff --git`,
 
 This spec defines semantic modes and result material. The first implementation
 slice's concrete parameter names and patch syntax are defined by [Tool I/O](tool-io.md).
+
+## LSP Diagnostics
+
+When enabled, runtime may use language servers to compute diagnostics
+introduced by `write` or `edit`. Language server processes are implementation
+details of the coding-core runtime. Runtime should reuse language server
+clients per workspace and server where practical, keep per-file baselines to
+avoid repeating pre-existing diagnostics, and isolate failed or timed-out
+servers so later edits are not repeatedly delayed by the same failure.
+
+Language server startup, background installation, skip, timeout, and failure
+states may be emitted through internal runtime events for local UI and
+diagnostic surfaces. These events are not model-visible tool result fields and
+must not alter the stable `write` or `edit` JSON result contract.
 
 ## `exec_command` and `write_stdin`
 

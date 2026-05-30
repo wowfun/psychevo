@@ -35,6 +35,9 @@ exec-session behavior.
 Real provider and live service validation remain opt-in. Managed ripgrep tests
 must not perform real GitHub downloads; download behavior should be covered with
 an injectable fake resolver/client or an equivalent deterministic harness.
+Managed LSP tests must not perform real npm installs or contact a package
+registry. Language-server resolution, install scheduling, process reuse, and
+failure isolation should be covered with fake installers and fake LSP servers.
 
 ## Scenario Matrix
 
@@ -54,10 +57,22 @@ an injectable fake resolver/client or an equivalent deterministic harness.
 - `read` refuses binary and image content without returning binary or base64 payloads.
 - `write` creates missing parent directories when allowed and returns `path`, `bytes_written`, and `dirs_created`.
 - `write` reports resource denial or write failure through `error`.
+- `write` and `edit` keep successful file writes successful when LSP is missing,
+  installing, broken, or timed out.
 - `edit.replace` modifies existing content and returns `success`, `diff`, and `files_modified`.
 - `edit.patch` may update, create, delete, or move files when every target is
   permitted.
 - `edit` reports not-found, ambiguous match, no-change, stale-content conflict, or resource denial through JSON.
+- LSP server resolution never uses `npx` or another ephemeral package runner in
+  the `write` or `edit` hot path.
+- `lsp.install_strategy = "auto"` schedules at most one background managed
+  install per missing npm-backed server while returning the current tool result
+  without waiting for install completion.
+- Reused LSP clients are scoped by workspace and server, filter pre-existing
+  diagnostics through a baseline, and mark failed or timed-out servers broken so
+  later tool calls skip quickly.
+- LSP status changes are exposed through internal `lsp_status` runtime events
+  without adding model-visible `write` or `edit` result fields.
 - `exec_command` returns strict `chunk_id`, `wall_time_seconds`, `exit_code`,
   `session_id`, `original_token_count`, and `output` fields.
 - Non-zero process exits are successful tool results with `exit_code` set.

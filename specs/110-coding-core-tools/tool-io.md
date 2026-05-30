@@ -97,6 +97,11 @@ Successful result fields:
 - `warning`
 - `error`
 
+`lsp_diagnostics` is `null` when no introduced diagnostics are available. A
+missing, installing, broken, or timed-out language server is reported only
+through internal runtime status events, not through additional model-visible
+result fields.
+
 ## `edit`
 
 Parameters:
@@ -151,6 +156,35 @@ Successful result fields:
 
 Diffs are Git-style patch blocks. Update, add, and delete operations include
 `diff --git`, file headers, and unified hunks; pure moves use Git rename headers.
+
+`lsp_diagnostics` follows the same best-effort rule as `write`: it is populated
+only when the runtime has introduced diagnostics ready for the edited files,
+and language-server status is not exposed by adding model-visible fields.
+
+## LSP Runtime Behavior
+
+The default LSP config is enabled with `wait_mode = "document"`,
+`wait_timeout = 5.0`, and `install_strategy = "auto"`.
+
+`install_strategy = "manual"` resolves only existing language-server binaries.
+`install_strategy = "off"` skips managed language-server installation and
+diagnostics. `install_strategy = "auto"` never shells out through ephemeral
+package runners from the `write` or `edit` hot path. If an npm-backed language
+server is missing, runtime may start one background managed install under
+`$PSYCHEVO_HOME/lsp/node` and return the current tool result without waiting for
+that install.
+
+Supported npm-backed managed language servers in this slice are:
+
+- Python: npm package `pyright`, executable `pyright-langserver --stdio`
+- JavaScript/TypeScript: npm package `typescript-language-server`, executable
+  `typescript-language-server --stdio`
+- YAML: npm package `yaml-language-server`, executable
+  `yaml-language-server --stdio`
+
+Language-server status events are internal `RunStreamEvent::Event` payloads
+with `type = "lsp_status"`. They are intended for local UI and diagnostic
+surfaces and are not included in provider-visible tool result JSON.
 
 ## `exec_command`
 
