@@ -445,20 +445,38 @@ function bindTrialSwitcher() {
 function renderStepsHeader(trajectory, trajectoryMeta) {
   const count = (trajectory?.steps || []).length ?? 0;
   const disabled = trajectory && count > 0 ? "" : "disabled";
-  return `<div class="steps-head"><h3>Steps (${count})</h3><div class="step-actions" aria-label="step visibility controls"><button class="step-toggle-button" type="button" data-step-action="expand" ${disabled}>Expand all</button><button class="step-toggle-button" type="button" data-step-action="collapse" ${disabled}>Collapse all</button></div></div>`;
+  return `<div class="steps-head"><h3>Steps (${count})</h3><div class="step-actions" aria-label="step visibility toggle"><button class="step-toggle-button" type="button" data-step-action="toggle" aria-pressed="false" ${disabled}>Expand all</button></div></div>`;
+}
+function stepRows() {
+  return Array.from(document.querySelectorAll("#step-list .step"));
+}
+function refreshStepToggleButton() {
+  const button = document.querySelector("[data-step-action=\"toggle\"]");
+  if (!button) return;
+  const rows = stepRows();
+  const hasRows = rows.length > 0;
+  const allOpen = hasRows && rows.every(row => row.open);
+  button.disabled = !hasRows;
+  button.dataset.stepState = allOpen ? "expanded" : "collapsed";
+  button.textContent = allOpen ? "Collapse all" : "Expand all";
+  button.setAttribute("aria-pressed", allOpen ? "true" : "false");
 }
 function bindStepControls() {
-  document.querySelectorAll("[data-step-action]").forEach(button => {
-    button.addEventListener("click", event => {
-      event.stopPropagation();
-      const shouldOpen = button.dataset.stepAction === "expand";
-      document.querySelectorAll("#step-list .step").forEach(row => {
-        row.open = shouldOpen;
-        if (!shouldOpen) row.classList.remove("selected-step");
-      });
-      if (!shouldOpen) state.selectedStepId = null;
+  const button = document.querySelector("[data-step-action=\"toggle\"]");
+  stepRows().forEach(row => row.addEventListener("toggle", refreshStepToggleButton));
+  if (!button) return;
+  button.addEventListener("click", event => {
+    event.stopPropagation();
+    const rows = stepRows();
+    const shouldOpen = !rows.every(row => row.open);
+    rows.forEach(row => {
+      row.open = shouldOpen;
+      if (!shouldOpen) row.classList.remove("selected-step");
     });
+    if (!shouldOpen) state.selectedStepId = null;
+    refreshStepToggleButton();
   });
+  refreshStepToggleButton();
 }
 function renderSelectedNotes(trialKey) {
   const notes = notesFor(trialKey);

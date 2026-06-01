@@ -346,8 +346,19 @@ command = {{ command = "sh", args = ["{}"], model = "test-model" }}
     assert!(html.stdout.contains("data-filter-value"));
     assert!(html.stdout.contains("renderStepsHeader"));
     assert!(html.stdout.contains("bindStepControls"));
-    assert!(html.stdout.contains("data-step-action=\"expand\""));
-    assert!(html.stdout.contains("data-step-action=\"collapse\""));
+    assert!(html.stdout.contains("data-step-action=\"toggle\""));
+    assert!(!html.stdout.contains("data-step-action=\"expand\""));
+    assert!(!html.stdout.contains("data-step-action=\"collapse\""));
+    assert!(html.stdout.contains("function refreshStepToggleButton()"));
+    assert!(html.stdout.contains("rows.every(row => row.open)"));
+    assert!(
+        html.stdout
+            .contains("const shouldOpen = !rows.every(row => row.open)")
+    );
+    assert!(
+        html.stdout
+            .contains("button.textContent = allOpen ? \"Collapse all\" : \"Expand all\"")
+    );
     assert!(html.stdout.contains("Expand all"));
     assert!(html.stdout.contains("Collapse all"));
     assert!(html.stdout.contains(".steps-head"));
