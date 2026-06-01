@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "BackendKind": {
+      "enum": [
+        "psychevo",
+        "peerAgent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "kind": {
+      "$ref": "#/definitions/BackendKind"
+    },
+    "nativeId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "kind"
+  ],
+  "title": "GatewayBackendInfo",
+  "type": "object"
+}

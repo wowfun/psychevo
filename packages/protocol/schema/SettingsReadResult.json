@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "memoryResources": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "secrets": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "workdir": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "memoryResources",
+    "secrets",
+    "workdir"
+  ],
+  "title": "SettingsReadResult",
+  "type": "object"
+}

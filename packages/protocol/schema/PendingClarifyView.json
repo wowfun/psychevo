@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "raw": true,
+    "requestId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "raw",
+    "requestId"
+  ],
+  "title": "PendingClarifyView",
+  "type": "object"
+}

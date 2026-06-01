@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "prompt",
+    "assistant",
+    "reasoning",
+    "tool",
+    "shell",
+    "file",
+    "web",
+    "mcp",
+    "clarify",
+    "permission",
+    "skill",
+    "agent",
+    "mailbox",
+    "status",
+    "diff",
+    "artifact"
+  ],
+  "title": "TimelineItemKind",
+  "type": "string"
+}

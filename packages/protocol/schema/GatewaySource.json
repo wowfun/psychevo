@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "kind": {
+      "type": "string"
+    },
+    "lifetime": {
+      "$ref": "#/definitions/GatewaySourceLifetime"
+    },
+    "rawId": {
+      "type": "string"
+    },
+    "rawIdentity": true,
+    "visibleName": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "kind",
+    "lifetime",
+    "rawId"
+  ],
+  "title": "GatewaySource",
+  "type": "object"
+}

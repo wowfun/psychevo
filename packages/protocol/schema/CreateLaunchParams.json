@@ -1,0 +1,67 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rawId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": true,
+        "visibleName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "source": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewaySourceInput"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "workdir": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "workdir"
+  ],
+  "title": "CreateLaunchParams",
+  "type": "object"
+}

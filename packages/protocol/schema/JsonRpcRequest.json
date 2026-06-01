@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonRpcId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "format": "int64",
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "properties": {
+    "id": {
+      "$ref": "#/definitions/JsonRpcId"
+    },
+    "jsonrpc": {
+      "type": "string"
+    },
+    "method": {
+      "type": "string"
+    },
+    "params": true
+  },
+  "required": [
+    "id",
+    "jsonrpc",
+    "method"
+  ],
+  "title": "JsonRpcRequest",
+  "type": "object"
+}

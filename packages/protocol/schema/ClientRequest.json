@@ -1,0 +1,760 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ClarifyRespondParams": {
+      "properties": {
+        "answers": {
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "cancel": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "requestId"
+      ],
+      "type": "object"
+    },
+    "DebugEventsParams": {
+      "properties": {
+        "limit": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "threadId"
+      ],
+      "type": "object"
+    },
+    "GatewayImageInput": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "localPath"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "url"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "url"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "GatewayInputPart": {
+      "oneOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "text"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "input": {
+              "$ref": "#/definitions/GatewayImageInput"
+            },
+            "type": {
+              "enum": [
+                "image"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "input",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "label": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "context"
+              ],
+              "type": "string"
+            },
+            "visibleToModel": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "label",
+            "text",
+            "type",
+            "visibleToModel"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "GatewayRequestScope": {
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rawId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": true,
+        "visibleName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    },
+    "InitializeParams": {
+      "type": "object"
+    },
+    "PermissionDecision": {
+      "enum": [
+        "allowOnce",
+        "allowSession",
+        "allowAlways",
+        "deny"
+      ],
+      "type": "string"
+    },
+    "PermissionRespondParams": {
+      "properties": {
+        "decision": {
+          "$ref": "#/definitions/PermissionDecision"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "decision",
+        "requestId"
+      ],
+      "type": "object"
+    },
+    "SettingsReadParams": {
+      "properties": {
+        "workdir": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "SourceResetParams": {
+      "properties": {
+        "scope": {
+          "$ref": "#/definitions/GatewayRequestScope"
+        }
+      },
+      "required": [
+        "scope"
+      ],
+      "type": "object"
+    },
+    "ThreadIdParams": {
+      "properties": {
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "threadId"
+      ],
+      "type": "object"
+    },
+    "ThreadListParams": {
+      "properties": {
+        "archived": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "limit": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "workdir": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ThreadReadParams": {
+      "properties": {
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "threadId"
+      ],
+      "type": "object"
+    },
+    "ThreadRenameParams": {
+      "properties": {
+        "threadId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "threadId",
+        "title"
+      ],
+      "type": "object"
+    },
+    "ThreadResumeParams": {
+      "properties": {
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewayRequestScope"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "threadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ThreadStartParams": {
+      "properties": {
+        "scope": {
+          "$ref": "#/definitions/GatewayRequestScope"
+        }
+      },
+      "required": [
+        "scope"
+      ],
+      "type": "object"
+    },
+    "TurnInterruptParams": {
+      "properties": {
+        "sourceKey": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "threadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "TurnStartParams": {
+      "properties": {
+        "input": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/GatewayInputPart"
+          },
+          "type": "array"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reasoningEffort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "threadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "scope"
+      ],
+      "type": "object"
+    },
+    "TurnSteerParams": {
+      "properties": {
+        "expectedTurnId": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "expectedTurnId",
+        "text"
+      ],
+      "type": "object"
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "initialize"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/InitializeParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "thread/start"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadStartParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "thread/resume"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadResumeParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "thread/read"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadReadParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "thread/list"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadListParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "thread/rename"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadRenameParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "thread/archive"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadIdParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "thread/restore"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadIdParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "thread/delete"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadIdParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "turn/start"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/TurnStartParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "turn/steer"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/TurnSteerParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "turn/interrupt"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/TurnInterruptParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "source/reset"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/SourceResetParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "permission/respond"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/PermissionRespondParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "clarify/respond"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ClarifyRespondParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "settings/read"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/SettingsReadParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "debug/events"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/DebugEventsParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "ClientRequest"
+}

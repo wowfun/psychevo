@@ -1,0 +1,26 @@
+{
+  "name": "@psychevo/workbench",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && vite build",
+    "check": "tsc -p tsconfig.json",
+    "dev": "vite --host 127.0.0.1",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@psychevo/assets": "workspace:*",
+    "@psychevo/client": "workspace:*",
+    "@psychevo/components": "workspace:*",
+    "@psychevo/host": "workspace:*",
+    "@psychevo/protocol": "workspace:*",
+    "lucide-react": "^0.511.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.5.0",
+    "vite": "^6.3.5"
+  }
+}

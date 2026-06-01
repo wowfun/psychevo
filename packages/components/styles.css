@@ -1,0 +1,600 @@
+.pevo-panel {
+  min-width: 0;
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius);
+  box-shadow: var(--pevo-shadow-panel);
+}
+
+.pevo-panelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--pevo-border);
+}
+
+.pevo-titleLine {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.pevo-titleLine h2 {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.2;
+  font-weight: 650;
+}
+
+.pevo-iconRow,
+.pevo-sessionActions,
+.pevo-buttonRow,
+.pevo-composerActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pevo-iconButton {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  transition-duration: 140ms;
+  transition-property: background-color, border-color, color, transform;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pevo-iconButton:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.pevo-iconButton:focus-visible,
+.pevo-primaryButton:focus-visible,
+.pevo-buttonRow button:focus-visible,
+.pevo-request button:focus-visible,
+.pevo-debugToggle:focus-visible,
+.pevo-debugHeader button:focus-visible,
+.pevo-sessionMain:focus-visible,
+.pevo-segmented button:focus-visible,
+.pevo-rename input:focus-visible,
+.pevo-request input:focus-visible,
+.pevo-composer textarea:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--pevo-accent), white 24%);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) {
+  .pevo-iconButton:hover:not(:disabled) {
+    color: var(--pevo-ink);
+    background: var(--pevo-panel-muted);
+    border-color: var(--pevo-border);
+  }
+}
+
+.pevo-iconButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+@media (hover: hover) {
+  .pevo-iconButton.is-danger:hover:not(:disabled) {
+    color: var(--pevo-danger);
+    background: color-mix(in oklch, var(--pevo-danger), white 88%);
+  }
+}
+
+.pevo-empty {
+  color: var(--pevo-muted);
+  padding: 16px;
+  font-size: 0.88rem;
+}
+
+.pevo-emptyThread {
+  display: grid;
+  min-height: 240px;
+  place-items: center;
+}
+
+.pevo-history,
+.pevo-utility {
+  overflow: hidden;
+}
+
+.pevo-sessionList {
+  display: grid;
+  gap: 7px;
+  max-height: calc(100dvh - 96px);
+  overflow: auto;
+  padding: 10px;
+}
+
+.pevo-sessionRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 7px;
+  padding: 8px;
+  background: var(--pevo-bg-raised);
+  border: 1px solid transparent;
+  border-radius: var(--pevo-radius);
+  transition-duration: 140ms;
+  transition-property: background-color, border-color, transform;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pevo-sessionRow.is-active {
+  border-color: var(--pevo-accent);
+  background: var(--pevo-accent-soft);
+}
+
+@media (hover: hover) {
+  .pevo-sessionRow:hover {
+    background: var(--pevo-panel-muted);
+  }
+}
+
+.pevo-sessionMain {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.pevo-sessionMain span,
+.pevo-sessionMain small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pevo-sessionMain span {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.pevo-sessionMain small,
+.pevo-muted {
+  color: var(--pevo-muted);
+}
+
+.pevo-sessionActions {
+  justify-content: flex-end;
+}
+
+.pevo-rename {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px 32px;
+  gap: 6px;
+}
+
+.pevo-rename input,
+.pevo-request input,
+.pevo-composer textarea {
+  width: 100%;
+  color: var(--pevo-ink);
+  background: #fff;
+  border: 1px solid var(--pevo-border-strong);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.pevo-rename input,
+.pevo-request input {
+  min-height: 32px;
+  padding: 5px 8px;
+}
+
+.pevo-transcript {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pevo-transcriptHeader {
+  background: var(--pevo-panel);
+}
+
+.pevo-countPill {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  color: var(--pevo-muted);
+  background: var(--pevo-panel-muted);
+  border-radius: 999px;
+  font-size: 0.78rem;
+}
+
+.pevo-threadItems {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+  padding: 18px 20px;
+  background: var(--pevo-bg-raised);
+}
+
+.pevo-message {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 9px;
+  max-width: min(760px, 100%);
+  padding: 12px 14px;
+  border-radius: var(--pevo-radius);
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.pevo-message p {
+  margin: 0;
+}
+
+.pevo-message.is-user {
+  align-self: flex-end;
+  background: var(--pevo-accent);
+  color: var(--pevo-accent-ink);
+}
+
+.pevo-message.is-assistant {
+  align-self: flex-start;
+  background: var(--pevo-panel);
+  box-shadow: 0 1px 2px rgb(21 28 36 / 8%);
+}
+
+.pevo-reasoning,
+.pevo-evidence {
+  display: grid;
+  align-self: flex-start;
+  width: min(760px, 100%);
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius);
+  box-shadow: 0 1px 2px rgb(21 28 36 / 7%);
+}
+
+.pevo-reasoning {
+  grid-template-columns: 18px minmax(0, 1fr);
+  color: var(--pevo-muted);
+}
+
+.pevo-reasoning p,
+.pevo-evidence p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.pevo-evidenceLine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--pevo-muted);
+  font-size: 0.86rem;
+}
+
+.pevo-evidenceLine em {
+  padding: 1px 6px;
+  color: var(--pevo-muted);
+  background: var(--pevo-panel-muted);
+  border-radius: 999px;
+  font-style: normal;
+}
+
+.pevo-evidence pre {
+  max-width: 100%;
+  max-height: 120px;
+  overflow: auto;
+  margin: 0;
+  padding: 8px;
+  color: #dce7ef;
+  background: var(--pevo-code-bg);
+  border-radius: var(--pevo-radius-sm);
+  white-space: pre-wrap;
+}
+
+.pevo-evidence code,
+.pevo-debugEvent code {
+  color: var(--pevo-ink);
+}
+
+.pevo-artifactRefs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pevo-artifactRefs span {
+  padding: 2px 7px;
+  color: var(--pevo-brass);
+  background: var(--pevo-brass-soft);
+  border-radius: 999px;
+  font-size: 0.78rem;
+}
+
+.pevo-debugDock {
+  display: grid;
+  background: var(--pevo-panel);
+  border-top: 1px solid var(--pevo-border);
+}
+
+.pevo-debugToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-self: end;
+  gap: 7px;
+  min-height: 36px;
+  margin: 8px 10px;
+  padding: 0 10px;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  transition-duration: 140ms;
+  transition-property: background-color, border-color, color, transform;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pevo-debugToggle:active {
+  transform: scale(0.96);
+}
+
+@media (hover: hover) {
+  .pevo-debugToggle:hover {
+    color: var(--pevo-ink);
+    background: var(--pevo-panel-muted);
+    border-color: var(--pevo-border-strong);
+  }
+}
+
+.pevo-debugToggle b {
+  min-width: 20px;
+  padding: 1px 5px;
+  color: var(--pevo-accent-ink);
+  background: var(--pevo-accent);
+  border-radius: 999px;
+  font-size: 0.72rem;
+}
+
+.pevo-debugDrawer {
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px;
+  background: var(--pevo-bg-raised);
+  border-top: 1px solid var(--pevo-border);
+}
+
+.pevo-debugHeader,
+.pevo-debugEvent div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.pevo-debugHeader button {
+  min-height: 28px;
+  padding: 0 9px;
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.pevo-debugEvent {
+  display: grid;
+  gap: 5px;
+  padding: 8px;
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.pevo-debugEvent span {
+  color: var(--pevo-muted);
+  font-size: 0.78rem;
+}
+
+.pevo-debugEvent p {
+  margin: 0;
+  color: var(--pevo-muted);
+  font-size: 0.84rem;
+}
+
+.pevo-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 12px;
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius);
+  box-shadow: var(--pevo-shadow-panel);
+}
+
+.pevo-composer textarea {
+  min-height: 74px;
+  max-height: 180px;
+  resize: vertical;
+  padding: 10px 12px;
+  line-height: 1.45;
+  box-shadow: inset 0 1px 2px rgb(21 28 36 / 5%);
+}
+
+.pevo-composerActions {
+  align-self: end;
+}
+
+.pevo-primaryButton,
+.pevo-buttonRow button,
+.pevo-request button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 12px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border-strong);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  transition-duration: 140ms;
+  transition-property: background-color, border-color, color, transform;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pevo-primaryButton:active:not(:disabled),
+.pevo-buttonRow button:active:not(:disabled),
+.pevo-request button:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.pevo-primaryButton {
+  color: var(--pevo-accent-ink);
+  background: var(--pevo-accent);
+  border-color: var(--pevo-accent);
+}
+
+@media (hover: hover) {
+  .pevo-primaryButton:hover:not(:disabled) {
+    background: color-mix(in oklch, var(--pevo-accent), black 8%);
+    border-color: color-mix(in oklch, var(--pevo-accent), black 8%);
+  }
+
+  .pevo-buttonRow button:hover:not(:disabled),
+  .pevo-request button:hover:not(:disabled) {
+    background: var(--pevo-panel-muted);
+    border-color: var(--pevo-border-strong);
+  }
+}
+
+.pevo-primaryButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.pevo-segmented {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  width: max-content;
+  padding: 3px;
+  background: var(--pevo-panel-muted);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.pevo-segmented button {
+  min-width: 72px;
+  padding: 5px 10px;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.pevo-segmented button.is-selected {
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  box-shadow: 0 1px 2px rgb(21 28 36 / 9%);
+}
+
+.pevo-statusGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 12px;
+}
+
+.pevo-statusGrid div,
+.pevo-settings div {
+  min-width: 0;
+}
+
+.pevo-statusGrid dt,
+.pevo-settings dt {
+  color: var(--pevo-muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.pevo-statusGrid dd,
+.pevo-settings dd {
+  overflow-wrap: anywhere;
+  margin: 2px 0 0;
+  font-size: 0.9rem;
+}
+
+.pevo-stack {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid var(--pevo-border);
+}
+
+.pevo-stack h3 {
+  margin: 0;
+  font-size: 0.84rem;
+}
+
+.pevo-stack p {
+  margin: 0;
+  font-size: 0.86rem;
+}
+
+.pevo-request {
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  background: var(--pevo-bg-raised);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius);
+}
+
+.pevo-request pre {
+  max-height: 140px;
+  overflow: auto;
+  margin: 0;
+  padding: 8px;
+  color: #dce7ef;
+  background: var(--pevo-code-bg);
+  border-radius: var(--pevo-radius-sm);
+  white-space: pre-wrap;
+}
+
+.pevo-settings {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+@media (max-width: 960px) {
+  .pevo-sessionList {
+    max-height: none;
+  }
+
+  .pevo-composer {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .pevo-composerActions {
+    justify-content: flex-end;
+  }
+}

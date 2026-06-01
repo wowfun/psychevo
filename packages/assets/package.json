@@ -1,0 +1,14 @@
+{
+  "name": "@psychevo/assets",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./theme.css": "./theme.css"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json",
+    "test": "vitest run --passWithNoTests"
+  }
+}

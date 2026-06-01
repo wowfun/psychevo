@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "pending",
+    "running",
+    "completed",
+    "failed",
+    "cancelled",
+    "needsInput",
+    "info"
+  ],
+  "title": "TimelineItemStatus",
+  "type": "string"
+}

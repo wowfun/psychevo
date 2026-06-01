@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "expiresAtMs": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "launchId": {
+      "type": "string"
+    },
+    "openUrl": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "expiresAtMs",
+    "launchId",
+    "openUrl"
+  ],
+  "title": "CreateLaunchResult",
+  "type": "object"
+}

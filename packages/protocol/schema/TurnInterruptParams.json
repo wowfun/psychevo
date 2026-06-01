@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "sourceKey": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "threadId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "TurnInterruptParams",
+  "type": "object"
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@psychevo/client",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@psychevo/host": "workspace:*",
+    "@psychevo/protocol": "workspace:*"
+  }
+}

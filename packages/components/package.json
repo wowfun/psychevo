@@ -1,0 +1,19 @@
+{
+  "name": "@psychevo/components",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.tsx",
+    "./styles.css": "./styles.css"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@psychevo/protocol": "workspace:*",
+    "lucide-react": "^0.511.0",
+    "react": "^19.1.0"
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "oneOf": [
+    {
+      "properties": {
+        "kind": {
+          "enum": [
+            "localPath"
+          ],
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "kind": {
+          "enum": [
+            "url"
+          ],
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "url"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "GatewayImageInput"
+}

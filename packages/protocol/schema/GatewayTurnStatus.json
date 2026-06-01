@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "queued",
+    "running",
+    "completed",
+    "failed",
+    "cancelled"
+  ],
+  "title": "GatewayTurnStatus",
+  "type": "string"
+}

@@ -1,0 +1,134 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "BackendKind": {
+      "enum": [
+        "psychevo",
+        "peerAgent"
+      ],
+      "type": "string"
+    },
+    "GatewayBackendInfo": {
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/BackendKind"
+        },
+        "nativeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewayThread": {
+      "properties": {
+        "backend": {
+          "$ref": "#/definitions/GatewayBackendInfo"
+        },
+        "id": {
+          "type": "string"
+        },
+        "sourceKey": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "backend",
+        "id"
+      ],
+      "type": "object"
+    },
+    "GatewayTurn": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/GatewayTurnStatus"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "threadId"
+      ],
+      "type": "object"
+    },
+    "GatewayTurnStatus": {
+      "enum": [
+        "queued",
+        "running",
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "type": "string"
+    },
+    "TurnRunResult": {
+      "properties": {
+        "finalAnswer": {
+          "type": "string"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "provider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "toolFailures": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "finalAnswer",
+        "outcome",
+        "sessionId",
+        "toolFailures"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "result": {
+      "$ref": "#/definitions/TurnRunResult"
+    },
+    "thread": {
+      "$ref": "#/definitions/GatewayThread"
+    },
+    "turn": {
+      "$ref": "#/definitions/GatewayTurn"
+    }
+  },
+  "required": [
+    "result",
+    "thread",
+    "turn"
+  ],
+  "title": "TurnResultPayload",
+  "type": "object"
+}

@@ -1,0 +1,234 @@
+#root {
+  min-height: 100dvh;
+  height: 100dvh;
+}
+
+.appShell {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  min-height: 100dvh;
+  height: 100dvh;
+  overflow: hidden;
+  padding: 14px;
+  gap: 12px;
+}
+
+.topBar {
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 52px;
+}
+
+.brandMark {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 10px;
+}
+
+.brandGlyph {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  color: var(--pevo-accent-ink);
+  background: var(--pevo-ink);
+  border-radius: 8px;
+  font-weight: 800;
+  box-shadow: 0 8px 18px rgb(21 28 36 / 16%);
+}
+
+.brandMark h1,
+.brandMark p {
+  overflow: hidden;
+  margin: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brandMark h1 {
+  font-size: 1.16rem;
+  line-height: 1.1;
+  font-weight: 650;
+}
+
+.brandMark p,
+.topMeta {
+  color: var(--pevo-muted);
+  font-size: 0.86rem;
+}
+
+.topMeta {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.endpointPill {
+  overflow: hidden;
+  max-width: 30vw;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statePill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel-muted);
+  border: 1px solid var(--pevo-border);
+  border-radius: 999px;
+}
+
+.stateDot {
+  width: 7px;
+  height: 7px;
+  background: var(--pevo-accent);
+  border-radius: 999px;
+  box-shadow: 0 0 0 3px var(--pevo-accent-soft);
+}
+
+.statePill.is-running {
+  color: var(--pevo-caution);
+  background: var(--pevo-brass-soft);
+  border-color: color-mix(in oklch, var(--pevo-brass), white 55%);
+}
+
+.statePill.is-running .stateDot {
+  background: var(--pevo-brass);
+  box-shadow: 0 0 0 3px var(--pevo-brass-soft);
+}
+
+.errorBand {
+  grid-row: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 8px 10px;
+  color: var(--pevo-danger);
+  background: color-mix(in oklch, var(--pevo-danger), white 88%);
+  border: 1px solid color-mix(in oklch, var(--pevo-danger), white 70%);
+  border-radius: var(--pevo-radius);
+}
+
+.mobileTabs {
+  grid-row: 3;
+  display: none;
+}
+
+.workbench {
+  grid-row: 4;
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr) minmax(260px, 330px);
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+}
+
+.historyColumn,
+.statusColumn,
+.conversationColumn {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+}
+
+.conversationColumn {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+@media (max-width: 1120px) {
+  .workbench {
+    grid-template-columns: minmax(200px, 250px) minmax(0, 1fr);
+  }
+
+  .statusColumn {
+    display: none;
+  }
+}
+
+@media (max-width: 780px) {
+  .appShell {
+    padding: 10px;
+  }
+
+  .topBar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .topMeta {
+    justify-content: end;
+  }
+
+  .endpointPill {
+    display: none;
+  }
+
+  .mobileTabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 3px;
+    padding: 3px;
+    background: var(--pevo-panel-muted);
+    border: 1px solid var(--pevo-border);
+    border-radius: var(--pevo-radius);
+  }
+
+  .mobileTabs button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 38px;
+    color: var(--pevo-muted);
+    background: transparent;
+    border: 0;
+    border-radius: var(--pevo-radius-sm);
+    cursor: pointer;
+    transition-duration: 140ms;
+    transition-property: background-color, color, transform;
+    transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .mobileTabs button:active {
+    transform: scale(0.96);
+  }
+
+  .mobileTabs button.is-selected {
+    color: var(--pevo-ink);
+    background: var(--pevo-panel);
+    box-shadow: 0 1px 2px rgb(21 28 36 / 9%);
+  }
+
+  .workbench {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .historyColumn,
+  .statusColumn,
+  .conversationColumn {
+    display: none;
+  }
+
+  .historyColumn.is-mobileSelected,
+  .statusColumn.is-mobileSelected,
+  .conversationColumn.is-mobileSelected {
+    display: grid;
+  }
+
+  .conversationColumn {
+    min-height: 0;
+  }
+}

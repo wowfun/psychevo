@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "baseUrl": {
+      "type": "string"
+    },
+    "pid": {
+      "format": "uint32",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "readyzUrl": {
+      "type": "string"
+    },
+    "startedAtMs": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "version": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "baseUrl",
+    "pid",
+    "readyzUrl",
+    "startedAtMs",
+    "version"
+  ],
+  "title": "ManagedServerState",
+  "type": "object"
+}
