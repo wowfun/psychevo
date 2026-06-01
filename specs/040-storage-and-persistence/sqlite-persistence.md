@@ -31,6 +31,7 @@ The default first-slice SQLite shape contains:
 - `context_evidence`
 - `agent_edges`
 - `session_compactions`
+- `gateway_source_bindings`
 
 The default first-slice SQLite shape does not create:
 - a separate per-invocation execution-root table
@@ -77,6 +78,33 @@ The first implementation slice stores these session columns:
 - `tool_call_count` integer
 - `title` text nullable
 - `metadata_json` text nullable
+
+## Gateway Source Bindings
+
+The `gateway_source_bindings` storage shape persists Gateway source-to-thread
+routing facts from [021 Gateway](../021-gateway/spec.md). It is not a
+second transcript or execution truth source.
+
+Required semantics include:
+- one active binding per deterministic source key
+- durable relationship from source key to current Psychevo thread/session
+- raw source identity retained for routing and local debugging
+- optional visible label retained for UI projection
+- backend kind and optional backend-native id for future peer-agent backends
+- timestamps and lineage metadata for reset/rebind audit
+
+The first implementation slice stores these columns:
+
+- `source_key` text primary key
+- `source_kind` text
+- `raw_identity_json` text
+- `visible_name` text nullable
+- `thread_id` text foreign key
+- `backend_kind` text
+- `backend_native_id` text nullable
+- `created_at_ms` integer
+- `updated_at_ms` integer
+- `lineage_json` text nullable
 
 ## Agent Edges
 
@@ -257,7 +285,7 @@ SQLite persistence should perform periodic WAL checkpoint work when supported by
 
 Storage failures that affect session or message persistence must be observable to runtime or caller-facing layers that depend on persistence.
 
-The current implementation uses `PRAGMA user_version = 12`, WAL, foreign keys,
+The current implementation uses `PRAGMA user_version = 14`, WAL, foreign keys,
 short busy timeouts, `BEGIN IMMEDIATE`, bounded jitter retry, and best-effort
 periodic `wal_checkpoint(PASSIVE)` every 50 successful writes.
 

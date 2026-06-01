@@ -145,7 +145,7 @@ validation failures do not leave partial changes behind.
 
 Successful edits return a JSON object with stable fields:
 - `success`: true when the edit was applied
-- `diff`: Git-style patch blocks describing the applied edit
+- `diff`: Git patch blocks describing the applied edit
 - `files_modified`: modified paths or equivalent target identifiers
 - `files_created`: created paths or equivalent target identifiers
 - `files_deleted`: deleted paths or equivalent target identifiers

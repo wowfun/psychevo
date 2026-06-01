@@ -73,11 +73,11 @@ startup.
   `exec_command` tool request from the model, but its bounded result is
   persisted as model-visible user shell context according to the runtime
   shell-context contract. Live and reloaded user shell transcript rows render
-  like user prompt rows: the command line uses the same full-width prompt
+  with the same treatment as user prompt rows: the command line uses the same full-width prompt
   background, starts with `! ` followed by the user's command, uses the same
   marker color as the shell-mode composer `!`, and omits the normal
   tool-evidence bullet and `Ran` label. The command output remains below that
-  prompt-styled command line as bounded evidence detail. This distinguishes
+  prompt-formatted command line as bounded evidence detail. This distinguishes
   user-submitted shell commands from model-requested `exec_command` tool calls.
 - `Up` and `Down` recall submitted composer history when the current composer
   position is at the first or last logical line respectively. History recall
@@ -104,11 +104,11 @@ startup.
   `cat src<Tab>` do not trigger shell-native completion.
 - `Shift+Tab` cycles `default -> acceptEdits -> plan -> default`. Dangerous
   bypass modes are not part of the normal cycle.
-- Pending steer and queued prompt entries are shown in a fixed
-  transcript-styled preview immediately above the composer and below any
+- Pending steer and queued prompt entries are shown in a fixed transcript
+  preview immediately above the composer and below any
   slash/file/agent/skill popup. Each entry shows its kind, text preview, and
   `edit`/`undo` actions. `undo` cancels a not-yet-committed steer or removes a
-  not-yet-started queued prompt. `edit` opens an inline composer-styled editor
+  not-yet-started queued prompt. `edit` opens an inline composer editor
   for that entry; while editing, `Enter` confirms, `Esc` cancels only the edit
   draft, and newline chords keep inserting newlines. Confirming a steer edit
   updates it in place when runtime still accepts the pending id; if that id was

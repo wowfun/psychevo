@@ -26,9 +26,16 @@ Out of scope:
 
 A caller is any product surface, library consumer, SDK, transport adapter, test harness, or automation layer that asks Psychevo to perform work.
 
-An entrypoint is a caller-facing way to invoke Psychevo. Runtime libraries are the stable substrate entrypoint. CLI is a product entrypoint category. SDK, HTTP, and other transports may exist as future entrypoint categories.
+An entrypoint is a caller-facing way to invoke Psychevo. Gateway libraries are the stable interactive substrate entrypoint, while runtime libraries remain the execution substrate beneath Gateway. CLI is a product entrypoint category. SDK, HTTP, and other transports may exist as future entrypoint categories.
 
-Every entrypoint should route work through `psychevo-runtime` instead of reaching into lower layers. ACP is a concrete transport entrypoint category for editor and agent-client integrations. `psychevo-agent-core` owns execution semantics, and `psychevo-ai` owns provider-neutral AI protocol semantics. Interface behavior must not redefine those lower-layer contracts.
+Interactive entrypoints should route work through `psychevo-gateway` instead of reaching into lower layers for thread/turn orchestration. Gateway delegates execution to `psychevo-runtime`. ACP is a concrete transport entrypoint category for editor and agent-client integrations. `psychevo-agent-core` owns execution semantics, and `psychevo-ai` owns provider-neutral AI protocol semantics. Interface behavior must not redefine those lower-layer contracts.
+
+Interactive entrypoints provide a source identity with an explicit lifetime to
+Gateway. Invocation-only callers may avoid automatic source continuity, process
+surfaces may keep continuity inside one Gateway instance, and reconnectable
+transports may request persistent source binding. Interface specs choose the
+caller semantics; Gateway owns normalization, queueing, and source-to-thread
+resolution.
 
 This spec defines interface semantics, not implementation shape. Narrower interface specs may specialize product entrypoints or transport behavior while preserving this caller-facing boundary.
 
@@ -104,8 +111,8 @@ Runtime wires control signals into lower layers. Outcome semantics remain owned 
 
 Pause, resume, retry, undo, branch navigation, and checkpoint restore are out of scope for this interface baseline.
 
-ACP interfaces specialize this baseline by mapping protocol requests to runtime
-sessions, observations, control signals, permissions, auth, commands, model and
+ACP interfaces specialize this baseline by mapping protocol requests to gateway
+threads, observations, control signals, permissions, auth, commands, model and
 mode controls, config controls, and capability source inputs. That protocol
 mapping is owned by [027 ACP](../027-acp/spec.md).
 
@@ -124,6 +131,7 @@ mapping is owned by [027 ACP](../027-acp/spec.md).
 - [010 Memory System](../010-memory-system/spec.md) defines optional memory boundaries that may provide invocation hints.
 - [025 CLI](../025-cli/spec.md) defines command-line interface foundation semantics.
 - [027 ACP](../027-acp/spec.md) defines the Agent Client Protocol boundary.
+- [021 Gateway](../021-gateway/spec.md) defines transport-neutral thread and turn orchestration.
 - [200 pevo CLI](../200-pevo-cli/spec.md) defines the concrete `pevo` product CLI.
 - [230 pevo-acp](../230-pevo-acp/spec.md) defines the concrete ACP server
   packaging for the `pevo` product.

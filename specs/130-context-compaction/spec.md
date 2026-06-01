@@ -70,7 +70,7 @@ no-op and must not write a checkpoint.
 Summary generation uses a no-tools provider request. The summarization input
 may include the previous compaction summary plus newly summarized messages, but
 must omit hidden reasoning and provider metadata, truncate large tool material,
-and redact obvious secret-like values. The generated summary must be framed as
+and redact obvious probable secrets. The generated summary must be framed as
 reference-only continuity context, not active instructions from the user.
 
 ## Triggers

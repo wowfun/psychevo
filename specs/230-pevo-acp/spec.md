@@ -19,7 +19,7 @@ construction for that product entrypoint.
 - `pevo acp` command behavior and process help positioning
 - ACP JSON-RPC server over stdio for the first product slice
 - product environment and path setup before runtime calls
-- construction of runtime calls from ACP inputs
+- construction of Gateway calls from ACP inputs
 
 Out of scope:
 
@@ -61,12 +61,12 @@ The ACP server uses the same product path conventions as the `pevo` CLI:
 Relative paths resolve from the server process cwd. The server may create the
 home directory before accepting ACP requests.
 
-## Runtime Wiring
+## Gateway Wiring
 
-`psychevo-acp` depends on `psychevo-runtime` and constructs runtime calls
-directly from ACP session state and prompt inputs. It passes cwd, session id,
-mode, model, image inputs, inherited environment, config path, database path,
-approval handler, and ACP-provided MCP servers through normal runtime inputs.
+`psychevo-acp` depends on `psychevo-gateway` and constructs Gateway calls from
+ACP session state and prompt inputs. It passes cwd, session id, mode, model,
+image inputs, inherited environment, config path, database path, approval
+handler, and ACP-provided MCP servers through normal Gateway/runtime inputs.
 
 Runtime remains the owner of session coordination, model resolution, tool
 surface assembly, capability source normalization, permission policy, command
@@ -79,8 +79,10 @@ The server does not add ACP-specific project-context protocol fields. Workspace
 for ACP prompts. Runtime environment context still exposes the ACP session cwd
 to the model.
 
-`psychevo-acp` may keep transport-local state for active ACP sessions and
-in-flight cancellation handles. That state is not durable session evidence.
+`psychevo-acp` may keep transport-local state for active ACP actors, but active
+turn queueing, steering, interrupt, permission, clarify, and source-to-thread
+binding use Gateway semantics. Transport-local state is not durable session
+evidence.
 
 ACP request handling must return protocol version `V1` in initialize
 responses, advertise only implemented optional capabilities, and avoid

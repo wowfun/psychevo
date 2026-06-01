@@ -170,7 +170,7 @@ skill body text is counted as `turn_context`.
 Default export/share header output exposes prefix slot names, hashes, source
 metadata, prompt-prefix metadata, provider-role fallback, and stale or
 approximate markers only. Full hidden prefix text is included only by explicit
-full-input or last-provider-request style options that already warn about
+full-input or last-provider-request options that already warn about
 hidden prompt disclosure. `last-provider-request` reconstructs hidden prefix
 messages and tools from the persisted snapshot only when the corresponding user
 prompt's recorded prefix hash matches the latest retained snapshot.

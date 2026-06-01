@@ -77,7 +77,7 @@ retry mechanism for it.
   Timeout, provider failure, malformed output, or missing reviewer support all
   fail closed.
 
-Agent frontmatter may use Claude-compatible `permissionMode`, but an agent can
+Agent frontmatter may use the legacy `permissionMode` alias, but an agent can
 only narrow its parent permission context. Unsupported or widening values must
 not expand access.
 
@@ -196,7 +196,7 @@ entry exists for a basename, basename fallback may match an absolute path to
 that basename.
 
 Known-safe exec commands are read-only exploration commands and safe shell
-compositions of those commands, including a bounded Codex-style subset such as
+compositions of those commands, including a bounded read-only subset such as
 `pwd`, `ls`, `cat`, `wc`, `rg`, `sed -n`, and read-only `git` subcommands.
 Known-safe exec is allowed by `:workspace` and `:read-only` profiles unless a
 hard deny or explicit policy rule overrides it. Dangerous commands require

@@ -8,7 +8,8 @@ Define the first interactive terminal surface for `pevo`.
 This topic implements the terminal-specific surface defined by
 [080 Design System](../080-design-system/spec.md). It also builds on
 [200 pevo CLI](../200-pevo-cli/spec.md) and [026 Commands](../026-commands/spec.md),
-and routes live coding-agent turns through `psychevo-runtime`. For interactive
+and routes live coding-agent turns through `psychevo-gateway`. Runtime remains
+the execution and persistence kernel behind Gateway. For interactive
 terminals, `pevo tui` is a fullscreen terminal UI. For non-terminal
 stdin/stdout, it keeps the deterministic line-by-line scripted behavior.
 
@@ -38,6 +39,9 @@ stdin/stdout, it keeps the deterministic line-by-line scripted behavior.
   when long tool/action/grant details wrap across many terminal rows
 - shared ownership boundaries for the rendered TUI surface, interaction model,
   sessions, state, and validation
+- long-lived process-scoped Gateway ownership for thread/source binding,
+  active-turn queueing, steering, interrupt, permission, clarify, and typed
+  timeline projection
 
 Rendering-specific rules live in [211 pevo TUI Rendering](../211-pevo-tui-rendering/spec.md).
 Input, slash-command, popup, panel, and selection rules live in
@@ -117,6 +121,19 @@ text is appended to the configured target line and then parsed. Invalid alias
 or keybinding configuration rejects TUI startup with a bounded configuration
 error. Configured aliases participate in slash menu completion as alias rows,
 and configured concrete slash lines appear in `/help` `Custom commands`.
+
+## Gateway Ownership
+
+Fullscreen TUI owns one long-lived `Gateway` instance for the process. Its
+source lifetime is `Process`, so the process can remember the current thread
+without creating durable source bindings. Normal prompts, queued prompts,
+steer, interrupt, permission responses, clarify responses, source reset, and
+thread switching go through Gateway APIs.
+
+The TUI slash parser remains local UI behavior, but slash command effects must
+map to typed Gateway/runtime APIs. TUI must not add a generic `slash/exec`
+Gateway method and must not shell out to `pevo run` for normal prompting or
+control.
 
 ## Attachments
 

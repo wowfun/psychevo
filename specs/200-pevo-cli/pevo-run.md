@@ -141,26 +141,32 @@ remain additive and may name a discovered skill or point at a skill path.
 
 `--format default` writes only the final assistant text to stdout.
 
-`--format json` writes newline-delimited JSON observation events to stdout.
-Output is buffered in this slice. Each line is one JSON object. The first line
-after a started run is `run_start` and identifies the session, selected
-provider/model, database, workdir, and resolved core model metadata when known.
-Subsequent lines project runtime
-observation events: `agent_start`, `turn_start`, `message_start`,
-`message_update`, `message_end`, `tool_execution_start`, `tool_execution_end`,
-`turn_end`, and `agent_end`. After `agent_end`, runtime may append at most one
-best-effort `context_snapshot` event for the latest provider generation
-request. If context counting has not completed by run completion, the event is
-omitted rather than delaying output.
+`--format json` writes newline-delimited typed timeline events to stdout.
+Output is buffered in this slice. Each line is one JSON object. The event shape
+is Psychevo-owned and uses dotted event names:
+
+- `thread.started`
+- `turn.started`
+- `item.started`
+- `item.updated`
+- `item.completed`
+- `turn.completed`
+- `turn.failed`
+- `error`
+
+`item.*` events carry typed timeline items rather than raw runtime event
+payloads. Tool and artifact items include bounded preview/detail references
+when output is large. `turn.completed` includes usage when known and the
+terminal outcome. `turn.failed` and `error` contain bounded human-readable
+diagnostics without provider secrets.
 
 Reasoning/thinking content is folded out of JSON output by default. Supplying
-`--include-reasoning` requires `--format json` and adds separate
-`reasoning_delta` and `reasoning_end` events. The `message_*` and `agent_end`
-events remain visible-transcript projections and must not carry reasoning
-blocks or provider reasoning wire fields.
+`--include-reasoning` requires `--format json` and allows typed reasoning
+timeline items or updates. Assistant message items remain visible-transcript
+projections and must not carry provider reasoning wire fields.
 
 When a started run ends because the agent loop reached its model-turn budget,
-the `agent_end` JSON event includes `terminal_reason:
+the terminal `turn.completed` or `turn.failed` JSON event includes `terminal_reason:
 {"type":"max_turns_exceeded","max_turns":N}` and a human-readable
 `terminal_message`. This is a terminal outcome projection, not a runtime error
 event.
@@ -172,7 +178,7 @@ after argument parsing, stdout contains one JSON object:
 {"type":"error","message":"..."}
 ```
 
-No `run_start` is emitted for errors before a session exists.
+No `thread.started` is emitted for errors before a session exists.
 
 ## Exit Behavior
 

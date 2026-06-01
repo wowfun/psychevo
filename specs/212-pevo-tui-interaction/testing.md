@@ -74,7 +74,7 @@ Required interaction coverage:
   execution during foreground agent turns, pending auxiliary commands waiting
   for `run_start`, and next-turn persistence if the foreground turn has ended.
 - Fullscreen composer `@` file completion: token detection for empty,
-  path-like, Unicode, second-`@`, whitespace-boundary, and multi-line tokens;
+  path-shaped, Unicode, second-`@`, whitespace-boundary, and multi-line tokens;
   mid-word rejection; workdir-relative search; directory marking; gitignore
   handling; stale-result rejection; keyboard and mouse insertion; `Esc`
   dismissal until token changes; slash-menu and bottom-pane interop; shell-mode

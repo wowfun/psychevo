@@ -5,17 +5,18 @@ psychevo_self_edit: deny
 
 # 213. pevo Display Model
 
-Define Psychevo's semantic display/transcript model. Runtime `messages` remain
+Define Psychevo's semantic timeline/transcript model. Runtime `messages` remain
 the source of truth for model context, exports, compaction, undo, accounting,
-and statistics. Display records are UI artifacts for TUI-first presentation and
-future ACP/WebUI/IM projection.
+and statistics. Timeline records are runtime-owned UI artifacts for TUI,
+Gateway, ACP, Web, and future IM projection.
 
 ## Scope
 
-- durable semantic display blocks for prompts, answers, thinking, tools,
-  status, command results, diffs, and local artifacts
-- display storage schema and cutover behavior
-- reusable renderable component expectations for transcript-style surfaces
+- durable semantic timeline items for prompts, answers, thinking, tools,
+  status, command results, diffs, local artifacts, permissions, clarify,
+  skills, agents, mailbox, and MCP activity
+- timeline storage schema and cutover behavior
+- reusable renderable component expectations for transcript surfaces
 - separation between model-visible history and UI-visible artifacts
 
 Out of scope:
@@ -26,42 +27,66 @@ Out of scope:
 
 ## Semantics
 
-Display blocks store semantic content, not terminal-rendered rows. They may
-include role, title, body text, structured metadata, ordering, visibility,
-folding state, and display category. They must not store ratatui `Line`s,
-terminal ANSI color, viewport-dependent wrapping, or layout cache rows.
+Timeline items store semantic content, not terminal-rendered rows. They include
+stable item identity, session id, turn id when known, source kind, status,
+ordering, title, body text, preview/detail metadata, artifact references, and
+typed kind-specific fields. They must not store ratatui `Line`s, terminal ANSI
+color, viewport-dependent wrapping, or layout cache rows.
 
-Display-only command output and observational artifacts, including `/diff`,
+Timeline items store the latest or terminal state of an item. Runtime may emit
+live `started`, `updated`, and `completed` observations while a turn is active,
+but the durable timeline is not a complete event-sourcing log. Restarted
+clients rebuild ordinary transcript state from timeline item rows plus runtime
+messages; they do not need every transient progress update.
+
+Timeline-only command output and observational artifacts, including `/diff`,
 must not become model context, session export message content, usage/cost
 statistics, or durable loop-visible assistant/user messages.
 
 Model-visible tool results may contain material that also benefits from richer
-UI projection. Display readers may parse stable tool-result fields, such as an
-`edit.diff` Git patch block, into semantic diff blocks for rendering. The
-parsed block is a UI artifact; it must not replace or mutate the model-visible
-tool result.
+UI projection. Runtime may parse stable tool-result fields, such as an
+`edit.diff` Git patch block, into semantic timeline items or artifact records
+for rendering. The parsed item is a UI artifact; it must not replace or mutate
+the model-visible tool result.
+
+Raw runtime/provider payloads, unclassified observations, and verbose hook or
+transport records are debug material. They may be captured in bounded debug
+records for diagnostics, but they must not appear in ordinary timeline items or
+ordinary Gateway/Web/TUI transcript streams.
 
 ## Storage
 
-The state database schema version is `12`. Psychevo does not migrate state
-databases at version `11` or lower in this cutover. Opening an old state
+The state database schema version is `15`. Psychevo does not migrate state
+databases at version `14` or lower in this cutover. Opening an old state
 database must fail with explicit guidance to run `pevo init --reset-state` or
 set `PSYCHEVO_DB` to a new database.
 
-The display block table is additive to runtime message storage. Runtime
-messages remain available for non-display consumers; display readers may build
-TUI rows from display blocks and may fall back to live in-memory projection
-while a turn is streaming.
+Runtime owns three timeline tables in this slice:
+
+- `timeline_items` stores the latest typed item projection per stable item id.
+- `timeline_artifacts` stores bounded preview/detail metadata and local
+  artifact references for large outputs, diffs, images, and downloads.
+- `timeline_debug_events` stores bounded debug summaries that are hidden from
+  ordinary transcript surfaces.
+
+These tables replace the previous `display_blocks` direction. Runtime messages
+remain available for non-display consumers; display readers build TUI, Gateway,
+Web, ACP, and IM projections from timeline items and may overlay live in-memory
+updates while a turn is streaming.
 
 ## Rendering Contract
 
-TUI transcript rendering should consume semantic blocks through reusable
+TUI transcript rendering should consume semantic timeline items through reusable
 renderable components with stable `desired_height(width)` and `render(area)`
 behavior. Component rendering owns wrapping, highlight roles, selection, and
 folding. Layout caches cache semantic block keys and measured heights, not
 terminal strings.
 
-ACP/WebUI/IM adapters may map display blocks into client-native update shapes,
+Gateway exposes typed timeline items in snapshots and typed item lifecycle
+events for live updates. Unknown raw runtime events are available only through
+debug APIs.
+
+ACP/WebUI/IM adapters may map timeline items into client-native update shapes,
 but must not require TUI-specific layout fields.
 
 ## Related Topics

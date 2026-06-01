@@ -21,10 +21,12 @@ actual tool invocation names and useful arguments, not category verbs such as
 Yielded `exec_command` rows keep the original command invocation as their
 title across output chunks, polls, and completion; the numeric session id used
 to poll `write_stdin` is not a display title.
-Transcript rendering consumes semantic display blocks and reusable renderable
+Transcript rendering consumes semantic timeline items and reusable renderable
 components as defined by [213 pevo Display Model](../213-pevo-display-model/spec.md).
 The TUI must not persist viewport-wrapped terminal lines as durable display
 state.
+Raw runtime/debug observations are not ordinary transcript rows. They may be
+shown only when a debug/raw surface explicitly requests bounded debug records.
 
 ## Scope
 
@@ -76,4 +78,4 @@ Out of scope:
 - [212 pevo TUI Interaction](../212-pevo-tui-interaction/spec.md) defines
   input routing, slash commands, panels, popups, and selection behavior.
 - [214 pevo Diff Command](../214-pevo-diff-command/spec.md) defines the
-  Codex-style `/diff` overlay.
+  fullscreen `/diff` overlay.

@@ -25,7 +25,7 @@ Out of scope:
 `/diff` is observational UI state. It must not append runtime messages, affect
 model context, change exports, or affect usage/cost statistics.
 
-The first implementation matches Codex's worktree behavior:
+The first implementation follows an explicit git worktree snapshot contract:
 
 - verify the cwd is inside a git worktree with
   `git rev-parse --is-inside-work-tree`
@@ -43,7 +43,7 @@ with path and reason; raw binary bytes must not be embedded.
 
 ## TUI
 
-Fullscreen TUI `/diff` opens a Codex-style read-only static overlay pager
+Fullscreen TUI `/diff` opens a read-only static overlay pager
 titled `D I F F`. The overlay shows no changes for empty diffs, a non-git
 message outside git worktrees, and semantic unified diff rendering otherwise.
 Esc closes the overlay. Scroll and page keys move through the static snapshot.
@@ -54,9 +54,9 @@ existing terminal highlighter rather than a heavy new dependency.
 
 Inline transcript rendering for `edit` tool results may reuse the same parsing
 model but is a separate surface from the fullscreen `/diff` overlay. Inline
-edit rows use a Codex-like single visible line-number gutter: deleted rows show
-the old line number, added rows show the new line number, and context rows show
-the current new line number. The fullscreen `/diff` overlay keeps its old/new
+edit rows use a single visible line-number gutter: deleted rows show the old
+line number, added rows show the new line number, and context rows show the
+current new line number. The fullscreen `/diff` overlay keeps its old/new
 dual-column line-number display.
 
 The deterministic VHS demo must include a screenshot of the `/diff` overlay

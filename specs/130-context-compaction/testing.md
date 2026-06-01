@@ -30,7 +30,7 @@ Automation vocabulary and generic validation boundaries follow
   tool-result messages.
 - Summary generation uses a no-tools provider request, omits hidden reasoning
   and provider metadata, truncates large tool material, redacts obvious
-  secret-like values, and frames the summary as reference-only continuity
+  probable secrets, and frames the summary as reference-only continuity
   context.
 - Manual `/compact [instructions]` passes optional instructions into summary
   generation and reports bounded completion feedback.

@@ -7,8 +7,8 @@ psychevo_self_edit: deny
 
 Define Psychevo's Agent Client Protocol boundary.
 
-ACP is a protocol interface over `psychevo-runtime`. It maps protocol requests
-and notifications to runtime sessions, invocations, observations, permissions,
+ACP is a protocol interface over `psychevo-gateway` and `psychevo-runtime`. It maps protocol requests
+and notifications to gateway threads, runtime sessions, invocations, observations, permissions,
 auth, commands, model and mode controls, config controls, and capability source
 inputs. ACP does not own agent execution, provider behavior, tool semantics,
 runtime permission policy, durable storage, or MCP semantics.
@@ -34,11 +34,14 @@ Out of scope:
 
 ## Protocol Boundary
 
-An ACP implementation accepts protocol requests, translates them into runtime
-inputs, projects runtime observations back to ACP updates, and keeps transport
+An ACP implementation accepts protocol requests, translates them into gateway
+inputs, projects gateway/runtime observations back to ACP updates, and keeps transport
 state for active ACP sessions.
 
-ACP implementations must call `psychevo-runtime` directly. They must not shell
+ACP implementations must call `psychevo-gateway` for normal prompting,
+cancellation, permission, clarify, queue, steer, reset, and source-to-thread
+behavior. They may call `psychevo-runtime` directly for non-interactive
+administrative projections that are not gateway semantics. ACP must not shell
 out through a CLI command for normal prompting, cancellation, permission, MCP,
 command, model, config, or session behavior.
 
@@ -49,10 +52,14 @@ owns the protocol mapping, not the product process that hosts it.
 
 ACP session ids identify active ACP session actors. Each actor maps to a
 Psychevo runtime session id once runtime creates or loads the backing session.
-New ACP sessions use source `acp` for runtime persistence. A newly created ACP
+New ACP sessions use gateway source kind `acp` and runtime source `acp` for persistence. A newly created ACP
 session may remain transport-local until the first model-backed prompt creates
 the durable runtime session; the ACP id must remain stable for the client and
 must be linked to the runtime id once that id exists.
+
+ACP uses a `Persistent` Gateway source lifetime. Source-to-thread binding is
+therefore durable across reconnects, while active turns and queued turns remain
+process-local to the Gateway instance that owns the running ACP agent.
 
 `session/new` creates a runtime session boundary for the selected cwd,
 provider, model, mode, permissions, and ACP-supplied MCP sources. `session/load`
@@ -87,18 +94,21 @@ to a visible resource-link note. Resource handling records prompt-scoped
 summaries in runtime context evidence; text that is actually inlined for the
 model is persisted in the user message for new runs.
 
-Runtime observation maps to ACP session updates:
+Gateway timeline observation maps to ACP session updates:
 
 - assistant text progress becomes agent message chunks
 - reasoning progress becomes agent thought chunks
 - pending tool-call argument progress becomes pending tool call update records
   when the runtime exposes it, so clients can distinguish model generation of a
   tool request from local tool execution
-- tool execution lifecycle events become tool call and tool call update records
+- typed tool timeline item lifecycle events become tool call and tool call
+  update records
 - final outcomes become ACP stop reasons
 - cancellation maps to runtime abort
 
-ACP observation must not rewrite durable runtime transcript content.
+ACP observation must not rewrite durable runtime transcript content. ACP must
+not consume or expose raw runtime fallback events as ordinary client updates;
+bounded debug records are diagnostics only.
 
 Runtime usage and accounting are projected at the ACP prompt boundary. When the
 ACP SDK exposes unstable usage fields, Psychevo sends `PromptResponse.usage`
@@ -159,13 +169,14 @@ must not send a plain assistant text fallback. The update is display-only and
 must not append runtime messages, affect model context, session export content,
 or usage/accounting statistics.
 
-ACP `/steer <text>` uses messaging-friendly semantics: if an agent turn is
-running, the text is injected through the runtime control handle; if runtime is
-still in pending setup, it is queued; if idle, the text is submitted as a
-normal prompt. ACP `/queue <text>` appends to a session-local FIFO and does not
-start a turn by itself when idle. Queued prompts drain after the current or
-next normal prompt. `/pending cancel` cancels unsent steers and clears queued
-prompts. ACP queue state is session-scoped and not durable.
+ACP `/steer <text>` uses Gateway active-turn semantics: if an agent turn is
+running, the text is injected through Gateway into the active runtime control
+handle; if runtime is still in pending setup, it is queued; if idle, the text
+is submitted as a normal prompt. ACP `/queue <text>` appends to a session-local
+FIFO and does not start a turn by itself when idle. Queued prompts drain after
+the current or next normal prompt. `/pending cancel` cancels unsent steers and
+clears queued prompts. ACP queue state follows Gateway first-slice semantics
+and is session-scoped but not durable.
 
 ACP `/sessions` lists numbered sessions with title, id, and updated time.
 `/resume` and `/continue` switch the current ACP actor to an existing runtime
@@ -254,6 +265,7 @@ always when runtime can persist a safe rule, and deny.
 - [020 Interfaces](../020-interfaces/spec.md) defines caller-facing interface
   semantics.
 - [026 Commands](../026-commands/spec.md) defines shared command metadata.
+- [021 Gateway](../021-gateway/spec.md) defines source mapping and thread/turn orchestration.
 - [035 Permissions](../035-permissions/spec.md) defines runtime permission
   policy.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines

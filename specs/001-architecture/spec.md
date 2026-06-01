@@ -11,6 +11,7 @@ Define Psychevo's system-level architecture boundaries.
 - primary architecture components and their Rust crate mapping
 - component ownership boundaries
 - runtime coordination responsibilities
+- gateway orchestration responsibilities
 - allowed direct interaction paths
 - dependency direction between architecture layers
 
@@ -24,7 +25,8 @@ Out of scope:
 
 - Layering over bundling. Psychevo separates provider protocol, agent execution, runtime assembly, persistence, and transport instead of bundling product concerns into lower layers.
 - Component specialization. Each primary architecture component owns one system-level responsibility area and must not absorb responsibilities from adjacent components.
-- Runtime is the coordination and library surface. Session coordination, agent-invocation assembly, resource surface wiring, tool surface assembly, context assembly, durable evidence, persistence, and replay wiring converge in `psychevo-runtime`; non-CLI entry points should depend on runtime libraries directly instead of routing through command-line transport.
+- Runtime is the execution and persistence kernel. Session coordination, agent-invocation assembly, resource surface wiring, tool surface assembly, context assembly, durable evidence, persistence, and replay wiring converge in `psychevo-runtime`.
+- Gateway is the caller-facing orchestration surface. Interactive entrypoints should route thread/turn requests, source mapping, queueing, steering, interrupt, reset, permission request, clarify request, and observation projection through `psychevo-gateway` instead of reimplementing those semantics per surface.
 - Transport is replaceable. CLI parsing, terminal rendering, stdin/stdout behavior, exit codes, and environment handling must remain outside the core runtime and lower layers.
 - Large crate implementations should be organized internally by owned responsibility instead of collecting unrelated behavior in a single root source file. Root crate files may act as facades that re-export stable public surfaces while private modules keep implementation details near their owning boundary.
 
@@ -103,6 +105,7 @@ Must not know:
 - CLI parsing, terminal rendering, stdin/stdout framing, or process exit behavior
 - UI-specific interaction mechanics
 - entry-point-specific modes that can be implemented separately
+- transport source routing, IM-specific routing keys, Web/Desktop connection identity, or gateway queue ownership
 
 `psychevo-runtime` may own shared interface-neutral command metadata when the
 metadata must be projected by multiple product surfaces, such as CLI, TUI, ACP,
@@ -111,14 +114,34 @@ identity, argument shape, status, and output kind; concrete parsing, terminal
 rendering, editor protocol payloads, and process behavior remain owned by the
 entrypoint crates.
 
+### `psychevo-gateway`
+
+Owns:
+- transport-neutral Thread/Turn orchestration over runtime
+- source identity normalization and source-to-thread mapping
+- active-turn queue, steer, interrupt, and reset coordination
+- caller-facing permission and clarify request rendezvous
+- canonical live event and item projection for product surfaces
+- backend boundary for Psychevo runtime and future peer-agent executors
+
+Must not own:
+- agent loop behavior
+- provider protocol behavior or provider/model resolution
+- coding tool behavior
+- runtime permission policy
+- capability selection semantics
+- context assembly semantics
+- durable evidence schemas or replay semantics
+- concrete CLI, TUI, ACP, Web, desktop, or IM rendering/protocol behavior
+
 ### `psychevo-acp`
 
 Owns:
 - ACP server packaging over stdio for the first product slice
 - ACP request and notification handling according to [027 ACP](../027-acp/spec.md)
-- ACP projection of runtime sessions, observations, permissions, commands,
+- ACP projection of gateway/runtime sessions, observations, permissions, commands,
   auth, model/mode choices, config options, and MCP source inputs
-- construction of runtime calls from ACP inputs
+- construction of gateway calls from ACP inputs
 
 Must not own:
 - agent loop behavior
@@ -136,7 +159,7 @@ Owns:
 - environment and process-level setup
 - terminal/event rendering
 - exit code behavior
-- construction of the runtime from CLI inputs
+- construction of gateway calls from CLI inputs
 
 Must not own:
 - agent loop behavior
@@ -151,20 +174,22 @@ Must not own:
 Dependencies between primary architecture components must point inward:
 
 ```text
-psychevo-cli -> psychevo-runtime -> psychevo-agent-core -> psychevo-ai
-psychevo-acp -> psychevo-runtime -> psychevo-agent-core -> psychevo-ai
+psychevo-cli -> psychevo-gateway -> psychevo-runtime -> psychevo-agent-core -> psychevo-ai
+psychevo-acp -> psychevo-gateway -> psychevo-runtime -> psychevo-agent-core -> psychevo-ai
 ```
 
 Allowed dependency rules:
 - `psychevo-cli` may depend on `psychevo-runtime`.
 - `psychevo-acp` may depend on `psychevo-runtime`.
+- `psychevo-cli` and `psychevo-acp` may depend on `psychevo-gateway`.
+- `psychevo-gateway` may depend on `psychevo-runtime`.
 - `psychevo-runtime` may depend on `psychevo-agent-core` and `psychevo-ai`.
 - `psychevo-agent-core` may depend on `psychevo-ai`.
 - `psychevo-ai` must not depend on higher Psychevo crates.
 
 Allowed direct interaction rules:
-- `psychevo-cli` may directly interact with `psychevo-runtime` only.
-- `psychevo-acp` may directly interact with `psychevo-runtime` only.
+- Interactive `psychevo-cli` and `psychevo-acp` work should interact with `psychevo-gateway` for thread/turn orchestration and may interact with `psychevo-runtime` for non-interactive administrative helpers that are not gateway semantics.
+- `psychevo-gateway` may directly interact with `psychevo-runtime` only.
 - `psychevo-runtime` may directly interact with `psychevo-agent-core`, `psychevo-ai`, agent-invocation scoped tool surface bindings, and runtime-owned durable records.
 - `psychevo-runtime` may resolve capability extension contributions into agent-invocation scoped selections.
 - `psychevo-runtime` may implement and assemble built-in capability modules, such as capability specs that explicitly place their implementation in runtime. Concrete capability behavior remains owned by those capability specs.
@@ -179,7 +204,8 @@ layer as long as dependency direction and transport separation remain intact.
 Prohibited dependency rules:
 - lower layers must not depend on higher layers
 - `psychevo-agent-core` must not depend on `psychevo-runtime`, `psychevo-cli`, or `psychevo-acp`
-- `psychevo-runtime` must not depend on `psychevo-cli` or `psychevo-acp`
+- `psychevo-runtime` must not depend on `psychevo-gateway`, `psychevo-cli`, or `psychevo-acp`
+- `psychevo-gateway` must not depend on `psychevo-cli` or `psychevo-acp`
 - business logic must not be introduced into `psychevo-cli`
 
 ## Related Topics
@@ -195,6 +221,7 @@ Prohibited dependency rules:
 - [009 Resource Surface](../009-resource-surface/spec.md) defines runtime-owned resource surface and resource decision semantics.
 - [010 Memory System](../010-memory-system/spec.md) defines optional memory boundaries outside architecture layering.
 - [020 Interfaces](../020-interfaces/spec.md) defines caller-facing interface layer semantics.
+- [021 Gateway](../021-gateway/spec.md) defines transport-neutral gateway orchestration.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines cross-cutting semantic state relationships.
 - [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines storage and persistence boundaries.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability contribution boundaries resolved by runtime.

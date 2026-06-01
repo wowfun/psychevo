@@ -57,8 +57,8 @@ primary theme color. Red marks failure words only when failure is the state.
 
 Surface hierarchy uses background steps, indentation, spacing, and dim text
 before borders. Borders are exceptional: use them only for hard terminal
-boundaries, not as the default way to create components. Nested card-like
-surfaces are not part of the TUI language.
+boundaries, not as the default way to create components. Nested card surfaces
+are not part of the TUI language.
 
 State emphasis stays low intensity. Selection may combine accent foreground and
 a background step. Active work uses motion and elapsed time before color.

@@ -101,7 +101,7 @@ prints the same deterministic help text without opening a pane.
 [214 pevo Diff Command](../214-pevo-diff-command/spec.md). Fullscreen TUI opens
 a read-only `D I F F` overlay pager instead of appending a command transcript
 row. The overlay is a static snapshot, may be used while a turn is active,
-closes with Esc, and supports normal transcript-style scrolling keys.
+closes with Esc, and supports normal transcript scrolling keys.
 
 `/status` shows workdir, home, db, session, model, variant, mode, permission
 mode, and debug state as one multi-line status block. It does not include thinking or raw
@@ -364,7 +364,7 @@ models, and locally configured model entries. Warmup failure is silent by
 default and may only surface as a warning when debug output is enabled.
 
 The `Models` tab shows search directly below the tab header, an `Add provider`
-action row, a status-style `All providers` row, and a selectable provider status
+action row, an `All providers` status row, and a selectable provider status
 row before each provider's models. These action rows replace non-selectable
 provider group headers. Selecting `Add provider` opens a bottom-panel wizard for
 creating a global user-defined OpenAI Chat-compatible provider. Selecting `All
@@ -546,7 +546,7 @@ skill and bundle command names are not user-aliasable in v1.
 `/skills` is a skill hub dispatcher. With no arguments it shows a bounded hub
 dashboard/help block; read subcommands include `list`, `browse`, `search`,
 `inspect`, `check`, `audit`, and `reload`. In fullscreen mode it appends a
-bounded status-style transcript block; in scripted mode it prints the same
+bounded status transcript block; in scripted mode it prints the same
 information deterministically. Mutating `/skills` subcommands that write
 scoped state default to the current workdir `.psychevo`, accept `--local` as an
 explicit local scope, accept `-g`/`--global` for global scope, and reject legacy

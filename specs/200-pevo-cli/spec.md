@@ -70,6 +70,8 @@ Implemented first-slice commands:
 - `pevo init`
 - `pevo run`
 - `pevo tui`
+- `pevo serve`
+- `pevo gateway`
 - `pevo acp`
 - `pevo skill`
 - `pevo stats`
@@ -122,6 +124,20 @@ metadata summaries. Debug projection does not change `pevo run --format json`,
 does not expose folded reasoning in sanitized transcript messages, and does not
 turn provider metadata into transcript content.
 
+`pevo serve` starts the strict headless local Gateway API server. It binds
+loopback by default, requires an explicit token from `PSYCHEVO_SERVE_TOKEN` or
+`--token-file`, emits one ready JSON object to stdout, and does not mount the
+Web Shell in the public command surface. Its concrete API behavior is owned by
+[221 pevo Serve](../221-pevo-serve/spec.md).
+
+`pevo gateway` owns managed local Web Shell lifecycle. With no subcommand it is
+equivalent to `pevo gateway open`. `open`, `start`, `status`, `stop`, and
+`restart` emit one JSON object to stdout. Managed state lives under
+`$PSYCHEVO_HOME/gateway/`, uses an owner-only generated token, and may start
+`pevo serve` with internal flags to mount built Workbench assets. The concrete
+managed Web Shell behavior is owned by
+[220 pevo Gateway](../220-pevo-gateway/spec.md).
+
 `pevo acp` runs the ACP stdio server. It is equivalent to the
 `psychevo-acp` binary and delegates behavior to the ACP crate instead of
 implementing protocol handling in `psychevo-cli`.
@@ -132,7 +148,7 @@ server. It accepts the same setup flags as `pevo auth setup`.
 subcommand it shows help. `list` and `view` are read operations; `audit`
 absorbs the old scan behavior; scoped `install`, `config`, and `bundle`
 writes default to the current workdir local scope and use `-g`/`--global` for
-global scope. Old verb-style
+global scope. Old verb-based
 lifecycle subcommands (`create`, `patch`, `remove`, `enable`, `disable`,
 `scan`) are not the CLI contract for this topic. Skill package, discovery,
 scanner, hub, bundle, curator, and provenance semantics belong to

@@ -37,7 +37,7 @@ display only. Supported styling includes headings, lists, emphasis, inline
 code, fenced code blocks, tables, links, and local file links. Markdown tables
 render as box tables when the available width can fit them; narrow terminals
 fall back to readable pipe-table text. Fenced `md` or `markdown` code blocks
-that contain only table-like Markdown may be smart-unpacked and rendered as
+that contain only table Markdown may be smart-unpacked and rendered as
 tables instead of as code blocks. Other fenced code blocks keep clear top and
 bottom boundaries, use the existing long-content folding thresholds, and apply
 lightweight semantic syntax highlighting. Link display exposes destinations:
@@ -52,7 +52,7 @@ Thinking bodies, as raw Markdown source. Raw mode is display-only and must not
 change persisted message content, provider replay, `/copy`, non-terminal JSON
 output, row identity, or tool evidence rendering.
 
-Activity indicators and shimmer-like running text must flow through a shared
+Activity indicators and shimmer running text must flow through a shared
 motion primitive with a deterministic static fallback for tests and reduced
 motion contexts. Time-varying motion must be included in transcript layout cache
 keys only when it changes rendered width or visible content.

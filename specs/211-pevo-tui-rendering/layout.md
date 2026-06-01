@@ -41,7 +41,7 @@ ledger block:
   marker as active tool evidence; completed Thinking uses a stable bullet
   marker with the same evidence marker role as completed tool rows. Thinking
   titles use the ordinary evidence title style rather than a dedicated thinking
-  color. Thinking body lines use compact tool-style indentation (`└` then
+  color. Thinking body lines use compact tool indentation (`└` then
   continuation spaces), and explicit new paragraphs in reasoning content do not
   receive label-width indentation.
 - consecutive tool evidence rows remain flat ledger rows. Individual tool

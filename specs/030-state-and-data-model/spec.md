@@ -28,6 +28,7 @@ Psychevo's state model is session-centered. A session is the durable continuity 
 The core relationship graph is:
 
 ```text
+Gateway Source -> Gateway Thread -> Session
 Session -> Agent Invocation -> Turn -> Message
 Session -> AI Generation
 Assistant tool request -> Tool execution -> Tool-result message/material
@@ -57,6 +58,8 @@ Tool state covers the agent-invocation scoped tool surface, refreshable tool dec
 Live observation state covers active agent-invocation observation, partial assistant output, pending tool executions, and active control signals. [020 Interfaces](../020-interfaces/spec.md) owns caller-facing observation semantics. [002 Agent Execution](../002-agent-execution/spec.md) and [003 AI Protocol](../003-ai-protocol/spec.md) own the underlying execution and AI output categories.
 
 Durable evidence facts cover final session and agent-invocation facts and causal relationships required for inspection and future replay work. [005 Durable Evidence](../005-durable-evidence/spec.md) owns durable evidence requirements.
+
+Gateway state covers source identity, source-to-thread binding, active-turn control handles, in-memory queues, and caller-facing item/event projections. [021 Gateway](../021-gateway/spec.md) owns gateway state semantics. Persistent source-to-thread bindings may be durable; invocation and process source bindings, active queues, and live control handles are transient.
 
 Session continuity state covers session identity, session lifecycle semantics, parent session lineage, and continuity inputs. [008 Session Continuity](../008-session-continuity/spec.md) owns session continuity semantics.
 
@@ -108,5 +111,6 @@ Recoverability class is semantic. It does not define persistence format, retenti
 - [009 Resource Surface](../009-resource-surface/spec.md) defines resource state and decision semantics.
 - [010 Memory System](../010-memory-system/spec.md) defines memory state boundaries.
 - [020 Interfaces](../020-interfaces/spec.md) defines caller-facing interface projection for session and agent-invocation state.
+- [021 Gateway](../021-gateway/spec.md) defines source-to-thread and live gateway state semantics.
 - [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines persistence boundaries for durable semantic facts.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability extension state boundaries.

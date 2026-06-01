@@ -154,7 +154,7 @@ Successful result fields:
 - `warning`
 - `error`
 
-Diffs are Git-style patch blocks. Update, add, and delete operations include
+Diffs are Git patch blocks. Update, add, and delete operations include
 `diff --git`, file headers, and unified hunks; pure moves use Git rename headers.
 
 `lsp_diagnostics` follows the same best-effort rule as `write`: it is populated

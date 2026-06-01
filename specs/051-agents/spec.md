@@ -156,7 +156,7 @@ in both is removed.
 read-only ceiling; agent definitions cannot expand it into mutating tools.
 `permissionMode: plan` narrows the invocation to the same read-only ceiling.
 `permissionMode: default` and `permissionMode: acceptEdits` operate only inside
-the active runtime ceiling. Dangerous or bypass-style permission modes are
+the active runtime ceiling. Dangerous or bypass permission modes are
 diagnosed as unsupported and do not grant broader access.
 
 Accepted tool-name spellings normalize to Psychevo tool names:
