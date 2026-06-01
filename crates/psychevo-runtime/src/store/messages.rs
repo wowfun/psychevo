@@ -128,7 +128,7 @@ impl SqliteStore {
         let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let mut stmt = conn.prepare(
             r#"
-            SELECT message_json, usage_json, metadata_json,
+            SELECT session_seq, message_json, usage_json, metadata_json,
                    context_input_tokens, billable_input_tokens, billable_output_tokens,
                    reasoning_tokens, cache_read_tokens, cache_write_tokens,
                    reported_total_tokens, estimated_cost_nanodollars,
@@ -139,21 +139,23 @@ impl SqliteStore {
             "#,
         )?;
         let rows = stmt.query_map(params![session_id, boundary], |row| {
-            let accounting = accounting_json_from_row(row, 3)?;
+            let accounting = accounting_json_from_row(row, 4)?;
             Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
                 row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
                 accounting,
             ))
         })?;
         let mut messages = Vec::new();
         for row in rows {
-            let (message_json, usage_json, metadata_json, accounting) = row?;
+            let (session_seq, message_json, usage_json, metadata_json, accounting) = row?;
             let message = serde_json::from_str::<Message>(&message_json)?;
             let usage = parse_optional_json(usage_json)?;
             let metadata = parse_optional_json(metadata_json)?;
             messages.push(TuiMessageSummary {
+                session_seq,
                 message: sanitize_message_for_tui_history(&message),
                 usage,
                 metadata,

@@ -214,18 +214,18 @@ impl EventSink for PersistenceSink {
                     display,
                     ..
                 } => {
-                    persist_tool_timeline_item(
-                        &store,
-                        &session_id,
-                        &tool_call_id,
-                        &tool_name,
-                        TimelineItemStatus::Running,
-                        Some(&args),
-                        None,
-                        display
+                    persist_tool_timeline_item(ToolTimelineItemUpsert {
+                        store: &store,
+                        session_id: &session_id,
+                        tool_call_id: &tool_call_id,
+                        tool_name: &tool_name,
+                        status: TimelineItemStatus::Running,
+                        args: Some(&args),
+                        result: None,
+                        metadata: display
                             .as_ref()
                             .and_then(|display| serde_json::to_value(display).ok()),
-                    )
+                    })
                     .map_err(|err| psychevo_agent_core::Error::EventSink(err.to_string()))?;
                 }
                 AgentEvent::ToolExecutionUpdate {
@@ -233,16 +233,16 @@ impl EventSink for PersistenceSink {
                     tool_name,
                     partial_result,
                 } => {
-                    persist_tool_timeline_item(
-                        &store,
-                        &session_id,
-                        &tool_call_id,
-                        &tool_name,
-                        TimelineItemStatus::Running,
-                        None,
-                        Some(&partial_result),
-                        None,
-                    )
+                    persist_tool_timeline_item(ToolTimelineItemUpsert {
+                        store: &store,
+                        session_id: &session_id,
+                        tool_call_id: &tool_call_id,
+                        tool_name: &tool_name,
+                        status: TimelineItemStatus::Running,
+                        args: None,
+                        result: Some(&partial_result),
+                        metadata: None,
+                    })
                     .map_err(|err| psychevo_agent_core::Error::EventSink(err.to_string()))?;
                 }
                 AgentEvent::ToolExecutionEnd {
@@ -261,20 +261,20 @@ impl EventSink for PersistenceSink {
                     {
                         metadata.insert("display".to_string(), display);
                     }
-                    persist_tool_timeline_item(
-                        &store,
-                        &session_id,
-                        &tool_call_id,
-                        &tool_name,
-                        if outcome.as_str() == "normal" {
+                    persist_tool_timeline_item(ToolTimelineItemUpsert {
+                        store: &store,
+                        session_id: &session_id,
+                        tool_call_id: &tool_call_id,
+                        tool_name: &tool_name,
+                        status: if outcome.as_str() == "normal" {
                             TimelineItemStatus::Completed
                         } else {
                             TimelineItemStatus::Failed
                         },
-                        None,
-                        Some(&result),
-                        Some(Value::Object(metadata)),
-                    )
+                        args: None,
+                        result: Some(&result),
+                        metadata: Some(Value::Object(metadata)),
+                    })
                     .map_err(|err| psychevo_agent_core::Error::EventSink(err.to_string()))?;
                 }
                 other => {
@@ -402,6 +402,7 @@ fn persist_timeline_for_message(
     match message {
         Message::User { content, .. } => {
             let text = content_text_override.unwrap_or_else(|| user_content_text(content));
+            let selected_skills = selected_skills_from_prompt_metadata(metadata.as_ref());
             store.upsert_timeline_item(TimelineItemInput {
                 session_id: session_id.to_string(),
                 item_id: format!("message:{message_seq}:prompt"),
@@ -416,9 +417,38 @@ fn persist_timeline_for_message(
                 artifact_ids: Vec::new(),
                 metadata,
             })?;
+            if !selected_skills.is_empty() {
+                let names = selected_skills
+                    .iter()
+                    .filter_map(|skill| skill.get("name").and_then(Value::as_str))
+                    .filter(|name| !name.trim().is_empty())
+                    .collect::<Vec<_>>();
+                if !names.is_empty() {
+                    let text = format!("skill loaded: {}", names.join(", "));
+                    store.upsert_timeline_item(TimelineItemInput {
+                        session_id: session_id.to_string(),
+                        item_id: format!("message:{message_seq}:skill-loaded"),
+                        turn_id: Some(format!("message:{message_seq}")),
+                        kind: TimelineItemKind::Status,
+                        status: TimelineItemStatus::Info,
+                        source: "runtime.context".to_string(),
+                        title: None,
+                        body_text: Some(text.clone()),
+                        preview_text: Some(text.clone()),
+                        detail_text: Some(text),
+                        artifact_ids: Vec::new(),
+                        metadata: Some(json!({
+                            "projection": "status",
+                            "status_kind": "skill_loaded",
+                            "selected_skills": selected_skills,
+                        })),
+                    })?;
+                }
+            }
         }
         Message::Assistant {
             content,
+            finish_reason,
             outcome,
             model,
             provider,
@@ -437,32 +467,7 @@ fn persist_timeline_for_message(
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
-            if !text.is_empty() {
-                let mut item_metadata = metadata_object(metadata.clone());
-                if let Some(accounting) = accounting {
-                    item_metadata.insert("accounting".to_string(), accounting.public_json());
-                }
-                if let Some(model) = model {
-                    item_metadata.insert("model".to_string(), json!(model));
-                }
-                if let Some(provider) = provider {
-                    item_metadata.insert("provider".to_string(), json!(provider));
-                }
-                store.upsert_timeline_item(TimelineItemInput {
-                    session_id: session_id.to_string(),
-                    item_id: format!("message:{message_seq}:assistant"),
-                    turn_id: Some(format!("message:{message_seq}")),
-                    kind: TimelineItemKind::Assistant,
-                    status: status.clone(),
-                    source: "runtime.message".to_string(),
-                    title: None,
-                    body_text: Some(text.clone()),
-                    preview_text: Some(compact_text(&text, 240)),
-                    detail_text: Some(text),
-                    artifact_ids: Vec::new(),
-                    metadata: (!item_metadata.is_empty()).then_some(Value::Object(item_metadata)),
-                })?;
-            }
+            let mut assistant_written = false;
             for (index, block) in content.iter().enumerate() {
                 match block {
                     AssistantBlock::Reasoning {
@@ -490,6 +495,41 @@ fn persist_timeline_for_message(
                                 .then_some(Value::Object(item_metadata)),
                         })?;
                     }
+                    AssistantBlock::Text { .. } if !text.is_empty() && !assistant_written => {
+                        assistant_written = true;
+                        let mut item_metadata = metadata_object(metadata.clone());
+                        item_metadata.insert("message_session_seq".to_string(), json!(message_seq));
+                        item_metadata.insert("content_array_index".to_string(), json!(index));
+                        if let Some(accounting) = accounting {
+                            item_metadata
+                                .insert("accounting".to_string(), accounting.public_json());
+                        }
+                        if let Some(model) = model {
+                            item_metadata.insert("model".to_string(), json!(model));
+                        }
+                        if let Some(provider) = provider {
+                            item_metadata.insert("provider".to_string(), json!(provider));
+                        }
+                        if let Some(finish_reason) = finish_reason {
+                            item_metadata.insert("finish_reason".to_string(), json!(finish_reason));
+                        }
+                        item_metadata.insert("outcome".to_string(), json!(outcome.as_str()));
+                        store.upsert_timeline_item(TimelineItemInput {
+                            session_id: session_id.to_string(),
+                            item_id: format!("message:{message_seq}:assistant"),
+                            turn_id: Some(format!("message:{message_seq}")),
+                            kind: TimelineItemKind::Assistant,
+                            status: status.clone(),
+                            source: "runtime.message".to_string(),
+                            title: None,
+                            body_text: Some(text.clone()),
+                            preview_text: Some(compact_text(&text, 240)),
+                            detail_text: Some(text.clone()),
+                            artifact_ids: Vec::new(),
+                            metadata: (!item_metadata.is_empty())
+                                .then_some(Value::Object(item_metadata)),
+                        })?;
+                    }
                     AssistantBlock::ToolCall(call) => {
                         store.upsert_timeline_item(TimelineItemInput {
                             session_id: session_id.to_string(),
@@ -504,10 +544,16 @@ fn persist_timeline_for_message(
                             detail_text: Some(call.arguments_json.clone()),
                             artifact_ids: Vec::new(),
                             metadata: Some(json!({
+                                "projection": "tool",
+                                "tool_name": call.name,
+                                "tool_call_id": call.id,
+                                "outcome": "normal",
                                 "message_session_seq": message_seq,
+                                "content_array_index": index,
                                 "content_index": call.content_index,
                                 "call_index": call.call_index,
                                 "arguments": call.arguments,
+                                "args": call.arguments,
                                 "arguments_error": call.arguments_error,
                             })),
                         })?;
@@ -523,9 +569,30 @@ fn persist_timeline_for_message(
             is_error,
             ..
         } => {
+            let item_id = format!("tool:{tool_call_id}");
+            let result = serde_json::from_str::<Value>(content).unwrap_or_else(|_| {
+                json!({
+                    "content": content,
+                })
+            });
+            let metadata = merged_timeline_metadata(
+                store,
+                session_id,
+                &item_id,
+                json!({
+                    "projection": "tool",
+                    "tool_name": tool_name,
+                    "tool_call_id": tool_call_id,
+                    "outcome": if *is_error { "failed" } else { "normal" },
+                    "is_error": is_error,
+                    "tool_result_message_session_seq": message_seq,
+                    "message_metadata": metadata,
+                    "result": result,
+                }),
+            )?;
             store.upsert_timeline_item(TimelineItemInput {
                 session_id: session_id.to_string(),
-                item_id: format!("tool:{tool_call_id}"),
+                item_id,
                 turn_id: Some(format!("message:{message_seq}")),
                 kind: tool_kind(tool_name),
                 status: if *is_error {
@@ -539,28 +606,35 @@ fn persist_timeline_for_message(
                 preview_text: Some(compact_text(content, 240)),
                 detail_text: Some(content.clone()),
                 artifact_ids: Vec::new(),
-                metadata: Some(json!({
-                    "message_session_seq": message_seq,
-                    "tool_call_id": tool_call_id,
-                    "is_error": is_error,
-                    "message_metadata": metadata,
-                })),
+                metadata,
             })?;
         }
     }
     Ok(())
 }
 
-fn persist_tool_timeline_item(
-    store: &SqliteStore,
-    session_id: &str,
-    tool_call_id: &str,
-    tool_name: &str,
+struct ToolTimelineItemUpsert<'a> {
+    store: &'a SqliteStore,
+    session_id: &'a str,
+    tool_call_id: &'a str,
+    tool_name: &'a str,
     status: TimelineItemStatus,
-    args: Option<&Value>,
-    result: Option<&Value>,
+    args: Option<&'a Value>,
+    result: Option<&'a Value>,
     metadata: Option<Value>,
-) -> crate::Result<()> {
+}
+
+fn persist_tool_timeline_item(input: ToolTimelineItemUpsert<'_>) -> crate::Result<()> {
+    let ToolTimelineItemUpsert {
+        store,
+        session_id,
+        tool_call_id,
+        tool_name,
+        status,
+        args,
+        result,
+        metadata,
+    } = input;
     let preview_value = result.or(args);
     let preview_text = preview_value
         .and_then(|value| serde_json::to_string(value).ok())
@@ -573,9 +647,24 @@ fn persist_tool_timeline_item(
     if let Some(result) = result {
         item_metadata.insert("result".to_string(), result.clone());
     }
+    item_metadata
+        .entry("projection".to_string())
+        .or_insert_with(|| Value::String("tool".to_string()));
+    item_metadata
+        .entry("tool_name".to_string())
+        .or_insert_with(|| Value::String(tool_name.to_string()));
+    item_metadata
+        .entry("tool_call_id".to_string())
+        .or_insert_with(|| Value::String(tool_call_id.to_string()));
+    item_metadata
+        .entry("outcome".to_string())
+        .or_insert_with(|| Value::String("normal".to_string()));
+    let item_id = format!("tool:{tool_call_id}");
+    let metadata =
+        merged_timeline_metadata(store, session_id, &item_id, Value::Object(item_metadata))?;
     store.upsert_timeline_item(TimelineItemInput {
         session_id: session_id.to_string(),
-        item_id: format!("tool:{tool_call_id}"),
+        item_id,
         turn_id: None,
         kind: tool_kind(tool_name),
         status,
@@ -585,9 +674,40 @@ fn persist_tool_timeline_item(
         preview_text,
         detail_text,
         artifact_ids: Vec::new(),
-        metadata: (!item_metadata.is_empty()).then_some(Value::Object(item_metadata)),
+        metadata,
     })?;
     Ok(())
+}
+
+fn merged_timeline_metadata(
+    store: &SqliteStore,
+    session_id: &str,
+    item_id: &str,
+    updates: Value,
+) -> crate::Result<Option<Value>> {
+    let mut merged = store
+        .timeline_item(session_id, item_id)?
+        .and_then(|item| item.metadata)
+        .map(|metadata| match metadata {
+            Value::Object(object) => object,
+            value => {
+                let mut object = serde_json::Map::new();
+                object.insert("value".to_string(), value);
+                object
+            }
+        })
+        .unwrap_or_default();
+    match updates {
+        Value::Object(object) => {
+            for (key, value) in object {
+                merged.insert(key, value);
+            }
+        }
+        value => {
+            merged.insert("value".to_string(), value);
+        }
+    }
+    Ok((!merged.is_empty()).then_some(Value::Object(merged)))
 }
 
 fn persist_debug_event(
@@ -684,6 +804,15 @@ fn metadata_object(metadata: Option<Value>) -> serde_json::Map<String, Value> {
         }
         None => serde_json::Map::new(),
     }
+}
+
+fn selected_skills_from_prompt_metadata(metadata: Option<&Value>) -> Vec<Value> {
+    metadata
+        .and_then(|metadata| metadata.get("prompt_prefix"))
+        .and_then(|prefix| prefix.get("selected_skills"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
 }
 
 pub(crate) fn project_agent_event(event: &AgentEvent, include_reasoning: bool) -> Option<Value> {

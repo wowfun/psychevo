@@ -1040,6 +1040,7 @@ pub struct SessionExportMessageSummary {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TuiMessageSummary {
+    pub session_seq: i64,
     pub message: Message,
     pub usage: Option<Value>,
     pub metadata: Option<Value>,

@@ -417,6 +417,7 @@ pub(crate) async fn run_live_internal(
         "effective_tools": effective_tool_names,
         "agent_catalog_visible": !prompt_agents.is_empty(),
         "visible_agents": prompt_agents.iter().map(|agent| agent.name.clone()).collect::<Vec<_>>(),
+        "selected_skills": selected_skills.clone(),
         "skill_catalog_visible": !prompt_skills.is_empty(),
         "project_instructions_visible": !prompt_project_instructions.is_empty(),
         "project_instructions_role": project_instructions_role,

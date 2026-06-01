@@ -396,6 +396,167 @@ pub(crate) async fn persistence_sink_persists_tool_elapsed_metadata() {
 }
 
 #[tokio::test]
+pub(crate) async fn timeline_persists_assistant_content_order() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let store = SqliteStore::open(&db).expect("store");
+    let session_id = store
+        .create_session_with_metadata(&workdir, "tui", "model", "provider", None)
+        .expect("session");
+    let sink = test_persistence_sink(store.clone(), session_id.clone());
+
+    sink.emit(AgentEvent::MessageEnd {
+        message: Message::Assistant {
+            content: vec![
+                AssistantBlock::Reasoning {
+                    text: "think first".to_string(),
+                    provider_evidence: None,
+                },
+                AssistantBlock::Text {
+                    text: "answer after thinking".to_string(),
+                },
+                AssistantBlock::ToolCall(psychevo_agent_core::ToolCallBlock {
+                    id: "call_exec".to_string(),
+                    name: "exec_command".to_string(),
+                    arguments: json!({"cmd": "date"}),
+                    arguments_json: "{\"cmd\":\"date\"}".to_string(),
+                    arguments_error: None,
+                    content_index: 0,
+                    call_index: 0,
+                }),
+            ],
+            timestamp_ms: 1,
+            finish_reason: Some("tool_calls".to_string()),
+            outcome: Outcome::Normal,
+            model: Some("model".to_string()),
+            provider: Some("provider".to_string()),
+        },
+        usage: None,
+        metadata: None,
+    })
+    .await
+    .expect("message end");
+
+    let items = store.load_timeline_items(&session_id).expect("timeline");
+    let item_ids = items
+        .iter()
+        .map(|item| item.item_id.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        item_ids,
+        vec![
+            "message:1:reasoning:0",
+            "message:1:assistant",
+            "tool:call_exec",
+        ]
+    );
+    let assistant = items
+        .iter()
+        .find(|item| item.item_id == "message:1:assistant")
+        .expect("assistant item");
+    let metadata = assistant.metadata.as_ref().expect("assistant metadata");
+    assert_eq!(metadata["provider"], "provider");
+    assert_eq!(metadata["model"], "model");
+    assert_eq!(metadata["finish_reason"], "tool_calls");
+    assert_eq!(metadata["outcome"], "normal");
+}
+
+#[tokio::test]
+pub(crate) async fn timeline_tool_result_preserves_pending_arguments() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let store = SqliteStore::open(&db).expect("store");
+    let session_id = store
+        .create_session_with_metadata(&workdir, "tui", "model", "provider", None)
+        .expect("session");
+    let sink = test_persistence_sink(store.clone(), session_id.clone());
+
+    sink.emit(AgentEvent::MessageEnd {
+        message: Message::Assistant {
+            content: vec![AssistantBlock::ToolCall(
+                psychevo_agent_core::ToolCallBlock {
+                    id: "call_poll".to_string(),
+                    name: "write_stdin".to_string(),
+                    arguments: json!({"session_id": 7, "yield_time_ms": 60000}),
+                    arguments_json: "{\"session_id\":7,\"yield_time_ms\":60000}".to_string(),
+                    arguments_error: None,
+                    content_index: 0,
+                    call_index: 0,
+                },
+            )],
+            timestamp_ms: 1,
+            finish_reason: Some("tool_calls".to_string()),
+            outcome: Outcome::Normal,
+            model: Some("model".to_string()),
+            provider: Some("provider".to_string()),
+        },
+        usage: None,
+        metadata: None,
+    })
+    .await
+    .expect("assistant message");
+    sink.emit(AgentEvent::MessageEnd {
+        message: Message::ToolResult {
+            tool_call_id: "call_poll".to_string(),
+            tool_name: "write_stdin".to_string(),
+            content: "{\"session_id\":null,\"exit_code\":0,\"output\":\"done\"}".to_string(),
+            is_error: false,
+            timestamp_ms: 2,
+        },
+        usage: None,
+        metadata: None,
+    })
+    .await
+    .expect("tool result");
+
+    let item = store
+        .timeline_item(&session_id, "tool:call_poll")
+        .expect("timeline item")
+        .expect("tool item");
+    let metadata = item.metadata.expect("metadata");
+    assert_eq!(metadata["projection"], "tool");
+    assert_eq!(metadata["tool_name"], "write_stdin");
+    assert_eq!(metadata["args"]["session_id"], 7);
+    assert_eq!(metadata["arguments"]["session_id"], 7);
+    assert_eq!(metadata["result"]["output"], "done");
+    assert_eq!(metadata["message_session_seq"], 1);
+    assert_eq!(metadata["tool_result_message_session_seq"], 2);
+}
+
+#[tokio::test]
+pub(crate) async fn timeline_persists_selected_skill_status_item() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let store = SqliteStore::open(&db).expect("store");
+    let session_id = store
+        .create_session_with_metadata(&workdir, "tui", "model", "provider", None)
+        .expect("session");
+    let mut sink = test_persistence_sink(store.clone(), session_id.clone());
+    sink.prompt_prefix_metadata = Some(json!({
+        "selected_skills": [
+            {"name": "x-daily", "path": "/tmp/x-daily/SKILL.md"}
+        ]
+    }));
+
+    sink.emit(AgentEvent::MessageEnd {
+        message: user_message("$x-daily", 1),
+        usage: None,
+        metadata: None,
+    })
+    .await
+    .expect("user message");
+
+    let items = store.load_timeline_items(&session_id).expect("timeline");
+    assert_eq!(items[0].item_id, "message:1:prompt");
+    assert_eq!(items[1].item_id, "message:1:skill-loaded");
+    assert_eq!(items[1].kind, TimelineItemKind::Status);
+    assert_eq!(items[1].body_text.as_deref(), Some("skill loaded: x-daily"));
+}
+
+#[tokio::test]
 pub(crate) async fn persistence_sink_persists_prompt_context_evidence_once() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
@@ -579,5 +740,28 @@ pub(crate) fn json_projection_hides_reasoning_unless_included() {
             assert_eq!(value["metadata"]["pending_input"]["kind"], "steer");
         }
         other => panic!("unexpected stream event: {other:?}"),
+    }
+}
+
+fn test_persistence_sink(store: SqliteStore, session_id: String) -> PersistenceSink {
+    PersistenceSink {
+        store,
+        session_id,
+        prompt_snapshot: None,
+        prompt_snapshot_written: Arc::new(Mutex::new(false)),
+        prompt_context_evidence: Arc::new(Vec::new()),
+        started: Instant::now(),
+        tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
+        control: SmokeControl::None,
+        control_handle: None,
+        events: None,
+        stream_events: None,
+        include_reasoning: false,
+        reasoning_effort: None,
+        model_metadata: Default::default(),
+        prompt_display: None,
+        context_recorder: None,
+        selected_agent: None,
+        prompt_prefix_metadata: None,
     }
 }
