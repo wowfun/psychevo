@@ -874,18 +874,20 @@ impl TuiApp {
         }
         let turn_for_sink = Arc::clone(&turn);
         let stdout_for_sink = Arc::clone(&stdout);
-        let sink: RunStreamSink = Arc::new(move |event| {
+        let sink: GatewayEventSink = Arc::new(move |event| {
             let mut turn = turn_for_sink.lock().expect("turn lock poisoned");
             let mut stdout = stdout_for_sink.lock().expect("stdout lock poisoned");
-            let _ = turn.render_event(&event, &mut *stdout);
+            let _ = turn.render_gateway_event(&event, &mut *stdout);
         });
         let options = self.run_options(prompt);
         let source = self.gateway_source();
+        let reset_source_binding = self.force_new_once && self.current_session.is_none();
         let result = self
             .gateway
             .send_turn(SendTurnRequest {
                 thread_id: options.session.clone(),
                 source: Some(source),
+                reset_source_binding,
                 input: Vec::new(),
                 options,
                 runtime_source: Some("tui".to_string()),
@@ -893,8 +895,8 @@ impl TuiApp {
                     .iter()
                     .map(|source| (*source).to_string())
                     .collect(),
-                stream: Some(sink),
-                event_sink: None,
+                stream: None,
+                event_sink: Some(sink),
                 control_handle: None,
                 control: None,
                 lineage: None,

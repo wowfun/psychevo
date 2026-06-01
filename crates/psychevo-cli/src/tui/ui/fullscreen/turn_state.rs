@@ -324,13 +324,6 @@ impl<'a> FullscreenUi<'a> {
         self.transcript.iter().any(active_tool_row)
     }
 
-    pub(crate) fn has_active_tool_for(&self, tool: &str) -> bool {
-        let kind = evidence_kind(tool);
-        self.transcript.iter().any(|row| {
-            row.kind == kind && row.tool_name.as_deref() == Some(tool) && active_tool_row(row)
-        })
-    }
-
     pub(crate) fn remove_orphan_provisional_tool_intents(
         &mut self,
         tool: &str,

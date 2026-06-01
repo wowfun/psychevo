@@ -3,8 +3,45 @@ pub(crate) use super::*;
 pub(crate) struct RunningTurn {
     pub(crate) session_id: Option<String>,
     pub(crate) control: RunControlHandle,
-    pub(crate) rx: mpsc::UnboundedReceiver<RunStreamEvent>,
+    pub(crate) selector: Option<GatewayThreadSelector>,
+    pub(crate) turn_id: Option<String>,
+    pub(crate) events: RunningTurnEvents,
     pub(crate) task: RunningTask,
+}
+
+pub(crate) enum RunningTurnEvents {
+    Gateway(mpsc::UnboundedReceiver<GatewayEvent>),
+    Runtime(mpsc::UnboundedReceiver<RunStreamEvent>),
+}
+
+pub(crate) enum TuiLiveEvent {
+    Gateway(Box<GatewayEvent>),
+    Runtime(RunStreamEvent),
+}
+
+impl RunningTurnEvents {
+    pub(crate) fn try_recv(
+        &mut self,
+    ) -> std::result::Result<TuiLiveEvent, mpsc::error::TryRecvError> {
+        match self {
+            Self::Gateway(rx) => rx
+                .try_recv()
+                .map(|event| TuiLiveEvent::Gateway(Box::new(event))),
+            Self::Runtime(rx) => rx.try_recv().map(TuiLiveEvent::Runtime),
+        }
+    }
+}
+
+impl From<RunStreamEvent> for TuiLiveEvent {
+    fn from(event: RunStreamEvent) -> Self {
+        Self::Runtime(event)
+    }
+}
+
+impl From<GatewayEvent> for TuiLiveEvent {
+    fn from(event: GatewayEvent) -> Self {
+        Self::Gateway(Box::new(event))
+    }
 }
 
 pub(crate) struct TuiApprovalRequest {
@@ -25,7 +62,7 @@ pub(crate) struct AuxiliaryAgentTask {
     pub(crate) child_session_id: Option<String>,
     pub(crate) visible_live: bool,
     pub(crate) control: RunControlHandle,
-    pub(crate) rx: mpsc::UnboundedReceiver<RunStreamEvent>,
+    pub(crate) events: RunningTurnEvents,
     pub(crate) task: JoinHandle<psychevo_runtime::Result<psychevo_runtime::RunResult>>,
 }
 

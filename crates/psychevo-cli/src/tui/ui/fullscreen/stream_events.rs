@@ -705,28 +705,8 @@ impl<'a> FullscreenUi<'a> {
         active_tool_frame_requested
     }
 
-    pub(crate) fn apply_visible_tool_intent(&mut self, text: &str) -> bool {
-        let Some(tool) = visible_tool_intent_from_text(text) else {
-            return false;
-        };
-        let key = tool_intent_key(tool);
-        if self.tool_rows.contains_key(&key) {
-            return false;
-        }
-        if self.has_active_tool_for(tool) {
-            return false;
-        }
-        let mut row = TranscriptRow::with_title(
-            evidence_kind(tool),
-            active_tool_title(tool, &serde_json::json!({ "args": Value::Null })),
-            "preparing",
-        );
-        row.tool_name = Some(tool.to_string());
-        row.tool_started = Some(Instant::now());
-        let idx = self.insert_evidence_row(row);
-        self.tool_rows.insert(key, idx);
-        self.remove_turn_meta();
-        true
+    pub(crate) fn apply_visible_tool_intent(&mut self, _text: &str) -> bool {
+        false
     }
 
     pub(crate) fn apply_agent_session_start(&mut self, value: &Value) {

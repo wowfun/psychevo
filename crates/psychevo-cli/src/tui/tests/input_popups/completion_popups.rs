@@ -84,6 +84,7 @@ pub(crate) async fn new_command_clears_pending_images_and_ephemeral_status() {
 pub(crate) async fn unknown_dynamic_skill_submits_as_prompt() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
+    app.current_session = Some("session-1".to_string());
     let mut ui = FullscreenUi::new(&app);
 
     app.submit_fullscreen_text(&mut ui, "/unknown".to_string(), true)
@@ -624,6 +625,31 @@ pub(crate) fn run_start_selected_skills_adds_transcript_status() {
             "selected_skills": [{"name": "reviewer", "path": "/tmp/reviewer/SKILL.md"}]
         }),
         false,
+    );
+
+    assert!(ui.transcript.iter().any(
+        |row| row.kind == TranscriptKind::Status && row.text.contains("skill loaded: reviewer")
+    ));
+}
+
+#[test]
+pub(crate) fn typed_turn_started_selected_skills_adds_transcript_status() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    app.current_session = Some("session-1".to_string());
+    let mut ui = FullscreenUi::new(&app);
+
+    app.apply_gateway_event(
+        &mut ui,
+        None,
+        GatewayEvent::TurnStarted {
+            thread_id: Some("session-1".to_string()),
+            turn_id: "turn-1".to_string(),
+            selected_skills: vec![psychevo_gateway::GatewaySelectedSkill {
+                name: "reviewer".to_string(),
+                path: "/tmp/reviewer/SKILL.md".to_string(),
+            }],
+        },
     );
 
     assert!(ui.transcript.iter().any(

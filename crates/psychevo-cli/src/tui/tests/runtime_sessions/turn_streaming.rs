@@ -143,7 +143,9 @@ pub(crate) async fn fullscreen_drain_keeps_queued_events_after_task_completion()
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
-        rx,
+        selector: None,
+        turn_id: None,
+        events: RunningTurnEvents::Runtime(rx),
         task: RunningTask::Agent(task),
     });
     while !ui.running.as_ref().expect("running").task.is_finished() {
@@ -253,7 +255,9 @@ pub(crate) async fn final_message_defers_turn_meta_while_foreground_task_is_runn
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
-        rx,
+        selector: None,
+        turn_id: None,
+        events: RunningTurnEvents::Runtime(rx),
         task: RunningTask::Agent(task),
     });
 
@@ -365,7 +369,9 @@ pub(crate) async fn fast_reasoning_only_write_renders_updating_before_completion
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
-        rx,
+        selector: None,
+        turn_id: None,
+        events: RunningTurnEvents::Runtime(rx),
         task: RunningTask::Agent(task),
     });
     while !ui.running.as_ref().expect("running").task.is_finished() {
@@ -380,21 +386,31 @@ pub(crate) async fn fast_reasoning_only_write_renders_updating_before_completion
         .iter()
         .position(|row| row.kind == TranscriptKind::Thinking)
         .expect("thinking row");
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| !(row.title == "write" && row.tool_call_id.is_none())),
+        "{:?}",
+        ui.transcript
+    );
     let updating = ui
         .transcript
         .iter()
-        .position(|row| row.title == "write")
-        .expect("provisional updating row");
+        .position(|row| row.title == "write /tmp/hackernews-hot-05-39.md")
+        .expect("typed write row");
     assert!(thinking < updating);
     assert!(ui.transcript[updating].tool_started.is_some());
-    assert!(ui.transcript[updating].tool_call_id.is_none());
+    assert_eq!(
+        ui.transcript[updating].tool_call_id.as_deref(),
+        Some("call_write_report")
+    );
     assert!(
         ui.transcript
             .iter()
             .all(|row| row.kind != TranscriptKind::Meta)
     );
     assert!(ui.running.is_some());
-    assert_eq!(ui.deferred_stream_events.len(), 3);
+    assert_eq!(ui.deferred_stream_events.len(), 2);
 
     app.drain_fullscreen_events(&mut ui)
         .await
@@ -477,7 +493,9 @@ pub(crate) async fn pending_write_tool_input_defers_later_completion_events() {
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
-        rx,
+        selector: None,
+        turn_id: None,
+        events: RunningTurnEvents::Runtime(rx),
         task: RunningTask::Agent(task),
     });
     while !ui.running.as_ref().expect("running").task.is_finished() {
@@ -488,7 +506,7 @@ pub(crate) async fn pending_write_tool_input_defers_later_completion_events() {
         .await
         .expect("first drain");
     assert!(ui.transcript.iter().any(|row| row.title == "write"));
-    assert_eq!(ui.deferred_stream_events.len(), 3);
+    assert_eq!(ui.deferred_stream_events.len(), 2);
     assert!(ui.running.is_some());
 
     app.drain_fullscreen_events(&mut ui)
@@ -510,6 +528,109 @@ pub(crate) async fn pending_write_tool_input_defers_later_completion_events() {
             .iter()
             .any(|row| row.title == "write feeds/2026-05-10/hackernews-hot-05-39.md")
     );
+}
+
+#[tokio::test]
+pub(crate) async fn typed_gateway_final_answer_restores_turn_meta_after_task_completion() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    app.current_session = Some("typed-session".to_string());
+    let mut ui = FullscreenUi::new(&app);
+    let (tx, rx) = mpsc::unbounded_channel();
+    tx.send(GatewayEvent::TurnStarted {
+        thread_id: Some("typed-session".to_string()),
+        turn_id: "turn-1".to_string(),
+        selected_skills: Vec::new(),
+    })
+    .expect("send turn start");
+    tx.send(GatewayEvent::ItemCompleted {
+        turn_id: "turn-1".to_string(),
+        item: TimelineItem {
+            id: "live:turn-1:assistant".to_string(),
+            thread_id: "typed-session".to_string(),
+            turn_id: Some("turn-1".to_string()),
+            sequence: 1,
+            kind: TimelineItemKind::Assistant,
+            status: TimelineItemStatus::Completed,
+            source: "runtime.stream".to_string(),
+            title: None,
+            body: Some("All done.".to_string()),
+            preview: Some("All done.".to_string()),
+            detail: Some("All done.".to_string()),
+            artifact_ids: Vec::new(),
+            metadata: Some(serde_json::json!({
+                "provider": "mock",
+                "model": "mock-model",
+                "finish_reason": "stop",
+                "outcome": "normal",
+                "metadata": {"elapsed_ms": 2_000},
+                "usage": {"input_tokens": 12},
+                "accounting": {"estimated_cost_nanodollars": 10}
+            })),
+            created_at_ms: 1,
+            updated_at_ms: 2,
+        },
+    })
+    .expect("send answer");
+    tx.send(GatewayEvent::TurnCompleted {
+        thread_id: Some("typed-session".to_string()),
+        turn_id: "turn-1".to_string(),
+        outcome: Some("normal".to_string()),
+    })
+    .expect("send turn complete");
+    drop(tx);
+
+    let task = tokio::spawn(async move {
+        Ok(psychevo_runtime::RunResult {
+            session_id: "typed-session".to_string(),
+            outcome: Outcome::Normal,
+            terminal_reason: None,
+            final_answer: "All done.".to_string(),
+            db_path: temp.path().join("state.db"),
+            workdir: temp.path().to_path_buf(),
+            provider: "mock".to_string(),
+            model: "mock-model".to_string(),
+            base_url: "http://127.0.0.1".to_string(),
+            api_key_env: None,
+            reasoning_effort: None,
+            context_limit: None,
+            tool_failures: 0,
+            selected_agent: None,
+            selected_skills: Vec::new(),
+            context_snapshot: None,
+            capability_snapshot: None,
+            events: Vec::new(),
+            warnings: Vec::new(),
+        })
+    });
+    let (control, _) = run_control();
+    ui.running = Some(RunningTurn {
+        session_id: None,
+        control,
+        selector: None,
+        turn_id: None,
+        events: RunningTurnEvents::Gateway(rx),
+        task: RunningTask::Agent(task),
+    });
+    while !ui.running.as_ref().expect("running").task.is_finished() {
+        tokio::task::yield_now().await;
+    }
+
+    app.drain_fullscreen_events(&mut ui)
+        .await
+        .expect("drain typed gateway turn");
+
+    assert!(ui.running.is_none());
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.kind == TranscriptKind::Answer && row.text == "All done.")
+    );
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Meta
+            && row.text.contains("mock/mock-model")
+            && row.text.contains("2s")
+    }));
 }
 
 #[test]
@@ -683,7 +804,9 @@ pub(crate) async fn fullscreen_agent_end_releases_turn_before_auxiliary_task_fin
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
-        rx,
+        selector: None,
+        turn_id: None,
+        events: RunningTurnEvents::Runtime(rx),
         task: RunningTask::Agent(task),
     });
 

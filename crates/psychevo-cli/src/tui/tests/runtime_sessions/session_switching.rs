@@ -36,7 +36,9 @@ pub(crate) async fn running_session_switch_buffers_stream_until_return() {
     ui.running = Some(RunningTurn {
         session_id: Some(first.clone()),
         control,
-        rx,
+        selector: None,
+        turn_id: None,
+        events: RunningTurnEvents::Runtime(rx),
         task: RunningTask::Agent(task),
     });
     ui.start_assistant();
@@ -139,7 +141,9 @@ pub(crate) async fn background_session_completion_does_not_steal_current_session
     ui.running = Some(RunningTurn {
         session_id: Some(first.clone()),
         control,
-        rx,
+        selector: None,
+        turn_id: None,
+        events: RunningTurnEvents::Runtime(rx),
         task: RunningTask::Agent(task),
     });
     ui.start_assistant();
@@ -183,7 +187,9 @@ pub(crate) async fn new_session_does_not_receive_previous_running_output() {
     ui.running = Some(RunningTurn {
         session_id: Some(first),
         control,
-        rx,
+        selector: None,
+        turn_id: None,
+        events: RunningTurnEvents::Runtime(rx),
         task: RunningTask::Agent(task),
     });
     ui.start_assistant();
@@ -235,7 +241,9 @@ pub(crate) async fn running_shell_switch_buffers_stream_until_return() {
     ui.running = Some(RunningTurn {
         session_id: Some(first.clone()),
         control,
-        rx,
+        selector: None,
+        turn_id: None,
+        events: RunningTurnEvents::Runtime(rx),
         task: RunningTask::UserShell(task),
     });
     ui.start_assistant();
@@ -607,7 +615,9 @@ pub(crate) async fn sessions_panel_action_mode_does_not_pollute_search_and_rejec
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
-        rx,
+        selector: None,
+        turn_id: None,
+        events: RunningTurnEvents::Runtime(rx),
         task: RunningTask::Agent(task),
     });
 

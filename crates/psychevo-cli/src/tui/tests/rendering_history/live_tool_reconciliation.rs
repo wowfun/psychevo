@@ -178,7 +178,7 @@ pub(crate) fn pending_write_tool_input_shows_updating_before_complete_arguments(
 }
 
 #[test]
-pub(crate) fn visible_write_preamble_creates_and_reconciles_provisional_updating_row() {
+pub(crate) fn visible_write_preamble_waits_for_typed_tool_call() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -197,12 +197,13 @@ pub(crate) fn visible_write_preamble_creates_and_reconciles_provisional_updating
         false,
     );
 
-    let provisional = ui
-        .transcript
-        .iter()
-        .position(|row| row.title == "write")
-        .expect("provisional row");
-    assert!(ui.transcript[provisional].tool_call_id.is_none());
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.tool_name.as_deref() != Some("write")),
+        "{:?}",
+        ui.transcript
+    );
 
     ui.apply_value_event(
         &serde_json::json!({
@@ -215,9 +216,13 @@ pub(crate) fn visible_write_preamble_creates_and_reconciles_provisional_updating
         }),
         false,
     );
-    assert_eq!(ui.transcript[provisional].title, "write feeds/report.md");
+    let tool = ui
+        .transcript
+        .iter()
+        .position(|row| row.title == "write feeds/report.md")
+        .expect("typed write row");
     assert_eq!(
-        ui.transcript[provisional].tool_call_id.as_deref(),
+        ui.transcript[tool].tool_call_id.as_deref(),
         Some("call_write_report")
     );
     assert_eq!(
@@ -230,7 +235,7 @@ pub(crate) fn visible_write_preamble_creates_and_reconciles_provisional_updating
 }
 
 #[test]
-pub(crate) fn visible_write_preamble_does_not_leave_orphan_after_non_write_tool_message() {
+pub(crate) fn visible_write_preamble_does_not_create_orphan_for_non_write_tool_message() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -248,7 +253,13 @@ pub(crate) fn visible_write_preamble_does_not_leave_orphan_after_non_write_tool_
         }),
         false,
     );
-    assert!(ui.transcript.iter().any(|row| row.title == "write"));
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.tool_name.as_deref() != Some("write")),
+        "{:?}",
+        ui.transcript
+    );
 
     ui.apply_value_event(
         &serde_json::json!({
@@ -366,13 +377,24 @@ pub(crate) fn repeated_visible_write_preamble_does_not_duplicate_after_concrete_
     );
 
     assert!(ui.transcript.iter().all(|row| row.title != "write"));
-    let updated = ui
+    let write_rows = ui
         .transcript
         .iter()
-        .filter(|row| row.kind == TranscriptKind::Updated)
+        .filter(|row| {
+            row.kind == TranscriptKind::Updated && row.tool_name.as_deref() == Some("write")
+        })
         .collect::<Vec<_>>();
-    assert_eq!(updated.len(), 1);
-    assert_eq!(updated[0].title, "write feeds/report.md");
+    assert_eq!(write_rows.len(), 1, "{:?}", ui.transcript);
+    assert_eq!(write_rows[0].title, "write feeds/report.md");
+    assert_eq!(
+        write_rows[0].tool_call_id.as_deref(),
+        Some("call_write_report")
+    );
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.title != "exec_command date -u +%H-%M")
+    );
 }
 
 #[test]
@@ -418,7 +440,13 @@ pub(crate) fn active_write_keeps_failed_tool_meta_suppressed_until_final_answer(
         false,
     );
 
-    assert!(ui.transcript.iter().any(|row| row.title == "write"));
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.tool_name.as_deref() != Some("write")),
+        "{:?}",
+        ui.transcript
+    );
     assert!(
         ui.transcript
             .iter()
@@ -598,7 +626,7 @@ pub(crate) fn aborted_reasoning_only_message_does_not_recreate_failure_meta() {
 }
 
 #[test]
-pub(crate) fn visible_write_preamble_provisional_row_is_removed_without_tool_call() {
+pub(crate) fn visible_write_preamble_without_tool_call_never_creates_tool_row() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -616,7 +644,7 @@ pub(crate) fn visible_write_preamble_provisional_row_is_removed_without_tool_cal
         }),
         false,
     );
-    assert!(ui.transcript.iter().any(|row| row.title == "write"));
+    assert!(ui.transcript.iter().all(|row| row.title != "write"));
 
     ui.apply_value_event(
         &serde_json::json!({

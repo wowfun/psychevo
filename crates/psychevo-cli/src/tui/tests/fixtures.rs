@@ -758,7 +758,9 @@ pub(crate) fn attach_pending_agent_running(ui: &mut FullscreenUi<'_>) {
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
-        rx,
+        selector: None,
+        turn_id: None,
+        events: RunningTurnEvents::Runtime(rx),
         task: RunningTask::Agent(task),
     });
 }
@@ -774,7 +776,7 @@ pub(crate) fn attach_background_agent_running(ui: &mut FullscreenUi<'_>, session
         child_session_id: None,
         visible_live: true,
         control,
-        rx,
+        events: RunningTurnEvents::Runtime(rx),
         task,
     });
 }

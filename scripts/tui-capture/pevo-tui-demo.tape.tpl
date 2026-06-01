@@ -14,6 +14,13 @@ Env TEST_PROVIDER_KEY "test-key"
 Type {{PEVO_CMD}}
 Enter
 Wait+Screen /Ask pevo/
+Type "/model"
+Enter
+Wait+Screen /Add provider/
+Sleep 500 ms
+Screenshot "01-model-picker.png"
+Escape
+Sleep 100 ms
 Type "/diff"
 Enter
 Wait+Screen /D I F F/
@@ -46,12 +53,6 @@ Type "/new"
 Enter
 Wait+Screen /Ask pevo/
 Sleep 100 ms
-Type "/model"
-Enter
-Wait+Screen /Add provider/
-Sleep 500 ms
-Screenshot "01-model-picker.png"
-Escape
 Type "Inspect the snapshot harness and read fixture.txt"
 Enter
 Wait+Screen /exec_command sleep 2 && cat fixture.txt/

@@ -204,7 +204,11 @@ impl TuiApp {
 
     pub(crate) fn request_current_session_interrupt(&mut self, ui: &mut FullscreenUi<'_>) -> bool {
         let current_session = self.current_session.clone();
-        let mut interrupted = ui.request_interrupt(current_session.as_deref());
+        let mut interrupted = false;
+        if let Some((selector, _)) = self.active_gateway_turn_selector(ui) {
+            interrupted |= self.gateway.interrupt_turn(selector);
+        }
+        interrupted |= ui.request_interrupt(current_session.as_deref());
         if let Some(session_id) = current_session.as_deref() {
             let store = self.state_runtime.store();
             let value = agent_status_value(Some(store), Some(session_id), false);
@@ -313,13 +317,23 @@ impl TuiApp {
             .and_then(|running| running.session_id.clone());
         let mut pending = std::mem::take(&mut ui.deferred_stream_events);
         if let Some(running) = &mut ui.running {
-            while let Ok(event) = running.rx.try_recv() {
+            while let Ok(event) = running.events.try_recv() {
                 pending.push_back(event);
             }
         }
         let had_pending = if owner_session.is_some() {
-            self.apply_pending_owned_fullscreen_stream_events(ui, owner_session.as_deref(), pending)
+            self.apply_pending_owned_fullscreen_live_events(ui, owner_session.as_deref(), pending)
         } else {
+            let pending = pending
+                .into_iter()
+                .filter_map(|event| match event {
+                    TuiLiveEvent::Runtime(event) => Some(event),
+                    TuiLiveEvent::Gateway(event) => {
+                        self.apply_gateway_event(ui, owner_session.as_deref(), *event);
+                        None
+                    }
+                })
+                .collect();
             self.apply_pending_fullscreen_stream_events_without_frames(ui, pending)
         };
         if had_pending {
@@ -337,7 +351,7 @@ impl TuiApp {
                     child_session_id,
                     visible_live: true,
                     control: running.control,
-                    rx: running.rx,
+                    events: running.events,
                     task,
                 });
             }
@@ -345,7 +359,13 @@ impl TuiApp {
                 ui.auxiliary_shell_tasks.push(AuxiliaryShellTask {
                     session_id: owner_session,
                     control: running.control,
-                    rx: running.rx,
+                    rx: match running.events {
+                        RunningTurnEvents::Runtime(rx) => rx,
+                        RunningTurnEvents::Gateway(_) => {
+                            let (_tx, rx) = mpsc::unbounded_channel();
+                            rx
+                        }
+                    },
                     task,
                 });
             }
@@ -599,24 +619,56 @@ impl TuiApp {
             .collect()
     }
 
-    pub(crate) fn load_current_session_history(&self, ui: &mut FullscreenUi<'_>) -> Result<()> {
-        let Some(session_id) = self.current_session.as_deref() else {
+    pub(crate) fn load_current_session_history(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
+        let Some(session_id) = self.current_session.clone() else {
             ui.loaded_session_message_count = 0;
             ui.visible_turn_started = None;
             ui.replace_session_history_prompts(Vec::new());
             ui.refresh_sidebar(self);
             return Ok(());
         };
-        let store = self.state_runtime.store();
-        let metadata = store.session_metadata(session_id)?;
-        ui.sidebar_context_limit =
-            session_context_limit_with_parent_fallback(store, session_id, metadata.as_ref())?;
-        let summaries = store.load_tui_message_summaries(session_id)?;
+        let metadata = self.state_runtime.store().session_metadata(&session_id)?;
+        ui.sidebar_context_limit = session_context_limit_with_parent_fallback(
+            self.state_runtime.store(),
+            &session_id,
+            metadata.as_ref(),
+        )?;
+        let summaries = self
+            .state_runtime
+            .store()
+            .load_tui_message_summaries(&session_id)?;
         ui.loaded_session_message_count = summaries.len();
+        let timeline_items =
+            timeline_items_for_transcript(self.gateway.thread_timeline(&session_id)?, &summaries)?;
+        if !timeline_items.is_empty() {
+            let agent_edges = self
+                .state_runtime
+                .store()
+                .list_agent_edges_for_parent(&session_id)?;
+            let mut history_prompts = Vec::new();
+            for item in timeline_items {
+                if item.kind == TimelineItemKind::Prompt {
+                    let text = timeline_history_text(&item);
+                    if !text.trim().is_empty() {
+                        history_prompts.push(text);
+                    }
+                }
+                self.apply_gateway_timeline_item(ui, Some(&session_id), item);
+            }
+            let agent_catalog = self.current_agent_catalog();
+            ui.reconcile_history_agent_rows(&agent_edges, agent_catalog.as_ref());
+            ui.visible_turn_started = ui
+                .history_prompt_started_ms
+                .and_then(instant_from_wall_timestamp_ms);
+            ui.replace_session_history_prompts(history_prompts);
+            ui.scroll_to_bottom();
+            ui.refresh_sidebar(self);
+            return Ok(());
+        }
         let summary_count = summaries.len();
-        let suppress_latest_terminal_meta = ui.status_has_running(Some(session_id));
+        let suppress_latest_terminal_meta = ui.status_has_running(Some(&session_id));
         let active_tool_call_ids =
-            history_active_tool_call_ids_for_reload(ui, session_id, &summaries)?;
+            history_active_tool_call_ids_for_reload(ui, &session_id, &summaries)?;
         let mut history_prompts = Vec::new();
         for (index, summary) in summaries.into_iter().enumerate() {
             let value = serde_json::to_value(summary.message)?;
@@ -635,7 +687,10 @@ impl TuiApp {
             );
         }
         let agent_catalog = self.current_agent_catalog();
-        let agent_edges = store.list_agent_edges_for_parent(session_id)?;
+        let agent_edges = self
+            .state_runtime
+            .store()
+            .list_agent_edges_for_parent(&session_id)?;
         ui.reconcile_history_agent_rows(&agent_edges, agent_catalog.as_ref());
         ui.visible_turn_started = ui
             .history_prompt_started_ms
@@ -765,6 +820,312 @@ pub(crate) fn session_base_agent_name_from_metadata(metadata: Option<&Value>) ->
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
+}
+
+fn timeline_history_text(item: &TimelineItem) -> String {
+    item.body
+        .as_ref()
+        .or(item.detail.as_ref())
+        .or(item.preview.as_ref())
+        .cloned()
+        .unwrap_or_default()
+}
+
+type TimelineHistoryOrder = (i64, i64, i64);
+
+fn timeline_items_for_transcript(
+    mut items: Vec<TimelineItem>,
+    summaries: &[TuiMessageSummary],
+) -> Result<Vec<TimelineItem>> {
+    let (order, tool_metadata) = timeline_history_projection(summaries)?;
+    for item in &mut items {
+        if let Some(metadata) = tool_metadata.get(&item.id) {
+            item.metadata = Some(merge_json_objects(item.metadata.take(), metadata.clone()));
+        }
+    }
+    items.sort_by_key(|item| {
+        order
+            .get(&item.id)
+            .copied()
+            .unwrap_or((i64::MAX / 2, item.sequence, 0))
+    });
+    Ok(merge_write_stdin_history_items(items))
+}
+
+fn merge_write_stdin_history_items(items: Vec<TimelineItem>) -> Vec<TimelineItem> {
+    let mut projected = Vec::with_capacity(items.len());
+    let mut exec_session_items = BTreeMap::<u64, usize>::new();
+
+    for item in items {
+        let tool = timeline_item_tool_name(&item);
+        match tool.as_deref() {
+            Some("exec_command") => {
+                let index = projected.len();
+                if let Some(metadata) = item.metadata.as_ref()
+                    && let Some(session_id) = exec_session_id_from_result(metadata)
+                    && exec_result_running(metadata)
+                {
+                    exec_session_items.insert(session_id, index);
+                }
+                projected.push(item);
+            }
+            Some("write_stdin") => {
+                let Some(metadata) = item.metadata.as_ref() else {
+                    continue;
+                };
+                let Some(session_id) = write_stdin_target_session_id(metadata) else {
+                    continue;
+                };
+                let Some(parent_index) = exec_session_items.get(&session_id).copied() else {
+                    continue;
+                };
+                if let Some(parent) = projected.get_mut(parent_index) {
+                    merge_write_stdin_into_exec_item(parent, &item);
+                }
+                if exec_result_completed(metadata) {
+                    exec_session_items.remove(&session_id);
+                }
+            }
+            _ => projected.push(item),
+        }
+    }
+
+    projected
+}
+
+fn timeline_item_tool_name(item: &TimelineItem) -> Option<String> {
+    item.metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("tool_name"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| item.title.clone())
+}
+
+fn write_stdin_target_session_id(metadata: &Value) -> Option<u64> {
+    metadata
+        .get("args")
+        .and_then(exec_session_id_from_args)
+        .or_else(|| {
+            metadata
+                .get("arguments")
+                .and_then(exec_session_id_from_args)
+        })
+        .or_else(|| exec_session_id_from_result(metadata))
+}
+
+fn merge_write_stdin_into_exec_item(exec_item: &mut TimelineItem, write_item: &TimelineItem) {
+    let Some(write_metadata) = write_item.metadata.as_ref() else {
+        return;
+    };
+    let Some(exec_metadata) = exec_item.metadata.as_mut() else {
+        return;
+    };
+    append_tool_result_output(exec_metadata, &tool_result_output(write_metadata));
+    if exec_result_completed(write_metadata) {
+        merge_terminal_exec_result(exec_metadata, write_metadata);
+        exec_item.status = write_item.status;
+    }
+    accumulate_elapsed_ms(exec_metadata, write_metadata);
+}
+
+fn append_tool_result_output(metadata: &mut Value, output: &str) {
+    if output.is_empty() {
+        return;
+    }
+    let result = ensure_json_object_field(metadata, "result");
+    let next = match result.get("output").and_then(Value::as_str) {
+        Some(existing) if existing.ends_with(output) => existing.to_string(),
+        Some(existing) => format!("{existing}{output}"),
+        None => output.to_string(),
+    };
+    result.insert("output".to_string(), Value::String(next));
+}
+
+fn merge_terminal_exec_result(metadata: &mut Value, write_metadata: &Value) {
+    let result = ensure_json_object_field(metadata, "result");
+    if let Some(exit_code) = write_metadata
+        .get("result")
+        .and_then(|result| result.get("exit_code"))
+        .filter(|value| !value.is_null())
+    {
+        result.insert("exit_code".to_string(), exit_code.clone());
+    }
+    if let Some(outcome) = write_metadata.get("outcome") {
+        ensure_json_object(metadata).insert("outcome".to_string(), outcome.clone());
+    }
+}
+
+fn accumulate_elapsed_ms(metadata: &mut Value, write_metadata: &Value) {
+    let Some(delta) = write_metadata.get("elapsed_ms").and_then(Value::as_u64) else {
+        return;
+    };
+    let object = ensure_json_object(metadata);
+    let total = object
+        .get("elapsed_ms")
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+        .saturating_add(delta);
+    object.insert("elapsed_ms".to_string(), Value::from(total));
+}
+
+fn ensure_json_object_field<'a>(
+    value: &'a mut Value,
+    key: &str,
+) -> &'a mut serde_json::Map<String, Value> {
+    let object = ensure_json_object(value);
+    let entry = object
+        .entry(key.to_string())
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    if !entry.is_object() {
+        *entry = Value::Object(serde_json::Map::new());
+    }
+    entry.as_object_mut().expect("object field")
+}
+
+fn ensure_json_object(value: &mut Value) -> &mut serde_json::Map<String, Value> {
+    if !value.is_object() {
+        *value = Value::Object(serde_json::Map::new());
+    }
+    value.as_object_mut().expect("object")
+}
+
+fn timeline_history_projection(
+    summaries: &[TuiMessageSummary],
+) -> Result<(
+    BTreeMap<String, TimelineHistoryOrder>,
+    BTreeMap<String, Value>,
+)> {
+    let mut order = BTreeMap::new();
+    let mut tool_metadata = BTreeMap::new();
+    for summary in summaries {
+        let seq = summary.session_seq;
+        let value = serde_json::to_value(&summary.message)?;
+        match value.get("role").and_then(Value::as_str) {
+            Some("user") => {
+                order.insert(format!("message:{seq}:prompt"), (seq, 0, 0));
+                order.insert(format!("message:{seq}:skill-loaded"), (seq, 1, 0));
+            }
+            Some("assistant") => {
+                let mut assistant_text_seen = false;
+                if let Some(content) = value.get("content").and_then(Value::as_array) {
+                    for (index, block) in content.iter().enumerate() {
+                        let block_order = 10 + (index as i64 * 10);
+                        match block.get("type").and_then(Value::as_str) {
+                            Some("reasoning") => {
+                                order.insert(
+                                    format!("message:{seq}:reasoning:{index}"),
+                                    (seq, block_order, 0),
+                                );
+                            }
+                            Some("text") if !assistant_text_seen => {
+                                assistant_text_seen = true;
+                                order.insert(
+                                    format!("message:{seq}:assistant"),
+                                    (seq, block_order, 1),
+                                );
+                            }
+                            Some("tool_call") => {
+                                let Some(tool_call_id) = block.get("id").and_then(Value::as_str)
+                                else {
+                                    continue;
+                                };
+                                let item_id = format!("tool:{tool_call_id}");
+                                order.insert(item_id.clone(), (seq, block_order, 2));
+                                let tool_name =
+                                    block.get("name").and_then(Value::as_str).unwrap_or("tool");
+                                upsert_tool_history_metadata(
+                                    &mut tool_metadata,
+                                    &item_id,
+                                    serde_json::json!({
+                                        "projection": "tool",
+                                        "tool_name": tool_name,
+                                        "tool_call_id": tool_call_id,
+                                        "outcome": "normal",
+                                        "message_session_seq": seq,
+                                        "content_array_index": index,
+                                        "content_index": block.get("content_index").cloned().unwrap_or(Value::Null),
+                                        "call_index": block.get("call_index").cloned().unwrap_or(Value::Null),
+                                        "arguments": block.get("arguments").cloned().unwrap_or(Value::Null),
+                                        "args": block.get("arguments").cloned().unwrap_or(Value::Null),
+                                        "arguments_error": block.get("arguments_error").cloned().unwrap_or(Value::Null),
+                                    }),
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            Some("tool_result") => {
+                let Some(tool_call_id) = value.get("tool_call_id").and_then(Value::as_str) else {
+                    continue;
+                };
+                let item_id = format!("tool:{tool_call_id}");
+                let tool_name = value
+                    .get("tool_name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("tool");
+                let is_error = value
+                    .get("is_error")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let content = value
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let result = serde_json::from_str::<Value>(content)
+                    .unwrap_or_else(|_| serde_json::json!({ "content": content }));
+                upsert_tool_history_metadata(
+                    &mut tool_metadata,
+                    &item_id,
+                    serde_json::json!({
+                        "projection": "tool",
+                        "tool_name": tool_name,
+                        "tool_call_id": tool_call_id,
+                        "outcome": if is_error { "failed" } else { "normal" },
+                        "is_error": is_error,
+                        "tool_result_message_session_seq": seq,
+                        "result": result,
+                    }),
+                );
+            }
+            _ => {}
+        }
+    }
+    Ok((order, tool_metadata))
+}
+
+fn upsert_tool_history_metadata(
+    metadata: &mut BTreeMap<String, Value>,
+    item_id: &str,
+    update: Value,
+) {
+    let existing = metadata.remove(item_id);
+    metadata.insert(item_id.to_string(), merge_json_objects(existing, update));
+}
+
+fn merge_json_objects(existing: Option<Value>, update: Value) -> Value {
+    let mut object = match existing {
+        Some(Value::Object(object)) => object,
+        Some(value) => {
+            let mut object = serde_json::Map::new();
+            object.insert("value".to_string(), value);
+            object
+        }
+        None => serde_json::Map::new(),
+    };
+    match update {
+        Value::Object(update) => {
+            for (key, value) in update {
+                object.insert(key, value);
+            }
+        }
+        value => {
+            object.insert("value".to_string(), value);
+        }
+    }
+    Value::Object(object)
 }
 
 #[cfg(test)]

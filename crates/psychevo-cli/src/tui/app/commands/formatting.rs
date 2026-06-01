@@ -1,50 +1,6 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
-#[derive(Clone)]
-pub(crate) struct TuiApprovalHandler {
-    pub(crate) session_id: Option<String>,
-    pub(crate) tx: mpsc::UnboundedSender<TuiApprovalRequest>,
-}
-
-impl std::fmt::Debug for TuiApprovalHandler {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("TuiApprovalHandler")
-            .field("session_id", &self.session_id)
-            .finish_non_exhaustive()
-    }
-}
-
-impl ApprovalHandler for TuiApprovalHandler {
-    fn timeout_secs(&self) -> u64 {
-        0
-    }
-
-    fn request_permission(
-        &self,
-        request: PermissionApprovalRequest,
-    ) -> futures::future::BoxFuture<'static, PermissionApprovalDecision> {
-        let tx = self.tx.clone();
-        let session_id = self.session_id.clone();
-        Box::pin(async move {
-            let (response, rx) = oneshot::channel();
-            if tx
-                .send(TuiApprovalRequest {
-                    session_id,
-                    request,
-                    response,
-                })
-                .is_err()
-            {
-                return PermissionApprovalDecision::deny();
-            }
-            rx.await
-                .unwrap_or_else(|_| PermissionApprovalDecision::deny())
-        })
-    }
-}
-
 impl TuiApp {
     pub(crate) async fn submit_shell_command(&mut self, command: String) -> Result<()> {
         if command.trim().is_empty() {
@@ -115,19 +71,16 @@ impl TuiApp {
         }
         ui.push_user_with_images(display_prompt.clone(), &images);
         let (tx, rx) = mpsc::unbounded_channel();
-        let sink: RunStreamSink = Arc::new(move |event| {
+        let event_sink: GatewayEventSink = Arc::new(move |event| {
             let _ = tx.send(event);
         });
-        let (approval_tx, approval_rx) = mpsc::unbounded_channel();
         let (control_handle, control) = run_control();
         let mut options = self.run_options_with_images(prompt, image_inputs);
-        options.approval_handler = Some(Arc::new(TuiApprovalHandler {
-            session_id: self.current_session.clone(),
-            tx: approval_tx,
-        }));
         options.prompt_display = prompt_display_metadata(display_prompt, &images, &self.workdir);
         let gateway = self.gateway.clone();
         let source = self.gateway_source();
+        let selector = GatewayThreadSelector::source(source.source_key());
+        let reset_source_binding = self.force_new_once && self.current_session.is_none();
         let thread_id = options.session.clone();
         let gateway_control_handle = control_handle.clone();
         let task = tokio::spawn(async move {
@@ -135,6 +88,7 @@ impl TuiApp {
                 .send_turn(SendTurnRequest {
                     thread_id,
                     source: Some(source),
+                    reset_source_binding,
                     input: Vec::new(),
                     options,
                     runtime_source: Some("tui".to_string()),
@@ -142,8 +96,8 @@ impl TuiApp {
                         .iter()
                         .map(|source| (*source).to_string())
                         .collect(),
-                    stream: Some(sink),
-                    event_sink: None,
+                    stream: None,
+                    event_sink: Some(event_sink),
                     control_handle: Some(gateway_control_handle),
                     control: Some(control),
                     lineage: None,
@@ -151,12 +105,13 @@ impl TuiApp {
                 .await
                 .map(|turn| turn.result)
         });
-        ui.approval_rx = Some(approval_rx);
         ui.scroll_to_bottom();
         ui.running = Some(RunningTurn {
             session_id: self.current_session.clone(),
             control: control_handle,
-            rx,
+            selector: Some(selector),
+            turn_id: None,
+            events: RunningTurnEvents::Gateway(rx),
             task: RunningTask::Agent(task),
         });
         ui.start_assistant();
@@ -195,7 +150,9 @@ impl TuiApp {
         ui.running = Some(RunningTurn {
             session_id: self.current_session.clone(),
             control: control_handle,
-            rx,
+            selector: None,
+            turn_id: None,
+            events: RunningTurnEvents::Runtime(rx),
             task: RunningTask::UserShell(task),
         });
         ui.start_assistant();

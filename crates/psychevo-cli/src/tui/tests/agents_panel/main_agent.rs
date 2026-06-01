@@ -460,7 +460,9 @@ pub(crate) async fn running_turn_blocks_main_agent_switching() {
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
-        rx,
+        selector: None,
+        turn_id: None,
+        events: RunningTurnEvents::Runtime(rx),
         task: RunningTask::Agent(task),
     });
     let selected = ui

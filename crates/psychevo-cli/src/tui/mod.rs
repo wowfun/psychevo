@@ -17,14 +17,17 @@ pub(crate) use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 pub(crate) use psychevo_ai::Outcome;
-pub(crate) use psychevo_gateway::{Gateway, GatewaySource, SendTurnRequest};
+pub(crate) use psychevo_gateway::{
+    Gateway, GatewayEvent, GatewayEventSink, GatewaySource, GatewayThreadSelector, SendTurnRequest,
+    TimelineItem, TimelineItemKind, TimelineItemStatus,
+};
 pub(crate) use psychevo_runtime::{
     AgentCatalog, AgentDiscoveryOptions, AgentEdgeRecord, AgentSource, AgentSpawnOptions,
-    ApprovalHandler, AutoCompactionCheckOptions, ChildSessionSnapshotInput, ClarifyAnswer,
-    ClarifyQuestion, ClarifyRequestEvent, ClarifyResolvedEvent, ClarifyResponse, ClarifyResult,
-    CompactSessionOptions, CompactionReason, CompactionResult, ConfigScope, ConfiguredModel,
-    ContextFormatOptions, ContextOptions, ContextSnapshot, CustomProviderInput, ImageInput,
-    InstallOptions, MAX_AGENT_SPAWN_DEPTH_CAP, ModelCatalogEntry, ModelCatalogProvider,
+    AutoCompactionCheckOptions, ChildSessionSnapshotInput, ClarifyAnswer, ClarifyQuestion,
+    ClarifyRequestEvent, ClarifyResolvedEvent, ClarifyResolvedReason, ClarifyResponse,
+    ClarifyResult, CompactSessionOptions, CompactionReason, CompactionResult, ConfigScope,
+    ConfiguredModel, ContextFormatOptions, ContextOptions, ContextSnapshot, CustomProviderInput,
+    ImageInput, InstallOptions, MAX_AGENT_SPAWN_DEPTH_CAP, ModelCatalogEntry, ModelCatalogProvider,
     ModelMetadataCacheTarget, PendingInputId, PermissionApprovalDecision,
     PermissionApprovalOutcome, PermissionApprovalRequest, PermissionMode, PromptAttachmentDisplay,
     PromptDisplayMetadata, ReloadContextOptions, RunControlHandle, RunMode, RunOptions,

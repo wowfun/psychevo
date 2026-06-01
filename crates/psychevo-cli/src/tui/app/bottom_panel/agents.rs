@@ -199,11 +199,12 @@ impl TuiApp {
         match panel.mode() {
             ClarifyInputMode::Options => match key.code {
                 KeyCode::Esc => {
-                    if let Some(running) = ui.running.as_ref() {
-                        if running
-                            .control
-                            .submit_clarify_result(&panel.request.call_id, ClarifyResult::Cancelled)
-                        {
+                    if let Some((selector, _)) = self.active_gateway_turn_selector(ui) {
+                        if self.gateway.submit_clarify(
+                            selector,
+                            &panel.request.call_id,
+                            ClarifyResult::Cancelled,
+                        ) {
                             restore = true;
                         } else {
                             panel.notice = Some("clarify request is no longer active".to_string());
@@ -340,7 +341,7 @@ impl TuiApp {
         panel.set_mode(ClarifyInputMode::Options);
         panel.notice = None;
         if panel.answers.iter().all(Option::is_some) {
-            let Some(running) = ui.running.as_ref() else {
+            let Some((selector, _)) = self.active_gateway_turn_selector(ui) else {
                 panel.notice = Some("clarify request is no longer active".to_string());
                 return Ok(());
             };
@@ -356,10 +357,11 @@ impl TuiApp {
                     })
                     .collect(),
             };
-            if !running
-                .control
-                .submit_clarify_result(&panel.request.call_id, ClarifyResult::Answered(response))
-            {
+            if !self.gateway.submit_clarify(
+                selector,
+                &panel.request.call_id,
+                ClarifyResult::Answered(response),
+            ) {
                 panel.notice = Some("clarify request is no longer active".to_string());
             }
             return Ok(());

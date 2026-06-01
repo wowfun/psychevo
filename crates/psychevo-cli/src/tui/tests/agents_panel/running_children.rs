@@ -179,7 +179,9 @@ pub(crate) async fn running_agent_row_enter_opens_child_session_before_parent_tu
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
-        rx,
+        selector: None,
+        turn_id: None,
+        events: RunningTurnEvents::Runtime(rx),
         task: RunningTask::Agent(task),
     });
     ui.start_assistant();
@@ -260,7 +262,9 @@ pub(crate) async fn esc_interrupts_running_child_session_after_open() {
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
-        rx,
+        selector: None,
+        turn_id: None,
+        events: RunningTurnEvents::Runtime(rx),
         task: RunningTask::Agent(task),
     });
 
@@ -389,7 +393,9 @@ pub(crate) async fn esc_interrupts_running_child_from_parent_session_after_retur
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
-        rx,
+        selector: None,
+        turn_id: None,
+        events: RunningTurnEvents::Runtime(rx),
         task: RunningTask::Agent(task),
     });
 
@@ -602,7 +608,9 @@ pub(crate) async fn running_child_session_receives_scoped_stream_after_open() {
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
-        rx,
+        selector: None,
+        turn_id: None,
+        events: RunningTurnEvents::Runtime(rx),
         task: RunningTask::Agent(task),
     });
 
@@ -681,7 +689,9 @@ pub(crate) async fn opening_running_agent_child_replays_scoped_live_backlog() {
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
-        rx,
+        selector: None,
+        turn_id: None,
+        events: RunningTurnEvents::Runtime(rx),
         task: RunningTask::Agent(task),
     });
     tx.send(RunStreamEvent::scoped(
@@ -743,7 +753,9 @@ pub(crate) async fn scoped_child_stream_updates_parent_agent_tail_without_child_
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
-        rx,
+        selector: None,
+        turn_id: None,
+        events: RunningTurnEvents::Runtime(rx),
         task: RunningTask::Agent(task),
     });
     tx.send(RunStreamEvent::scoped(

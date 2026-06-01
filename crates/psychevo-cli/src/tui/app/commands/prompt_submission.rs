@@ -573,12 +573,21 @@ impl TuiApp {
         display_prompt: String,
         images: Vec<PendingImageAttachment>,
     ) -> Result<()> {
-        let Some(control) = ui
-            .running
-            .as_ref()
-            .filter(|running| matches!(running.task, RunningTask::Agent(_)))
-            .map(|running| running.control.clone())
-        else {
+        let Some((selector, expected_turn_id)) = self.active_gateway_turn_selector(ui) else {
+            if let Some(control) = ui
+                .running
+                .as_ref()
+                .filter(|running| matches!(running.task, RunningTask::Agent(_)))
+                .map(|running| running.control.clone())
+            {
+                return self.steer_fullscreen_prompt_with_control(
+                    ui,
+                    control,
+                    prompt,
+                    display_prompt,
+                    images,
+                );
+            }
             self.queue_fullscreen_prompt(ui, prompt, display_prompt, images);
             return Ok(());
         };
@@ -591,6 +600,55 @@ impl TuiApp {
                 "selected model does not support image input; sent image source as text",
             );
         }
+        let metadata = self
+            .selected_model
+            .as_ref()
+            .map(|model| model.metadata.clone())
+            .unwrap_or_default();
+        let message = prompt_message_from_inputs_with_options(
+            &prompt,
+            &image_inputs,
+            &self.workdir,
+            &metadata,
+            false,
+        )?
+        .message;
+        let Some(id) = self
+            .gateway
+            .steer_turn(selector, expected_turn_id.as_deref(), message)
+        else {
+            ui.set_ephemeral_error("unable to steer current turn");
+            return Ok(());
+        };
+        let session_id = ui
+            .running
+            .as_ref()
+            .and_then(|running| running.session_id.clone())
+            .or_else(|| self.current_session.clone());
+        let sequence = ui.next_pending_input_sequence();
+        ui.pending_steers.push_back(PendingSteerInput {
+            id,
+            session_id,
+            prompt,
+            display_prompt: display_prompt.clone(),
+            images,
+            sequence,
+        });
+        Ok(())
+    }
+
+    pub(crate) fn steer_fullscreen_prompt_with_control(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        control: RunControlHandle,
+        prompt: String,
+        display_prompt: String,
+        images: Vec<PendingImageAttachment>,
+    ) -> Result<()> {
+        let image_inputs = images
+            .iter()
+            .map(|attachment| attachment.image.clone())
+            .collect::<Vec<_>>();
         let metadata = self
             .selected_model
             .as_ref()
@@ -618,11 +676,36 @@ impl TuiApp {
             id,
             session_id,
             prompt,
-            display_prompt: display_prompt.clone(),
+            display_prompt,
             images,
             sequence,
         });
         Ok(())
+    }
+
+    pub(crate) fn active_gateway_turn_selector(
+        &self,
+        ui: &FullscreenUi<'_>,
+    ) -> Option<(GatewayThreadSelector, Option<String>)> {
+        let running = ui
+            .running
+            .as_ref()
+            .filter(|running| matches!(running.task, RunningTask::Agent(_)))?;
+        let selector = if let Some(selector) = running.selector.clone() {
+            selector
+        } else {
+            let selector = GatewayThreadSelector::source(self.gateway_source().source_key());
+            if !self.gateway.activity_for_selector(selector.clone()).running {
+                return None;
+            }
+            selector
+        };
+        let expected_turn_id = running.turn_id.clone().or_else(|| {
+            self.gateway
+                .activity_for_selector(selector.clone())
+                .active_turn_id
+        });
+        Some((selector, expected_turn_id))
     }
 
     pub(crate) fn queue_fullscreen_prompt(
@@ -667,11 +750,18 @@ impl TuiApp {
     }
 
     pub(crate) fn cancel_pending_fullscreen_inputs(&mut self, ui: &mut FullscreenUi<'_>) {
-        let control = ui.running.as_ref().map(|running| running.control.clone());
+        let active = self.active_gateway_turn_selector(ui);
+        let legacy_control = active
+            .is_none()
+            .then(|| ui.running.as_ref().map(|running| running.control.clone()))
+            .flatten();
         let mut cancelled_steers = 0usize;
         let mut retained = VecDeque::new();
         while let Some(input) = ui.pending_steers.pop_front() {
-            let cancelled = control
+            let cancelled = active.as_ref().is_some_and(|(selector, expected)| {
+                self.gateway
+                    .cancel_steer(selector.clone(), expected.as_deref(), input.id)
+            }) || legacy_control
                 .as_ref()
                 .is_some_and(|control| control.cancel_pending_user_message(input.id));
             if cancelled {
@@ -716,10 +806,15 @@ impl TuiApp {
     ) -> Result<()> {
         match target {
             PendingInputRef::Steer(id) => {
-                let cancelled = ui
-                    .running
-                    .as_ref()
-                    .is_some_and(|running| running.control.cancel_pending_user_message(id));
+                let cancelled =
+                    self.active_gateway_turn_selector(ui)
+                        .is_some_and(|(selector, expected)| {
+                            self.gateway.cancel_steer(selector, expected.as_deref(), id)
+                        })
+                        || ui
+                            .running
+                            .as_ref()
+                            .is_some_and(|running| running.control.cancel_pending_user_message(id));
                 if !cancelled {
                     ui.set_ephemeral_error("steer already sent");
                     return Ok(());
@@ -796,9 +891,6 @@ impl TuiApp {
         display_prompt: String,
         images: &[PendingImageAttachment],
     ) -> Result<bool> {
-        let Some(control) = ui.running.as_ref().map(|running| running.control.clone()) else {
-            return Ok(false);
-        };
         let prompt = prompt_without_image_placeholders(&display_prompt, images);
         let image_inputs = images
             .iter()
@@ -817,7 +909,20 @@ impl TuiApp {
             false,
         )?
         .message;
-        if !control.update_pending_user_message(id, message) {
+        let updated =
+            self.active_gateway_turn_selector(ui)
+                .is_some_and(|(selector, expected_turn_id)| {
+                    self.gateway.update_steer(
+                        selector,
+                        expected_turn_id.as_deref(),
+                        id,
+                        message.clone(),
+                    )
+                })
+                || ui.running.as_ref().is_some_and(|running| {
+                    running.control.update_pending_user_message(id, message)
+                });
+        if !updated {
             return Ok(false);
         }
         if let Some(input) = ui.pending_steers.iter_mut().find(|input| input.id == id) {

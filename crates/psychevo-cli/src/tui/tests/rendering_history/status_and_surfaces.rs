@@ -373,7 +373,7 @@ pub(crate) fn live_tool_call_reasoning_message_does_not_get_turn_meta() {
 }
 
 #[test]
-pub(crate) fn reasoning_only_write_message_shows_active_updating_without_meta() {
+pub(crate) fn reasoning_only_write_message_waits_for_typed_tool_call() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -396,17 +396,10 @@ pub(crate) fn reasoning_only_write_message_shows_active_updating_without_meta() 
         false,
     );
 
-    let provisional = ui
-        .transcript
-        .iter()
-        .position(|row| row.title == "write")
-        .expect("provisional updating row");
-    assert!(ui.transcript[provisional].tool_started.is_some());
-    assert_eq!(ui.transcript[provisional].tool_call_id, None);
     assert!(
         ui.transcript
             .iter()
-            .all(|row| row.title != "write /tmp/hackernews-hot-05-39.md"),
+            .all(|row| row.tool_name.as_deref() != Some("write")),
         "{:?}",
         ui.transcript
     );
@@ -495,7 +488,7 @@ pub(crate) fn hidden_thinking_write_intent_does_not_create_provisional_updating(
 }
 
 #[test]
-pub(crate) fn visible_thinking_run_intent_creates_and_reconciles_running_command() {
+pub(crate) fn visible_thinking_run_text_waits_for_typed_command_call() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -508,9 +501,13 @@ pub(crate) fn visible_thinking_run_intent_creates_and_reconciles_running_command
         true,
         false,
     );
-    assert!(ui.transcript.iter().any(|row| {
-        row.kind == TranscriptKind::Ran && row.title == "exec_command" && row.tool_started.is_some()
-    }));
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.tool_name.as_deref() != Some("exec_command")),
+        "{:?}",
+        ui.transcript
+    );
 
     ui.apply_value_event(
         &serde_json::json!({

@@ -261,7 +261,7 @@ pub(crate) struct FullscreenUi<'a> {
     pub(crate) tool_rows: BTreeMap<String, usize>,
     pub(crate) streaming_tool_message_seq: u64,
     pub(crate) streaming_tool_message_open: bool,
-    pub(crate) deferred_stream_events: VecDeque<RunStreamEvent>,
+    pub(crate) deferred_stream_events: VecDeque<TuiLiveEvent>,
     pub(crate) history_tool_titles: BTreeMap<String, String>,
     pub(crate) history_tool_args: BTreeMap<String, Value>,
     pub(crate) live_tool_args: BTreeMap<String, Value>,

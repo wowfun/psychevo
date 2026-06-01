@@ -65,6 +65,176 @@ impl TurnPrinter {
         out.flush()
     }
 
+    pub(crate) fn render_gateway_event(
+        &mut self,
+        event: &GatewayEvent,
+        out: &mut impl Write,
+    ) -> io::Result<()> {
+        match event {
+            GatewayEvent::ItemDelta { delta, .. } => {
+                if self.thinking_enabled {
+                    if !self.reasoning_active {
+                        self.reasoning_active = true;
+                        write!(out, "Thinking: ")?;
+                    }
+                    write!(out, "{}", self.renderer.dim(delta))?;
+                }
+            }
+            GatewayEvent::ItemStarted { item, .. }
+            | GatewayEvent::ItemUpdated { item, .. }
+            | GatewayEvent::ItemCompleted { item, .. } => {
+                self.render_gateway_item(item, out)?;
+            }
+            GatewayEvent::Warning {
+                message,
+                suggestion,
+                ..
+            } => {
+                writeln!(
+                    out,
+                    "{}",
+                    self.renderer.status(&format!("warning: {message}"))
+                )?;
+                if let Some(suggestion) = suggestion {
+                    writeln!(
+                        out,
+                        "{}",
+                        self.renderer.dim(&format!("suggestion: {suggestion}"))
+                    )?;
+                }
+            }
+            GatewayEvent::TurnStarted { .. }
+            | GatewayEvent::TurnQueued { .. }
+            | GatewayEvent::TurnCompleted { .. }
+            | GatewayEvent::PermissionRequested { .. }
+            | GatewayEvent::PermissionResolved { .. }
+            | GatewayEvent::ClarifyRequested { .. }
+            | GatewayEvent::ClarifyResolved { .. }
+            | GatewayEvent::DebugAvailable { .. } => {}
+        }
+        out.flush()
+    }
+
+    fn render_gateway_item(&mut self, item: &TimelineItem, out: &mut impl Write) -> io::Result<()> {
+        match item.kind {
+            TimelineItemKind::Reasoning => {
+                if matches!(
+                    item.status,
+                    TimelineItemStatus::Completed
+                        | TimelineItemStatus::Failed
+                        | TimelineItemStatus::Cancelled
+                ) && self.reasoning_active
+                {
+                    self.reasoning_active = false;
+                    if self.thinking_enabled {
+                        writeln!(out)?;
+                    }
+                }
+            }
+            TimelineItemKind::Assistant => {
+                if let Some(text) = item.body.as_deref().or(item.preview.as_deref()) {
+                    self.last_assistant_text = text.to_string();
+                    if item.status == TimelineItemStatus::Completed && !text.trim().is_empty() {
+                        writeln!(out, "Answer:\n{text}")?;
+                    }
+                }
+                if item.status == TimelineItemStatus::Completed {
+                    self.render_gateway_item_meta(item, out)?;
+                }
+            }
+            TimelineItemKind::Prompt => {}
+            _ => self.render_gateway_evidence_item(item, out)?,
+        }
+        Ok(())
+    }
+
+    fn render_gateway_item_meta(
+        &mut self,
+        item: &TimelineItem,
+        out: &mut impl Write,
+    ) -> io::Result<()> {
+        let metadata = item.metadata.as_ref();
+        let usage = metadata.and_then(|value| value.get("usage"));
+        let response_metadata = metadata.and_then(|value| value.get("metadata"));
+        let accounting = metadata.and_then(|value| value.get("accounting"));
+        let meta = turn_meta_text(TurnMetaProjection {
+            mode: &self.run_mode,
+            provider: &self.run_provider,
+            model: &self.run_model,
+            started: None,
+            usage,
+            metadata: response_metadata,
+            accounting,
+            failures: 0,
+            interrupted: false,
+            debug: self.debug,
+        });
+        if !meta.is_empty() {
+            writeln!(out, "Meta: {meta}")?;
+        }
+        Ok(())
+    }
+
+    fn render_gateway_evidence_item(
+        &mut self,
+        item: &TimelineItem,
+        out: &mut impl Write,
+    ) -> io::Result<()> {
+        let title = item
+            .title
+            .as_deref()
+            .filter(|title| !title.trim().is_empty())
+            .unwrap_or(match item.kind {
+                TimelineItemKind::Shell => "shell",
+                TimelineItemKind::File => "file",
+                TimelineItemKind::Web => "web",
+                TimelineItemKind::Mcp => "mcp",
+                TimelineItemKind::Clarify => "clarify",
+                TimelineItemKind::Permission => "permission",
+                TimelineItemKind::Skill => "skill",
+                TimelineItemKind::Agent => "agent",
+                TimelineItemKind::Mailbox => "mailbox",
+                TimelineItemKind::Diff => "diff",
+                TimelineItemKind::Artifact => "artifact",
+                TimelineItemKind::Status => "status",
+                TimelineItemKind::Tool => "tool",
+                TimelineItemKind::Prompt
+                | TimelineItemKind::Assistant
+                | TimelineItemKind::Reasoning => "item",
+            });
+        match item.status {
+            TimelineItemStatus::Pending => writeln!(out, "{title}: preparing")?,
+            TimelineItemStatus::Running => writeln!(out, "{title}: running")?,
+            TimelineItemStatus::Completed | TimelineItemStatus::Info => {
+                let summary = item
+                    .body
+                    .as_deref()
+                    .or(item.preview.as_deref())
+                    .unwrap_or("done");
+                writeln!(
+                    out,
+                    "{}",
+                    self.renderer.success(&format!("{title}: {summary}"))
+                )?;
+            }
+            TimelineItemStatus::Failed
+            | TimelineItemStatus::Cancelled
+            | TimelineItemStatus::NeedsInput => {
+                let summary = item
+                    .body
+                    .as_deref()
+                    .or(item.preview.as_deref())
+                    .unwrap_or("failed");
+                writeln!(
+                    out,
+                    "{}",
+                    self.renderer.error(&format!("{title}: {summary}"))
+                )?;
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn render_value_event(
         &mut self,
         value: &Value,
