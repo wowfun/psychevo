@@ -880,7 +880,27 @@ impl TuiApp {
             let _ = turn.render_event(&event, &mut *stdout);
         });
         let options = self.run_options(prompt);
-        let result = run_live_streaming(options, "tui", TUI_SESSION_SOURCES, sink).await?;
+        let source = self.gateway_source();
+        let result = self
+            .gateway
+            .send_turn(SendTurnRequest {
+                thread_id: options.session.clone(),
+                source: Some(source),
+                input: Vec::new(),
+                options,
+                runtime_source: Some("tui".to_string()),
+                continue_sources: TUI_SESSION_SOURCES
+                    .iter()
+                    .map(|source| (*source).to_string())
+                    .collect(),
+                stream: Some(sink),
+                event_sink: None,
+                control_handle: None,
+                control: None,
+                lineage: None,
+            })
+            .await?
+            .result;
         self.last_context_snapshot = result.context_snapshot.clone();
         {
             let mut turn = turn.lock().expect("turn lock poisoned");

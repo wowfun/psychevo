@@ -6,6 +6,7 @@ pub(crate) struct TuiApp {
     pub(crate) state_path: PathBuf,
     pub(crate) state: TuiState,
     pub(crate) state_runtime: StateRuntime,
+    pub(crate) gateway: Gateway,
     pub(crate) db_path: PathBuf,
     pub(crate) config_path: Option<PathBuf>,
     pub(crate) workdir: PathBuf,
@@ -71,6 +72,16 @@ pub(crate) struct DiffTask {
 }
 
 impl TuiApp {
+    pub(crate) fn gateway_source(&self) -> GatewaySource {
+        GatewaySource::new("tui", self.workdir_key.clone())
+            .process()
+            .with_visible_name("TUI")
+            .with_raw_identity(serde_json::json!({
+                "kind": "tui",
+                "cwd": self.workdir.display().to_string(),
+            }))
+    }
+
     pub(crate) fn current_skill_catalog(&self) -> Option<SkillCatalog> {
         discover_skills(&SkillDiscoveryOptions {
             home: self.home.clone(),

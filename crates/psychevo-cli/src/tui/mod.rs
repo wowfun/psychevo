@@ -17,6 +17,7 @@ pub(crate) use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 pub(crate) use psychevo_ai::Outcome;
+pub(crate) use psychevo_gateway::{Gateway, GatewaySource, SendTurnRequest};
 pub(crate) use psychevo_runtime::{
     AgentCatalog, AgentDiscoveryOptions, AgentEdgeRecord, AgentSource, AgentSpawnOptions,
     ApprovalHandler, AutoCompactionCheckOptions, ChildSessionSnapshotInput, ClarifyAnswer,
@@ -43,12 +44,11 @@ pub(crate) use psychevo_runtime::{
     permission_rules_value, prompt_message_from_inputs_with_options,
     prompt_starts_with_supported_image_path, redo_session, refresh_model_metadata_cache,
     reload_session_context, remove_installed_skill, resolve_agent_definition, resolve_image_source,
-    run_control, run_live_streaming, run_live_streaming_controlled,
-    run_user_shell_command_streaming_controlled, scan_skill_path, selected_configured_model,
-    set_agent_spawn_paused, set_default_model_with_reasoning, set_local_toolset_enabled,
-    set_skill_config_value, set_skill_enabled, side_conversation_boundary_prompt,
-    spawn_agent_background, stop_agent_id_with_grace, toolsets_value, undo_session, usage_stats,
-    view_skill_value, write_session_export,
+    run_control, run_user_shell_command_streaming_controlled, scan_skill_path,
+    selected_configured_model, set_agent_spawn_paused, set_default_model_with_reasoning,
+    set_local_toolset_enabled, set_skill_config_value, set_skill_enabled,
+    side_conversation_boundary_prompt, spawn_agent_background, stop_agent_id_with_grace,
+    toolsets_value, undo_session, usage_stats, view_skill_value, write_session_export,
 };
 pub(crate) use ratatui::Frame;
 pub(crate) use ratatui::Terminal;
@@ -150,12 +150,14 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
 
     let color = io::stdout().is_terminal() && env_value("NO_COLOR", &env_map).is_none();
     let (clipboard_result_tx, clipboard_result_rx) = std::sync::mpsc::channel();
+    let gateway = Gateway::new(state_runtime.clone());
     let mut app = TuiApp {
         env_map,
         home,
         state_path,
         state,
         state_runtime,
+        gateway,
         db_path,
         config_path,
         workdir,

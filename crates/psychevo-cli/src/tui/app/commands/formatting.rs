@@ -126,8 +126,30 @@ impl TuiApp {
             tx: approval_tx,
         }));
         options.prompt_display = prompt_display_metadata(display_prompt, &images, &self.workdir);
+        let gateway = self.gateway.clone();
+        let source = self.gateway_source();
+        let thread_id = options.session.clone();
+        let gateway_control_handle = control_handle.clone();
         let task = tokio::spawn(async move {
-            run_live_streaming_controlled(options, "tui", TUI_SESSION_SOURCES, sink, control).await
+            gateway
+                .send_turn(SendTurnRequest {
+                    thread_id,
+                    source: Some(source),
+                    input: Vec::new(),
+                    options,
+                    runtime_source: Some("tui".to_string()),
+                    continue_sources: TUI_SESSION_SOURCES
+                        .iter()
+                        .map(|source| (*source).to_string())
+                        .collect(),
+                    stream: Some(sink),
+                    event_sink: None,
+                    control_handle: Some(gateway_control_handle),
+                    control: Some(control),
+                    lineage: None,
+                })
+                .await
+                .map(|turn| turn.result)
         });
         ui.approval_rx = Some(approval_rx);
         ui.scroll_to_bottom();

@@ -50,6 +50,7 @@ pub async fn run_stdio(options: AcpOptions) -> std::io::Result<()> {
 pub(crate) struct PsychevoAcpAgent {
     pub(crate) options: AcpOptions,
     pub(crate) state: StateRuntime,
+    pub(crate) gateway: Gateway,
     pub(crate) sessions: Arc<Mutex<HashMap<String, AcpSession>>>,
     pub(crate) client_terminal_auth: Arc<Mutex<bool>>,
 }
@@ -94,12 +95,33 @@ impl AcpSession {
 impl PsychevoAcpAgent {
     pub(crate) fn new(options: AcpOptions) -> psychevo_runtime::Result<Self> {
         let state = StateRuntime::open(&options.db_path)?;
+        let gateway = Gateway::new(state.clone());
         Ok(Self {
             options,
             state,
+            gateway,
             sessions: Arc::default(),
             client_terminal_auth: Arc::new(Mutex::new(false)),
         })
+    }
+
+    fn gateway_source(&self, session_id: &SessionId, session: &AcpSession) -> GatewaySource {
+        GatewaySource::new("acp", session_id.to_string())
+            .persistent()
+            .with_visible_name(format!("ACP {session_id}"))
+            .with_raw_identity(json!({
+                "kind": "acp",
+                "session_id": session_id.to_string(),
+                "cwd": session.cwd.display().to_string(),
+            }))
+    }
+
+    fn gateway_selector(&self, session_id: &SessionId) -> GatewayThreadSelector {
+        GatewayThreadSelector::source(
+            GatewaySource::new("acp", session_id.to_string())
+                .persistent()
+                .source_key(),
+        )
     }
 
     pub(crate) async fn serve(
@@ -354,12 +376,16 @@ impl PsychevoAcpAgent {
         &self,
         request: CloseSessionRequest,
     ) -> Result<CloseSessionResponse, Error> {
+        let selector = self.gateway_selector(&request.session_id);
+        let interrupted = self.gateway.interrupt_turn(selector.clone());
+        self.gateway.clear_queue(selector);
         if let Some(session) = self
             .sessions
             .lock()
             .expect("acp session lock poisoned")
             .remove(&request.session_id.to_string())
             && let Some(control) = session.control
+            && !interrupted
         {
             control.abort();
         }
@@ -474,19 +500,36 @@ impl PsychevoAcpAgent {
             session_id: session_id.clone(),
             cx: cx.clone(),
         });
-        let stream_session_id = session_id.clone();
-        let stream_cx = cx.clone();
         let stream_usage = Arc::clone(&usage);
         let stream = Arc::new(move |event| {
             if let Ok(mut usage) = stream_usage.lock() {
                 usage.record_stream_event(&event);
             }
-            send_run_stream_update(&stream_cx, &stream_session_id, event);
+        });
+        let event_session_id = session_id.clone();
+        let event_cx = cx.clone();
+        let event_sink = Arc::new(move |event| {
+            send_gateway_event_update(&event_cx, &event_session_id, event);
         });
         let options = self.run_options(&session, prompt, image_inputs, Some(approval_handler));
-        let result =
-            run_live_streaming_controlled(options, "acp", &["acp", "run", "tui"], stream, control)
-                .await;
+        let source = self.gateway_source(&session_id, &session);
+        let result = self
+            .gateway
+            .send_turn(SendTurnRequest {
+                thread_id: session.runtime_session_id.clone(),
+                source: Some(source),
+                input: Vec::new(),
+                options,
+                runtime_source: Some("acp".to_string()),
+                continue_sources: vec!["acp".to_string(), "run".to_string(), "tui".to_string()],
+                stream: Some(stream),
+                event_sink: Some(event_sink),
+                control_handle: Some(handle),
+                control: Some(control),
+                lineage: None,
+            })
+            .await
+            .map(|turn| turn.result);
         match result {
             Ok(result) => {
                 if !result.final_answer.trim().is_empty() {
@@ -543,6 +586,9 @@ impl PsychevoAcpAgent {
     }
 
     pub(crate) async fn cancel(&self, notification: CancelNotification) {
+        let selector = self.gateway_selector(&notification.session_id);
+        let interrupted = self.gateway.interrupt_turn(selector.clone());
+        self.gateway.clear_queue(selector);
         let control = self
             .sessions
             .lock()
@@ -553,7 +599,7 @@ impl PsychevoAcpAgent {
                 session.pending_steers.clear();
                 session.control.clone()
             });
-        if let Some(control) = control {
+        if !interrupted && let Some(control) = control {
             control.abort();
         }
     }

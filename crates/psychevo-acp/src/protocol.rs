@@ -1,6 +1,7 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
+#[cfg(test)]
 pub(crate) fn send_runtime_event_update(
     cx: &ConnectionTo<Client>,
     session_id: &SessionId,
@@ -12,6 +13,7 @@ pub(crate) fn send_runtime_event_update(
     send_session_update(cx, session_id.clone(), update);
 }
 
+#[cfg(test)]
 pub(crate) fn runtime_event_session_update(value: &Value) -> Option<SessionUpdate> {
     let event_type = value.get("type").and_then(Value::as_str)?;
     let update = match event_type {
@@ -95,6 +97,7 @@ pub(crate) fn runtime_event_session_update(value: &Value) -> Option<SessionUpdat
     Some(update)
 }
 
+#[cfg(test)]
 pub(crate) fn tool_timing_meta(
     field_name: &str,
     field_value: Option<Value>,
@@ -113,6 +116,7 @@ pub(crate) fn tool_timing_meta(
     Some(meta)
 }
 
+#[cfg(test)]
 pub(crate) fn tool_call_pending_raw_input(value: &Value) -> Value {
     let arguments_json = value
         .get("arguments_json")
@@ -748,6 +752,7 @@ pub(crate) fn tool_kind(tool_name: &str) -> ToolKind {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn compact_tool_result_text(value: &Value) -> String {
     value
         .get("model_content")

@@ -486,13 +486,14 @@ pub(crate) fn cli_run_json_outputs_ndjson_events() {
         .lines()
         .map(|line| serde_json::from_str::<Value>(line).expect("json line"))
         .collect::<Vec<_>>();
-    assert_eq!(events.first().expect("first")["type"], "run_start");
-    assert!(events.iter().any(|event| event["type"] == "agent_start"));
-    assert!(events.iter().any(|event| event["type"] == "message_end"));
-    let agent_end = events
+    assert_eq!(events.first().expect("first")["type"], "thread.started");
+    assert_eq!(events.get(1).expect("second")["type"], "turn.started");
+    assert!(events.iter().any(|event| event["type"] == "item.completed"));
+    assert!(events.iter().any(|event| event["type"] == "turn.completed"));
+    let turn_end = events
         .iter()
-        .position(|event| event["type"] == "agent_end")
-        .expect("agent_end");
+        .position(|event| event["type"] == "turn.completed")
+        .expect("turn.completed");
     let context_snapshots = events
         .iter()
         .enumerate()
@@ -500,7 +501,7 @@ pub(crate) fn cli_run_json_outputs_ndjson_events() {
         .collect::<Vec<_>>();
     assert!(context_snapshots.len() <= 1);
     if let Some(context_snapshot) = context_snapshots.first() {
-        assert!(*context_snapshot > agent_end);
+        assert!(*context_snapshot > turn_end);
     }
     assert!(!stdout.contains("json final\njson final"));
 }

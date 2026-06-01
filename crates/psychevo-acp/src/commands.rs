@@ -904,22 +904,92 @@ pub(crate) fn send_session_update(
     let _ = cx.send_notification(SessionNotification::new(session_id, update));
 }
 
-pub(crate) fn send_run_stream_update(
+pub(crate) fn send_gateway_event_update(
     cx: &ConnectionTo<Client>,
     session_id: &SessionId,
-    event: RunStreamEvent,
+    event: GatewayEvent,
 ) {
     match event {
-        RunStreamEvent::ReasoningDelta { text } => send_session_update(
+        GatewayEvent::ItemDelta { delta, .. } => send_session_update(
             cx,
             session_id.clone(),
-            SessionUpdate::AgentThoughtChunk(ContentChunk::new(text.into())),
+            SessionUpdate::AgentThoughtChunk(ContentChunk::new(delta.into())),
         ),
-        RunStreamEvent::Event(value) => send_runtime_event_update(cx, session_id, value),
-        RunStreamEvent::Scoped { event, .. } => send_run_stream_update(cx, session_id, *event),
-        RunStreamEvent::ReasoningEnd
-        | RunStreamEvent::ClarifyRequest(_)
-        | RunStreamEvent::ClarifyResolved(_) => {}
+        GatewayEvent::ItemStarted { item, .. }
+        | GatewayEvent::ItemUpdated { item, .. }
+        | GatewayEvent::ItemCompleted { item, .. } => {
+            if let Some(update) = timeline_item_session_update(&item) {
+                send_session_update(cx, session_id.clone(), update);
+            }
+        }
+        GatewayEvent::Warning { message, .. } => send_session_update(
+            cx,
+            session_id.clone(),
+            SessionUpdate::AgentMessageChunk(ContentChunk::new(
+                format!("warning: {message}").into(),
+            )),
+        ),
+        GatewayEvent::TurnStarted { .. }
+        | GatewayEvent::TurnQueued { .. }
+        | GatewayEvent::TurnCompleted { .. }
+        | GatewayEvent::PermissionRequested { .. }
+        | GatewayEvent::PermissionResolved { .. }
+        | GatewayEvent::ClarifyRequested { .. }
+        | GatewayEvent::ClarifyResolved { .. }
+        | GatewayEvent::DebugAvailable { .. } => {}
+    }
+}
+
+fn timeline_item_session_update(item: &TimelineItem) -> Option<SessionUpdate> {
+    if !matches!(
+        item.kind,
+        TimelineItemKind::Tool
+            | TimelineItemKind::Shell
+            | TimelineItemKind::File
+            | TimelineItemKind::Web
+            | TimelineItemKind::Mcp
+            | TimelineItemKind::Clarify
+            | TimelineItemKind::Diff
+            | TimelineItemKind::Artifact
+    ) {
+        return None;
+    }
+    let call_id = timeline_tool_call_id(item);
+    let tool_name = item.title.as_deref().unwrap_or("tool");
+    let content = item
+        .detail
+        .as_deref()
+        .or(item.body.as_deref())
+        .or(item.preview.as_deref())
+        .filter(|text| !text.trim().is_empty())
+        .map(|text| vec![ToolCallContent::from(text.to_string())])
+        .unwrap_or_default();
+    Some(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+        call_id,
+        ToolCallUpdateFields::new()
+            .title(tool_title(tool_name))
+            .kind(tool_kind(tool_name))
+            .status(timeline_tool_status(item.status))
+            .content(content)
+            .raw_input(item.metadata.clone()),
+    )))
+}
+
+fn timeline_tool_call_id(item: &TimelineItem) -> String {
+    item.id
+        .rsplit_once("tool:")
+        .map(|(_, id)| id)
+        .unwrap_or(item.id.as_str())
+        .to_string()
+}
+
+fn timeline_tool_status(status: TimelineItemStatus) -> ToolCallStatus {
+    match status {
+        TimelineItemStatus::Pending => ToolCallStatus::Pending,
+        TimelineItemStatus::Running => ToolCallStatus::InProgress,
+        TimelineItemStatus::Completed | TimelineItemStatus::Info => ToolCallStatus::Completed,
+        TimelineItemStatus::Failed | TimelineItemStatus::Cancelled => ToolCallStatus::Failed,
+        TimelineItemStatus::NeedsInput => ToolCallStatus::Pending,
     }
 }
 

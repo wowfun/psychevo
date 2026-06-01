@@ -6,9 +6,10 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use futures::future::BoxFuture;
 use psychevo_ai::Outcome;
+use psychevo_gateway::{Gateway, GatewaySource, SendTurnRequest};
 use psychevo_runtime::{
     ApprovalHandler, PermissionApprovalDecision, PermissionApprovalRequest, PermissionMode,
-    ProjectContextInstructionMode, RunMode, RunOptions, StateRuntime, run_live,
+    ProjectContextInstructionMode, RunMode, RunOptions, StateRuntime, TimelineItemRecord,
 };
 
 use crate::args::{PermissionModeArg, RunArgs, RunFormatArg};
@@ -79,41 +80,104 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
     };
     let approval_handler = interactive_approval_handler();
     let state = StateRuntime::open(&db_path)?;
+    let gateway = Gateway::new(state.clone());
+    let source = GatewaySource::new("cli", format!("run:{}", std::process::id()))
+        .invocation()
+        .with_raw_identity(serde_json::json!({
+            "kind": "cli",
+            "entrypoint": "run",
+            "cwd": workdir.display().to_string(),
+        }));
 
-    let result = run_live(RunOptions {
-        state,
-        workdir,
-        snapshot_root: Some(home.join("snapshots")),
-        session: args.session.clone(),
-        continue_latest: args.continue_latest,
-        prompt,
-        image_inputs: Vec::new(),
-        extract_prompt_image_sources: true,
-        prompt_display: None,
-        max_context_messages: None,
-        config_path,
-        project_context_override,
-        model: args.model.clone(),
-        reasoning_effort: args.variant.map(|variant| variant.as_str().to_string()),
-        include_reasoning: args.include_reasoning,
-        mode: run_mode,
-        permission_mode,
-        approval_mode: None,
-        approval_handler,
-        clarify_enabled: false,
-        inherited_env: Some(env_map),
-        agent: args.agent.clone(),
-        no_agents: args.no_agents,
-        no_skills: args.no_skills,
-        skill_inputs: args.skill.clone(),
-        mcp_servers: Vec::new(),
-    })
-    .await?;
+    let result = gateway
+        .send_turn(SendTurnRequest {
+            thread_id: args.session.clone(),
+            source: Some(source),
+            input: Vec::new(),
+            options: RunOptions {
+                state,
+                workdir,
+                snapshot_root: Some(home.join("snapshots")),
+                session: args.session.clone(),
+                continue_latest: args.continue_latest,
+                prompt,
+                image_inputs: Vec::new(),
+                extract_prompt_image_sources: true,
+                prompt_display: None,
+                max_context_messages: None,
+                config_path,
+                project_context_override,
+                model: args.model.clone(),
+                reasoning_effort: args.variant.map(|variant| variant.as_str().to_string()),
+                include_reasoning: args.include_reasoning,
+                mode: run_mode,
+                permission_mode,
+                approval_mode: None,
+                approval_handler,
+                clarify_enabled: false,
+                inherited_env: Some(env_map),
+                agent: args.agent.clone(),
+                no_agents: args.no_agents,
+                no_skills: args.no_skills,
+                skill_inputs: args.skill.clone(),
+                mcp_servers: Vec::new(),
+            },
+            runtime_source: Some("run".to_string()),
+            continue_sources: vec!["run".to_string()],
+            stream: None,
+            event_sink: None,
+            control_handle: None,
+            control: None,
+            lineage: None,
+        })
+        .await?
+        .result;
 
+    let success = result.outcome == Outcome::Normal && result.tool_failures == 0;
     if args.format == RunFormatArg::Json {
-        for event in &result.events {
-            println!("{}", serde_json::to_string(event)?);
+        let thread_id = result.session_id.clone();
+        let turn_id = format!("run:{thread_id}");
+        println!(
+            "{}",
+            serde_json::to_string(&serde_json::json!({
+                "type": "thread.started",
+                "threadId": thread_id,
+            }))?
+        );
+        println!(
+            "{}",
+            serde_json::to_string(&serde_json::json!({
+                "type": "turn.started",
+                "threadId": result.session_id,
+                "turnId": turn_id,
+            }))?
+        );
+        for item in gateway
+            .state()
+            .store()
+            .load_timeline_items(&result.session_id)?
+        {
+            println!(
+                "{}",
+                serde_json::to_string(&serde_json::json!({
+                    "type": "item.completed",
+                    "threadId": result.session_id,
+                    "turnId": turn_id,
+                    "item": timeline_item_value(item),
+                }))?
+            );
         }
+        println!(
+            "{}",
+            serde_json::to_string(&serde_json::json!({
+                "type": if success { "turn.completed" } else { "turn.failed" },
+                "threadId": result.session_id,
+                "turnId": turn_id,
+                "outcome": result.outcome.as_str(),
+                "toolFailures": result.tool_failures,
+                "finalAnswer": result.final_answer,
+            }))?
+        );
     } else {
         for warning in &result.warnings {
             eprintln!("warning: {}", warning.message);
@@ -133,11 +197,30 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
         }
     }
 
-    let success = result.outcome == Outcome::Normal && result.tool_failures == 0;
     Ok(if success {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(1)
+    })
+}
+
+fn timeline_item_value(item: TimelineItemRecord) -> serde_json::Value {
+    serde_json::json!({
+        "id": item.item_id,
+        "threadId": item.session_id,
+        "turnId": item.turn_id,
+        "sequence": item.item_seq,
+        "kind": item.kind,
+        "status": item.status,
+        "source": item.source,
+        "title": item.title,
+        "body": item.body_text,
+        "preview": item.preview_text,
+        "detail": item.detail_text,
+        "artifactIds": item.artifact_ids,
+        "metadata": item.metadata,
+        "createdAtMs": item.created_at_ms,
+        "updatedAtMs": item.updated_at_ms,
     })
 }
 

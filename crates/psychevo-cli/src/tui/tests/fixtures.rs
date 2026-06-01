@@ -67,12 +67,14 @@ pub(crate) fn test_app(temp: &tempfile::TempDir) -> TuiApp {
     let (clipboard_result_tx, clipboard_result_rx) = std::sync::mpsc::channel();
     let db_path = home.join("state.db");
     let state_runtime = StateRuntime::open(&db_path).expect("state runtime");
+    let gateway = Gateway::new(state_runtime.clone());
     TuiApp {
         env_map,
         home: home.clone(),
         state_path: home.join("tui-state.json"),
         state: TuiState::default(),
         state_runtime,
+        gateway,
         db_path,
         config_path: None,
         workdir: workdir.clone(),

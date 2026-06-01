@@ -25,6 +25,10 @@ pub(crate) use agent_client_protocol::{
     Agent, ByteStreams, Client, ConnectTo, ConnectionTo, Error,
 };
 pub(crate) use futures::future::BoxFuture;
+pub(crate) use psychevo_gateway::{
+    Gateway, GatewayEvent, GatewaySource, GatewayThreadSelector, SendTurnRequest, TimelineItem,
+    TimelineItemKind, TimelineItemStatus,
+};
 pub(crate) use psychevo_runtime::{
     AgentDiscoveryOptions, ApprovalHandler, ApprovalMode, CompactSessionOptions, CompactionReason,
     ConfigScope, ContextFormatOptions, ContextOptions, ContextSnapshot, ImageInput, InstallOptions,
@@ -37,8 +41,8 @@ pub(crate) use psychevo_runtime::{
     context_snapshot, default_session_export_filename, discover_agents, discover_skills,
     format_context_snapshot_text_with_options, install_skill, list_agents_value,
     list_skill_bundles, model_catalog_providers, permission_rules_value, redo_session,
-    remove_local_permission_rule, remove_skill, run_control, run_live_streaming_controlled,
-    scan_skill_path, selected_configured_model, set_local_toolset_enabled, set_skill_config_value,
+    remove_local_permission_rule, remove_skill, run_control, scan_skill_path,
+    selected_configured_model, set_local_toolset_enabled, set_skill_config_value,
     set_skill_enabled, toolsets_value, undo_session, usage_stats,
 };
 pub(crate) use serde_json::{Value, json};
