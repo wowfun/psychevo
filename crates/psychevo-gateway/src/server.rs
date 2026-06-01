@@ -308,6 +308,7 @@ impl WebState {
                 request_id,
                 tool_name,
                 reason,
+                ..
             } => {
                 self.inner
                     .pending_permissions
@@ -695,6 +696,7 @@ async fn handle_rpc(
                     .send_turn(crate::SendTurnRequest {
                         thread_id: params.thread_id,
                         source: Some(source),
+                        reset_source_binding: false,
                         input,
                         options,
                         runtime_source: Some("web".to_string()),

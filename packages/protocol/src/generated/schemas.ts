@@ -486,9 +486,41 @@ export const gatewaySchemas = {
   ],
   "title": "GatewayImageInput"
 },
+  GatewaySelectedSkill: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "path"
+  ],
+  "title": "GatewaySelectedSkill",
+  "type": "object"
+},
   GatewayEvent: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "GatewaySelectedSkill": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "path"
+      ],
+      "type": "object"
+    },
     "PermissionDecision": {
       "enum": [
         "allowOnce",
@@ -615,6 +647,12 @@ export const gatewaySchemas = {
   "oneOf": [
     {
       "properties": {
+        "selectedSkills": {
+          "items": {
+            "$ref": "#/definitions/GatewaySelectedSkill"
+          },
+          "type": "array"
+        },
         "threadId": {
           "type": [
             "string",
@@ -793,11 +831,34 @@ export const gatewaySchemas = {
     },
     {
       "properties": {
+        "allowAlways": {
+          "type": "boolean"
+        },
+        "matchedRule": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "reason": {
           "type": "string"
         },
         "requestId": {
           "type": "string"
+        },
+        "suggestedRule": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "timeoutSecs": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
         },
         "toolName": {
           "type": "string"
@@ -810,8 +871,11 @@ export const gatewaySchemas = {
         }
       },
       "required": [
+        "allowAlways",
         "reason",
         "requestId",
+        "summary",
+        "timeoutSecs",
         "toolName",
         "type"
       ],
@@ -4023,6 +4087,12 @@ export const gatewaySchemas = {
       "oneOf": [
         {
           "properties": {
+            "selectedSkills": {
+              "items": {
+                "$ref": "#/definitions/GatewaySelectedSkill"
+              },
+              "type": "array"
+            },
             "threadId": {
               "type": [
                 "string",
@@ -4201,11 +4271,34 @@ export const gatewaySchemas = {
         },
         {
           "properties": {
+            "allowAlways": {
+              "type": "boolean"
+            },
+            "matchedRule": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "reason": {
               "type": "string"
             },
             "requestId": {
               "type": "string"
+            },
+            "suggestedRule": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "summary": {
+              "type": "string"
+            },
+            "timeoutSecs": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
             },
             "toolName": {
               "type": "string"
@@ -4218,8 +4311,11 @@ export const gatewaySchemas = {
             }
           },
           "required": [
+            "allowAlways",
             "reason",
             "requestId",
+            "summary",
+            "timeoutSecs",
             "toolName",
             "type"
           ],
@@ -4342,6 +4438,21 @@ export const gatewaySchemas = {
           "type": "object"
         }
       ]
+    },
+    "GatewaySelectedSkill": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "path"
+      ],
+      "type": "object"
     },
     "GatewayThread": {
       "properties": {

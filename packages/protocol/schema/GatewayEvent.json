@@ -1,6 +1,21 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "GatewaySelectedSkill": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "path"
+      ],
+      "type": "object"
+    },
     "PermissionDecision": {
       "enum": [
         "allowOnce",
@@ -127,6 +142,12 @@
   "oneOf": [
     {
       "properties": {
+        "selectedSkills": {
+          "items": {
+            "$ref": "#/definitions/GatewaySelectedSkill"
+          },
+          "type": "array"
+        },
         "threadId": {
           "type": [
             "string",
@@ -305,11 +326,34 @@
     },
     {
       "properties": {
+        "allowAlways": {
+          "type": "boolean"
+        },
+        "matchedRule": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "reason": {
           "type": "string"
         },
         "requestId": {
           "type": "string"
+        },
+        "suggestedRule": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "timeoutSecs": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
         },
         "toolName": {
           "type": "string"
@@ -322,8 +366,11 @@
         }
       },
       "required": [
+        "allowAlways",
         "reason",
         "requestId",
+        "summary",
+        "timeoutSecs",
         "toolName",
         "type"
       ],

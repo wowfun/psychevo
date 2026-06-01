@@ -24,9 +24,9 @@ use uuid::Uuid;
 pub use projection::gateway_event_from_run_stream;
 pub use protocol::{
     BackendKind, GatewayBackendInfo, GatewayEvent, GatewayImageInput, GatewayInputPart,
-    GatewaySource, GatewaySourceLifetime, GatewayThread, GatewayThreadSelector, GatewayTurn,
-    GatewayTurnStatus, PermissionDecision, SourceKey, ThreadItem, TimelineItem, TimelineItemKind,
-    TimelineItemStatus, TurnItem,
+    GatewaySelectedSkill, GatewaySource, GatewaySourceLifetime, GatewayThread,
+    GatewayThreadSelector, GatewayTurn, GatewayTurnStatus, PermissionDecision, SourceKey,
+    ThreadItem, TimelineItem, TimelineItemKind, TimelineItemStatus, TurnItem,
 };
 pub use server::{BoundGatewayWebServer, GatewayWebServerConfig, bind_gateway_web_server};
 
@@ -75,6 +75,15 @@ impl Gateway {
         source: &GatewaySource,
     ) -> psychevo_runtime::Result<Option<String>> {
         self.lookup_source_thread(source)
+    }
+
+    pub fn thread_timeline(&self, thread_id: &str) -> psychevo_runtime::Result<Vec<TimelineItem>> {
+        self.state
+            .store()
+            .load_timeline_items(thread_id)?
+            .into_iter()
+            .map(gateway_timeline_item_from_record)
+            .collect()
     }
 
     pub fn activity_for_selector(&self, selector: GatewayThreadSelector) -> GatewayActivity {
@@ -153,6 +162,27 @@ impl Gateway {
     ) -> Option<psychevo_runtime::PendingInputId> {
         self.control_for_selector(&selector, expected_turn_id)
             .and_then(|control| control.steer_user_message(message))
+    }
+
+    pub fn cancel_steer(
+        &self,
+        selector: GatewayThreadSelector,
+        expected_turn_id: Option<&str>,
+        input_id: psychevo_runtime::PendingInputId,
+    ) -> bool {
+        self.control_for_selector(&selector, expected_turn_id)
+            .is_some_and(|control| control.cancel_pending_user_message(input_id))
+    }
+
+    pub fn update_steer(
+        &self,
+        selector: GatewayThreadSelector,
+        expected_turn_id: Option<&str>,
+        input_id: psychevo_runtime::PendingInputId,
+        message: psychevo_runtime::Message,
+    ) -> bool {
+        self.control_for_selector(&selector, expected_turn_id)
+            .is_some_and(|control| control.update_pending_user_message(input_id, message))
     }
 
     pub fn interrupt_turn(&self, selector: GatewayThreadSelector) -> bool {
@@ -284,7 +314,9 @@ impl Gateway {
         options.state = self.state.clone();
         apply_input_parts(&mut options, &request.input)?;
 
-        let mapped_thread_id = if let Some(source) = &request.source {
+        let mapped_thread_id = if !request.reset_source_binding
+            && let Some(source) = &request.source
+        {
             self.lookup_source_thread(source)?
         } else {
             None
@@ -392,7 +424,9 @@ impl Gateway {
             return Ok(thread_key(thread_id));
         }
         if let Some(source) = &request.source {
-            if let Some(thread_id) = self.lookup_source_thread(source)? {
+            if !request.reset_source_binding
+                && let Some(thread_id) = self.lookup_source_thread(source)?
+            {
                 return Ok(thread_key(&thread_id));
             }
             return Ok(source_key_key(&source.source_key()));
@@ -606,8 +640,13 @@ impl ApprovalHandler for GatewayApprovalHandler {
             }
             event_sink(GatewayEvent::PermissionRequested {
                 request_id: request_id.clone(),
-                tool_name: request.tool_name,
-                reason: request.reason,
+                tool_name: request.tool_name.clone(),
+                summary: request.summary.clone(),
+                reason: request.reason.clone(),
+                matched_rule: request.matched_rule.clone(),
+                suggested_rule: request.suggested_rule.clone(),
+                allow_always: request.allow_always,
+                timeout_secs: request.timeout_secs,
             });
             let decision = timeout(Duration::from_secs(timeout_secs), receiver)
                 .await
@@ -637,6 +676,7 @@ pub struct QueuedGatewayInput {
 pub struct SendTurnRequest {
     pub thread_id: Option<String>,
     pub source: Option<GatewaySource>,
+    pub reset_source_binding: bool,
     pub input: Vec<GatewayInputPart>,
     pub options: RunOptions,
     pub runtime_source: Option<String>,
@@ -654,6 +694,7 @@ impl fmt::Debug for SendTurnRequest {
             .debug_struct("SendTurnRequest")
             .field("thread_id", &self.thread_id)
             .field("source", &self.source)
+            .field("reset_source_binding", &self.reset_source_binding)
             .field("input", &self.input)
             .field("options", &self.options)
             .field("runtime_source", &self.runtime_source)
@@ -825,6 +866,61 @@ fn gateway_image_input_into_runtime(input: GatewayImageInput) -> ImageInput {
     }
 }
 
+fn gateway_timeline_item_from_record(
+    record: psychevo_runtime::TimelineItemRecord,
+) -> psychevo_runtime::Result<TimelineItem> {
+    Ok(TimelineItem {
+        id: record.item_id,
+        thread_id: record.session_id,
+        turn_id: record.turn_id,
+        sequence: record.item_seq,
+        kind: gateway_timeline_kind(record.kind),
+        status: gateway_timeline_status(record.status),
+        source: record.source,
+        title: record.title,
+        body: record.body_text,
+        preview: record.preview_text,
+        detail: record.detail_text,
+        artifact_ids: record.artifact_ids,
+        metadata: record.metadata,
+        created_at_ms: record.created_at_ms,
+        updated_at_ms: record.updated_at_ms,
+    })
+}
+
+fn gateway_timeline_kind(kind: psychevo_runtime::TimelineItemKind) -> TimelineItemKind {
+    match kind {
+        psychevo_runtime::TimelineItemKind::Prompt => TimelineItemKind::Prompt,
+        psychevo_runtime::TimelineItemKind::Assistant => TimelineItemKind::Assistant,
+        psychevo_runtime::TimelineItemKind::Reasoning => TimelineItemKind::Reasoning,
+        psychevo_runtime::TimelineItemKind::Tool => TimelineItemKind::Tool,
+        psychevo_runtime::TimelineItemKind::Shell => TimelineItemKind::Shell,
+        psychevo_runtime::TimelineItemKind::File => TimelineItemKind::File,
+        psychevo_runtime::TimelineItemKind::Web => TimelineItemKind::Web,
+        psychevo_runtime::TimelineItemKind::Mcp => TimelineItemKind::Mcp,
+        psychevo_runtime::TimelineItemKind::Clarify => TimelineItemKind::Clarify,
+        psychevo_runtime::TimelineItemKind::Permission => TimelineItemKind::Permission,
+        psychevo_runtime::TimelineItemKind::Skill => TimelineItemKind::Skill,
+        psychevo_runtime::TimelineItemKind::Agent => TimelineItemKind::Agent,
+        psychevo_runtime::TimelineItemKind::Mailbox => TimelineItemKind::Mailbox,
+        psychevo_runtime::TimelineItemKind::Status => TimelineItemKind::Status,
+        psychevo_runtime::TimelineItemKind::Diff => TimelineItemKind::Diff,
+        psychevo_runtime::TimelineItemKind::Artifact => TimelineItemKind::Artifact,
+    }
+}
+
+fn gateway_timeline_status(status: psychevo_runtime::TimelineItemStatus) -> TimelineItemStatus {
+    match status {
+        psychevo_runtime::TimelineItemStatus::Pending => TimelineItemStatus::Pending,
+        psychevo_runtime::TimelineItemStatus::Running => TimelineItemStatus::Running,
+        psychevo_runtime::TimelineItemStatus::Completed => TimelineItemStatus::Completed,
+        psychevo_runtime::TimelineItemStatus::Failed => TimelineItemStatus::Failed,
+        psychevo_runtime::TimelineItemStatus::Cancelled => TimelineItemStatus::Cancelled,
+        psychevo_runtime::TimelineItemStatus::NeedsInput => TimelineItemStatus::NeedsInput,
+        psychevo_runtime::TimelineItemStatus::Info => TimelineItemStatus::Info,
+    }
+}
+
 fn permission_decision_from_runtime(decision: &PermissionApprovalDecision) -> PermissionDecision {
     match decision.outcome {
         PermissionApprovalOutcome::AllowOnce => PermissionDecision::AllowOnce,
@@ -848,7 +944,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     use psychevo_ai::Outcome;
-    use psychevo_runtime::{PermissionMode, RunMode};
+    use psychevo_runtime::{Message, PermissionMode, RunMode, UserContentBlock};
     use tokio::sync::{Notify, mpsc};
 
     #[derive(Debug, Clone)]
@@ -1052,6 +1148,7 @@ mod tests {
         SendTurnRequest {
             thread_id: None,
             source: Some(source),
+            reset_source_binding: false,
             input: Vec::new(),
             options: run_options(harness, prompt),
             runtime_source: Some("test".to_string()),
@@ -1199,6 +1296,69 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["first".to_string(), "second".to_string()]
         );
+    }
+
+    #[tokio::test]
+    async fn typed_steer_requires_expected_turn_id() {
+        let backend = Arc::new(FakeBackend::default());
+        let wait = backend.wait_on_first_run();
+        let harness = harness(backend);
+        let source = GatewaySource::new("tui", "workdir").process();
+        let selector = GatewayThreadSelector::source(source.source_key());
+
+        let (handle, control) = run_control();
+        let mut first_request = request(&harness, source.clone(), "first");
+        first_request.control_handle = Some(handle);
+        first_request.control = Some(control);
+        let gateway = harness.gateway.clone();
+        let first = tokio::spawn(async move { gateway.send_turn(first_request).await });
+        wait.started.notified().await;
+
+        let active_turn_id = harness
+            .gateway
+            .activity_for_selector(selector.clone())
+            .active_turn_id
+            .expect("active turn id");
+        let message = Message::User {
+            content: vec![UserContentBlock::text("steer")],
+            timestamp_ms: 0,
+        };
+
+        assert!(
+            harness
+                .gateway
+                .steer_turn(selector.clone(), Some("stale-turn"), message.clone())
+                .is_none()
+        );
+        let input_id = harness
+            .gateway
+            .steer_turn(selector.clone(), Some(&active_turn_id), message.clone())
+            .expect("current turn steer");
+        assert!(!harness.gateway.update_steer(
+            selector.clone(),
+            Some("stale-turn"),
+            input_id,
+            message.clone()
+        ));
+        assert!(harness.gateway.update_steer(
+            selector.clone(),
+            Some(&active_turn_id),
+            input_id,
+            message.clone()
+        ));
+        assert!(
+            !harness
+                .gateway
+                .cancel_steer(selector.clone(), Some("stale-turn"), input_id)
+        );
+        assert!(
+            harness
+                .gateway
+                .cancel_steer(selector, Some(&active_turn_id), input_id)
+        );
+
+        wait.release.notify_one();
+        first.await.expect("first task").expect("first turn");
     }
 
     #[tokio::test]

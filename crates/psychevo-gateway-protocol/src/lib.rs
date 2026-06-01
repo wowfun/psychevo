@@ -218,6 +218,12 @@ pub enum GatewayEvent {
         thread_id: Option<String>,
         #[serde(rename = "turnId")]
         turn_id: String,
+        #[serde(
+            rename = "selectedSkills",
+            default,
+            skip_serializing_if = "Vec::is_empty"
+        )]
+        selected_skills: Vec<GatewaySelectedSkill>,
     },
     TurnQueued {
         #[serde(rename = "threadId")]
@@ -261,7 +267,16 @@ pub enum GatewayEvent {
         request_id: String,
         #[serde(rename = "toolName")]
         tool_name: String,
+        summary: String,
         reason: String,
+        #[serde(rename = "matchedRule")]
+        matched_rule: Option<String>,
+        #[serde(rename = "suggestedRule")]
+        suggested_rule: Option<String>,
+        #[serde(rename = "allowAlways")]
+        allow_always: bool,
+        #[serde(rename = "timeoutSecs")]
+        timeout_secs: u64,
     },
     PermissionResolved {
         #[serde(rename = "requestId")]
@@ -290,6 +305,13 @@ pub enum GatewayEvent {
         #[serde(rename = "turnId")]
         turn_id: String,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewaySelectedSkill {
+    pub name: String,
+    pub path: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -880,9 +902,7 @@ where
 }
 
 fn export_ts_decl(decl: String) -> String {
-    if decl.starts_with("type ") {
-        format!("export {decl}")
-    } else if decl.starts_with("interface ") {
+    if decl.starts_with("type ") || decl.starts_with("interface ") {
         format!("export {decl}")
     } else {
         decl
@@ -947,6 +967,7 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(GatewayTurnStatus),
         exported_type!(GatewayInputPart),
         exported_type!(GatewayImageInput),
+        exported_type!(GatewaySelectedSkill),
         exported_type!(GatewayEvent),
         exported_type!(PermissionDecision),
         exported_type!(TimelineItemKind),

@@ -2,18 +2,6 @@
 pub(crate) use super::*;
 
 #[cfg(test)]
-pub(crate) fn send_runtime_event_update(
-    cx: &ConnectionTo<Client>,
-    session_id: &SessionId,
-    value: Value,
-) {
-    let Some(update) = runtime_event_session_update(&value) else {
-        return;
-    };
-    send_session_update(cx, session_id.clone(), update);
-}
-
-#[cfg(test)]
 pub(crate) fn runtime_event_session_update(value: &Value) -> Option<SessionUpdate> {
     let event_type = value.get("type").and_then(Value::as_str)?;
     let update = match event_type {
