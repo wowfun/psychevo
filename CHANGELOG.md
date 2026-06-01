@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-06-01
+
+- Replaced the unreleased `display_blocks` direction with schema v15
+  runtime-owned typed timeline items, artifacts, and bounded debug events.
+- Moved Gateway snapshots, Workbench rendering, and `pevo run --format json` to
+  typed timeline projections while keeping default plain CLI output unchanged.
+- Split browser host capabilities into `@psychevo/host`, added a generic
+  Gateway IM adapter boundary, and refined the Workbench operator-shell UI with
+  Playwright coverage.
+- Scrubbed non-evaluation specs and changelog language so product design and
+  implementation docs use Psychevo-owned terminology instead of external
+  reference-project phrasing.
+
+## 2026-05-31
+
+- Added capability contribution snapshots and Gateway source/thread binding,
+  queue/control, permission, clarify, and source-lifetime foundations.
+- Added `pevo serve`, `pevo gateway`, the managed Web Workbench, and generated
+  Gateway protocol packages for Rust, TypeScript, and JSON Schema.
+- Updated capability extension ADR/specs and Gateway/Web validation around
+  source identity, selection snapshots, peer-agent boundaries, and typed hook
+  evidence.
+
 ## 2026-05-30
 
 - Made `edit`/`write` LSP diagnostics best-effort with background client reuse,
@@ -74,8 +97,7 @@
   fail-closed runtime prompts, persistent project-local grants, TUI approval
   panels, ACP/CLI approval parity, and VHS coverage for the approval panel.
 - Added `/diff` across TUI and ACP with shared workspace diff collection,
-  structured ACP output, a Codex-style TUI pager, and deterministic VHS
-  coverage.
+  structured ACP output, a read-only TUI pager, and deterministic VHS coverage.
 - Upgraded local state storage to schema v12 with durable semantic display
   blocks and reset guidance for older state databases.
 - Migrated evaluation fixtures from `local-rust-swe` to `local-coding` with
@@ -93,8 +115,8 @@
   idle TUI agent reload and WAL checkpoint churn.
 - Fixed scoped default-model writes for CLI/TUI model selection, including
   explicit reasoning variants.
-- Normalized `edit` tool diffs to Git-style patch blocks and rendered completed
-  inline edit rows with a Codex-style single line-number gutter while keeping
+- Normalized `edit` tool diffs to Git patch blocks and rendered completed
+  inline edit rows with a single line-number gutter while keeping
   `/diff` on its existing dual-column diff display, with deterministic VHS
   coverage for the inline edit row.
 - Treated unknown slash-looking TUI input, including absolute paths, as normal
