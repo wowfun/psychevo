@@ -442,15 +442,15 @@ pub(crate) fn cli_run_json_budget_exhaustion_includes_terminal_reason() {
         .map(|line| serde_json::from_str::<Value>(line).expect("json line"))
         .collect::<Vec<_>>();
     assert!(events.iter().all(|event| event["type"] != "error"));
-    let agent_end = events
+    let turn_failed = events
         .iter()
-        .find(|event| event["type"] == "agent_end")
-        .expect("agent_end");
-    assert_eq!(agent_end["outcome"], "failed");
-    assert_eq!(agent_end["terminal_reason"]["type"], "max_turns_exceeded");
-    assert_eq!(agent_end["terminal_reason"]["max_turns"], 128);
+        .find(|event| event["type"] == "turn.failed")
+        .expect("turn.failed");
+    assert_eq!(turn_failed["outcome"], "failed");
+    assert_eq!(turn_failed["terminalReason"]["type"], "max_turns_exceeded");
+    assert_eq!(turn_failed["terminalReason"]["max_turns"], 128);
     assert!(
-        agent_end["terminal_message"]
+        turn_failed["terminalMessage"]
             .as_str()
             .expect("terminal message")
             .contains("model-turn limit (128)")
@@ -617,7 +617,7 @@ pub(crate) fn cli_run_skill_marker_injects_context_and_preserves_prompt() {
         .map(|line| serde_json::from_str::<Value>(line).expect("json line"))
         .collect::<Vec<_>>();
     assert_eq!(
-        events.first().expect("run start")["selected_skills"][0]["name"],
+        events.first().expect("thread start")["selectedSkills"][0]["name"],
         "reviewer"
     );
 
@@ -709,7 +709,7 @@ pub(crate) fn cli_run_unknown_skill_marker_remains_plain_text() {
     let stdout = String::from_utf8(output.stdout).expect("stdout");
     let first = serde_json::from_str::<Value>(stdout.lines().next().expect("run start"))
         .expect("run start json");
-    assert_eq!(first["selected_skills"], serde_json::json!([]));
+    assert_eq!(first["selectedSkills"], serde_json::json!([]));
     assert_eq!(
         user_contents(&server.request_json(0)),
         vec!["$missing do it"]

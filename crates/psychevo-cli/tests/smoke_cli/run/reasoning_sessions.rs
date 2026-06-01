@@ -114,16 +114,22 @@ pub(crate) fn cli_run_warns_for_claude_memory_without_loading_it() {
         .collect::<Vec<_>>();
     let warning = events
         .iter()
-        .find(|event| event["type"] == "warning")
-        .expect("warning event");
-    assert_eq!(warning["kind"], "project_instruction");
+        .find(|event| {
+            event["type"] == "item.completed"
+                && event["item"]["source"] == "runtime.warning"
+                && event["item"]["metadata"]["kind"] == "project_instruction"
+        })
+        .expect("warning item");
     assert!(
-        warning["message"]
+        warning["item"]["body"]
             .as_str()
             .expect("message")
             .contains("Psychevo only loads AGENTS-named")
     );
-    assert_eq!(warning["suggestion"], "ln -s CLAUDE.md AGENTS.md");
+    assert_eq!(
+        warning["item"]["metadata"]["suggestion"],
+        "ln -s CLAUDE.md AGENTS.md"
+    );
     assert!(!user_contents(&server.request_json(0))[0].contains("Do not load this Claude memory."));
 }
 
@@ -209,16 +215,11 @@ pub(crate) fn cli_run_json_hides_reasoning_by_default_and_debug_flag_emits_it() 
         .lines()
         .map(|line| serde_json::from_str::<Value>(line).expect("json line"))
         .collect::<Vec<_>>();
-    assert!(
-        events
-            .iter()
-            .any(|event| { event["type"] == "reasoning_delta" && event["text"] == "debug chain" })
-    );
-    assert!(
-        events
-            .iter()
-            .any(|event| { event["type"] == "reasoning_end" && event["text"] == "debug chain" })
-    );
+    assert!(events.iter().any(|event| {
+        event["type"] == "item.completed"
+            && event["item"]["kind"] == "reasoning"
+            && event["item"]["body"] == "debug chain"
+    }));
     assert!(shown_stdout.contains("debug final"));
 }
 

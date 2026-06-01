@@ -9,7 +9,8 @@ use psychevo_ai::Outcome;
 use psychevo_gateway::{Gateway, GatewaySource, SendTurnRequest};
 use psychevo_runtime::{
     ApprovalHandler, PermissionApprovalDecision, PermissionApprovalRequest, PermissionMode,
-    ProjectContextInstructionMode, RunMode, RunOptions, StateRuntime, TimelineItemRecord,
+    ProjectContextInstructionMode, RunMode, RunOptions, RunWarning, StateRuntime, TimelineItemKind,
+    TimelineItemRecord,
 };
 
 use crate::args::{PermissionModeArg, RunArgs, RunFormatArg};
@@ -93,6 +94,7 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
         .send_turn(SendTurnRequest {
             thread_id: args.session.clone(),
             source: Some(source),
+            reset_source_binding: false,
             input: Vec::new(),
             options: RunOptions {
                 state,
@@ -142,6 +144,7 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
             serde_json::to_string(&serde_json::json!({
                 "type": "thread.started",
                 "threadId": thread_id,
+                "selectedSkills": &result.selected_skills,
             }))?
         );
         println!(
@@ -152,11 +155,25 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
                 "turnId": turn_id,
             }))?
         );
+        for (index, warning) in result.warnings.iter().enumerate() {
+            println!(
+                "{}",
+                serde_json::to_string(&serde_json::json!({
+                    "type": "item.completed",
+                    "threadId": result.session_id,
+                    "turnId": turn_id,
+                    "item": warning_item_value(index, warning),
+                }))?
+            );
+        }
         for item in gateway
             .state()
             .store()
             .load_timeline_items(&result.session_id)?
         {
+            if item.kind == TimelineItemKind::Reasoning && !args.include_reasoning {
+                continue;
+            }
             println!(
                 "{}",
                 serde_json::to_string(&serde_json::json!({
@@ -167,17 +184,24 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
                 }))?
             );
         }
-        println!(
-            "{}",
-            serde_json::to_string(&serde_json::json!({
+        let mut terminal = serde_json::json!({
                 "type": if success { "turn.completed" } else { "turn.failed" },
                 "threadId": result.session_id,
                 "turnId": turn_id,
                 "outcome": result.outcome.as_str(),
                 "toolFailures": result.tool_failures,
                 "finalAnswer": result.final_answer,
-            }))?
-        );
+        });
+        if let Some(reason) = result.terminal_reason
+            && let Some(object) = terminal.as_object_mut()
+        {
+            object.insert("terminalReason".to_string(), serde_json::to_value(reason)?);
+            object.insert(
+                "terminalMessage".to_string(),
+                serde_json::json!(reason.message()),
+            );
+        }
+        println!("{}", serde_json::to_string(&terminal)?);
     } else {
         for warning in &result.warnings {
             eprintln!("warning: {}", warning.message);
@@ -221,6 +245,30 @@ fn timeline_item_value(item: TimelineItemRecord) -> serde_json::Value {
         "metadata": item.metadata,
         "createdAtMs": item.created_at_ms,
         "updatedAtMs": item.updated_at_ms,
+    })
+}
+
+fn warning_item_value(index: usize, warning: &RunWarning) -> serde_json::Value {
+    serde_json::json!({
+        "id": format!("warning:{index}"),
+        "threadId": null,
+        "turnId": null,
+        "sequence": index,
+        "kind": "status",
+        "status": "info",
+        "source": "runtime.warning",
+        "title": "warning",
+        "body": &warning.message,
+        "preview": &warning.message,
+        "detail": &warning.message,
+        "artifactIds": [],
+        "metadata": {
+            "kind": &warning.kind,
+            "sourcePath": &warning.source_path,
+            "suggestion": &warning.suggestion,
+        },
+        "createdAtMs": null,
+        "updatedAtMs": null,
     })
 }
 
