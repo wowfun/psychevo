@@ -2,10 +2,15 @@
 
 ## 2026-06-01
 
+- Combined the `peval view` HTML report Step expand/collapse controls into a
+  single stateful toggle button.
 - Replaced the unreleased `display_blocks` direction with schema v15
   runtime-owned typed timeline items, artifacts, and bounded debug events.
 - Moved Gateway snapshots, Workbench rendering, and `pevo run --format json` to
   typed timeline projections while keeping default plain CLI output unchanged.
+- Moved fullscreen TUI live/reload flows onto Gateway typed events and runtime
+  timeline snapshots, fixing tool-row evidence, `write_stdin` merging,
+  skill-loaded status, reasoning order, and completed-turn metadata footers.
 - Split browser host capabilities into `@psychevo/host`, added a generic
   Gateway IM adapter boundary, and refined the Workbench operator-shell UI with
   Playwright coverage.
