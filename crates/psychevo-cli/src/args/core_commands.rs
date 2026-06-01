@@ -48,6 +48,16 @@ pub(crate) enum Commands {
         long_about = "Open the fullscreen terminal UI for interactive coding-agent work. In non-terminal stdin/stdout, each input line is processed deterministically as a prompt, slash command, or shell escape."
     )]
     Tui(TuiArgs),
+    #[command(
+        about = "Run the headless local Gateway API server",
+        long_about = "Run the headless local Gateway API server on loopback. The command emits one ready JSON object on stdout and writes logs to stderr."
+    )]
+    Serve(ServeArgs),
+    #[command(
+        about = "Manage the local Gateway Web Shell",
+        long_about = "Open, start, inspect, stop, or restart the managed Gateway Web Shell. The default subcommand is open."
+    )]
+    Gateway(GatewayArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -66,6 +76,95 @@ pub(crate) struct InitArgs {
         help = "Back up existing SQLite state files and create a fresh state database"
     )]
     pub(crate) reset_state: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct ServeArgs {
+    #[arg(
+        long = "dir",
+        value_name = "DIR",
+        help = "Use this default workdir for API requests without an explicit scope"
+    )]
+    pub(crate) dir: Option<PathBuf>,
+    #[arg(
+        long,
+        value_name = "ADDR",
+        default_value = "127.0.0.1:0",
+        help = "Loopback address for the local Gateway server"
+    )]
+    pub(crate) bind: std::net::SocketAddr,
+    #[arg(
+        long = "token-file",
+        value_name = "FILE",
+        help = "Read the Bearer API token from this file"
+    )]
+    pub(crate) token_file: Option<PathBuf>,
+    #[arg(
+        long = "internal-static-dir",
+        hide = true,
+        value_name = "DIR",
+        help = "Serve Workbench assets from this directory"
+    )]
+    pub(crate) static_dir: Option<PathBuf>,
+    #[arg(
+        long = "internal-managed-state",
+        hide = true,
+        value_name = "FILE",
+        help = "Write managed server metadata to this file after binding"
+    )]
+    pub(crate) managed_state: Option<PathBuf>,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct GatewayArgs {
+    #[command(subcommand)]
+    pub(crate) command: Option<GatewayCommand>,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum GatewayCommand {
+    #[command(about = "Open the managed Gateway Web Shell")]
+    Open(GatewayOpenArgs),
+    #[command(about = "Start the managed Gateway server without opening a browser")]
+    Start(GatewayStartArgs),
+    #[command(about = "Print managed Gateway server status")]
+    Status,
+    #[command(about = "Stop the managed Gateway server")]
+    Stop,
+    #[command(about = "Restart the managed Gateway server")]
+    Restart(GatewayStartArgs),
+}
+
+#[derive(Debug, Parser, Clone)]
+pub(crate) struct GatewayOpenArgs {
+    #[arg(
+        long = "dir",
+        value_name = "DIR",
+        help = "Open this workdir in the Web Shell"
+    )]
+    pub(crate) dir: Option<PathBuf>,
+    #[arg(
+        long,
+        value_name = "ADDR",
+        default_value = "127.0.0.1:0",
+        help = "Loopback address for a newly started managed Gateway server"
+    )]
+    pub(crate) bind: std::net::SocketAddr,
+    #[arg(long, help = "Do not open a browser")]
+    pub(crate) no_browser: bool,
+    #[arg(long, help = "Include the short-lived launch URL in stdout JSON")]
+    pub(crate) print_url: bool,
+}
+
+#[derive(Debug, Parser, Clone)]
+pub(crate) struct GatewayStartArgs {
+    #[arg(
+        long,
+        value_name = "ADDR",
+        default_value = "127.0.0.1:0",
+        help = "Loopback address for the managed Gateway server"
+    )]
+    pub(crate) bind: std::net::SocketAddr,
 }
 
 #[derive(Debug, Parser)]

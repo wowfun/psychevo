@@ -1,3 +1,9 @@
 .references/
 target/
 .local/
+node_modules/
+coverage/
+**/.vite/
+**/dist/
+playwright-report/
+test-results/

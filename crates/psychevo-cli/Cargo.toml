@@ -17,17 +17,20 @@ futures.workspace = true
 ignore.workspace = true
 psychevo-ai = { path = "../psychevo-ai" }
 psychevo-acp = { path = "../psychevo-acp" }
+psychevo-gateway = { path = "../psychevo-gateway" }
 psychevo-runtime = { path = "../psychevo-runtime" }
 pulldown-cmark.workspace = true
 ratatui.workspace = true
 ratatui-textarea.workspace = true
 regex-lite.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 supports-color.workspace = true
 tokio.workspace = true
 toml.workspace = true
 unicode-width.workspace = true
+uuid.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

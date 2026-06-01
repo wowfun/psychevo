@@ -3,9 +3,12 @@ members = [
     "crates/psychevo-ai",
     "crates/psychevo-agent-core",
     "crates/psychevo-runtime",
+    "crates/psychevo-gateway-protocol",
+    "crates/psychevo-gateway",
     "crates/psychevo-acp",
     "crates/psychevo-cli",
     "crates/psychevo-eval",
+    "xtask",
 ]
 resolver = "3"
 
@@ -39,6 +42,7 @@ ratatui = { version = "0.30.0", features = ["unstable-rendered-line-info"] }
 ratatui-textarea = "0.9.1"
 rmcp = { version = "1.7.0", default-features = false, features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest", "reqwest"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
+schemars = { version = "0.8", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
@@ -52,5 +56,6 @@ tokio-util = { version = "0.7", features = ["compat"] }
 toml = "0.8"
 tree-sitter = "0.25.10"
 tree-sitter-bash = "0.25"
+ts-rs = { version = "10.1", features = ["serde-json-impl"] }
 unicode-width = "0.2"
 uuid = { version = "1.11", features = ["v7", "serde"] }

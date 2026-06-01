@@ -16,9 +16,11 @@ use commands::agent::run_agent_command;
 use commands::auth::run_auth_command;
 use commands::config::run_config_command;
 use commands::context::run_context_command;
+use commands::gateway::run_gateway_command;
 use commands::init::run_init_command;
 use commands::model::run_model_command;
 use commands::run::run_run_command;
+use commands::serve::run_serve_command;
 use commands::session::run_session_command;
 use commands::skills::run_skills_command;
 use commands::stats::run_stats_command;
@@ -65,5 +67,7 @@ pub(crate) async fn run() -> Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         Commands::Tui(args) => tui::run_tui_command(&args).await,
+        Commands::Serve(args) => run_serve_command(args).await,
+        Commands::Gateway(args) => run_gateway_command(args).await,
     }
 }

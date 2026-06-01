@@ -1,0 +1,21 @@
+[package]
+name = "psychevo-gateway"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+axum.workspace = true
+futures.workspace = true
+http.workspace = true
+psychevo-gateway-protocol = { path = "../psychevo-gateway-protocol" }
+psychevo-runtime = { path = "../psychevo-runtime" }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+psychevo-ai = { path = "../psychevo-ai" }
+tempfile.workspace = true

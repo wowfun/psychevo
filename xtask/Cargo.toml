@@ -1,0 +1,11 @@
+[package]
+name = "psychevo-xtask"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+psychevo-gateway-protocol = { path = "../crates/psychevo-gateway-protocol" }
