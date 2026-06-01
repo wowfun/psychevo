@@ -34,6 +34,9 @@ Rendering of the resulting transcript rows and panels is defined by
 - undo/redo command interactions and interruption priority
 - transparent permission approval prompts, queued approval routing, and
   approval slash commands
+- Gateway-backed control routing for live turns, including steer, interrupt,
+  permission response, and clarify response by the active source/thread
+  selector
 
 Out of scope:
 
@@ -81,14 +84,34 @@ Approval panel defaults:
   space, keep the full detail text and make the panel scroll internally
 
 If a running turn is interrupted or the fullscreen TUI exits while approval is
-pending, TUI must release pending approval requests with a deny/abort decision
-so the suspended tool call can settle and persist an observable interrupted
-result instead of leaving background work or orphaned live rows behind.
+pending, TUI must route the interruption through Gateway and release pending
+approval requests with a deny/abort decision so the suspended tool call can
+settle and persist an observable interrupted result instead of leaving
+background work or orphaned live rows behind.
 
 The `/approve` and `/deny` slash commands resolve the current pending approval
 or the most recent smart-review denial override. `/approve` accepts `once`,
 `session`, or `always`; omitted scope defaults to `once`. These commands must
 not substitute for the model-visible clarify tool.
+
+## Gateway Control
+
+The fullscreen TUI owns slash parsing and local pending-input UI, but active
+turn control is delegated to Gateway. Foreground turns are addressed by the
+current `GatewayThreadSelector` and active turn id:
+
+- ordinary composer submission during an active agent turn sends a Gateway
+  steer request with the expected active turn id
+- `/queue` remains a TUI-local next-turn queue and starts through Gateway only
+  after the current turn settles
+- interrupt keys and exit cleanup call Gateway interrupt for the active
+  selector, then clear local approval, clarify, and pending steer UI
+- approval and clarify panels submit typed Gateway responses; they do not call
+  runtime handlers directly
+
+Gateway rejects stale steer attempts whose expected turn id no longer matches
+the active turn. The TUI must present that rejection as bounded feedback and
+leave the current transcript state consistent with the latest Gateway event.
 
 ## Related Topics
 

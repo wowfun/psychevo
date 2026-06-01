@@ -166,8 +166,9 @@ The flat Agent / Model Comparison table is a per-task comparison view: score,
 duration, tokens, and cost columns use per-Trial averages for the row instead
 of summing repeated Trials in the same matrix cell. The Trial details table
 continues to show exact single-Trial values.
-The selected Trial Steps header offers one-click expand and collapse controls
-for the current Trial's step details without changing report filters or
+The selected Trial Steps header offers a single expand/collapse toggle for the
+current Trial's step details. It expands all rows when any step is collapsed and
+collapses all rows when every step is open, without changing report filters or
 selection state outside the step list.
 HTML report duration displays use seconds with one decimal place consistently
 across heatmap values, tables, selected-Trial summaries, expanded tool timing,

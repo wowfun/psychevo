@@ -34,16 +34,15 @@ scripts/validate.sh broad
 - positional prompt plus stdin append.
 - empty prompt rejection before session creation.
 - `--dir` controls the tool workdir.
-- `--format json` emits NDJSON beginning with `run_start`.
-- `--format json` may emit one `context_snapshot` after `agent_end` and never
-  before it.
+- `--format json` emits typed timeline NDJSON beginning with `thread.started`
+  and `turn.started`.
 - `--format json` hides reasoning by default.
-- `--format json --include-reasoning` emits separate `reasoning_delta` and
-  `reasoning_end` events while keeping `message_*` events sanitized.
+- `--format json --include-reasoning` emits typed reasoning timeline items
+  while keeping assistant transcript items sanitized.
 - `--include-reasoning` without JSON format rejects.
 - `--format json` runtime/config errors emit one stdout error JSON object.
 - default-format errors remain human stderr failures.
-- budget exhaustion emits a structured `agent_end.terminal_reason`, writes a
+- budget exhaustion emits a structured `turn.failed.terminalReason`, writes a
   default-format diagnostic to stderr, and exits non-zero.
 - long tool workflows can exceed 32 tool turns before a final assistant answer.
 - removed old `run` flags are rejected by argument parsing.

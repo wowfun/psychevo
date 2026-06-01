@@ -300,9 +300,10 @@ Report-wide row-count status bars are omitted. Both aggregate and Trial details
 table body rows are clickable and update the selected Trial panel. The Trial
 details table omits long path columns; selected Trial metadata such as the cell
 root is shown below the tables instead.
-The selected Trial Steps header provides one-click Expand all and Collapse all
-controls for that Trial's transcript rows. These controls only change the
-current step list's `<details>` state; they do not alter table expansion,
+The selected Trial Steps header provides one combined Expand all / Collapse all
+toggle for that Trial's transcript rows. The toggle expands all rows when any
+row is collapsed and collapses all rows when every row is open. It only changes
+the current step list's `<details>` state; it does not alter table expansion,
 filters, selected metric, or report data.
 
 The old report-wide diagnostic sections are not rendered as an Evidence Ledger

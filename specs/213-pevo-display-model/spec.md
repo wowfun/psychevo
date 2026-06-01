@@ -33,6 +33,13 @@ ordering, title, body text, preview/detail metadata, artifact references, and
 typed kind-specific fields. They must not store ratatui `Line`s, terminal ANSI
 color, viewport-dependent wrapping, or layout cache rows.
 
+Runtime writes transcript timeline items in semantic message order. For an
+assistant message, visible reasoning, visible assistant text, and tool-call
+items follow the original assistant `content[]` order. An assistant message may
+still use one consolidated assistant-text item, but that item is first inserted
+at the first text block position rather than ahead of earlier reasoning or tool
+blocks.
+
 Timeline items store the latest or terminal state of an item. Runtime may emit
 live `started`, `updated`, and `completed` observations while a turn is active,
 but the durable timeline is not a complete event-sourcing log. Restarted
@@ -48,6 +55,41 @@ UI projection. Runtime may parse stable tool-result fields, such as an
 `edit.diff` Git patch block, into semantic timeline items or artifact records
 for rendering. The parsed item is a UI artifact; it must not replace or mutate
 the model-visible tool result.
+
+Tool timeline rows merge pending tool-call metadata with later execution and
+tool-result metadata. Result upserts must preserve stable call identity fields,
+including arguments, content index, call index, and message sequence, so display
+projections can associate terminal updates with the row created when the tool
+call first appeared.
+
+Ordinary tool rows require an explicit typed tool call, execution observation,
+or durable tool timeline item. Reasoning or assistant text that merely says the
+model is about to run, read, write, search, or create something is not evidence
+of tool execution and must not create a primary active tool row.
+
+`write_stdin` is a model-visible tool call but not a primary transcript item
+when it targets an existing yielded `exec_command` session. Its output and
+completion state are appended to the owning `exec_command` timeline/projection
+row by session identity. The binding uses the `write_stdin` call arguments when
+the terminal result has a null `session_id`. Unmatched `write_stdin`
+observations are diagnostic material rather than ordinary transcript rows.
+
+Reasoning completion observations without text close an existing live Thinking
+item; they must not create an empty Thinking item. Completed reasoning timeline
+rows with body text are rendered as finished history rows and must not keep
+active timers after reload.
+
+Selected skill activation is represented in the typed timeline as a quiet status
+item at turn start. Live Gateway events and history snapshots must carry enough
+typed information for TUI, Web, ACP, and future IM clients to show the same
+skill-loaded notice without consuming raw runtime events.
+
+Assistant answer timeline items carry the metadata needed to render the
+turn-level footer: provider, model, finish reason, outcome, usage, elapsed or
+reasoning metadata, and accounting when available. Clients use that metadata to
+decide whether a completed assistant item is a terminal user-visible answer;
+assistant messages that continue into tool calls do not create a turn metadata
+footer.
 
 Raw runtime/provider payloads, unclassified observations, and verbose hook or
 transport records are debug material. They may be captured in bounded debug

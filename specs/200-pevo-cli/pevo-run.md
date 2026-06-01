@@ -166,10 +166,10 @@ timeline items or updates. Assistant message items remain visible-transcript
 projections and must not carry provider reasoning wire fields.
 
 When a started run ends because the agent loop reached its model-turn budget,
-the terminal `turn.completed` or `turn.failed` JSON event includes `terminal_reason:
-{"type":"max_turns_exceeded","max_turns":N}` and a human-readable
-`terminal_message`. This is a terminal outcome projection, not a runtime error
-event.
+the terminal `turn.completed` or `turn.failed` JSON event includes
+`terminalReason: {"type":"max_turns_exceeded","max_turns":N}` and a
+human-readable `terminalMessage`. This is a terminal outcome projection, not a
+runtime error event.
 
 When `--format json` is selected and a runtime/configuration error happens
 after argument parsing, stdout contains one JSON object:
