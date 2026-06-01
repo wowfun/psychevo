@@ -3,7 +3,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use futures::future::BoxFuture;
-use psychevo_agent_core::{AgentEvent, ControlHandle, EventSink, Message, Result as CoreResult};
+use psychevo_agent_core::{
+    AgentEvent, AssistantBlock, ControlHandle, EventSink, Message, Result as CoreResult,
+};
 use serde_json::{Value, json};
 
 use crate::accounting::account_usage;
@@ -11,7 +13,11 @@ use crate::context_usage::ContextRecorder;
 use crate::messages::{
     add_assistant_metadata, add_elapsed_ms_metadata, sanitize_message_for_output,
 };
-use crate::store::{ContextEvidenceInput, SqliteStore};
+use crate::store::store_message_fields::user_content_text;
+use crate::store::{
+    ContextEvidenceInput, SqliteStore, TimelineDebugEventInput, TimelineItemInput,
+    TimelineItemKind, TimelineItemStatus,
+};
 use crate::types::{
     MessageAccounting, ModelMetadata, PromptDisplayMetadata, RunStreamEvent, RunStreamSink,
     SelectedAgent, SmokeControl, TUI_DISPLAY_METADATA_KEY,
@@ -141,27 +147,54 @@ impl EventSink for PersistenceSink {
                             prompt_display.as_ref(),
                             prompt_prefix_metadata.clone(),
                         );
+                        let timeline_metadata = metadata.clone();
                         store
                             .append_message_with_undo_snapshot_metadata_and_context_evidence(
                                 &session_id,
                                 &message,
                                 metadata,
-                                content_text_override,
+                                content_text_override.clone(),
                                 prompt_context_evidence.as_slice(),
                             )
-                            .map(|_| ())
+                            .and_then(|seq| {
+                                persist_timeline_for_message(
+                                    &store,
+                                    &session_id,
+                                    seq,
+                                    &message,
+                                    content_text_override,
+                                    timeline_metadata,
+                                    accounting.as_ref(),
+                                )
+                            })
                             .map_err(|err| {
                                 psychevo_agent_core::Error::EventSink(err.to_string())
                             })?;
                     } else {
+                        let timeline_metadata = metadata.clone();
                         store
-                            .append_message_with_metrics_and_accounting(
-                                &session_id,
-                                &message,
-                                usage,
-                                metadata,
-                                accounting,
+                            .append_message_with_metrics_accounting_and_context_evidence(
+                                crate::store::store_messages::AppendMessageParams {
+                                    session_id: &session_id,
+                                    message: &message,
+                                    usage,
+                                    metadata,
+                                    accounting: accounting.clone(),
+                                    context_evidence: &[],
+                                    content_text_override: None,
+                                },
                             )
+                            .and_then(|seq| {
+                                persist_timeline_for_message(
+                                    &store,
+                                    &session_id,
+                                    seq,
+                                    &message,
+                                    None,
+                                    timeline_metadata,
+                                    accounting.as_ref(),
+                                )
+                            })
                             .map_err(|err| {
                                 psychevo_agent_core::Error::EventSink(err.to_string())
                             })?;
@@ -174,7 +207,80 @@ impl EventSink for PersistenceSink {
                 } => store
                     .finish_session(&session_id, outcome, terminal_reason)
                     .map_err(|err| psychevo_agent_core::Error::EventSink(err.to_string()))?,
-                _ => {}
+                AgentEvent::ToolExecutionStart {
+                    tool_call_id,
+                    tool_name,
+                    args,
+                    display,
+                    ..
+                } => {
+                    persist_tool_timeline_item(
+                        &store,
+                        &session_id,
+                        &tool_call_id,
+                        &tool_name,
+                        TimelineItemStatus::Running,
+                        Some(&args),
+                        None,
+                        display
+                            .as_ref()
+                            .and_then(|display| serde_json::to_value(display).ok()),
+                    )
+                    .map_err(|err| psychevo_agent_core::Error::EventSink(err.to_string()))?;
+                }
+                AgentEvent::ToolExecutionUpdate {
+                    tool_call_id,
+                    tool_name,
+                    partial_result,
+                } => {
+                    persist_tool_timeline_item(
+                        &store,
+                        &session_id,
+                        &tool_call_id,
+                        &tool_name,
+                        TimelineItemStatus::Running,
+                        None,
+                        Some(&partial_result),
+                        None,
+                    )
+                    .map_err(|err| psychevo_agent_core::Error::EventSink(err.to_string()))?;
+                }
+                AgentEvent::ToolExecutionEnd {
+                    tool_call_id,
+                    tool_name,
+                    result,
+                    outcome,
+                    elapsed_ms,
+                    display,
+                } => {
+                    let mut metadata = serde_json::Map::new();
+                    metadata.insert("elapsed_ms".to_string(), json!(elapsed_ms));
+                    metadata.insert("outcome".to_string(), json!(outcome.as_str()));
+                    if let Some(display) =
+                        display.and_then(|display| serde_json::to_value(display).ok())
+                    {
+                        metadata.insert("display".to_string(), display);
+                    }
+                    persist_tool_timeline_item(
+                        &store,
+                        &session_id,
+                        &tool_call_id,
+                        &tool_name,
+                        if outcome.as_str() == "normal" {
+                            TimelineItemStatus::Completed
+                        } else {
+                            TimelineItemStatus::Failed
+                        },
+                        None,
+                        Some(&result),
+                        Some(Value::Object(metadata)),
+                    )
+                    .map_err(|err| psychevo_agent_core::Error::EventSink(err.to_string()))?;
+                }
+                other => {
+                    persist_debug_event(&store, &session_id, &other)
+                        .map_err(|err| psychevo_agent_core::Error::EventSink(err.to_string()))?;
+                }
             }
             Ok(())
         })
@@ -282,6 +388,302 @@ pub(crate) fn prompt_user_metadata(
         (!metadata.is_empty()).then_some(Value::Object(metadata)),
         content_text_override,
     )
+}
+
+fn persist_timeline_for_message(
+    store: &SqliteStore,
+    session_id: &str,
+    message_seq: i64,
+    message: &Message,
+    content_text_override: Option<String>,
+    metadata: Option<Value>,
+    accounting: Option<&MessageAccounting>,
+) -> crate::Result<()> {
+    match message {
+        Message::User { content, .. } => {
+            let text = content_text_override.unwrap_or_else(|| user_content_text(content));
+            store.upsert_timeline_item(TimelineItemInput {
+                session_id: session_id.to_string(),
+                item_id: format!("message:{message_seq}:prompt"),
+                turn_id: Some(format!("message:{message_seq}")),
+                kind: TimelineItemKind::Prompt,
+                status: TimelineItemStatus::Completed,
+                source: "runtime.message".to_string(),
+                title: None,
+                body_text: Some(text.clone()),
+                preview_text: Some(compact_text(&text, 240)),
+                detail_text: Some(text),
+                artifact_ids: Vec::new(),
+                metadata,
+            })?;
+        }
+        Message::Assistant {
+            content,
+            outcome,
+            model,
+            provider,
+            ..
+        } => {
+            let status = if outcome.as_str() == "normal" {
+                TimelineItemStatus::Completed
+            } else {
+                TimelineItemStatus::Failed
+            };
+            let text = content
+                .iter()
+                .filter_map(|block| match block {
+                    AssistantBlock::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !text.is_empty() {
+                let mut item_metadata = metadata_object(metadata.clone());
+                if let Some(accounting) = accounting {
+                    item_metadata.insert("accounting".to_string(), accounting.public_json());
+                }
+                if let Some(model) = model {
+                    item_metadata.insert("model".to_string(), json!(model));
+                }
+                if let Some(provider) = provider {
+                    item_metadata.insert("provider".to_string(), json!(provider));
+                }
+                store.upsert_timeline_item(TimelineItemInput {
+                    session_id: session_id.to_string(),
+                    item_id: format!("message:{message_seq}:assistant"),
+                    turn_id: Some(format!("message:{message_seq}")),
+                    kind: TimelineItemKind::Assistant,
+                    status: status.clone(),
+                    source: "runtime.message".to_string(),
+                    title: None,
+                    body_text: Some(text.clone()),
+                    preview_text: Some(compact_text(&text, 240)),
+                    detail_text: Some(text),
+                    artifact_ids: Vec::new(),
+                    metadata: (!item_metadata.is_empty()).then_some(Value::Object(item_metadata)),
+                })?;
+            }
+            for (index, block) in content.iter().enumerate() {
+                match block {
+                    AssistantBlock::Reasoning {
+                        text,
+                        provider_evidence,
+                    } if !text.is_empty() => {
+                        let mut item_metadata = serde_json::Map::new();
+                        if let Some(provider_evidence) = provider_evidence {
+                            item_metadata
+                                .insert("provider_evidence".to_string(), provider_evidence.clone());
+                        }
+                        store.upsert_timeline_item(TimelineItemInput {
+                            session_id: session_id.to_string(),
+                            item_id: format!("message:{message_seq}:reasoning:{index}"),
+                            turn_id: Some(format!("message:{message_seq}")),
+                            kind: TimelineItemKind::Reasoning,
+                            status: status.clone(),
+                            source: "runtime.message".to_string(),
+                            title: Some("Reasoning".to_string()),
+                            body_text: Some(text.clone()),
+                            preview_text: Some(compact_text(text, 240)),
+                            detail_text: Some(text.clone()),
+                            artifact_ids: Vec::new(),
+                            metadata: (!item_metadata.is_empty())
+                                .then_some(Value::Object(item_metadata)),
+                        })?;
+                    }
+                    AssistantBlock::ToolCall(call) => {
+                        store.upsert_timeline_item(TimelineItemInput {
+                            session_id: session_id.to_string(),
+                            item_id: format!("tool:{}", call.id),
+                            turn_id: Some(format!("message:{message_seq}")),
+                            kind: tool_kind(&call.name),
+                            status: TimelineItemStatus::Pending,
+                            source: "runtime.tool_call".to_string(),
+                            title: Some(call.name.clone()),
+                            body_text: None,
+                            preview_text: Some(compact_text(&call.arguments_json, 240)),
+                            detail_text: Some(call.arguments_json.clone()),
+                            artifact_ids: Vec::new(),
+                            metadata: Some(json!({
+                                "message_session_seq": message_seq,
+                                "content_index": call.content_index,
+                                "call_index": call.call_index,
+                                "arguments": call.arguments,
+                                "arguments_error": call.arguments_error,
+                            })),
+                        })?;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Message::ToolResult {
+            tool_call_id,
+            tool_name,
+            content,
+            is_error,
+            ..
+        } => {
+            store.upsert_timeline_item(TimelineItemInput {
+                session_id: session_id.to_string(),
+                item_id: format!("tool:{tool_call_id}"),
+                turn_id: Some(format!("message:{message_seq}")),
+                kind: tool_kind(tool_name),
+                status: if *is_error {
+                    TimelineItemStatus::Failed
+                } else {
+                    TimelineItemStatus::Completed
+                },
+                source: "runtime.tool_result".to_string(),
+                title: Some(tool_name.clone()),
+                body_text: Some(content.clone()),
+                preview_text: Some(compact_text(content, 240)),
+                detail_text: Some(content.clone()),
+                artifact_ids: Vec::new(),
+                metadata: Some(json!({
+                    "message_session_seq": message_seq,
+                    "tool_call_id": tool_call_id,
+                    "is_error": is_error,
+                    "message_metadata": metadata,
+                })),
+            })?;
+        }
+    }
+    Ok(())
+}
+
+fn persist_tool_timeline_item(
+    store: &SqliteStore,
+    session_id: &str,
+    tool_call_id: &str,
+    tool_name: &str,
+    status: TimelineItemStatus,
+    args: Option<&Value>,
+    result: Option<&Value>,
+    metadata: Option<Value>,
+) -> crate::Result<()> {
+    let preview_value = result.or(args);
+    let preview_text = preview_value
+        .and_then(|value| serde_json::to_string(value).ok())
+        .map(|text| compact_text(&text, 240));
+    let detail_text = preview_value.and_then(|value| serde_json::to_string_pretty(value).ok());
+    let mut item_metadata = metadata_object(metadata);
+    if let Some(args) = args {
+        item_metadata.insert("args".to_string(), args.clone());
+    }
+    if let Some(result) = result {
+        item_metadata.insert("result".to_string(), result.clone());
+    }
+    store.upsert_timeline_item(TimelineItemInput {
+        session_id: session_id.to_string(),
+        item_id: format!("tool:{tool_call_id}"),
+        turn_id: None,
+        kind: tool_kind(tool_name),
+        status,
+        source: "runtime.tool_execution".to_string(),
+        title: Some(tool_name.to_string()),
+        body_text: detail_text.clone(),
+        preview_text,
+        detail_text,
+        artifact_ids: Vec::new(),
+        metadata: (!item_metadata.is_empty()).then_some(Value::Object(item_metadata)),
+    })?;
+    Ok(())
+}
+
+fn persist_debug_event(
+    store: &SqliteStore,
+    session_id: &str,
+    event: &AgentEvent,
+) -> crate::Result<()> {
+    let Some(event_type) = debug_event_type(event) else {
+        return Ok(());
+    };
+    let payload = serde_json::to_value(event).ok();
+    store.append_timeline_debug_event(TimelineDebugEventInput {
+        session_id: session_id.to_string(),
+        turn_id: None,
+        event_type: event_type.to_string(),
+        source: "runtime.agent_event".to_string(),
+        scope: None,
+        status: Some("observed".to_string()),
+        summary: Some(debug_event_summary(event)),
+        payload,
+    })?;
+    Ok(())
+}
+
+fn debug_event_type(event: &AgentEvent) -> Option<&'static str> {
+    match event {
+        AgentEvent::AgentStart => Some("agent.start"),
+        AgentEvent::TurnStart { .. } => Some("turn.start"),
+        AgentEvent::TurnEnd { .. } => Some("turn.end"),
+        AgentEvent::ReasoningDelta { .. } => Some("reasoning.delta"),
+        AgentEvent::ReasoningEnd { .. } => Some("reasoning.end"),
+        AgentEvent::ToolCallPending { .. } => Some("tool.pending"),
+        AgentEvent::MessageStart { .. } => Some("message.start"),
+        AgentEvent::MessageUpdate { .. } => Some("message.update"),
+        AgentEvent::AgentEnd { .. }
+        | AgentEvent::MessageEnd { .. }
+        | AgentEvent::ToolExecutionStart { .. }
+        | AgentEvent::ToolExecutionUpdate { .. }
+        | AgentEvent::ToolExecutionEnd { .. } => None,
+    }
+}
+
+fn debug_event_summary(event: &AgentEvent) -> String {
+    match event {
+        AgentEvent::TurnStart { turn_index } => format!("turn {turn_index} started"),
+        AgentEvent::TurnEnd {
+            turn_index,
+            outcome,
+        } => format!("turn {turn_index} ended with {}", outcome.as_str()),
+        AgentEvent::ReasoningDelta { text } => compact_text(text, 80),
+        AgentEvent::ReasoningEnd { text } => compact_text(text, 80),
+        AgentEvent::ToolCallPending {
+            tool_name,
+            tool_call_id,
+            ..
+        } => format!("{tool_name} pending ({tool_call_id})"),
+        AgentEvent::MessageStart { message } => format!("{} message started", message.role()),
+        AgentEvent::MessageUpdate { message } => format!("{} message updated", message.role()),
+        AgentEvent::AgentStart => "agent started".to_string(),
+        _ => "event observed".to_string(),
+    }
+}
+
+fn tool_kind(tool_name: &str) -> TimelineItemKind {
+    match tool_name {
+        "exec_command" | "write_stdin" => TimelineItemKind::Shell,
+        "read" | "write" | "edit" | "apply_patch" => TimelineItemKind::File,
+        "web_fetch" | "web_search" => TimelineItemKind::Web,
+        "mcp" | "mcp_call" => TimelineItemKind::Mcp,
+        "clarify" => TimelineItemKind::Clarify,
+        _ => TimelineItemKind::Tool,
+    }
+}
+
+fn compact_text(text: &str, max_chars: usize) -> String {
+    let mut output = String::new();
+    for (index, ch) in text.chars().enumerate() {
+        if index >= max_chars {
+            output.push_str("...");
+            return output;
+        }
+        output.push(ch);
+    }
+    output
+}
+
+fn metadata_object(metadata: Option<Value>) -> serde_json::Map<String, Value> {
+    match metadata {
+        Some(Value::Object(object)) => object,
+        Some(value) => {
+            let mut object = serde_json::Map::new();
+            object.insert("value".to_string(), value);
+            object
+        }
+        None => serde_json::Map::new(),
+    }
 }
 
 pub(crate) fn project_agent_event(event: &AgentEvent, include_reasoning: bool) -> Option<Value> {

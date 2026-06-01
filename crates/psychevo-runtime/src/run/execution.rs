@@ -323,7 +323,7 @@ pub(crate) async fn run_live_internal(
         crate::mcp::mcp_tool_bindings(&options.mcp_servers, &workdir, Some(&permission_runtime))
             .await;
     emit_warning_events(&mcp_warnings, &events, stream_events.as_ref());
-    let mut tools = assemble_tool_surface(ToolSurfaceAssembly {
+    let tool_surface = assemble_tool_surface_with_capabilities(ToolSurfaceAssembly {
         workdir: workdir.clone(),
         task_id: session_id.clone(),
         mode: options.mode,
@@ -343,10 +343,19 @@ pub(crate) async fn run_live_internal(
         extension_tools: mcp_tools,
         agents: agent_tools,
     });
+    emit_warning_events(&tool_surface.warnings, &events, stream_events.as_ref());
+    let mut tool_surface_warnings = tool_surface.warnings;
+    let mut capability_parts = tool_surface.capability_parts;
+    let mut tools = tool_surface.tools;
     tools = apply_agent_tool_policy(tools, selected_agent.as_ref(), options.mode);
     tools = apply_agent_hooks(tools, selected_agent.as_ref(), &workdir);
     tools = permission_runtime.wrap_tools(tools);
     let effective_tool_names = effective_tool_names(&tools);
+    let final_tool_names = effective_tool_names
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    capability_parts.retain_selected_tools(&final_tool_names, "omitted by runtime tool policy");
     let prompt_agents = if options.no_agents {
         Vec::new()
     } else {
@@ -365,6 +374,35 @@ pub(crate) async fn run_live_internal(
     };
     let project_instructions_role = (!prompt_project_instructions.is_empty())
         .then(|| developer_provider_role(&resolved.metadata.capabilities).to_string());
+    add_provider_capability(
+        &mut capability_parts,
+        ProviderCapabilityInput {
+            provider: &resolved.provider,
+            provider_label: &resolved.display_label,
+            model: &resolved.model,
+            base_url: Some(&resolved.base_url),
+            api_key_env: resolved.api_key_env.as_deref(),
+            reasoning_effort: resolved.reasoning_effort.as_deref(),
+            context_limit: resolved.context_limit,
+        },
+    );
+    add_agent_capabilities(
+        &mut capability_parts,
+        selected_agent_summary.as_ref(),
+        !options.no_agents,
+        agent_catalog.agents.len(),
+        prompt_agents
+            .iter()
+            .map(|agent| agent.name.clone())
+            .collect(),
+    );
+    add_skill_capabilities(
+        &mut capability_parts,
+        &selected_skills,
+        !options.no_skills || !explicit_skill_inputs.is_empty(),
+        skill_catalog.skills.len(),
+        !prompt_skills.is_empty(),
+    );
     let tool_declarations_hash = tool_declarations_hash(&tools);
     let prefix_metadata = json!({
         "mode": options.mode.as_str(),
@@ -430,6 +468,16 @@ pub(crate) async fn run_live_internal(
         (assembly_from_prefix_record(&record), record)
     };
     let prefix_notice = take_prompt_prefix_notice(&store, &session_id)?;
+    let capability_snapshot = if let Some(snapshot) =
+        store.load_capability_snapshot(&session_id, prompt_prefix_record.version)?
+    {
+        snapshot
+    } else {
+        let snapshot =
+            build_capability_snapshot(&session_id, &prompt_prefix_record, capability_parts);
+        store.upsert_capability_snapshot(&snapshot)?;
+        snapshot
+    };
     let mut turn_prompt_instructions = Vec::new();
     if let Some(notice) = prefix_notice.as_deref()
         && let Some(instruction) =
@@ -628,6 +676,7 @@ pub(crate) async fn run_live_internal(
     }
     let mut warnings = project_instructions.warnings;
     warnings.extend(mcp_warnings);
+    warnings.append(&mut tool_surface_warnings);
     Ok(RunResult {
         session_id,
         outcome: completion.outcome,
@@ -645,6 +694,7 @@ pub(crate) async fn run_live_internal(
         selected_agent: selected_agent_summary,
         selected_skills,
         context_snapshot,
+        capability_snapshot: Some(capability_snapshot),
         events,
         warnings,
     })

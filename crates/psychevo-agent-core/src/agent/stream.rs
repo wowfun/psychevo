@@ -6,13 +6,8 @@ pub(crate) async fn emit(sink: &Arc<dyn EventSink>, event: AgentEvent) -> Result
         .map_err(|err| Error::EventSink(err.to_string()))
 }
 
-pub(crate) fn display_spec_for_tool(request: &AgentLoopRequest, name: &str) -> ToolDisplaySpec {
-    request
-        .tools
-        .iter()
-        .find(|tool| tool.name() == name)
-        .map(|tool| tool.display_spec())
-        .unwrap_or_else(|| ToolDisplaySpec::for_name(name))
+pub(crate) fn display_spec_for_tool(router: &ToolRouter, name: &str) -> ToolDisplaySpec {
+    router.display_spec(name)
 }
 
 pub(crate) async fn stream_assistant(
@@ -22,6 +17,7 @@ pub(crate) async fn stream_assistant(
     sink: Arc<dyn EventSink>,
     abort: AbortSignal,
 ) -> Result<Message> {
+    let tool_router = ToolRouter::from_tools(request.tools.clone());
     let mut messages = request
         .prompt_instructions
         .iter()
@@ -74,15 +70,7 @@ pub(crate) async fn stream_assistant(
             model: request.model.clone(),
         },
         messages,
-        tools: request
-            .tools
-            .iter()
-            .map(|tool| ToolDeclaration {
-                name: tool.name().to_string(),
-                description: tool.description().to_string(),
-                parameters: tool.parameters(),
-            })
-            .collect(),
+        tools: tool_router.declarations(),
         metadata: request.generation_metadata.clone(),
     };
 
@@ -165,7 +153,7 @@ pub(crate) async fn stream_assistant(
                         arguments_json: String::new(),
                         content_index,
                         call_index,
-                        display: Some(display_spec_for_tool(request, &pending_name)),
+                        display: Some(display_spec_for_tool(&tool_router, &pending_name)),
                     },
                 )
                 .await?;
@@ -203,7 +191,7 @@ pub(crate) async fn stream_assistant(
                             arguments_json: builder.arguments_json.clone(),
                             content_index: builder.content_index,
                             call_index: builder.call_index,
-                            display: Some(display_spec_for_tool(request, &builder.name)),
+                            display: Some(display_spec_for_tool(&tool_router, &builder.name)),
                         },
                     )
                     .await?;

@@ -28,6 +28,9 @@ pub use control::*;
 #[path = "request.rs"]
 pub(crate) mod request;
 pub use request::*;
+#[path = "tool_router.rs"]
+pub(crate) mod tool_router;
+pub use tool_router::*;
 #[path = "agent/loop.rs"]
 pub(crate) mod agent_loop;
 pub use agent_loop::*;

@@ -2,6 +2,8 @@
 
 pub(crate) mod accounting;
 pub(crate) mod agents;
+pub mod capabilities;
+pub(crate) mod capability_snapshot;
 pub mod command_registry;
 pub(crate) mod compaction;
 pub(crate) mod config;
@@ -45,6 +47,7 @@ pub use agents::{
     stop_agent_id_with_grace, view_agent_value, view_agent_value_with_catalog, wait_agent_id,
     wait_agent_mailbox,
 };
+pub use capabilities::{CapabilitySnapshot, CapabilitySnapshotParts};
 pub use compaction::{
     AutoCompactionCheckOptions, CompactSessionOptions, CompactionReason, CompactionResult,
     auto_compaction_due_for_snapshot, compact_session,
@@ -104,9 +107,11 @@ pub use state_runtime::StateRuntime;
 pub use stats::usage_stats;
 pub use store::{AgentEdgeRecord, AgentEdgeStatus};
 pub use store::{
-    ChildSessionSnapshotInput, ContextEvidenceInput, ContextEvidenceRecord, DisplayBlockInput,
-    DisplayBlockKind, DisplayBlockRecord, SessionCompactionInput, SessionCompactionRecord,
-    SessionMessageRecord, SqliteStore,
+    ChildSessionSnapshotInput, ContextEvidenceInput, ContextEvidenceRecord,
+    GatewaySourceBindingInput, GatewaySourceBindingRecord, SessionCompactionInput,
+    SessionCompactionRecord, SessionMessageRecord, SqliteStore, TimelineArtifactInput,
+    TimelineArtifactRecord, TimelineDebugEventInput, TimelineDebugEventRecord, TimelineItemInput,
+    TimelineItemKind, TimelineItemRecord, TimelineItemStatus,
 };
 pub use tools::tool_names_for_mode;
 pub use types::{

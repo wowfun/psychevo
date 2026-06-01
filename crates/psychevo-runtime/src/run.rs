@@ -22,6 +22,10 @@ pub(crate) use crate::agents::{
     narrow_permission_mode_for_agent, resolve_agent_definition, resolve_agents_home,
     run_agent_hook_event, skill_catalog_visible_for_tools, spawn_child_agent_background,
 };
+pub(crate) use crate::capability_snapshot::{
+    ProviderCapabilityInput, add_agent_capabilities, add_provider_capability,
+    add_skill_capabilities, build_capability_snapshot,
+};
 pub(crate) use crate::compaction::{
     CompactSessionOptions, CompactionReason, compact_session, is_context_overflow_error,
     load_projected_messages,
@@ -55,7 +59,7 @@ pub(crate) use crate::skills::{
 pub(crate) use crate::snapshot::SnapshotStore;
 pub(crate) use crate::store::{PromptPrefixRecord, SqliteStore};
 pub(crate) use crate::tool_surface::{
-    ClarifyToolSurface, ToolSurfaceAssembly, assemble_tool_surface,
+    ClarifyToolSurface, ToolSurfaceAssembly, assemble_tool_surface_with_capabilities,
 };
 pub(crate) use crate::tools::{detach_exec_sessions_for_task, interrupt_exec_sessions_for_task};
 pub(crate) use crate::types::{

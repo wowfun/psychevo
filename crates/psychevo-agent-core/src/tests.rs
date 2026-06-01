@@ -114,6 +114,39 @@ impl ToolBinding for DisplayOnlyTool {
     }
 }
 
+pub(crate) struct HiddenTool;
+
+impl ToolBinding for HiddenTool {
+    fn name(&self) -> &str {
+        "hidden"
+    }
+
+    fn description(&self) -> &str {
+        "A hidden test tool."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({"type": "object", "properties": {}, "additionalProperties": false})
+    }
+
+    fn exposure(&self) -> ToolExposure {
+        ToolExposure::Hidden
+    }
+
+    fn execution_mode(&self) -> ToolExecutionMode {
+        ToolExecutionMode::Parallel
+    }
+
+    fn execute(
+        &self,
+        _tool_call_id: String,
+        _args: Value,
+        _abort: AbortSignal,
+    ) -> BoxFuture<'static, ToolOutput> {
+        Box::pin(async { ToolOutput::ok(json!({"hidden": true})) })
+    }
+}
+
 #[tokio::test]
 pub(crate) async fn tool_display_spec_is_not_model_visible_declaration() {
     let provider = RequestCaptureProvider::default();
@@ -136,6 +169,37 @@ pub(crate) async fn tool_display_spec_is_not_model_visible_declaration() {
     let value = serde_json::to_value(tool).expect("tool declaration json");
     assert_eq!(value["name"], "display_only");
     assert!(value.get("display").is_none(), "{value}");
+}
+
+#[tokio::test]
+pub(crate) async fn hidden_tools_are_not_model_callable() {
+    let (_abort_tx, abort_rx) = watch::channel(false);
+    let tools: Vec<Arc<dyn ToolBinding>> = vec![Arc::new(HiddenTool)];
+    let messages = execute_tool_batch(
+        &tools,
+        &[ToolCallBlock {
+            id: "call-1".to_string(),
+            name: "hidden".to_string(),
+            arguments: json!({}),
+            arguments_json: "{}".to_string(),
+            arguments_error: None,
+            content_index: 0,
+            call_index: 0,
+        }],
+        Arc::new(CaptureSink::default()),
+        AbortSignal::new(abort_rx),
+    )
+    .await
+    .expect("tool execution");
+
+    let Message::ToolResult {
+        is_error, content, ..
+    } = &messages[0]
+    else {
+        panic!("tool result");
+    };
+    assert!(*is_error);
+    assert!(content.contains("tool not found: hidden"));
 }
 
 #[tokio::test]

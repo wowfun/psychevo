@@ -2,7 +2,7 @@
 pub(crate) use super::*;
 
 #[test]
-pub(crate) fn sqlite_schema_v12_stores_reasoning_only_in_message_json_and_metrics_separately() {
+pub(crate) fn sqlite_schema_v15_stores_reasoning_only_in_message_json_and_metrics_separately() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");

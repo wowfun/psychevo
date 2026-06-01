@@ -1,11 +1,13 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::capabilities::{
+    CapabilityCategory, CapabilityContributionRecord, CapabilitySnapshot, CapabilitySnapshotParts,
+    source_record,
+};
 
 #[test]
-pub(crate) fn sqlite_schema_v12_rejects_v3_through_v11_state_databases() {
-    for version in 3..=11 {
+pub(crate) fn sqlite_schema_v15_rejects_old_state_databases() {
+    for version in 1..=14 {
         let temp = tempdir().expect("temp");
         let db = temp.path().join(format!("v{version}.db"));
         {
@@ -30,12 +32,12 @@ pub(crate) fn sqlite_schema_v12_rejects_v3_through_v11_state_databases() {
 }
 
 #[test]
-pub(crate) fn sqlite_schema_v12_rejects_v1_and_v2_state_databases() {
+pub(crate) fn sqlite_schema_v15_rejects_unknown_state_database() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("old.db");
     {
         let conn = Connection::open(&db).expect("db");
-        conn.pragma_update(None, "user_version", 1)
+        conn.pragma_update(None, "user_version", 99)
             .expect("version");
         conn.execute_batch("CREATE TABLE sessions (id TEXT);")
             .expect("schema");
@@ -45,27 +47,12 @@ pub(crate) fn sqlite_schema_v12_rejects_v1_and_v2_state_databases() {
         Ok(_) => panic!("old db opened successfully"),
         Err(err) => err,
     };
-    assert!(err.to_string().contains("schema version 1"));
-    assert!(err.to_string().contains("--reset-state"));
-
-    let v2_db = temp.path().join("v2.db");
-    {
-        let conn = Connection::open(&v2_db).expect("db");
-        conn.pragma_update(None, "user_version", 2)
-            .expect("version");
-        conn.execute_batch("CREATE TABLE sessions (id TEXT);")
-            .expect("schema");
-    }
-    let err = match SqliteStore::open(&v2_db) {
-        Ok(_) => panic!("v2 db opened successfully"),
-        Err(err) => err,
-    };
-    assert!(err.to_string().contains("schema version 2"));
+    assert!(err.to_string().contains("schema version 99"));
     assert!(err.to_string().contains("--reset-state"));
 }
 
 #[test]
-pub(crate) fn sqlite_schema_v12_stores_semantic_display_blocks() {
+pub(crate) fn sqlite_schema_v15_stores_timeline_capability_snapshots_and_gateway_bindings() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
@@ -82,36 +69,234 @@ pub(crate) fn sqlite_schema_v12_stores_semantic_display_blocks() {
         )
         .expect("message");
 
-    let block_seq = store
-        .append_display_block(DisplayBlockInput {
+    let item = store
+        .upsert_timeline_item(TimelineItemInput {
             session_id: session_id.clone(),
-            kind: DisplayBlockKind::Diff,
-            surface: "tui".to_string(),
+            item_id: "diff:1".to_string(),
+            turn_id: Some("turn:1".to_string()),
+            kind: TimelineItemKind::Diff,
+            status: TimelineItemStatus::Completed,
             source: "slash:/diff".to_string(),
-            message_session_seq: Some(message_seq),
             title: Some("D I F F".to_string()),
-            content_text: "diff --git a/a b/a\n".to_string(),
+            body_text: Some("diff --git a/a b/a\n".to_string()),
+            preview_text: Some("a/a".to_string()),
+            detail_text: None,
+            artifact_ids: vec!["artifact:diff:1".to_string()],
+            metadata: Some(json!({
+                "message_session_seq": message_seq,
+                "truncated": false,
+            })),
+        })
+        .expect("timeline item");
+    store
+        .upsert_timeline_artifact(TimelineArtifactInput {
+            session_id: session_id.clone(),
+            artifact_id: "artifact:diff:1".to_string(),
+            kind: "diff".to_string(),
+            mime_type: Some("text/x-diff".to_string()),
+            title: Some("D I F F".to_string()),
+            preview_text: Some("diff --git a/a b/a".to_string()),
+            path: None,
             metadata: Some(json!({ "truncated": false })),
         })
-        .expect("display block");
+        .expect("timeline artifact");
+    store
+        .append_timeline_debug_event(TimelineDebugEventInput {
+            session_id: session_id.clone(),
+            turn_id: Some("turn:1".to_string()),
+            event_type: "hook.completed".to_string(),
+            source: "test".to_string(),
+            scope: Some(json!({ "tool": "diff" })),
+            status: Some("ok".to_string()),
+            summary: Some("hook finished".to_string()),
+            payload: Some(json!({ "duration_ms": 5 })),
+        })
+        .expect("debug event");
 
-    assert_eq!(block_seq, 1);
+    assert_eq!(item.item_seq, 1);
     let conn = Connection::open(&db).expect("db");
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 12);
+    assert_eq!(user_version, 15);
     assert!(
-        sqlite_columns(&conn, "display_blocks")
+        sqlite_columns(&conn, "timeline_items")
             .iter()
             .any(|name| name == "kind")
     );
-    let blocks = store.load_display_blocks(&session_id).expect("blocks");
-    assert_eq!(blocks.len(), 1);
-    assert_eq!(blocks[0].kind, DisplayBlockKind::Diff);
-    assert_eq!(blocks[0].surface, "tui");
-    assert_eq!(blocks[0].message_session_seq, Some(message_seq));
-    assert_eq!(blocks[0].metadata, Some(json!({ "truncated": false })));
+    assert!(
+        sqlite_columns(&conn, "timeline_artifacts")
+            .iter()
+            .any(|name| name == "preview_text")
+    );
+    assert!(
+        sqlite_columns(&conn, "timeline_debug_events")
+            .iter()
+            .any(|name| name == "payload_json")
+    );
+    assert!(
+        sqlite_columns(&conn, "capability_snapshots")
+            .iter()
+            .any(|name| name == "snapshot_json")
+    );
+    assert!(
+        sqlite_columns(&conn, "gateway_source_bindings")
+            .iter()
+            .any(|name| name == "raw_identity_json")
+    );
+    let items = store.load_timeline_items(&session_id).expect("items");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].kind, TimelineItemKind::Diff);
+    assert_eq!(items[0].status, TimelineItemStatus::Completed);
+    assert_eq!(items[0].artifact_ids, vec!["artifact:diff:1"]);
+    assert_eq!(
+        items[0].metadata,
+        Some(json!({
+            "message_session_seq": message_seq,
+            "truncated": false,
+        }))
+    );
+    let artifacts = store
+        .load_timeline_artifacts(&session_id)
+        .expect("artifacts");
+    assert_eq!(artifacts.len(), 1);
+    assert_eq!(artifacts[0].artifact_id, "artifact:diff:1");
+    let debug = store
+        .load_timeline_debug_events(&session_id, 10)
+        .expect("debug events");
+    assert_eq!(debug.len(), 1);
+    assert_eq!(debug[0].event_type, "hook.completed");
+    assert_eq!(debug[0].payload, Some(json!({ "duration_ms": 5 })));
+}
+
+#[test]
+pub(crate) fn sqlite_gateway_source_binding_round_trips_and_rebinds() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let store = SqliteStore::open(&db).expect("store");
+    let first_session = store
+        .create_session_with_metadata(&workdir, "acp", "model", "provider", None)
+        .expect("first session");
+    let second_session = store
+        .create_session_with_metadata(&workdir, "acp", "model", "provider", None)
+        .expect("second session");
+
+    let first = store
+        .upsert_gateway_source_binding(GatewaySourceBindingInput {
+            source_key: "acp:client-session",
+            source_kind: "acp",
+            raw_identity: json!({
+                "kind": "acp",
+                "session_id": "client-session",
+            }),
+            visible_name: Some("ACP client-session"),
+            thread_id: &first_session,
+            backend_kind: "psychevo",
+            backend_native_id: Some(&first_session),
+            lineage: Some(json!({ "source": "test" })),
+        })
+        .expect("insert binding");
+
+    assert_eq!(first.source_key, "acp:client-session");
+    assert_eq!(first.source_kind, "acp");
+    assert_eq!(first.visible_name.as_deref(), Some("ACP client-session"));
+    assert_eq!(first.thread_id, first_session);
+    assert_eq!(first.backend_kind, "psychevo");
+    assert_eq!(
+        first.backend_native_id.as_deref(),
+        Some(first_session.as_str())
+    );
+    assert_eq!(first.lineage, Some(json!({ "source": "test" })));
+
+    let rebound = store
+        .upsert_gateway_source_binding(GatewaySourceBindingInput {
+            source_key: "acp:client-session",
+            source_kind: "acp",
+            raw_identity: json!({
+                "kind": "acp",
+                "session_id": "client-session",
+                "reset": true,
+            }),
+            visible_name: Some("ACP client-session"),
+            thread_id: &second_session,
+            backend_kind: "psychevo",
+            backend_native_id: Some(&second_session),
+            lineage: Some(json!({ "reason": "gateway_reset" })),
+        })
+        .expect("rebind");
+
+    assert_eq!(rebound.thread_id, second_session);
+    assert_eq!(
+        store
+            .gateway_source_binding("acp:client-session")
+            .expect("load binding")
+            .expect("binding")
+            .thread_id,
+        second_session
+    );
+
+    store
+        .mark_session_ended_with_reason(&first_session, "gateway_reset")
+        .expect("end first session");
+    store
+        .archive_session(&first_session)
+        .expect("archive first");
+    let first_summary = store
+        .session_summary(&first_session)
+        .expect("summary")
+        .expect("first session");
+    assert_eq!(first_summary.end_reason.as_deref(), Some("gateway_reset"));
+    assert!(first_summary.ended_at_ms.is_some());
+    assert!(first_summary.archived_at_ms.is_some());
+}
+
+#[test]
+pub(crate) fn sqlite_capability_snapshot_round_trips_by_session_and_prefix_version() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let store = SqliteStore::open(&db).expect("store");
+    let session_id = store
+        .create_session_with_metadata(&workdir, "run", "model", "provider", None)
+        .expect("session");
+
+    let mut parts = CapabilitySnapshotParts::default();
+    parts.push_source(source_record(
+        "provider:mock",
+        "provider_adapter",
+        "mock",
+        Some("Mock".to_string()),
+        "session_snapshot",
+        None,
+    ));
+    parts.push_selected(CapabilityContributionRecord {
+        id: "provider:mock:model:fake".to_string(),
+        source_id: "provider:mock".to_string(),
+        category: CapabilityCategory::Provider,
+        raw_name: "mock/fake".to_string(),
+        visible_name: Some("mock/fake".to_string()),
+        exposure: None,
+        status: "selected".to_string(),
+        reason: None,
+        metadata: Some(json!({ "model": "fake" })),
+    });
+    let snapshot = CapabilitySnapshot::from_parts(session_id.clone(), 7, 42, parts);
+    store
+        .upsert_capability_snapshot(&snapshot)
+        .expect("snapshot");
+
+    let loaded = store
+        .load_capability_snapshot(&session_id, 7)
+        .expect("load snapshot")
+        .expect("snapshot exists");
+    assert_eq!(loaded, snapshot);
+    assert_eq!(
+        store
+            .load_latest_capability_snapshot(&session_id)
+            .expect("latest snapshot"),
+        Some(snapshot)
+    );
 }
 
 #[test]

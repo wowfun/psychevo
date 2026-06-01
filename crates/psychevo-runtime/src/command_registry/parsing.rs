@@ -53,6 +53,28 @@ pub const CLI_COMMANDS: &[CliCommandSpec] = &[
         status: CommandStatus::Active,
     },
     CliCommandSpec {
+        canonical: "serve",
+        aliases: &[],
+        usage: "pevo serve",
+        summary: "run the headless Gateway API server",
+        surface: PEVO_CLI,
+        group: COMMANDS,
+        argument_kind: CommandArgumentKind::OptionalValue,
+        output_kind: CommandOutputKind::ProcessResult,
+        status: CommandStatus::Active,
+    },
+    CliCommandSpec {
+        canonical: "gateway",
+        aliases: &[],
+        usage: "pevo gateway [open|start|status|stop|restart]",
+        summary: "manage the local Gateway Web Shell",
+        surface: PEVO_CLI,
+        group: COMMANDS,
+        argument_kind: CommandArgumentKind::OptionalValue,
+        output_kind: CommandOutputKind::ProcessResult,
+        status: CommandStatus::Active,
+    },
+    CliCommandSpec {
         canonical: "acp",
         aliases: &[],
         usage: "pevo acp",
@@ -637,8 +659,8 @@ pub(crate) mod tests {
         assert_eq!(
             names,
             [
-                "init", "run", "tui", "acp", "agent", "skill", "tool", "session", "model",
-                "config", "auth", "stats", "context",
+                "init", "run", "tui", "serve", "gateway", "acp", "agent", "skill", "tool",
+                "session", "model", "config", "auth", "stats", "context",
             ]
         );
         assert!(

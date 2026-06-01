@@ -236,6 +236,20 @@ pub enum ToolExecutionMode {
     Sequential,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolExposure {
+    Direct,
+    Deferred,
+    Hidden,
+}
+
+impl ToolExposure {
+    pub fn is_model_visible(self) -> bool {
+        matches!(self, Self::Direct)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolDisplayCategory {
@@ -428,6 +442,9 @@ pub trait ToolBinding: Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn parameters(&self) -> Value;
+    fn exposure(&self) -> ToolExposure {
+        ToolExposure::Direct
+    }
     fn execution_mode(&self) -> ToolExecutionMode;
     fn display_spec(&self) -> ToolDisplaySpec {
         ToolDisplaySpec::for_name(self.name())

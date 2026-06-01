@@ -118,6 +118,16 @@ impl SqliteStore {
                 metadata_json TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS capability_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                prompt_prefix_version INTEGER NOT NULL,
+                created_at_ms INTEGER NOT NULL,
+                snapshot_hash TEXT NOT NULL,
+                snapshot_json TEXT NOT NULL,
+                UNIQUE(session_id, prompt_prefix_version)
+            );
+
             CREATE TABLE IF NOT EXISTS agent_mailbox_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 parent_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -151,19 +161,65 @@ impl SqliteStore {
                 metadata_json TEXT
             );
 
-            CREATE TABLE IF NOT EXISTS display_blocks (
+            CREATE TABLE IF NOT EXISTS timeline_items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-                block_seq INTEGER NOT NULL,
+                item_seq INTEGER NOT NULL,
+                item_id TEXT NOT NULL,
+                turn_id TEXT,
                 kind TEXT NOT NULL,
-                surface TEXT NOT NULL,
+                status TEXT NOT NULL,
                 source TEXT NOT NULL,
-                message_session_seq INTEGER,
                 title TEXT,
-                content_text TEXT NOT NULL,
+                body_text TEXT,
+                preview_text TEXT,
+                detail_text TEXT,
+                artifact_ids_json TEXT NOT NULL DEFAULT '[]',
                 metadata_json TEXT,
                 created_at_ms INTEGER NOT NULL,
-                UNIQUE(session_id, block_seq)
+                updated_at_ms INTEGER NOT NULL,
+                UNIQUE(session_id, item_id),
+                UNIQUE(session_id, item_seq)
+            );
+
+            CREATE TABLE IF NOT EXISTS timeline_artifacts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                artifact_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                mime_type TEXT,
+                title TEXT,
+                preview_text TEXT,
+                path TEXT,
+                metadata_json TEXT,
+                created_at_ms INTEGER NOT NULL,
+                UNIQUE(session_id, artifact_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS timeline_debug_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                turn_id TEXT,
+                event_type TEXT NOT NULL,
+                source TEXT NOT NULL,
+                scope_json TEXT,
+                status TEXT,
+                summary TEXT,
+                payload_json TEXT,
+                created_at_ms INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS gateway_source_bindings (
+                source_key TEXT PRIMARY KEY,
+                source_kind TEXT NOT NULL,
+                raw_identity_json TEXT NOT NULL,
+                visible_name TEXT,
+                thread_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                backend_kind TEXT NOT NULL,
+                backend_native_id TEXT,
+                created_at_ms INTEGER NOT NULL,
+                updated_at_ms INTEGER NOT NULL,
+                lineage_json TEXT
             );
 
             CREATE INDEX IF NOT EXISTS idx_messages_session_seq
@@ -172,35 +228,22 @@ impl SqliteStore {
                 ON context_evidence(session_id, prompt_session_seq, context_seq);
             CREATE INDEX IF NOT EXISTS idx_agent_edges_parent
                 ON agent_edges(parent_session_id, status, updated_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_capability_snapshots_session_version
+                ON capability_snapshots(session_id, prompt_prefix_version);
             CREATE INDEX IF NOT EXISTS idx_agent_mailbox_parent_pending
                 ON agent_mailbox_events(parent_session_id, delivered_at_ms, created_at_ms);
             CREATE INDEX IF NOT EXISTS idx_session_compactions_latest
                 ON session_compactions(session_id, created_after_session_seq, created_at_ms);
-            CREATE INDEX IF NOT EXISTS idx_display_blocks_session_seq
-                ON display_blocks(session_id, block_seq);
+            CREATE INDEX IF NOT EXISTS idx_timeline_items_session_seq
+                ON timeline_items(session_id, item_seq);
+            CREATE INDEX IF NOT EXISTS idx_timeline_artifacts_session
+                ON timeline_artifacts(session_id, artifact_id);
+            CREATE INDEX IF NOT EXISTS idx_timeline_debug_events_session_id
+                ON timeline_debug_events(session_id, id);
+            CREATE INDEX IF NOT EXISTS idx_gateway_source_bindings_thread
+                ON gateway_source_bindings(thread_id, updated_at_ms);
             "#,
         )?;
-        if user_version == 3 && !sqlite_column_exists(&conn, "sessions", "archived_at_ms")? {
-            conn.execute_batch("ALTER TABLE sessions ADD COLUMN archived_at_ms INTEGER;")?;
-        }
-        if (user_version == 3 || user_version == 4)
-            && !sqlite_column_exists(&conn, "messages", "context_input_tokens")?
-        {
-            conn.execute_batch(
-                r#"
-                ALTER TABLE messages ADD COLUMN context_input_tokens INTEGER;
-                ALTER TABLE messages ADD COLUMN billable_input_tokens INTEGER;
-                ALTER TABLE messages ADD COLUMN billable_output_tokens INTEGER;
-                ALTER TABLE messages ADD COLUMN reasoning_tokens INTEGER;
-                ALTER TABLE messages ADD COLUMN cache_read_tokens INTEGER;
-                ALTER TABLE messages ADD COLUMN cache_write_tokens INTEGER;
-                ALTER TABLE messages ADD COLUMN reported_total_tokens INTEGER;
-                ALTER TABLE messages ADD COLUMN estimated_cost_nanodollars INTEGER;
-                ALTER TABLE messages ADD COLUMN pricing_source TEXT;
-                ALTER TABLE messages ADD COLUMN pricing_tier TEXT;
-                "#,
-            )?;
-        }
         if !sqlite_column_exists(&conn, "context_evidence", "provider_group")? {
             conn.execute_batch("ALTER TABLE context_evidence ADD COLUMN provider_group TEXT;")?;
         }

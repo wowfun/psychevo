@@ -154,25 +154,8 @@ pub(crate) fn effective_tool_names_for_mode_with_config(
     selection: &ToolSelectionConfig,
     custom_toolsets: &BTreeMap<String, CustomToolsetConfig>,
 ) -> Vec<String> {
-    let mode_config = selection.modes.get(mode.as_str());
-    let mut toolsets = mode_config
-        .and_then(|config| config.enabled_toolsets.clone())
-        .unwrap_or_else(|| {
-            DEFAULT_ENABLED_TOOLSETS
-                .iter()
-                .map(|name| name.to_string())
-                .collect()
-        });
-    let disabled = mode_config
-        .map(|config| {
-            config
-                .disabled_toolsets
-                .iter()
-                .map(String::as_str)
-                .collect::<BTreeSet<_>>()
-        })
-        .unwrap_or_default();
-    toolsets.retain(|toolset| !disabled.contains(toolset.as_str()));
+    let toolsets = effective_toolset_names_for_mode_with_config(mode, selection);
+    let disabled = disabled_toolset_names_for_mode(mode, selection);
 
     let mut out = Vec::new();
     let mut seen_tools = HashSet::new();
@@ -189,6 +172,41 @@ pub(crate) fn effective_tool_names_for_mode_with_config(
         );
     }
     out
+}
+
+pub(crate) fn effective_toolset_names_for_mode_with_config(
+    mode: RunMode,
+    selection: &ToolSelectionConfig,
+) -> Vec<String> {
+    let mode_config = selection.modes.get(mode.as_str());
+    let mut toolsets = mode_config
+        .and_then(|config| config.enabled_toolsets.clone())
+        .unwrap_or_else(|| {
+            DEFAULT_ENABLED_TOOLSETS
+                .iter()
+                .map(|name| name.to_string())
+                .collect()
+        });
+    let disabled = disabled_toolset_names_for_mode(mode, selection);
+    toolsets.retain(|toolset| !disabled.contains(toolset.as_str()));
+    toolsets
+}
+
+fn disabled_toolset_names_for_mode(
+    mode: RunMode,
+    selection: &ToolSelectionConfig,
+) -> BTreeSet<&str> {
+    selection
+        .modes
+        .get(mode.as_str())
+        .map(|config| {
+            config
+                .disabled_toolsets
+                .iter()
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default()
 }
 
 pub(crate) fn builtin_toolset_names() -> &'static [&'static str] {

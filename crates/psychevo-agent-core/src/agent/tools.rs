@@ -35,18 +35,14 @@ pub(crate) async fn execute_tool_batch(
     sink: Arc<dyn EventSink>,
     abort: AbortSignal,
 ) -> Result<Vec<Message>> {
-    let has_sequential = tool_calls.iter().any(|call| {
-        tools
-            .iter()
-            .find(|tool| tool.name() == call.name)
-            .is_none_or(|tool| tool.execution_mode() == ToolExecutionMode::Sequential)
-    });
+    let router = ToolRouter::from_tools(tools.iter().cloned());
+    let has_sequential = router.has_sequential_call(tool_calls);
 
     let outputs = if has_sequential {
         let mut outputs = Vec::new();
         for call in tool_calls {
             let output =
-                execute_one_tool(tools, call.clone(), Arc::clone(&sink), abort.clone()).await?;
+                execute_one_tool(&router, call.clone(), Arc::clone(&sink), abort.clone()).await?;
             outputs.push(output);
         }
         outputs
@@ -54,7 +50,7 @@ pub(crate) async fn execute_tool_batch(
         let futures = tool_calls
             .iter()
             .cloned()
-            .map(|call| execute_one_tool(tools, call, Arc::clone(&sink), abort.clone()));
+            .map(|call| execute_one_tool(&router, call, Arc::clone(&sink), abort.clone()));
         let joined = join_all(futures).await;
         let mut outputs = Vec::new();
         for output in joined {
@@ -75,14 +71,18 @@ pub(crate) async fn execute_tool_batch(
 }
 
 pub(crate) async fn execute_one_tool(
-    tools: &[Arc<dyn ToolBinding>],
+    router: &ToolRouter,
     call: ToolCallBlock,
     sink: Arc<dyn EventSink>,
     abort: AbortSignal,
 ) -> Result<(ToolCallBlock, ToolOutput)> {
     let started_at_ms = now_ms();
     let started = Instant::now();
-    let tool = tools.iter().find(|tool| tool.name() == call.name).cloned();
+    let tool = router
+        .effective_exposure(&call.name)
+        .is_some_and(ToolExposure::is_model_visible)
+        .then(|| router.tool(&call.name))
+        .flatten();
     let display = tool
         .as_ref()
         .map(|tool| tool.display_spec())
