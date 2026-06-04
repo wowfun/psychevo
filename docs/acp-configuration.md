@@ -89,6 +89,20 @@ config file:
 You may also pass provider API-key environment variables through the client
 configuration when the editor does not inherit your shell environment.
 
+To opt into terminal-style command output display for clients that advertise
+Psychevo's terminal-output extension, set:
+
+```json
+{
+  "env": {
+    "PSYCHEVO_ACP_TERMINAL_OUTPUT": "1"
+  }
+}
+```
+
+This changes presentation only. Psychevo still runs `exec_command` through its
+own runtime, permission policy, transcript, and accounting paths.
+
 ## Zed
 
 Zed can run custom ACP agents from `agent_servers`. Add a Psychevo entry to
@@ -151,6 +165,11 @@ as normal prompt text.
 
 Permission prompts appear in the ACP client UI. Psychevo permission rules still
 come from Psychevo config and project-local `.psychevo/config.toml`.
+
+`exec_command` tool cards show a readable command title and display the full
+command in the tool content. `rawInput` and `rawOutput` remain available as
+structured protocol metadata, but clients do not need to render raw JSON to show
+the command a tool is running.
 
 When the client sends MCP server declarations, Psychevo accepts supported stdio
 and HTTP MCP inputs for that ACP session. MCP tools still run through Psychevo's

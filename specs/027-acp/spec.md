@@ -94,14 +94,16 @@ to a visible resource-link note. Resource handling records prompt-scoped
 summaries in runtime context evidence; text that is actually inlined for the
 model is persisted in the user message for new runs.
 
-Gateway timeline observation maps to ACP session updates:
+Gateway transcript observation maps to ACP session updates:
 
 - assistant text progress becomes agent message chunks
-- reasoning progress becomes agent thought chunks
+- reasoning progress becomes agent thought chunks; ACP only exposes reasoning
+  already projected by runtime or Gateway and must not mine provider-private
+  raw reasoning fields
 - pending tool-call argument progress becomes pending tool call update records
   when the runtime exposes it, so clients can distinguish model generation of a
   tool request from local tool execution
-- typed tool timeline item lifecycle events become tool call and tool call
+- typed tool transcript lifecycle events become tool call and tool call
   update records
 - final outcomes become ACP stop reasons
 - cancellation maps to runtime abort
@@ -109,6 +111,18 @@ Gateway timeline observation maps to ACP session updates:
 ACP observation must not rewrite durable runtime transcript content. ACP must
 not consume or expose raw runtime fallback events as ordinary client updates;
 bounded debug records are diagnostics only.
+
+Tool call projection must preserve structured `rawInput` and `rawOutput` while
+also sending a human-readable title and display content when the runtime
+transcript has them. Command tools such as `exec_command` use the visible title
+for a short command summary and content for the full command/output text, so ACP
+clients are not required to inspect raw JSON to show useful progress.
+
+ACP may provide terminal-style output presentation for command tools only as a
+display enhancement. Runtime remains the executor and permission authority. The
+ACP layer must not delegate command execution to client `terminal/create`, and
+must not use client terminal presentation to bypass runtime `exec_command`,
+`write_stdin`, yield-session, persistence, permission, or accounting semantics.
 
 Runtime usage and accounting are projected at the ACP prompt boundary. When the
 ACP SDK exposes unstable usage fields, Psychevo sends `PromptResponse.usage`

@@ -53,6 +53,7 @@ pub(crate) struct PsychevoAcpAgent {
     pub(crate) gateway: Gateway,
     pub(crate) sessions: Arc<Mutex<HashMap<String, AcpSession>>>,
     pub(crate) client_terminal_auth: Arc<Mutex<bool>>,
+    pub(crate) client_terminal_output: Arc<Mutex<bool>>,
 }
 
 #[derive(Debug, Clone)]
@@ -102,6 +103,7 @@ impl PsychevoAcpAgent {
             gateway,
             sessions: Arc::default(),
             client_terminal_auth: Arc::new(Mutex::new(false)),
+            client_terminal_output: Arc::new(Mutex::new(false)),
         })
     }
 
@@ -246,15 +248,6 @@ impl PsychevoAcpAgent {
             .on_receive_request(
                 {
                     let agent = Arc::clone(&agent);
-                    async move |request: SetSessionModelRequest, responder, _cx| {
-                        responder.respond_with_result(agent.set_session_model(request).await)
-                    }
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                {
-                    let agent = Arc::clone(&agent);
                     async move |request: SetSessionConfigOptionRequest,
                                 responder,
                                 cx: ConnectionTo<Client>| {
@@ -273,8 +266,12 @@ impl PsychevoAcpAgent {
         request: InitializeRequest,
     ) -> Result<InitializeResponse, Error> {
         let terminal_auth = request.client_capabilities.auth.terminal;
+        let terminal_output = self.client_terminal_output_enabled(&request.client_capabilities);
         if let Ok(mut value) = self.client_terminal_auth.lock() {
             *value = terminal_auth;
+        }
+        if let Ok(mut value) = self.client_terminal_output.lock() {
+            *value = terminal_output;
         }
         let auth_methods = self.auth_methods(terminal_auth);
         let mut capabilities = AgentCapabilities::new()
@@ -323,9 +320,7 @@ impl PsychevoAcpAgent {
             .lock()
             .expect("acp session lock poisoned")
             .insert(session_id.to_string(), session);
-        Ok(NewSessionResponse::new(session_id)
-            .modes(mode_state(RunMode::Default))
-            .models(self.model_state(None)))
+        Ok(NewSessionResponse::new(session_id).modes(mode_state(RunMode::Default)))
     }
 
     pub(crate) async fn load_session(
@@ -346,9 +341,7 @@ impl PsychevoAcpAgent {
             .lock()
             .expect("acp session lock poisoned")
             .insert(request.session_id.to_string(), session);
-        Ok(LoadSessionResponse::new()
-            .modes(mode_state(RunMode::Default))
-            .models(self.model_state(None)))
+        Ok(LoadSessionResponse::new().modes(mode_state(RunMode::Default)))
     }
 
     pub(crate) async fn list_sessions(
@@ -508,8 +501,13 @@ impl PsychevoAcpAgent {
         });
         let event_session_id = session_id.clone();
         let event_cx = cx.clone();
+        let event_projection = Arc::new(Mutex::new(AcpLiveProjection::new(
+            self.terminal_output_available(),
+        )));
         let event_sink = Arc::new(move |event| {
-            send_gateway_event_update(&event_cx, &event_session_id, event);
+            if let Ok(mut projection) = event_projection.lock() {
+                send_gateway_event_update(&event_cx, &event_session_id, event, &mut projection);
+            }
         });
         let options = self.run_options(&session, prompt, image_inputs, Some(approval_handler));
         let source = self.gateway_source(&session_id, &session);
@@ -629,21 +627,6 @@ impl PsychevoAcpAgent {
             SessionUpdate::CurrentModeUpdate(CurrentModeUpdate::new(mode.as_str())),
         );
         Ok(SetSessionModeResponse::new())
-    }
-
-    pub(crate) async fn set_session_model(
-        &self,
-        request: SetSessionModelRequest,
-    ) -> Result<SetSessionModelResponse, Error> {
-        let mut sessions = self.sessions.lock().expect("acp session lock poisoned");
-        let Some(session) = sessions.get_mut(&request.session_id.to_string()) else {
-            return Err(Error::resource_not_found(Some(
-                request.session_id.to_string(),
-            )));
-        };
-        let model = self.normalize_session_model(session, &request.model_id.to_string())?;
-        session.model = Some(model);
-        Ok(SetSessionModelResponse::new())
     }
 
     pub(crate) async fn set_session_config_option(
@@ -778,89 +761,23 @@ impl PsychevoAcpAgent {
             .unwrap_or(false)
     }
 
-    pub(crate) fn model_state(&self, session: Option<&AcpSession>) -> SessionModelState {
-        let cwd = session
-            .map(|session| session.cwd.clone())
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-        let model_override = session.and_then(|session| session.model.clone());
-        let options = self.probe_run_options(cwd, model_override.clone());
-        let selected = selected_configured_model(&options).ok().flatten();
-        let current_id = selected
-            .as_ref()
-            .map(configured_model_id)
-            .or(model_override)
-            .unwrap_or_else(|| "auto/default".to_string());
-        let mut models = configured_models(&options)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|model| {
-                ModelInfo::new(
-                    configured_model_id(&model),
-                    format!("{} ({})", model.model, model.provider_label),
-                )
+    pub(crate) fn terminal_output_available(&self) -> bool {
+        self.client_terminal_output
+            .lock()
+            .map(|value| *value)
+            .unwrap_or(false)
+    }
+
+    fn client_terminal_output_enabled(&self, capabilities: &ClientCapabilities) -> bool {
+        self.options
+            .inherited_env
+            .get("PSYCHEVO_ACP_TERMINAL_OUTPUT")
+            .is_some_and(|value| env_flag_enabled(value))
+            && capabilities.meta.as_ref().is_some_and(|meta| {
+                meta.get("terminal_output")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
             })
-            .collect::<Vec<_>>();
-        if !models
-            .iter()
-            .any(|model| model.model_id.to_string() == current_id)
-        {
-            let name = selected
-                .as_ref()
-                .map(|model| format!("{} ({})", model.model, model.provider_label))
-                .unwrap_or_else(|| current_id.clone());
-            models.push(ModelInfo::new(current_id.clone(), name));
-        }
-        models.sort_by(|left, right| left.name.cmp(&right.name));
-        SessionModelState::new(current_id, models)
-    }
-
-    pub(crate) fn normalize_session_model(
-        &self,
-        session: &AcpSession,
-        requested: &str,
-    ) -> Result<String, Error> {
-        let requested = requested.trim();
-        if requested.is_empty() {
-            return Err(Error::invalid_params().data("model id must not be empty"));
-        }
-        let requested = if requested.contains('/') {
-            let Some((provider, model)) = requested.split_once('/') else {
-                return Err(Error::invalid_params().data("model id must use provider/model"));
-            };
-            if provider.trim().is_empty() || model.trim().is_empty() {
-                return Err(Error::invalid_params().data("model id must use provider/model"));
-            }
-            format!("{}/{}", provider.trim(), model.trim())
-        } else {
-            self.unique_bare_model_id(session, requested)?
-        };
-        let options = self.probe_run_options(session.cwd.clone(), Some(requested.clone()));
-        if selected_configured_model(&options)
-            .map_err(acp_internal_error)?
-            .is_none()
-        {
-            return Err(
-                Error::invalid_params().data(format!("unknown model selection: {requested}"))
-            );
-        }
-        Ok(requested)
-    }
-
-    fn unique_bare_model_id(&self, session: &AcpSession, requested: &str) -> Result<String, Error> {
-        let options = self.probe_run_options(session.cwd.clone(), None);
-        let matches = configured_models(&options)
-            .map_err(acp_internal_error)?
-            .into_iter()
-            .filter(|model| model.model == requested)
-            .map(|model| configured_model_id(&model))
-            .collect::<Vec<_>>();
-        match matches.as_slice() {
-            [model] => Ok(model.clone()),
-            [] => Err(Error::invalid_params().data(format!("unknown bare model id: {requested}"))),
-            _ => Err(Error::invalid_params().data(format!(
-                "ambiguous bare model id: {requested}; use provider/model"
-            ))),
-        }
     }
 
     fn send_usage_update_from_context(
@@ -948,8 +865,4 @@ impl PsychevoAcpAgent {
         )
         .await
     }
-}
-
-fn configured_model_id(model: &psychevo_runtime::ConfiguredModel) -> String {
-    format!("{}/{}", model.provider, model.model)
 }

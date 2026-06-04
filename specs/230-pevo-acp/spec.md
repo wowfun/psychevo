@@ -55,6 +55,8 @@ The ACP server uses the same product path conventions as the `pevo` CLI:
 - `PSYCHEVO_HOME` defaults to `~/.psychevo`
 - `PSYCHEVO_DB` defaults to `$PSYCHEVO_HOME/state.db`
 - `PSYCHEVO_CONFIG` may point at one TOML config file
+- `PSYCHEVO_ACP_TERMINAL_OUTPUT=1` opts into ACP terminal-output display
+  metadata when the client advertises support through `_meta.terminal_output`
 - inherited environment variables are available to runtime provider and auth
   resolution
 
@@ -89,6 +91,11 @@ responses, advertise only implemented optional capabilities, and avoid
 placeholder logout support. Runtime usage, accounting, turns, warnings, and
 context-window updates are projected according to [027 ACP](../027-acp/spec.md)
 without mutating the durable transcript.
+
+`PSYCHEVO_ACP_TERMINAL_OUTPUT` affects only ACP presentation. It does not make
+the editor execute Psychevo commands, and `pevo acp` must continue to route
+`exec_command`, yielded command sessions, and `write_stdin` through runtime and
+Gateway semantics.
 
 `psychevo-acp` sends ACP command availability after the client receives or can
 apply the ACP session id. It also handles supported slash-command prompts

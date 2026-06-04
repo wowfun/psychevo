@@ -776,6 +776,13 @@ pub(crate) fn env_path_or_default(
         .pipe(|value| resolve_path(value, env, cwd))
 }
 
+pub(crate) fn env_flag_enabled(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
 pub(crate) fn resolve_path(value: &str, env: &BTreeMap<String, String>, cwd: &Path) -> PathBuf {
     let path = if value == "~" {
         env.get("HOME")

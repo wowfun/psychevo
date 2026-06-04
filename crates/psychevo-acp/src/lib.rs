@@ -7,27 +7,27 @@ pub(crate) use std::time::{SystemTime, UNIX_EPOCH};
 pub(crate) use agent_client_protocol::schema::{
     AgentAuthCapabilities, AgentCapabilities, AuthMethod, AuthMethodAgent, AuthMethodTerminal,
     AuthenticateRequest, AuthenticateResponse, AvailableCommand, AvailableCommandInput,
-    AvailableCommandsUpdate, CancelNotification, CloseSessionRequest, CloseSessionResponse,
-    ConfigOptionUpdate, ContentBlock, ContentChunk, Cost, CurrentModeUpdate, Diff as AcpDiff,
-    EnvVariable, Implementation, InitializeRequest, InitializeResponse, ListSessionsRequest,
-    ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, McpCapabilities, McpServer,
-    McpServerHttp, McpServerStdio, ModelInfo, NewSessionRequest, NewSessionResponse,
-    PermissionOption, PermissionOptionKind, PromptCapabilities, PromptRequest, PromptResponse,
-    ProtocolVersion, RequestPermissionOutcome, RequestPermissionRequest, SessionCapabilities,
-    SessionCloseCapabilities, SessionConfigSelectOption, SessionId, SessionInfo,
-    SessionListCapabilities, SessionMode, SessionModeState, SessionModelState, SessionNotification,
+    AvailableCommandsUpdate, CancelNotification, ClientCapabilities, CloseSessionRequest,
+    CloseSessionResponse, ConfigOptionUpdate, ContentBlock, ContentChunk, Cost, CurrentModeUpdate,
+    Diff as AcpDiff, EnvVariable, Implementation, InitializeRequest, InitializeResponse,
+    ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
+    McpCapabilities, McpServer, McpServerHttp, McpServerStdio, Meta, NewSessionRequest,
+    NewSessionResponse, PermissionOption, PermissionOptionKind, PromptCapabilities, PromptRequest,
+    PromptResponse, ProtocolVersion, RequestPermissionOutcome, RequestPermissionRequest,
+    SessionCapabilities, SessionCloseCapabilities, SessionConfigSelectOption, SessionId,
+    SessionInfo, SessionListCapabilities, SessionMode, SessionModeState, SessionNotification,
     SessionUpdate, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
-    SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
-    StopReason, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
-    ToolKind, UnstructuredCommandInput, Usage, UsageUpdate,
+    SetSessionModeRequest, SetSessionModeResponse, StopReason, Terminal, ToolCall, ToolCallContent,
+    ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind, UnstructuredCommandInput,
+    Usage, UsageUpdate,
 };
 pub(crate) use agent_client_protocol::{
     Agent, ByteStreams, Client, ConnectTo, ConnectionTo, Error,
 };
 pub(crate) use futures::future::BoxFuture;
 pub(crate) use psychevo_gateway::{
-    Gateway, GatewayEvent, GatewaySource, GatewayThreadSelector, SendTurnRequest, TimelineItem,
-    TimelineItemKind, TimelineItemStatus,
+    Gateway, GatewayEvent, GatewaySource, GatewayThreadSelector, SendTurnRequest, TranscriptBlock,
+    TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
 };
 pub(crate) use psychevo_runtime::{
     AgentDiscoveryOptions, ApprovalHandler, ApprovalMode, CompactSessionOptions, CompactionReason,
