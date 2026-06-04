@@ -141,10 +141,261 @@
   display: grid;
 }
 
+.statusColumn {
+  align-content: start;
+  gap: 12px;
+  overflow: auto;
+}
+
 .conversationColumn {
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   gap: 12px;
+}
+
+.composerDock {
+  display: grid;
+  gap: 6px;
+}
+
+.agentRunSelector {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  color: var(--pevo-muted);
+  font-size: 0.78rem;
+}
+
+.agentRunSelector span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.agentRunSelector select {
+  width: min(210px, 55vw);
+  min-height: 30px;
+  padding: 0 28px 0 9px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  font: inherit;
+}
+
+.agentRunSelector select:disabled {
+  color: var(--pevo-muted);
+  background: var(--pevo-panel-muted);
+}
+
+.agentSurfacePanel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius);
+}
+
+.utilityTabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+  padding: 3px;
+  background: var(--pevo-panel-muted);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius);
+}
+
+.utilityTabs button {
+  min-width: 0;
+  min-height: 30px;
+  overflow: hidden;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.utilityTabs button.is-selected {
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  box-shadow: 0 1px 2px rgb(21 28 36 / 9%);
+}
+
+.agentSurfacePanel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--pevo-muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.agentSurfacePanel header span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agentSurfacePanel header b {
+  color: var(--pevo-ink);
+  font-size: 0.8rem;
+}
+
+.agentSurfaceList {
+  display: grid;
+  gap: 6px;
+}
+
+.agentSurfaceList p {
+  margin: 0;
+  color: var(--pevo-muted);
+  font-size: 0.84rem;
+}
+
+.agentSurfaceRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 7px 8px;
+  background: var(--pevo-panel-muted);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.agentSurfaceRow div {
+  min-width: 0;
+}
+
+.agentSurfaceRow strong,
+.agentSurfaceRow span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentSurfaceRow strong {
+  color: var(--pevo-ink);
+  font-size: 0.86rem;
+  font-weight: 650;
+}
+
+.agentSurfaceRow span,
+.agentSurfaceRow small {
+  color: var(--pevo-muted);
+  font-size: 0.76rem;
+}
+
+.commandChipList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.commandChipList span {
+  max-width: 100%;
+  padding: 4px 7px;
+  overflow: hidden;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel-muted);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commandSurfacePanel {
+  align-content: start;
+}
+
+.commandFeedback {
+  display: grid;
+  gap: 2px;
+  padding: 8px 9px;
+  color: var(--pevo-muted);
+  background: var(--pevo-panel-muted);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  font-size: 0.8rem;
+}
+
+.commandFeedback strong {
+  color: var(--pevo-ink);
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  font-size: 0.78rem;
+}
+
+.commandFeedback.is-error {
+  color: var(--pevo-danger);
+  background: color-mix(in oklch, var(--pevo-danger), white 91%);
+  border-color: color-mix(in oklch, var(--pevo-danger), white 72%);
+}
+
+.commandSurfaceList {
+  display: grid;
+  gap: 6px;
+}
+
+.commandSurfaceList p {
+  margin: 0;
+  color: var(--pevo-muted);
+  font-size: 0.84rem;
+}
+
+.commandSurfaceRow {
+  display: grid;
+  grid-template-columns: minmax(66px, 96px) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 7px 8px;
+  text-align: left;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel-muted);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.commandSurfaceRow code,
+.commandSurfaceRow span,
+.commandSurfaceRow small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commandSurfaceRow code {
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  font-size: 0.78rem;
+}
+
+.commandSurfaceRow span {
+  color: var(--pevo-muted);
+  font-size: 0.8rem;
+}
+
+.commandSurfaceRow small {
+  grid-column: 2;
+  color: var(--pevo-muted);
+  font-size: 0.72rem;
 }
 
 @media (max-width: 1120px) {

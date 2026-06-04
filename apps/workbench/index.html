@@ -4,9 +4,65 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>pevo Workbench</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      body {
+        margin: 0;
+        background: #edf4f6;
+        color: #0b1720;
+      }
+
+      .bootFallback {
+        display: grid;
+        min-height: 100vh;
+        opacity: 0;
+        place-items: center;
+        padding: 32px;
+        animation: bootFallbackReveal 1ms linear 1.2s forwards;
+      }
+
+      .bootFallback main {
+        max-width: 560px;
+        line-height: 1.5;
+      }
+
+      .bootFallback h1 {
+        margin: 0 0 12px;
+        font-size: 24px;
+      }
+
+      .bootFallback p {
+        margin: 0 0 14px;
+      }
+
+      .bootFallback code {
+        padding: 2px 6px;
+        background: rgb(255 255 255 / 72%);
+        border: 1px solid rgb(116 135 150 / 28%);
+        border-radius: 6px;
+      }
+
+      @keyframes bootFallbackReveal {
+        to {
+          opacity: 1;
+        }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="bootFallback">
+        <main>
+          <h1>Starting pevo Workbench</h1>
+          <p>If this page stays here, the Workbench script did not start.</p>
+          <p>Run <code>pevo web --print-url</code> and open the returned one-time <code>openUrl</code>, or hard refresh this tab after reopening from a fresh launch URL.</p>
+        </main>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

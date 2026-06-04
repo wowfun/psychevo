@@ -1,9 +1,12 @@
 import {
   RpcNotificationSchema,
   RpcResponseSchema,
+  ThreadSnapshotSchema,
   type ClarifyRespondParams,
-  type DebugEventsParams,
-  type DebugEventsResult,
+  type CommandExecuteParams,
+  type CommandExecuteResult,
+  type CompletionListParams,
+  type CompletionListResult,
   type GatewayRequestScope,
   type InitializeParams,
   type InitializeResult,
@@ -31,12 +34,21 @@ import {
 import type { GatewayEndpoint } from "@psychevo/host";
 
 export type { GatewayEndpoint } from "@psychevo/host";
+export {
+  appendOptimisticPrompt,
+  applyLiveTranscriptEvent,
+  reconcileThreadSnapshot
+} from "./transcript";
 
 export type NotificationHandler = (notification: RpcNotification) => void;
 
 export interface GatewayRequestParams {
+  "agent/list": { scope?: GatewayRequestScope | null };
+  "backend/list": { scope?: GatewayRequestScope | null };
   "clarify/respond": ClarifyRespondParams;
-  "debug/events": DebugEventsParams;
+  "command/execute": CommandExecuteParams;
+  "command/list": { scope?: GatewayRequestScope | null; threadId?: string | null };
+  "completion/list": CompletionListParams;
   "initialize": InitializeParams;
   "permission/respond": PermissionRespondParams;
   "settings/read": SettingsReadParams;
@@ -55,8 +67,12 @@ export interface GatewayRequestParams {
 }
 
 export interface GatewayRequestResults {
+  "agent/list": unknown;
+  "backend/list": unknown;
   "clarify/respond": InteractionRespondResult;
-  "debug/events": DebugEventsResult;
+  "command/execute": CommandExecuteResult;
+  "command/list": unknown;
+  "completion/list": CompletionListResult;
   "initialize": InitializeResult;
   "permission/respond": InteractionRespondResult;
   "settings/read": SettingsReadResult;
@@ -90,6 +106,10 @@ export function scopeForWorkdir(workdir: string): GatewayRequestScope {
       visibleName: null
     }
   };
+}
+
+export function parseThreadSnapshot(value: unknown): ThreadSnapshot {
+  return ThreadSnapshotSchema.parse(withThreadSnapshotDefaults(value));
 }
 
 export class GatewayClient {
@@ -188,4 +208,33 @@ export class GatewayClient {
     }
     this.pending.clear();
   }
+}
+
+function withThreadSnapshotDefaults(value: unknown): unknown {
+  const record = asRecord(value);
+  if (!record) {
+    return value;
+  }
+  return {
+    ...record,
+    thread: Object.prototype.hasOwnProperty.call(record, "thread") ? record.thread : null,
+    activity: withActivityDefaults(record.activity),
+    pendingPermissions: Array.isArray(record.pendingPermissions) ? record.pendingPermissions : [],
+    pendingClarifies: Array.isArray(record.pendingClarifies) ? record.pendingClarifies : []
+  };
+}
+
+function withActivityDefaults(value: unknown): Record<string, unknown> {
+  const activity = asRecord(value) ?? {};
+  return {
+    running: activity.running === true,
+    activeTurnId: typeof activity.activeTurnId === "string" ? activity.activeTurnId : null,
+    queuedTurns: Number.isFinite(activity.queuedTurns) ? activity.queuedTurns : 0
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
 }

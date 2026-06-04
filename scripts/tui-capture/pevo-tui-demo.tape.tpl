@@ -37,6 +37,7 @@ Wait+Screen /line 02: limit = 2000/
 Wait+Screen /INLINE_EDIT_DIFF_FINAL/
 Sleep 300 ms
 Screenshot "20-inline-edit-diff.png"
+Sleep 200 ms
 Type "/new"
 Enter
 Wait+Screen /Ask pevo/
@@ -80,6 +81,7 @@ PageDown 40
 Wait+Screen /LONG_MARKDOWN_BOTTOM_MARKER/
 Sleep 300 ms
 Screenshot "05-long-markdown-bottom-scroll.png"
+Sleep 200 ms
 Type "/new"
 Enter
 Wait+Screen /Ask pevo/
@@ -89,16 +91,12 @@ Enter
 Wait+Screen /REASONING_ONLY_BOTTOM_MARKER/
 Sleep 300 ms
 Screenshot "06-reasoning-only-collapsed.png"
-Ctrl+T
-Space
-Sleep 200 ms
 PageUp 8
 Sleep 100 ms
-PageDown 40
+PageDown 80
 Wait+Screen /REASONING_ONLY_BOTTOM_MARKER/
 Sleep 300 ms
 Screenshot "07-reasoning-only-bottom-scroll.png"
-Escape
 Type "Visible write preamble fixture"
 Enter
 Wait+Screen /Now I have all the data needed/
@@ -114,6 +112,7 @@ Escape
 Wait+Screen /interrupted/
 Sleep 300 ms
 Screenshot "09-interrupted-exec-command.png"
+Sleep 200 ms
 Type "/new"
 Enter
 Wait+Screen /Ask pevo/
