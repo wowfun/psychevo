@@ -9,6 +9,15 @@
 - Added `peval-py` adapter auto-registration through Python entry points, with
   path-adapter support, adapter-specific TOML options, custom adapter docs, and
   deterministic plugin registry tests.
+- Added adapter-owned `peval-py` input handling, including native Psychevo,
+  OpenCode, and Hermes SQLite conversion, latest-session defaults, ATIF JSON
+  passthrough, and per-input multi-adapter comparison reports.
+- Added config-selected `peval-py` report localization and Simplified Chinese
+  docs while preserving selected English report terms and avoiding duplicate
+  comparison section labels.
+- Improved `peval-py` HTML reports with estimated step token chips,
+  proportional timing fills, larger typography, and package CSS/JavaScript
+  assets while keeping generated reports self-contained.
 
 ## 2026-06-03
 
