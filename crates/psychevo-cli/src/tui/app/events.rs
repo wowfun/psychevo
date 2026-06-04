@@ -1,5 +1,16 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct GatewayTranscriptEntryMeta<'a> {
+    role: TranscriptEntryRole,
+    thread_id: &'a str,
+    turn_id: Option<&'a str>,
+    entry_id: &'a str,
+    message_seq: Option<i64>,
+    source: &'a str,
+}
+
 impl TuiApp {
     pub(crate) async fn drain_fullscreen_events(
         &mut self,
@@ -479,6 +490,7 @@ impl TuiApp {
                 turn_id,
                 selected_skills,
             } => {
+                ui.bind_unbound_optimistic_rows_to_turn(&turn_id);
                 if let Some(running) = ui.running.as_mut() {
                     running.turn_id = Some(turn_id);
                     if running.session_id.is_none() {
@@ -504,17 +516,23 @@ impl TuiApp {
                 ui.push_status(format!("turn queued: #{queue_position}"));
                 false
             }
-            GatewayEvent::TurnCompleted { outcome, .. } => {
+            GatewayEvent::TurnCompleted {
+                outcome,
+                turn_id,
+                committed_entries,
+                ..
+            } => {
                 if let Some(outcome) = outcome.as_deref().and_then(outcome_from_str) {
                     ui.turn_outcome = Some(outcome);
                     if ui.interrupt_requested && outcome == Outcome::Aborted {
                         ui.turn_interrupted = true;
                     }
                 }
+                self.apply_committed_turn_entries(ui, owner_session, &turn_id, committed_entries);
                 ui.update_turn_meta(self.debug, true, true, true);
                 false
             }
-            GatewayEvent::ItemDelta { delta, .. } => {
+            GatewayEvent::EntryDelta { delta, .. } => {
                 if delta.trim().is_empty() {
                     return false;
                 }
@@ -535,10 +553,10 @@ impl TuiApp {
                 let reasoning = ui.thinking_full_text(idx);
                 self.thinking_visible && ui.apply_visible_tool_intent(&reasoning)
             }
-            GatewayEvent::ItemStarted { item, .. }
-            | GatewayEvent::ItemUpdated { item, .. }
-            | GatewayEvent::ItemCompleted { item, .. } => {
-                self.apply_gateway_timeline_item(ui, owner_session, item)
+            GatewayEvent::EntryStarted { entry, .. }
+            | GatewayEvent::EntryUpdated { entry, .. }
+            | GatewayEvent::EntryCompleted { entry, .. } => {
+                self.apply_gateway_transcript_entry(ui, owner_session, entry)
             }
             GatewayEvent::PermissionRequested {
                 request_id,
@@ -623,7 +641,6 @@ impl TuiApp {
                 }
                 false
             }
-            GatewayEvent::DebugAvailable { .. } => false,
         }
     }
 
@@ -656,23 +673,86 @@ impl TuiApp {
         self.force_new_once = false;
     }
 
-    pub(crate) fn apply_gateway_timeline_item(
+    pub(crate) fn apply_gateway_transcript_entry(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         owner_session: Option<&str>,
-        item: TimelineItem,
+        entry: TranscriptEntry,
     ) -> bool {
-        if let Some(value) = gateway_item_runtime_value(&item)
+        let mut active = false;
+        let meta = GatewayTranscriptEntryMeta {
+            role: entry.role,
+            thread_id: &entry.thread_id,
+            turn_id: entry.turn_id.as_deref(),
+            entry_id: &entry.id,
+            message_seq: entry.message_seq,
+            source: &entry.source,
+        };
+        for block in entry.blocks {
+            active |= self.apply_gateway_transcript_block(ui, owner_session, meta, block);
+        }
+        active
+    }
+
+    pub(crate) fn apply_committed_turn_entries(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        owner_session: Option<&str>,
+        turn_id: &str,
+        committed_entries: Vec<TranscriptEntry>,
+    ) -> bool {
+        let loaded_message_count = ui.loaded_session_message_count as i64;
+        let mut max_message_seq = None::<i64>;
+        let entries = committed_entries
+            .into_iter()
+            .filter(|entry| {
+                entry
+                    .message_seq
+                    .is_none_or(|seq| seq > loaded_message_count)
+            })
+            .inspect(|entry| {
+                if let Some(seq) = entry.message_seq {
+                    max_message_seq = Some(max_message_seq.map_or(seq, |max| max.max(seq)));
+                }
+            })
+            .collect::<Vec<_>>();
+        if entries.is_empty() {
+            return false;
+        }
+
+        ui.bind_unbound_optimistic_rows_to_turn(turn_id);
+        ui.bind_unbound_live_turn_meta_to_turn(turn_id);
+        ui.remove_live_overlay_for_turn(turn_id);
+        let mut active = false;
+        for entry in entries {
+            active |= self.apply_gateway_transcript_entry(ui, owner_session, entry);
+        }
+        if let Some(max_seq) = max_message_seq {
+            ui.loaded_session_message_count = ui
+                .loaded_session_message_count
+                .max(max_seq.try_into().unwrap_or(usize::MAX));
+        }
+        active
+    }
+
+    pub(crate) fn apply_gateway_transcript_block(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        owner_session: Option<&str>,
+        entry_meta: GatewayTranscriptEntryMeta<'_>,
+        block: TranscriptBlock,
+    ) -> bool {
+        if let Some(value) = gateway_block_runtime_value(&block)
             && value.get("type").and_then(Value::as_str) == Some("agent_session_start")
         {
             ui.apply_agent_session_start(&value);
             return false;
         }
-        if let Some(value) = gateway_item_tool_value(&item) {
-            return self.apply_gateway_tool_item(ui, owner_session, &item, value);
+        if let Some(value) = gateway_block_tool_value(&block) {
+            return self.apply_gateway_tool_block(ui, owner_session, entry_meta, &block, value);
         }
-        let event_session = (!item.thread_id.is_empty())
-            .then_some(item.thread_id.as_str())
+        let event_session = (!entry_meta.thread_id.is_empty())
+            .then_some(entry_meta.thread_id)
             .or(owner_session);
         if let Some(session_id) = event_session
             && self
@@ -682,111 +762,161 @@ impl TuiApp {
         {
             return false;
         }
-        match item.kind {
-            TimelineItemKind::Prompt => {
-                let text = timeline_item_text(&item);
+        match (entry_meta.role, block.kind) {
+            (TranscriptEntryRole::User, TranscriptBlockKind::Text) => {
+                let text = transcript_block_text(&block);
                 if !text.trim().is_empty() {
-                    ui.push_user_with_attachment_meta(text, None);
+                    let idx = gateway_block_row_index(ui, &block.id).unwrap_or_else(|| {
+                        let idx = ui.insert_transcript_row(
+                            ui.transcript.len(),
+                            TranscriptRow::with_title(TranscriptKind::Prompt, "", String::new()),
+                        );
+                        record_gateway_block_row(ui, &block.id, idx);
+                        idx
+                    });
+                    if let Some(row) = ui.transcript.get_mut(idx) {
+                        row.kind = TranscriptKind::Prompt;
+                        row.title.clear();
+                        row.text = text;
+                        row.full_text = None;
+                    }
+                    tag_gateway_transcript_row(ui, idx, entry_meta, &block);
                 }
                 false
             }
-            TimelineItemKind::Assistant => {
-                let live_item = item.source == "runtime.stream";
-                let text = timeline_item_text(&item);
+            (TranscriptEntryRole::Assistant, TranscriptBlockKind::Text) => {
+                let live_item = block.source == "runtime.stream";
+                let text = transcript_block_text(&block);
                 if text.trim().is_empty() {
                     return false;
                 }
-                if let Some(idx) = ui.reasoning_row.take() {
+                if let Some(idx) = ui.reasoning_row.take()
+                    && gateway_block_row_index(ui, &block.id) != Some(idx)
+                {
                     ui.finish_thinking_row(idx);
                 }
-                let idx = ui.assistant_row.unwrap_or_else(|| {
+                let idx = gateway_block_row_index(ui, &block.id).unwrap_or_else(|| {
                     let idx = ui.insert_answer_row(TranscriptRow::with_title(
                         TranscriptKind::Answer,
                         "",
                         String::new(),
                     ));
+                    record_gateway_block_row(ui, &block.id, idx);
                     ui.assistant_row = Some(idx);
                     idx
                 });
-                ui.transcript[idx].text = text;
+                clear_gateway_row_slots_for_index(ui, idx);
+                ui.assistant_row = Some(idx);
+                if let Some(row) = ui.transcript.get_mut(idx) {
+                    row.kind = TranscriptKind::Answer;
+                    row.title.clear();
+                    row.text = text;
+                    row.full_text = None;
+                    row.expanded = false;
+                    row.tool_started = None;
+                    row.tool_elapsed = None;
+                    row.tool_name = None;
+                    row.tool_call_id = None;
+                }
+                tag_gateway_transcript_row(ui, idx, entry_meta, &block);
                 ui.remove_turn_meta();
-                apply_gateway_assistant_turn_metadata(ui, &item);
+                apply_gateway_assistant_turn_metadata(ui, &block);
                 if matches!(
-                    item.status,
-                    TimelineItemStatus::Completed
-                        | TimelineItemStatus::Failed
-                        | TimelineItemStatus::Cancelled
+                    block.status,
+                    TranscriptBlockStatus::Completed
+                        | TranscriptBlockStatus::Failed
+                        | TranscriptBlockStatus::Cancelled
                 ) {
-                    if gateway_assistant_item_receives_meta(&item) {
+                    if gateway_assistant_block_receives_meta(&block) {
                         ui.turn_terminal_visible_answer = true;
                         if live_item {
                             ui.update_turn_meta(self.debug, true, false, false);
                         } else {
-                            push_gateway_completed_turn_meta(ui, self.debug);
+                            push_gateway_completed_turn_meta(ui, self.debug, entry_meta);
                         }
                     }
                     ui.assistant_row = None;
                     return false;
                 }
-                item.status == TimelineItemStatus::Running
+                block.status == TranscriptBlockStatus::Running
             }
-            TimelineItemKind::Reasoning => {
-                let text = timeline_item_text(&item);
-                let existing_idx = ui.reasoning_row;
+            (_, TranscriptBlockKind::Reasoning) => {
+                let text = transcript_block_text(&block);
+                let existing_idx = gateway_block_row_index(ui, &block.id).or(ui.reasoning_row);
                 if text.trim().is_empty() && existing_idx.is_none() {
                     return false;
                 }
                 let idx = existing_idx.unwrap_or_else(|| {
                     let mut row = TranscriptRow::with_title(
                         TranscriptKind::Thinking,
-                        "Thinking",
+                        gateway_reasoning_title(&block),
                         String::new(),
                     );
                     if !matches!(
-                        item.status,
-                        TimelineItemStatus::Completed
-                            | TimelineItemStatus::Failed
-                            | TimelineItemStatus::Cancelled
+                        block.status,
+                        TranscriptBlockStatus::Completed
+                            | TranscriptBlockStatus::Failed
+                            | TranscriptBlockStatus::Cancelled
                     ) {
                         row.tool_started = Some(Instant::now());
                     }
                     let idx = ui.insert_evidence_row(row);
+                    record_gateway_block_row(ui, &block.id, idx);
                     ui.reasoning_row = Some(idx);
                     idx
                 });
+                clear_gateway_row_slots_for_index(ui, idx);
+                if let Some(row) = ui.transcript.get_mut(idx) {
+                    row.kind = TranscriptKind::Thinking;
+                    row.title = gateway_reasoning_title(&block);
+                    row.tool_name = None;
+                    row.tool_call_id = None;
+                    if !matches!(
+                        block.status,
+                        TranscriptBlockStatus::Completed
+                            | TranscriptBlockStatus::Failed
+                            | TranscriptBlockStatus::Cancelled
+                    ) && row.tool_started.is_none()
+                    {
+                        row.tool_started = Some(Instant::now());
+                    }
+                }
+                tag_gateway_transcript_row(ui, idx, entry_meta, &block);
+                ui.reasoning_row = Some(idx);
                 if !text.trim().is_empty() {
-                    ui.transcript[idx].text = text;
+                    ui.transcript[idx].set_evidence_body_text(text);
                     ui.turn_had_reasoning = true;
                     ui.remove_turn_meta();
                 }
-                if item.status == TimelineItemStatus::Completed {
-                    if let Some(idx) = ui.reasoning_row.take() {
-                        ui.finish_thinking_row(idx);
+                if block.status == TranscriptBlockStatus::Completed {
+                    ui.finish_thinking_row(idx);
+                    if ui.reasoning_row == Some(idx) {
+                        ui.reasoning_row = None;
                     }
                     return false;
                 }
                 true
             }
-            TimelineItemKind::Status => {
-                let text = timeline_item_text(&item);
+            (_, TranscriptBlockKind::Status) => {
+                let text = transcript_block_text(&block);
                 if !text.trim().is_empty() {
                     ui.push_status(text);
                 }
                 false
             }
             _ => {
-                let key = format!("gateway:{}", item.id);
-                let kind = transcript_kind_for_timeline(item.kind);
+                let key = format!("gateway:{}", block.id);
+                let kind = transcript_kind_for_block(block.kind);
                 let idx = ui.tool_rows.get(&key).copied().unwrap_or_else(|| {
                     let mut row = TranscriptRow::with_title(
                         kind,
-                        timeline_item_title(&item),
-                        timeline_item_running_text(&item),
+                        transcript_block_title(&block),
+                        transcript_block_running_text(&block),
                     );
-                    row.tool_name = item.title.clone();
+                    row.tool_name = block.title.clone();
                     if matches!(
-                        item.status,
-                        TimelineItemStatus::Pending | TimelineItemStatus::Running
+                        block.status,
+                        TranscriptBlockStatus::Pending | TranscriptBlockStatus::Running
                     ) {
                         row.tool_started = Some(Instant::now());
                     }
@@ -794,43 +924,48 @@ impl TuiApp {
                     ui.tool_rows.insert(key.clone(), idx);
                     idx
                 });
-                let row = &mut ui.transcript[idx];
-                row.kind = kind;
-                row.title = timeline_item_title(&item);
-                row.tool_name = item.title.clone();
-                row.failed = item.status == TimelineItemStatus::Failed;
-                row.interrupted = item.status == TimelineItemStatus::Cancelled;
-                row.text = timeline_item_running_text(&item);
-                row.full_text = item.detail.clone().filter(|detail| detail != &row.text);
-                if matches!(
-                    item.status,
-                    TimelineItemStatus::Pending | TimelineItemStatus::Running
-                ) {
-                    if row.tool_started.is_none() {
-                        row.tool_started = Some(Instant::now());
+                let active = {
+                    let row = &mut ui.transcript[idx];
+                    row.kind = kind;
+                    row.title = transcript_block_title(&block);
+                    row.tool_name = block.title.clone();
+                    row.failed = block.status == TranscriptBlockStatus::Failed;
+                    row.interrupted = block.status == TranscriptBlockStatus::Cancelled;
+                    row.text = transcript_block_running_text(&block);
+                    row.full_text = block.detail.clone().filter(|detail| detail != &row.text);
+                    if matches!(
+                        block.status,
+                        TranscriptBlockStatus::Pending | TranscriptBlockStatus::Running
+                    ) {
+                        if row.tool_started.is_none() {
+                            row.tool_started = Some(Instant::now());
+                        }
+                        row.tool_elapsed = None;
+                        ui.remove_turn_meta();
+                        true
+                    } else {
+                        if let Some(started) = row.tool_started.take() {
+                            row.tool_elapsed = Some(started.elapsed());
+                        }
+                        false
                     }
-                    row.tool_elapsed = None;
-                    ui.remove_turn_meta();
-                    true
-                } else {
-                    if let Some(started) = row.tool_started.take() {
-                        row.tool_elapsed = Some(started.elapsed());
-                    }
-                    false
-                }
+                };
+                tag_gateway_transcript_row(ui, idx, entry_meta, &block);
+                active
             }
         }
     }
 
-    pub(crate) fn apply_gateway_tool_item(
+    pub(crate) fn apply_gateway_tool_block(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         owner_session: Option<&str>,
-        item: &TimelineItem,
+        entry_meta: GatewayTranscriptEntryMeta<'_>,
+        block: &TranscriptBlock,
         value: Value,
     ) -> bool {
-        let event_session = (!item.thread_id.is_empty())
-            .then_some(item.thread_id.as_str())
+        let event_session = (!entry_meta.thread_id.is_empty())
+            .then_some(entry_meta.thread_id)
             .or(owner_session);
         if let Some(session_id) = event_session
             && self
@@ -850,7 +985,7 @@ impl TuiApp {
             .and_then(Value::as_str)
             .unwrap_or("");
         let key = if tool_call_id.is_empty() {
-            format!("gateway:{}", item.id)
+            format!("gateway:{}", block.id)
         } else {
             tool_id_key(tool_call_id)
         };
@@ -865,10 +1000,15 @@ impl TuiApp {
             ui.live_tool_args.insert(tool_call_id.to_string(), args);
         }
 
+        let yielded_exec_running = tool == "exec_command"
+            && exec_session_id_from_result(&value).is_some()
+            && exec_result_running(&value);
+
         if matches!(
-            item.status,
-            TimelineItemStatus::Pending | TimelineItemStatus::Running
-        ) {
+            block.status,
+            TranscriptBlockStatus::Pending | TranscriptBlockStatus::Running
+        ) && !yielded_exec_running
+        {
             if tool == "clarify" {
                 return false;
             }
@@ -880,7 +1020,7 @@ impl TuiApp {
                 let mut row = TranscriptRow::with_title(
                     evidence_kind_for_value(tool, &value),
                     active_tool_title(tool, &value),
-                    if item.status == TimelineItemStatus::Pending {
+                    if block.status == TranscriptBlockStatus::Pending {
                         "preparing"
                     } else {
                         "running"
@@ -898,7 +1038,7 @@ impl TuiApp {
             row.kind = evidence_kind_for_value(tool, &value);
             row.tool_name = Some(tool.to_string());
             row.title = active_tool_title(tool, &value);
-            row.text = if item.status == TimelineItemStatus::Pending {
+            row.text = if block.status == TranscriptBlockStatus::Pending {
                 "preparing".to_string()
             } else if tool == "Agent" {
                 agent_child_status_text("Running", 0, None)
@@ -913,6 +1053,7 @@ impl TuiApp {
                 row.tool_started = Some(tool_started_instant(&value));
             }
             row.tool_elapsed = None;
+            tag_gateway_transcript_row(ui, idx, entry_meta, block);
             return true;
         }
 
@@ -921,10 +1062,10 @@ impl TuiApp {
             .and_then(Value::as_str)
             .unwrap_or("normal");
         let interrupted =
-            item.status == TimelineItemStatus::Cancelled || tool_event_interrupted(&value);
+            block.status == TranscriptBlockStatus::Cancelled || tool_event_interrupted(&value);
         let user_confirmed_interrupt = interrupted && ui.interrupt_requested;
         let clarify_no_answer = tool == "clarify" && clarify_no_answer_result(&value);
-        let failed = item.status == TimelineItemStatus::Failed
+        let failed = block.status == TranscriptBlockStatus::Failed
             || (outcome != "normal" && !interrupted && !clarify_no_answer);
         if tool == "write_stdin" {
             let cached_args = (!tool_call_id.is_empty())
@@ -1000,11 +1141,54 @@ impl TuiApp {
                 }
             }
             ui.prefix_exec_session_output_if_needed(idx, tool_result_output(&value));
+            tag_gateway_transcript_row(ui, idx, entry_meta, block);
             ui.exec_session_rows.insert(session_id, idx);
             if !already_finished && !tool_call_id.is_empty() {
                 ui.tool_rows.insert(key, idx);
             }
             return !already_finished;
+        }
+        if tool == "exec_command"
+            && let Some(session_id) = exec_session_id_from_result(&value)
+            && exec_result_completed(&value)
+        {
+            let idx = ui
+                .tool_rows
+                .get(&key)
+                .copied()
+                .or_else(|| ui.exec_session_rows.get(&session_id).copied())
+                .unwrap_or_else(|| {
+                    let mut row = TranscriptRow::with_title(
+                        evidence_kind_for_value(tool, &value),
+                        tool_title(tool, &value),
+                        String::new(),
+                    );
+                    row.tool_name = Some(tool.to_string());
+                    row.tool_call_id =
+                        (!tool_call_id.is_empty()).then_some(tool_call_id.to_string());
+                    ui.insert_evidence_row(row)
+                });
+            {
+                let row = &mut ui.transcript[idx];
+                row.kind = evidence_kind_for_value(tool, &value);
+                row.tool_name = Some(tool.to_string());
+                row.title = tool_title_for_update(tool, &value, &row.title);
+                row.failed = failed;
+                row.interrupted = interrupted;
+                row.user_shell = user_shell;
+                row.tool_call_id = (!tool_call_id.is_empty()).then_some(tool_call_id.to_string());
+            }
+            ui.prefix_exec_session_output_if_needed(idx, tool_result_output(&value));
+            let elapsed = ui
+                .transcript
+                .get(idx)
+                .and_then(|row| completed_live_tool_elapsed(row, Some(&value)));
+            ui.finish_exec_session_row(session_id, idx, elapsed, interrupted, false);
+            if let Some(row) = ui.transcript.get_mut(idx) {
+                row.failed = failed;
+            }
+            tag_gateway_transcript_row(ui, idx, entry_meta, block);
+            return false;
         }
         if outcome != "normal" && !user_shell && !interrupted && !clarify_no_answer {
             ui.turn_failures += 1;
@@ -1061,10 +1245,11 @@ impl TuiApp {
             };
             row.full_text = full;
         }
+        tag_gateway_transcript_row(ui, idx, entry_meta, block);
         if is_write_like_tool(tool) {
             ui.remove_orphan_provisional_tool_intents(tool, Some(idx));
         }
-        if item.status != TimelineItemStatus::Running {
+        if block.status != TranscriptBlockStatus::Running {
             ui.tool_rows.remove(&tool_id_key(tool_call_id));
         }
         false
@@ -1667,58 +1852,132 @@ fn outcome_from_str(value: &str) -> Option<Outcome> {
     }
 }
 
-fn timeline_item_text(item: &TimelineItem) -> String {
-    item.body
+fn transcript_block_text(block: &TranscriptBlock) -> String {
+    block
+        .body
         .as_ref()
-        .or(item.detail.as_ref())
-        .or(item.preview.as_ref())
+        .or(block.detail.as_ref())
+        .or(block.preview.as_ref())
         .cloned()
         .unwrap_or_default()
 }
 
-fn timeline_item_title(item: &TimelineItem) -> String {
-    item.title.clone().unwrap_or_else(|| match item.kind {
-        TimelineItemKind::Shell => "exec_command".to_string(),
-        TimelineItemKind::File => "file".to_string(),
-        TimelineItemKind::Web => "web".to_string(),
-        TimelineItemKind::Mcp => "mcp".to_string(),
-        TimelineItemKind::Clarify => "clarify".to_string(),
-        TimelineItemKind::Permission => "permission".to_string(),
-        TimelineItemKind::Skill => "skill".to_string(),
-        TimelineItemKind::Agent => "Agent".to_string(),
-        TimelineItemKind::Mailbox => "mailbox".to_string(),
-        TimelineItemKind::Diff => "diff".to_string(),
-        TimelineItemKind::Artifact => "artifact".to_string(),
-        TimelineItemKind::Tool => "tool".to_string(),
-        TimelineItemKind::Status => "status".to_string(),
-        TimelineItemKind::Prompt | TimelineItemKind::Assistant | TimelineItemKind::Reasoning => {
-            String::new()
-        }
+fn gateway_block_row_index(ui: &mut FullscreenUi<'_>, block_id: &str) -> Option<usize> {
+    if block_id.is_empty() {
+        return None;
+    }
+    let index = ui.gateway_item_rows.get(block_id).copied()?;
+    if index < ui.transcript.len() {
+        Some(index)
+    } else {
+        ui.gateway_item_rows.remove(block_id);
+        None
+    }
+}
+
+fn record_gateway_block_row(ui: &mut FullscreenUi<'_>, block_id: &str, index: usize) {
+    if !block_id.is_empty() {
+        ui.gateway_item_rows.insert(block_id.to_string(), index);
+    }
+}
+
+fn tag_gateway_transcript_row(
+    ui: &mut FullscreenUi<'_>,
+    index: usize,
+    entry: GatewayTranscriptEntryMeta<'_>,
+    block: &TranscriptBlock,
+) {
+    let Some(row) = ui.transcript.get_mut(index) else {
+        return;
+    };
+    row.transcript_turn_id = entry.turn_id.map(str::to_string);
+    row.transcript_source = Some(if block.source.trim().is_empty() {
+        entry.source.to_string()
+    } else {
+        block.source.clone()
+    });
+    row.transcript_entry_id = Some(entry.entry_id.to_string());
+    row.transcript_block_id = Some(block.id.clone());
+    row.transcript_message_seq = entry.message_seq;
+}
+
+fn clear_gateway_row_slots_for_index(ui: &mut FullscreenUi<'_>, index: usize) {
+    if ui.assistant_row == Some(index) {
+        ui.assistant_row = None;
+    }
+    if ui.assistant_preamble_row == Some(index) {
+        ui.assistant_preamble_row = None;
+    }
+    if ui.reasoning_row == Some(index) {
+        ui.reasoning_row = None;
+    }
+}
+
+fn gateway_reasoning_title(block: &TranscriptBlock) -> String {
+    if gateway_block_is_assistant_preamble(block) {
+        return "Thinking".to_string();
+    }
+    block
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .unwrap_or("Thinking")
+        .to_string()
+}
+
+fn gateway_block_is_assistant_preamble(block: &TranscriptBlock) -> bool {
+    block
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("projection"))
+        .and_then(Value::as_str)
+        .is_some_and(|projection| projection == "assistant_preamble")
+        || block.title.as_deref() == Some("Preamble")
+}
+
+fn transcript_block_title(block: &TranscriptBlock) -> String {
+    block.title.clone().unwrap_or_else(|| match block.kind {
+        TranscriptBlockKind::Shell => "exec_command".to_string(),
+        TranscriptBlockKind::File => "file".to_string(),
+        TranscriptBlockKind::Web => "web".to_string(),
+        TranscriptBlockKind::Mcp => "mcp".to_string(),
+        TranscriptBlockKind::Clarify => "clarify".to_string(),
+        TranscriptBlockKind::Permission => "permission".to_string(),
+        TranscriptBlockKind::Skill => "skill".to_string(),
+        TranscriptBlockKind::Agent => "Agent".to_string(),
+        TranscriptBlockKind::Mailbox => "mailbox".to_string(),
+        TranscriptBlockKind::Diff => "diff".to_string(),
+        TranscriptBlockKind::Artifact => "artifact".to_string(),
+        TranscriptBlockKind::Tool | TranscriptBlockKind::ToolCall => "tool".to_string(),
+        TranscriptBlockKind::ToolResult => "result".to_string(),
+        TranscriptBlockKind::Status => "status".to_string(),
+        TranscriptBlockKind::Text | TranscriptBlockKind::Reasoning => String::new(),
     })
 }
 
-fn timeline_item_running_text(item: &TimelineItem) -> String {
-    let text = timeline_item_text(item);
+fn transcript_block_running_text(block: &TranscriptBlock) -> String {
+    let text = transcript_block_text(block);
     if !text.trim().is_empty() {
         return text;
     }
-    match item.status {
-        TimelineItemStatus::Pending => "pending".to_string(),
-        TimelineItemStatus::Running => "running".to_string(),
-        TimelineItemStatus::Cancelled => "interrupted".to_string(),
-        TimelineItemStatus::Failed => "failed".to_string(),
-        TimelineItemStatus::NeedsInput => "needs input".to_string(),
-        TimelineItemStatus::Info | TimelineItemStatus::Completed => String::new(),
+    match block.status {
+        TranscriptBlockStatus::Pending => "pending".to_string(),
+        TranscriptBlockStatus::Running => "running".to_string(),
+        TranscriptBlockStatus::Cancelled => "interrupted".to_string(),
+        TranscriptBlockStatus::Failed => "failed".to_string(),
+        TranscriptBlockStatus::NeedsInput => "needs input".to_string(),
+        TranscriptBlockStatus::Info | TranscriptBlockStatus::Completed => String::new(),
     }
 }
 
-fn transcript_kind_for_timeline(kind: TimelineItemKind) -> TranscriptKind {
+fn transcript_kind_for_block(kind: TranscriptBlockKind) -> TranscriptKind {
     match kind {
-        TimelineItemKind::File | TimelineItemKind::Diff | TimelineItemKind::Artifact => {
+        TranscriptBlockKind::File | TranscriptBlockKind::Diff | TranscriptBlockKind::Artifact => {
             TranscriptKind::Updated
         }
-        TimelineItemKind::Web | TimelineItemKind::Mcp => TranscriptKind::Explored,
-        TimelineItemKind::Status => TranscriptKind::Status,
+        TranscriptBlockKind::Web | TranscriptBlockKind::Mcp => TranscriptKind::Explored,
+        TranscriptBlockKind::Status => TranscriptKind::Status,
         _ => TranscriptKind::Ran,
     }
 }
@@ -1728,28 +1987,27 @@ fn gateway_event_session_id(event: &GatewayEvent) -> Option<&str> {
         GatewayEvent::TurnStarted { thread_id, .. }
         | GatewayEvent::TurnQueued { thread_id, .. }
         | GatewayEvent::TurnCompleted { thread_id, .. } => thread_id.as_deref(),
-        GatewayEvent::ItemStarted { item, .. }
-        | GatewayEvent::ItemUpdated { item, .. }
-        | GatewayEvent::ItemCompleted { item, .. } => {
-            (!item.thread_id.is_empty()).then_some(item.thread_id.as_str())
+        GatewayEvent::EntryStarted { entry, .. }
+        | GatewayEvent::EntryUpdated { entry, .. }
+        | GatewayEvent::EntryCompleted { entry, .. } => {
+            (!entry.thread_id.is_empty()).then_some(entry.thread_id.as_str())
         }
-        GatewayEvent::ItemDelta { .. }
+        GatewayEvent::EntryDelta { .. }
         | GatewayEvent::PermissionRequested { .. }
         | GatewayEvent::PermissionResolved { .. }
         | GatewayEvent::ClarifyRequested { .. }
         | GatewayEvent::ClarifyResolved { .. }
-        | GatewayEvent::Warning { .. }
-        | GatewayEvent::DebugAvailable { .. } => None,
+        | GatewayEvent::Warning { .. } => None,
     }
 }
 
-fn gateway_item_tool_value(item: &TimelineItem) -> Option<Value> {
-    let value = item.metadata.as_ref()?;
+fn gateway_block_tool_value(block: &TranscriptBlock) -> Option<Value> {
+    let value = block.metadata.as_ref()?;
     (value.get("projection").and_then(Value::as_str) == Some("tool")).then(|| value.clone())
 }
 
-fn gateway_item_runtime_value(item: &TimelineItem) -> Option<Value> {
-    let value = item.metadata.as_ref()?;
+fn gateway_block_runtime_value(block: &TranscriptBlock) -> Option<Value> {
+    let value = block.metadata.as_ref()?;
     (value.get("projection").and_then(Value::as_str) == Some("runtimeValue")).then(|| value.clone())
 }
 
@@ -1769,8 +2027,8 @@ fn remove_visible_write_stdin_row(ui: &mut FullscreenUi<'_>, tool_call_id: &str)
     }
 }
 
-fn apply_gateway_assistant_turn_metadata(ui: &mut FullscreenUi<'_>, item: &TimelineItem) {
-    let Some(metadata) = item.metadata.as_ref() else {
+fn apply_gateway_assistant_turn_metadata(ui: &mut FullscreenUi<'_>, block: &TranscriptBlock) {
+    let Some(metadata) = block.metadata.as_ref() else {
         return;
     };
     if let Some(usage) = non_null_metadata_field(metadata, "usage") {
@@ -1797,7 +2055,11 @@ fn apply_gateway_assistant_turn_metadata(ui: &mut FullscreenUi<'_>, item: &Timel
     }
 }
 
-fn push_gateway_completed_turn_meta(ui: &mut FullscreenUi<'_>, debug: bool) {
+fn push_gateway_completed_turn_meta(
+    ui: &mut FullscreenUi<'_>,
+    debug: bool,
+    entry: GatewayTranscriptEntryMeta<'_>,
+) {
     let meta = turn_meta_text(TurnMetaProjection {
         mode: &ui.turn_mode,
         provider: &ui.turn_provider,
@@ -1811,17 +2073,22 @@ fn push_gateway_completed_turn_meta(ui: &mut FullscreenUi<'_>, debug: bool) {
         debug,
     });
     if !meta.is_empty() {
-        ui.transcript
-            .push(TranscriptRow::with_title(TranscriptKind::Meta, "", meta));
+        let mut row = TranscriptRow::with_title(TranscriptKind::Meta, "", meta);
+        row.transcript_turn_id = entry.turn_id.map(str::to_string);
+        row.transcript_source = Some(entry.source.to_string());
+        row.transcript_entry_id = Some(entry.entry_id.to_string());
+        row.transcript_block_id = Some(format!("{}:meta", entry.entry_id));
+        row.transcript_message_seq = entry.message_seq;
+        ui.transcript.push(row);
     }
     ui.finish_turn();
 }
 
-fn gateway_assistant_item_receives_meta(item: &TimelineItem) -> bool {
-    if item.kind != TimelineItemKind::Assistant || item.status != TimelineItemStatus::Completed {
+fn gateway_assistant_block_receives_meta(block: &TranscriptBlock) -> bool {
+    if block.kind != TranscriptBlockKind::Text || block.status != TranscriptBlockStatus::Completed {
         return false;
     }
-    let Some(metadata) = item.metadata.as_ref() else {
+    let Some(metadata) = block.metadata.as_ref() else {
         return true;
     };
     if metadata_string_field(metadata, "finish_reason")

@@ -114,6 +114,15 @@ the original submitted line. Unknown slash-looking input is represented as a
 pass-through prompt so prompt-bearing user surfaces can send it to the model
 with the original submitted text.
 
+Gateway exposes the same command catalog to reconnectable clients through
+`command/list` and `command/execute`. TUI, Web, Desktop, ACP, and messaging
+surfaces must project the shared catalog rather than inventing separate slash
+semantics.
+Web and Desktop shells present the shared catalog as a command utility panel.
+Executing `/help` or `/commands` opens that panel, `/agents` opens the agents
+panel, `/status` opens status, and `/sessions` or `/history` opens history.
+These panel switches are host display effects, not ordinary transcript facts.
+
 Shared execution returns an effect rather than directly manipulating a UI. The
 effect vocabulary includes local text, pass-through prompt, prompt submission,
 steer, queue, pending cancel, session switch, state patch, artifact result,
@@ -121,18 +130,29 @@ structured diff result, unsupported guidance, and approval required. Surfaces
 apply these effects to their own transcript, panes, protocol updates, queues,
 or approval UI.
 
+Peer-agent ACP commands are dynamic catalog entries sourced from ACP
+`available_commands_update`. They are exposed as namespaced commands of the
+form `/agent:command`. Core Psychevo commands keep their canonical names and
+are never shadowed by peer commands. When executing a peer command, Gateway
+removes the namespace and sends the original peer slash command to the selected
+peer thread.
+
 `/diff` is an observational shared command. It requires a surface capable of
 showing a structured diff result, is available during active turns, and must
 not write runtime messages, affect model context, alter exports, or change
 usage/accounting. Its concrete semantics are defined by
 [214 pevo Diff Command](../214-pevo-diff-command/spec.md).
 
-Interactive terminal surfaces may project local slash command feedback that is
-written to the transcript as a distinct command-result transcript row. Such
-rows are display-only: they do not become user prompts, durable session
-messages, provider context, or visible message counts. Commands whose output
-kind is a bottom pane use that pane instead of adding command-result transcript
-rows.
+Interactive terminal surfaces may project local slash command feedback as
+surface-local UI state. Such feedback is display-only: it must not become user
+prompts, durable session messages, provider context, visible message counts, or
+ordinary main transcript history. Commands whose output kind is a bottom pane
+use that pane instead of adding transcript rows. Any future persistent command
+result history requires an explicit domain sidecar spec rather than a generic
+transcript sidecar.
+This boundary follows the transcript state and projection ownership defined by
+[030 Transcript State](../030-state-and-data-model/transcript-state.md) and
+[213 pevo Display Model](../213-pevo-display-model/spec.md).
 
 Statuses are:
 

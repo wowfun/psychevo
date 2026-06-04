@@ -642,7 +642,7 @@ pub(crate) fn streaming_tool_call_creates_pending_updating_row_before_execution(
 }
 
 #[test]
-pub(crate) fn streaming_tool_call_after_visible_text_stays_below_answer() {
+pub(crate) fn streaming_tool_call_after_visible_text_stays_below_preamble() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -673,23 +673,33 @@ pub(crate) fn streaming_tool_call_after_visible_text_stays_below_answer() {
         false,
     );
 
-    let answer = ui
+    let preamble = ui
         .transcript
         .iter()
-        .position(|row| row.kind == TranscriptKind::Answer)
-        .expect("answer row");
+        .position(|row| {
+            row.kind == TranscriptKind::Thinking
+                && row.title == "Thinking"
+                && row.text == "Now let me write the complete report."
+        })
+        .expect("preamble row");
     let tool = ui
         .transcript
         .iter()
         .position(|row| row.kind == TranscriptKind::Updated)
         .expect("tool row");
-    assert!(answer < tool);
+    assert!(preamble < tool);
     assert_eq!(ui.transcript[tool].title, "write report.md");
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.kind != TranscriptKind::Answer)
+    );
 
     ui.scroll_to_bottom();
     let buffer = draw_fullscreen_for_test(&app, &mut ui, 80, 8);
     let text = buffer_text(&buffer);
     assert!(text.contains("write report.md"), "{text}");
+    assert!(!text.contains("Preamble"), "{text}");
     assert!(!text.contains("Tool calls"), "{text}");
 }
 
@@ -747,20 +757,29 @@ pub(crate) fn message_end_text_plus_write_tool_shows_active_row_without_intermed
         false,
     );
 
-    let answer = ui
+    let preamble = ui
         .transcript
         .iter()
-        .position(|row| row.kind == TranscriptKind::Answer)
-        .expect("answer row");
+        .position(|row| {
+            row.kind == TranscriptKind::Thinking
+                && row.title == "Thinking"
+                && row.text == "Now I have all the data I need. Let me write the full report:"
+        })
+        .expect("preamble row");
     let tool = ui
         .transcript
         .iter()
         .position(|row| row.kind == TranscriptKind::Updated)
         .expect("tool row");
-    assert!(answer < tool);
+    assert!(preamble < tool);
     assert_eq!(
         ui.transcript[tool].title,
         "write /tmp/hackernews-hot-05-15.md"
+    );
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.kind != TranscriptKind::Answer)
     );
     assert!(
         ui.transcript

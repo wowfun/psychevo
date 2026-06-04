@@ -28,6 +28,12 @@ transcript. `Stop subtree` first requests cooperative shutdown for the selected
 child and descendants, waits a short grace window, then force-interrupts and
 closes any still-running child edge.
 
+Peer-agent definitions appear in the same Agents panel as local definitions.
+Rows expose actions according to `entrypoints`: `Open peer` for top-level peer
+threads, `Run subagent` for child runs, and existing selected-agent/edit
+actions when supported. Generated peer agents are editable by creating a
+project Markdown shadow definition that references the backend.
+
 `Use as main` changes the selected main-session agent for future turns in the
 current session only. It does not rewrite history, does not start a child run,
 and is unavailable for shadowed or diagnostic definitions. The selected main
@@ -62,6 +68,10 @@ action enters the child session. If the title action overlaps the row title
 line's general row hit area, `Open` wins only inside that visible action region;
 clicks elsewhere on the row still toggle details. In transcript focus, `Space`
 toggles details while `Enter` or `O` opens an Agent row.
+
+`@agent-name` always keeps the existing delegation semantics. For peer agents it
+starts or requires a subagent run when the definition has the `subagent`
+entrypoint; it does not switch to or create a top-level peer thread.
 
 Running an available definition from `/agents` prompts for a task, starts a
 background fresh-context child agent, writes a concise clickable parent status

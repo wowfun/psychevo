@@ -1,6 +1,76 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 impl<'a> FullscreenUi<'a> {
+    pub(crate) fn mark_optimistic_rows_from(&mut self, start_index: usize) {
+        for row in self.transcript.iter_mut().skip(start_index) {
+            row.transcript_source = Some("tui.optimistic".to_string());
+        }
+    }
+
+    pub(crate) fn bind_unbound_optimistic_rows_to_turn(&mut self, turn_id: &str) {
+        for row in &mut self.transcript {
+            if row.transcript_source.as_deref() == Some("tui.optimistic")
+                && row.transcript_turn_id.is_none()
+            {
+                row.transcript_turn_id = Some(turn_id.to_string());
+            }
+        }
+    }
+
+    pub(crate) fn bind_unbound_live_turn_meta_to_turn(&mut self, turn_id: &str) {
+        let Some(index) = self.meta_row else {
+            return;
+        };
+        let Some(row) = self.transcript.get_mut(index) else {
+            return;
+        };
+        if row.kind == TranscriptKind::Meta
+            && row.transcript_source.as_deref() == Some("runtime.stream")
+            && row.transcript_turn_id.is_none()
+        {
+            row.transcript_turn_id = Some(turn_id.to_string());
+        }
+    }
+
+    pub(crate) fn remove_live_overlay_for_turn(&mut self, turn_id: &str) {
+        for index in (0..self.transcript.len()).rev() {
+            let Some(row) = self.transcript.get(index) else {
+                continue;
+            };
+            let same_turn = row.transcript_turn_id.as_deref() == Some(turn_id);
+            let live_source = matches!(
+                row.transcript_source.as_deref(),
+                Some("runtime.stream" | "tui.optimistic")
+            );
+            if same_turn && live_source {
+                self.remove_transcript_row(index);
+            }
+        }
+    }
+
+    pub(crate) fn tag_live_turn_meta_row(&mut self, index: usize) {
+        let turn_id = self
+            .running
+            .as_ref()
+            .and_then(|running| running.turn_id.as_deref())
+            .map(str::to_string)
+            .or_else(|| {
+                self.transcript
+                    .iter()
+                    .rev()
+                    .find(|row| row.kind != TranscriptKind::Meta)
+                    .and_then(|row| row.transcript_turn_id.clone())
+            });
+        let Some(row) = self.transcript.get_mut(index) else {
+            return;
+        };
+        row.transcript_turn_id = turn_id;
+        row.transcript_source = Some("runtime.stream".to_string());
+        row.transcript_entry_id = None;
+        row.transcript_block_id = None;
+        row.transcript_message_seq = None;
+    }
+
     pub(crate) fn upsert_streaming_tool_call(&mut self, call: StreamingToolCall) -> bool {
         if call.tool_name == "clarify" {
             return false;
@@ -120,8 +190,10 @@ impl<'a> FullscreenUi<'a> {
             self.finish_thinking_row(idx);
         }
         self.assistant_row = None;
+        self.assistant_preamble_row = None;
         self.reasoning_row = None;
         self.meta_row = None;
+        self.gateway_item_rows.clear();
         self.tool_rows.clear();
         self.live_tool_args.clear();
         self.streaming_tool_message_open = false;
@@ -303,6 +375,7 @@ impl<'a> FullscreenUi<'a> {
             self.meta_row = Some(idx);
             idx
         });
+        self.tag_live_turn_meta_row(idx);
         self.transcript[idx].text = meta;
     }
 
@@ -702,9 +775,7 @@ pub(crate) fn refresh_agent_child_preview(row: &mut TranscriptRow) {
         return;
     }
     let full = format!("{status}\n{}", row.agent_child_live_text);
-    let (collapsed, full_text) = collapse_ledger_body(&full);
-    row.text = collapsed;
-    row.full_text = full_text;
+    row.set_evidence_body_text(full);
 }
 
 pub(crate) fn agent_child_status_text(status: &str, tool_uses: i64, tokens: Option<u64>) -> String {
@@ -785,15 +856,11 @@ pub(crate) fn set_exec_row_text(row: &mut TranscriptRow, full: String) {
     if full.is_empty() {
         row.text.clear();
         row.full_text = None;
+        row.expanded = false;
+        row.details_collapsed = false;
         return;
     }
-    let (collapsed, full_text) = collapse_ledger_body(&full);
-    row.text = if collapsed.is_empty() {
-        full.clone()
-    } else {
-        collapsed
-    };
-    row.full_text = full_text;
+    row.set_evidence_body_text(full);
 }
 
 pub(crate) fn with_exec_history_running_marker(mut full: String) -> String {

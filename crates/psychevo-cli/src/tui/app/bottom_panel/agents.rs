@@ -402,11 +402,16 @@ impl TuiApp {
                 name,
                 source,
                 path,
+                entrypoints,
                 shadowed,
             }) => {
-                ui.bottom_panel = Some(BottomPanel::AgentActions(
-                    self.agent_action_panel(name, source, path, shadowed),
-                ));
+                ui.bottom_panel = Some(BottomPanel::AgentActions(self.agent_action_panel(
+                    name,
+                    source,
+                    path,
+                    entrypoints,
+                    shadowed,
+                )));
             }
             Some(BottomSelectionValue::AgentAction {
                 name,
@@ -550,13 +555,19 @@ impl TuiApp {
                 self.toggle_agent_spawning(ui);
             }
             KeyCode::Char('r') | KeyCode::Char('R') => {
-                if let Some(BottomSelectionValue::AgentAvailable { name, .. }) = ui
+                if let Some(BottomSelectionValue::AgentAvailable {
+                    name, entrypoints, ..
+                }) = ui
                     .bottom_panel
                     .as_ref()
                     .and_then(BottomPanel::selected_value)
                 {
-                    ui.bottom_panel =
-                        Some(BottomPanel::AgentRunPrompt(AgentRunPromptPanel::new(name)));
+                    if entrypoints.contains(&AgentEntrypoint::Subagent) {
+                        ui.bottom_panel =
+                            Some(BottomPanel::AgentRunPrompt(AgentRunPromptPanel::new(name)));
+                    } else {
+                        ui.set_bottom_panel_notice("agent does not support subagent runs");
+                    }
                 }
             }
             KeyCode::Char('v') | KeyCode::Char('V') => {
@@ -564,6 +575,7 @@ impl TuiApp {
                     name,
                     source,
                     path,
+                    entrypoints: _,
                     shadowed,
                 }) = ui
                     .bottom_panel

@@ -141,7 +141,7 @@ remain additive and may name a discovered skill or point at a skill path.
 
 `--format default` writes only the final assistant text to stdout.
 
-`--format json` writes newline-delimited typed timeline events to stdout.
+`--format json` writes newline-delimited typed transcript events to stdout.
 Output is buffered in this slice. Each line is one JSON object. The event shape
 is Psychevo-owned and uses dotted event names:
 
@@ -154,16 +154,17 @@ is Psychevo-owned and uses dotted event names:
 - `turn.failed`
 - `error`
 
-`item.*` events carry typed timeline items rather than raw runtime event
-payloads. Tool and artifact items include bounded preview/detail references
+`item.*` events carry typed transcript entries rather than raw runtime event
+payloads. Tool and artifact entries include bounded preview/detail references
 when output is large. `turn.completed` includes usage when known and the
 terminal outcome. `turn.failed` and `error` contain bounded human-readable
 diagnostics without provider secrets.
 
 Reasoning/thinking content is folded out of JSON output by default. Supplying
 `--include-reasoning` requires `--format json` and allows typed reasoning
-timeline items or updates. Assistant message items remain visible-transcript
-projections and must not carry provider reasoning wire fields.
+transcript entries or updates. Assistant message entries remain
+visible-transcript projections and must not carry provider reasoning wire
+fields.
 
 When a started run ends because the agent loop reached its model-turn budget,
 the terminal `turn.completed` or `turn.failed` JSON event includes

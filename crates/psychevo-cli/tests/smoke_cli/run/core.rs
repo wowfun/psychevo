@@ -209,7 +209,7 @@ pub(crate) fn cli_run_child_agent_session_exports_prefix_and_last_request() {
         .expect("child session");
     let prefix_slots: Vec<String> = conn
         .prepare(
-            "SELECT json_extract(value, '$.slot') FROM session_prompt_prefixes, json_each(slots_json) WHERE session_id = ?1 ORDER BY json_extract(value, '$.order')",
+            "SELECT json_extract(value, '$.slot') FROM session_prompt_prefixes, json_each(slots_json) WHERE session_id = ?1 AND version = (SELECT MAX(version) FROM session_prompt_prefixes WHERE session_id = ?1) ORDER BY json_extract(value, '$.order')",
         )
         .expect("prepare")
         .query_map([child_session.as_str()], |row| row.get::<_, String>(0))
@@ -488,7 +488,11 @@ pub(crate) fn cli_run_json_outputs_ndjson_events() {
         .collect::<Vec<_>>();
     assert_eq!(events.first().expect("first")["type"], "thread.started");
     assert_eq!(events.get(1).expect("second")["type"], "turn.started");
-    assert!(events.iter().any(|event| event["type"] == "item.completed"));
+    assert!(
+        events
+            .iter()
+            .any(|event| event["type"] == "entry.completed")
+    );
     assert!(events.iter().any(|event| event["type"] == "turn.completed"));
     let turn_end = events
         .iter()

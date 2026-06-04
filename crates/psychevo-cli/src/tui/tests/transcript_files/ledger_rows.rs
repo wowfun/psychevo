@@ -235,14 +235,17 @@ pub(crate) fn long_thinking_defaults_to_row_level_collapse_without_left_rail() {
     assert!(rendered.contains("• Thinking"), "{rendered}");
     assert!(rendered.contains("▸ 6 more lines"), "{rendered}");
     assert!(rendered.contains("  └ line 1"), "{rendered}");
+    assert!(rendered.contains("line 2"), "{rendered}");
     assert!(rendered.contains("... 6 more lines"), "{rendered}");
+    assert!(rendered.contains("line 9"), "{rendered}");
     assert!(rendered.contains("line 12"), "{rendered}");
+    assert!(!rendered.contains("line 8"), "{rendered}");
     assert!(!rendered.contains("▌"), "{rendered}");
     assert!(!rendered.contains("Thinking:"), "{rendered}");
 }
 
 #[test]
-pub(crate) fn long_thinking_can_expand_then_collapse_details() {
+pub(crate) fn long_thinking_cycles_preview_full_title_preview() {
     let long = (1..=12)
         .map(|index| format!("line {index}"))
         .collect::<Vec<_>>()
@@ -259,6 +262,7 @@ pub(crate) fn long_thinking_can_expand_then_collapse_details() {
         .join("\n");
     assert!(expanded.contains("▾ collapse"), "{expanded}");
     assert!(expanded.contains("line 3"), "{expanded}");
+    assert!(!expanded.contains("... 6 more lines"), "{expanded}");
 
     toggle_transcript_row_details(&mut row);
     assert!(!row.expanded);
@@ -282,6 +286,8 @@ pub(crate) fn long_thinking_can_expand_then_collapse_details() {
         .join("\n");
     assert!(preview.contains("▸ 6 more lines"), "{preview}");
     assert!(preview.contains("line 1"), "{preview}");
+    assert!(preview.contains("line 12"), "{preview}");
+    assert!(!preview.contains("line 8"), "{preview}");
 }
 
 #[test]
@@ -412,8 +418,11 @@ pub(crate) fn long_tool_output_uses_shared_default_collapse() {
         .join("\n");
     assert!(rendered.contains("▸ 6 more lines"), "{rendered}");
     assert!(rendered.contains("  └ line 01"), "{rendered}");
+    assert!(rendered.contains("line 02"), "{rendered}");
+    assert!(rendered.contains("line 09"), "{rendered}");
     assert!(rendered.contains("line 12"), "{rendered}");
     assert!(rendered.contains("... 6 more lines"), "{rendered}");
+    assert!(!rendered.contains("line 08"), "{rendered}");
 }
 
 #[test]
@@ -539,7 +548,33 @@ pub(crate) fn expanded_tool_output_restores_full_text() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(rendered.contains("▾ collapse"), "{rendered}");
+    assert!(rendered.contains("line 03"), "{rendered}");
     assert!(rendered.contains("line 12"), "{rendered}");
+    assert!(!rendered.contains("... 6 more lines"), "{rendered}");
+
+    toggle_transcript_row_details(&mut row);
+    assert!(!row.expanded);
+    assert!(row.details_collapsed);
+    let title_only = tool_lines(&row, false, true, 80)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(title_only.contains("▸ details"), "{title_only}");
+    assert!(!title_only.contains("line 01"), "{title_only}");
+
+    toggle_transcript_row_details(&mut row);
+    assert!(!row.expanded);
+    assert!(!row.details_collapsed);
+    let preview = tool_lines(&row, false, true, 80)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(preview.contains("▸ 6 more lines"), "{preview}");
+    assert!(preview.contains("line 01"), "{preview}");
+    assert!(preview.contains("line 12"), "{preview}");
+    assert!(!preview.contains("line 08"), "{preview}");
 }
 
 #[test]

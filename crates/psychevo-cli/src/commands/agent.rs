@@ -1,21 +1,25 @@
 use std::env;
 use std::io::{self, IsTerminal, Read};
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
 use psychevo_ai::Outcome;
 use psychevo_runtime::{
-    AgentCatalog, AgentDiscoveryOptions, AgentEdgeRecord, RunMode, RunOptions, SessionSummary,
-    SqliteStore, StateRuntime, TuiMessageSummary, agent_status_value, close_agent_id,
-    discover_agents, list_agents_value, resolve_agent_definition, resume_agent_id,
-    send_agent_message, view_agent_value_with_catalog, wait_agent_mailbox,
+    AgentBackendConfig, AgentCatalog, AgentDiscoveryOptions, AgentEdgeRecord, RunMode, RunOptions,
+    SessionSummary, SqliteStore, StateRuntime, TuiMessageSummary, agent_status_value,
+    close_agent_id, discover_agents, list_agents_value, load_agent_backend_configs,
+    resolve_agent_definition, resume_agent_id, send_agent_message, set_config_value,
+    valid_agent_name, view_agent_value_with_catalog, wait_agent_mailbox,
 };
 use serde_json::{Value, json};
 
 use crate::args::{
-    AgentArgs, AgentCommand, AgentIdArgs, AgentInspectArgs, AgentListArgs, AgentLogsArgs,
-    AgentNameArgs, AgentRunArgs, AgentSendArgs, AgentStatusArgs, AgentWaitArgs, RunFormatArg,
+    AgentArgs, AgentBackendAddArgs, AgentBackendArgs, AgentBackendCommand, AgentBackendDoctorArgs,
+    AgentBackendListArgs, AgentCommand, AgentIdArgs, AgentInspectArgs, AgentListArgs,
+    AgentLogsArgs, AgentNameArgs, AgentRunArgs, AgentSendArgs, AgentStatusArgs, AgentWaitArgs,
+    RunFormatArg,
 };
 use crate::env::{
     ensure_home_initialized, env_path, env_value, inherited_env, resolve_explicit_path,
@@ -36,6 +40,15 @@ pub(crate) async fn run_agent_command(args: AgentArgs) -> Result<ExitCode> {
         AgentCommand::Send(args) => send_agent(args),
         AgentCommand::Attach(args) => attach_agent(args).await,
         AgentCommand::Logs(args) => agent_logs(args),
+        AgentCommand::Backend(args) => agent_backend(args),
+    }
+}
+
+pub(crate) fn agent_backend(args: AgentBackendArgs) -> Result<ExitCode> {
+    match args.command {
+        AgentBackendCommand::List(args) => agent_backend_list(args),
+        AgentBackendCommand::Add(args) => agent_backend_add(args),
+        AgentBackendCommand::Doctor(args) => agent_backend_doctor(args),
     }
 }
 
@@ -59,6 +72,133 @@ pub(crate) fn list_agents(args: AgentListArgs) -> Result<ExitCode> {
                 "{}",
                 serde_json::to_string(&json!({"diagnostics": catalog.diagnostics}))?
             );
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+pub(crate) fn agent_backend_list(args: AgentBackendListArgs) -> Result<ExitCode> {
+    let (home, workdir, env_map) = backend_context()?;
+    let backends = load_agent_backend_configs(&home, &workdir, &env_map)?;
+    let values = backends
+        .values()
+        .map(agent_backend_value)
+        .collect::<Vec<_>>();
+    if args.json {
+        println!("{}", serde_json::to_string(&json!({ "backends": values }))?);
+    } else if backends.is_empty() {
+        println!("No agent backends configured.");
+    } else {
+        for backend in backends.values() {
+            println!(
+                "{}\t{}\t{}\t{}",
+                backend.id,
+                backend.kind.as_str(),
+                if backend.enabled {
+                    "enabled"
+                } else {
+                    "disabled"
+                },
+                backend.command.as_deref().unwrap_or("-")
+            );
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+pub(crate) fn agent_backend_add(args: AgentBackendAddArgs) -> Result<ExitCode> {
+    if !valid_agent_name(&args.id) {
+        return Err(anyhow!("invalid backend id: {}", args.id));
+    }
+    if args.description.trim().is_empty() {
+        return Err(anyhow!("backend description must be non-empty"));
+    }
+    if args.command.trim().is_empty() {
+        return Err(anyhow!("backend command must be non-empty"));
+    }
+    let (home, workdir, _env_map) = backend_context()?;
+    let config_dir = if args.local {
+        workdir.join(".psychevo")
+    } else {
+        home.clone()
+    };
+    let entrypoints = if args.entrypoints.is_empty() {
+        vec!["peer".to_string(), "subagent".to_string()]
+    } else {
+        validate_backend_entrypoints(&args.entrypoints)?
+    };
+    let client_capabilities = if args.client_capabilities.is_empty() {
+        vec![
+            "fs.read".to_string(),
+            "fs.write".to_string(),
+            "terminal".to_string(),
+        ]
+    } else {
+        validate_backend_client_capabilities(&args.client_capabilities)?
+    };
+    let value = json!({
+        "kind": "acp",
+        "enabled": true,
+        "label": args.label.unwrap_or_else(|| args.id.clone()),
+        "description": args.description.trim(),
+        "command": args.command.trim(),
+        "args": args.args,
+        "entrypoints": entrypoints,
+        "client_capabilities": client_capabilities,
+        "cwd": "invocation",
+        "env": {},
+    });
+    let result = set_config_value(config_dir, &format!("agents.backends.{}", args.id), value)?;
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string(&json!({
+                "path": result.path,
+                "key": result.key,
+                "changed": result.changed,
+            }))?
+        );
+    } else {
+        println!("backend: {}", args.id);
+        println!("path: {}", result.path.display());
+        println!("changed: {}", result.changed);
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+pub(crate) fn agent_backend_doctor(args: AgentBackendDoctorArgs) -> Result<ExitCode> {
+    let (home, workdir, env_map) = backend_context()?;
+    let backends = load_agent_backend_configs(&home, &workdir, &env_map)?;
+    let backend = backends
+        .get(&args.id)
+        .ok_or_else(|| anyhow!("unknown backend: {}", args.id))?;
+    let value = agent_backend_doctor_value(backend, &env_map);
+    if args.json {
+        println!("{}", serde_json::to_string(&value)?);
+    } else {
+        println!(
+            "backend: {}\t{}\t{}",
+            backend.id,
+            backend.kind.as_str(),
+            if value.get("ok").and_then(Value::as_bool) == Some(true) {
+                "ok"
+            } else {
+                "failed"
+            }
+        );
+        if let Some(checks) = value.get("checks").and_then(Value::as_array) {
+            for check in checks {
+                println!(
+                    "{}\t{}\t{}",
+                    check.get("name").and_then(Value::as_str).unwrap_or("-"),
+                    if check.get("ok").and_then(Value::as_bool) == Some(true) {
+                        "ok"
+                    } else {
+                        "failed"
+                    },
+                    check.get("message").and_then(Value::as_str).unwrap_or("")
+                );
+            }
         }
     }
     Ok(ExitCode::SUCCESS)
@@ -630,6 +770,156 @@ pub(crate) fn truncate_preview(input: &str, max_chars: usize) -> String {
         .collect::<String>();
     out.push_str("...");
     out
+}
+
+pub(crate) fn backend_context()
+-> Result<(PathBuf, PathBuf, std::collections::BTreeMap<String, String>)> {
+    let env_map = inherited_env();
+    let cwd = env::current_dir()?;
+    let home = resolve_psychevo_home(&env_map, &cwd)?;
+    let workdir = cwd.canonicalize().unwrap_or(cwd);
+    Ok((home, workdir, env_map))
+}
+
+pub(crate) fn validate_backend_entrypoints(values: &[String]) -> Result<Vec<String>> {
+    let mut out = Vec::new();
+    for value in values {
+        let value = value.trim();
+        if !matches!(value, "peer" | "subagent") {
+            return Err(anyhow!(
+                "backend entrypoint must be peer or subagent: {value}"
+            ));
+        }
+        out.push(value.to_string());
+    }
+    Ok(out)
+}
+
+pub(crate) fn validate_backend_client_capabilities(values: &[String]) -> Result<Vec<String>> {
+    let mut out = Vec::new();
+    for value in values {
+        let value = value.trim();
+        if !matches!(value, "fs.read" | "fs.write" | "terminal") {
+            return Err(anyhow!(
+                "backend client capability must be fs.read, fs.write, or terminal: {value}"
+            ));
+        }
+        out.push(value.to_string());
+    }
+    Ok(out)
+}
+
+pub(crate) fn agent_backend_value(backend: &AgentBackendConfig) -> Value {
+    json!({
+        "id": backend.id,
+        "kind": backend.kind.as_str(),
+        "enabled": backend.enabled,
+        "label": backend.label,
+        "description": backend.description,
+        "command": backend.command,
+        "args": backend.args,
+        "cwd": backend.cwd,
+        "entrypoints": backend.entrypoints,
+        "clientCapabilities": backend.client_capabilities,
+        "mcpServers": backend.mcp_servers,
+        "envKeys": backend.env.keys().cloned().collect::<Vec<_>>(),
+        "diagnostics": agent_backend_diagnostics(backend),
+    })
+}
+
+pub(crate) fn agent_backend_diagnostics(backend: &AgentBackendConfig) -> Vec<Value> {
+    let mut diagnostics = Vec::new();
+    if !backend.enabled {
+        diagnostics.push(json!({"kind": "disabled", "message": "backend is disabled"}));
+    }
+    if backend
+        .description
+        .as_deref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        diagnostics.push(json!({
+            "kind": "missing_description",
+            "message": "backend will not generate an agent without a description"
+        }));
+    }
+    if backend.command.is_none() {
+        diagnostics.push(json!({
+            "kind": "missing_command",
+            "message": "backend command is required for execution"
+        }));
+    }
+    diagnostics
+}
+
+pub(crate) fn agent_backend_doctor_value(
+    backend: &AgentBackendConfig,
+    env_map: &std::collections::BTreeMap<String, String>,
+) -> Value {
+    let mut checks = Vec::new();
+    checks.push(json!({
+        "name": "enabled",
+        "ok": backend.enabled,
+        "message": if backend.enabled { "backend enabled" } else { "backend disabled" },
+    }));
+    let has_description = backend
+        .description
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty());
+    checks.push(json!({
+        "name": "description",
+        "ok": has_description,
+        "message": if has_description {
+            "description configured"
+        } else {
+            "description missing; generated agent will be hidden"
+        },
+    }));
+    checks.push(match backend.command.as_deref() {
+        Some(command) => match resolve_command_path(command, env_map) {
+            Some(path) => json!({
+                "name": "command",
+                "ok": true,
+                "message": "command resolved",
+                "path": path,
+            }),
+            None => json!({
+                "name": "command",
+                "ok": false,
+                "message": "command was not found on PATH or as a configured path",
+            }),
+        },
+        None => json!({
+            "name": "command",
+            "ok": false,
+            "message": "command missing",
+        }),
+    });
+    let ok = checks
+        .iter()
+        .all(|check| check.get("ok").and_then(Value::as_bool).unwrap_or(false));
+    json!({
+        "id": backend.id,
+        "kind": backend.kind.as_str(),
+        "ok": ok,
+        "checks": checks,
+    })
+}
+
+pub(crate) fn resolve_command_path(
+    command: &str,
+    env_map: &std::collections::BTreeMap<String, String>,
+) -> Option<PathBuf> {
+    let command_path = PathBuf::from(command);
+    if command_path.components().count() > 1 {
+        return command_path.is_file().then_some(command_path);
+    }
+    let path_var = env_map
+        .get("PATH")
+        .cloned()
+        .or_else(|| std::env::var("PATH").ok())?;
+    std::env::split_paths(&path_var)
+        .map(|dir| dir.join(command))
+        .find(|path| path.is_file())
 }
 
 pub(crate) fn catalog() -> Result<AgentCatalog> {

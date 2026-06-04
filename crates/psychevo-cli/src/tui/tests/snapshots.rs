@@ -307,6 +307,17 @@ pub(crate) async fn tui_snapshot_active_write_suppresses_failure_meta() {
         }),
         false,
     );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_call_pending",
+            "tool_call_id": "call_write_report",
+            "tool_name": "write",
+            "arguments_json": "",
+            "content_index": 1,
+            "call_index": 0
+        }),
+        false,
+    );
     for row in &mut ui.transcript {
         if row.title.starts_with("write ") || row.title == "write" {
             row.tool_started = Some(

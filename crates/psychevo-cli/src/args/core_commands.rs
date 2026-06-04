@@ -8,14 +8,14 @@ pub(crate) use super::*;
 )]
 pub(crate) struct Cli {
     #[command(subcommand)]
-    pub(crate) command: Commands,
+    pub(crate) command: Option<Commands>,
 }
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Commands {
     #[command(about = "Create or repair the global Psychevo home")]
     Init(InitArgs),
-    #[command(about = "List, inspect, run, and manage agents")]
+    #[command(about = "List, inspect, run, and manage agents", alias = "agents")]
     Agent(AgentArgs),
     #[command(about = "List, view, create, install, and toggle local skills")]
     Skill(SkillsArgs),
@@ -49,6 +49,11 @@ pub(crate) enum Commands {
     )]
     Tui(TuiArgs),
     #[command(
+        about = "Open the managed local Web UI",
+        long_about = "Open the managed local Web UI for the current workdir. The command is equivalent to `pevo gateway open` and emits exactly one JSON object on stdout."
+    )]
+    Web(GatewayOpenArgs),
+    #[command(
         about = "Run the headless local Gateway API server",
         long_about = "Run the headless local Gateway API server on loopback. The command emits one ready JSON object on stdout and writes logs to stderr."
     )]
@@ -58,6 +63,16 @@ pub(crate) enum Commands {
         long_about = "Open, start, inspect, stop, or restart the managed Gateway Web Shell. The default subcommand is open."
     )]
     Gateway(GatewayArgs),
+    #[command(
+        about = "Run local deterministic diagnostics",
+        long_about = "Run local diagnostics for Psychevo home, config, auth, model selection, Web UI assets, Gateway status, and local tools. Provider network checks run only with --live."
+    )]
+    Doctor(DoctorArgs),
+    #[command(
+        about = "Run the interactive first-run setup wizard",
+        long_about = "Run a TTY-only setup wizard that initializes Psychevo home, configures a provider/model, optionally stores an API key, checks Web UI assets, and finishes with a doctor summary."
+    )]
+    Setup(SetupArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -76,6 +91,26 @@ pub(crate) struct InitArgs {
         help = "Back up existing SQLite state files and create a fresh state database"
     )]
     pub(crate) reset_state: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct DoctorArgs {
+    #[arg(long, help = "Emit structured JSON instead of human text")]
+    pub(crate) json: bool,
+    #[arg(
+        long,
+        help = "Opt in to live provider/model checks that may contact configured providers"
+    )]
+    pub(crate) live: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct SetupArgs {
+    #[arg(
+        long,
+        help = "Print the setup steps without prompting or writing files"
+    )]
+    pub(crate) dry_run: bool,
 }
 
 #[derive(Debug, Parser)]
@@ -659,7 +694,7 @@ pub(crate) struct SkillsBundleDeleteArgs {
     pub(crate) json: bool,
 }
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Parser, Default)]
 pub(crate) struct TuiArgs {
     #[arg(
         long = "dir",
@@ -878,6 +913,93 @@ pub(crate) enum AgentCommand {
     Attach(AgentIdArgs),
     #[command(about = "Show recent transcript logs for an agent run")]
     Logs(AgentLogsArgs),
+    #[command(about = "List, add, and diagnose external agent backends")]
+    Backend(AgentBackendArgs),
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct AgentBackendArgs {
+    #[command(subcommand)]
+    pub(crate) command: AgentBackendCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum AgentBackendCommand {
+    #[command(about = "List configured external agent backends")]
+    List(AgentBackendListArgs),
+    #[command(about = "Add a generic ACP backend registration")]
+    Add(AgentBackendAddArgs),
+    #[command(about = "Run local diagnostics for one backend")]
+    Doctor(AgentBackendDoctorArgs),
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct AgentBackendListArgs {
+    #[arg(long, help = "Emit structured JSON instead of human text")]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct AgentBackendAddArgs {
+    #[arg(
+        value_name = "ID",
+        help = "Backend id; also used as generated agent name"
+    )]
+    pub(crate) id: String,
+    #[arg(
+        long,
+        value_name = "COMMAND",
+        help = "Executable command to start the ACP agent"
+    )]
+    pub(crate) command: String,
+    #[arg(long, value_name = "TEXT", help = "Generated agent description")]
+    pub(crate) description: String,
+    #[arg(
+        long,
+        value_name = "LABEL",
+        help = "Human display label; defaults to the id"
+    )]
+    pub(crate) label: Option<String>,
+    #[arg(
+        long = "arg",
+        value_name = "ARG",
+        help = "Argument passed to the backend command; repeatable"
+    )]
+    pub(crate) args: Vec<String>,
+    #[arg(
+        long = "entrypoint",
+        value_name = "peer|subagent",
+        help = "Supported entrypoint; repeatable, defaults to peer and subagent"
+    )]
+    pub(crate) entrypoints: Vec<String>,
+    #[arg(
+        long = "client-capability",
+        value_name = "CAP",
+        help = "Client callback capability; repeatable, defaults to fs.read, fs.write, terminal"
+    )]
+    pub(crate) client_capabilities: Vec<String>,
+    #[arg(
+        long,
+        conflicts_with = "local",
+        help = "Write global config; this is the default"
+    )]
+    pub(crate) global: bool,
+    #[arg(
+        long,
+        conflicts_with = "global",
+        help = "Write current workdir .psychevo/config.toml"
+    )]
+    pub(crate) local: bool,
+    #[arg(long, help = "Emit structured JSON instead of human text")]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct AgentBackendDoctorArgs {
+    #[arg(value_name = "ID", help = "Backend id")]
+    pub(crate) id: String,
+    #[arg(long, help = "Emit structured JSON instead of human text")]
+    pub(crate) json: bool,
 }
 
 #[derive(Debug, Parser)]

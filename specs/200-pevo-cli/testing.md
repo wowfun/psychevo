@@ -34,10 +34,10 @@ scripts/validate.sh broad
 - positional prompt plus stdin append.
 - empty prompt rejection before session creation.
 - `--dir` controls the tool workdir.
-- `--format json` emits typed timeline NDJSON beginning with `thread.started`
+- `--format json` emits typed transcript NDJSON beginning with `thread.started`
   and `turn.started`.
 - `--format json` hides reasoning by default.
-- `--format json --include-reasoning` emits typed reasoning timeline items
+- `--format json --include-reasoning` emits typed reasoning transcript entries
   while keeping assistant transcript items sanitized.
 - `--include-reasoning` without JSON format rejects.
 - `--format json` runtime/config errors emit one stdout error JSON object.

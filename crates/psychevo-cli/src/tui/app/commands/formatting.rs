@@ -69,7 +69,9 @@ impl TuiApp {
                 "selected model does not support image input; sent image source as text",
             );
         }
+        let optimistic_start = ui.transcript.len();
         ui.push_user_with_images(display_prompt.clone(), &images);
+        ui.mark_optimistic_rows_from(optimistic_start);
         let (tx, rx) = mpsc::unbounded_channel();
         let event_sink: GatewayEventSink = Arc::new(move |event| {
             let _ = tx.send(event);

@@ -581,6 +581,17 @@ pub(crate) fn push_active_visible_write_preamble_turn(ui: &mut FullscreenUi<'_>)
         }),
         false,
     );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_call_pending",
+            "tool_call_id": "call_write_report",
+            "tool_name": "write",
+            "arguments_json": "",
+            "content_index": 1,
+            "call_index": 0
+        }),
+        false,
+    );
     ui.scroll_to_bottom();
 }
 

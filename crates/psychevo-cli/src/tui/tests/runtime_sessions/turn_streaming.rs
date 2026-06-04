@@ -96,7 +96,6 @@ pub(crate) fn finished_run_result(app: &TuiApp) -> psychevo_runtime::RunResult {
         selected_agent: None,
         selected_skills: Vec::new(),
         context_snapshot: None,
-        capability_snapshot: None,
         events: Vec::new(),
         warnings: Vec::new(),
     }
@@ -246,7 +245,6 @@ pub(crate) async fn final_message_defers_turn_meta_while_foreground_task_is_runn
             selected_agent: None,
             selected_skills: Vec::new(),
             context_snapshot: None,
-            capability_snapshot: None,
             events: Vec::new(),
             warnings: Vec::new(),
         })
@@ -543,30 +541,43 @@ pub(crate) async fn typed_gateway_final_answer_restores_turn_meta_after_task_com
         selected_skills: Vec::new(),
     })
     .expect("send turn start");
-    tx.send(GatewayEvent::ItemCompleted {
+    tx.send(GatewayEvent::EntryCompleted {
         turn_id: "turn-1".to_string(),
-        item: TimelineItem {
+        entry: TranscriptEntry {
             id: "live:turn-1:assistant".to_string(),
             thread_id: "typed-session".to_string(),
             turn_id: Some("turn-1".to_string()),
-            sequence: 1,
-            kind: TimelineItemKind::Assistant,
-            status: TimelineItemStatus::Completed,
+            message_seq: None,
+            role: TranscriptEntryRole::Assistant,
+            status: TranscriptBlockStatus::Completed,
             source: "runtime.stream".to_string(),
-            title: None,
-            body: Some("All done.".to_string()),
-            preview: Some("All done.".to_string()),
-            detail: Some("All done.".to_string()),
-            artifact_ids: Vec::new(),
-            metadata: Some(serde_json::json!({
-                "provider": "mock",
-                "model": "mock-model",
-                "finish_reason": "stop",
-                "outcome": "normal",
-                "metadata": {"elapsed_ms": 2_000},
-                "usage": {"input_tokens": 12},
-                "accounting": {"estimated_cost_nanodollars": 10}
-            })),
+            blocks: vec![TranscriptBlock {
+                id: "live:turn-1:assistant:text".to_string(),
+                kind: TranscriptBlockKind::Text,
+                status: TranscriptBlockStatus::Completed,
+                order: 0,
+                source: "runtime.stream".to_string(),
+                title: None,
+                body: Some("All done.".to_string()),
+                preview: Some("All done.".to_string()),
+                detail: Some("All done.".to_string()),
+                artifact_ids: Vec::new(),
+                metadata: Some(serde_json::json!({
+                    "provider": "mock",
+                    "model": "mock-model",
+                    "finish_reason": "stop",
+                    "outcome": "normal",
+                    "metadata": {"elapsed_ms": 2_000},
+                    "usage": {"input_tokens": 12},
+                    "accounting": {"estimated_cost_nanodollars": 10}
+                })),
+                result: None,
+                created_at_ms: 1,
+                updated_at_ms: 2,
+            }],
+            metadata: None,
+            usage: None,
+            accounting: None,
             created_at_ms: 1,
             updated_at_ms: 2,
         },
@@ -576,6 +587,7 @@ pub(crate) async fn typed_gateway_final_answer_restores_turn_meta_after_task_com
         thread_id: Some("typed-session".to_string()),
         turn_id: "turn-1".to_string(),
         outcome: Some("normal".to_string()),
+        committed_entries: Vec::new(),
     })
     .expect("send turn complete");
     drop(tx);
@@ -598,7 +610,6 @@ pub(crate) async fn typed_gateway_final_answer_restores_turn_meta_after_task_com
             selected_agent: None,
             selected_skills: Vec::new(),
             context_snapshot: None,
-            capability_snapshot: None,
             events: Vec::new(),
             warnings: Vec::new(),
         })
@@ -714,18 +725,16 @@ pub(crate) fn multi_message_turn_preserves_answer_rows_across_tool_cycles() {
         .filter(|row| row.kind == TranscriptKind::Answer)
         .map(|row| row.text.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(
-        answers,
-        vec![
-            "First visible answer before tools.",
-            "Second visible answer after tools."
-        ]
-    );
-    let first_answer = ui
+    assert_eq!(answers, vec!["Second visible answer after tools."]);
+    let first_preamble = ui
         .transcript
         .iter()
-        .position(|row| row.text == "First visible answer before tools.")
-        .expect("first answer");
+        .position(|row| {
+            row.kind == TranscriptKind::Thinking
+                && row.title == "Thinking"
+                && row.text == "First visible answer before tools."
+        })
+        .expect("first preamble");
     let tool = ui
         .transcript
         .iter()
@@ -736,7 +745,7 @@ pub(crate) fn multi_message_turn_preserves_answer_rows_across_tool_cycles() {
         .iter()
         .position(|row| row.text == "Second visible answer after tools.")
         .expect("second answer");
-    assert!(first_answer < tool);
+    assert!(first_preamble < tool);
     assert!(tool < second_answer);
 }
 
@@ -791,7 +800,6 @@ pub(crate) async fn fullscreen_agent_end_releases_turn_before_auxiliary_task_fin
         selected_agent: None,
         selected_skills: Vec::new(),
         context_snapshot: None,
-        capability_snapshot: None,
         events: Vec::new(),
         warnings: Vec::new(),
     };
@@ -970,5 +978,835 @@ pub(crate) async fn live_session_history_reload_defers_latest_terminal_meta() {
 
     for agent in &ui.auxiliary_agent_tasks {
         agent.task.abort();
+    }
+}
+
+#[test]
+pub(crate) fn typed_gateway_preamble_completion_updates_existing_answer_row_by_item_id() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    app.current_session = Some("session-1".to_string());
+    let mut ui = FullscreenUi::new(&app);
+
+    app.apply_gateway_transcript_entry(
+        &mut ui,
+        Some("session-1"),
+        gateway_test_entry(
+            "live:turn-1:assistant:0",
+            TranscriptBlockKind::Text,
+            TranscriptBlockStatus::Running,
+            None,
+            "好的，开始执行 X 日报流程。先运行 fetch.py 抓取数据。",
+        ),
+    );
+    app.apply_gateway_transcript_entry(
+        &mut ui,
+        Some("session-1"),
+        gateway_test_entry(
+            "live:turn-1:assistant:0",
+            TranscriptBlockKind::Reasoning,
+            TranscriptBlockStatus::Completed,
+            Some("Preamble"),
+            "好的，开始执行 X 日报流程。先运行 fetch.py 抓取数据。",
+        ),
+    );
+
+    assert_eq!(
+        ui.transcript
+            .iter()
+            .filter(|row| row.kind == TranscriptKind::Answer)
+            .count(),
+        0,
+        "{:?}",
+        ui.transcript
+    );
+    let thinking_rows = ui
+        .transcript
+        .iter()
+        .filter(|row| row.kind == TranscriptKind::Thinking)
+        .collect::<Vec<_>>();
+    assert_eq!(thinking_rows.len(), 1, "{:?}", ui.transcript);
+    assert_eq!(thinking_rows[0].title, "Thinking");
+    assert_eq!(
+        thinking_rows[0].text,
+        "好的，开始执行 X 日报流程。先运行 fetch.py 抓取数据。"
+    );
+}
+
+#[test]
+pub(crate) fn typed_gateway_reasoning_update_uses_middle_fold_preview() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    app.current_session = Some("session-1".to_string());
+    let mut ui = FullscreenUi::new(&app);
+    let long = numbered_lines(1, 12);
+
+    app.apply_gateway_transcript_entry(
+        &mut ui,
+        Some("session-1"),
+        gateway_test_entry(
+            "live:turn-1:reasoning:0",
+            TranscriptBlockKind::Reasoning,
+            TranscriptBlockStatus::Running,
+            Some("Thinking"),
+            &long,
+        ),
+    );
+
+    let row = ui
+        .transcript
+        .iter()
+        .find(|row| row.kind == TranscriptKind::Thinking)
+        .expect("thinking row");
+    assert!(!row.expanded);
+    assert!(!row.details_collapsed);
+    assert_eq!(row.full_text.as_deref(), Some(long.as_str()));
+    assert!(row.text.contains("line 1"), "{}", row.text);
+    assert!(row.text.contains("line 2"), "{}", row.text);
+    assert!(row.text.contains("... 6 more lines"), "{}", row.text);
+    assert!(row.text.contains("line 9"), "{}", row.text);
+    assert!(row.text.contains("line 12"), "{}", row.text);
+    assert!(!row.text.contains("line 8"), "{}", row.text);
+}
+
+#[test]
+pub(crate) fn streaming_thinking_preview_tail_updates_while_collapsed() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    ui.apply_stream_event(
+        RunStreamEvent::ReasoningDelta {
+            text: numbered_lines(1, 8),
+        },
+        true,
+        false,
+    );
+    let idx = ui
+        .transcript
+        .iter()
+        .position(|row| row.kind == TranscriptKind::Thinking)
+        .expect("thinking row");
+    assert!(ui.transcript[idx].text.contains("line 8"));
+
+    ui.apply_stream_event(
+        RunStreamEvent::ReasoningDelta {
+            text: format!("\n{}", numbered_lines(9, 12)),
+        },
+        true,
+        false,
+    );
+
+    let row = &ui.transcript[idx];
+    assert!(!row.expanded);
+    assert!(!row.details_collapsed);
+    assert!(row.text.contains("line 9"), "{}", row.text);
+    assert!(row.text.contains("line 12"), "{}", row.text);
+    assert!(!row.text.contains("line 8"), "{}", row.text);
+}
+
+#[test]
+pub(crate) fn typed_gateway_assistant_preamble_defaults_to_middle_fold_preview() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    app.current_session = Some("session-1".to_string());
+    let mut ui = FullscreenUi::new(&app);
+    let long = numbered_lines(1, 12);
+
+    app.apply_gateway_transcript_entry(
+        &mut ui,
+        Some("session-1"),
+        gateway_test_entry(
+            "live:turn-1:assistant:0",
+            TranscriptBlockKind::Reasoning,
+            TranscriptBlockStatus::Completed,
+            Some("Preamble"),
+            &long,
+        ),
+    );
+
+    let row = ui
+        .transcript
+        .iter()
+        .find(|row| row.kind == TranscriptKind::Thinking)
+        .expect("thinking row");
+    assert_eq!(row.title, "Thinking");
+    assert!(!row.expanded);
+    assert_eq!(row.full_text.as_deref(), Some(long.as_str()));
+    assert!(row.text.contains("... 6 more lines"), "{}", row.text);
+    assert!(row.text.contains("line 12"), "{}", row.text);
+    assert!(!row.text.contains("line 8"), "{}", row.text);
+}
+
+#[test]
+pub(crate) fn typed_gateway_reasoning_completion_is_idempotent_by_item_id() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    app.current_session = Some("session-1".to_string());
+    let mut ui = FullscreenUi::new(&app);
+
+    let running = gateway_test_entry(
+        "live:turn-1:reasoning:0",
+        TranscriptBlockKind::Reasoning,
+        TranscriptBlockStatus::Running,
+        Some("Thinking"),
+        "The command is still running.",
+    );
+    let completed = gateway_test_entry(
+        "live:turn-1:reasoning:0",
+        TranscriptBlockKind::Reasoning,
+        TranscriptBlockStatus::Completed,
+        Some("Thinking"),
+        "The command is still running.",
+    );
+    app.apply_gateway_transcript_entry(&mut ui, Some("session-1"), running);
+    app.apply_gateway_transcript_entry(&mut ui, Some("session-1"), completed.clone());
+    app.apply_gateway_transcript_entry(&mut ui, Some("session-1"), completed);
+
+    let thinking_rows = ui
+        .transcript
+        .iter()
+        .filter(|row| row.kind == TranscriptKind::Thinking)
+        .collect::<Vec<_>>();
+    assert_eq!(thinking_rows.len(), 1, "{:?}", ui.transcript);
+    assert_eq!(thinking_rows[0].text, "The command is still running.");
+    assert!(thinking_rows[0].tool_started.is_none());
+}
+
+#[test]
+pub(crate) fn typed_gateway_final_answer_does_not_enter_thinking_row() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    app.current_session = Some("session-1".to_string());
+    let mut ui = FullscreenUi::new(&app);
+
+    app.apply_gateway_transcript_entry(
+        &mut ui,
+        Some("session-1"),
+        gateway_test_entry(
+            "live:turn-1:reasoning:0",
+            TranscriptBlockKind::Reasoning,
+            TranscriptBlockStatus::Completed,
+            Some("Thinking"),
+            "Now I can write the report.",
+        ),
+    );
+    app.apply_gateway_transcript_entry(
+        &mut ui,
+        Some("session-1"),
+        gateway_test_entry(
+            "live:turn-1:assistant:0",
+            TranscriptBlockKind::Text,
+            TranscriptBlockStatus::Completed,
+            None,
+            "日报完成。",
+        ),
+    );
+
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.kind == TranscriptKind::Answer && row.text == "日报完成。"),
+        "{:?}",
+        ui.transcript
+    );
+    assert!(
+        ui.transcript
+            .iter()
+            .filter(|row| row.kind == TranscriptKind::Thinking)
+            .all(|row| !row.text.contains("日报完成")),
+        "{:?}",
+        ui.transcript
+    );
+}
+
+#[test]
+pub(crate) fn gateway_yielded_exec_entry_keeps_original_command_title() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    app.current_session = Some("session-1".to_string());
+    let mut ui = FullscreenUi::new(&app);
+
+    app.apply_gateway_transcript_entry(
+        &mut ui,
+        Some("session-1"),
+        gateway_tool_entry(
+            "live:turn-1:tool:call_exec",
+            "runtime.stream",
+            None,
+            TranscriptBlockStatus::Running,
+            "exec_command",
+            Some(serde_json::json!({"cmd": "python fetch.py"})),
+            Some(serde_json::json!({"session_id": 7, "exit_code": null, "output": "live\n"})),
+        ),
+    );
+
+    let row = ui
+        .transcript
+        .iter()
+        .find(|row| row.tool_name.as_deref() == Some("exec_command"))
+        .expect("exec row");
+    assert_eq!(row.title, "exec_command python fetch.py");
+    assert_eq!(row.kind, TranscriptKind::Ran);
+    assert_eq!(row.text, "live\n");
+}
+
+#[test]
+pub(crate) fn committed_turn_entries_replace_live_overlay_and_optimistic_prompt() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    app.current_session = Some("session-1".to_string());
+    let mut ui = FullscreenUi::new(&app);
+    ui.loaded_session_message_count = 2;
+
+    let optimistic_start = ui.transcript.len();
+    ui.push_user_with_images("$hackernews-daily".to_string(), &[]);
+    ui.mark_optimistic_rows_from(optimistic_start);
+    ui.bind_unbound_optimistic_rows_to_turn("turn-1");
+    app.apply_gateway_transcript_entry(
+        &mut ui,
+        Some("session-1"),
+        gateway_test_entry(
+            "live:turn-1:reasoning:0",
+            TranscriptBlockKind::Reasoning,
+            TranscriptBlockStatus::Running,
+            Some("Thinking"),
+            "live thinking",
+        ),
+    );
+    app.apply_gateway_transcript_entry(
+        &mut ui,
+        Some("session-1"),
+        gateway_tool_entry(
+            "live:turn-1:tool:call_exec",
+            "runtime.stream",
+            None,
+            TranscriptBlockStatus::Running,
+            "exec_command",
+            Some(serde_json::json!({"cmd": "python fetch.py"})),
+            Some(serde_json::json!({"session_id": 7, "exit_code": null, "output": "live\n"})),
+        ),
+    );
+    app.apply_gateway_transcript_entry(
+        &mut ui,
+        Some("session-1"),
+        gateway_test_entry(
+            "live:turn-1:assistant:0",
+            TranscriptBlockKind::Text,
+            TranscriptBlockStatus::Running,
+            None,
+            "live answer",
+        ),
+    );
+
+    app.apply_committed_turn_entries(
+        &mut ui,
+        Some("session-1"),
+        "turn-1",
+        vec![
+            durable_text_entry(3, TranscriptEntryRole::User, "$hackernews-daily"),
+            durable_assistant_entry(
+                4,
+                vec![
+                    durable_block(
+                        "message:4:block:0",
+                        TranscriptBlockKind::Reasoning,
+                        TranscriptBlockStatus::Completed,
+                        Some("Thinking"),
+                        Some("durable thinking"),
+                        None,
+                    ),
+                    durable_tool_block(
+                        "tool:call_exec",
+                        TranscriptBlockStatus::Completed,
+                        "exec_command",
+                        serde_json::json!({"cmd": "python fetch.py"}),
+                        serde_json::json!({"session_id": null, "exit_code": 0, "output": "done\n"}),
+                    ),
+                    durable_block(
+                        "message:4:block:2",
+                        TranscriptBlockKind::Text,
+                        TranscriptBlockStatus::Completed,
+                        None,
+                        Some("durable answer"),
+                        None,
+                    ),
+                ],
+            ),
+        ],
+    );
+
+    assert!(
+        ui.transcript.iter().all(|row| !matches!(
+            row.transcript_source.as_deref(),
+            Some("runtime.stream" | "tui.optimistic")
+        )),
+        "{:?}",
+        ui.transcript
+    );
+    assert_eq!(ui.loaded_session_message_count, 4);
+    assert_eq!(
+        ui.transcript
+            .iter()
+            .filter(|row| row.kind == TranscriptKind::Prompt && row.text == "$hackernews-daily")
+            .count(),
+        1,
+        "{:?}",
+        ui.transcript
+    );
+    assert_eq!(
+        ui.transcript
+            .iter()
+            .filter(|row| row.kind == TranscriptKind::Thinking && row.text == "durable thinking")
+            .count(),
+        1,
+        "{:?}",
+        ui.transcript
+    );
+    assert_eq!(
+        ui.transcript
+            .iter()
+            .filter(|row| row.kind == TranscriptKind::Ran
+                && row.tool_name.as_deref() == Some("exec_command"))
+            .count(),
+        1,
+        "{:?}",
+        ui.transcript
+    );
+    assert_eq!(
+        ui.transcript
+            .iter()
+            .filter(|row| row.kind == TranscriptKind::Answer && row.text == "durable answer")
+            .count(),
+        1,
+        "{:?}",
+        ui.transcript
+    );
+}
+
+#[test]
+pub(crate) fn committed_turn_entries_remove_live_meta_without_removing_committed_footer() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    app.current_session = Some("session-1".to_string());
+    let mut ui = FullscreenUi::new(&app);
+    ui.loaded_session_message_count = 2;
+
+    app.apply_gateway_transcript_entry(
+        &mut ui,
+        Some("session-1"),
+        durable_assistant_entry(
+            2,
+            vec![durable_block(
+                "message:2:block:0",
+                TranscriptBlockKind::Text,
+                TranscriptBlockStatus::Completed,
+                None,
+                Some("previous answer"),
+                Some(serde_json::json!({
+                    "provider": "mock",
+                    "model": "mock-model",
+                    "finish_reason": "stop",
+                    "outcome": "normal",
+                    "metadata": {"elapsed_ms": 2_000}
+                })),
+            )],
+        ),
+    );
+
+    let optimistic_start = ui.transcript.len();
+    ui.push_user_with_images("你有哪些技能".to_string(), &[]);
+    ui.mark_optimistic_rows_from(optimistic_start);
+    ui.bind_unbound_optimistic_rows_to_turn("turn-2");
+
+    app.apply_gateway_transcript_entry(
+        &mut ui,
+        Some("session-1"),
+        live_text_entry_with_turn(
+            "live:turn-2:assistant",
+            "turn-2",
+            TranscriptBlockStatus::Completed,
+            "live answer",
+        ),
+    );
+    assert!(
+        ui.transcript.iter().any(|row| {
+            row.kind == TranscriptKind::Meta
+                && row.text.contains("mock/mock-model")
+                && row.transcript_source.as_deref() == Some("runtime.stream")
+        }),
+        "{:?}",
+        ui.transcript
+    );
+
+    let mut committed_user = durable_text_entry(3, TranscriptEntryRole::User, "你有哪些技能");
+    committed_user.turn_id = Some("turn-2".to_string());
+    let mut committed_assistant = durable_assistant_entry(
+        4,
+        vec![durable_block(
+            "message:4:block:0",
+            TranscriptBlockKind::Text,
+            TranscriptBlockStatus::Completed,
+            None,
+            Some("committed answer"),
+            Some(serde_json::json!({
+                "provider": "mock",
+                "model": "mock-model",
+                "finish_reason": "stop",
+                "outcome": "normal",
+                "metadata": {"elapsed_ms": 3_000}
+            })),
+        )],
+    );
+    committed_assistant.turn_id = Some("turn-2".to_string());
+
+    app.apply_committed_turn_entries(
+        &mut ui,
+        Some("session-1"),
+        "turn-2",
+        vec![committed_user, committed_assistant],
+    );
+
+    assert!(
+        ui.transcript.iter().all(|row| !matches!(
+            row.transcript_source.as_deref(),
+            Some("runtime.stream" | "tui.optimistic")
+        )),
+        "{:?}",
+        ui.transcript
+    );
+    assert_eq!(
+        ui.transcript
+            .iter()
+            .filter(|row| row.kind == TranscriptKind::Prompt && row.text == "你有哪些技能")
+            .count(),
+        1,
+        "{:?}",
+        ui.transcript
+    );
+    let committed_meta_entries = ui
+        .transcript
+        .iter()
+        .filter(|row| {
+            row.kind == TranscriptKind::Meta
+                && row.transcript_source.as_deref() == Some("runtime.message")
+        })
+        .filter_map(|row| row.transcript_entry_id.as_deref())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        committed_meta_entries,
+        vec!["message:2", "message:4"],
+        "{:?}",
+        ui.transcript
+    );
+}
+
+#[test]
+pub(crate) fn committed_turn_entries_skip_already_loaded_message_sequences() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    app.current_session = Some("session-1".to_string());
+    let mut ui = FullscreenUi::new(&app);
+    ui.loaded_session_message_count = 2;
+
+    app.apply_committed_turn_entries(
+        &mut ui,
+        Some("session-1"),
+        "turn-1",
+        vec![
+            durable_text_entry(1, TranscriptEntryRole::User, "old prompt"),
+            durable_text_entry(3, TranscriptEntryRole::User, "new prompt"),
+        ],
+    );
+
+    assert!(
+        ui.transcript.iter().all(|row| row.text != "old prompt"),
+        "{:?}",
+        ui.transcript
+    );
+    assert!(
+        ui.transcript.iter().any(|row| row.text == "new prompt"),
+        "{:?}",
+        ui.transcript
+    );
+    assert_eq!(ui.loaded_session_message_count, 3);
+}
+
+#[test]
+pub(crate) fn committed_reasoning_entry_uses_middle_fold_preview() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    app.current_session = Some("session-1".to_string());
+    let mut ui = FullscreenUi::new(&app);
+    let long = numbered_lines(1, 12);
+
+    app.apply_committed_turn_entries(
+        &mut ui,
+        Some("session-1"),
+        "turn-1",
+        vec![durable_assistant_entry(
+            1,
+            vec![durable_block(
+                "message:1:block:0",
+                TranscriptBlockKind::Reasoning,
+                TranscriptBlockStatus::Completed,
+                Some("Thinking"),
+                Some(&long),
+                None,
+            )],
+        )],
+    );
+
+    let row = ui
+        .transcript
+        .iter()
+        .find(|row| row.kind == TranscriptKind::Thinking)
+        .expect("thinking row");
+    assert!(!row.expanded);
+    assert_eq!(row.full_text.as_deref(), Some(long.as_str()));
+    assert!(row.text.contains("line 1"), "{}", row.text);
+    assert!(row.text.contains("line 2"), "{}", row.text);
+    assert!(row.text.contains("... 6 more lines"), "{}", row.text);
+    assert!(row.text.contains("line 9"), "{}", row.text);
+    assert!(row.text.contains("line 12"), "{}", row.text);
+    assert!(!row.text.contains("line 8"), "{}", row.text);
+}
+
+fn gateway_test_entry(
+    id: &str,
+    kind: TranscriptBlockKind,
+    status: TranscriptBlockStatus,
+    title: Option<&str>,
+    text: &str,
+) -> TranscriptEntry {
+    TranscriptEntry {
+        id: id.to_string(),
+        thread_id: "session-1".to_string(),
+        turn_id: Some("turn-1".to_string()),
+        message_seq: None,
+        role: TranscriptEntryRole::Assistant,
+        status,
+        source: "runtime.stream".to_string(),
+        blocks: vec![TranscriptBlock {
+            id: format!("{id}:block"),
+            kind,
+            status,
+            order: 0,
+            source: "runtime.stream".to_string(),
+            title: title.map(str::to_string),
+            preview: Some(text.to_string()),
+            detail: Some(text.to_string()),
+            body: Some(text.to_string()),
+            artifact_ids: Vec::new(),
+            metadata: if title == Some("Preamble") {
+                Some(serde_json::json!({"projection": "assistant_preamble"}))
+            } else {
+                None
+            },
+            result: None,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        }],
+        metadata: None,
+        usage: None,
+        accounting: None,
+        created_at_ms: 1,
+        updated_at_ms: 1,
+    }
+}
+
+fn numbered_lines(start: usize, end: usize) -> String {
+    (start..=end)
+        .map(|index| format!("line {index}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn gateway_tool_entry(
+    id: &str,
+    source: &str,
+    message_seq: Option<i64>,
+    status: TranscriptBlockStatus,
+    tool_name: &str,
+    args: Option<serde_json::Value>,
+    result: Option<serde_json::Value>,
+) -> TranscriptEntry {
+    let mut metadata = serde_json::Map::new();
+    metadata.insert("projection".to_string(), serde_json::json!("tool"));
+    metadata.insert("tool_name".to_string(), serde_json::json!(tool_name));
+    metadata.insert("tool_call_id".to_string(), serde_json::json!("call_exec"));
+    if let Some(args) = args {
+        metadata.insert("args".to_string(), args);
+    }
+    if let Some(result) = result {
+        metadata.insert("result".to_string(), result);
+    }
+    metadata.insert("outcome".to_string(), serde_json::json!("normal"));
+    TranscriptEntry {
+        id: id.to_string(),
+        thread_id: "session-1".to_string(),
+        turn_id: Some("turn-1".to_string()),
+        message_seq,
+        role: TranscriptEntryRole::Assistant,
+        status,
+        source: source.to_string(),
+        blocks: vec![TranscriptBlock {
+            id: format!("{id}:block"),
+            kind: TranscriptBlockKind::Shell,
+            status,
+            order: 0,
+            source: source.to_string(),
+            title: Some(tool_name.to_string()),
+            preview: None,
+            detail: None,
+            body: None,
+            artifact_ids: Vec::new(),
+            metadata: Some(serde_json::Value::Object(metadata)),
+            result: None,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        }],
+        metadata: None,
+        usage: None,
+        accounting: None,
+        created_at_ms: 1,
+        updated_at_ms: 1,
+    }
+}
+
+fn live_text_entry_with_turn(
+    id: &str,
+    turn_id: &str,
+    status: TranscriptBlockStatus,
+    text: &str,
+) -> TranscriptEntry {
+    TranscriptEntry {
+        id: id.to_string(),
+        thread_id: "session-1".to_string(),
+        turn_id: Some(turn_id.to_string()),
+        message_seq: None,
+        role: TranscriptEntryRole::Assistant,
+        status,
+        source: "runtime.stream".to_string(),
+        blocks: vec![TranscriptBlock {
+            id: format!("{id}:block"),
+            kind: TranscriptBlockKind::Text,
+            status,
+            order: 0,
+            source: "runtime.stream".to_string(),
+            title: None,
+            preview: Some(text.to_string()),
+            detail: Some(text.to_string()),
+            body: Some(text.to_string()),
+            artifact_ids: Vec::new(),
+            metadata: Some(serde_json::json!({
+                "provider": "mock",
+                "model": "mock-model",
+                "finish_reason": "stop",
+                "outcome": "normal",
+                "metadata": {"elapsed_ms": 1_000}
+            })),
+            result: None,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        }],
+        metadata: None,
+        usage: None,
+        accounting: None,
+        created_at_ms: 1,
+        updated_at_ms: 1,
+    }
+}
+
+fn durable_text_entry(seq: i64, role: TranscriptEntryRole, text: &str) -> TranscriptEntry {
+    TranscriptEntry {
+        id: format!("message:{seq}"),
+        thread_id: "session-1".to_string(),
+        turn_id: Some("turn-1".to_string()),
+        message_seq: Some(seq),
+        role,
+        status: TranscriptBlockStatus::Completed,
+        source: "runtime.message".to_string(),
+        blocks: vec![durable_block(
+            &format!("message:{seq}:block:0"),
+            TranscriptBlockKind::Text,
+            TranscriptBlockStatus::Completed,
+            None,
+            Some(text),
+            None,
+        )],
+        metadata: None,
+        usage: None,
+        accounting: None,
+        created_at_ms: 1,
+        updated_at_ms: 1,
+    }
+}
+
+fn durable_assistant_entry(seq: i64, blocks: Vec<TranscriptBlock>) -> TranscriptEntry {
+    TranscriptEntry {
+        id: format!("message:{seq}"),
+        thread_id: "session-1".to_string(),
+        turn_id: Some("turn-1".to_string()),
+        message_seq: Some(seq),
+        role: TranscriptEntryRole::Assistant,
+        status: TranscriptBlockStatus::Completed,
+        source: "runtime.message".to_string(),
+        blocks,
+        metadata: None,
+        usage: None,
+        accounting: None,
+        created_at_ms: 1,
+        updated_at_ms: 1,
+    }
+}
+
+fn durable_tool_block(
+    id: &str,
+    status: TranscriptBlockStatus,
+    tool_name: &str,
+    args: serde_json::Value,
+    result: serde_json::Value,
+) -> TranscriptBlock {
+    let mut metadata = serde_json::Map::new();
+    metadata.insert("projection".to_string(), serde_json::json!("tool"));
+    metadata.insert("tool_name".to_string(), serde_json::json!(tool_name));
+    metadata.insert("tool_call_id".to_string(), serde_json::json!("call_exec"));
+    metadata.insert("args".to_string(), args);
+    metadata.insert("result".to_string(), result);
+    metadata.insert("outcome".to_string(), serde_json::json!("normal"));
+    durable_block(
+        id,
+        TranscriptBlockKind::Shell,
+        status,
+        Some(tool_name),
+        None,
+        Some(serde_json::Value::Object(metadata)),
+    )
+}
+
+fn durable_block(
+    id: &str,
+    kind: TranscriptBlockKind,
+    status: TranscriptBlockStatus,
+    title: Option<&str>,
+    body: Option<&str>,
+    metadata: Option<serde_json::Value>,
+) -> TranscriptBlock {
+    TranscriptBlock {
+        id: id.to_string(),
+        kind,
+        status,
+        order: 0,
+        source: "runtime.message".to_string(),
+        title: title.map(str::to_string),
+        preview: body.map(str::to_string),
+        detail: body.map(str::to_string),
+        body: body.map(str::to_string),
+        artifact_ids: Vec::new(),
+        metadata,
+        result: None,
+        created_at_ms: 1,
+        updated_at_ms: 1,
     }
 }

@@ -10,6 +10,7 @@ source_arg=""
 run_init=1
 dry_run=0
 install_peval=0
+install_web=1
 tmp_dir=""
 
 usage() {
@@ -23,6 +24,7 @@ Options:
   --ref <ref>       Git branch or tag to clone
   --source <path>   Install from a local Psychevo source checkout
   --with-peval      Also install and verify the peval evaluation CLI
+  --no-web          Skip building and installing Web UI assets
   --no-init         Skip post-install pevo init
   --dry-run         Print the resolved install plan without making changes
   -h, --help        Show this help
@@ -138,6 +140,11 @@ candidate_peval_bin() {
   printf '%s/peval%s\n' "$(cargo_bin_dir)" "$(pevo_bin_suffix)"
 }
 
+web_asset_target_for_bin() {
+  bin_dir=$(dirname "$1")
+  printf '%s/../share/psychevo/web\n' "$bin_dir"
+}
+
 path_contains_dir() {
   case ":${PATH:-}:" in
     *":$1:"*) return 0 ;;
@@ -221,6 +228,16 @@ ensure_cargo() {
   have_cmd cargo || die "cargo is still not available in this shell. $(manual_rust_hint)"
 }
 
+ensure_pnpm() {
+  if [ "$install_web" -eq 0 ]; then
+    return 0
+  fi
+  if have_cmd pnpm; then
+    return 0
+  fi
+  die "pnpm is required to build Web UI assets. Install pnpm and rerun this script, or use --no-web to install only the CLI."
+}
+
 resolve_pevo_bin() {
   candidate=$(candidate_pevo_bin)
   if [ -x "$candidate" ]; then
@@ -287,6 +304,7 @@ print_plan() {
   printf 'repo_url: %s\n' "$repo_url"
   printf 'repo_ref: %s\n' "$repo_ref"
   printf 'with_peval: %s\n' "$install_peval"
+  printf 'with_web: %s\n' "$install_web"
   printf 'source: %s\n' "$source_display"
   if [ "$source_origin" = "clone" ]; then
     printf 'clone_command: git clone --depth 1 --branch %s %s %s\n' \
@@ -297,6 +315,16 @@ print_plan() {
   printf 'install_command: cargo install --locked --path %s --force\n' \
     "$(shell_quote "$source_display/crates/psychevo-cli")"
   printf 'pevo_binary: %s\n' "$(candidate_pevo_bin)"
+  if [ "$install_web" -eq 1 ]; then
+    printf 'web_install_command: cd %s && pnpm install --frozen-lockfile\n' \
+      "$(shell_quote "$source_display")"
+    printf 'web_build_command: cd %s && pnpm --filter @psychevo/workbench build\n' \
+      "$(shell_quote "$source_display")"
+    printf 'web_asset_source: %s\n' "$source_display/apps/workbench/dist"
+    printf 'web_asset_target: %s\n' "$(web_asset_target_for_bin "$(candidate_pevo_bin)")"
+  else
+    printf 'web_asset_install: (skipped)\n'
+  fi
   if [ "$install_peval" -eq 1 ]; then
     printf 'peval_install_command: cargo install --locked --path %s --force\n' \
       "$(shell_quote "$source_display/crates/psychevo-eval")"
@@ -328,6 +356,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --with-peval)
       install_peval=1
+      shift
+      ;;
+    --no-web)
+      install_web=0
       shift
       ;;
     --no-init)
@@ -383,6 +415,7 @@ fi
 
 valid_source_dir "$source_dir" || die "not a Psychevo source checkout: $source_dir"
 ensure_cargo
+ensure_pnpm
 
 info "Installing pevo from $source_dir..."
 if ! cargo install --locked --path "$source_dir/crates/psychevo-cli" --force; then
@@ -396,6 +429,21 @@ pevo_bin=$(resolve_pevo_bin) || die "pevo was installed, but the binary could no
 
 info "Verifying pevo..."
 "$pevo_bin" --help >/dev/null
+
+if [ "$install_web" -eq 1 ]; then
+  info "Building Workbench assets..."
+  (CDPATH= cd "$source_dir" && pnpm install --frozen-lockfile)
+  (CDPATH= cd "$source_dir" && pnpm --filter @psychevo/workbench build)
+  web_source="$source_dir/apps/workbench/dist"
+  [ -f "$web_source/index.html" ] || die "Workbench build did not produce $web_source/index.html"
+  web_target=$(web_asset_target_for_bin "$pevo_bin")
+  info "Installing Workbench assets to $web_target..."
+  rm -rf "$web_target"
+  mkdir -p "$web_target"
+  cp -R "$web_source/." "$web_target/"
+else
+  info "Skipping Web UI assets because --no-web was supplied."
+fi
 
 if [ "$install_peval" -eq 1 ]; then
   [ -f "$source_dir/crates/psychevo-eval/Cargo.toml" ] || die "source checkout does not contain crates/psychevo-eval/Cargo.toml"
@@ -437,7 +485,8 @@ fi
 cat <<EOF
 Try:
   pevo --help
-  pevo tui
+  pevo
+  pevo web
 EOF
 
 if [ "$install_peval" -eq 1 ]; then

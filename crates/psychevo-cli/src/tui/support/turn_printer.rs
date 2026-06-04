@@ -12,6 +12,7 @@ pub(crate) struct TurnPrinter {
     pub(crate) context_limit: Option<u64>,
     pub(crate) tool_titles: BTreeMap<String, String>,
     pub(crate) pending_tool_keys: BTreeMap<String, String>,
+    pub(crate) gateway_reasoning_texts: BTreeMap<String, String>,
     pub(crate) streaming_tool_message_seq: u64,
     pub(crate) streaming_tool_message_open: bool,
 }
@@ -30,6 +31,7 @@ impl TurnPrinter {
             context_limit: None,
             tool_titles: BTreeMap::new(),
             pending_tool_keys: BTreeMap::new(),
+            gateway_reasoning_texts: BTreeMap::new(),
             streaming_tool_message_seq: 0,
             streaming_tool_message_open: false,
         }
@@ -71,7 +73,7 @@ impl TurnPrinter {
         out: &mut impl Write,
     ) -> io::Result<()> {
         match event {
-            GatewayEvent::ItemDelta { delta, .. } => {
+            GatewayEvent::EntryDelta { delta, .. } => {
                 if self.thinking_enabled {
                     if !self.reasoning_active {
                         self.reasoning_active = true;
@@ -80,10 +82,10 @@ impl TurnPrinter {
                     write!(out, "{}", self.renderer.dim(delta))?;
                 }
             }
-            GatewayEvent::ItemStarted { item, .. }
-            | GatewayEvent::ItemUpdated { item, .. }
-            | GatewayEvent::ItemCompleted { item, .. } => {
-                self.render_gateway_item(item, out)?;
+            GatewayEvent::EntryStarted { entry, .. }
+            | GatewayEvent::EntryUpdated { entry, .. }
+            | GatewayEvent::EntryCompleted { entry, .. } => {
+                self.render_gateway_entry(entry, out)?;
             }
             GatewayEvent::Warning {
                 message,
@@ -103,57 +105,111 @@ impl TurnPrinter {
                     )?;
                 }
             }
+            GatewayEvent::TurnCompleted {
+                committed_entries, ..
+            } => {
+                for entry in committed_entries {
+                    self.render_gateway_entry(entry, out)?;
+                }
+            }
             GatewayEvent::TurnStarted { .. }
             | GatewayEvent::TurnQueued { .. }
-            | GatewayEvent::TurnCompleted { .. }
             | GatewayEvent::PermissionRequested { .. }
             | GatewayEvent::PermissionResolved { .. }
             | GatewayEvent::ClarifyRequested { .. }
-            | GatewayEvent::ClarifyResolved { .. }
-            | GatewayEvent::DebugAvailable { .. } => {}
+            | GatewayEvent::ClarifyResolved { .. } => {}
         }
         out.flush()
     }
 
-    fn render_gateway_item(&mut self, item: &TimelineItem, out: &mut impl Write) -> io::Result<()> {
-        match item.kind {
-            TimelineItemKind::Reasoning => {
-                if matches!(
-                    item.status,
-                    TimelineItemStatus::Completed
-                        | TimelineItemStatus::Failed
-                        | TimelineItemStatus::Cancelled
-                ) && self.reasoning_active
-                {
-                    self.reasoning_active = false;
-                    if self.thinking_enabled {
-                        writeln!(out)?;
-                    }
-                }
-            }
-            TimelineItemKind::Assistant => {
-                if let Some(text) = item.body.as_deref().or(item.preview.as_deref()) {
-                    self.last_assistant_text = text.to_string();
-                    if item.status == TimelineItemStatus::Completed && !text.trim().is_empty() {
-                        writeln!(out, "Answer:\n{text}")?;
-                    }
-                }
-                if item.status == TimelineItemStatus::Completed {
-                    self.render_gateway_item_meta(item, out)?;
-                }
-            }
-            TimelineItemKind::Prompt => {}
-            _ => self.render_gateway_evidence_item(item, out)?,
+    fn render_gateway_entry(
+        &mut self,
+        entry: &TranscriptEntry,
+        out: &mut impl Write,
+    ) -> io::Result<()> {
+        for block in &entry.blocks {
+            self.render_gateway_block(entry.role, block, out)?;
         }
         Ok(())
     }
 
-    fn render_gateway_item_meta(
+    fn render_gateway_block(
         &mut self,
-        item: &TimelineItem,
+        role: TranscriptEntryRole,
+        block: &TranscriptBlock,
         out: &mut impl Write,
     ) -> io::Result<()> {
-        let metadata = item.metadata.as_ref();
+        match (role, block.kind) {
+            (_, TranscriptBlockKind::Reasoning) => {
+                self.render_gateway_reasoning_block(block, out)?;
+            }
+            (TranscriptEntryRole::Assistant, TranscriptBlockKind::Text) => {
+                if let Some(text) = block.body.as_deref().or(block.preview.as_deref()) {
+                    self.last_assistant_text = text.to_string();
+                    if block.status == TranscriptBlockStatus::Completed && !text.trim().is_empty() {
+                        writeln!(out, "Answer:\n{text}")?;
+                    }
+                }
+                if block.status == TranscriptBlockStatus::Completed {
+                    self.render_gateway_block_meta(block, out)?;
+                }
+            }
+            (TranscriptEntryRole::User, TranscriptBlockKind::Text) => {}
+            _ => self.render_gateway_evidence_block(block, out)?,
+        }
+        Ok(())
+    }
+
+    fn render_gateway_reasoning_block(
+        &mut self,
+        block: &TranscriptBlock,
+        out: &mut impl Write,
+    ) -> io::Result<()> {
+        if self.thinking_enabled {
+            let text = block
+                .body
+                .as_deref()
+                .or(block.preview.as_deref())
+                .unwrap_or("");
+            let previous = self
+                .gateway_reasoning_texts
+                .get(&block.id)
+                .map(String::as_str)
+                .unwrap_or("");
+            let delta = text.strip_prefix(previous).unwrap_or(text);
+            if !delta.is_empty() {
+                if !self.reasoning_active {
+                    self.reasoning_active = true;
+                    write!(out, "Thinking: ")?;
+                }
+                write!(out, "{}", self.renderer.dim(delta))?;
+                self.gateway_reasoning_texts
+                    .insert(block.id.clone(), text.to_string());
+            }
+        }
+        if matches!(
+            block.status,
+            TranscriptBlockStatus::Completed
+                | TranscriptBlockStatus::Failed
+                | TranscriptBlockStatus::Cancelled
+        ) {
+            self.gateway_reasoning_texts.remove(&block.id);
+            if self.reasoning_active {
+                self.reasoning_active = false;
+                if self.thinking_enabled {
+                    writeln!(out)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn render_gateway_block_meta(
+        &mut self,
+        block: &TranscriptBlock,
+        out: &mut impl Write,
+    ) -> io::Result<()> {
+        let metadata = block.metadata.as_ref();
         let usage = metadata.and_then(|value| value.get("usage"));
         let response_metadata = metadata.and_then(|value| value.get("metadata"));
         let accounting = metadata.and_then(|value| value.get("accounting"));
@@ -175,41 +231,40 @@ impl TurnPrinter {
         Ok(())
     }
 
-    fn render_gateway_evidence_item(
+    fn render_gateway_evidence_block(
         &mut self,
-        item: &TimelineItem,
+        block: &TranscriptBlock,
         out: &mut impl Write,
     ) -> io::Result<()> {
-        let title = item
+        let title = block
             .title
             .as_deref()
             .filter(|title| !title.trim().is_empty())
-            .unwrap_or(match item.kind {
-                TimelineItemKind::Shell => "shell",
-                TimelineItemKind::File => "file",
-                TimelineItemKind::Web => "web",
-                TimelineItemKind::Mcp => "mcp",
-                TimelineItemKind::Clarify => "clarify",
-                TimelineItemKind::Permission => "permission",
-                TimelineItemKind::Skill => "skill",
-                TimelineItemKind::Agent => "agent",
-                TimelineItemKind::Mailbox => "mailbox",
-                TimelineItemKind::Diff => "diff",
-                TimelineItemKind::Artifact => "artifact",
-                TimelineItemKind::Status => "status",
-                TimelineItemKind::Tool => "tool",
-                TimelineItemKind::Prompt
-                | TimelineItemKind::Assistant
-                | TimelineItemKind::Reasoning => "item",
+            .unwrap_or(match block.kind {
+                TranscriptBlockKind::Shell => "shell",
+                TranscriptBlockKind::File => "file",
+                TranscriptBlockKind::Web => "web",
+                TranscriptBlockKind::Mcp => "mcp",
+                TranscriptBlockKind::Clarify => "clarify",
+                TranscriptBlockKind::Permission => "permission",
+                TranscriptBlockKind::Skill => "skill",
+                TranscriptBlockKind::Agent => "agent",
+                TranscriptBlockKind::Mailbox => "mailbox",
+                TranscriptBlockKind::Diff => "diff",
+                TranscriptBlockKind::Artifact => "artifact",
+                TranscriptBlockKind::Status => "status",
+                TranscriptBlockKind::Tool | TranscriptBlockKind::ToolCall => "tool",
+                TranscriptBlockKind::ToolResult => "result",
+                TranscriptBlockKind::Text | TranscriptBlockKind::Reasoning => "item",
             });
-        match item.status {
-            TimelineItemStatus::Pending => writeln!(out, "{title}: preparing")?,
-            TimelineItemStatus::Running => writeln!(out, "{title}: running")?,
-            TimelineItemStatus::Completed | TimelineItemStatus::Info => {
-                let summary = item
+        match block.status {
+            TranscriptBlockStatus::Pending => writeln!(out, "{title}: preparing")?,
+            TranscriptBlockStatus::Running => writeln!(out, "{title}: running")?,
+            TranscriptBlockStatus::Completed | TranscriptBlockStatus::Info => {
+                let summary = block
                     .body
                     .as_deref()
-                    .or(item.preview.as_deref())
+                    .or(block.preview.as_deref())
                     .unwrap_or("done");
                 writeln!(
                     out,
@@ -217,13 +272,13 @@ impl TurnPrinter {
                     self.renderer.success(&format!("{title}: {summary}"))
                 )?;
             }
-            TimelineItemStatus::Failed
-            | TimelineItemStatus::Cancelled
-            | TimelineItemStatus::NeedsInput => {
-                let summary = item
+            TranscriptBlockStatus::Failed
+            | TranscriptBlockStatus::Cancelled
+            | TranscriptBlockStatus::NeedsInput => {
+                let summary = block
                     .body
                     .as_deref()
-                    .or(item.preview.as_deref())
+                    .or(block.preview.as_deref())
                     .unwrap_or("failed");
                 writeln!(
                     out,
@@ -264,6 +319,7 @@ impl TurnPrinter {
                 self.context_limit = value.get("context_limit").and_then(Value::as_u64);
                 self.tool_titles.clear();
                 self.pending_tool_keys.clear();
+                self.gateway_reasoning_texts.clear();
                 self.streaming_tool_message_seq = 0;
                 self.streaming_tool_message_open = false;
             }

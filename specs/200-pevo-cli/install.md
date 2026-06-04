@@ -42,6 +42,7 @@ Accepted flags and environment defaults:
   environment default.
 - `--source <path>` forces installation from a local Psychevo source tree.
 - `--with-peval` also installs and verifies the `peval` evaluation CLI.
+- `--no-web` skips building and installing Web UI assets.
 - `--no-init` skips post-install `pevo init`.
 - `--dry-run` prints the resolved plan and commands without cloning,
   installing, initializing, or requiring installed dependencies.
@@ -78,6 +79,10 @@ When `cargo` is missing in a non-interactive shell, or the guided installation
 cannot make `cargo` available in the current process, the script fails with a
 manual Rust installation hint.
 
+Web UI asset installation is enabled by default. When it is enabled, missing
+`pnpm` is a hard failure with a short hint to install pnpm or rerun with
+`--no-web`. The script does not install Node.js or pnpm automatically.
+
 The script must not install native compiler toolchains automatically. If
 `cargo install` fails under Windows Git Bash/MSYS/MINGW, the failure text must
 mention that Rust and native C/C++ build tools, such as Visual Studio Build
@@ -89,6 +94,18 @@ After `cargo install` succeeds, the script locates `pevo` or `pevo.exe`, runs
 `pevo --help`, and by default runs `pevo init`. When `--with-peval` is
 supplied, the script also locates `peval` or `peval.exe` and runs
 `peval --help`.
+
+Unless `--no-web` is supplied, the script builds Workbench assets from the
+selected source checkout using:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm --filter @psychevo/workbench build
+```
+
+It then copies `apps/workbench/dist` into `$(dirname pevo)/../share/psychevo/web`.
+This install-share location is the stable Web UI asset location for source
+installs. Dry-run output includes the install, build, and copy commands.
 
 The install script must not run `peval init` automatically. Evaluation store
 setup remains an explicit user action through `peval init`, `--root`, or

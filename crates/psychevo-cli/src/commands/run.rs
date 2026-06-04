@@ -6,11 +6,10 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use futures::future::BoxFuture;
 use psychevo_ai::Outcome;
-use psychevo_gateway::{Gateway, GatewaySource, SendTurnRequest};
+use psychevo_gateway::{Gateway, GatewaySource, SendTurnRequest, TranscriptBlockKind};
 use psychevo_runtime::{
     ApprovalHandler, PermissionApprovalDecision, PermissionApprovalRequest, PermissionMode,
-    ProjectContextInstructionMode, RunMode, RunOptions, RunWarning, StateRuntime, TimelineItemKind,
-    TimelineItemRecord,
+    ProjectContextInstructionMode, RunMode, RunOptions, RunWarning, StateRuntime,
 };
 
 use crate::args::{PermissionModeArg, RunArgs, RunFormatArg};
@@ -90,7 +89,7 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
             "cwd": workdir.display().to_string(),
         }));
 
-    let result = gateway
+    let turn_result = gateway
         .send_turn(SendTurnRequest {
             thread_id: args.session.clone(),
             source: Some(source),
@@ -132,8 +131,9 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
             control: None,
             lineage: None,
         })
-        .await?
-        .result;
+        .await?;
+    let committed_entries = turn_result.committed_entries;
+    let result = turn_result.result;
 
     let success = result.outcome == Outcome::Normal && result.tool_failures == 0;
     if args.format == RunFormatArg::Json {
@@ -159,28 +159,29 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
             println!(
                 "{}",
                 serde_json::to_string(&serde_json::json!({
-                    "type": "item.completed",
+                    "type": "entry.completed",
                     "threadId": result.session_id,
                     "turnId": turn_id,
-                    "item": warning_item_value(index, warning),
+                    "entry": warning_entry_value(index, warning),
                 }))?
             );
         }
-        for item in gateway
-            .state()
-            .store()
-            .load_timeline_items(&result.session_id)?
-        {
-            if item.kind == TimelineItemKind::Reasoning && !args.include_reasoning {
+        for mut entry in committed_entries {
+            if !args.include_reasoning {
+                entry
+                    .blocks
+                    .retain(|block| block.kind != TranscriptBlockKind::Reasoning);
+            }
+            if entry.blocks.is_empty() {
                 continue;
             }
             println!(
                 "{}",
                 serde_json::to_string(&serde_json::json!({
-                    "type": "item.completed",
+                    "type": "entry.completed",
                     "threadId": result.session_id,
                     "turnId": turn_id,
-                    "item": timeline_item_value(item),
+                    "entry": entry,
                 }))?
             );
         }
@@ -228,45 +229,42 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
     })
 }
 
-fn timeline_item_value(item: TimelineItemRecord) -> serde_json::Value {
-    serde_json::json!({
-        "id": item.item_id,
-        "threadId": item.session_id,
-        "turnId": item.turn_id,
-        "sequence": item.item_seq,
-        "kind": item.kind,
-        "status": item.status,
-        "source": item.source,
-        "title": item.title,
-        "body": item.body_text,
-        "preview": item.preview_text,
-        "detail": item.detail_text,
-        "artifactIds": item.artifact_ids,
-        "metadata": item.metadata,
-        "createdAtMs": item.created_at_ms,
-        "updatedAtMs": item.updated_at_ms,
-    })
-}
-
-fn warning_item_value(index: usize, warning: &RunWarning) -> serde_json::Value {
+fn warning_entry_value(index: usize, warning: &RunWarning) -> serde_json::Value {
     serde_json::json!({
         "id": format!("warning:{index}"),
         "threadId": null,
         "turnId": null,
-        "sequence": index,
-        "kind": "status",
+        "messageSeq": null,
+        "role": "diagnostic",
         "status": "info",
         "source": "runtime.warning",
-        "title": "warning",
-        "body": &warning.message,
-        "preview": &warning.message,
-        "detail": &warning.message,
-        "artifactIds": [],
+        "blocks": [{
+            "id": format!("warning:{index}:block:0"),
+            "kind": "status",
+            "status": "info",
+            "order": 0,
+            "source": "runtime.warning",
+            "title": "warning",
+            "body": &warning.message,
+            "preview": &warning.message,
+            "detail": &warning.message,
+            "artifactIds": [],
+            "metadata": {
+                "kind": &warning.kind,
+                "sourcePath": &warning.source_path,
+                "suggestion": &warning.suggestion,
+            },
+            "result": null,
+            "createdAtMs": null,
+            "updatedAtMs": null
+        }],
         "metadata": {
             "kind": &warning.kind,
             "sourcePath": &warning.source_path,
             "suggestion": &warning.suggestion,
         },
+        "usage": null,
+        "accounting": null,
         "createdAtMs": null,
         "updatedAtMs": null,
     })

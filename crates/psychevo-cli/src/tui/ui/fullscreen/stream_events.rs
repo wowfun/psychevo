@@ -5,9 +5,15 @@ impl<'a> FullscreenUi<'a> {
         let index = index.min(self.transcript.len());
         self.transcript.insert(index, row);
         increment_row_index(&mut self.assistant_row, index);
+        increment_row_index(&mut self.assistant_preamble_row, index);
         increment_row_index(&mut self.reasoning_row, index);
         increment_row_index(&mut self.meta_row, index);
         increment_row_index(&mut self.selected_row, index);
+        for row_index in self.gateway_item_rows.values_mut() {
+            if *row_index >= index {
+                *row_index += 1;
+            }
+        }
         for row_index in self.tool_rows.values_mut() {
             if *row_index >= index {
                 *row_index += 1;
@@ -27,9 +33,17 @@ impl<'a> FullscreenUi<'a> {
         }
         self.transcript.remove(index);
         decrement_row_index(&mut self.assistant_row, index);
+        decrement_row_index(&mut self.assistant_preamble_row, index);
         decrement_row_index(&mut self.reasoning_row, index);
         decrement_row_index(&mut self.meta_row, index);
         decrement_row_index(&mut self.selected_row, index);
+        self.gateway_item_rows
+            .retain(|_, row_index| *row_index != index);
+        for row_index in self.gateway_item_rows.values_mut() {
+            if *row_index > index {
+                *row_index -= 1;
+            }
+        }
         self.tool_rows.retain(|_, row_index| *row_index != index);
         for row_index in self.tool_rows.values_mut() {
             if *row_index > index {
@@ -72,15 +86,13 @@ impl<'a> FullscreenUi<'a> {
             row.text.push_str(text);
             return;
         }
-        if let Some(full) = row.full_text.as_mut() {
-            full.push_str(text);
-            if !row.expanded {
-                row.text = ledger_body_collapse_policy().collapse(full).preview;
-            }
-            return;
-        }
-        row.text.push_str(text);
-        row.apply_default_evidence_collapse();
+        let mut full = row
+            .full_text
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| row.text.clone());
+        full.push_str(text);
+        row.set_evidence_body_text(full);
     }
 
     pub(crate) fn thinking_full_text(&self, index: usize) -> String {
@@ -100,6 +112,42 @@ impl<'a> FullscreenUi<'a> {
         }
         if let Some(started) = row.tool_started.take() {
             row.tool_elapsed = Some(started.elapsed());
+        }
+    }
+
+    pub(crate) fn apply_assistant_preamble_text(&mut self, text: String, completed: bool) {
+        if let Some(idx) = self.reasoning_row.take() {
+            self.finish_thinking_row(idx);
+        }
+        let idx = self
+            .assistant_preamble_row
+            .or_else(|| self.assistant_row.take())
+            .unwrap_or_else(|| {
+                let mut row =
+                    TranscriptRow::with_title(TranscriptKind::Thinking, "Thinking", String::new());
+                if !completed {
+                    row.tool_started = Some(Instant::now());
+                }
+                let idx = self.insert_evidence_row(row);
+                self.assistant_preamble_row = Some(idx);
+                idx
+            });
+        let Some(row) = self.transcript.get_mut(idx) else {
+            self.assistant_preamble_row = None;
+            return;
+        };
+        row.kind = TranscriptKind::Thinking;
+        row.title = "Thinking".to_string();
+        row.set_evidence_body_text(text);
+        if !completed && row.tool_started.is_none() {
+            row.tool_started = Some(Instant::now());
+        }
+        self.assistant_preamble_row = Some(idx);
+        self.turn_had_reasoning = true;
+        self.remove_turn_meta();
+        if completed {
+            self.finish_thinking_row(idx);
+            self.assistant_preamble_row = None;
         }
     }
 
@@ -270,25 +318,38 @@ impl<'a> FullscreenUi<'a> {
                     return false;
                 }
                 let mut active_tool_frame_requested = false;
+                let message = value.get("message");
+                let is_tool_call_preamble = message.is_some_and(assistant_message_has_tool_calls)
+                    || message
+                        .and_then(|message| message.get("finish_reason"))
+                        .and_then(Value::as_str)
+                        == Some("tool_calls");
                 if let Some(text) =
                     assistant_text_from_event(value).filter(|text| !text.trim().is_empty())
                 {
-                    if let Some(idx) = self.reasoning_row.take() {
-                        self.finish_thinking_row(idx);
-                    }
-                    let idx = self.assistant_row.unwrap_or_else(|| {
-                        let idx = self.insert_answer_row(TranscriptRow::with_title(
-                            TranscriptKind::Answer,
-                            "",
-                            String::new(),
-                        ));
-                        self.assistant_row = Some(idx);
-                        idx
-                    });
-                    self.transcript[idx].text = text.clone();
-                    self.remove_turn_meta();
-                    if event_type == Some("message_update") {
-                        active_tool_frame_requested |= self.apply_visible_tool_intent(&text);
+                    if is_tool_call_preamble {
+                        self.apply_assistant_preamble_text(
+                            text.clone(),
+                            event_type == Some("message_end"),
+                        );
+                    } else {
+                        if let Some(idx) = self.reasoning_row.take() {
+                            self.finish_thinking_row(idx);
+                        }
+                        let idx = self.assistant_row.unwrap_or_else(|| {
+                            let idx = self.insert_answer_row(TranscriptRow::with_title(
+                                TranscriptKind::Answer,
+                                "",
+                                String::new(),
+                            ));
+                            self.assistant_row = Some(idx);
+                            idx
+                        });
+                        self.transcript[idx].text = text.clone();
+                        self.remove_turn_meta();
+                        if event_type == Some("message_update") {
+                            active_tool_frame_requested |= self.apply_visible_tool_intent(&text);
+                        }
                     }
                 }
                 active_tool_frame_requested |= self.apply_streaming_tool_calls(value);
@@ -327,6 +388,7 @@ impl<'a> FullscreenUi<'a> {
                         == Some("assistant")
                     {
                         self.assistant_row = None;
+                        self.assistant_preamble_row = None;
                     }
                 }
                 active_tool_frame_requested

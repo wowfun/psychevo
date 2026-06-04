@@ -107,6 +107,11 @@ pub(crate) struct TranscriptRow {
     pub(crate) agent_child_live_text: String,
     pub(crate) tool_started: Option<Instant>,
     pub(crate) tool_elapsed: Option<Duration>,
+    pub(crate) transcript_turn_id: Option<String>,
+    pub(crate) transcript_source: Option<String>,
+    pub(crate) transcript_entry_id: Option<String>,
+    pub(crate) transcript_block_id: Option<String>,
+    pub(crate) transcript_message_seq: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -193,6 +198,11 @@ impl TranscriptRow {
             agent_child_live_text: String::new(),
             tool_started: None,
             tool_elapsed: None,
+            transcript_turn_id: None,
+            transcript_source: None,
+            transcript_entry_id: None,
+            transcript_block_id: None,
+            transcript_message_seq: None,
         };
         row.apply_default_evidence_collapse();
         row
@@ -230,12 +240,30 @@ impl TranscriptRow {
             .as_ref()
             .cloned()
             .unwrap_or_else(|| self.text.clone());
-        if !ledger_body_collapse_policy().should_collapse(&source) {
+        self.set_evidence_body_text(source);
+    }
+
+    pub(crate) fn set_evidence_body_text(&mut self, full: impl Into<String>) {
+        let full = full.into();
+        if full.is_empty() {
+            self.text.clear();
+            self.full_text = None;
+            self.expanded = false;
+            self.details_collapsed = false;
             return;
         }
-        let collapsed = ledger_body_collapse_policy().collapse(&source);
-        self.text = collapsed.preview;
+
+        let keep_expanded = self.expanded && !self.details_collapsed;
+        let keep_details_collapsed = self.details_collapsed;
+        let collapsed = ledger_body_collapse_policy().collapse(&full);
+        self.text = if collapsed.preview.is_empty() {
+            full.clone()
+        } else {
+            collapsed.preview
+        };
         self.full_text = collapsed.full_text;
+        self.expanded = self.full_text.is_some() && keep_expanded;
+        self.details_collapsed = keep_details_collapsed && self.is_expandable();
     }
 }
 
@@ -256,8 +284,10 @@ pub(crate) struct FullscreenUi<'a> {
     pub(crate) workdir: PathBuf,
     pub(crate) transcript: Vec<TranscriptRow>,
     pub(crate) assistant_row: Option<usize>,
+    pub(crate) assistant_preamble_row: Option<usize>,
     pub(crate) reasoning_row: Option<usize>,
     pub(crate) meta_row: Option<usize>,
+    pub(crate) gateway_item_rows: BTreeMap<String, usize>,
     pub(crate) tool_rows: BTreeMap<String, usize>,
     pub(crate) streaming_tool_message_seq: u64,
     pub(crate) streaming_tool_message_open: bool,
@@ -744,6 +774,7 @@ pub(crate) enum BottomSelectionValue {
         name: String,
         source: AgentSource,
         path: Option<PathBuf>,
+        entrypoints: BTreeSet<AgentEntrypoint>,
         shadowed: bool,
     },
     AgentAction {

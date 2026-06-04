@@ -89,7 +89,7 @@ pub(crate) async fn agents_command_opens_running_tab_and_available_shows_shadowe
         .expect("active project general");
     assert_eq!(
         active_general.detail.as_deref(),
-        Some("Active project editable  depth 0")
+        Some("Active project editable  subagent  depth 0")
     );
     assert!(!active_general.is_default);
 
@@ -111,7 +111,7 @@ pub(crate) async fn agents_command_opens_running_tab_and_available_shows_shadowe
         .expect("shadowed built-in general");
     assert_eq!(
         shadowed_general.detail.as_deref(),
-        Some("Shadowed built-in read-only  depth 0")
+        Some("Shadowed built-in read-only  subagent  depth 0")
     );
     assert!(!shadowed_general.is_default);
 }

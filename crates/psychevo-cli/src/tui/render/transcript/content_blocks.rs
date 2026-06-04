@@ -527,12 +527,16 @@ pub(crate) fn toggle_transcript_row_details(row: &mut TranscriptRow) {
         row.details_collapsed = false;
         return;
     }
-    if row.full_text.as_ref().is_some_and(|full| full != &row.text) || foldable_tool_title(row) {
-        if row.expanded && row.kind == TranscriptKind::Thinking && foldable_evidence_body(row) {
+    if row_has_collapsed_body(row) {
+        if row.expanded {
             row.expanded = false;
             row.details_collapsed = true;
             return;
         }
+        row.expanded = true;
+        return;
+    }
+    if foldable_tool_title(row) {
         row.expanded = !row.expanded;
         return;
     }
@@ -680,12 +684,6 @@ pub(crate) fn ledger_body_collapse_policy() -> LedgerBodyCollapsePolicy {
 }
 
 impl LedgerBodyCollapsePolicy {
-    pub(crate) fn should_collapse(self, text: &str) -> bool {
-        text.lines().count() > self.head_lines.saturating_add(self.tail_lines)
-            || display_token_count(text) > self.max_tokens
-            || UnicodeWidthStr::width(text) > self.max_width
-    }
-
     pub(crate) fn collapse(self, text: &str) -> LedgerBodyCollapse {
         let lines = text.lines().collect::<Vec<_>>();
         let max_lines = self.head_lines.saturating_add(self.tail_lines);

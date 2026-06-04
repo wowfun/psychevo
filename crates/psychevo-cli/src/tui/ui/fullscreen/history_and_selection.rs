@@ -10,8 +10,10 @@ impl<'a> FullscreenUi<'a> {
             workdir: app.workdir.clone(),
             transcript: Vec::new(),
             assistant_row: None,
+            assistant_preamble_row: None,
             reasoning_row: None,
             meta_row: None,
+            gateway_item_rows: BTreeMap::new(),
             tool_rows: BTreeMap::new(),
             streaming_tool_message_seq: 0,
             streaming_tool_message_open: false,
@@ -190,8 +192,10 @@ impl<'a> FullscreenUi<'a> {
     pub(crate) fn clear_transcript(&mut self) {
         self.transcript.clear();
         self.assistant_row = None;
+        self.assistant_preamble_row = None;
         self.reasoning_row = None;
         self.meta_row = None;
+        self.gateway_item_rows.clear();
         self.tool_rows.clear();
         self.history_tool_titles.clear();
         self.history_tool_args.clear();
@@ -870,9 +874,9 @@ impl<'a> FullscreenUi<'a> {
             return;
         };
         let full = exec_row_full_text_without_history_marker(row);
-        if full.is_empty() {
+        if full.is_empty() || output.starts_with(&full) {
             set_exec_row_text(row, output);
-        } else if !full.starts_with(&output) {
+        } else if !full.starts_with(&output) && !full.ends_with(&output) {
             set_exec_row_text(row, format!("{output}{full}"));
         }
     }

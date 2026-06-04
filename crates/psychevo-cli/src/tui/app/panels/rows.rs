@@ -113,6 +113,8 @@ pub(crate) fn agent_definition_row(
     let state = if shadowed { "Shadowed" } else { "Active" };
     let editable = agent_definition_editable(source, path.as_ref());
     let source_label = source.as_str().replace('_', "-");
+    let entrypoints = agent.entrypoints.clone();
+    let entrypoint_label = agent_entrypoint_label(&entrypoints);
     let current_main = current_agent.is_some_and(|current| {
         current == agent.name.as_str()
             || agent
@@ -122,13 +124,13 @@ pub(crate) fn agent_definition_row(
     });
     let definition_detail = if editable {
         format!(
-            "{state} {source_label} editable  depth {}",
-            agent.max_spawn_depth
+            "{state} {source_label} editable  {entrypoint_label}  depth {}",
+            agent.max_spawn_depth,
         )
     } else {
         format!(
-            "{state} {source_label} read-only  depth {}",
-            agent.max_spawn_depth
+            "{state} {source_label} read-only  {entrypoint_label}  depth {}",
+            agent.max_spawn_depth,
         )
     };
     let detail = if current_main && !shadowed {
@@ -146,10 +148,11 @@ pub(crate) fn agent_definition_row(
             "Available definitions".to_string()
         }),
         search_text: format!(
-            "{} {} {} {} {} {}",
+            "{} {} {} {} {} {} {}",
             agent.name,
             agent.description,
             source.as_str(),
+            entrypoint_label,
             path.as_ref()
                 .map(|path| path.display().to_string())
                 .unwrap_or_default(),
@@ -164,6 +167,7 @@ pub(crate) fn agent_definition_row(
             name: agent.name,
             source,
             path,
+            entrypoints,
             shadowed,
         },
     }
@@ -231,6 +235,17 @@ pub(crate) fn agent_action_row(
 
 pub(crate) fn agent_definition_editable(source: AgentSource, path: Option<&PathBuf>) -> bool {
     matches!(source, AgentSource::Project | AgentSource::Global) && path.is_some()
+}
+
+pub(crate) fn agent_entrypoint_label(entrypoints: &BTreeSet<AgentEntrypoint>) -> String {
+    if entrypoints.is_empty() {
+        return "no-entrypoint".to_string();
+    }
+    entrypoints
+        .iter()
+        .map(|entrypoint| entrypoint.as_str())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 pub(crate) fn json_i64(value: &Value, key: &str) -> i64 {

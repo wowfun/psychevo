@@ -18,6 +18,8 @@ pub(crate) fn cli_help_lists_aligned_command_descriptions() {
     assert!(stdout.contains("Create or repair the global Psychevo home"));
     assert!(stdout.contains("Run one coding-agent turn"));
     assert!(stdout.contains("Open the fullscreen terminal UI"));
+    assert!(stdout.contains("Open the managed local Web UI"));
+    assert!(stdout.contains("Run local deterministic diagnostics"));
     assert!(stdout.contains("Inspect local context-window usage for a session"));
 }
 
@@ -43,6 +45,25 @@ pub(crate) fn cli_help_describes_representative_commands_and_flags() {
             "--new",
             "leading ! runs a local shell escape",
         ],
+    );
+    assert_help_contains(
+        temp.path(),
+        &["web", "--help"],
+        &[
+            "Open the managed local Web UI",
+            "--no-browser",
+            "--print-url",
+        ],
+    );
+    assert_help_contains(
+        temp.path(),
+        &["doctor", "--help"],
+        &["Run local diagnostics", "--json", "--live"],
+    );
+    assert_help_contains(
+        temp.path(),
+        &["setup", "--help"],
+        &["setup wizard", "--dry-run"],
     );
     assert_help_contains(
         temp.path(),
@@ -101,6 +122,124 @@ pub(crate) fn cli_help_describes_representative_commands_and_flags() {
     );
 }
 
+#[test]
+pub(crate) fn cli_default_command_rejects_non_tty_without_consuming_stdin() {
+    let temp = tempdir().expect("temp");
+    let output = pevo_cmd(temp.path())
+        .stdin(Stdio::piped())
+        .output()
+        .expect("pevo default");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("requires an interactive terminal"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("pevo run <prompt>"), "{stderr}");
+}
+
+#[test]
+pub(crate) fn cli_doctor_json_reports_local_web_asset_status() {
+    let temp = tempdir().expect("temp");
+    let psychevo_home = temp.path().join("psychevo-home");
+    let workdir = temp.path().join("work");
+    let dist = temp.path().join("dist");
+    std::fs::create_dir_all(&workdir).expect("workdir");
+    std::fs::create_dir_all(&dist).expect("dist");
+    std::fs::write(dist.join("index.html"), "<html></html>").expect("index");
+
+    let init = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &psychevo_home)
+        .arg("init")
+        .output()
+        .expect("pevo init");
+    assert!(
+        init.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    let output = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &psychevo_home)
+        .env("PSYCHEVO_WEB_DIST", &dist)
+        .current_dir(&workdir)
+        .args(["doctor", "--json"])
+        .output()
+        .expect("pevo doctor");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: Value = serde_json::from_slice(&output.stdout).expect("doctor json");
+    assert_eq!(value["live"]["enabled"], false);
+    assert_eq!(value["webAssets"]["ok"], true);
+    assert_eq!(value["webAssets"]["source"], "env");
+    assert_eq!(value["webAssets"]["path"], dist.display().to_string());
+}
+
+#[test]
+pub(crate) fn cli_web_opens_current_workdir_with_json_output() {
+    let temp = tempdir().expect("temp");
+    let psychevo_home = temp.path().join("psychevo-home");
+    let workdir = temp.path().join("work");
+    let dist = temp.path().join("dist");
+    std::fs::create_dir_all(&workdir).expect("workdir");
+    std::fs::create_dir_all(&dist).expect("dist");
+    std::fs::write(dist.join("index.html"), "<html></html>").expect("index");
+
+    let init = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &psychevo_home)
+        .arg("init")
+        .output()
+        .expect("pevo init");
+    assert!(
+        init.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    let output = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &psychevo_home)
+        .env("PSYCHEVO_WEB_DIST", &dist)
+        .current_dir(&workdir)
+        .args(["web", "--no-browser", "--print-url"])
+        .output()
+        .expect("pevo web");
+    let stop = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &psychevo_home)
+        .current_dir(&workdir)
+        .args(["gateway", "stop"])
+        .output()
+        .expect("pevo gateway stop");
+    assert!(
+        stop.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: Value = serde_json::from_slice(&output.stdout).expect("web json");
+    assert_eq!(value["ok"], true);
+    assert_eq!(value["openedBrowser"], false);
+    assert_eq!(value["workdir"], workdir.display().to_string());
+    assert!(
+        value["openUrl"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("http://"),
+        "{value}"
+    );
+    assert_eq!(value["openUrlOneTime"], true);
+    assert!(
+        value["openUrlExpiresAtMs"].as_i64().unwrap_or_default() > 0,
+        "{value}"
+    );
+}
+
 pub(crate) fn assert_help_contains(test_home: &Path, args: &[&str], expected: &[&str]) {
     let output = pevo_cmd(test_home).args(args).output().expect("pevo help");
     assert!(
@@ -151,7 +290,7 @@ pub(crate) fn cli_init_creates_home_tree_and_is_idempotent() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 15);
+    assert_eq!(user_version, 18);
 
     std::fs::write(home.join("config.toml"), "custom config").expect("custom config");
     std::fs::write(home.join(".env"), "CUSTOM=1\n").expect("custom env");
@@ -221,5 +360,5 @@ pub(crate) fn cli_init_reset_state_backs_up_existing_sqlite_files() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 15);
+    assert_eq!(user_version, 18);
 }

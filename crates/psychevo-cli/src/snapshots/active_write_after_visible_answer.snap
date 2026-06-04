@@ -1,5 +1,6 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 724
 expression: combined
 ---
 fixture=active_write_after_visible_answer
@@ -8,10 +9,10 @@ size=120x24
 --- text ---
 › Write the report after collecting data.
 
-Now I have all the data I need. Let me write the full report:
+• Thinking
+  └ Now I have all the data I need. Let me write the full report:
 
 ⠋ write /tmp/hackernews-hot-05-15.md                                                                                 0s
-
 
 
 
@@ -34,10 +35,10 @@ mock/model  high  ⠋ 0s · Esc  ~/work · main
 --- styles ---
 [dim]› [default]Write the report after collecting data.
 [default]
-[default]Now I have all the data I need. Let me write the full report:
+[green]• [default]Thinking
+[dim]  └ Now I have all the data I need. Let me write the full report:[default]
 [default]
 [cyan]⠋ [default]write /tmp/hackernews-hot-05-15.md                                                                                 [dim]0s[default]
-[default]
 [default]
 [default]
 [default]

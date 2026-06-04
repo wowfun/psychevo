@@ -70,8 +70,11 @@ Implemented first-slice commands:
 - `pevo init`
 - `pevo run`
 - `pevo tui`
+- `pevo web`
 - `pevo serve`
 - `pevo gateway`
+- `pevo doctor`
+- `pevo setup`
 - `pevo acp`
 - `pevo skill`
 - `pevo stats`
@@ -92,6 +95,12 @@ expose sensitive reconstructed prompt material.
 
 `pevo skill` is the only skill command family name. The obsolete plural
 `pevo skills` is not accepted.
+
+`pevo` with no subcommand is the interactive default entrypoint. When stdin
+and stdout are both terminals, it is equivalent to `pevo tui`. When either side
+is not a terminal, it must not consume stdin; it exits with a concise error and
+points users to explicit commands such as `pevo tui`, `pevo run`, `pevo web`,
+and `pevo --help`.
 
 `pevo agent` owns local agent definition inspection and first-class child-agent
 control.
@@ -124,6 +133,11 @@ metadata summaries. Debug projection does not change `pevo run --format json`,
 does not expose folded reasoning in sanitized transcript messages, and does not
 turn provider metadata into transcript content.
 
+`pevo web` is the convenience entrypoint for the managed local Web UI. It is
+equivalent to `pevo gateway open`, defaults to the current working directory,
+keeps stdout as exactly one JSON object, and accepts the same first-slice open
+flags: `--dir`, `--bind`, `--no-browser`, and `--print-url`.
+
 `pevo serve` starts the strict headless local Gateway API server. It binds
 loopback by default, requires an explicit token from `PSYCHEVO_SERVE_TOKEN` or
 `--token-file`, emits one ready JSON object to stdout, and does not mount the
@@ -137,6 +151,20 @@ equivalent to `pevo gateway open`. `open`, `start`, `status`, `stop`, and
 `pevo serve` with internal flags to mount built Workbench assets. The concrete
 managed Web Shell behavior is owned by
 [220 pevo Gateway](../220-pevo-gateway/spec.md).
+
+`pevo doctor` owns local deterministic diagnostics. By default it checks local
+paths, config readability, SQLite path selection, configured model/auth status,
+Web UI asset resolution, managed Gateway status, and required local tool
+availability without contacting providers. `--json` emits a structured,
+secret-free report. `--live` is the explicit opt-in for provider/model network
+checks.
+
+`pevo setup` owns the full interactive first-run wizard. It is TTY-only and may
+initialize or repair Psychevo home, guide provider/model selection, write scoped
+provider config, read or reference an API key without printing it, check or
+install Web UI assets from a source checkout, and finish with a doctor summary.
+In non-terminal stdin/stdout it exits without prompting and points users to
+`pevo init`, `pevo auth setup`, and `pevo doctor`.
 
 `pevo acp` runs the ACP stdio server. It is equivalent to the
 `psychevo-acp` binary and delegates behavior to the ACP crate instead of
@@ -208,12 +236,14 @@ omitted, the effective include set is `messages`. The include set is exact:
 `--include header` emits only header metadata, and
 `--include last-provider-request` emits only the reconstructed provider request.
 That request expands the persisted prompt prefix snapshot when the
-corresponding user prompt's recorded prefix hash matches the latest stored
+corresponding user prompt's recorded prefix version and hash match a stored
 snapshot, so hidden prefix slots such as agent catalog, skill index, selected
 main agent, base mode, and project context appear in the reconstructed request
-body. Assistant-turn prefix metadata may be used only as a fallback for older
-records. If the full snapshot is missing or stale, the request is marked
-approximate with warnings instead of silently applying the latest prefix.
+body. Assistant-turn prefix metadata may be used only as a fallback when prompt
+metadata is unavailable. If the full snapshot is missing, stale, or cannot
+verify the recorded tool declaration hash against the current registry
+reconstruction, the request is marked approximate with warnings instead of
+silently applying the latest prefix or current tool schema as exact history.
 `reasoning` expands to include `messages` and retains assistant reasoning
 blocks without provider evidence metadata inside exported messages. The old
 `--with-reasoning`, `--full-inputs`, and `--last-request` flags are not

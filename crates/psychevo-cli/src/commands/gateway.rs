@@ -2,7 +2,10 @@ use std::env;
 use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, UNIX_EPOCH};
+
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 
 use anyhow::{Context, Result, anyhow};
 use psychevo_runtime::canonicalize_workdir;
@@ -11,7 +14,10 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::args::{GatewayArgs, GatewayCommand, GatewayOpenArgs, GatewayStartArgs};
-use crate::commands::serve::resolve_static_dir;
+use crate::commands::serve::{
+    StaticDirResolution, resolve_static_dir_diagnostic, static_dir_build_command,
+    static_dir_install_command,
+};
 use crate::env::{
     ensure_home_initialized, env_path, env_value, inherited_env, resolve_explicit_path,
     resolve_psychevo_home,
@@ -36,6 +42,32 @@ struct ManagedServerState {
     readyz_url: String,
     started_at_ms: i64,
     version: String,
+    executable_path: Option<String>,
+    executable_modified_ms: Option<i64>,
+    executable_size: Option<u64>,
+    executable_inode: Option<u64>,
+    static_dir: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExecutableFingerprint {
+    path: String,
+    modified_ms: i64,
+    size: u64,
+    inode: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ManagedReuseTarget {
+    executable: ExecutableFingerprint,
+    static_dir: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProcessExecutable {
+    path: String,
+    inode: Option<u64>,
+    deleted: bool,
 }
 
 pub(crate) async fn run_gateway_command(args: GatewayArgs) -> Result<ExitCode> {
@@ -57,19 +89,17 @@ pub(crate) async fn run_gateway_command(args: GatewayArgs) -> Result<ExitCode> {
     }
 }
 
-async fn open(args: GatewayOpenArgs) -> Result<ExitCode> {
+pub(crate) async fn run_web_command(args: GatewayOpenArgs) -> Result<ExitCode> {
+    open(args).await
+}
+
+pub(crate) async fn open(args: GatewayOpenArgs) -> Result<ExitCode> {
     let ctx = GatewayContext::load()?;
-    let static_dir = resolve_static_dir(None, &ctx.env_map, &ctx.cwd)?;
-    if !static_dir.join("index.html").exists() {
-        return print_json_code(json!({
-            "ok": false,
-            "error": {
-                "code": "workbench_dist_missing",
-                "message": format!("Workbench assets not found at {}", static_dir.display())
-            }
-        }));
+    let static_dir = resolve_static_dir_diagnostic(None, &ctx.env_map, &ctx.cwd)?;
+    if !static_dir.found() {
+        return print_json_code(workbench_dist_missing(&static_dir));
     }
-    let state = ensure_started(&ctx, args.bind, &static_dir).await?;
+    let state = ensure_started(&ctx, args.bind, &static_dir.path).await?;
     let workdir = match &args.dir {
         Some(dir) => canonicalize_workdir(&resolve_explicit_path(dir, &ctx.env_map, &ctx.cwd)?)?,
         None => canonicalize_workdir(&ctx.cwd)?,
@@ -86,6 +116,8 @@ async fn open(args: GatewayOpenArgs) -> Result<ExitCode> {
         "openedBrowser": !args.no_browser,
     });
     if args.print_url {
+        output["openUrlExpiresAtMs"] = Value::from(launch.expires_at_ms);
+        output["openUrlOneTime"] = Value::Bool(true);
         output["openUrl"] = Value::String(launch.open_url);
     }
     print_json(output)
@@ -93,17 +125,11 @@ async fn open(args: GatewayOpenArgs) -> Result<ExitCode> {
 
 async fn start(args: GatewayStartArgs) -> Result<ExitCode> {
     let ctx = GatewayContext::load()?;
-    let static_dir = resolve_static_dir(None, &ctx.env_map, &ctx.cwd)?;
-    if !static_dir.join("index.html").exists() {
-        return print_json_code(json!({
-            "ok": false,
-            "error": {
-                "code": "workbench_dist_missing",
-                "message": format!("Workbench assets not found at {}", static_dir.display())
-            }
-        }));
+    let static_dir = resolve_static_dir_diagnostic(None, &ctx.env_map, &ctx.cwd)?;
+    if !static_dir.found() {
+        return print_json_code(workbench_dist_missing(&static_dir));
     }
-    let state = ensure_started(&ctx, args.bind, &static_dir).await?;
+    let state = ensure_started(&ctx, args.bind, &static_dir.path).await?;
     print_json(json!({
         "ok": true,
         "running": true,
@@ -130,17 +156,11 @@ async fn stop() -> Result<ExitCode> {
 async fn restart(args: GatewayStartArgs) -> Result<ExitCode> {
     let ctx = GatewayContext::load()?;
     let _ = stop_managed(&ctx.paths)?;
-    let static_dir = resolve_static_dir(None, &ctx.env_map, &ctx.cwd)?;
-    if !static_dir.join("index.html").exists() {
-        return print_json_code(json!({
-            "ok": false,
-            "error": {
-                "code": "workbench_dist_missing",
-                "message": format!("Workbench assets not found at {}", static_dir.display())
-            }
-        }));
+    let static_dir = resolve_static_dir_diagnostic(None, &ctx.env_map, &ctx.cwd)?;
+    if !static_dir.found() {
+        return print_json_code(workbench_dist_missing(&static_dir));
     }
-    let state = ensure_started(&ctx, args.bind, &static_dir).await?;
+    let state = ensure_started(&ctx, args.bind, &static_dir.path).await?;
     print_json(json!({
         "ok": true,
         "running": true,
@@ -184,10 +204,22 @@ async fn ensure_started(
     bind: std::net::SocketAddr,
     static_dir: &Path,
 ) -> Result<ManagedServerState> {
-    if let Some(state) = read_state(&ctx.paths)?
-        && pid_alive(state.pid)
-    {
-        return Ok(state);
+    let target = managed_reuse_target(static_dir)?;
+    if let Some(state) = read_state(&ctx.paths)? {
+        let process = process_executable(state.pid);
+        let stale_reason = managed_stale_reason(
+            &state,
+            pid_alive(state.pid),
+            Some(&target.executable),
+            Some(target.static_dir.as_str()),
+            process.as_ref(),
+        );
+        if stale_reason.is_none() {
+            return Ok(state);
+        }
+        if pid_alive(state.pid) {
+            let _ = kill_pid(state.pid);
+        }
     }
     cleanup_state(&ctx.paths)?;
     rotate_token(&ctx.paths)?;
@@ -202,7 +234,8 @@ fn spawn_serve(ctx: &GatewayContext, bind: std::net::SocketAddr, static_dir: &Pa
         .append(true)
         .open(&ctx.paths.log)?;
     let log_err = log.try_clone()?;
-    let child = Command::new(exe)
+    let mut command = Command::new(exe);
+    command
         .arg("serve")
         .arg("--bind")
         .arg(bind.to_string())
@@ -214,9 +247,12 @@ fn spawn_serve(ctx: &GatewayContext, bind: std::net::SocketAddr, static_dir: &Pa
         .arg(&ctx.paths.server_json)
         .stdin(Stdio::null())
         .stdout(Stdio::from(log))
-        .stderr(Stdio::from(log_err))
-        .spawn()
-        .context("spawn pevo serve")?;
+        .stderr(Stdio::from(log_err));
+    #[cfg(unix)]
+    {
+        command.process_group(0);
+    }
+    let child = command.spawn().context("spawn pevo serve")?;
     let _ = child.id();
     Ok(())
 }
@@ -240,6 +276,7 @@ async fn wait_for_state(paths: &ManagedPaths) -> Result<ManagedServerState> {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LaunchResponse {
+    expires_at_ms: i64,
     open_url: String,
 }
 
@@ -276,18 +313,185 @@ async fn create_launch(
 fn managed_status(paths: &ManagedPaths) -> Result<Value> {
     if let Some(state) = read_state(paths)? {
         let running = pid_alive(state.pid);
-        return Ok(json!({
-            "ok": true,
-            "running": running,
-            "pid": state.pid,
-            "baseUrl": state.base_url,
-            "readyzUrl": state.readyz_url,
-            "startedAtMs": state.started_at_ms,
-            "version": state.version,
-            "stale": !running,
-        }));
+        let executable = current_executable_fingerprint().ok();
+        let process = process_executable(state.pid);
+        return Ok(managed_status_value(
+            &state,
+            running,
+            executable.as_ref(),
+            process.as_ref(),
+        ));
     }
     Ok(json!({"ok": true, "running": false}))
+}
+
+pub(crate) fn managed_status_for_home(home: &Path) -> Result<Value> {
+    managed_status(&managed_paths(home))
+}
+
+pub(crate) fn workbench_dist_missing(resolution: &StaticDirResolution) -> Value {
+    json!({
+        "ok": false,
+        "error": {
+            "code": "workbench_dist_missing",
+            "message": format!("Workbench assets not found at {}", resolution.path.display()),
+            "path": resolution.path.display().to_string(),
+            "source": resolution.source,
+            "searched": resolution.searched.iter().map(|path| path.display().to_string()).collect::<Vec<_>>(),
+            "envVar": "PSYCHEVO_WEB_DIST",
+            "buildCommand": static_dir_build_command(),
+            "installCommand": static_dir_install_command(),
+        }
+    })
+}
+
+fn managed_reuse_target(static_dir: &Path) -> Result<ManagedReuseTarget> {
+    Ok(ManagedReuseTarget {
+        executable: current_executable_fingerprint()?,
+        static_dir: canonical_path_string(static_dir),
+    })
+}
+
+fn managed_status_value(
+    state: &ManagedServerState,
+    running: bool,
+    expected_executable: Option<&ExecutableFingerprint>,
+    process_executable: Option<&ProcessExecutable>,
+) -> Value {
+    let stale_reason = managed_stale_reason(
+        state,
+        running,
+        expected_executable,
+        None,
+        process_executable,
+    );
+    json!({
+        "ok": true,
+        "running": running,
+        "pid": state.pid,
+        "baseUrl": state.base_url,
+        "readyzUrl": state.readyz_url,
+        "startedAtMs": state.started_at_ms,
+        "version": state.version,
+        "executablePath": state.executable_path,
+        "executableModifiedMs": state.executable_modified_ms,
+        "executableSize": state.executable_size,
+        "executableInode": state.executable_inode,
+        "staticDir": state.static_dir,
+        "stale": stale_reason.is_some(),
+        "staleReason": stale_reason,
+    })
+}
+
+fn current_executable_fingerprint() -> Result<ExecutableFingerprint> {
+    executable_fingerprint(&env::current_exe().context("resolve pevo executable")?)
+}
+
+fn executable_fingerprint(path: &Path) -> Result<ExecutableFingerprint> {
+    let path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let metadata = fs::metadata(&path)?;
+    let modified_ms = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis().min(i64::MAX as u128) as i64)
+        .unwrap_or_default();
+    Ok(ExecutableFingerprint {
+        path: path.display().to_string(),
+        modified_ms,
+        size: metadata.len(),
+        inode: executable_inode(&metadata),
+    })
+}
+
+fn canonical_path_string(path: &Path) -> String {
+    fs::canonicalize(path)
+        .unwrap_or_else(|_| path.to_path_buf())
+        .display()
+        .to_string()
+}
+
+fn managed_stale_reason(
+    state: &ManagedServerState,
+    pid_running: bool,
+    expected_executable: Option<&ExecutableFingerprint>,
+    expected_static_dir: Option<&str>,
+    process_executable: Option<&ProcessExecutable>,
+) -> Option<&'static str> {
+    if !pid_running {
+        return Some("pid_not_running");
+    }
+    let Some(state_executable) = state_executable_fingerprint(state) else {
+        return Some("missing_executable_fingerprint");
+    };
+    if let Some(expected) = expected_executable
+        && &state_executable != expected
+    {
+        return Some("executable_fingerprint_mismatch");
+    }
+    if let Some(process) = process_executable {
+        if process.deleted {
+            return Some("process_executable_deleted");
+        }
+        if let Some(expected) = expected_executable {
+            if let (Some(process_inode), Some(expected_inode)) = (process.inode, expected.inode)
+                && process_inode != expected_inode
+            {
+                return Some("process_executable_mismatch");
+            }
+            if process.path != expected.path {
+                return Some("process_executable_mismatch");
+            }
+        }
+    }
+    if let Some(expected_static_dir) = expected_static_dir {
+        let Some(static_dir) = state.static_dir.as_deref() else {
+            return Some("missing_static_dir");
+        };
+        if static_dir != expected_static_dir {
+            return Some("static_dir_mismatch");
+        }
+    }
+    None
+}
+
+fn state_executable_fingerprint(state: &ManagedServerState) -> Option<ExecutableFingerprint> {
+    Some(ExecutableFingerprint {
+        path: state.executable_path.clone()?,
+        modified_ms: state.executable_modified_ms?,
+        size: state.executable_size?,
+        inode: state.executable_inode,
+    })
+}
+
+#[cfg(unix)]
+fn process_executable(pid: u32) -> Option<ProcessExecutable> {
+    let path = fs::read_link(format!("/proc/{pid}/exe")).ok()?;
+    let path_text = path.display().to_string();
+    let deleted = path_text.ends_with(" (deleted)");
+    let metadata = fs::metadata(&path).ok();
+    Some(ProcessExecutable {
+        path: path_text.trim_end_matches(" (deleted)").to_string(),
+        inode: metadata.as_ref().and_then(executable_inode),
+        deleted,
+    })
+}
+
+#[cfg(not(unix))]
+fn process_executable(_pid: u32) -> Option<ProcessExecutable> {
+    None
+}
+
+#[cfg(unix)]
+fn executable_inode(metadata: &fs::Metadata) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+
+    Some(metadata.ino())
+}
+
+#[cfg(not(unix))]
+fn executable_inode(_metadata: &fs::Metadata) -> Option<u64> {
+    None
 }
 
 fn stop_managed(paths: &ManagedPaths) -> Result<bool> {
@@ -421,4 +625,116 @@ fn kill_pid(pid: u32) -> Result<()> {
         .args(["/PID", &pid.to_string(), "/T", "/F"])
         .status()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn managed_state_executable_mismatch_is_stale() {
+        let state = test_state(test_fingerprint("/old/pevo", 10, 100, Some(1)), "/static");
+        let expected = test_fingerprint("/new/pevo", 20, 200, Some(2));
+
+        assert_eq!(
+            managed_stale_reason(&state, true, Some(&expected), Some("/static"), None),
+            Some("executable_fingerprint_mismatch")
+        );
+    }
+
+    #[test]
+    fn old_style_managed_state_without_executable_fingerprint_is_stale() {
+        let state = ManagedServerState {
+            pid: 42,
+            base_url: "http://127.0.0.1:1".to_string(),
+            readyz_url: "http://127.0.0.1:1/readyz".to_string(),
+            started_at_ms: 100,
+            version: "0.1.0".to_string(),
+            executable_path: None,
+            executable_modified_ms: None,
+            executable_size: None,
+            executable_inode: None,
+            static_dir: Some("/static".to_string()),
+        };
+        let expected = test_fingerprint("/current/pevo", 20, 200, Some(2));
+
+        assert_eq!(
+            managed_stale_reason(&state, true, Some(&expected), Some("/static"), None),
+            Some("missing_executable_fingerprint")
+        );
+    }
+
+    #[test]
+    fn managed_state_static_dir_mismatch_is_stale() {
+        let executable = test_fingerprint("/current/pevo", 20, 200, Some(2));
+        let state = test_state(executable.clone(), "/old-static");
+
+        assert_eq!(
+            managed_stale_reason(&state, true, Some(&executable), Some("/new-static"), None),
+            Some("static_dir_mismatch")
+        );
+    }
+
+    #[test]
+    fn managed_status_reports_stale_reason() {
+        let executable = test_fingerprint("/current/pevo", 20, 200, Some(2));
+        let state = test_state(executable.clone(), "/static");
+
+        let value = managed_status_value(&state, false, Some(&executable), None);
+
+        assert_eq!(value["running"], false);
+        assert_eq!(value["stale"], true);
+        assert_eq!(value["staleReason"], "pid_not_running");
+    }
+
+    #[test]
+    fn deleted_process_executable_is_stale() {
+        let executable = test_fingerprint("/current/pevo", 20, 200, Some(2));
+        let state = test_state(executable.clone(), "/static");
+        let process = ProcessExecutable {
+            path: executable.path.clone(),
+            inode: executable.inode,
+            deleted: true,
+        };
+
+        assert_eq!(
+            managed_stale_reason(
+                &state,
+                true,
+                Some(&executable),
+                Some("/static"),
+                Some(&process)
+            ),
+            Some("process_executable_deleted")
+        );
+    }
+
+    fn test_state(executable: ExecutableFingerprint, static_dir: &str) -> ManagedServerState {
+        ManagedServerState {
+            pid: 42,
+            base_url: "http://127.0.0.1:1".to_string(),
+            readyz_url: "http://127.0.0.1:1/readyz".to_string(),
+            started_at_ms: 100,
+            version: "0.1.0".to_string(),
+            executable_path: Some(executable.path),
+            executable_modified_ms: Some(executable.modified_ms),
+            executable_size: Some(executable.size),
+            executable_inode: executable.inode,
+            static_dir: Some(static_dir.to_string()),
+        }
+    }
+
+    fn test_fingerprint(
+        path: &str,
+        modified_ms: i64,
+        size: u64,
+        inode: Option<u64>,
+    ) -> ExecutableFingerprint {
+        ExecutableFingerprint {
+            path: path.to_string(),
+            modified_ms,
+            size,
+            inode,
+        }
+    }
 }

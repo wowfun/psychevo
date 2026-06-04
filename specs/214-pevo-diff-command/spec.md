@@ -22,8 +22,9 @@ Out of scope:
 
 ## Diff Semantics
 
-`/diff` is observational UI state. It must not append runtime messages, affect
-model context, change exports, or affect usage/cost statistics.
+`/diff` is an observational structured display artifact. It must not append
+runtime messages, affect model context, change exports, affect usage/cost
+statistics, or enter ordinary main transcript history or transcript projection.
 
 The first implementation follows an explicit git worktree snapshot contract:
 

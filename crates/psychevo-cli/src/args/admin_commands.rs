@@ -673,9 +673,9 @@ pub(crate) mod tests {
         let cli = Cli::try_parse_from(["pevo", "skill", "list", "--json"]).expect("skill");
         assert!(matches!(
             cli.command,
-            Commands::Skill(SkillsArgs {
+            Some(Commands::Skill(SkillsArgs {
                 command: Some(SkillsCommand::List(SkillsListArgs { json: true, .. }))
-            })
+            }))
         ));
         assert!(Cli::try_parse_from(["pevo", "skills", "list"]).is_err());
     }
@@ -693,13 +693,13 @@ pub(crate) mod tests {
         .expect("local skill install");
         assert!(matches!(
             cli.command,
-            Commands::Skill(SkillsArgs {
+            Some(Commands::Skill(SkillsArgs {
                 command: Some(SkillsCommand::Install(SkillsInstallArgs {
                     local: true,
                     force: true,
                     ..
                 }))
-            })
+            }))
         ));
         assert!(
             Cli::try_parse_from(["pevo", "skill", "install", "/tmp/reviewer", "--project"])
@@ -725,6 +725,16 @@ pub(crate) mod tests {
 
     #[test]
     fn parses_new_cli_command_families() {
+        assert!(
+            Cli::try_parse_from(["pevo"])
+                .expect("default")
+                .command
+                .is_none()
+        );
+        assert!(Cli::try_parse_from(["pevo", "web", "--no-browser", "--print-url"]).is_ok());
+        assert!(Cli::try_parse_from(["pevo", "doctor", "--json"]).is_ok());
+        assert!(Cli::try_parse_from(["pevo", "doctor", "--live"]).is_ok());
+        assert!(Cli::try_parse_from(["pevo", "setup", "--dry-run"]).is_ok());
         assert!(Cli::try_parse_from(["pevo", "session", "list", "--archived", "--json"]).is_ok());
         assert!(
             Cli::try_parse_from([

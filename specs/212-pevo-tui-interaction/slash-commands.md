@@ -63,6 +63,11 @@ matched: the row label is the alias token, the description identifies the
 configured target slash line and canonical summary, Tab completes to the alias
 token, and Enter or mouse selection submits the alias token so normal alias
 expansion performs execution.
+Peer-agent ACP slash commands are rendered as `/agent:command` entries when a
+peer thread or peer-capable agent context exposes them. Selecting or submitting
+one sends the peer's un-namespaced slash command through Gateway command
+execution. Psychevo core commands keep priority over any peer command with the
+same name.
 Slash menu summaries stay compact enough for one-line discovery. Expanded
 `/help` may add short detail lines for commands whose consequences are easy to
 miss, such as local artifact writes, provider calls, session mutation, display

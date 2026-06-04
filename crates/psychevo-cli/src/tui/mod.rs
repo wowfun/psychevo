@@ -19,16 +19,17 @@ pub(crate) use crossterm::terminal::{
 pub(crate) use psychevo_ai::Outcome;
 pub(crate) use psychevo_gateway::{
     Gateway, GatewayEvent, GatewayEventSink, GatewaySource, GatewayThreadSelector, SendTurnRequest,
-    TimelineItem, TimelineItemKind, TimelineItemStatus,
+    TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
+    TranscriptEntryRole,
 };
 pub(crate) use psychevo_runtime::{
-    AgentCatalog, AgentDiscoveryOptions, AgentEdgeRecord, AgentSource, AgentSpawnOptions,
-    AutoCompactionCheckOptions, ChildSessionSnapshotInput, ClarifyAnswer, ClarifyQuestion,
-    ClarifyRequestEvent, ClarifyResolvedEvent, ClarifyResolvedReason, ClarifyResponse,
-    ClarifyResult, CompactSessionOptions, CompactionReason, CompactionResult, ConfigScope,
-    ConfiguredModel, ContextFormatOptions, ContextOptions, ContextSnapshot, CustomProviderInput,
-    ImageInput, InstallOptions, MAX_AGENT_SPAWN_DEPTH_CAP, ModelCatalogEntry, ModelCatalogProvider,
-    ModelMetadataCacheTarget, PendingInputId, PermissionApprovalDecision,
+    AgentCatalog, AgentDiscoveryOptions, AgentEdgeRecord, AgentEntrypoint, AgentSource,
+    AgentSpawnOptions, AutoCompactionCheckOptions, ChildSessionSnapshotInput, ClarifyAnswer,
+    ClarifyQuestion, ClarifyRequestEvent, ClarifyResolvedEvent, ClarifyResolvedReason,
+    ClarifyResponse, ClarifyResult, CompactSessionOptions, CompactionReason, CompactionResult,
+    ConfigScope, ConfiguredModel, ContextFormatOptions, ContextOptions, ContextSnapshot,
+    CustomProviderInput, ImageInput, InstallOptions, MAX_AGENT_SPAWN_DEPTH_CAP, ModelCatalogEntry,
+    ModelCatalogProvider, ModelMetadataCacheTarget, PendingInputId, PermissionApprovalDecision,
     PermissionApprovalOutcome, PermissionApprovalRequest, PermissionMode, PromptAttachmentDisplay,
     PromptDisplayMetadata, ReloadContextOptions, RunControlHandle, RunMode, RunOptions,
     RunStreamEvent, RunStreamSink, SessionArtifactKind, SessionExportFormat, SessionExportOptions,

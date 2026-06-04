@@ -235,6 +235,147 @@ pub(crate) fn visible_write_preamble_waits_for_typed_tool_call() {
 }
 
 #[test]
+pub(crate) fn tool_call_message_end_converts_visible_answer_to_preamble_in_place() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.start_assistant();
+    let preamble = "The article fetch failed. Let me query comments.";
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_update",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": preamble}]
+            }
+        }),
+        false,
+    );
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.kind == TranscriptKind::Answer && row.text == preamble),
+        "{:?}",
+        ui.transcript
+    );
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_call_pending",
+            "tool_call_id": "call_comments",
+            "tool_name": "exec_command",
+            "arguments_json": "{\"cmd\":\"sqlite3 -json hn.db 'select * from comments'\"}",
+            "content_index": 1,
+            "call_index": 0
+        }),
+        false,
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": preamble},
+                    {
+                        "type": "tool_call",
+                        "id": "call_comments",
+                        "name": "exec_command",
+                        "arguments": {"cmd": "sqlite3 -json hn.db 'select * from comments'"},
+                        "arguments_json": "{\"cmd\":\"sqlite3 -json hn.db 'select * from comments'\"}",
+                        "arguments_error": null,
+                        "content_index": 1,
+                        "call_index": 0
+                    }
+                ],
+                "finish_reason": "tool_calls",
+                "outcome": "normal"
+            }
+        }),
+        false,
+    );
+
+    let preamble_row = ui
+        .transcript
+        .iter()
+        .position(|row| row.title == "Thinking" && row.text == preamble)
+        .expect("preamble row");
+    let tool_row = ui
+        .transcript
+        .iter()
+        .position(|row| row.tool_call_id.as_deref() == Some("call_comments"))
+        .expect("tool row");
+    assert!(preamble_row < tool_row, "{:?}", ui.transcript);
+    assert_eq!(ui.transcript[preamble_row].kind, TranscriptKind::Thinking);
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| !(row.kind == TranscriptKind::Answer && row.text == preamble)),
+        "{:?}",
+        ui.transcript
+    );
+}
+
+#[test]
+pub(crate) fn tool_call_preamble_stays_between_reasoning_and_tool_rows() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.start_assistant();
+
+    ui.apply_stream_event(
+        RunStreamEvent::ReasoningDelta {
+            text: "The comments are too many. Let me query them in batches.".to_string(),
+        },
+        true,
+        false,
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "Now query all story comments."},
+                    {
+                        "type": "tool_call",
+                        "id": "call_comments",
+                        "name": "exec_command",
+                        "arguments": {"cmd": "sqlite3 -json hn.db 'select * from comments'"},
+                        "arguments_json": "{\"cmd\":\"sqlite3 -json hn.db 'select * from comments'\"}",
+                        "arguments_error": null,
+                        "content_index": 1,
+                        "call_index": 0
+                    }
+                ],
+                "finish_reason": "tool_calls",
+                "outcome": "normal"
+            }
+        }),
+        false,
+    );
+
+    let reasoning = ui
+        .transcript
+        .iter()
+        .position(|row| row.title == "Thinking" && row.text.contains("comments are too many"))
+        .expect("reasoning");
+    let preamble = ui
+        .transcript
+        .iter()
+        .position(|row| row.title == "Thinking" && row.text == "Now query all story comments.")
+        .expect("preamble");
+    let tool = ui
+        .transcript
+        .iter()
+        .position(|row| row.tool_call_id.as_deref() == Some("call_comments"))
+        .expect("tool");
+    assert!(reasoning < preamble, "{:?}", ui.transcript);
+    assert!(preamble < tool, "{:?}", ui.transcript);
+}
+
+#[test]
 pub(crate) fn visible_write_preamble_does_not_create_orphan_for_non_write_tool_message() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);

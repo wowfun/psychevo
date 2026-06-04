@@ -218,10 +218,11 @@ impl TuiApp {
         name: String,
         source: AgentSource,
         path: Option<PathBuf>,
+        entrypoints: BTreeSet<AgentEntrypoint>,
         shadowed: bool,
     ) -> BottomSelectionPanel {
         let mut rows = Vec::new();
-        if !shadowed {
+        if !shadowed && entrypoints.contains(&AgentEntrypoint::Subagent) {
             rows.push(agent_action_row(
                 &name,
                 source,
@@ -230,15 +231,22 @@ impl TuiApp {
                 AgentAction::UseAsMain,
             ));
         }
-        for action in [AgentAction::Run, AgentAction::View] {
+        if entrypoints.contains(&AgentEntrypoint::Subagent) {
             rows.push(agent_action_row(
                 &name,
                 source,
                 path.clone(),
                 shadowed,
-                action,
+                AgentAction::Run,
             ));
         }
+        rows.push(agent_action_row(
+            &name,
+            source,
+            path.clone(),
+            shadowed,
+            AgentAction::View,
+        ));
         if agent_definition_editable(source, path.as_ref()) {
             rows.push(agent_action_row(
                 &name,

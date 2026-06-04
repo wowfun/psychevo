@@ -774,6 +774,7 @@ impl BottomSelectionValue {
                 name,
                 source,
                 path,
+                entrypoints: _,
                 shadowed,
             } => format!(
                 "agent:available:{name}:{}:{}:{}",

@@ -50,7 +50,6 @@ pub(crate) async fn fullscreen_refreshes_title_after_detached_agent_task_finishe
             selected_agent: None,
             selected_skills: Vec::new(),
             context_snapshot: None,
-            capability_snapshot: None,
             events: Vec::new(),
             warnings: Vec::new(),
         })
@@ -110,7 +109,6 @@ pub(crate) async fn interrupted_turn_restores_queued_inputs_to_composer_without_
         selected_agent: None,
         selected_skills: Vec::new(),
         context_snapshot: None,
-        capability_snapshot: None,
         events: Vec::new(),
         warnings: Vec::new(),
     };
@@ -277,7 +275,6 @@ pub(crate) async fn completed_normal_task_with_tool_failures_does_not_mark_tui_e
         selected_agent: None,
         selected_skills: Vec::new(),
         context_snapshot: None,
-        capability_snapshot: None,
         events: Vec::new(),
         warnings: Vec::new(),
     };
@@ -328,7 +325,6 @@ pub(crate) async fn completed_budget_exhaustion_renders_specific_error_row() {
         selected_agent: None,
         selected_skills: Vec::new(),
         context_snapshot: None,
-        capability_snapshot: None,
         events: Vec::new(),
         warnings: Vec::new(),
     };
@@ -474,6 +470,46 @@ pub(crate) fn fullscreen_loads_current_session_history() {
     assert_eq!(textarea_text(&ui.textarea), "follow-up");
     ui.recall_history(1);
     assert_eq!(textarea_text(&ui.textarea), "draft");
+}
+
+fn gateway_test_entry(
+    id: &str,
+    kind: TranscriptBlockKind,
+    status: TranscriptBlockStatus,
+    title: Option<&str>,
+    text: Option<&str>,
+    metadata: Option<serde_json::Value>,
+) -> TranscriptEntry {
+    TranscriptEntry {
+        id: id.to_string(),
+        thread_id: String::new(),
+        turn_id: Some("turn-1".to_string()),
+        message_seq: None,
+        role: TranscriptEntryRole::Assistant,
+        status,
+        source: "runtime.stream".to_string(),
+        blocks: vec![TranscriptBlock {
+            id: format!("{id}:block"),
+            kind,
+            status,
+            order: 0,
+            source: "runtime.stream".to_string(),
+            title: title.map(str::to_string),
+            body: text.map(str::to_string),
+            preview: text.map(str::to_string),
+            detail: text.map(str::to_string),
+            artifact_ids: Vec::new(),
+            metadata,
+            result: None,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        }],
+        metadata: None,
+        usage: None,
+        accounting: None,
+        created_at_ms: 1,
+        updated_at_ms: 1,
+    }
 }
 
 #[test]
@@ -785,7 +821,7 @@ pub(crate) fn load_history_does_not_rehydrate_aborted_tool_calls_as_running() {
 }
 
 #[test]
-pub(crate) fn timeline_history_orders_reasoning_before_assistant_text() {
+pub(crate) fn message_history_orders_reasoning_before_assistant_text() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
@@ -813,39 +849,6 @@ pub(crate) fn timeline_history_orders_reasoning_before_assistant_text() {
             "provider": "mock"
         }),
     );
-    store
-        .upsert_timeline_item(psychevo_runtime::TimelineItemInput {
-            session_id: session_id.clone(),
-            item_id: "message:1:assistant".to_string(),
-            turn_id: Some("message:1".to_string()),
-            kind: psychevo_runtime::TimelineItemKind::Assistant,
-            status: psychevo_runtime::TimelineItemStatus::Completed,
-            source: "runtime.message".to_string(),
-            title: None,
-            body_text: Some("answer second".to_string()),
-            preview_text: Some("answer second".to_string()),
-            detail_text: Some("answer second".to_string()),
-            artifact_ids: Vec::new(),
-            metadata: None,
-        })
-        .expect("assistant timeline");
-    store
-        .upsert_timeline_item(psychevo_runtime::TimelineItemInput {
-            session_id: session_id.clone(),
-            item_id: "message:1:reasoning:0".to_string(),
-            turn_id: Some("message:1".to_string()),
-            kind: psychevo_runtime::TimelineItemKind::Reasoning,
-            status: psychevo_runtime::TimelineItemStatus::Completed,
-            source: "runtime.message".to_string(),
-            title: Some("Reasoning".to_string()),
-            body_text: Some("think first".to_string()),
-            preview_text: Some("think first".to_string()),
-            detail_text: Some("think first".to_string()),
-            artifact_ids: Vec::new(),
-            metadata: None,
-        })
-        .expect("reasoning timeline");
-
     let mut ui = FullscreenUi::new(&app);
     app.load_current_session_history(&mut ui).expect("history");
 
@@ -863,7 +866,7 @@ pub(crate) fn timeline_history_orders_reasoning_before_assistant_text() {
 }
 
 #[test]
-pub(crate) fn timeline_history_completed_assistant_restores_turn_meta() {
+pub(crate) fn message_history_orders_assistant_preamble_before_tool_after_reload() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
@@ -880,6 +883,111 @@ pub(crate) fn timeline_history_completed_assistant_restores_turn_meta() {
         1,
         serde_json::json!({
             "role": "assistant",
+            "content": [
+                {"type": "reasoning", "text": "数据查询完毕。现在撰写日报。"},
+                {
+                    "type": "tool_call",
+                    "id": "call_write",
+                    "name": "write",
+                    "arguments": {"path": "feeds/2026-06-03/x-hot-09-41.md", "content": "body"},
+                    "arguments_json": "{\"path\":\"feeds/2026-06-03/x-hot-09-41.md\",\"content\":\"body\"}",
+                    "content_index": 1,
+                    "call_index": 0
+                }
+            ],
+            "timestamp_ms": 1,
+            "finish_reason": "tool_calls",
+            "outcome": "normal",
+            "model": "mock-model",
+            "provider": "mock"
+        }),
+    );
+    insert_tui_message(
+        &conn,
+        &session_id,
+        2,
+        "assistant",
+        2,
+        serde_json::json!({
+            "role": "assistant",
+            "content": [{"type": "reasoning", "text": "The file was written successfully."}],
+            "timestamp_ms": 2,
+            "finish_reason": "tool_calls",
+            "outcome": "normal",
+            "model": "mock-model",
+            "provider": "mock"
+        }),
+    );
+    insert_tui_message(
+        &conn,
+        &session_id,
+        3,
+        "assistant",
+        3,
+        serde_json::json!({
+            "role": "assistant",
+            "content": [{"type": "text", "text": "X 日报生成完毕"}],
+            "timestamp_ms": 3,
+            "finish_reason": "stop",
+            "outcome": "normal",
+            "model": "mock-model",
+            "provider": "mock"
+        }),
+    );
+    let mut ui = FullscreenUi::new(&app);
+    app.load_current_session_history(&mut ui).expect("history");
+
+    let preamble = ui
+        .transcript
+        .iter()
+        .position(|row| {
+            row.kind == TranscriptKind::Thinking
+                && row.title == "Thinking"
+                && row.text == "数据查询完毕。现在撰写日报。"
+        })
+        .expect("preamble row");
+    let tool = ui
+        .transcript
+        .iter()
+        .position(|row| row.tool_call_id.as_deref() == Some("call_write"))
+        .expect("write row");
+    let later_reasoning = ui
+        .transcript
+        .iter()
+        .position(|row| row.text == "The file was written successfully.")
+        .expect("later reasoning");
+    let final_answer = ui
+        .transcript
+        .iter()
+        .position(|row| row.kind == TranscriptKind::Answer && row.text == "X 日报生成完毕")
+        .expect("final answer");
+    assert!(preamble < tool, "{:?}", ui.transcript);
+    assert!(tool < later_reasoning, "{:?}", ui.transcript);
+    assert!(later_reasoning < final_answer, "{:?}", ui.transcript);
+    assert!(
+        ui.transcript.iter().all(|row| row.title != "Preamble"),
+        "{:?}",
+        ui.transcript
+    );
+}
+
+#[test]
+pub(crate) fn message_history_completed_assistant_restores_turn_meta() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let session_id = store
+        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .expect("session");
+    app.current_session = Some(session_id.clone());
+    insert_tui_message_with_metadata(
+        &app.db_path,
+        &session_id,
+        1,
+        "assistant",
+        "done",
+        serde_json::json!({
+            "role": "assistant",
             "content": [{"type": "text", "text": "done"}],
             "timestamp_ms": 1,
             "finish_reason": "stop",
@@ -887,29 +995,10 @@ pub(crate) fn timeline_history_completed_assistant_restores_turn_meta() {
             "model": "mock-model",
             "provider": "mock"
         }),
+        Some(serde_json::json!({
+            "elapsed_ms": 2_000
+        })),
     );
-    store
-        .upsert_timeline_item(psychevo_runtime::TimelineItemInput {
-            session_id: session_id.clone(),
-            item_id: "message:1:assistant".to_string(),
-            turn_id: Some("message:1".to_string()),
-            kind: psychevo_runtime::TimelineItemKind::Assistant,
-            status: psychevo_runtime::TimelineItemStatus::Completed,
-            source: "runtime.message".to_string(),
-            title: None,
-            body_text: Some("done".to_string()),
-            preview_text: Some("done".to_string()),
-            detail_text: Some("done".to_string()),
-            artifact_ids: Vec::new(),
-            metadata: Some(serde_json::json!({
-                "provider": "mock",
-                "model": "mock-model",
-                "finish_reason": "stop",
-                "outcome": "normal",
-                "elapsed_ms": 2_000
-            })),
-        })
-        .expect("assistant timeline");
 
     let mut ui = FullscreenUi::new(&app);
     app.load_current_session_history(&mut ui).expect("history");
@@ -932,7 +1021,7 @@ pub(crate) fn timeline_history_completed_assistant_restores_turn_meta() {
 }
 
 #[test]
-pub(crate) fn timeline_history_merges_write_stdin_into_exec_command_row() {
+pub(crate) fn message_history_merges_write_stdin_into_exec_command_row() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
@@ -1021,36 +1110,6 @@ pub(crate) fn timeline_history_merges_write_stdin_into_exec_command_row() {
             "timestamp_ms": 4
         }),
     );
-    for (item_id, title, body) in [
-        (
-            "tool:call_exec",
-            "exec_command",
-            "{\"session_id\":99,\"exit_code\":null,\"output\":\"first\\n\"}",
-        ),
-        (
-            "tool:call_poll",
-            "write_stdin",
-            "{\"session_id\":null,\"exit_code\":0,\"output\":\"second\\n\"}",
-        ),
-    ] {
-        store
-            .upsert_timeline_item(psychevo_runtime::TimelineItemInput {
-                session_id: session_id.clone(),
-                item_id: item_id.to_string(),
-                turn_id: Some("message:1".to_string()),
-                kind: psychevo_runtime::TimelineItemKind::Shell,
-                status: psychevo_runtime::TimelineItemStatus::Completed,
-                source: "runtime.tool_result".to_string(),
-                title: Some(title.to_string()),
-                body_text: Some(body.to_string()),
-                preview_text: Some(body.to_string()),
-                detail_text: Some(body.to_string()),
-                artifact_ids: Vec::new(),
-                metadata: None,
-            })
-            .expect("timeline item");
-    }
-
     let mut ui = FullscreenUi::new(&app);
     app.load_current_session_history(&mut ui).expect("history");
 
@@ -1079,26 +1138,17 @@ pub(crate) fn typed_empty_reasoning_completion_does_not_create_blank_row() {
     app.current_session = Some("session-1".to_string());
     let mut ui = FullscreenUi::new(&app);
 
-    app.apply_gateway_timeline_item(
+    app.apply_gateway_transcript_entry(
         &mut ui,
         Some("session-1"),
-        TimelineItem {
-            id: "live:turn-1:reasoning".to_string(),
-            thread_id: String::new(),
-            turn_id: Some("turn-1".to_string()),
-            sequence: 0,
-            kind: TimelineItemKind::Reasoning,
-            status: TimelineItemStatus::Completed,
-            source: "runtime.stream".to_string(),
-            title: None,
-            preview: None,
-            detail: None,
-            body: None,
-            artifact_ids: Vec::new(),
-            metadata: None,
-            created_at_ms: 1,
-            updated_at_ms: 1,
-        },
+        gateway_test_entry(
+            "live:turn-1:reasoning",
+            TranscriptBlockKind::Reasoning,
+            TranscriptBlockStatus::Completed,
+            None,
+            None,
+            None,
+        ),
     );
 
     assert!(ui.transcript.is_empty());
@@ -1111,23 +1161,16 @@ pub(crate) fn typed_write_stdin_completion_uses_cached_args_and_hides_row() {
     app.current_session = Some("session-1".to_string());
     let mut ui = FullscreenUi::new(&app);
 
-    app.apply_gateway_timeline_item(
+    app.apply_gateway_transcript_entry(
         &mut ui,
         Some("session-1"),
-        TimelineItem {
-            id: "live:turn-1:tool:call_exec".to_string(),
-            thread_id: String::new(),
-            turn_id: Some("turn-1".to_string()),
-            sequence: 0,
-            kind: TimelineItemKind::Shell,
-            status: TimelineItemStatus::Completed,
-            source: "runtime.stream".to_string(),
-            title: Some("exec_command".to_string()),
-            preview: None,
-            detail: None,
-            body: None,
-            artifact_ids: Vec::new(),
-            metadata: Some(serde_json::json!({
+        gateway_test_entry(
+            "live:turn-1:tool:call_exec",
+            TranscriptBlockKind::Shell,
+            TranscriptBlockStatus::Completed,
+            Some("exec_command"),
+            None,
+            Some(serde_json::json!({
                 "projection": "tool",
                 "tool_name": "exec_command",
                 "tool_call_id": "call_exec",
@@ -1135,63 +1178,43 @@ pub(crate) fn typed_write_stdin_completion_uses_cached_args_and_hides_row() {
                 "result": {"session_id": 7, "exit_code": null, "output": "first\n"},
                 "outcome": "normal"
             })),
-            created_at_ms: 1,
-            updated_at_ms: 1,
-        },
+        ),
     );
-    app.apply_gateway_timeline_item(
+    app.apply_gateway_transcript_entry(
         &mut ui,
         Some("session-1"),
-        TimelineItem {
-            id: "live:turn-1:tool:call_poll".to_string(),
-            thread_id: String::new(),
-            turn_id: Some("turn-1".to_string()),
-            sequence: 0,
-            kind: TimelineItemKind::Shell,
-            status: TimelineItemStatus::Pending,
-            source: "runtime.stream".to_string(),
-            title: Some("write_stdin".to_string()),
-            preview: None,
-            detail: None,
-            body: None,
-            artifact_ids: Vec::new(),
-            metadata: Some(serde_json::json!({
+        gateway_test_entry(
+            "live:turn-1:tool:call_poll",
+            TranscriptBlockKind::Shell,
+            TranscriptBlockStatus::Pending,
+            Some("write_stdin"),
+            None,
+            Some(serde_json::json!({
                 "projection": "tool",
                 "tool_name": "write_stdin",
                 "tool_call_id": "call_poll",
                 "args": {"session_id": 7, "yield_time_ms": 60000},
                 "outcome": "normal"
             })),
-            created_at_ms: 2,
-            updated_at_ms: 2,
-        },
+        ),
     );
-    app.apply_gateway_timeline_item(
+    app.apply_gateway_transcript_entry(
         &mut ui,
         Some("session-1"),
-        TimelineItem {
-            id: "live:turn-1:tool:call_poll".to_string(),
-            thread_id: String::new(),
-            turn_id: Some("turn-1".to_string()),
-            sequence: 0,
-            kind: TimelineItemKind::Shell,
-            status: TimelineItemStatus::Completed,
-            source: "runtime.stream".to_string(),
-            title: Some("write_stdin".to_string()),
-            preview: None,
-            detail: None,
-            body: None,
-            artifact_ids: Vec::new(),
-            metadata: Some(serde_json::json!({
+        gateway_test_entry(
+            "live:turn-1:tool:call_poll",
+            TranscriptBlockKind::Shell,
+            TranscriptBlockStatus::Completed,
+            Some("write_stdin"),
+            None,
+            Some(serde_json::json!({
                 "projection": "tool",
                 "tool_name": "write_stdin",
                 "tool_call_id": "call_poll",
                 "result": {"session_id": null, "exit_code": 0, "output": "second\n"},
                 "outcome": "normal"
             })),
-            created_at_ms: 3,
-            updated_at_ms: 3,
-        },
+        ),
     );
 
     let rows = ui

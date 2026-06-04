@@ -781,8 +781,10 @@ impl<'a> FullscreenUi<'a> {
 
     pub(crate) fn start_assistant(&mut self) {
         self.assistant_row = None;
+        self.assistant_preamble_row = None;
         self.reasoning_row = None;
         self.meta_row = None;
+        self.gateway_item_rows.clear();
         self.tool_rows.clear();
         self.live_tool_args.clear();
         self.streaming_tool_message_seq = 0;
