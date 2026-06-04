@@ -1,16 +1,68 @@
 # Changelog
 
+## 2026-06-04
+
+- Fixed `pevo acp` Zed visibility by upgrading the ACP SDK to 0.13.1,
+  projecting runtime reasoning as ACP thought chunks, improving
+  `exec_command` tool cards, and adding opt-in terminal-output display metadata
+  without delegating command execution to the client.
+
+## 2026-06-03
+
+- Added the standalone `tools/peval-py` trajectory reporter for
+  Psychevo/OpenCode/Hermes JSONL and Psychevo SQLite sessions, with ATIF export,
+  JSON/HTML reports, multi-session comparison, notes, defaults, docs, and
+  offline tests.
+- Shared trajectory semantics across peval and `peval-py`, including grouped
+  observations, tool timing, failed-tool styling, token chips, and
+  Run/Result/Evidence report sections.
+- Split transcript ownership across state, shared display projection, and TUI
+  rendering specs while removing durable runtime debug events, legacy timeline
+  storage, and durable capability snapshots.
+- Tightened Gateway/Web transcript projection and reconciliation so reasoning,
+  assistant text, tools, optimistic prompts, snapshots, and yielded
+  `write_stdin`/`exec_command` rows keep stable order without duplicate
+  Thinking or answer rows.
+- Improved Workbench command routing, composer mentions/completions, transcript
+  rendering, session switching, boot fallback, managed Gateway reuse, and the
+  opt-in Playwright live-skill harness.
+- Fixed TUI transcript replacement, history reload, committed footers, Thinking
+  folding, tool evidence folding, and live-turn reconciliation around
+  message-derived transcript entries.
+- Cleaned Gateway protocol generation so Rust DTOs, generated TypeScript, and
+  JSON Schema stay aligned without noisy serde warning output.
+
+## 2026-06-02
+
+- Added local startup and recovery flows for `pevo web`, default TTY `pevo`,
+  `pevo doctor`, and interactive `pevo setup`, including managed Workbench
+  asset installation, launch-required recovery pages, and one-time launch URL
+  reuse behavior.
+- Added the first Gateway ACP peer-agent foundation with `[agents.backends]`,
+  backend-backed agent definitions, `pevo agents backend` commands, ACP stdio
+  routing, native session linkage, and shared agent/backend APIs.
+- Added shared Gateway completions, structured mentions, command execution
+  feedback, and per-session activity metadata for `/`, `$`, and `@` behavior.
+- Upgraded Workbench composer and transcript parity with TUI-style sending,
+  accepted mentions, live Thinking, optimistic prompts, Markdown/GFM,
+  collapsible tools, bottom-follow, and thread-scoped live updates.
+- Hardened Web history, settings, session switching, background-turn handling,
+  transcript ordering, tool evidence, long tool headers, and startup fallback
+  behavior.
+- Fixed Gateway/TUI live transcript reconciliation, yielded command title
+  retention, `write_stdin` folding, Thinking/tool evidence folding, and
+  history reload ordering.
+
 ## 2026-06-01
 
 - Combined the `peval view` HTML report Step expand/collapse controls into a
   single stateful toggle button.
-- Replaced the unreleased `display_blocks` direction with schema v15
-  runtime-owned typed timeline items, artifacts, and bounded debug events.
-- Moved Gateway snapshots, Workbench rendering, and `pevo run --format json` to
-  typed timeline projections while keeping default plain CLI output unchanged.
-- Moved fullscreen TUI live/reload flows onto Gateway typed events and runtime
-  timeline snapshots, fixing tool-row evidence, `write_stdin` merging,
-  skill-loaded status, reasoning order, and completed-turn metadata footers.
+- Removed unreleased timeline persistence and moved Gateway, Workbench, ACP,
+  `pevo run --format json`, and fullscreen TUI live/reload flows to
+  message-derived transcript projections.
+- Kept default plain CLI output unchanged while fixing transcript evidence,
+  `write_stdin` merging, skill-loaded status, reasoning order, and
+  completed-turn metadata footers.
 - Split browser host capabilities into `@psychevo/host`, added a generic
   Gateway IM adapter boundary, and refined the Workbench operator-shell UI with
   Playwright coverage.
