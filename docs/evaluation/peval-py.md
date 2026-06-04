@@ -1,9 +1,11 @@
 # peval-py Lightweight Trajectory Reports
 
+Language: English | [简体中文](../i18n/zh-CN/evaluation/peval-py.md)
+
 `peval-py` is a lightweight Python edition of peval for retained agent
-trajectories. It reads JSONL or SQLite `messages` rows and writes derived ATIF
-trajectories or static peval-style reports. It does not run agents, score
-tasks, or mutate peval workspaces.
+trajectories. It reads JSONL sessions or adapter-owned SQLite databases and
+writes derived ATIF trajectories or static peval-style reports. It does not run
+agents, score tasks, or mutate peval workspaces.
 
 For install, source-tree usage, and local binary packaging, see
 [tools/peval-py/README.md](../../tools/peval-py/README.md).
@@ -21,6 +23,14 @@ python -m json.tool trajectory-psychevo-<session>.json >/dev/null
 JSONL input accepts one object per line. Each line may be a direct message
 object, or a wrapper with `message`, `usage`, `metadata`, `accounting`, and
 `session_seq`.
+
+`-p/--path` also accepts an exported ATIF JSON trajectory. ATIF JSON input does
+not require `-a/--adapter`; it is treated as a passthrough source and appears
+with adapter `atif` in report metadata:
+
+```bash
+peval-py view tr -p trajectory-opencode-<session>.json -o
+```
 
 Use `-a` when the source is not the default Psychevo adapter:
 
@@ -87,8 +97,8 @@ class CustomAdapter:
         )
 ```
 
-Adapter-specific settings go in TOML, not CLI flags. `peval-py` passes the
-selected adapter's table to `config.adapter_options`:
+Adapter-specific settings go in TOML, not CLI flags. `peval-py` passes each
+effective adapter's table to `config.adapter_options`:
 
 ```toml
 [defaults]
@@ -106,19 +116,68 @@ peval-py export tr -a custom -p custom-session.log -o
 ```
 
 If a custom adapter only implements `convert_path`, use it with `-p/--path`.
-SQLite `-d/--db` input requires `convert(records, config)` because `peval-py`
-loads `messages` rows before conversion.
+For SQLite `-d/--db` input, implement `convert_db(path, session_id, config)` to
+own the database parsing. Adapters without `convert_db` can still use
+`convert(records, config)` with the generic configured `messages` table shape.
+
+## Report From An OpenCode DB
+
+The `opencode` adapter can read the current OpenCode SQLite persistence format
+directly. Pass the OpenCode database path with `--db`. If `--session-id` is
+omitted, the adapter selects the most recently updated session:
+
+```bash
+peval-py view tr \
+  -a opencode \
+  -d ~/.local/share/opencode/opencode.db \
+  -o
+```
+
+Select a specific session when needed:
+
+```bash
+peval-py view tr \
+  -a opencode \
+  -d ~/.local/share/opencode/opencode.db \
+  -s <session-id> \
+  -o
+```
+
+## Report From A Hermes DB
+
+The `hermes` adapter can read the current Hermes SQLite persistence format
+directly. Pass the Hermes database path with `--db`. If `--session-id` is
+omitted, the adapter selects the most recently active session. Stored
+`sessions.system_prompt` content is included as the first system step when it
+is present.
+
+```bash
+peval-py view tr \
+  -a hermes \
+  -d ~/.hermes/state.db \
+  -o
+```
+
+Select a specific session when needed:
+
+```bash
+peval-py view tr \
+  -a hermes \
+  -d ~/.hermes/state.db \
+  -s <session-id> \
+  -o
+```
 
 ## Report From A Psychevo State DB
 
 Use `view trajectory` for the peval-compatible JSON or offline HTML report.
 `tr` works here too. The output suffix chooses the format, so `-f` is usually
-unnecessary:
+unnecessary. If `--session-id` is omitted, the adapter selects the most
+recently updated session from the Psychevo `sessions` table:
 
 ```bash
 peval-py view tr \
   -d ~/.psychevo/state.db \
-  -s <session-id> \
   -o
 ```
 
@@ -127,15 +186,24 @@ For JSON:
 ```bash
 peval-py view tr \
   -d ~/.psychevo/state.db \
-  -s <session-id> \
   -f json \
   -o
 
 python -m json.tool report-psychevo-<session-id>.json >/dev/null
 ```
 
-The SQLite reader only reads the selected `messages` rows. It preserves the
-selected session id in the trajectory and report header.
+Select a specific session when needed:
+
+```bash
+peval-py view tr \
+  -d ~/.psychevo/state.db \
+  -s <session-id> \
+  -o
+```
+
+The Psychevo DB reader selects a session first, then reads that session's
+`messages` rows. It preserves the selected session id in the trajectory and
+report header.
 
 ## Compare Sessions
 
@@ -166,6 +234,38 @@ peval-py view tr \
   -o
 ```
 
+Compare sessions from different adapter-owned DBs:
+
+```bash
+peval-py view tr \
+  -d ~/.hermes/state.db \
+  -d ~/.local/share/opencode/opencode.db \
+  -a d1=hermes \
+  -a d2=opencode \
+  -o
+```
+
+Use `-a ADAPTER` as the default adapter for every input. Use `-a pN=ADAPTER`
+or `-a dN=ADAPTER` when one path or DB input needs a different adapter. Path
+and DB indexes are one-based and counted independently.
+
+When multiple DB inputs need explicit sessions, bind each session id to its DB
+with `-s dN=<session-id>`:
+
+```bash
+peval-py view tr \
+  -d ~/.hermes/state.db \
+  -d ~/.local/share/opencode/opencode.db \
+  -a d1=hermes \
+  -a d2=opencode \
+  -s d1=<hermes-session-id> \
+  -s d2=<opencode-session-id> \
+  -o
+```
+
+`view tr` can also mix path and DB inputs. `export tr` remains single-session
+only.
+
 Add lightweight notes with peval-style indexes:
 
 ```bash
@@ -183,21 +283,43 @@ session order in the command. Repeating `-n/--note` appends notes in CLI order.
 HTML report notes, Leaderboard note snippets, and selected Trial notes follow
 the same display style as `peval view`.
 
+## Localized HTML Reports
+
+English is the default report UI language. To localize the report title and
+comparison chrome to Simplified Chinese, set the locale in config:
+
+```toml
+[defaults]
+locale = "zh-CN"
+```
+
+`zh` is accepted as an alias for `zh-CN`, and `en-US` normalizes to `en`.
+Locale is config-only; there is no CLI flag. In Simplified Chinese reports,
+domain terms such as Run, Result, Notes, Evidence, Steps/events, Session,
+variant, evaluator, reasoning, selected trial trajectory, Turns, Tool Calls,
+tool success / total, cache read, and cache write remain English. The final
+selected Trial Steps detail section also remains English.
+
 ## Useful Flags
 
 - `-p, --path PATH`: read a session path. Built-in adapters treat it as JSONL;
-  custom path adapters may parse their own file format.
-- `-d, --db PATH`: read a SQLite state database.
-- `-s, --session-id ID`: select a DB session. Repeat it with `view tr` to
-  compare sessions from the same DB.
-- `-a, --adapter ADAPTER`: select a built-in adapter or an installed adapter
-  entry point.
+  exported ATIF JSON is accepted without an adapter, and custom path adapters
+  may parse their own file format.
+- `-d, --db PATH`: read an adapter-owned SQLite database. Repeat it with
+  `view tr` for cross-DB comparison.
+- `-s, --session-id ID`: select a DB session. With one DB, bare `-s ID`
+  remains valid and repeatable. With multiple DBs, use `-s dN=ID`.
+- `-a, --adapter ADAPTER`: select the default built-in adapter or installed
+  adapter entry point. Repeat it with `pN=ADAPTER` or `dN=ADAPTER` for
+  per-input overrides.
 - `-f, --format json|html`: force report format.
 - `-o, --output [PATH]`: write to a file instead of stdout. Bare `-o` writes
   `trajectory-<adapter>-<session>.json` for export,
   `report-<adapter>-<session>.html` for HTML view, or
   `report-<adapter>-<session>.json` with `-f json`. Multi-session views use
-  `report-<adapter>-sessions-<count>.<format>`.
+  `report-<adapter>-sessions-<count>.<format>` when all inputs share an
+  adapter, or `report-multi-adapter-sessions-<count>.<format>` when they do
+  not.
 - `-n, --note N=TEXT`: add a report note (`0`) or session note (`1..N`) for
   `view tr`.
 - `--max-content-chars N`: bound large message/tool payloads.
@@ -215,8 +337,20 @@ Matched tool observations appear inside the Agent step that issued the tool
 call. Failed tool calls use a red tool chip and still remain attached to the
 same Agent step.
 
+Step token chips use real per-step metrics when the source provides them. If a
+step has visible text but no per-step token metrics, the HTML report shows an
+estimated chip with an `≈` prefix and tooltip. If `tiktoken` is installed in
+the runtime environment, `peval-py` uses it for that HTML estimate; otherwise
+it falls back to a deterministic byte-length estimate. These estimates are
+visual only and are not written into ATIF or report JSON.
+
+Steps timing chips use a subtle proportional fill when timing metadata is
+available. Step duration, elapsed time, and tool execution time each scale
+against comparable timings in the selected Trial, so the fill is a visual cue
+rather than a new report metric.
+
 If a tool result has no matching tool call, `peval-py` keeps it visible as a
 standalone observation step and records a conversion warning in the report.
 
-`export tr` is intentionally single-session only. Use repeated `-p` or repeated
-`-s` only with `view tr`.
+`export tr` is intentionally single-session only. Use repeated `-p`, repeated
+`-d`, repeated `-s`, or mixed path/DB inputs only with `view tr`.

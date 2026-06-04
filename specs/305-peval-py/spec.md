@@ -15,6 +15,9 @@ same command tree.
 - offline trajectory export of one session from JSONL or SQLite `messages` rows
 - ATIF v1.7 trajectory projection
 - single-session and session-comparison JSON/HTML report generation
+- config-selected English and Simplified Chinese HTML report UI localization
+- translated canonical docs under `docs/i18n/<locale>/...`
+- localized tool README files beside their original README files
 - adapter-specific message readers for Psychevo, OpenCode, and Hermes
 - deterministic local tests for the `peval-py` package
 
@@ -42,15 +45,25 @@ artifacts, or user config.
 
 ## Inputs
 
-The command supports one input source family per run:
+The command supports path and DB input sources:
 
-- `-p, --path PATH` reads one JSONL file containing one JSON object per line.
-  `view trajectory` may repeat `-p` to compare sessions.
-- `-d, --db PATH` plus `-s, --session-id ID` reads SQLite `messages` rows.
-  `view trajectory` may repeat `-s` against the same DB to compare sessions.
+- `-p, --path PATH` reads one source file. By default this accepts JSONL with
+  one JSON object per line or an exported ATIF JSON trajectory object. Adapters
+  may parse other path formats directly.
+- `-d, --db PATH` reads an adapter-owned SQLite persistence format. `view
+  trajectory` may repeat `-d` to compare sessions across adapters.
 
-JSONL and SQLite input families cannot be mixed in one invocation. `-s,
---session-id` is valid only with `-d, --db`.
+`view trajectory` may mix repeated `-p` and repeated `-d` inputs in one
+invocation. Each loaded path or DB session becomes one Trial in the report.
+`export trajectory` remains single-session only and must fail clearly when the
+effective input set contains more than one session.
+
+`-s, --session-id` is valid only when at least one `-d, --db` input is present.
+With one DB input, bare `-s ID` remains valid and may be repeated to compare
+multiple sessions from that DB in `view trajectory`. With multiple DB inputs,
+session ids must use `-s dN=ID`, where `N` is the one-based DB input index.
+Repeating `-s dN=ID` selects multiple sessions from that DB. A DB input without
+explicit session ids lets its adapter choose its default or latest session.
 
 The command surface follows a peval-style verb and scenario shape:
 
@@ -70,46 +83,77 @@ Common trajectory flags use both long and short forms:
 - `-n, --note N=TEXT` for `view trajectory`, where `0` is report-level and
   positive one-based indexes attach to the ordered input sessions
 
+`-a ADAPTER` sets the default adapter for all inputs. `-a pN=ADAPTER` overrides
+the adapter for the one-based path input `N`; `-a dN=ADAPTER` overrides the
+adapter for the one-based DB input `N`. `-a` may be repeated. The default
+adapter starts from config, the last bare `-a ADAPTER` overrides that default,
+and selector forms override only their matching input. Invalid selectors,
+duplicate selectors, selectors that reference missing inputs, and unknown
+adapter ids must fail clearly and list available adapters for unknown ids.
+
 When `-o/--output` is omitted, commands write to stdout. When `-o/--output` is
-present without a path, the default file name includes the selected adapter and
+present without a path, the default file name includes the effective adapter and
 session identity. Single-session `export trajectory` writes
 `trajectory-<adapter>-<session>.json`. Single-session `view trajectory` writes
 `report-<adapter>-<session>.html`, or `report-<adapter>-<session>.json` when
 `--format json` is set. Multi-session `view trajectory` writes
-`report-<adapter>-sessions-<count>.<format>`. Unsafe filename characters are
-replaced with `-`, and missing session ids fall back to `session`.
+`report-<adapter>-sessions-<count>.<format>` when every session uses the same
+adapter, or `report-multi-adapter-sessions-<count>.<format>` when multiple
+adapters are present. Unsafe filename characters are replaced with `-`, and
+missing session ids fall back to `session`.
 
-`export trajectory` remains single-session only. Multiple `-p` values or
-multiple `-s` values must fail clearly for export.
+`export trajectory` remains single-session only. Multiple path inputs, multiple
+DB inputs, mixed path/DB inputs, or multiple selected DB sessions must fail
+clearly for export.
 
 TOML config uses `defaults.adapter` for the input adapter default. Older
 `defaults.agent` config keys may be accepted for local compatibility, but the
-public CLI and docs use `adapter`. Adapter-specific options live under
-`[adapters.<adapter-id>]`. `peval-py` passes the selected adapter's raw option
-table through to that adapter and does not define adapter-specific CLI flags.
+public CLI and docs use `adapter`. `defaults.locale` selects the generated HTML
+report UI locale and is config-only; there is no CLI locale flag. Supported
+values are `en`, `en-US`, `zh-CN`, and `zh`; `en-US` normalizes to `en`, and
+`zh` normalizes to `zh-CN`. Unsupported locale values must fail with a clear
+config error. Adapter-specific options live under `[adapters.<adapter-id>]`.
+`peval-py` passes each effective adapter's raw option table through to that
+adapter and does not define adapter-specific CLI flags.
 
 JSONL accepts either direct message objects or wrapper objects containing
 `message`, optional `usage`, optional `metadata`, optional `accounting`, and
-optional `session_seq`.
+optional `session_seq`. Exported ATIF JSON path input preserves the trajectory
+object as the canonical data source, does not require a selected adapter, and
+uses `atif` as the report metadata adapter id to mark passthrough input.
+It rebuilds only minimal report sidecar step metadata; peval-only timing
+metadata that is not present in ATIF is not reconstructed.
 
-SQLite reads only the configured `messages` table in v1. The default Psychevo
+SQLite `--db` input is interpreted by the effective adapter for that DB input.
+Adapters may implement native database conversion for their own
+retained-session persistence. If an adapter does not implement native DB
+conversion but does
+implement record conversion, `peval-py` may use the configured generic
+`messages` table mapping and then call `convert(records, config)`. That generic
 mapping reads `session_seq`, `message_json`, `usage_json`, `metadata_json`, and
 accounting columns ordered by `session_seq`. Table and column names supplied by
 config must be SQL identifiers, not raw SQL fragments.
-For SQLite inputs, the selected `--session-id` is report metadata even when it
-is not duplicated inside individual message rows. ATIF output must set
-`session_id` from that selected id.
+For generic SQLite inputs, the selected `--session-id` is report metadata even
+when it is not duplicated inside individual message rows. ATIF output must set
+`session_id` from that selected id. Native DB adapters may define their own
+session selection behavior. Psychevo defaults to the most recently updated
+session from the `sessions` table, OpenCode defaults to the most recently
+updated session, and Hermes defaults to the session with the most recent active
+message, ending, or start time when `--session-id` is omitted.
 
 ## Adapters
 
-`-a, --adapter` selects one adapter. Built-in adapters are always available:
+`-a, --adapter` selects the default adapter or a per-input adapter selector.
+Built-in adapters are always available:
 
 - `psychevo` supports current Psychevo retained messages with
   `role=user|assistant|tool_result`, user text blocks, assistant text,
-  reasoning, and tool-call blocks.
-- `opencode` and `hermes` are separate adapter modules from v1. They support a
-  common single-session message JSONL shape and provide agent-specific defaults
-  so native formats can be added without changing the CLI surface.
+  reasoning, tool-call blocks, and current Psychevo SQLite persistence with
+  `sessions` and `messages` tables.
+- `opencode` supports the common single-session message JSONL shape and current
+  OpenCode SQLite persistence with `session`, `message`, and `part` tables.
+- `hermes` supports the common single-session message JSONL shape and current
+  Hermes SQLite persistence with `sessions` and `messages` tables.
 
 Third-party adapters register through installed Python package entry points in
 the `peval_py.adapters` group. The entry point name is the adapter id after
@@ -118,13 +162,18 @@ available adapter ids, and duplicate ids fail clearly instead of shadowing an
 existing adapter.
 
 Adapters may implement the normal record conversion contract,
-`convert(records, config)`, for JSONL and SQLite inputs. Adapters that need to
-parse a source file directly may also implement `convert_path(path, config)`.
-For `-p/--path`, `peval-py` calls `convert_path` when the selected adapter
-provides it; otherwise it reads JSONL into `MessageRecord` values and calls
-`convert`. For `-d/--db`, `peval-py` always reads SQLite `messages` rows and
-requires a record adapter. A path-only adapter used with `--db` must fail with
-a clear unsupported-input diagnostic.
+`convert(records, config)`, for JSONL and generic SQLite inputs. Adapters that
+need to parse a source file directly may also implement `convert_path(path,
+config)`. Adapters that own a SQLite persistence format may implement
+`convert_db(path, session_id, config)`.
+For `-p/--path`, `peval-py` first recognizes exported ATIF JSON trajectory
+objects. Otherwise it calls `convert_path` when the effective adapter provides
+it, then falls back to reading JSONL into `MessageRecord` values and calling
+`convert`. For `-d/--db`, `peval-py` calls `convert_db` when the effective
+adapter provides it; otherwise it reads the configured generic SQLite
+`messages` rows and requires a record adapter. An adapter used with `--db` that
+supports neither native DB input nor record conversion must fail with a clear
+unsupported-input diagnostic.
 
 Adapters may preserve source metadata in report sidecars, but ATIF output must
 stay standard and must not include peval-only fields.
@@ -138,16 +187,22 @@ writes either JSON or HTML:
   `includes`, `scope`, `path_selections`, `trajectory`, and
   `trajectory_meta`. Multi-session view reports also include `comparison`;
   reports with notes also include `annotations`.
-- HTML is a single offline file with inline CSS and JavaScript. It renders the
-  selected Trial trajectory, step rows, reasoning, message, tool-call,
-  observation, metrics cues, and one combined Expand all / Collapse all control.
-  The page head contains only `Agent Trajectory Report`; agent/model and metric
-  summaries stay inside the Run and Result sections instead of appearing as a
-  separate top banner.
+- HTML is emitted as a single offline file with inline CSS and JavaScript,
+  while the source CSS and JavaScript live in package asset files instead of a
+  large Python string. It renders the selected Trial trajectory, step rows,
+  reasoning, message, tool-call, observation, metrics cues, and one combined
+  Expand all / Collapse all control. The page head contains only the localized
+  report title; agent/model and metric summaries stay inside the Run and Result
+  sections instead of appearing as a separate top banner. Report typography
+  uses a 15px body text baseline, with compact labels, chips, table headers,
+  and code blocks no smaller than 12px.
 
 Single-session HTML renders the current Run, Result, Evidence, and Steps
 sections. Multi-session HTML follows the Rust `peval view` report structure:
 Report Notes, Visible Heatmap, Leaderboard, then the selected Trial trajectory.
+Visible Heatmap and Leaderboard comparison panels render one primary section
+title without a duplicate eyebrow label. `Leaderboard` is a preserved report UI
+term and remains English in localized reports.
 `peval-py` treats each input session as one Trial. The Visible Heatmap supports
 metric switching for duration, tokens, tool calls, and turns. It uses a
 session/trial row axis: each input session occupies one row with a left-side
@@ -156,6 +211,47 @@ than as an unbounded horizontal row. The Leaderboard shows session,
 adapter/model, result, duration, turns, tools, tokens, cost, and notes. The
 rendered comparison sections must not show benchmark, task, task-set,
 task-family, or matrix task-axis fields.
+
+Step token chips prefer real per-step metrics from the trajectory. When a
+visible step lacks per-step token metrics, HTML may show an estimated token
+chip to avoid an empty visual rail. Estimated step tokens are UI-only: they are
+derived while rendering HTML, are visibly marked with an estimated indicator,
+and must not be written back into ATIF trajectories or report JSON. When the
+optional `tiktoken` package is importable, the renderer may use it for the
+visible step text; otherwise it falls back to a deterministic standard-library
+byte-length estimate.
+Estimated chips must resolve against the selected Trial identity and render in
+the final Steps rail for any visible step without real step metrics, including
+user and system steps.
+
+Steps timing chips may show a UI-only proportional fill in HTML. The fill is
+computed in the browser from the selected Trial metadata and is not written
+back to ATIF or report JSON. Step duration chips scale against the slowest step
+in the selected Trial, tool execution chips scale against the slowest tool
+execution in the selected Trial, and elapsed chips scale against the selected
+Trial wall duration when available, falling back to the largest elapsed step
+value.
+
+HTML localization covers the report title, report-level chrome, comparison
+section titles, metric labels, comparison table headers, comparison empty
+states, buttons, aria labels, comparison status labels, and the selected Trial
+summary, notes, result, and evidence sections. Only the final selected Trial
+Steps detail section remains English in this version. English is the default.
+Simplified Chinese is selected with `defaults.locale = "zh-CN"` or the `zh`
+alias. In Simplified Chinese reports, domain terms such as Run, Result, Notes,
+Evidence, Steps, events, Session, variant, evaluator, reasoning, selected
+trial trajectory, cache read, and cache write remain English, as do metric/tool
+labels such as Turns, Tool Calls, and tool success / total. Report JSON schema,
+adapter ids, model names, session ids, note text, tool names, raw warnings, and
+stored status values remain unchanged.
+
+User-facing translated Markdown for canonical docs lives under
+`docs/i18n/<locale>/...`. Tool README translations live beside their original
+README files, such as `tools/peval-py/README.zh-CN.md`. The canonical English
+docs remain in their original locations. Chinese docs link to Chinese
+translated pages when available and fall back to the canonical English target
+when a page has not been translated. Spec links continue to point at
+`specs/...` unless translated specs are introduced later.
 
 Report timing, tool/observation grouping, and trajectory row visualization
 follow [340 Trajectory](../340-agent-evaluation/trajectory.md). This spec
@@ -178,7 +274,7 @@ the assistant tool-call timestamp and the tool-result timestamp.
 Single-session report defaults use deterministic peval-compatible placeholders
 for eval-only fields: benchmark, case, task-set, task, and task family are
 `session`; status is `passed` unless conversion warnings or errors require
-`failed`; adapter is the selected adapter id.
+`failed`; adapter is the effective adapter id for that input session.
 
 Multi-session report rows are ordered by input order. Each input session is one
 trial. Trial keys are deterministic from the displayed session id, with

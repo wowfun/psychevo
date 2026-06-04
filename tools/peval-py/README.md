@@ -1,7 +1,9 @@
 # peval-py
 
+Language: English | [简体中文](README.zh-CN.md)
+
 `peval-py` is the lightweight Python edition of `peval` for retained agent
-trajectories. It reads JSONL sessions or Psychevo SQLite `messages` rows and
+trajectories. It reads JSONL sessions or adapter-owned SQLite databases and
 writes ATIF JSON or static peval-style reports.
 
 ## Install From A Checkout
@@ -65,6 +67,10 @@ C compiler, but check its output size and startup behavior on your target
 platform before choosing it.
 
 ## Usage Guide
+
+Use `-a ADAPTER` to set the default adapter for all inputs. For comparison
+reports, repeat `-a` with `pN=ADAPTER` or `dN=ADAPTER` to parse individual
+path or DB inputs with different adapters.
 
 For reporting, comparison, and custom adapter examples, read
 [peval-py Lightweight Trajectory Reports](../../docs/evaluation/peval-py.md).
