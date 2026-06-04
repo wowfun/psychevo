@@ -66,3 +66,13 @@ class RecordAdapter(Adapter, Protocol):
 class PathAdapter(Adapter, Protocol):
     def convert_path(self, path: str, config: ToolConfig) -> ConversionResult:
         ...
+
+
+class DbAdapter(Adapter, Protocol):
+    def convert_db(
+        self,
+        path: str,
+        session_id: str | None,
+        config: ToolConfig,
+    ) -> ConversionResult:
+        ...

@@ -20,6 +20,7 @@ class ReportSession:
     input_label: str
     input_path: str | None = None
     session_hint: str | None = None
+    adapter_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,7 @@ def prepare_session_report(
     finished = conversion.finished_at_ms or started
     status = "failed" if conversion.warnings or conversion.unmapped_events else "passed"
     data_ref = data_ref_for_input(session.input_label, session.input_path)
+    adapter_id = session.adapter_id or config.adapter
     meta = {
         "trial_key": trial_key,
         "matrix_cell_key": "session:matrix",
@@ -109,7 +111,7 @@ def prepare_session_report(
         "task_set_id": "session",
         "task_id": "session",
         "task_family": "session",
-        "adapter": config.adapter,
+        "adapter": adapter_id,
         "started_at_ms": started,
         "finished_at_ms": finished,
         "duration_ms": max(0, finished - started),

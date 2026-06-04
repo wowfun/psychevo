@@ -68,6 +68,7 @@ def coerce_adapter(adapter_id: str, value: Any) -> Adapter:
     elif callable(value) and not (
         callable(getattr(value, "convert", None))
         or callable(getattr(value, "convert_path", None))
+        or callable(getattr(value, "convert_db", None))
     ):
         value = value()
     require_adapter_protocol(adapter_id, value)
@@ -78,10 +79,11 @@ def require_adapter_protocol(adapter_id: str, value: Any) -> None:
     if not (
         callable(getattr(value, "convert", None))
         or callable(getattr(value, "convert_path", None))
+        or callable(getattr(value, "convert_db", None))
     ):
         raise ValueError(
             f"adapter {adapter_id} must define convert(records, config) "
-            "or convert_path(path, config)"
+            "or convert_path(path, config) or convert_db(path, session_id, config)"
         )
 
 
