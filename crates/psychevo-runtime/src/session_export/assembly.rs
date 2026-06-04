@@ -428,13 +428,7 @@ pub fn render_session_export(
         .contains(SessionExportInclude::LastProviderRequest)
     {
         let unfiltered_messages = load_unfiltered_export_messages(store, session_id)?;
-        reconstruct_last_provider_request(
-            store,
-            session_id,
-            &summary,
-            &unfiltered_messages,
-            prompt_prefix_record.as_ref(),
-        )?
+        reconstruct_last_provider_request(store, session_id, &summary, &unfiltered_messages)?
     } else {
         None
     };
@@ -661,7 +655,6 @@ pub(crate) fn reconstruct_last_provider_request(
     session_id: &str,
     summary: &SessionSummary,
     messages: &[ExportMessageRecord],
-    prompt_prefix: Option<&PromptPrefixRecord>,
 ) -> Result<Option<ProviderRequestExport>> {
     let metadata = store.session_metadata(session_id)?.unwrap_or(Value::Null);
     let base_url = metadata
@@ -675,6 +668,7 @@ pub(crate) fn reconstruct_last_provider_request(
     let generation_metadata = generation_metadata_from_session_metadata(&metadata, &mut warnings);
     let workdir = PathBuf::from(&summary.workdir);
     let all_tools = reconstructed_tool_declarations(store, summary, &metadata, &workdir, mode);
+    let reconstructed_tool_declarations_hash = tool_declarations_hash_from_declarations(&all_tools);
     let mut current_prompt = None;
     let mut last_request = None;
 
@@ -689,10 +683,25 @@ pub(crate) fn reconstruct_last_provider_request(
             continue;
         };
         let mut request_warnings = warnings.clone();
+        let prompt_prefix_record = matching_prompt_prefix(
+            store,
+            session_id,
+            prompt_metadata,
+            &record.metadata,
+            &mut request_warnings,
+        )?;
+        if let Some(prefix) = prompt_prefix_record.as_ref()
+            && prefix.tool_declarations_hash != reconstructed_tool_declarations_hash
+        {
+            request_warnings.push(format!(
+                "current registry tool declarations hash `{}` does not match recorded prompt prefix tool declarations hash `{}`; tool schema reconstruction is approximate",
+                reconstructed_tool_declarations_hash, prefix.tool_declarations_hash
+            ));
+        }
         let effective_tool_names = effective_tool_names_from_prefix_metadata(
             prompt_metadata,
             &record.metadata,
-            prompt_prefix,
+            prompt_prefix_record.as_ref(),
             &mut request_warnings,
         );
         let tools = filter_tool_declarations(&all_tools, &effective_tool_names);
@@ -701,7 +710,7 @@ pub(crate) fn reconstruct_last_provider_request(
             session_id,
             messages,
             mode,
-            prompt_prefix,
+            prompt_prefix: prompt_prefix_record.as_ref(),
         };
         let provider_messages = reconstructed_provider_messages(
             &context,
@@ -759,12 +768,8 @@ pub(crate) fn reconstructed_provider_messages(
     let mailbox_events = context
         .store
         .load_agent_mailbox_events(context.session_id)?;
-    if let Some(prefix) = matching_prompt_prefix(
-        context.prompt_prefix,
-        prompt_metadata,
-        assistant_metadata,
-        warnings,
-    ) {
+    let _ = (prompt_metadata, assistant_metadata);
+    if let Some(prefix) = context.prompt_prefix {
         return reconstructed_provider_messages_from_prefix(
             &evidence,
             &mailbox_events,
@@ -886,12 +891,13 @@ pub(crate) fn reconstructed_provider_messages_from_prefix(
     Ok(provider_messages)
 }
 
-pub(crate) fn matching_prompt_prefix<'a>(
-    prompt_prefix: Option<&'a PromptPrefixRecord>,
+pub(crate) fn matching_prompt_prefix(
+    store: &SqliteStore,
+    session_id: &str,
     prompt_metadata: &Option<Value>,
     assistant_metadata: &Option<Value>,
     warnings: &mut Vec<String>,
-) -> Option<&'a PromptPrefixRecord> {
+) -> Result<Option<PromptPrefixRecord>> {
     let prompt_hash = prompt_prefix_hash(prompt_metadata);
     let assistant_hash = prompt_prefix_hash(assistant_metadata);
     if let (Some(prompt_hash), Some(assistant_hash)) = (prompt_hash, assistant_hash)
@@ -910,20 +916,43 @@ pub(crate) fn matching_prompt_prefix<'a>(
             "neither the user prompt nor assistant message includes a prompt prefix hash; hidden prefix snapshot cannot be verified and the reconstructed request is approximate"
                 .to_string(),
         );
-        return None;
+        return Ok(None);
     };
-    let Some(prefix) = prompt_prefix else {
+    let prompt_version = prompt_prefix_version(prompt_metadata);
+    let assistant_version = prompt_prefix_version(assistant_metadata);
+    if let (Some(prompt_version), Some(assistant_version)) = (prompt_version, assistant_version)
+        && prompt_version != assistant_version
+    {
         warnings.push(format!(
-            "prompt prefix snapshot `{recorded_hash}` from {source} is unavailable; hidden prefix text cannot be reconstructed and the request is approximate"
+            "user prompt prefix version `{prompt_version}` differs from assistant prompt prefix version `{assistant_version}`; using the user prompt version for reconstruction"
         ));
-        return None;
+    }
+    let prefix = if let Some(version) = prompt_version.or(assistant_version) {
+        let Some(prefix) = store.load_session_prompt_prefix_version(session_id, version)? else {
+            warnings.push(format!(
+                "prompt prefix snapshot version `{version}` from {source} is unavailable; hidden prefix text cannot be reconstructed and the request is approximate"
+            ));
+            return Ok(None);
+        };
+        prefix
+    } else {
+        warnings.push(format!(
+            "{source} prompt prefix metadata does not include a version; using latest stored prompt prefix as an approximate fallback"
+        ));
+        let Some(prefix) = store.load_session_prompt_prefix(session_id)? else {
+            warnings.push(format!(
+                "prompt prefix snapshot `{recorded_hash}` from {source} is unavailable; hidden prefix text cannot be reconstructed and the request is approximate"
+            ));
+            return Ok(None);
+        };
+        prefix
     };
     if prefix.prefix_hash != recorded_hash {
         warnings.push(format!(
-            "latest prompt prefix snapshot `{}` does not match {source} prompt prefix `{recorded_hash}`; hidden prefix text is stale or unavailable and the request is approximate",
-            prefix.prefix_hash
+            "prompt prefix snapshot version `{}` hash `{}` does not match {source} prompt prefix `{recorded_hash}`; hidden prefix text is stale or unavailable and the request is approximate",
+            prefix.version, prefix.prefix_hash
         ));
-        return None;
+        return Ok(None);
     }
-    Some(prefix)
+    Ok(Some(prefix))
 }

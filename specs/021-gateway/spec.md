@@ -20,7 +20,7 @@ ACP, future Web/Desktop surfaces, IM adapters, and peer-agent backends.
 - active-turn queue, steer, interrupt, and reset semantics
 - gateway-owned permission and clarify request routing
 - canonical caller-facing item and event projection
-- bounded debug observation access separate from ordinary transcript events
+- typed live observation projection without generic raw debug persistence
 - local loopback HTTP/WebSocket facade for product and API clients
 - generic IM source adapter boundary for first-party Gateway integration
 - backend boundary for Psychevo runtime and future peer-agent executors
@@ -83,10 +83,19 @@ platform, channel, thread, or participant context.
 
 ## Input And Control
 
-Gateway turn input is a list of transport-neutral parts. The first slice
-supports text, image, and explicit context parts. Text and images map to
-runtime prompt and image inputs. Context parts are included only when the
-caller explicitly marks them model-visible.
+Gateway turn input is a list of transport-neutral parts plus optional structured
+mentions resolved by the client. The first slice supports text, image, explicit
+context parts, and `GatewayMention` records for visible inline references. Text
+and images map to runtime prompt and image inputs. Context parts are included
+only when the caller explicitly marks them model-visible.
+
+Mentions keep user-visible text separate from the resolved target. A surface may
+show `$reviewer`, `@src/main.rs`, or `$acp-agent` in the composer while sending
+a structured mention that records the sigil, label, replacement range, target
+kind, and target id/path/URI. Skill mentions are mapped to runtime explicit
+skill inputs. Agent and ACP-capability mentions provide capability metadata and
+disambiguation for the turn, but they do not override the explicit top-level
+`agentName` used to choose the executor for the turn.
 
 Each gateway thread has at most one active turn. Normal inputs submitted while
 a turn is active enter a Gateway-owned in-memory FIFO queue for the same
@@ -100,9 +109,40 @@ The queue is not durable in the first slice. Completed history and
 `Persistent` source-to-thread mappings are durable; active process state and
 `Process` source bindings are not.
 
-Resetting a source creates or selects a new thread and rebinds the source key.
-The old runtime session remains inspectable and is marked ended/archived with
-the reset reason instead of being deleted.
+Starting a new thread or resuming a history thread rebinds the source key
+without archiving, ending, or deleting the previously bound thread. Historical
+threads remain visible in the ordinary active history list unless the user
+explicitly archives or deletes them.
+
+Live turn projection is thread-scoped. A transport that accepts a prompt while
+no source thread is bound must first create or select a concrete thread id, then
+start the turn against that id. `entryStarted`, `entryUpdated`, and
+`entryCompleted` events must carry transcript entries whose `threadId` is the
+owning thread id; clients must not assign live entries to the currently visible
+thread as a fallback.
+
+Assistant messages whose runtime finish reason is `tool_calls`, or whose
+content includes tool-call blocks, are tool-call preambles rather than final
+assistant answers. Gateway projects their visible text as a non-answer
+transcript entry/block with `metadata.projection = "assistant_preamble"` so the
+preamble remains in observed order before the associated tool rows, while final
+assistant answer entries are reserved for assistant messages that do not
+continue into tool calls.
+`assistant_preamble` is machine-readable projection metadata, not a user-facing
+label. Clients should render it as ordinary reasoning/Thinking content and must
+normalize legacy `title = "Preamble"` items to the same display.
+
+Ordinary thread navigation is allowed while the previously bound thread has an
+active turn. The active turn remains keyed by its thread id and continues in the
+background. Source-scoped control resolves against the currently bound thread;
+thread-scoped control can still interrupt, steer, or answer requests for a
+background thread. Running threads may not be archived or deleted until their
+active turn finishes or is interrupted.
+
+Resetting a source is stronger than ordinary thread navigation: it creates or
+selects a new thread and rebinds the source key. The old runtime session
+remains inspectable and is marked ended/archived with the reset reason instead
+of being deleted.
 
 Control APIs use a `GatewayThreadSelector` instead of a raw thread id. A
 selector can target a concrete thread id or a source key. Gateway resolves the
@@ -157,6 +197,17 @@ string tokens are not a supported auth mechanism.
 First-slice JSON-RPC methods include:
 
 - `initialize`
+- `agent/list`
+- `agent/read`
+- `agent/write`
+- `agent/delete`
+- `backend/list`
+- `backend/doctor`
+- `command/list`
+- `command/execute`
+- `completion/list`
+- `peerSession/list`
+- `peerSession/import`
 - `thread/start`
 - `thread/resume`
 - `thread/read`
@@ -171,7 +222,28 @@ First-slice JSON-RPC methods include:
 - `source/reset`
 - `permission/respond`
 - `clarify/respond`
-- `debug/events`
+
+`thread/start` may start a local Psychevo thread or a top-level peer-agent
+thread. Peer-agent starts target `agentName`; Gateway resolves generated and
+Markdown agent definitions, validates that the definition has the `peer`
+entrypoint, and routes to the referenced backend. Direct backend-id task starts
+are not supported.
+
+`completion/list` is the shared input-completion endpoint for Web, Desktop,
+Mobile, and other GUI clients. It accepts `scope`, optional `threadId`, `text`,
+and `cursor`, and returns ranked completion items plus the text range to
+replace. The first slice recognizes `/` for shared slash commands, `@` for
+workdir-local file references, and `$` for skills, local agents, and ACP
+capability mentions. Completion responses are transport data only; accepting an
+item does not execute a command or start a turn.
+
+`command/execute` executes shared surface commands that can be represented by
+Gateway operations. Prompt-submission commands resolve to `turn/start` inputs;
+session commands resolve to thread/source operations; control commands resolve
+to turn control operations. Commands that require host-only side effects such as
+clipboard or download may return a structured client action for the surface to
+perform. Unsupported commands return structured feedback rather than silently
+falling back to prompt text.
 
 Transport-level `turn/steer` includes `expected_turn_id` and is rejected when
 the supplied id does not match the active turn. `thread/resume` may resolve by
@@ -186,6 +258,11 @@ authenticated local clients for the same workdir share the same source/thread,
 queue, event stream, and control surface. Client connection ids are transport
 state and do not affect source continuity.
 
+Gateway thread ids remain Psychevo-local identifiers. Peer backends store their
+native session id in backend metadata and may expose a display handle such as
+`acp:<backend-id>:<native-session-id>` for imported sessions, debugging, and
+search. Public control APIs continue to use `GatewayThreadSelector`.
+
 Source keys should avoid exposing raw local paths. A workdir source key uses a
 stable hash of the canonical workdir, while raw identity metadata may retain
 canonical and display paths for local diagnostics and UI display.
@@ -194,41 +271,73 @@ Transport requests that introduce or select a source carry a request-scoped
 `scope` object inside `params`. The scope contains `workdir` plus source intent.
 `source.kind` is an open namespace string such as `web`, `desktop`,
 `im.platform`, or `agent.peer`. `rawId` may be omitted; Gateway derives a stable
-raw id from source kind plus canonical workdir. `thread/start`, source-default
-`thread/resume`, and `turn/start` require `params.scope`. Methods anchored by a
-thread id or active selector authorize through the stored thread/workdir
-binding. `thread/list` uses an explicit workdir filter instead of a full source
-scope.
+raw id from source kind plus canonical workdir. `thread/start`,
+source-default `thread/resume`, `turn/start`, and completion requests require
+`params.scope`. Methods anchored by a thread id or active selector authorize
+through the stored thread/workdir binding. `thread/list` uses an explicit
+workdir filter instead of a full source scope and includes per-session activity
+so multi-client shells can show background running state.
 
 The transport protocol is generated from Rust-owned Gateway wire types. Clients
 should consume generated TypeScript types and JSON Schema rather than
 maintaining a hand-written second schema.
+
+Generated protocol validation must be free of `ts-rs` serde-attribute parse
+warnings. If a Rust wire field is omitted during serialization, the generated
+TypeScript type and JSON Schema must also model that field as optional.
+Otherwise Gateway should serialize the field explicitly, using `null` for absent
+optional values and `[]` for empty collections, so Rust JSON, generated
+TypeScript, and generated schema describe the same wire shape.
 
 The transport facade passes session-scoped source inputs and dynamic tool
 candidates to Gateway; Gateway remains responsible for validation,
 normalization, conflict handling, selection, snapshotting, queueing, and
 execution delegation.
 
-## Events And Items
+## Events And Transcript Entries
 
-Gateway projects runtime observations into a Psychevo canonical item model.
-The model uses a Psychevo-owned thread/turn/item contract and omits
-backend-specific fields unless they are required for Psychevo semantics.
+Gateway projects runtime observations into the Psychevo transcript entry model
+defined by [213 pevo Display Model](../213-pevo-display-model/spec.md). The
+model uses a Psychevo-owned thread/turn/entry contract and omits backend-specific
+fields unless they are required for Psychevo semantics.
 
-Gateway snapshots expose runtime-owned timeline items as the ordinary
+Gateway snapshots expose message-derived transcript entries as the ordinary
 transcript. Gateway events include thread lifecycle, turn lifecycle, typed
-item started/updated/completed observations, permission requests and
+entry started/updated/completed observations, permission requests and
 resolutions, clarify requests and resolutions, status, warnings, and terminal
 turn outcomes. Ordinary Gateway events do not include raw runtime event
-fallbacks.
-
-Debuggability is provided by bounded debug records. Raw or unclassified
-runtime/provider observations may be stored as debug summaries and exposed
-through `debug/events`, but they must not be delivered as ordinary
-`gateway/event` notifications or ordinary transcript items.
+fallbacks. Raw or unclassified runtime/provider observations are ignored by the
+ordinary Gateway stream unless another spec assigns them explicit typed
+semantics.
 
 Gateway events are live observations, not durable evidence. Durable records
 remain owned by runtime and storage specs.
+
+Web and GUI clients must apply typed live entry observations to their in-memory
+transcript while a turn is running. `entryStarted`, `entryUpdated`, and
+`entryCompleted` upsert the event entry by id; the completed entry replaces the
+running entry until the committed turn slice or next snapshot refresh arrives.
+`entryDelta` may update an existing live entry when it names an entry id, but
+clients must not invent durable records from deltas alone. A subsequent
+`thread/read` or `thread/resume` snapshot remains authoritative and may replace
+live ids with message-derived entry ids.
+
+Gateway must project reasoning as typed live entries, not anonymous deltas.
+Reasoning streams use a stable entry id for the current assistant segment, such
+as `live:{turn}:reasoning:{segment}`. The first reasoning delta in that segment
+starts a running reasoning entry, later deltas update the same entry, and
+reasoning completion marks it completed. Assistant text for the same segment
+uses a paired `live:{turn}:assistant:{segment}` entry id. The segment
+increments after the assistant message closes, so later model steps do not
+overwrite or move earlier Thinking/answer rows.
+
+If a live assistant-text entry is later confirmed by `message_end` to be a
+tool-call message, Gateway keeps the same assistant entry id and changes the
+completed entry to a `Reasoning` block with
+`metadata.projection = "assistant_preamble"`. Clients must apply that
+kind/body replacement in place by id, not keep both the provisional assistant
+row and the completed preamble row. Non-tool assistant completions remain
+assistant text entries and must never be projected into a Thinking row.
 
 ## IM Adapter Boundary
 
@@ -242,7 +351,7 @@ deterministic source/session routing while preserving Psychevo's Gateway core:
 - Gateway derives a stable persistent source key from normalized source fields
   without exposing raw local paths or raw platform identifiers in public keys.
 - IM adapters submit inbound text/images/context as Gateway source-scoped
-  turn inputs and receive typed timeline events for delivery.
+  turn inputs and receive typed transcript events for delivery.
 - Task-scoped routing state is explicit in the request context; process-global
   mutable session state is not part of the boundary.
 - Platform message editing, rate limits, mentions, pairing, credentials,

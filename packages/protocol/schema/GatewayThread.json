@@ -14,6 +14,7 @@
           "$ref": "#/definitions/BackendKind"
         },
         "nativeId": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -34,6 +35,7 @@
       "type": "string"
     },
     "sourceKey": {
+      "default": null,
       "type": [
         "string",
         "null"

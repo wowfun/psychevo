@@ -4,6 +4,35 @@
     "baseUrl": {
       "type": "string"
     },
+    "executableInode": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "executableModifiedMs": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "executablePath": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "executableSize": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "pid": {
       "format": "uint32",
       "minimum": 0.0,
@@ -15,6 +44,12 @@
     "startedAtMs": {
       "format": "int64",
       "type": "integer"
+    },
+    "staticDir": {
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "version": {
       "type": "string"

@@ -14,6 +14,7 @@ pub enum AgentSource {
     ClaudeProject,
     Global,
     ClaudeGlobal,
+    Generated,
     BuiltIn,
 }
 
@@ -25,9 +26,94 @@ impl AgentSource {
             Self::ClaudeProject => "claude_project",
             Self::Global => "global",
             Self::ClaudeGlobal => "claude_global",
+            Self::Generated => "generated",
             Self::BuiltIn => "built_in",
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentEntrypoint {
+    Peer,
+    Subagent,
+}
+
+impl AgentEntrypoint {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Peer => "peer",
+            Self::Subagent => "subagent",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim() {
+            "peer" => Some(Self::Peer),
+            "subagent" => Some(Self::Subagent),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentBackendKind {
+    Acp,
+}
+
+impl AgentBackendKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Acp => "acp",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        match value.trim() {
+            "acp" => Some(Self::Acp),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentBackendRef {
+    #[serde(rename = "ref")]
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentBackendConfig {
+    pub id: String,
+    pub kind: AgentBackendKind,
+    pub enabled: bool,
+    pub label: String,
+    pub description: Option<String>,
+    pub command: Option<String>,
+    pub args: Vec<String>,
+    pub env: BTreeMap<String, String>,
+    pub cwd: String,
+    pub entrypoints: BTreeSet<AgentEntrypoint>,
+    pub client_capabilities: BTreeSet<String>,
+    pub mcp_servers: BTreeSet<String>,
+}
+
+pub(crate) fn default_peer_agent_entrypoints() -> BTreeSet<AgentEntrypoint> {
+    [AgentEntrypoint::Peer, AgentEntrypoint::Subagent]
+        .into_iter()
+        .collect()
+}
+
+pub(crate) fn default_subagent_entrypoints() -> BTreeSet<AgentEntrypoint> {
+    [AgentEntrypoint::Subagent].into_iter().collect()
+}
+
+pub(crate) fn default_peer_client_capabilities() -> BTreeSet<String> {
+    ["fs.read", "fs.write", "terminal"]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -86,6 +172,8 @@ pub struct AgentDefinition {
     pub instructions: String,
     pub file_path: Option<PathBuf>,
     pub source: AgentSource,
+    pub backend: Option<AgentBackendRef>,
+    pub entrypoints: BTreeSet<AgentEntrypoint>,
     pub model: Option<String>,
     pub tool_policy: AgentToolPolicy,
     pub skills: Vec<String>,
@@ -97,6 +185,12 @@ pub struct AgentDefinition {
     pub project_instructions: Option<bool>,
     pub effort: Option<String>,
     pub diagnostics: Vec<AgentDiagnostic>,
+}
+
+impl AgentDefinition {
+    pub fn supports_entrypoint(&self, entrypoint: AgentEntrypoint) -> bool {
+        self.entrypoints.contains(&entrypoint)
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -220,6 +314,17 @@ pub(crate) struct RawAgentFrontmatter {
     #[serde(rename = "projectInstructions", alias = "project_instructions")]
     pub(crate) project_instructions: Option<Value>,
     pub(crate) effort: Option<String>,
+    pub(crate) backend: Option<Value>,
+    pub(crate) entrypoints: Option<Value>,
+    pub(crate) kind: Option<Value>,
+    pub(crate) enabled: Option<Value>,
+    pub(crate) label: Option<Value>,
+    pub(crate) command: Option<Value>,
+    pub(crate) args: Option<Value>,
+    pub(crate) env: Option<Value>,
+    #[serde(rename = "clientCapabilities", alias = "client_capabilities")]
+    pub(crate) client_capabilities: Option<Value>,
+    pub(crate) cwd: Option<Value>,
     pub(crate) memory: Option<Value>,
     pub(crate) isolation: Option<Value>,
 }
@@ -322,6 +427,28 @@ pub fn discover_agents(options: &AgentDiscoveryOptions) -> Result<AgentCatalog> 
         )?;
     }
 
+    match crate::config::load_agent_backend_configs(&options.home, &options.workdir, &options.env) {
+        Ok(backends) => {
+            for backend in backends.values() {
+                if let Some(agent) = generated_agent_from_backend(backend) {
+                    insert_agent(&mut catalog, &mut winners, agent);
+                } else if backend.enabled && backend.description.is_none() {
+                    catalog.diagnostics.push(AgentDiagnostic::warning(
+                        format!(
+                            "agent backend `{}` is missing description and did not generate an agent",
+                            backend.id
+                        ),
+                        None,
+                    ));
+                }
+            }
+        }
+        Err(err) => catalog.diagnostics.push(AgentDiagnostic::warning(
+            format!("failed to load agent backends: {err}"),
+            None,
+        )),
+    }
+
     for agent in built_in_agents() {
         insert_agent(&mut catalog, &mut winners, agent);
     }
@@ -347,6 +474,52 @@ pub fn resolve_agent_definition(
         .ok_or_else(|| Error::Config(format!("unknown agent: {input}")))
 }
 
+pub(crate) fn generated_agent_from_backend(
+    backend: &AgentBackendConfig,
+) -> Option<AgentDefinition> {
+    if !backend.enabled {
+        return None;
+    }
+    let description = backend
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?
+        .to_string();
+    let mut diagnostics = Vec::new();
+    if backend.command.is_none() {
+        diagnostics.push(AgentDiagnostic::warning(
+            format!("agent backend `{}` is missing command", backend.id),
+            None,
+        ));
+    }
+    Some(AgentDefinition {
+        name: backend.id.clone(),
+        description,
+        instructions: String::new(),
+        file_path: None,
+        source: AgentSource::Generated,
+        backend: Some(AgentBackendRef {
+            name: backend.id.clone(),
+        }),
+        entrypoints: backend.entrypoints.clone(),
+        model: None,
+        tool_policy: AgentToolPolicy {
+            mcp_servers: backend.mcp_servers.clone(),
+            ..AgentToolPolicy::default()
+        },
+        skills: Vec::new(),
+        hooks: None,
+        background: None,
+        initial_prompt: None,
+        max_turns: None,
+        max_spawn_depth: 0,
+        project_instructions: None,
+        effort: None,
+        diagnostics,
+    })
+}
+
 pub fn list_agents_value(catalog: &AgentCatalog) -> Value {
     json!({
         "agents": catalog.agents.iter().map(|agent| {
@@ -354,7 +527,10 @@ pub fn list_agents_value(catalog: &AgentCatalog) -> Value {
                 "name": agent.name,
                 "description": agent.description,
                 "source": agent.source.as_str(),
+                "generated": agent.source == AgentSource::Generated,
                 "path": agent.file_path,
+                "backend": agent.backend,
+                "entrypoints": agent.entrypoints,
                 "model": agent.model,
                 "tools": agent.tool_policy.allowed,
                 "disallowed_tools": agent.tool_policy.denied,
@@ -372,7 +548,10 @@ pub fn list_agents_value(catalog: &AgentCatalog) -> Value {
                 "name": agent.name,
                 "description": agent.description,
                 "source": agent.source.as_str(),
+                "generated": agent.source == AgentSource::Generated,
                 "path": agent.file_path,
+                "backend": agent.backend,
+                "entrypoints": agent.entrypoints,
                 "model": agent.model,
                 "tools": agent.tool_policy.allowed,
                 "disallowed_tools": agent.tool_policy.denied,
@@ -402,7 +581,10 @@ pub fn view_agent_value_with_catalog(
         "description": agent.description,
         "instructions": agent.instructions,
         "source": agent.source.as_str(),
+        "generated": agent.source == AgentSource::Generated,
         "path": agent.file_path,
+        "backend": agent.backend,
+        "entrypoints": agent.entrypoints,
         "model": agent.model,
         "tools": agent.tool_policy.allowed,
         "disallowed_tools": agent.tool_policy.denied,
@@ -573,7 +755,11 @@ pub(crate) fn agent_catalog_for_selected_policy(
 ) -> Vec<AgentDefinition> {
     match selected_agent {
         Some(agent) => agent_catalog_for_policy(agent, catalog),
-        None => catalog.to_vec(),
+        None => catalog
+            .iter()
+            .filter(|agent| agent.supports_entrypoint(AgentEntrypoint::Subagent))
+            .cloned()
+            .collect(),
     }
 }
 

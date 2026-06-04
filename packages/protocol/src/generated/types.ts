@@ -24,19 +24,31 @@ export type GatewayTurnStatus = "queued" | "running" | "completed" | "failed" | 
 
 export type GatewayInputPart = { "type": "text", text: string, } | { "type": "image", input: GatewayImageInput, } | { "type": "context", label: string, text: string, visibleToModel: boolean, };
 
+export type GatewayMentionRange = { start: number, end: number, };
+
+export type GatewayMentionTarget = { "kind": "skill", name: string, path: string | null, } | { "kind": "agent", name: string, source: string | null, entrypoints: Array<string>, backendRef: string | null, } | { "kind": "file", path: string, relativePath: string, } | { "kind": "capability", id: string, label: string, targetKind: string, uri: string | null, };
+
+export type GatewayMention = { visibleText: string, range: GatewayMentionRange, target: GatewayMentionTarget, };
+
 export type GatewayImageInput = { "kind": "localPath", path: string, } | { "kind": "url", url: string, };
 
 export type GatewaySelectedSkill = { name: string, path: string, };
 
-export type GatewayEvent = { "type": "turnStarted", threadId: string | null, turnId: string, selectedSkills: Array<GatewaySelectedSkill>, } | { "type": "turnQueued", threadId: string | null, turnId: string, queuePosition: number, } | { "type": "turnCompleted", threadId: string | null, turnId: string, outcome: string | null, } | { "type": "itemDelta", turnId: string, itemId: string | null, delta: string, } | { "type": "itemStarted", turnId: string, item: TimelineItem, } | { "type": "itemUpdated", turnId: string, item: TimelineItem, } | { "type": "itemCompleted", turnId: string, item: TimelineItem, } | { "type": "permissionRequested", requestId: string, toolName: string, summary: string, reason: string, matchedRule: string | null, suggestedRule: string | null, allowAlways: boolean, timeoutSecs: number, } | { "type": "permissionResolved", requestId: string, decision: PermissionDecision, } | { "type": "clarifyRequested", requestId: string, raw: unknown, } | { "type": "clarifyResolved", requestId: string, reason: string, } | { "type": "warning", kind: string, message: string, sourcePath: string | null, suggestion: string | null, } | { "type": "debugAvailable", turnId: string, };
+export type GatewayEvent = { "type": "turnStarted", threadId: string | null, turnId: string, selectedSkills: Array<GatewaySelectedSkill>, } | { "type": "turnQueued", threadId: string | null, turnId: string, queuePosition: number, } | { "type": "turnCompleted", threadId: string | null, turnId: string, outcome: string | null, committedEntries: Array<TranscriptEntry>, } | { "type": "entryDelta", turnId: string, entryId: string | null, blockId: string | null, delta: string, } | { "type": "entryStarted", turnId: string, entry: TranscriptEntry, } | { "type": "entryUpdated", turnId: string, entry: TranscriptEntry, } | { "type": "entryCompleted", turnId: string, entry: TranscriptEntry, } | { "type": "permissionRequested", requestId: string, toolName: string, summary: string, reason: string, matchedRule: string | null, suggestedRule: string | null, allowAlways: boolean, timeoutSecs: number, } | { "type": "permissionResolved", requestId: string, decision: PermissionDecision, } | { "type": "clarifyRequested", requestId: string, raw: unknown, } | { "type": "clarifyResolved", requestId: string, reason: string, } | { "type": "warning", kind: string, message: string, sourcePath: string | null, suggestion: string | null, };
 
 export type PermissionDecision = "allowOnce" | "allowSession" | "allowAlways" | "deny";
 
-export type TimelineItemKind = "prompt" | "assistant" | "reasoning" | "tool" | "shell" | "file" | "web" | "mcp" | "clarify" | "permission" | "skill" | "agent" | "mailbox" | "status" | "diff" | "artifact";
+export type TranscriptEntryRole = "user" | "assistant" | "diagnostic";
 
-export type TimelineItemStatus = "pending" | "running" | "completed" | "failed" | "cancelled" | "needsInput" | "info";
+export type TranscriptBlockKind = "text" | "reasoning" | "toolCall" | "toolResult" | "tool" | "shell" | "file" | "web" | "mcp" | "clarify" | "permission" | "skill" | "agent" | "mailbox" | "status" | "diff" | "artifact";
 
-export type TimelineItem = { id: string, threadId: string, turnId: string | null, sequence: number, kind: TimelineItemKind, status: TimelineItemStatus, source: string, title: string | null, body: string | null, preview: string | null, detail: string | null, artifactIds: Array<string>, metadata: unknown | null, createdAtMs: number, updatedAtMs: number, };
+export type TranscriptBlockStatus = "pending" | "running" | "completed" | "failed" | "cancelled" | "needsInput" | "info";
+
+export type TranscriptToolResult = { resultMessageSeq: number, status: TranscriptBlockStatus, content: string, isError: boolean, metadata: unknown | null, createdAtMs: number, updatedAtMs: number, };
+
+export type TranscriptBlock = { id: string, kind: TranscriptBlockKind, status: TranscriptBlockStatus, order: number, source: string, title: string | null, body: string | null, preview: string | null, detail: string | null, artifactIds: Array<string>, metadata: unknown | null, result: TranscriptToolResult | null, createdAtMs: number, updatedAtMs: number, };
+
+export type TranscriptEntry = { id: string, threadId: string, turnId: string | null, messageSeq: number | null, role: TranscriptEntryRole, status: TranscriptBlockStatus, source: string, blocks: Array<TranscriptBlock>, metadata: unknown | null, usage: unknown | null, accounting: unknown | null, createdAtMs: number, updatedAtMs: number, };
 
 export type GatewayActivityView = { running: boolean, activeTurnId: string | null, queuedTurns: number, };
 
@@ -44,9 +56,9 @@ export type PendingPermissionView = { requestId: string, toolName: string, reaso
 
 export type PendingClarifyView = { requestId: string, raw: unknown, };
 
-export type ThreadSnapshot = { source: GatewaySource, thread: GatewayThread | null, items: Array<TimelineItem>, activity: GatewayActivityView, pendingPermissions: Array<PendingPermissionView>, pendingClarifies: Array<PendingClarifyView>, };
+export type ThreadSnapshot = { source: GatewaySource, thread: GatewayThread | null, entries: Array<TranscriptEntry>, activity: GatewayActivityView, pendingPermissions: Array<PendingPermissionView>, pendingClarifies: Array<PendingClarifyView>, };
 
-export type SessionSummaryView = { id: string, source: string, workdir: string, model: string | null, provider: string | null, startedAtMs: number, updatedAtMs: number | null, endedAtMs: number | null, endReason: string | null, archivedAtMs: number | null, messageCount: number, toolCallCount: number, title: string | null, };
+export type SessionSummaryView = { id: string, source: string, workdir: string, model: string | null, provider: string | null, startedAtMs: number, updatedAtMs: number | null, endedAtMs: number | null, endReason: string | null, archivedAtMs: number | null, messageCount: number, toolCallCount: number, activity: GatewayActivityView, title: string | null, };
 
 export type InitializeParams = Record<string, never>;
 
@@ -70,7 +82,19 @@ export type ThreadMutationResult = { session: SessionSummaryView, };
 
 export type ThreadDeleteResult = { deleted: boolean, threadId: string, };
 
-export type TurnStartParams = { scope: GatewayRequestScope, threadId: string | null, input: Array<GatewayInputPart>, text: string | null, model: string | null, reasoningEffort: string | null, };
+export type CompletionListParams = { scope: GatewayRequestScope, threadId: string | null, text: string, cursor: number, };
+
+export type CompletionReplacement = { start: number, end: number, };
+
+export type CompletionItem = { id: string, sigil: string, label: string, insertText: string, kind: string, detail: string | null, target: GatewayMentionTarget | null, sortText: string | null, };
+
+export type CompletionListResult = { items: Array<CompletionItem>, replacement: CompletionReplacement | null, };
+
+export type CommandExecuteParams = { scope: GatewayRequestScope, threadId: string | null, command: string, };
+
+export type CommandExecuteResult = { accepted: boolean, command: string, message: string | null, action: unknown | null, };
+
+export type TurnStartParams = { scope: GatewayRequestScope, threadId: string | null, agentName: string | null, input: Array<GatewayInputPart>, mentions: Array<GatewayMention>, text: string | null, model: string | null, reasoningEffort: string | null, };
 
 export type TurnSteerParams = { threadId: string | null, expectedTurnId: string, text: string, };
 
@@ -80,7 +104,7 @@ export type TurnStartResult = { accepted: boolean, };
 
 export type TurnControlResult = { accepted: boolean | null, interrupted: boolean | null, cleared: number | null, };
 
-export type TurnResultPayload = { thread: GatewayThread, turn: GatewayTurn, result: TurnRunResult, };
+export type TurnResultPayload = { thread: GatewayThread, turn: GatewayTurn, result: TurnRunResult, committedEntries: Array<TranscriptEntry>, };
 
 export type TurnRunResult = { sessionId: string, outcome: string, finalAnswer: string, toolFailures: number, provider: string | null, model: string | null, };
 
@@ -98,19 +122,13 @@ export type SettingsReadParams = { workdir: string | null, };
 
 export type SettingsReadResult = { workdir: string, memoryResources: Record<string, unknown>, secrets: Record<string, unknown>, };
 
-export type DebugEventsParams = { threadId: string, limit: number | null, };
-
-export type TimelineDebugEvent = { id: number, threadId: string, turnId: string | null, eventType: string, source: string, scope: unknown | null, status: string | null, summary: string | null, payload: unknown | null, createdAtMs: number, };
-
-export type DebugEventsResult = { events: Array<TimelineDebugEvent>, };
-
 export type ReadyzResult = { ok: boolean, server: string, version: string, };
 
 export type CreateLaunchParams = { workdir: string, source: GatewaySourceInput | null, };
 
 export type CreateLaunchResult = { launchId: string, expiresAtMs: number, openUrl: string, };
 
-export type ManagedServerState = { pid: number, baseUrl: string, readyzUrl: string, startedAtMs: number, version: string, };
+export type ManagedServerState = { pid: number, baseUrl: string, readyzUrl: string, startedAtMs: number, version: string, executablePath: string | null, executableModifiedMs: number | null, executableSize: number | null, executableInode: number | null, staticDir: string | null, };
 
 export type JsonRpcId = string | number | null;
 
@@ -124,7 +142,7 @@ export type JsonRpcErrorResponse = { jsonrpc: string, id: JsonRpcId, error: Json
 
 export type JsonRpcError = { code: number, message: string, data: unknown | null, };
 
-export type ClientRequest = { "method": "initialize", "params": InitializeParams } | { "method": "thread/start", "params": ThreadStartParams } | { "method": "thread/resume", "params": ThreadResumeParams } | { "method": "thread/read", "params": ThreadReadParams } | { "method": "thread/list", "params": ThreadListParams } | { "method": "thread/rename", "params": ThreadRenameParams } | { "method": "thread/archive", "params": ThreadIdParams } | { "method": "thread/restore", "params": ThreadIdParams } | { "method": "thread/delete", "params": ThreadIdParams } | { "method": "turn/start", "params": TurnStartParams } | { "method": "turn/steer", "params": TurnSteerParams } | { "method": "turn/interrupt", "params": TurnInterruptParams } | { "method": "source/reset", "params": SourceResetParams } | { "method": "permission/respond", "params": PermissionRespondParams } | { "method": "clarify/respond", "params": ClarifyRespondParams } | { "method": "settings/read", "params": SettingsReadParams } | { "method": "debug/events", "params": DebugEventsParams };
+export type ClientRequest = { "method": "initialize", "params": InitializeParams } | { "method": "thread/start", "params": ThreadStartParams } | { "method": "thread/resume", "params": ThreadResumeParams } | { "method": "thread/read", "params": ThreadReadParams } | { "method": "thread/list", "params": ThreadListParams } | { "method": "thread/rename", "params": ThreadRenameParams } | { "method": "thread/archive", "params": ThreadIdParams } | { "method": "thread/restore", "params": ThreadIdParams } | { "method": "thread/delete", "params": ThreadIdParams } | { "method": "turn/start", "params": TurnStartParams } | { "method": "turn/steer", "params": TurnSteerParams } | { "method": "turn/interrupt", "params": TurnInterruptParams } | { "method": "completion/list", "params": CompletionListParams } | { "method": "command/execute", "params": CommandExecuteParams } | { "method": "source/reset", "params": SourceResetParams } | { "method": "permission/respond", "params": PermissionRespondParams } | { "method": "clarify/respond", "params": ClarifyRespondParams } | { "method": "settings/read", "params": SettingsReadParams };
 
 export type ServerNotification = { "method": "gateway/event", "params": GatewayEvent } | { "method": "turn/result", "params": TurnResultPayload } | { "method": "turn/error", "params": TurnErrorPayload };
 

@@ -2,7 +2,9 @@ pub mod im;
 pub mod protocol;
 pub mod server;
 
+mod acp_peer;
 mod projection;
+mod transcript;
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
@@ -11,22 +13,26 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::future::BoxFuture;
 use psychevo_runtime::{
-    ApprovalHandler, ClarifyResult, Error, GatewaySourceBindingInput, ImageInput,
-    PermissionApprovalDecision, PermissionApprovalOutcome, PermissionApprovalRequest, RunControl,
-    RunControlHandle, RunOptions, RunResult, RunStreamEvent, RunStreamSink, StateRuntime,
-    run_control, run_live, run_live_streaming, run_live_streaming_controlled,
+    AgentDiscoveryOptions, AgentEntrypoint, ApprovalHandler, ClarifyResult, Error,
+    GatewaySourceBindingInput, ImageInput, PermissionApprovalDecision, PermissionApprovalOutcome,
+    PermissionApprovalRequest, RunControl, RunControlHandle, RunOptions, RunResult, RunStreamEvent,
+    RunStreamSink, StateRuntime, discover_agents, load_agent_backend_configs,
+    resolve_agent_definition, resolve_skills_home, run_control, run_live, run_live_streaming,
+    run_live_streaming_controlled,
 };
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 use uuid::Uuid;
 
+use projection::GatewayLiveProjector;
 pub use projection::gateway_event_from_run_stream;
 pub use protocol::{
     BackendKind, GatewayBackendInfo, GatewayEvent, GatewayImageInput, GatewayInputPart,
     GatewaySelectedSkill, GatewaySource, GatewaySourceLifetime, GatewayThread,
     GatewayThreadSelector, GatewayTurn, GatewayTurnStatus, PermissionDecision, SourceKey,
-    ThreadItem, TimelineItem, TimelineItemKind, TimelineItemStatus, TurnItem,
+    TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
+    TranscriptEntryRole, TranscriptToolResult,
 };
 pub use server::{BoundGatewayWebServer, GatewayWebServerConfig, bind_gateway_web_server};
 
@@ -77,13 +83,14 @@ impl Gateway {
         self.lookup_source_thread(source)
     }
 
-    pub fn thread_timeline(&self, thread_id: &str) -> psychevo_runtime::Result<Vec<TimelineItem>> {
-        self.state
-            .store()
-            .load_timeline_items(thread_id)?
-            .into_iter()
-            .map(gateway_timeline_item_from_record)
-            .collect()
+    pub fn thread_transcript(
+        &self,
+        thread_id: &str,
+    ) -> psychevo_runtime::Result<Vec<TranscriptEntry>> {
+        let summaries = self.state.store().load_tui_message_summaries(thread_id)?;
+        Ok(transcript::project_transcript_entries(
+            thread_id, &summaries,
+        ))
     }
 
     pub fn activity_for_selector(&self, selector: GatewayThreadSelector) -> GatewayActivity {
@@ -303,6 +310,45 @@ impl Gateway {
         Ok(())
     }
 
+    pub fn bind_source_thread(
+        &self,
+        source: &GatewaySource,
+        thread_id: &str,
+        backend: &GatewayBackendInfo,
+        lineage: Option<Value>,
+    ) -> psychevo_runtime::Result<()> {
+        let source_key = source.source_key();
+        match source.lifetime {
+            GatewaySourceLifetime::Invocation => {
+                return Err(Error::Message(
+                    "cannot bind invocation-scoped gateway source".to_string(),
+                ));
+            }
+            GatewaySourceLifetime::Process => {
+                self.state.store().resume_session(thread_id)?;
+                self.process_bindings
+                    .lock()
+                    .expect("gateway process binding map poisoned")
+                    .insert(source_key.0, thread_id.to_string());
+            }
+            GatewaySourceLifetime::Persistent => {
+                self.state
+                    .store()
+                    .upsert_gateway_source_binding(GatewaySourceBindingInput {
+                        source_key: &source_key.0,
+                        source_kind: &source.kind,
+                        raw_identity: source.raw_identity.clone().unwrap_or(Value::Null),
+                        visible_name: source.visible_name.as_deref(),
+                        thread_id,
+                        backend_kind: backend.kind.as_str(),
+                        backend_native_id: backend.native_id.as_deref(),
+                        lineage,
+                    })?;
+            }
+        }
+        Ok(())
+    }
+
     async fn run_turn_now(
         &self,
         queue_key: &str,
@@ -310,6 +356,7 @@ impl Gateway {
         turn_id: String,
     ) -> psychevo_runtime::Result<GatewayTurnResult> {
         let event_sink = request.event_sink.clone();
+        let event_sink_for_completion = request.event_sink.clone();
         let mut options = request.options;
         options.state = self.state.clone();
         apply_input_parts(&mut options, &request.input)?;
@@ -321,10 +368,21 @@ impl Gateway {
         } else {
             None
         };
-        if let Some(thread_id) = request.thread_id.clone().or(mapped_thread_id) {
+        let active_thread_id = request.thread_id.clone().or(mapped_thread_id);
+        if let Some(thread_id) = active_thread_id.clone() {
             options.session = Some(thread_id);
             options.continue_latest = false;
         }
+        let first_committed_seq = active_thread_id
+            .as_deref()
+            .and_then(|thread_id| {
+                self.state
+                    .store()
+                    .load_tui_message_summaries(thread_id)
+                    .ok()
+            })
+            .and_then(|summaries| summaries.last().map(|summary| summary.session_seq + 1))
+            .unwrap_or(1);
 
         if options.approval_handler.is_none()
             && let Some(event_sink) = event_sink.clone()
@@ -347,7 +405,14 @@ impl Gateway {
 
         self.register_active(queue_key, turn_id.clone(), control_handle);
 
-        let stream = wrap_stream(request.stream, event_sink, turn_id.clone());
+        let stream = wrap_stream(
+            request.stream,
+            event_sink,
+            turn_id.clone(),
+            active_thread_id.clone(),
+        );
+        let result_source = request.source.clone();
+        let result_lineage = request.lineage.clone();
         let source_name = request
             .runtime_source
             .unwrap_or_else(|| "gateway".to_string());
@@ -357,29 +422,70 @@ impl Gateway {
             request.continue_sources
         };
 
-        let result = self
-            .backend
-            .run_turn(BackendTurnRequest {
-                options,
-                runtime_source: source_name,
-                continue_sources,
-                stream,
-                control,
-            })
-            .await?;
+        let peer = resolve_peer_turn(&options)?;
+        let backend_request = BackendTurnRequest {
+            options,
+            runtime_source: source_name,
+            continue_sources,
+            stream,
+            control,
+        };
+        let (result, backend_info) = match peer {
+            Some(peer) => {
+                let result =
+                    acp_peer::run_acp_peer_turn(peer, backend_request, turn_id.clone()).await?;
+                (
+                    result.run,
+                    GatewayBackendInfo {
+                        kind: BackendKind::PeerAgent,
+                        native_id: Some(result.native_session_id),
+                    },
+                )
+            }
+            None => {
+                let result = self.backend.run_turn(backend_request).await?;
+                (
+                    result,
+                    GatewayBackendInfo {
+                        kind: self.backend.kind(),
+                        native_id: None,
+                    },
+                )
+            }
+        };
+        let backend_info = GatewayBackendInfo {
+            native_id: backend_info
+                .native_id
+                .or_else(|| Some(result.session_id.clone())),
+            ..backend_info
+        };
 
-        if let Some(source) = &request.source {
-            self.bind_source_to_result(source, &result, request.lineage)?;
+        if let Some(source) = &result_source {
+            self.bind_source_to_result(source, &result, &backend_info, result_lineage)?;
+        }
+        let summaries = self
+            .state
+            .store()
+            .load_tui_message_summaries(&result.session_id)?;
+        let committed_entries = transcript::project_committed_turn_entries(
+            &result.session_id,
+            &summaries,
+            first_committed_seq,
+        );
+        if let Some(event_sink) = event_sink_for_completion {
+            event_sink(GatewayEvent::TurnCompleted {
+                thread_id: Some(result.session_id.clone()),
+                turn_id: turn_id.clone(),
+                outcome: Some(result.outcome.as_str().to_string()),
+                committed_entries: committed_entries.clone(),
+            });
         }
 
         Ok(GatewayTurnResult {
             thread: GatewayThread {
                 id: result.session_id.clone(),
-                backend: GatewayBackendInfo {
-                    kind: self.backend.kind(),
-                    native_id: Some(result.session_id.clone()),
-                },
-                source_key: request.source.as_ref().map(GatewaySource::source_key),
+                backend: backend_info,
+                source_key: result_source.as_ref().map(GatewaySource::source_key),
             },
             turn: GatewayTurn {
                 id: turn_id,
@@ -387,6 +493,7 @@ impl Gateway {
                 status: GatewayTurnStatus::Completed,
             },
             result,
+            committed_entries,
         })
     }
 
@@ -461,6 +568,7 @@ impl Gateway {
         &self,
         source: &GatewaySource,
         result: &RunResult,
+        backend: &GatewayBackendInfo,
         lineage: Option<Value>,
     ) -> psychevo_runtime::Result<()> {
         let source_key = source.source_key();
@@ -481,8 +589,8 @@ impl Gateway {
                         raw_identity: source.raw_identity.clone().unwrap_or(Value::Null),
                         visible_name: source.visible_name.as_deref(),
                         thread_id: &result.session_id,
-                        backend_kind: self.backend.kind().as_str(),
-                        backend_native_id: Some(&result.session_id),
+                        backend_kind: backend.kind.as_str(),
+                        backend_native_id: backend.native_id.as_deref(),
                         lineage,
                     })?;
             }
@@ -541,6 +649,65 @@ impl Gateway {
             }
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ResolvedPeerTurn {
+    pub(crate) agent: psychevo_runtime::AgentDefinition,
+    pub(crate) backend: psychevo_runtime::AgentBackendConfig,
+}
+
+fn resolve_peer_turn(options: &RunOptions) -> psychevo_runtime::Result<Option<ResolvedPeerTurn>> {
+    if options.no_agents {
+        return Ok(None);
+    }
+    let Some(agent_input) = options.agent.as_ref() else {
+        return Ok(None);
+    };
+    let env = options
+        .inherited_env
+        .clone()
+        .unwrap_or_else(|| std::env::vars().collect());
+    let agents_home = resolve_skills_home(&env, &options.workdir)?;
+    let catalog = discover_agents(&AgentDiscoveryOptions {
+        home: agents_home.clone(),
+        workdir: options.workdir.clone(),
+        env: env.clone(),
+        explicit_inputs: vec![agent_input.clone()],
+        no_agents: false,
+    })?;
+    let agent = resolve_agent_definition(&catalog, agent_input, &options.workdir, &env)?;
+    let Some(backend_ref) = agent.backend.as_ref() else {
+        return Ok(None);
+    };
+    if !agent.supports_entrypoint(AgentEntrypoint::Peer) {
+        return Err(Error::Message(format!(
+            "agent `{}` references backend `{}` but does not support the peer entrypoint",
+            agent.name, backend_ref.name
+        )));
+    }
+    let backends = load_agent_backend_configs(&agents_home, &options.workdir, &env)?;
+    let backend = backends
+        .get(&backend_ref.name)
+        .cloned()
+        .ok_or_else(|| Error::Message(format!("unknown agent backend: {}", backend_ref.name)))?;
+    if !backend.enabled {
+        return Err(Error::Message(format!(
+            "agent backend `{}` is disabled",
+            backend.id
+        )));
+    }
+    if backend
+        .command
+        .as_deref()
+        .is_none_or(|command| command.trim().is_empty())
+    {
+        return Err(Error::Message(format!(
+            "agent backend `{}` is missing command",
+            backend.id
+        )));
+    }
+    Ok(Some(ResolvedPeerTurn { agent, backend }))
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -713,6 +880,7 @@ pub struct GatewayTurnResult {
     pub thread: GatewayThread,
     pub turn: GatewayTurn,
     pub result: RunResult,
+    pub committed_entries: Vec<TranscriptEntry>,
 }
 
 pub struct BackendTurnRequest {
@@ -814,17 +982,26 @@ fn wrap_stream(
     stream: Option<RunStreamSink>,
     event_sink: Option<GatewayEventSink>,
     turn_id: String,
+    thread_id: Option<String>,
 ) -> Option<RunStreamSink> {
     match (stream, event_sink) {
         (None, None) => None,
-        (stream, event_sink) => Some(Arc::new(move |event: RunStreamEvent| {
-            if let Some(event_sink) = &event_sink {
-                event_sink(gateway_event_from_run_stream(&turn_id, &event));
-            }
-            if let Some(stream) = &stream {
-                stream(event);
-            }
-        })),
+        (stream, event_sink) => {
+            let projector = Arc::new(Mutex::new(GatewayLiveProjector::new(thread_id)));
+            Some(Arc::new(move |event: RunStreamEvent| {
+                if let Some(event_sink) = &event_sink
+                    && let Some(event) = projector
+                        .lock()
+                        .expect("gateway live projector poisoned")
+                        .project(&turn_id, &event)
+                {
+                    event_sink(event);
+                }
+                if let Some(stream) = &stream {
+                    stream(event);
+                }
+            }))
+        }
     }
 }
 
@@ -866,61 +1043,6 @@ fn gateway_image_input_into_runtime(input: GatewayImageInput) -> ImageInput {
     }
 }
 
-fn gateway_timeline_item_from_record(
-    record: psychevo_runtime::TimelineItemRecord,
-) -> psychevo_runtime::Result<TimelineItem> {
-    Ok(TimelineItem {
-        id: record.item_id,
-        thread_id: record.session_id,
-        turn_id: record.turn_id,
-        sequence: record.item_seq,
-        kind: gateway_timeline_kind(record.kind),
-        status: gateway_timeline_status(record.status),
-        source: record.source,
-        title: record.title,
-        body: record.body_text,
-        preview: record.preview_text,
-        detail: record.detail_text,
-        artifact_ids: record.artifact_ids,
-        metadata: record.metadata,
-        created_at_ms: record.created_at_ms,
-        updated_at_ms: record.updated_at_ms,
-    })
-}
-
-fn gateway_timeline_kind(kind: psychevo_runtime::TimelineItemKind) -> TimelineItemKind {
-    match kind {
-        psychevo_runtime::TimelineItemKind::Prompt => TimelineItemKind::Prompt,
-        psychevo_runtime::TimelineItemKind::Assistant => TimelineItemKind::Assistant,
-        psychevo_runtime::TimelineItemKind::Reasoning => TimelineItemKind::Reasoning,
-        psychevo_runtime::TimelineItemKind::Tool => TimelineItemKind::Tool,
-        psychevo_runtime::TimelineItemKind::Shell => TimelineItemKind::Shell,
-        psychevo_runtime::TimelineItemKind::File => TimelineItemKind::File,
-        psychevo_runtime::TimelineItemKind::Web => TimelineItemKind::Web,
-        psychevo_runtime::TimelineItemKind::Mcp => TimelineItemKind::Mcp,
-        psychevo_runtime::TimelineItemKind::Clarify => TimelineItemKind::Clarify,
-        psychevo_runtime::TimelineItemKind::Permission => TimelineItemKind::Permission,
-        psychevo_runtime::TimelineItemKind::Skill => TimelineItemKind::Skill,
-        psychevo_runtime::TimelineItemKind::Agent => TimelineItemKind::Agent,
-        psychevo_runtime::TimelineItemKind::Mailbox => TimelineItemKind::Mailbox,
-        psychevo_runtime::TimelineItemKind::Status => TimelineItemKind::Status,
-        psychevo_runtime::TimelineItemKind::Diff => TimelineItemKind::Diff,
-        psychevo_runtime::TimelineItemKind::Artifact => TimelineItemKind::Artifact,
-    }
-}
-
-fn gateway_timeline_status(status: psychevo_runtime::TimelineItemStatus) -> TimelineItemStatus {
-    match status {
-        psychevo_runtime::TimelineItemStatus::Pending => TimelineItemStatus::Pending,
-        psychevo_runtime::TimelineItemStatus::Running => TimelineItemStatus::Running,
-        psychevo_runtime::TimelineItemStatus::Completed => TimelineItemStatus::Completed,
-        psychevo_runtime::TimelineItemStatus::Failed => TimelineItemStatus::Failed,
-        psychevo_runtime::TimelineItemStatus::Cancelled => TimelineItemStatus::Cancelled,
-        psychevo_runtime::TimelineItemStatus::NeedsInput => TimelineItemStatus::NeedsInput,
-        psychevo_runtime::TimelineItemStatus::Info => TimelineItemStatus::Info,
-    }
-}
-
 fn permission_decision_from_runtime(decision: &PermissionApprovalDecision) -> PermissionDecision {
     match decision.outcome {
         PermissionApprovalOutcome::AllowOnce => PermissionDecision::AllowOnce,
@@ -940,6 +1062,7 @@ pub(crate) fn gateway_now_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -1084,7 +1207,6 @@ mod tests {
                     selected_agent: None,
                     selected_skills: Vec::new(),
                     context_snapshot: None,
-                    capability_snapshot: None,
                     events: Vec::new(),
                     warnings: Vec::new(),
                 })
@@ -1299,6 +1421,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn explicit_thread_turn_allows_source_rebind_while_running() {
+        let backend = Arc::new(FakeBackend::default());
+        let wait = backend.wait_on_first_run();
+        let harness = harness(backend);
+        let source = GatewaySource::new("web", "workdir").persistent();
+        let first = harness
+            .state
+            .store()
+            .create_session_with_metadata(&harness.workdir, "web", "model", "provider", None)
+            .expect("first session");
+        let second = harness
+            .state
+            .store()
+            .create_session_with_metadata(&harness.workdir, "web", "model", "provider", None)
+            .expect("second session");
+        harness
+            .gateway
+            .bind_source_thread(
+                &source,
+                &first,
+                &GatewayBackendInfo {
+                    kind: BackendKind::Psychevo,
+                    native_id: Some(first.clone()),
+                },
+                None,
+            )
+            .expect("bind first");
+
+        let mut first_request = request(&harness, source.clone(), "first");
+        first_request.thread_id = Some(first.clone());
+        let gateway = harness.gateway.clone();
+        let running = tokio::spawn(async move { gateway.send_turn(first_request).await });
+        wait.started.notified().await;
+
+        harness
+            .gateway
+            .bind_source_thread(
+                &source,
+                &second,
+                &GatewayBackendInfo {
+                    kind: BackendKind::Psychevo,
+                    native_id: Some(second.clone()),
+                },
+                None,
+            )
+            .expect("bind second");
+
+        assert!(
+            harness
+                .gateway
+                .activity_for_selector(GatewayThreadSelector::thread_id(&first))
+                .running
+        );
+        assert!(
+            !harness
+                .gateway
+                .activity_for_selector(GatewayThreadSelector::source(source.source_key()))
+                .running
+        );
+
+        wait.release.notify_one();
+        running
+            .await
+            .expect("running task")
+            .expect("running result");
+    }
+
+    #[tokio::test]
     async fn typed_steer_requires_expected_turn_id() {
         let backend = Arc::new(FakeBackend::default());
         let wait = backend.wait_on_first_run();
@@ -1403,6 +1593,157 @@ mod tests {
 
         wait.release.notify_one();
         first.await.expect("first task").expect("first turn");
+    }
+
+    #[tokio::test]
+    async fn acp_peer_agent_turn_routes_to_backend_and_persists_native_session() {
+        let backend = Arc::new(FakeBackend::default());
+        let harness = harness(backend.clone());
+        let home = harness._temp.path().join("home");
+        let script = harness._temp.path().join("fake_acp.py");
+        std::fs::create_dir_all(&home).expect("home");
+        std::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json
+import sys
+
+loaded_session = None
+
+def send(value):
+    print(json.dumps(value), flush=True)
+
+for line in sys.stdin:
+    if not line.strip():
+        continue
+    message = json.loads(line)
+    method = message.get("method")
+    mid = message.get("id")
+    params = message.get("params") or {}
+    if method == "initialize":
+        send({"jsonrpc": "2.0", "id": mid, "result": {"protocolVersion": 1, "agentCapabilities": {}}})
+    elif method == "session/new":
+        send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": "native-1"}})
+    elif method == "session/load":
+        loaded_session = params.get("sessionId")
+        send({"jsonrpc": "2.0", "id": mid, "result": {}})
+    elif method == "session/prompt":
+        session_id = params.get("sessionId") or "native-1"
+        chunks = []
+        for block in params.get("prompt") or []:
+            if block.get("type") == "text":
+                chunks.append(block.get("text") or "")
+        prefix = "loaded:" + loaded_session if loaded_session else "new:" + session_id
+        text = prefix + ":" + "\n".join(chunks)
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": session_id,
+            "update": {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": text}
+            }
+        }})
+        send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
+    else:
+        send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "method not found"}})
+"#,
+        )
+        .expect("fake acp script");
+        std::fs::write(
+            home.join("config.toml"),
+            format!(
+                r#"[agents.backends.fake]
+kind = "acp"
+description = "Fake ACP agent."
+command = "python3"
+args = ["{}"]
+entrypoints = ["peer"]
+client_capabilities = ["fs.read"]
+"#,
+                script.display()
+            ),
+        )
+        .expect("config");
+        let agents_dir = harness.workdir.join(".psychevo").join("agents");
+        std::fs::create_dir_all(&agents_dir).expect("agents dir");
+        std::fs::write(
+            agents_dir.join("reviewer.md"),
+            r#"---
+name: reviewer
+description: Review with fake ACP.
+backend:
+  ref: fake
+entrypoints: [peer]
+tools: [read]
+---
+Peer instructions.
+"#,
+        )
+        .expect("agent file");
+
+        let env = BTreeMap::from([
+            (
+                "HOME".to_string(),
+                harness._temp.path().display().to_string(),
+            ),
+            ("PSYCHEVO_HOME".to_string(), home.display().to_string()),
+        ]);
+        let source = GatewaySource::new("web", "peer").persistent();
+        let mut first_request = request(&harness, source.clone(), "hello");
+        first_request.options.agent = Some("reviewer".to_string());
+        first_request.options.inherited_env = Some(env.clone());
+        let first = harness
+            .gateway
+            .send_turn(first_request)
+            .await
+            .expect("first peer turn");
+
+        assert_eq!(first.thread.backend.kind, BackendKind::PeerAgent);
+        assert_eq!(first.thread.backend.native_id.as_deref(), Some("native-1"));
+        assert_eq!(
+            first
+                .result
+                .selected_agent
+                .as_ref()
+                .map(|agent| agent.name.as_str()),
+            Some("reviewer")
+        );
+        assert!(first.result.final_answer.contains("new:native-1"));
+        assert!(first.result.final_answer.contains("Peer instructions."));
+        assert!(first.result.final_answer.contains("hello"));
+
+        let binding = harness
+            .state
+            .store()
+            .gateway_source_binding(&source.source_key().0)
+            .expect("binding lookup")
+            .expect("binding");
+        assert_eq!(binding.backend_kind, "peer_agent");
+        assert_eq!(binding.backend_native_id.as_deref(), Some("native-1"));
+        let metadata = harness
+            .state
+            .store()
+            .session_metadata(&first.result.session_id)
+            .expect("metadata")
+            .expect("metadata value");
+        assert_eq!(metadata["peer_agent"]["nativeSessionId"], "native-1");
+        let transcript = harness
+            .gateway
+            .thread_transcript(&first.result.session_id)
+            .expect("transcript");
+        assert_eq!(transcript.len(), 2);
+        assert_eq!(transcript[0].role, TranscriptEntryRole::User);
+        assert_eq!(transcript[1].role, TranscriptEntryRole::Assistant);
+
+        let mut second_request = request(&harness, source.clone(), "again");
+        second_request.options.agent = Some("reviewer".to_string());
+        second_request.options.inherited_env = Some(env);
+        let second = harness
+            .gateway
+            .send_turn(second_request)
+            .await
+            .expect("second peer turn");
+        assert_eq!(second.result.session_id, first.result.session_id);
+        assert!(second.result.final_answer.contains("loaded:native-1"));
     }
 
     #[tokio::test]

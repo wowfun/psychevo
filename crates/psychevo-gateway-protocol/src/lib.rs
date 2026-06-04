@@ -12,6 +12,7 @@ pub const JSONRPC_VERSION: &str = "2.0";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(transparent)]
+#[ts(type = "string")]
 pub struct SourceKey(pub String);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -28,10 +29,10 @@ pub struct GatewaySource {
     pub kind: String,
     pub raw_id: String,
     pub lifetime: GatewaySourceLifetime,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     #[ts(type = "unknown | null")]
     pub raw_identity: Option<Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub visible_name: Option<String>,
 }
 
@@ -80,14 +81,14 @@ impl GatewaySource {
 #[serde(rename_all = "camelCase")]
 pub struct GatewaySourceInput {
     pub kind: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub raw_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub lifetime: Option<GatewaySourceLifetime>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     #[ts(type = "unknown | null")]
     pub raw_identity: Option<Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub visible_name: Option<String>,
 }
 
@@ -147,7 +148,7 @@ impl BackendKind {
 #[serde(rename_all = "camelCase")]
 pub struct GatewayBackendInfo {
     pub kind: BackendKind,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub native_id: Option<String>,
 }
 
@@ -156,7 +157,7 @@ pub struct GatewayBackendInfo {
 pub struct GatewayThread {
     pub id: String,
     pub backend: GatewayBackendInfo,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub source_key: Option<SourceKey>,
 }
 
@@ -200,6 +201,55 @@ pub enum GatewayInputPart {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayMentionRange {
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum GatewayMentionTarget {
+    Skill {
+        name: String,
+        #[serde(default)]
+        path: Option<String>,
+    },
+    Agent {
+        name: String,
+        #[serde(default)]
+        source: Option<String>,
+        #[serde(default)]
+        entrypoints: Vec<String>,
+        #[serde(default)]
+        backend_ref: Option<String>,
+    },
+    File {
+        path: String,
+        relative_path: String,
+    },
+    Capability {
+        id: String,
+        label: String,
+        target_kind: String,
+        #[serde(default)]
+        uri: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayMention {
+    pub visible_text: String,
+    pub range: GatewayMentionRange,
+    pub target: GatewayMentionTarget,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum GatewayImageInput {
     LocalPath { path: String },
@@ -218,11 +268,7 @@ pub enum GatewayEvent {
         thread_id: Option<String>,
         #[serde(rename = "turnId")]
         turn_id: String,
-        #[serde(
-            rename = "selectedSkills",
-            default,
-            skip_serializing_if = "Vec::is_empty"
-        )]
+        #[serde(rename = "selectedSkills", default)]
         selected_skills: Vec<GatewaySelectedSkill>,
     },
     TurnQueued {
@@ -239,28 +285,32 @@ pub enum GatewayEvent {
         #[serde(rename = "turnId")]
         turn_id: String,
         outcome: Option<String>,
+        #[serde(rename = "committedEntries", default)]
+        committed_entries: Vec<TranscriptEntry>,
     },
-    ItemDelta {
+    EntryDelta {
         #[serde(rename = "turnId")]
         turn_id: String,
-        #[serde(rename = "itemId")]
-        item_id: Option<String>,
+        #[serde(rename = "entryId")]
+        entry_id: Option<String>,
+        #[serde(rename = "blockId")]
+        block_id: Option<String>,
         delta: String,
     },
-    ItemStarted {
+    EntryStarted {
         #[serde(rename = "turnId")]
         turn_id: String,
-        item: TimelineItem,
+        entry: TranscriptEntry,
     },
-    ItemUpdated {
+    EntryUpdated {
         #[serde(rename = "turnId")]
         turn_id: String,
-        item: TimelineItem,
+        entry: TranscriptEntry,
     },
-    ItemCompleted {
+    EntryCompleted {
         #[serde(rename = "turnId")]
         turn_id: String,
-        item: TimelineItem,
+        entry: TranscriptEntry,
     },
     PermissionRequested {
         #[serde(rename = "requestId")]
@@ -301,10 +351,6 @@ pub enum GatewayEvent {
         source_path: Option<String>,
         suggestion: Option<String>,
     },
-    DebugAvailable {
-        #[serde(rename = "turnId")]
-        turn_id: String,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -325,10 +371,19 @@ pub enum PermissionDecision {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
-pub enum TimelineItemKind {
-    Prompt,
+pub enum TranscriptEntryRole {
+    User,
     Assistant,
+    Diagnostic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum TranscriptBlockKind {
+    Text,
     Reasoning,
+    ToolCall,
+    ToolResult,
     Tool,
     Shell,
     File,
@@ -346,7 +401,7 @@ pub enum TimelineItemKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
-pub enum TimelineItemStatus {
+pub enum TranscriptBlockStatus {
     Pending,
     Running,
     Completed,
@@ -358,15 +413,29 @@ pub enum TimelineItemStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct TimelineItem {
+pub struct TranscriptToolResult {
+    #[serde(rename = "resultMessageSeq")]
+    pub result_message_seq: i64,
+    pub status: TranscriptBlockStatus,
+    pub content: String,
+    #[serde(rename = "isError")]
+    pub is_error: bool,
+    #[serde(default)]
+    #[ts(type = "unknown | null")]
+    pub metadata: Option<Value>,
+    #[serde(rename = "createdAtMs")]
+    pub created_at_ms: i64,
+    #[serde(rename = "updatedAtMs")]
+    pub updated_at_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptBlock {
     pub id: String,
-    #[serde(rename = "threadId")]
-    pub thread_id: String,
-    #[serde(rename = "turnId")]
-    pub turn_id: Option<String>,
-    pub sequence: i64,
-    pub kind: TimelineItemKind,
-    pub status: TimelineItemStatus,
+    pub kind: TranscriptBlockKind,
+    pub status: TranscriptBlockStatus,
+    pub order: i64,
     pub source: String,
     pub title: Option<String>,
     pub body: Option<String>,
@@ -376,20 +445,45 @@ pub struct TimelineItem {
     pub artifact_ids: Vec<String>,
     #[ts(type = "unknown | null")]
     pub metadata: Option<Value>,
+    #[serde(default)]
+    pub result: Option<TranscriptToolResult>,
     #[serde(rename = "createdAtMs")]
     pub created_at_ms: i64,
     #[serde(rename = "updatedAtMs")]
     pub updated_at_ms: i64,
 }
 
-pub type ThreadItem = TimelineItem;
-pub type TurnItem = TimelineItem;
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptEntry {
+    pub id: String,
+    #[serde(rename = "threadId")]
+    pub thread_id: String,
+    #[serde(rename = "turnId")]
+    pub turn_id: Option<String>,
+    #[serde(rename = "messageSeq")]
+    pub message_seq: Option<i64>,
+    pub role: TranscriptEntryRole,
+    pub status: TranscriptBlockStatus,
+    pub source: String,
+    pub blocks: Vec<TranscriptBlock>,
+    #[ts(type = "unknown | null")]
+    pub metadata: Option<Value>,
+    #[ts(type = "unknown | null")]
+    pub usage: Option<Value>,
+    #[ts(type = "unknown | null")]
+    pub accounting: Option<Value>,
+    #[serde(rename = "createdAtMs")]
+    pub created_at_ms: i64,
+    #[serde(rename = "updatedAtMs")]
+    pub updated_at_ms: i64,
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct GatewayActivityView {
     pub running: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub active_turn_id: Option<String>,
     pub queued_turns: usize,
 }
@@ -414,9 +508,9 @@ pub struct PendingClarifyView {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadSnapshot {
     pub source: GatewaySource,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub thread: Option<GatewayThread>,
-    pub items: Vec<ThreadItem>,
+    pub entries: Vec<TranscriptEntry>,
     pub activity: GatewayActivityView,
     pub pending_permissions: Vec<PendingPermissionView>,
     pub pending_clarifies: Vec<PendingClarifyView>,
@@ -428,22 +522,24 @@ pub struct SessionSummaryView {
     pub id: String,
     pub source: String,
     pub workdir: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub provider: Option<String>,
     pub started_at_ms: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub updated_at_ms: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub ended_at_ms: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub end_reason: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub archived_at_ms: Option<i64>,
     pub message_count: usize,
     pub tool_call_count: usize,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub activity: GatewayActivityView,
+    #[serde(default)]
     pub title: Option<String>,
 }
 
@@ -471,9 +567,9 @@ pub struct ThreadStartParams {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadResumeParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub thread_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
 }
 
@@ -486,11 +582,11 @@ pub struct ThreadReadParams {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadListParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub workdir: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub archived: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub limit: Option<usize>,
 }
 
@@ -528,24 +624,90 @@ pub struct ThreadDeleteResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct CompletionListParams {
+    pub scope: GatewayRequestScope,
+    #[serde(default)]
+    pub thread_id: Option<String>,
+    pub text: String,
+    pub cursor: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CompletionReplacement {
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CompletionItem {
+    pub id: String,
+    pub sigil: String,
+    pub label: String,
+    pub insert_text: String,
+    pub kind: String,
+    #[serde(default)]
+    pub detail: Option<String>,
+    #[serde(default)]
+    pub target: Option<GatewayMentionTarget>,
+    #[serde(default)]
+    pub sort_text: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CompletionListResult {
+    pub items: Vec<CompletionItem>,
+    #[serde(default)]
+    pub replacement: Option<CompletionReplacement>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandExecuteParams {
+    pub scope: GatewayRequestScope,
+    #[serde(default)]
+    pub thread_id: Option<String>,
+    pub command: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandExecuteResult {
+    pub accepted: bool,
+    pub command: String,
+    #[serde(default)]
+    pub message: Option<String>,
+    #[serde(default)]
+    #[ts(type = "unknown | null")]
+    pub action: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct TurnStartParams {
     pub scope: GatewayRequestScope,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub thread_id: Option<String>,
     #[serde(default)]
+    pub agent_name: Option<String>,
+    #[serde(default)]
     pub input: Vec<GatewayInputPart>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub mentions: Vec<GatewayMention>,
+    #[serde(default)]
     pub text: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub reasoning_effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TurnSteerParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub thread_id: Option<String>,
     pub expected_turn_id: String,
     pub text: String,
@@ -554,9 +716,9 @@ pub struct TurnSteerParams {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TurnInterruptParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub thread_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub source_key: Option<SourceKey>,
 }
 
@@ -569,11 +731,11 @@ pub struct TurnStartResult {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TurnControlResult {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub accepted: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub interrupted: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub cleared: Option<usize>,
 }
 
@@ -583,6 +745,8 @@ pub struct TurnResultPayload {
     pub thread: GatewayThread,
     pub turn: GatewayTurn,
     pub result: TurnRunResult,
+    #[serde(rename = "committedEntries", default)]
+    pub committed_entries: Vec<TranscriptEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -592,9 +756,9 @@ pub struct TurnRunResult {
     pub outcome: String,
     pub final_answer: String,
     pub tool_failures: usize,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub provider: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub model: Option<String>,
 }
 
@@ -607,7 +771,7 @@ pub struct TurnErrorPayload {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionRespondParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub thread_id: Option<String>,
     pub request_id: String,
     pub decision: PermissionDecision,
@@ -616,12 +780,12 @@ pub struct PermissionRespondParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ClarifyRespondParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub thread_id: Option<String>,
     pub request_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub answers: Option<Vec<Vec<String>>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub cancel: Option<bool>,
 }
 
@@ -640,7 +804,7 @@ pub struct SourceResetParams {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsReadParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub workdir: Option<String>,
 }
 
@@ -656,41 +820,6 @@ pub struct SettingsReadResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct DebugEventsParams {
-    pub thread_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub limit: Option<usize>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TimelineDebugEvent {
-    pub id: i64,
-    #[serde(rename = "threadId")]
-    pub thread_id: String,
-    #[serde(rename = "turnId")]
-    pub turn_id: Option<String>,
-    #[serde(rename = "eventType")]
-    pub event_type: String,
-    pub source: String,
-    #[ts(type = "unknown | null")]
-    pub scope: Option<Value>,
-    pub status: Option<String>,
-    pub summary: Option<String>,
-    #[ts(type = "unknown | null")]
-    pub payload: Option<Value>,
-    #[serde(rename = "createdAtMs")]
-    pub created_at_ms: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct DebugEventsResult {
-    pub events: Vec<TimelineDebugEvent>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
 pub struct ReadyzResult {
     pub ok: bool,
     pub server: String,
@@ -701,7 +830,7 @@ pub struct ReadyzResult {
 #[serde(rename_all = "camelCase")]
 pub struct CreateLaunchParams {
     pub workdir: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub source: Option<GatewaySourceInput>,
 }
 
@@ -721,6 +850,11 @@ pub struct ManagedServerState {
     pub readyz_url: String,
     pub started_at_ms: i64,
     pub version: String,
+    pub executable_path: Option<String>,
+    pub executable_modified_ms: Option<i64>,
+    pub executable_size: Option<u64>,
+    pub executable_inode: Option<u64>,
+    pub static_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -737,7 +871,7 @@ pub struct JsonRpcRequest {
     pub jsonrpc: String,
     pub id: JsonRpcId,
     pub method: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     #[ts(type = "unknown | null")]
     pub params: Option<Value>,
 }
@@ -747,7 +881,7 @@ pub struct JsonRpcRequest {
 pub struct JsonRpcNotification {
     pub jsonrpc: String,
     pub method: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     #[ts(type = "unknown | null")]
     pub params: Option<Value>,
 }
@@ -774,7 +908,7 @@ pub struct JsonRpcErrorResponse {
 pub struct JsonRpcError {
     pub code: i64,
     pub message: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     #[ts(type = "unknown | null")]
     pub data: Option<Value>,
 }
@@ -806,6 +940,10 @@ pub enum ClientRequest {
     TurnSteer(TurnSteerParams),
     #[serde(rename = "turn/interrupt")]
     TurnInterrupt(TurnInterruptParams),
+    #[serde(rename = "completion/list")]
+    CompletionList(CompletionListParams),
+    #[serde(rename = "command/execute")]
+    CommandExecute(CommandExecuteParams),
     #[serde(rename = "source/reset")]
     SourceReset(SourceResetParams),
     #[serde(rename = "permission/respond")]
@@ -814,8 +952,6 @@ pub enum ClientRequest {
     ClarifyRespond(ClarifyRespondParams),
     #[serde(rename = "settings/read")]
     SettingsRead(SettingsReadParams),
-    #[serde(rename = "debug/events")]
-    DebugEvents(DebugEventsParams),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -929,6 +1065,20 @@ fn camelize_ts_decl_numbers(mut decl: String) -> String {
         ("created_at_ms", "createdAtMs"),
         ("updated_at_ms", "updatedAtMs"),
         ("event_type", "eventType"),
+        ("active_turn_id", "activeTurnId"),
+        ("queued_turns", "queuedTurns"),
+        ("started_at_ms", "startedAtMs"),
+        ("ended_at_ms", "endedAtMs"),
+        ("archived_at_ms", "archivedAtMs"),
+        ("message_count", "messageCount"),
+        ("tool_call_count", "toolCallCount"),
+        ("reasoning_effort", "reasoningEffort"),
+        ("insert_text", "insertText"),
+        ("sort_text", "sortText"),
+        ("visible_text", "visibleText"),
+        ("backend_ref", "backendRef"),
+        ("relative_path", "relativePath"),
+        ("target_kind", "targetKind"),
     ] {
         decl = decl.replace(from, to);
     }
@@ -966,13 +1116,19 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(GatewayTurn),
         exported_type!(GatewayTurnStatus),
         exported_type!(GatewayInputPart),
+        exported_type!(GatewayMentionRange),
+        exported_type!(GatewayMentionTarget),
+        exported_type!(GatewayMention),
         exported_type!(GatewayImageInput),
         exported_type!(GatewaySelectedSkill),
         exported_type!(GatewayEvent),
         exported_type!(PermissionDecision),
-        exported_type!(TimelineItemKind),
-        exported_type!(TimelineItemStatus),
-        exported_type!(TimelineItem),
+        exported_type!(TranscriptEntryRole),
+        exported_type!(TranscriptBlockKind),
+        exported_type!(TranscriptBlockStatus),
+        exported_type!(TranscriptToolResult),
+        exported_type!(TranscriptBlock),
+        exported_type!(TranscriptEntry),
         exported_type!(GatewayActivityView),
         exported_type!(PendingPermissionView),
         exported_type!(PendingClarifyView),
@@ -989,6 +1145,12 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(ThreadListResult),
         exported_type!(ThreadMutationResult),
         exported_type!(ThreadDeleteResult),
+        exported_type!(CompletionListParams),
+        exported_type!(CompletionReplacement),
+        exported_type!(CompletionItem),
+        exported_type!(CompletionListResult),
+        exported_type!(CommandExecuteParams),
+        exported_type!(CommandExecuteResult),
         exported_type!(TurnStartParams),
         exported_type!(TurnSteerParams),
         exported_type!(TurnInterruptParams),
@@ -1003,9 +1165,6 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(SourceResetParams),
         exported_type!(SettingsReadParams),
         exported_type!(SettingsReadResult),
-        exported_type!(DebugEventsParams),
-        exported_type!(TimelineDebugEvent),
-        exported_type!(DebugEventsResult),
         exported_type!(ReadyzResult),
         exported_type!(CreateLaunchParams),
         exported_type!(CreateLaunchResult),

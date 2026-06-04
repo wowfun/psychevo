@@ -219,6 +219,135 @@ pub(crate) fn project_agent_wins_over_built_in() {
 }
 
 #[test]
+pub(crate) fn backend_config_generates_peer_agent_definition() {
+    let tmp = TempDir::new().expect("tmp");
+    let home = tmp.path().join("home");
+    let workdir = tmp.path().join("repo");
+    fs::create_dir_all(&home).expect("home");
+    fs::write(
+        home.join("config.toml"),
+        r#"[agents.backends.cursor]
+kind = "acp"
+description = "Cursor ACP coding agent."
+command = "cursor-agent"
+args = ["--acp"]
+client_capabilities = ["fs.read", "terminal"]
+"#,
+    )
+    .expect("config");
+
+    let catalog = discover_agents(&AgentDiscoveryOptions {
+        home,
+        workdir,
+        env: env(tmp.path()),
+        explicit_inputs: Vec::new(),
+        no_agents: false,
+    })
+    .expect("catalog");
+    let agent = catalog
+        .agents
+        .iter()
+        .find(|agent| agent.name == "cursor")
+        .expect("generated cursor");
+    assert_eq!(agent.source, AgentSource::Generated);
+    assert_eq!(
+        agent.backend.as_ref().map(|backend| backend.name.as_str()),
+        Some("cursor")
+    );
+    assert!(agent.supports_entrypoint(AgentEntrypoint::Peer));
+    assert!(agent.supports_entrypoint(AgentEntrypoint::Subagent));
+    let value = list_agents_value(&catalog);
+    assert_eq!(value["agents"][0]["generated"], true);
+}
+
+#[test]
+pub(crate) fn markdown_agent_shadows_generated_backend_agent() {
+    let tmp = TempDir::new().expect("tmp");
+    let home = tmp.path().join("home");
+    let workdir = tmp.path().join("repo");
+    fs::create_dir_all(&home).expect("home");
+    fs::create_dir_all(workdir.join(".psychevo/agents")).expect("agents");
+    fs::write(
+        home.join("config.toml"),
+        r#"[agents.backends.cursor]
+kind = "acp"
+description = "Generated Cursor agent."
+command = "cursor-agent"
+"#,
+    )
+    .expect("config");
+    fs::write(
+        workdir.join(".psychevo/agents/cursor.md"),
+        r#"---
+description: Project Cursor wrapper.
+backend:
+  ref: cursor
+entrypoints: [subagent]
+---
+Use project-specific review instructions.
+"#,
+    )
+    .expect("agent");
+
+    let catalog = discover_agents(&AgentDiscoveryOptions {
+        home,
+        workdir,
+        env: env(tmp.path()),
+        explicit_inputs: Vec::new(),
+        no_agents: false,
+    })
+    .expect("catalog");
+    let active = catalog
+        .agents
+        .iter()
+        .find(|agent| agent.name == "cursor")
+        .expect("active cursor");
+    assert_eq!(active.source, AgentSource::Project);
+    assert!(!active.supports_entrypoint(AgentEntrypoint::Peer));
+    assert!(active.supports_entrypoint(AgentEntrypoint::Subagent));
+    let shadowed = catalog
+        .shadowed_agents
+        .iter()
+        .find(|agent| agent.name == "cursor")
+        .expect("shadowed cursor");
+    assert_eq!(shadowed.source, AgentSource::Generated);
+}
+
+#[test]
+pub(crate) fn command_bearing_markdown_agent_surfaces_catalog_diagnostic() {
+    let tmp = TempDir::new().expect("tmp");
+    let home = tmp.path().join("home");
+    let workdir = tmp.path().join("repo");
+    fs::create_dir_all(workdir.join(".psychevo/agents")).expect("agents");
+    fs::write(
+        workdir.join(".psychevo/agents/cursor.md"),
+        r#"---
+description: Invalid Cursor wrapper.
+command: cursor-agent
+---
+Invalid.
+"#,
+    )
+    .expect("agent");
+
+    let catalog = discover_agents(&AgentDiscoveryOptions {
+        home,
+        workdir,
+        env: env(tmp.path()),
+        explicit_inputs: Vec::new(),
+        no_agents: false,
+    })
+    .expect("catalog");
+    assert!(!catalog.agents.iter().any(|agent| agent.name == "cursor"));
+    assert!(
+        catalog
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("backend.ref"))
+    );
+}
+
+#[test]
 pub(crate) fn selected_agent_instruction_includes_description_and_body() {
     let agent = built_in_agent(
         "translate",

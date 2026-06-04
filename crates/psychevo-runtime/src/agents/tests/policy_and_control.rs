@@ -79,6 +79,32 @@ Review the code.
 }
 
 #[test]
+pub(crate) fn parses_backend_ref_and_peer_entrypoint_defaults() {
+    let tmp = TempDir::new().expect("tmp");
+    let path = tmp.path().join("cursor-reviewer.md");
+    fs::write(
+        &path,
+        r#"---
+name: cursor-reviewer
+description: Review code through an ACP peer
+backend:
+  ref: cursor
+---
+Review the code.
+"#,
+    )
+    .expect("write");
+
+    let agent = parse_agent_file(&path, AgentSource::Explicit).expect("agent");
+    assert_eq!(
+        agent.backend.as_ref().map(|backend| backend.name.as_str()),
+        Some("cursor")
+    );
+    assert!(agent.supports_entrypoint(AgentEntrypoint::Peer));
+    assert!(agent.supports_entrypoint(AgentEntrypoint::Subagent));
+}
+
+#[test]
 pub(crate) fn removed_list_search_tool_names_are_not_aliases() {
     let tmp = TempDir::new().expect("tmp");
     let path = tmp.path().join("legacy-tools.md");
@@ -509,6 +535,8 @@ pub(crate) fn agent_permission_mode_can_only_narrow_parent_mode() {
         instructions: String::new(),
         file_path: None,
         source: AgentSource::Explicit,
+        backend: None,
+        entrypoints: default_subagent_entrypoints(),
         model: None,
         tool_policy: AgentToolPolicy::default(),
         skills: Vec::new(),

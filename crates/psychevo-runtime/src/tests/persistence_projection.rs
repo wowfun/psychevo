@@ -396,7 +396,7 @@ pub(crate) async fn persistence_sink_persists_tool_elapsed_metadata() {
 }
 
 #[tokio::test]
-pub(crate) async fn timeline_persists_assistant_content_order() {
+pub(crate) async fn messages_preserve_assistant_content_order() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
@@ -438,32 +438,43 @@ pub(crate) async fn timeline_persists_assistant_content_order() {
     .await
     .expect("message end");
 
-    let items = store.load_timeline_items(&session_id).expect("timeline");
-    let item_ids = items
-        .iter()
-        .map(|item| item.item_id.clone())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        item_ids,
-        vec![
-            "message:1:reasoning:0",
-            "message:1:assistant",
-            "tool:call_exec",
-        ]
-    );
-    let assistant = items
-        .iter()
-        .find(|item| item.item_id == "message:1:assistant")
-        .expect("assistant item");
-    let metadata = assistant.metadata.as_ref().expect("assistant metadata");
-    assert_eq!(metadata["provider"], "provider");
-    assert_eq!(metadata["model"], "model");
-    assert_eq!(metadata["finish_reason"], "tool_calls");
-    assert_eq!(metadata["outcome"], "normal");
+    let messages = store.load_messages(&session_id).expect("messages");
+    let [
+        Message::Assistant {
+            content,
+            finish_reason,
+            outcome,
+            model,
+            provider,
+            ..
+        },
+    ] = messages.as_slice()
+    else {
+        panic!("unexpected messages: {messages:?}");
+    };
+    assert_eq!(finish_reason.as_deref(), Some("tool_calls"));
+    assert_eq!(outcome, &Outcome::Normal);
+    assert_eq!(model.as_deref(), Some("model"));
+    assert_eq!(provider.as_deref(), Some("provider"));
+    let [
+        AssistantBlock::Reasoning {
+            text: reasoning, ..
+        },
+        AssistantBlock::Text { text: answer },
+        AssistantBlock::ToolCall(tool_call),
+    ] = content.as_slice()
+    else {
+        panic!("unexpected assistant content: {content:?}");
+    };
+    assert_eq!(reasoning, "think first");
+    assert_eq!(answer, "answer after thinking");
+    assert_eq!(tool_call.id, "call_exec");
+    assert_eq!(tool_call.name, "exec_command");
+    assert_eq!(tool_call.arguments["cmd"], "date");
 }
 
 #[tokio::test]
-pub(crate) async fn timeline_tool_result_preserves_pending_arguments() {
+pub(crate) async fn messages_preserve_tool_call_and_tool_result_facts() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
@@ -511,22 +522,38 @@ pub(crate) async fn timeline_tool_result_preserves_pending_arguments() {
     .await
     .expect("tool result");
 
-    let item = store
-        .timeline_item(&session_id, "tool:call_poll")
-        .expect("timeline item")
-        .expect("tool item");
-    let metadata = item.metadata.expect("metadata");
-    assert_eq!(metadata["projection"], "tool");
-    assert_eq!(metadata["tool_name"], "write_stdin");
-    assert_eq!(metadata["args"]["session_id"], 7);
-    assert_eq!(metadata["arguments"]["session_id"], 7);
-    assert_eq!(metadata["result"]["output"], "done");
-    assert_eq!(metadata["message_session_seq"], 1);
-    assert_eq!(metadata["tool_result_message_session_seq"], 2);
+    let messages = store.load_messages(&session_id).expect("messages");
+    let [
+        Message::Assistant { content, .. },
+        Message::ToolResult {
+            tool_call_id,
+            tool_name,
+            content: result_content,
+            is_error,
+            ..
+        },
+    ] = messages.as_slice()
+    else {
+        panic!("unexpected messages: {messages:?}");
+    };
+    let [AssistantBlock::ToolCall(tool_call)] = content.as_slice() else {
+        panic!("unexpected assistant content: {content:?}");
+    };
+    assert_eq!(tool_call.id, "call_poll");
+    assert_eq!(tool_call.name, "write_stdin");
+    assert_eq!(tool_call.arguments["session_id"], 7);
+    assert_eq!(tool_call.arguments["yield_time_ms"], 60000);
+    assert_eq!(tool_call_id, "call_poll");
+    assert_eq!(tool_name, "write_stdin");
+    assert!(!is_error);
+    assert_eq!(
+        serde_json::from_str::<Value>(result_content).unwrap()["output"],
+        "done"
+    );
 }
 
 #[tokio::test]
-pub(crate) async fn timeline_persists_selected_skill_status_item() {
+pub(crate) async fn messages_preserve_selected_skill_prompt_metadata() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
@@ -549,11 +576,18 @@ pub(crate) async fn timeline_persists_selected_skill_status_item() {
     .await
     .expect("user message");
 
-    let items = store.load_timeline_items(&session_id).expect("timeline");
-    assert_eq!(items[0].item_id, "message:1:prompt");
-    assert_eq!(items[1].item_id, "message:1:skill-loaded");
-    assert_eq!(items[1].kind, TimelineItemKind::Status);
-    assert_eq!(items[1].body_text.as_deref(), Some("skill loaded: x-daily"));
+    let summaries = store
+        .load_tui_message_summaries(&session_id)
+        .expect("summaries");
+    assert_eq!(summaries.len(), 1);
+    assert_eq!(
+        summaries[0].metadata.as_ref().unwrap()["prompt_prefix"]["selected_skills"][0]["name"],
+        "x-daily"
+    );
+    assert_eq!(
+        summaries[0].metadata.as_ref().unwrap()["prompt_prefix"]["selected_skills"][0]["path"],
+        "/tmp/x-daily/SKILL.md"
+    );
 }
 
 #[tokio::test]

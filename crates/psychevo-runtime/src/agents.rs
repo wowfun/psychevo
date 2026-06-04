@@ -19,10 +19,6 @@ pub(crate) use serde::{Deserialize, Serialize};
 pub(crate) use serde_json::{Map, Value, json};
 pub(crate) use uuid::Uuid;
 
-pub(crate) use crate::capability_snapshot::{
-    ProviderCapabilityInput, add_agent_capabilities, add_provider_capability,
-    add_skill_capabilities, build_capability_snapshot,
-};
 pub(crate) use crate::compaction::{
     CompactSessionOptions, CompactionReason, compact_session, load_projected_messages,
 };
@@ -43,7 +39,7 @@ pub(crate) use crate::store::{
     AgentEdgeRecord, AgentEdgeStatus, AgentMailboxEventInput, AgentMailboxEventRecord, SqliteStore,
 };
 pub(crate) use crate::tool_surface::{
-    ClarifyToolSurface, ToolSurfaceAssembly, assemble_tool_surface_with_capabilities,
+    ClarifyToolSurface, ToolSurfaceAssembly, assemble_tool_surface_with_warnings,
 };
 pub(crate) use crate::types::{
     ApprovalHandler, ApprovalMode, ModelMetadata, PermissionConfig, PermissionMode,

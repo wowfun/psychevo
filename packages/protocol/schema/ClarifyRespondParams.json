@@ -2,6 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
     "answers": {
+      "default": null,
       "items": {
         "items": {
           "type": "string"
@@ -14,6 +15,7 @@
       ]
     },
     "cancel": {
+      "default": null,
       "type": [
         "boolean",
         "null"
@@ -23,6 +25,7 @@
       "type": "string"
     },
     "threadId": {
+      "default": null,
       "type": [
         "string",
         "null"

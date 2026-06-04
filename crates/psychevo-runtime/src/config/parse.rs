@@ -46,6 +46,9 @@ pub(crate) fn parse_run_config(value: Value) -> Result<RunConfig> {
     if let Some(toolsets) = object.get("toolsets") {
         config.toolsets = parse_custom_toolsets(toolsets)?;
     }
+    if let Some(agents) = object.get("agents") {
+        config.agent_backends = parse_agent_backend_configs(agents)?;
+    }
     Ok(config)
 }
 
@@ -139,6 +142,122 @@ pub(crate) fn validate_toolset_name(name: &str) -> Result<()> {
     } else {
         Err(Error::Config(format!("invalid toolset name: {name}")))
     }
+}
+
+pub(crate) fn parse_agent_backend_configs(
+    value: &Value,
+) -> Result<BTreeMap<String, AgentBackendConfig>> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| Error::Config("agents must be an object".to_string()))?;
+    let Some(backends) = object.get("backends") else {
+        return Ok(BTreeMap::new());
+    };
+    let backends = backends
+        .as_object()
+        .ok_or_else(|| Error::Config("agents.backends must be an object".to_string()))?;
+    let mut out = BTreeMap::new();
+    for (id, value) in backends {
+        if !valid_agent_name(id) {
+            return Err(Error::Config(format!(
+                "agents.backends.{id} must be a valid agent/backend id"
+            )));
+        }
+        out.insert(id.clone(), parse_agent_backend_config(id, value)?);
+    }
+    Ok(out)
+}
+
+pub(crate) fn parse_agent_backend_config(id: &str, value: &Value) -> Result<AgentBackendConfig> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| Error::Config(format!("agents.backends.{id} must be an object")))?;
+    let kind_raw = optional_string_field(object, "kind")?
+        .ok_or_else(|| Error::Config(format!("agents.backends.{id}.kind is required")))?;
+    let kind = AgentBackendKind::parse(&kind_raw).ok_or_else(|| {
+        Error::Config(format!(
+            "agents.backends.{id}.kind `{kind_raw}` must be acp"
+        ))
+    })?;
+    let enabled = optional_bool_field(object, "enabled")?.unwrap_or(true);
+    let label = optional_string_field(object, "label")?.unwrap_or_else(|| id.to_string());
+    let description = optional_string_field(object, "description")?;
+    let command = optional_string_field(object, "command")?;
+    let args = string_array_field(object, "args", &format!("agents.backends.{id}.args"))?;
+    let env = string_map_field(object, "env", &format!("agents.backends.{id}.env"))?;
+    let cwd = optional_string_field(object, "cwd")?.unwrap_or_else(|| "invocation".to_string());
+    let entrypoints = object
+        .get("entrypoints")
+        .map(|value| parse_agent_backend_entrypoints(id, value))
+        .transpose()?
+        .unwrap_or_else(default_peer_agent_entrypoints);
+    let client_capabilities = object
+        .get("client_capabilities")
+        .or_else(|| object.get("clientCapabilities"))
+        .map(|value| parse_agent_backend_client_capabilities(id, value))
+        .transpose()?
+        .unwrap_or_else(default_peer_client_capabilities);
+    let mcp_servers = object
+        .get("mcp_servers")
+        .or_else(|| object.get("mcpServers"))
+        .map(parse_string_array_value)
+        .transpose()?
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    Ok(AgentBackendConfig {
+        id: id.to_string(),
+        kind,
+        enabled,
+        label,
+        description,
+        command,
+        args,
+        env,
+        cwd,
+        entrypoints,
+        client_capabilities,
+        mcp_servers,
+    })
+}
+
+pub(crate) fn parse_agent_backend_entrypoints(
+    id: &str,
+    value: &Value,
+) -> Result<BTreeSet<AgentEntrypoint>> {
+    let values = parse_string_array_value(value)?;
+    if values.is_empty() {
+        return Err(Error::Config(format!(
+            "agents.backends.{id}.entrypoints must include at least one value"
+        )));
+    }
+    let mut entrypoints = BTreeSet::new();
+    for value in values {
+        let entrypoint = AgentEntrypoint::parse(&value).ok_or_else(|| {
+            Error::Config(format!(
+                "agents.backends.{id}.entrypoints contains `{value}`; expected peer or subagent"
+            ))
+        })?;
+        entrypoints.insert(entrypoint);
+    }
+    Ok(entrypoints)
+}
+
+pub(crate) fn parse_agent_backend_client_capabilities(
+    id: &str,
+    value: &Value,
+) -> Result<BTreeSet<String>> {
+    let values = parse_string_array_value(value)?;
+    let mut capabilities = BTreeSet::new();
+    for value in values {
+        if !matches!(value.as_str(), "fs.read" | "fs.write" | "terminal") {
+            return Err(Error::Config(format!(
+                "agents.backends.{id}.client_capabilities contains `{value}`; expected fs.read, fs.write, or terminal"
+            )));
+        }
+        capabilities.insert(value);
+    }
+    Ok(capabilities)
 }
 
 pub(crate) fn parse_compression_config(
@@ -1004,6 +1123,46 @@ pub(crate) fn string_array_field(
                 .filter(|value| !value.is_empty())
                 .map(str::to_string)
                 .ok_or_else(|| Error::Config(format!("{path} entries must be strings")))
+        })
+        .collect()
+}
+
+pub(crate) fn parse_string_array_value(value: &Value) -> Result<Vec<String>> {
+    let values = value
+        .as_array()
+        .ok_or_else(|| Error::Config("value must be an array".to_string()))?;
+    values
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .ok_or_else(|| Error::Config("array entries must be strings".to_string()))
+        })
+        .collect()
+}
+
+pub(crate) fn string_map_field(
+    object: &serde_json::Map<String, Value>,
+    key: &str,
+    path: &str,
+) -> Result<BTreeMap<String, String>> {
+    let Some(value) = object.get(key) else {
+        return Ok(BTreeMap::new());
+    };
+    let values = value
+        .as_object()
+        .ok_or_else(|| Error::Config(format!("{path} must be an object")))?;
+    values
+        .iter()
+        .map(|(key, value)| {
+            let value = value
+                .as_str()
+                .map(str::trim)
+                .ok_or_else(|| Error::Config(format!("{path}.{key} must be a string")))?;
+            Ok((key.clone(), value.to_string()))
         })
         .collect()
 }

@@ -597,7 +597,6 @@ pub struct RunResult {
     pub selected_agent: Option<SelectedAgent>,
     pub selected_skills: Vec<SelectedSkill>,
     pub context_snapshot: Option<crate::context_usage::ContextSnapshot>,
-    pub capability_snapshot: Option<crate::capabilities::CapabilitySnapshot>,
     pub events: Vec<Value>,
     pub warnings: Vec<RunWarning>,
 }

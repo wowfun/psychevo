@@ -13,8 +13,31 @@ impl SqliteStore {
                    slots_json, metadata_json
             FROM session_prompt_prefixes
             WHERE session_id = ?1
+            ORDER BY version DESC
+            LIMIT 1
             "#,
             params![session_id],
+            prompt_prefix_record_from_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    pub fn load_session_prompt_prefix_version(
+        &self,
+        session_id: &str,
+        version: i64,
+    ) -> Result<Option<PromptPrefixRecord>> {
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
+        conn.query_row(
+            r#"
+            SELECT session_id, version, created_at_ms, provider, model,
+                   prefix_hash, tool_declarations_hash, invalidation_reason,
+                   slots_json, metadata_json
+            FROM session_prompt_prefixes
+            WHERE session_id = ?1 AND version = ?2
+            "#,
+            params![session_id, version],
             prompt_prefix_record_from_row,
         )
         .optional()
@@ -28,12 +51,11 @@ impl SqliteStore {
         let next_version = {
             let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
             conn.query_row(
-                "SELECT version FROM session_prompt_prefixes WHERE session_id = ?1",
+                "SELECT COALESCE(MAX(version), 0) FROM session_prompt_prefixes WHERE session_id = ?1",
                 params![&record.session_id],
                 |row| row.get::<_, i64>(0),
             )
-            .optional()?
-            .unwrap_or_default()
+            ?
             .saturating_add(1)
         };
         record.version = next_version;
@@ -51,16 +73,6 @@ impl SqliteStore {
                     prefix_hash, tool_declarations_hash, invalidation_reason,
                     slots_json, metadata_json
                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-                ON CONFLICT(session_id) DO UPDATE SET
-                    version = excluded.version,
-                    created_at_ms = excluded.created_at_ms,
-                    provider = excluded.provider,
-                    model = excluded.model,
-                    prefix_hash = excluded.prefix_hash,
-                    tool_declarations_hash = excluded.tool_declarations_hash,
-                    invalidation_reason = excluded.invalidation_reason,
-                    slots_json = excluded.slots_json,
-                    metadata_json = excluded.metadata_json
                 "#,
                 params![
                     &record.session_id,

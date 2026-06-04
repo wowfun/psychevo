@@ -67,6 +67,11 @@ pub(crate) fn agent_from_raw(
             path.clone(),
         ));
     }
+    if raw_declares_backend_details(&raw) {
+        return Err(Error::Config(
+            "agent markdown may only reference external backends with backend.ref; configure executable backend details under [agents.backends.<id>]".to_string(),
+        ));
+    }
 
     let (permission_mode, permission_diagnostic) =
         parse_permission_mode(raw.permission_mode.as_ref());
@@ -90,6 +95,8 @@ pub(crate) fn agent_from_raw(
         let trimmed = value.trim();
         (!trimmed.is_empty() && trimmed != "inherit").then(|| trimmed.to_string())
     });
+    let backend = parse_agent_backend_ref(raw.backend.as_ref())?;
+    let entrypoints = parse_agent_entrypoints(raw.entrypoints.as_ref(), backend.is_some())?;
 
     Ok(AgentDefinition {
         name,
@@ -97,6 +104,8 @@ pub(crate) fn agent_from_raw(
         instructions: instructions.trim().to_string(),
         file_path,
         source,
+        backend,
+        entrypoints,
         model,
         tool_policy,
         skills: parse_string_vec(raw.skills.as_ref()),
@@ -112,6 +121,102 @@ pub(crate) fn agent_from_raw(
         effort: raw.effort,
         diagnostics,
     })
+}
+
+pub(crate) fn raw_declares_backend_details(raw: &RawAgentFrontmatter) -> bool {
+    raw.kind.is_some()
+        || raw.enabled.is_some()
+        || raw.label.is_some()
+        || raw.command.is_some()
+        || raw.args.is_some()
+        || raw.env.is_some()
+        || raw.client_capabilities.is_some()
+        || raw.cwd.is_some()
+}
+
+pub(crate) fn parse_agent_backend_ref(value: Option<&Value>) -> Result<Option<AgentBackendRef>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let object = value.as_object().ok_or_else(|| {
+        Error::Config("agent backend must be an object with backend.ref".to_string())
+    })?;
+    let Some(raw_ref) = object.get("ref") else {
+        return Err(Error::Config(
+            "agent backend must define backend.ref".to_string(),
+        ));
+    };
+    if object.keys().any(|key| key != "ref") {
+        return Err(Error::Config(
+            "agent backend only supports backend.ref in Markdown definitions".to_string(),
+        ));
+    }
+    let name = raw_ref
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| Error::Config("agent backend.ref must be a non-empty string".to_string()))?;
+    if !valid_agent_name(name) {
+        return Err(Error::Config(format!(
+            "agent backend.ref `{name}` is invalid"
+        )));
+    }
+    Ok(Some(AgentBackendRef {
+        name: name.to_string(),
+    }))
+}
+
+pub(crate) fn parse_agent_entrypoints(
+    value: Option<&Value>,
+    backend_ref: bool,
+) -> Result<BTreeSet<AgentEntrypoint>> {
+    let Some(value) = value else {
+        return Ok(if backend_ref {
+            default_peer_agent_entrypoints()
+        } else {
+            default_subagent_entrypoints()
+        });
+    };
+    let values = match value {
+        Value::String(raw) => raw
+            .split(',')
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>(),
+        Value::Array(items) => items
+            .iter()
+            .map(|item| {
+                item.as_str()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+                    .ok_or_else(|| {
+                        Error::Config("agent entrypoints entries must be strings".to_string())
+                    })
+            })
+            .collect::<Result<Vec<_>>>()?,
+        _ => {
+            return Err(Error::Config(
+                "agent entrypoints must be a string or array".to_string(),
+            ));
+        }
+    };
+    if values.is_empty() {
+        return Err(Error::Config(
+            "agent entrypoints must include at least one value".to_string(),
+        ));
+    }
+    let mut entrypoints = BTreeSet::new();
+    for value in values {
+        let entrypoint = AgentEntrypoint::parse(&value).ok_or_else(|| {
+            Error::Config(format!(
+                "agent entrypoint `{value}` must be peer or subagent"
+            ))
+        })?;
+        entrypoints.insert(entrypoint);
+    }
+    Ok(entrypoints)
 }
 
 pub(crate) fn clamp_agent_spawn_depth(value: Option<u8>) -> u8 {
@@ -523,6 +628,7 @@ pub(crate) fn agent_catalog_for_policy(
     }
     catalog
         .iter()
+        .filter(|candidate| candidate.supports_entrypoint(AgentEntrypoint::Subagent))
         .filter(|candidate| {
             agent
                 .tool_policy
@@ -535,7 +641,7 @@ pub(crate) fn agent_catalog_for_policy(
         .collect()
 }
 
-pub(crate) fn valid_agent_name(name: &str) -> bool {
+pub fn valid_agent_name(name: &str) -> bool {
     if name.is_empty() || name.len() > MAX_AGENT_NAME_LEN {
         return false;
     }
@@ -651,6 +757,8 @@ pub(crate) fn built_in_agent(
         instructions: instructions.to_string(),
         file_path: None,
         source: AgentSource::BuiltIn,
+        backend: None,
+        entrypoints: default_subagent_entrypoints(),
         model: None,
         tool_policy: AgentToolPolicy {
             allowed: allowed.map(|set| set.into_iter().map(str::to_string).collect()),

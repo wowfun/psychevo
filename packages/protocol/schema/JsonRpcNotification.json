@@ -7,7 +7,9 @@
     "method": {
       "type": "string"
     },
-    "params": true
+    "params": {
+      "default": null
+    }
   },
   "required": [
     "jsonrpc",

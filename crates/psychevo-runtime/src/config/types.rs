@@ -276,6 +276,37 @@ pub(crate) fn load_project_context_instruction_mode(
         .map(|config| config.unwrap_or_default().instructions)
 }
 
+pub fn load_agent_backend_configs(
+    home: &Path,
+    workdir: &Path,
+    env_map: &BTreeMap<String, String>,
+) -> Result<BTreeMap<String, AgentBackendConfig>> {
+    let mut value = json!({});
+    if let Some(config_path) = env_map
+        .get("PSYCHEVO_CONFIG")
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| resolve_explicit_path(Path::new(value), env_map))
+        .transpose()?
+    {
+        deep_merge(&mut value, load_toml_config_file(&config_path, true)?);
+    } else {
+        deep_merge(
+            &mut value,
+            load_toml_config_file(&home.join(CONFIG_FILE_NAME), false)?,
+        );
+        deep_merge(
+            &mut value,
+            load_toml_config_file(&workdir.join(".psychevo").join(CONFIG_FILE_NAME), false)?,
+        );
+    }
+    value
+        .get("agents")
+        .map(parse_agent_backend_configs)
+        .transpose()
+        .map(Option::unwrap_or_default)
+}
+
 pub(crate) fn load_config_value(options: &RunOptions, workdir: &Path) -> Result<LoadedConfigValue> {
     let mut env_map = options
         .inherited_env

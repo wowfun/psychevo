@@ -1,0 +1,125 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "oneOf": [
+    {
+      "properties": {
+        "kind": {
+          "enum": [
+            "skill"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "backend_ref": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "entrypoints": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "agent"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "source": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "kind": {
+          "enum": [
+            "file"
+          ],
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "relative_path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "path",
+        "relative_path"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "capability"
+          ],
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "target_kind": {
+          "type": "string"
+        },
+        "uri": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "target_kind"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "GatewayMentionTarget"
+}

@@ -1,0 +1,165 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayMentionRange": {
+      "properties": {
+        "end": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "start": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "end",
+        "start"
+      ],
+      "type": "object"
+    },
+    "GatewayMentionTarget": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "skill"
+              ],
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "path": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "backend_ref": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "entrypoints": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "agent"
+              ],
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "source": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "file"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "relative_path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path",
+            "relative_path"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "capability"
+              ],
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "target_kind": {
+              "type": "string"
+            },
+            "uri": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "label",
+            "target_kind"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "properties": {
+    "range": {
+      "$ref": "#/definitions/GatewayMentionRange"
+    },
+    "target": {
+      "$ref": "#/definitions/GatewayMentionTarget"
+    },
+    "visibleText": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "range",
+    "target",
+    "visibleText"
+  ],
+  "title": "GatewayMention",
+  "type": "object"
+}

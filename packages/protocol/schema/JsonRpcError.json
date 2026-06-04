@@ -5,7 +5,9 @@
       "format": "int64",
       "type": "integer"
     },
-    "data": true,
+    "data": {
+      "default": null
+    },
     "message": {
       "type": "string"
     }

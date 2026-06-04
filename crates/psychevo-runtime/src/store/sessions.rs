@@ -212,14 +212,14 @@ impl SqliteStore {
         value: Option<Value>,
     ) -> Result<()> {
         let changed = self.write_retry(|conn| {
-            let metadata_json = conn
+            let metadata_row = conn
                 .query_row(
                     "SELECT metadata_json FROM sessions WHERE id = ?1",
                     params![session_id],
                     |row| row.get::<_, Option<String>>(0),
                 )
                 .optional()?;
-            let Some(metadata_json) = metadata_json else {
+            let Some(metadata_json) = metadata_row else {
                 return Ok(0);
             };
             let mut metadata = metadata_object_sql(metadata_json.as_deref())?;

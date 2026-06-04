@@ -2,8 +2,6 @@
 
 pub(crate) mod accounting;
 pub(crate) mod agents;
-pub mod capabilities;
-pub(crate) mod capability_snapshot;
 pub mod command_registry;
 pub(crate) mod compaction;
 pub(crate) mod config;
@@ -39,15 +37,14 @@ pub mod workspace_diff;
 pub(crate) mod tests;
 
 pub use agents::{
-    AgentCatalog, AgentControl, AgentDefinition, AgentDiagnostic, AgentDiscoveryOptions,
-    AgentInvocationRole, AgentPermissionMode, AgentRun, AgentRunRecord, AgentRunStatus,
-    AgentSource, AgentToolPolicy, MAX_AGENT_SPAWN_DEPTH_CAP, agent_spawn_paused,
-    agent_status_value, close_agent_id, discover_agents, list_agents_value,
-    resolve_agent_definition, resume_agent_id, send_agent_message, set_agent_spawn_paused,
-    stop_agent_id_with_grace, view_agent_value, view_agent_value_with_catalog, wait_agent_id,
-    wait_agent_mailbox,
+    AgentBackendConfig, AgentBackendKind, AgentBackendRef, AgentCatalog, AgentControl,
+    AgentDefinition, AgentDiagnostic, AgentDiscoveryOptions, AgentEntrypoint, AgentInvocationRole,
+    AgentPermissionMode, AgentRun, AgentRunRecord, AgentRunStatus, AgentSource, AgentToolPolicy,
+    MAX_AGENT_SPAWN_DEPTH_CAP, agent_spawn_paused, agent_status_value, close_agent_id,
+    discover_agents, list_agents_value, resolve_agent_definition, resume_agent_id,
+    send_agent_message, set_agent_spawn_paused, stop_agent_id_with_grace, valid_agent_name,
+    view_agent_value, view_agent_value_with_catalog, wait_agent_id, wait_agent_mailbox,
 };
-pub use capabilities::{CapabilitySnapshot, CapabilitySnapshotParts};
 pub use compaction::{
     AutoCompactionCheckOptions, CompactSessionOptions, CompactionReason, CompactionResult,
     auto_compaction_due_for_snapshot, compact_session,
@@ -56,11 +53,12 @@ pub use config::{
     ToolsetMutationResult, append_local_permission_allow_rule, append_local_permission_rule,
     auth_status_value, config_provider_list_value, config_show_value, configured_models,
     create_global_custom_provider, create_local_toolset, create_scoped_custom_provider,
-    custom_provider_api_key_env, fetch_model_catalog, model_catalog_endpoint,
-    model_catalog_providers, permission_rules_value, refresh_model_metadata_cache,
-    remove_local_permission_rule, remove_local_toolset, selected_configured_model,
-    set_config_value, set_default_model, set_default_model_with_reasoning,
-    set_local_toolset_enabled, set_provider_api_key, toolsets_value,
+    custom_provider_api_key_env, fetch_model_catalog, load_agent_backend_configs,
+    model_catalog_endpoint, model_catalog_providers, permission_rules_value,
+    refresh_model_metadata_cache, remove_local_permission_rule, remove_local_toolset,
+    selected_configured_model, set_config_value, set_default_model,
+    set_default_model_with_reasoning, set_local_toolset_enabled, set_provider_api_key,
+    toolsets_value,
 };
 pub use context::prune_context;
 pub use context_usage::{
@@ -79,9 +77,10 @@ pub use prompt_image::{
 };
 pub use prompt_templates::side_conversation_boundary_prompt;
 pub use psychevo_agent_core::{
-    Message, PendingInputId, TerminalReason, ToolDisplayBodyPolicy, ToolDisplayCategory,
-    ToolDisplaySpec, UserContentBlock,
+    AssistantBlock, Message, PendingInputId, TerminalReason, ToolDisplayBodyPolicy,
+    ToolDisplayCategory, ToolDisplaySpec, UserContentBlock,
 };
+pub use psychevo_ai::Outcome;
 pub use run::{
     reload_session_context, run_live, run_live_streaming, run_live_streaming_controlled,
     spawn_agent_background,
@@ -109,9 +108,7 @@ pub use store::{AgentEdgeRecord, AgentEdgeStatus};
 pub use store::{
     ChildSessionSnapshotInput, ContextEvidenceInput, ContextEvidenceRecord,
     GatewaySourceBindingInput, GatewaySourceBindingRecord, SessionCompactionInput,
-    SessionCompactionRecord, SessionMessageRecord, SqliteStore, TimelineArtifactInput,
-    TimelineArtifactRecord, TimelineDebugEventInput, TimelineDebugEventRecord, TimelineItemInput,
-    TimelineItemKind, TimelineItemRecord, TimelineItemStatus,
+    SessionCompactionRecord, SessionMessageRecord, SqliteStore,
 };
 pub use tools::tool_names_for_mode;
 pub use types::{

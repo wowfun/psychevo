@@ -5,6 +5,7 @@
       "type": "string"
     },
     "model": {
+      "default": null,
       "type": [
         "string",
         "null"
@@ -14,6 +15,7 @@
       "type": "string"
     },
     "provider": {
+      "default": null,
       "type": [
         "string",
         "null"

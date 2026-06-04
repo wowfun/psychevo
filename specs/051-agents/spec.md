@@ -16,6 +16,7 @@ the same definition model.
 - runtime tool-policy resolution for selected agents
 - model preference, skill, hook, and MCP-scope contributions
 - compatibility input formats for local agent definitions
+- external peer-agent backend references and generated agent identities
 
 Out of scope:
 
@@ -55,12 +56,19 @@ the agent instruction body. Runtime accepts compatibility fields including
 `name`, `description`, `model`, `tools`, `disallowedTools`, `permission`,
 `permissions`, `permissionMode`, `mcpServers`, `skills`, `hooks`,
 `background`, `initialPrompt`, `maxTurns`, `maxSpawnDepth`,
-`projectInstructions`, and `effort`. `maxSpawnDepth` is a Psychevo extension
-that defaults to `0`; it controls how many additional descendant spawn levels a
-child created from this definition may use, as defined by
-[Subagents](subagents.md). `memory` and `isolation: worktree` are parsed
-for compatibility but are unsupported in the first implementation slice and
-must produce diagnostics rather than executing.
+`projectInstructions`, `effort`, `backend`, and `entrypoints`. `backend.ref`
+references a configured external agent backend when this definition delegates
+execution to a peer agent; command-bearing backend details are never declared
+directly in Markdown agent files. `entrypoints` declares where the definition
+may be used, with supported values `peer` and `subagent`. Local Markdown
+definitions default to `subagent`; Markdown definitions with `backend.ref`
+default to `peer` and `subagent` unless they explicitly narrow the list.
+`maxSpawnDepth` is a
+Psychevo extension that defaults to `0`; it controls how many additional
+descendant spawn levels a child created from this definition may use, as
+defined by [Subagents](subagents.md). `memory` and `isolation: worktree` are
+parsed for compatibility but are unsupported in the first implementation slice
+and must produce diagnostics rather than executing.
 
 Runtime validates names using lowercase letters, digits, and hyphens. Missing
 or empty descriptions are diagnostics and prevent model-index loading. Unknown
@@ -86,6 +94,11 @@ prompt catalogs must exclude invalid definitions.
 External `--agents` JSON, settings-provided agents, and plugin-provided agents
 are future compatibility targets and are not loaded in the first implementation
 slice.
+
+Configured external backends may generate default agent definitions. Generated
+definitions follow normal catalog precedence and are shadowed by Markdown
+definitions with the same name. Generated definitions are runnable only when
+the referenced backend is enabled and defines a non-empty description.
 
 ## Selected-Agent Behavior
 
@@ -201,6 +214,8 @@ the actual provider request would.
 
 MCP tools use canonical MCP tool identifiers. MCP scope may narrow available
 MCP tools but must not bypass runtime capability selection or resource policy.
+For peer-agent backends, the backend's client-capability list is a hard ceiling
+and the selected agent's `tools` policy may only narrow that ceiling.
 
 ## Hooks
 
@@ -214,6 +229,9 @@ diagnostics and do not fail closed in the first implementation slice.
 ## Attachments
 
 - [Subagents](subagents.md) defines child and forked agent run semantics.
+- [Peer Agents](peer-agents.md) defines configured external backend references,
+  generated agent identities, ACP client behavior, and unified surface
+  projection.
 
 ## Related Topics
 

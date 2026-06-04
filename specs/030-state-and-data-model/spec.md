@@ -13,6 +13,7 @@ Define Psychevo's semantic state and data model across foundation specs.
 - semantic identity and causal relationship requirements
 - recoverability classes for durable, reconstructable, and transient facts
 - first-slice session record model attachment
+- transcript state ownership attachment
 
 Out of scope:
 - Rust structs, traits, APIs, modules, or type names
@@ -42,6 +43,9 @@ The first implementation slice centers persistence on sessions and messages. Tur
 This graph defines semantic relationships only. It does not define storage layout, object identifiers, foreign keys, in-memory structs, wire payloads, or event payloads.
 
 State facts may be live, durable, reconstructable, or derived. A state fact should have one best-fit truth source. Other representations are projections, observations, cached views, or implementation details.
+Transcript state follows the same rule: ordinary transcript facts belong to
+runtime messages, while product transcript views are projections owned by their
+interface specs.
 
 ## State Families
 
@@ -83,19 +87,33 @@ Derived views must not become new truth sources. CLI rendering, SDK responses, l
 
 Each state family keeps its source-of-truth ownership in its owning spec. This spec maps relationships between those families; it does not move ownership into one crate or storage layer.
 
-Durable facts must be representable through durable evidence or another durable system owned by a later spec. Final loop-visible messages, terminal outcomes, tool request and result relationships, resource decisions that affect execution, capability extension facts that affect agent-invocation assembly, and evidence-linked memory facts fall into this class when the owning specs require them.
+Durable facts must be representable through durable evidence or another durable system owned by a later spec. Final loop-visible messages, terminal outcomes, tool request and result relationships, resource decisions that affect execution, and evidence-linked memory facts fall into this class when the owning specs require them.
 
 [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines the persistence boundary for durable facts. This spec defines recoverability classes, not persistence substrate behavior.
 
-Reconstructable facts may be rebuilt from durable facts, configuration, source material, or provider/runtime capability discovery. Context projections, summary context, selected tool surfaces, tool declaration snapshots, resource facts, capability extension candidates, and memory recall candidates may be reconstructable when their source material remains available. This spec does not guarantee deterministic reconstruction.
+Reconstructable facts may be rebuilt from durable facts, configuration, source material, or provider/runtime capability discovery. Context projections, summary context, selected tool surfaces, tool declaration snapshots, resource facts, capability extension candidates, capability assembly selections, and memory recall candidates may be reconstructable when their source material remains available. This spec does not guarantee deterministic reconstruction.
 
-Transient facts exist while an agent invocation or runtime operation is active. Partial assistant output, pending tool executions, live observation buffers, in-flight control signals, temporary resource operations, and active runtime handles may disappear after settlement, failure, abort, or process loss unless another spec requires durable evidence for their final effect.
+Request reconstruction should prefer durable prompt-prefix evidence, message
+metadata, context evidence, and current runtime/provider registries over a
+separate durable capability sidecar. If a reconstructed tool declaration
+snapshot cannot be verified against the recorded declaration hash, the consumer
+must mark the reconstruction approximate instead of treating current registry
+state as the original request.
+
+Transient facts exist while an agent invocation or runtime operation is active. Partial assistant output, pending tool executions, live observation buffers, in-flight control signals, temporary resource operations, active runtime handles, and raw runtime diagnostic observations may disappear after settlement, failure, abort, or process loss unless another spec requires durable evidence for their final effect.
+
+Generic runtime debug observations are not ordinary durable facts, request
+reconstruction facts, or transcript facts. A future diagnostic store must be
+defined by a domain-specific spec with explicit payload and retention policy,
+not inferred from the state model.
 
 Recoverability class is semantic. It does not define persistence format, retention policy, retry behavior, cleanup behavior, or replay behavior.
 
 ## Attachments
 
 - [Session Record Model](session-record-model.md) defines the first implementation slice contract for session and message records.
+- [Transcript State](transcript-state.md) defines ordinary transcript fact
+  ownership and recoverability boundaries.
 
 ## Related Topics
 

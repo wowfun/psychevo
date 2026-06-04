@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "TranscriptBlockStatus": {
+      "enum": [
+        "pending",
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+        "needsInput",
+        "info"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "content": {
+      "type": "string"
+    },
+    "createdAtMs": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "isError": {
+      "type": "boolean"
+    },
+    "metadata": {
+      "default": null
+    },
+    "resultMessageSeq": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "status": {
+      "$ref": "#/definitions/TranscriptBlockStatus"
+    },
+    "updatedAtMs": {
+      "format": "int64",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "content",
+    "createdAtMs",
+    "isError",
+    "resultMessageSeq",
+    "status",
+    "updatedAtMs"
+  ],
+  "title": "TranscriptToolResult",
+  "type": "object"
+}

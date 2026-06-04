@@ -11,7 +11,7 @@ export type {
 } from "./generated";
 import type {
   GatewayEvent,
-  DebugEventsResult,
+  CompletionListResult,
   InitializeResult,
   JsonRpcErrorResponse,
   JsonRpcNotification,
@@ -41,13 +41,13 @@ export const JsonRpcErrorResponseSchema =
 export const GatewayEventSchema = schema<GatewayEvent>("GatewayEvent");
 export const ThreadSnapshotSchema = schema<ThreadSnapshot>("ThreadSnapshot");
 export const ThreadListResultSchema = schema<ThreadListResult>("ThreadListResult");
+export const CompletionListResultSchema =
+  schema<CompletionListResult>("CompletionListResult");
 export const TurnResultNotificationSchema =
   schema<TurnResultPayload>("TurnResultPayload");
 export const InitializeResultSchema = schema<InitializeResult>("InitializeResult");
 export const SettingsReadResultSchema =
   schema<SettingsReadResult>("SettingsReadResult");
-export const DebugEventsResultSchema =
-  schema<DebugEventsResult>("DebugEventsResult");
 
 export const RpcResponseSchema: RuntimeSchema<JsonRpcSuccess | JsonRpcErrorResponse> = {
   parse(value) {

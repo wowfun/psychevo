@@ -38,8 +38,11 @@ export const gatewaySchemas = {
     "rawId": {
       "type": "string"
     },
-    "rawIdentity": true,
+    "rawIdentity": {
+      "default": null
+    },
     "visibleName": {
+      "default": null,
       "type": [
         "string",
         "null"
@@ -78,16 +81,21 @@ export const gatewaySchemas = {
         {
           "type": "null"
         }
-      ]
+      ],
+      "default": null
     },
     "rawId": {
+      "default": null,
       "type": [
         "string",
         "null"
       ]
     },
-    "rawIdentity": true,
+    "rawIdentity": {
+      "default": null
+    },
     "visibleName": {
+      "default": null,
       "type": [
         "string",
         "null"
@@ -116,16 +124,21 @@ export const gatewaySchemas = {
             {
               "type": "null"
             }
-          ]
+          ],
+          "default": null
         },
         "rawId": {
+          "default": null,
           "type": [
             "string",
             "null"
           ]
         },
-        "rawIdentity": true,
+        "rawIdentity": {
+          "default": null
+        },
         "visibleName": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -228,6 +241,7 @@ export const gatewaySchemas = {
       "$ref": "#/definitions/BackendKind"
     },
     "nativeId": {
+      "default": null,
       "type": [
         "string",
         "null"
@@ -256,6 +270,7 @@ export const gatewaySchemas = {
           "$ref": "#/definitions/BackendKind"
         },
         "nativeId": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -276,6 +291,7 @@ export const gatewaySchemas = {
       "type": "string"
     },
     "sourceKey": {
+      "default": null,
       "type": [
         "string",
         "null"
@@ -444,6 +460,317 @@ export const gatewaySchemas = {
   ],
   "title": "GatewayInputPart"
 },
+  GatewayMentionRange: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "end": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "start": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "end",
+    "start"
+  ],
+  "title": "GatewayMentionRange",
+  "type": "object"
+},
+  GatewayMentionTarget: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "oneOf": [
+    {
+      "properties": {
+        "kind": {
+          "enum": [
+            "skill"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "backend_ref": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "entrypoints": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "agent"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "source": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "kind": {
+          "enum": [
+            "file"
+          ],
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "relative_path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "path",
+        "relative_path"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "capability"
+          ],
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "target_kind": {
+          "type": "string"
+        },
+        "uri": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "target_kind"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "GatewayMentionTarget"
+},
+  GatewayMention: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayMentionRange": {
+      "properties": {
+        "end": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "start": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "end",
+        "start"
+      ],
+      "type": "object"
+    },
+    "GatewayMentionTarget": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "skill"
+              ],
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "path": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "backend_ref": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "entrypoints": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "agent"
+              ],
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "source": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "file"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "relative_path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path",
+            "relative_path"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "capability"
+              ],
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "target_kind": {
+              "type": "string"
+            },
+            "uri": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "label",
+            "target_kind"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "properties": {
+    "range": {
+      "$ref": "#/definitions/GatewayMentionRange"
+    },
+    "target": {
+      "$ref": "#/definitions/GatewayMentionTarget"
+    },
+    "visibleText": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "range",
+    "target",
+    "visibleText"
+  ],
+  "title": "GatewayMention",
+  "type": "object"
+},
   GatewayImageInput: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "oneOf": [
@@ -530,7 +857,7 @@ export const gatewaySchemas = {
       ],
       "type": "string"
     },
-    "TimelineItem": {
+    "TranscriptBlock": {
       "properties": {
         "artifactIds": {
           "items": {
@@ -558,35 +885,37 @@ export const gatewaySchemas = {
           "type": "string"
         },
         "kind": {
-          "$ref": "#/definitions/TimelineItemKind"
+          "$ref": "#/definitions/TranscriptBlockKind"
         },
         "metadata": true,
+        "order": {
+          "format": "int64",
+          "type": "integer"
+        },
         "preview": {
           "type": [
             "string",
             "null"
           ]
         },
-        "sequence": {
-          "format": "int64",
-          "type": "integer"
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TranscriptToolResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "source": {
           "type": "string"
         },
         "status": {
-          "$ref": "#/definitions/TimelineItemStatus"
-        },
-        "threadId": {
-          "type": "string"
+          "$ref": "#/definitions/TranscriptBlockStatus"
         },
         "title": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "turnId": {
           "type": [
             "string",
             "null"
@@ -602,19 +931,19 @@ export const gatewaySchemas = {
         "createdAtMs",
         "id",
         "kind",
-        "sequence",
+        "order",
         "source",
         "status",
-        "threadId",
         "updatedAtMs"
       ],
       "type": "object"
     },
-    "TimelineItemKind": {
+    "TranscriptBlockKind": {
       "enum": [
-        "prompt",
-        "assistant",
+        "text",
         "reasoning",
+        "toolCall",
+        "toolResult",
         "tool",
         "shell",
         "file",
@@ -631,7 +960,7 @@ export const gatewaySchemas = {
       ],
       "type": "string"
     },
-    "TimelineItemStatus": {
+    "TranscriptBlockStatus": {
       "enum": [
         "pending",
         "running",
@@ -642,12 +971,118 @@ export const gatewaySchemas = {
         "info"
       ],
       "type": "string"
+    },
+    "TranscriptEntry": {
+      "properties": {
+        "accounting": true,
+        "blocks": {
+          "items": {
+            "$ref": "#/definitions/TranscriptBlock"
+          },
+          "type": "array"
+        },
+        "createdAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "messageSeq": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "metadata": true,
+        "role": {
+          "$ref": "#/definitions/TranscriptEntryRole"
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/TranscriptBlockStatus"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "usage": true
+      },
+      "required": [
+        "blocks",
+        "createdAtMs",
+        "id",
+        "role",
+        "source",
+        "status",
+        "threadId",
+        "updatedAtMs"
+      ],
+      "type": "object"
+    },
+    "TranscriptEntryRole": {
+      "enum": [
+        "user",
+        "assistant",
+        "diagnostic"
+      ],
+      "type": "string"
+    },
+    "TranscriptToolResult": {
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "createdAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "isError": {
+          "type": "boolean"
+        },
+        "metadata": {
+          "default": null
+        },
+        "resultMessageSeq": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/definitions/TranscriptBlockStatus"
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "content",
+        "createdAtMs",
+        "isError",
+        "resultMessageSeq",
+        "status",
+        "updatedAtMs"
+      ],
+      "type": "object"
     }
   },
   "oneOf": [
     {
       "properties": {
         "selectedSkills": {
+          "default": [],
           "items": {
             "$ref": "#/definitions/GatewaySelectedSkill"
           },
@@ -707,6 +1142,13 @@ export const gatewaySchemas = {
     },
     {
       "properties": {
+        "committedEntries": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/TranscriptEntry"
+          },
+          "type": "array"
+        },
         "outcome": {
           "type": [
             "string",
@@ -737,10 +1179,16 @@ export const gatewaySchemas = {
     },
     {
       "properties": {
+        "blockId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "delta": {
           "type": "string"
         },
-        "itemId": {
+        "entryId": {
           "type": [
             "string",
             "null"
@@ -751,7 +1199,7 @@ export const gatewaySchemas = {
         },
         "type": {
           "enum": [
-            "itemDelta"
+            "entryDelta"
           ],
           "type": "string"
         }
@@ -765,21 +1213,21 @@ export const gatewaySchemas = {
     },
     {
       "properties": {
-        "item": {
-          "$ref": "#/definitions/TimelineItem"
+        "entry": {
+          "$ref": "#/definitions/TranscriptEntry"
         },
         "turnId": {
           "type": "string"
         },
         "type": {
           "enum": [
-            "itemStarted"
+            "entryStarted"
           ],
           "type": "string"
         }
       },
       "required": [
-        "item",
+        "entry",
         "turnId",
         "type"
       ],
@@ -787,21 +1235,21 @@ export const gatewaySchemas = {
     },
     {
       "properties": {
-        "item": {
-          "$ref": "#/definitions/TimelineItem"
+        "entry": {
+          "$ref": "#/definitions/TranscriptEntry"
         },
         "turnId": {
           "type": "string"
         },
         "type": {
           "enum": [
-            "itemUpdated"
+            "entryUpdated"
           ],
           "type": "string"
         }
       },
       "required": [
-        "item",
+        "entry",
         "turnId",
         "type"
       ],
@@ -809,21 +1257,21 @@ export const gatewaySchemas = {
     },
     {
       "properties": {
-        "item": {
-          "$ref": "#/definitions/TimelineItem"
+        "entry": {
+          "$ref": "#/definitions/TranscriptEntry"
         },
         "turnId": {
           "type": "string"
         },
         "type": {
           "enum": [
-            "itemCompleted"
+            "entryCompleted"
           ],
           "type": "string"
         }
       },
       "required": [
-        "item",
+        "entry",
         "turnId",
         "type"
       ],
@@ -978,24 +1426,6 @@ export const gatewaySchemas = {
         "type"
       ],
       "type": "object"
-    },
-    {
-      "properties": {
-        "turnId": {
-          "type": "string"
-        },
-        "type": {
-          "enum": [
-            "debugAvailable"
-          ],
-          "type": "string"
-        }
-      },
-      "required": [
-        "turnId",
-        "type"
-      ],
-      "type": "object"
     }
   ],
   "title": "GatewayEvent"
@@ -1011,12 +1441,23 @@ export const gatewaySchemas = {
   "title": "PermissionDecision",
   "type": "string"
 },
-  TimelineItemKind: {
+  TranscriptEntryRole: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "enum": [
-    "prompt",
+    "user",
     "assistant",
+    "diagnostic"
+  ],
+  "title": "TranscriptEntryRole",
+  "type": "string"
+},
+  TranscriptBlockKind: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "text",
     "reasoning",
+    "toolCall",
+    "toolResult",
     "tool",
     "shell",
     "file",
@@ -1031,10 +1472,10 @@ export const gatewaySchemas = {
     "diff",
     "artifact"
   ],
-  "title": "TimelineItemKind",
+  "title": "TranscriptBlockKind",
   "type": "string"
 },
-  TimelineItemStatus: {
+  TranscriptBlockStatus: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "enum": [
     "pending",
@@ -1045,17 +1486,71 @@ export const gatewaySchemas = {
     "needsInput",
     "info"
   ],
-  "title": "TimelineItemStatus",
+  "title": "TranscriptBlockStatus",
   "type": "string"
 },
-  TimelineItem: {
+  TranscriptToolResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
-    "TimelineItemKind": {
+    "TranscriptBlockStatus": {
       "enum": [
-        "prompt",
-        "assistant",
+        "pending",
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+        "needsInput",
+        "info"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "content": {
+      "type": "string"
+    },
+    "createdAtMs": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "isError": {
+      "type": "boolean"
+    },
+    "metadata": {
+      "default": null
+    },
+    "resultMessageSeq": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "status": {
+      "$ref": "#/definitions/TranscriptBlockStatus"
+    },
+    "updatedAtMs": {
+      "format": "int64",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "content",
+    "createdAtMs",
+    "isError",
+    "resultMessageSeq",
+    "status",
+    "updatedAtMs"
+  ],
+  "title": "TranscriptToolResult",
+  "type": "object"
+},
+  TranscriptBlock: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "TranscriptBlockKind": {
+      "enum": [
+        "text",
         "reasoning",
+        "toolCall",
+        "toolResult",
         "tool",
         "shell",
         "file",
@@ -1072,7 +1567,7 @@ export const gatewaySchemas = {
       ],
       "type": "string"
     },
-    "TimelineItemStatus": {
+    "TranscriptBlockStatus": {
       "enum": [
         "pending",
         "running",
@@ -1083,6 +1578,43 @@ export const gatewaySchemas = {
         "info"
       ],
       "type": "string"
+    },
+    "TranscriptToolResult": {
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "createdAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "isError": {
+          "type": "boolean"
+        },
+        "metadata": {
+          "default": null
+        },
+        "resultMessageSeq": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/definitions/TranscriptBlockStatus"
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "content",
+        "createdAtMs",
+        "isError",
+        "resultMessageSeq",
+        "status",
+        "updatedAtMs"
+      ],
+      "type": "object"
     }
   },
   "properties": {
@@ -1112,35 +1644,37 @@ export const gatewaySchemas = {
       "type": "string"
     },
     "kind": {
-      "$ref": "#/definitions/TimelineItemKind"
+      "$ref": "#/definitions/TranscriptBlockKind"
     },
     "metadata": true,
+    "order": {
+      "format": "int64",
+      "type": "integer"
+    },
     "preview": {
       "type": [
         "string",
         "null"
       ]
     },
-    "sequence": {
-      "format": "int64",
-      "type": "integer"
+    "result": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/TranscriptToolResult"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "source": {
       "type": "string"
     },
     "status": {
-      "$ref": "#/definitions/TimelineItemStatus"
-    },
-    "threadId": {
-      "type": "string"
+      "$ref": "#/definitions/TranscriptBlockStatus"
     },
     "title": {
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "turnId": {
       "type": [
         "string",
         "null"
@@ -1156,19 +1690,243 @@ export const gatewaySchemas = {
     "createdAtMs",
     "id",
     "kind",
-    "sequence",
+    "order",
+    "source",
+    "status",
+    "updatedAtMs"
+  ],
+  "title": "TranscriptBlock",
+  "type": "object"
+},
+  TranscriptEntry: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "TranscriptBlock": {
+      "properties": {
+        "artifactIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "body": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/TranscriptBlockKind"
+        },
+        "metadata": true,
+        "order": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "preview": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TranscriptToolResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/TranscriptBlockStatus"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifactIds",
+        "createdAtMs",
+        "id",
+        "kind",
+        "order",
+        "source",
+        "status",
+        "updatedAtMs"
+      ],
+      "type": "object"
+    },
+    "TranscriptBlockKind": {
+      "enum": [
+        "text",
+        "reasoning",
+        "toolCall",
+        "toolResult",
+        "tool",
+        "shell",
+        "file",
+        "web",
+        "mcp",
+        "clarify",
+        "permission",
+        "skill",
+        "agent",
+        "mailbox",
+        "status",
+        "diff",
+        "artifact"
+      ],
+      "type": "string"
+    },
+    "TranscriptBlockStatus": {
+      "enum": [
+        "pending",
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+        "needsInput",
+        "info"
+      ],
+      "type": "string"
+    },
+    "TranscriptEntryRole": {
+      "enum": [
+        "user",
+        "assistant",
+        "diagnostic"
+      ],
+      "type": "string"
+    },
+    "TranscriptToolResult": {
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "createdAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "isError": {
+          "type": "boolean"
+        },
+        "metadata": {
+          "default": null
+        },
+        "resultMessageSeq": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/definitions/TranscriptBlockStatus"
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "content",
+        "createdAtMs",
+        "isError",
+        "resultMessageSeq",
+        "status",
+        "updatedAtMs"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "accounting": true,
+    "blocks": {
+      "items": {
+        "$ref": "#/definitions/TranscriptBlock"
+      },
+      "type": "array"
+    },
+    "createdAtMs": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "id": {
+      "type": "string"
+    },
+    "messageSeq": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "metadata": true,
+    "role": {
+      "$ref": "#/definitions/TranscriptEntryRole"
+    },
+    "source": {
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/definitions/TranscriptBlockStatus"
+    },
+    "threadId": {
+      "type": "string"
+    },
+    "turnId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "updatedAtMs": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "usage": true
+  },
+  "required": [
+    "blocks",
+    "createdAtMs",
+    "id",
+    "role",
     "source",
     "status",
     "threadId",
     "updatedAtMs"
   ],
-  "title": "TimelineItem",
+  "title": "TranscriptEntry",
   "type": "object"
 },
   GatewayActivityView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
     "activeTurnId": {
+      "default": null,
       "type": [
         "string",
         "null"
@@ -1239,6 +1997,7 @@ export const gatewaySchemas = {
     "GatewayActivityView": {
       "properties": {
         "activeTurnId": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -1265,6 +2024,7 @@ export const gatewaySchemas = {
           "$ref": "#/definitions/BackendKind"
         },
         "nativeId": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -1287,8 +2047,11 @@ export const gatewaySchemas = {
         "rawId": {
           "type": "string"
         },
-        "rawIdentity": true,
+        "rawIdentity": {
+          "default": null
+        },
         "visibleName": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -1319,6 +2082,7 @@ export const gatewaySchemas = {
           "type": "string"
         },
         "sourceKey": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -1363,7 +2127,7 @@ export const gatewaySchemas = {
       ],
       "type": "object"
     },
-    "TimelineItem": {
+    "TranscriptBlock": {
       "properties": {
         "artifactIds": {
           "items": {
@@ -1391,35 +2155,37 @@ export const gatewaySchemas = {
           "type": "string"
         },
         "kind": {
-          "$ref": "#/definitions/TimelineItemKind"
+          "$ref": "#/definitions/TranscriptBlockKind"
         },
         "metadata": true,
+        "order": {
+          "format": "int64",
+          "type": "integer"
+        },
         "preview": {
           "type": [
             "string",
             "null"
           ]
         },
-        "sequence": {
-          "format": "int64",
-          "type": "integer"
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TranscriptToolResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "source": {
           "type": "string"
         },
         "status": {
-          "$ref": "#/definitions/TimelineItemStatus"
-        },
-        "threadId": {
-          "type": "string"
+          "$ref": "#/definitions/TranscriptBlockStatus"
         },
         "title": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "turnId": {
           "type": [
             "string",
             "null"
@@ -1435,19 +2201,19 @@ export const gatewaySchemas = {
         "createdAtMs",
         "id",
         "kind",
-        "sequence",
+        "order",
         "source",
         "status",
-        "threadId",
         "updatedAtMs"
       ],
       "type": "object"
     },
-    "TimelineItemKind": {
+    "TranscriptBlockKind": {
       "enum": [
-        "prompt",
-        "assistant",
+        "text",
         "reasoning",
+        "toolCall",
+        "toolResult",
         "tool",
         "shell",
         "file",
@@ -1464,7 +2230,7 @@ export const gatewaySchemas = {
       ],
       "type": "string"
     },
-    "TimelineItemStatus": {
+    "TranscriptBlockStatus": {
       "enum": [
         "pending",
         "running",
@@ -1475,15 +2241,120 @@ export const gatewaySchemas = {
         "info"
       ],
       "type": "string"
+    },
+    "TranscriptEntry": {
+      "properties": {
+        "accounting": true,
+        "blocks": {
+          "items": {
+            "$ref": "#/definitions/TranscriptBlock"
+          },
+          "type": "array"
+        },
+        "createdAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "messageSeq": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "metadata": true,
+        "role": {
+          "$ref": "#/definitions/TranscriptEntryRole"
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/TranscriptBlockStatus"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "usage": true
+      },
+      "required": [
+        "blocks",
+        "createdAtMs",
+        "id",
+        "role",
+        "source",
+        "status",
+        "threadId",
+        "updatedAtMs"
+      ],
+      "type": "object"
+    },
+    "TranscriptEntryRole": {
+      "enum": [
+        "user",
+        "assistant",
+        "diagnostic"
+      ],
+      "type": "string"
+    },
+    "TranscriptToolResult": {
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "createdAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "isError": {
+          "type": "boolean"
+        },
+        "metadata": {
+          "default": null
+        },
+        "resultMessageSeq": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/definitions/TranscriptBlockStatus"
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "content",
+        "createdAtMs",
+        "isError",
+        "resultMessageSeq",
+        "status",
+        "updatedAtMs"
+      ],
+      "type": "object"
     }
   },
   "properties": {
     "activity": {
       "$ref": "#/definitions/GatewayActivityView"
     },
-    "items": {
+    "entries": {
       "items": {
-        "$ref": "#/definitions/TimelineItem"
+        "$ref": "#/definitions/TranscriptEntry"
       },
       "type": "array"
     },
@@ -1510,12 +2381,13 @@ export const gatewaySchemas = {
         {
           "type": "null"
         }
-      ]
+      ],
+      "default": null
     }
   },
   "required": [
     "activity",
-    "items",
+    "entries",
     "pendingClarifies",
     "pendingPermissions",
     "source"
@@ -1525,8 +2397,47 @@ export const gatewaySchemas = {
 },
   SessionSummaryView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayActivityView": {
+      "properties": {
+        "activeTurnId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "queuedTurns": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "running": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "queuedTurns",
+        "running"
+      ],
+      "type": "object"
+    }
+  },
   "properties": {
+    "activity": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/GatewayActivityView"
+        }
+      ],
+      "default": {
+        "activeTurnId": null,
+        "queuedTurns": 0,
+        "running": false
+      }
+    },
     "archivedAtMs": {
+      "default": null,
       "format": "int64",
       "type": [
         "integer",
@@ -1534,12 +2445,14 @@ export const gatewaySchemas = {
       ]
     },
     "endReason": {
+      "default": null,
       "type": [
         "string",
         "null"
       ]
     },
     "endedAtMs": {
+      "default": null,
       "format": "int64",
       "type": [
         "integer",
@@ -1555,12 +2468,14 @@ export const gatewaySchemas = {
       "type": "integer"
     },
     "model": {
+      "default": null,
       "type": [
         "string",
         "null"
       ]
     },
     "provider": {
+      "default": null,
       "type": [
         "string",
         "null"
@@ -1574,6 +2489,7 @@ export const gatewaySchemas = {
       "type": "integer"
     },
     "title": {
+      "default": null,
       "type": [
         "string",
         "null"
@@ -1585,6 +2501,7 @@ export const gatewaySchemas = {
       "type": "integer"
     },
     "updatedAtMs": {
+      "default": null,
       "format": "int64",
       "type": [
         "integer",
@@ -1640,8 +2557,11 @@ export const gatewaySchemas = {
         "rawId": {
           "type": "string"
         },
-        "rawIdentity": true,
+        "rawIdentity": {
+          "default": null
+        },
         "visibleName": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -1668,16 +2588,21 @@ export const gatewaySchemas = {
             {
               "type": "null"
             }
-          ]
+          ],
+          "default": null
         },
         "rawId": {
+          "default": null,
           "type": [
             "string",
             "null"
           ]
         },
-        "rawIdentity": true,
+        "rawIdentity": {
+          "default": null
+        },
         "visibleName": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -1761,16 +2686,21 @@ export const gatewaySchemas = {
             {
               "type": "null"
             }
-          ]
+          ],
+          "default": null
         },
         "rawId": {
+          "default": null,
           "type": [
             "string",
             "null"
           ]
         },
-        "rawIdentity": true,
+        "rawIdentity": {
+          "default": null
+        },
         "visibleName": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -1833,16 +2763,21 @@ export const gatewaySchemas = {
             {
               "type": "null"
             }
-          ]
+          ],
+          "default": null
         },
         "rawId": {
+          "default": null,
           "type": [
             "string",
             "null"
           ]
         },
-        "rawIdentity": true,
+        "rawIdentity": {
+          "default": null
+        },
         "visibleName": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -1872,9 +2807,11 @@ export const gatewaySchemas = {
         {
           "type": "null"
         }
-      ]
+      ],
+      "default": null
     },
     "threadId": {
+      "default": null,
       "type": [
         "string",
         "null"
@@ -1901,12 +2838,14 @@ export const gatewaySchemas = {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
     "archived": {
+      "default": null,
       "type": [
         "boolean",
         "null"
       ]
     },
     "limit": {
+      "default": null,
       "format": "uint",
       "minimum": 0.0,
       "type": [
@@ -1915,6 +2854,7 @@ export const gatewaySchemas = {
       ]
     },
     "workdir": {
+      "default": null,
       "type": [
         "string",
         "null"
@@ -1957,9 +2897,46 @@ export const gatewaySchemas = {
   ThreadListResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "GatewayActivityView": {
+      "properties": {
+        "activeTurnId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "queuedTurns": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "running": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "queuedTurns",
+        "running"
+      ],
+      "type": "object"
+    },
     "SessionSummaryView": {
       "properties": {
+        "activity": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/GatewayActivityView"
+            }
+          ],
+          "default": {
+            "activeTurnId": null,
+            "queuedTurns": 0,
+            "running": false
+          }
+        },
         "archivedAtMs": {
+          "default": null,
           "format": "int64",
           "type": [
             "integer",
@@ -1967,12 +2944,14 @@ export const gatewaySchemas = {
           ]
         },
         "endReason": {
+          "default": null,
           "type": [
             "string",
             "null"
           ]
         },
         "endedAtMs": {
+          "default": null,
           "format": "int64",
           "type": [
             "integer",
@@ -1988,12 +2967,14 @@ export const gatewaySchemas = {
           "type": "integer"
         },
         "model": {
+          "default": null,
           "type": [
             "string",
             "null"
           ]
         },
         "provider": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -2007,6 +2988,7 @@ export const gatewaySchemas = {
           "type": "integer"
         },
         "title": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -2018,6 +3000,7 @@ export const gatewaySchemas = {
           "type": "integer"
         },
         "updatedAtMs": {
+          "default": null,
           "format": "int64",
           "type": [
             "integer",
@@ -2056,9 +3039,46 @@ export const gatewaySchemas = {
   ThreadMutationResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "GatewayActivityView": {
+      "properties": {
+        "activeTurnId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "queuedTurns": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "running": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "queuedTurns",
+        "running"
+      ],
+      "type": "object"
+    },
     "SessionSummaryView": {
       "properties": {
+        "activity": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/GatewayActivityView"
+            }
+          ],
+          "default": {
+            "activeTurnId": null,
+            "queuedTurns": 0,
+            "running": false
+          }
+        },
         "archivedAtMs": {
+          "default": null,
           "format": "int64",
           "type": [
             "integer",
@@ -2066,12 +3086,14 @@ export const gatewaySchemas = {
           ]
         },
         "endReason": {
+          "default": null,
           "type": [
             "string",
             "null"
           ]
         },
         "endedAtMs": {
+          "default": null,
           "format": "int64",
           "type": [
             "integer",
@@ -2087,12 +3109,14 @@ export const gatewaySchemas = {
           "type": "integer"
         },
         "model": {
+          "default": null,
           "type": [
             "string",
             "null"
           ]
         },
         "provider": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -2106,6 +3130,7 @@ export const gatewaySchemas = {
           "type": "integer"
         },
         "title": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -2117,6 +3142,7 @@ export const gatewaySchemas = {
           "type": "integer"
         },
         "updatedAtMs": {
+          "default": null,
           "format": "int64",
           "type": [
             "integer",
@@ -2164,6 +3190,638 @@ export const gatewaySchemas = {
     "threadId"
   ],
   "title": "ThreadDeleteResult",
+  "type": "object"
+},
+  CompletionListParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "cursor": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "scope": {
+      "$ref": "#/definitions/GatewayRequestScope"
+    },
+    "text": {
+      "type": "string"
+    },
+    "threadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "cursor",
+    "scope",
+    "text"
+  ],
+  "title": "CompletionListParams",
+  "type": "object"
+},
+  CompletionReplacement: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "end": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "start": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "end",
+    "start"
+  ],
+  "title": "CompletionReplacement",
+  "type": "object"
+},
+  CompletionItem: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayMentionTarget": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "skill"
+              ],
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "path": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "backend_ref": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "entrypoints": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "agent"
+              ],
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "source": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "file"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "relative_path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path",
+            "relative_path"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "capability"
+              ],
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "target_kind": {
+              "type": "string"
+            },
+            "uri": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "label",
+            "target_kind"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "properties": {
+    "detail": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "id": {
+      "type": "string"
+    },
+    "insertText": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "label": {
+      "type": "string"
+    },
+    "sigil": {
+      "type": "string"
+    },
+    "sortText": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "target": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayMentionTarget"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "id",
+    "insertText",
+    "kind",
+    "label",
+    "sigil"
+  ],
+  "title": "CompletionItem",
+  "type": "object"
+},
+  CompletionListResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "CompletionItem": {
+      "properties": {
+        "detail": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "insertText": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "sigil": {
+          "type": "string"
+        },
+        "sortText": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewayMentionTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "insertText",
+        "kind",
+        "label",
+        "sigil"
+      ],
+      "type": "object"
+    },
+    "CompletionReplacement": {
+      "properties": {
+        "end": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "start": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "end",
+        "start"
+      ],
+      "type": "object"
+    },
+    "GatewayMentionTarget": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "skill"
+              ],
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "path": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "backend_ref": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "entrypoints": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "agent"
+              ],
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "source": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "file"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "relative_path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path",
+            "relative_path"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "capability"
+              ],
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "target_kind": {
+              "type": "string"
+            },
+            "uri": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "label",
+            "target_kind"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "properties": {
+    "items": {
+      "items": {
+        "$ref": "#/definitions/CompletionItem"
+      },
+      "type": "array"
+    },
+    "replacement": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/CompletionReplacement"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "items"
+  ],
+  "title": "CompletionListResult",
+  "type": "object"
+},
+  CommandExecuteParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "command": {
+      "type": "string"
+    },
+    "scope": {
+      "$ref": "#/definitions/GatewayRequestScope"
+    },
+    "threadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "command",
+    "scope"
+  ],
+  "title": "CommandExecuteParams",
+  "type": "object"
+},
+  CommandExecuteResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "accepted": {
+      "type": "boolean"
+    },
+    "action": {
+      "default": null
+    },
+    "command": {
+      "type": "string"
+    },
+    "message": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "accepted",
+    "command"
+  ],
+  "title": "CommandExecuteResult",
   "type": "object"
 },
   TurnStartParams: {
@@ -2275,6 +3933,167 @@ export const gatewaySchemas = {
         }
       ]
     },
+    "GatewayMention": {
+      "properties": {
+        "range": {
+          "$ref": "#/definitions/GatewayMentionRange"
+        },
+        "target": {
+          "$ref": "#/definitions/GatewayMentionTarget"
+        },
+        "visibleText": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "range",
+        "target",
+        "visibleText"
+      ],
+      "type": "object"
+    },
+    "GatewayMentionRange": {
+      "properties": {
+        "end": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "start": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "end",
+        "start"
+      ],
+      "type": "object"
+    },
+    "GatewayMentionTarget": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "skill"
+              ],
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "path": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "backend_ref": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "entrypoints": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "agent"
+              ],
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "source": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "file"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "relative_path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path",
+            "relative_path"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "capability"
+              ],
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "target_kind": {
+              "type": "string"
+            },
+            "uri": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "label",
+            "target_kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "GatewayRequestScope": {
       "properties": {
         "source": {
@@ -2303,16 +4122,21 @@ export const gatewaySchemas = {
             {
               "type": "null"
             }
-          ]
+          ],
+          "default": null
         },
         "rawId": {
+          "default": null,
           "type": [
             "string",
             "null"
           ]
         },
-        "rawIdentity": true,
+        "rawIdentity": {
+          "default": null
+        },
         "visibleName": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -2334,6 +4158,13 @@ export const gatewaySchemas = {
     }
   },
   "properties": {
+    "agentName": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "input": {
       "default": [],
       "items": {
@@ -2341,13 +4172,22 @@ export const gatewaySchemas = {
       },
       "type": "array"
     },
+    "mentions": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/GatewayMention"
+      },
+      "type": "array"
+    },
     "model": {
+      "default": null,
       "type": [
         "string",
         "null"
       ]
     },
     "reasoningEffort": {
+      "default": null,
       "type": [
         "string",
         "null"
@@ -2357,12 +4197,14 @@ export const gatewaySchemas = {
       "$ref": "#/definitions/GatewayRequestScope"
     },
     "text": {
+      "default": null,
       "type": [
         "string",
         "null"
       ]
     },
     "threadId": {
+      "default": null,
       "type": [
         "string",
         "null"
@@ -2385,6 +4227,7 @@ export const gatewaySchemas = {
       "type": "string"
     },
     "threadId": {
+      "default": null,
       "type": [
         "string",
         "null"
@@ -2402,12 +4245,14 @@ export const gatewaySchemas = {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
     "sourceKey": {
+      "default": null,
       "type": [
         "string",
         "null"
       ]
     },
     "threadId": {
+      "default": null,
       "type": [
         "string",
         "null"
@@ -2434,12 +4279,14 @@ export const gatewaySchemas = {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
     "accepted": {
+      "default": null,
       "type": [
         "boolean",
         "null"
       ]
     },
     "cleared": {
+      "default": null,
       "format": "uint",
       "minimum": 0.0,
       "type": [
@@ -2448,6 +4295,7 @@ export const gatewaySchemas = {
       ]
     },
     "interrupted": {
+      "default": null,
       "type": [
         "boolean",
         "null"
@@ -2473,6 +4321,7 @@ export const gatewaySchemas = {
           "$ref": "#/definitions/BackendKind"
         },
         "nativeId": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -2493,6 +4342,7 @@ export const gatewaySchemas = {
           "type": "string"
         },
         "sourceKey": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -2534,12 +4384,233 @@ export const gatewaySchemas = {
       ],
       "type": "string"
     },
+    "TranscriptBlock": {
+      "properties": {
+        "artifactIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "body": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/TranscriptBlockKind"
+        },
+        "metadata": true,
+        "order": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "preview": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TranscriptToolResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/TranscriptBlockStatus"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifactIds",
+        "createdAtMs",
+        "id",
+        "kind",
+        "order",
+        "source",
+        "status",
+        "updatedAtMs"
+      ],
+      "type": "object"
+    },
+    "TranscriptBlockKind": {
+      "enum": [
+        "text",
+        "reasoning",
+        "toolCall",
+        "toolResult",
+        "tool",
+        "shell",
+        "file",
+        "web",
+        "mcp",
+        "clarify",
+        "permission",
+        "skill",
+        "agent",
+        "mailbox",
+        "status",
+        "diff",
+        "artifact"
+      ],
+      "type": "string"
+    },
+    "TranscriptBlockStatus": {
+      "enum": [
+        "pending",
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+        "needsInput",
+        "info"
+      ],
+      "type": "string"
+    },
+    "TranscriptEntry": {
+      "properties": {
+        "accounting": true,
+        "blocks": {
+          "items": {
+            "$ref": "#/definitions/TranscriptBlock"
+          },
+          "type": "array"
+        },
+        "createdAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "messageSeq": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "metadata": true,
+        "role": {
+          "$ref": "#/definitions/TranscriptEntryRole"
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/TranscriptBlockStatus"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "usage": true
+      },
+      "required": [
+        "blocks",
+        "createdAtMs",
+        "id",
+        "role",
+        "source",
+        "status",
+        "threadId",
+        "updatedAtMs"
+      ],
+      "type": "object"
+    },
+    "TranscriptEntryRole": {
+      "enum": [
+        "user",
+        "assistant",
+        "diagnostic"
+      ],
+      "type": "string"
+    },
+    "TranscriptToolResult": {
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "createdAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "isError": {
+          "type": "boolean"
+        },
+        "metadata": {
+          "default": null
+        },
+        "resultMessageSeq": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/definitions/TranscriptBlockStatus"
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "content",
+        "createdAtMs",
+        "isError",
+        "resultMessageSeq",
+        "status",
+        "updatedAtMs"
+      ],
+      "type": "object"
+    },
     "TurnRunResult": {
       "properties": {
         "finalAnswer": {
           "type": "string"
         },
         "model": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -2549,6 +4620,7 @@ export const gatewaySchemas = {
           "type": "string"
         },
         "provider": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -2573,6 +4645,13 @@ export const gatewaySchemas = {
     }
   },
   "properties": {
+    "committedEntries": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/TranscriptEntry"
+      },
+      "type": "array"
+    },
     "result": {
       "$ref": "#/definitions/TurnRunResult"
     },
@@ -2598,6 +4677,7 @@ export const gatewaySchemas = {
       "type": "string"
     },
     "model": {
+      "default": null,
       "type": [
         "string",
         "null"
@@ -2607,6 +4687,7 @@ export const gatewaySchemas = {
       "type": "string"
     },
     "provider": {
+      "default": null,
       "type": [
         "string",
         "null"
@@ -2664,6 +4745,7 @@ export const gatewaySchemas = {
       "type": "string"
     },
     "threadId": {
+      "default": null,
       "type": [
         "string",
         "null"
@@ -2681,6 +4763,7 @@ export const gatewaySchemas = {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
     "answers": {
+      "default": null,
       "items": {
         "items": {
           "type": "string"
@@ -2693,6 +4776,7 @@ export const gatewaySchemas = {
       ]
     },
     "cancel": {
+      "default": null,
       "type": [
         "boolean",
         "null"
@@ -2702,6 +4786,7 @@ export const gatewaySchemas = {
       "type": "string"
     },
     "threadId": {
+      "default": null,
       "type": [
         "string",
         "null"
@@ -2758,16 +4843,21 @@ export const gatewaySchemas = {
             {
               "type": "null"
             }
-          ]
+          ],
+          "default": null
         },
         "rawId": {
+          "default": null,
           "type": [
             "string",
             "null"
           ]
         },
-        "rawIdentity": true,
+        "rawIdentity": {
+          "default": null
+        },
         "visibleName": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -2803,6 +4893,7 @@ export const gatewaySchemas = {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
     "workdir": {
+      "default": null,
       "type": [
         "string",
         "null"
@@ -2833,145 +4924,6 @@ export const gatewaySchemas = {
     "workdir"
   ],
   "title": "SettingsReadResult",
-  "type": "object"
-},
-  DebugEventsParams: {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "properties": {
-    "limit": {
-      "format": "uint",
-      "minimum": 0.0,
-      "type": [
-        "integer",
-        "null"
-      ]
-    },
-    "threadId": {
-      "type": "string"
-    }
-  },
-  "required": [
-    "threadId"
-  ],
-  "title": "DebugEventsParams",
-  "type": "object"
-},
-  TimelineDebugEvent: {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "properties": {
-    "createdAtMs": {
-      "format": "int64",
-      "type": "integer"
-    },
-    "eventType": {
-      "type": "string"
-    },
-    "id": {
-      "format": "int64",
-      "type": "integer"
-    },
-    "payload": true,
-    "scope": true,
-    "source": {
-      "type": "string"
-    },
-    "status": {
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "summary": {
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "threadId": {
-      "type": "string"
-    },
-    "turnId": {
-      "type": [
-        "string",
-        "null"
-      ]
-    }
-  },
-  "required": [
-    "createdAtMs",
-    "eventType",
-    "id",
-    "source",
-    "threadId"
-  ],
-  "title": "TimelineDebugEvent",
-  "type": "object"
-},
-  DebugEventsResult: {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "definitions": {
-    "TimelineDebugEvent": {
-      "properties": {
-        "createdAtMs": {
-          "format": "int64",
-          "type": "integer"
-        },
-        "eventType": {
-          "type": "string"
-        },
-        "id": {
-          "format": "int64",
-          "type": "integer"
-        },
-        "payload": true,
-        "scope": true,
-        "source": {
-          "type": "string"
-        },
-        "status": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "summary": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "threadId": {
-          "type": "string"
-        },
-        "turnId": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "createdAtMs",
-        "eventType",
-        "id",
-        "source",
-        "threadId"
-      ],
-      "type": "object"
-    }
-  },
-  "properties": {
-    "events": {
-      "items": {
-        "$ref": "#/definitions/TimelineDebugEvent"
-      },
-      "type": "array"
-    }
-  },
-  "required": [
-    "events"
-  ],
-  "title": "DebugEventsResult",
   "type": "object"
 },
   ReadyzResult: {
@@ -3011,16 +4963,21 @@ export const gatewaySchemas = {
             {
               "type": "null"
             }
-          ]
+          ],
+          "default": null
         },
         "rawId": {
+          "default": null,
           "type": [
             "string",
             "null"
           ]
         },
-        "rawIdentity": true,
+        "rawIdentity": {
+          "default": null
+        },
         "visibleName": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -3050,7 +5007,8 @@ export const gatewaySchemas = {
         {
           "type": "null"
         }
-      ]
+      ],
+      "default": null
     },
     "workdir": {
       "type": "string"
@@ -3090,6 +5048,35 @@ export const gatewaySchemas = {
     "baseUrl": {
       "type": "string"
     },
+    "executableInode": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "executableModifiedMs": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "executablePath": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "executableSize": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "pid": {
       "format": "uint32",
       "minimum": 0.0,
@@ -3101,6 +5088,12 @@ export const gatewaySchemas = {
     "startedAtMs": {
       "format": "int64",
       "type": "integer"
+    },
+    "staticDir": {
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "version": {
       "type": "string"
@@ -3160,7 +5153,9 @@ export const gatewaySchemas = {
     "method": {
       "type": "string"
     },
-    "params": true
+    "params": {
+      "default": null
+    }
   },
   "required": [
     "id",
@@ -3179,7 +5174,9 @@ export const gatewaySchemas = {
     "method": {
       "type": "string"
     },
-    "params": true
+    "params": {
+      "default": null
+    }
   },
   "required": [
     "jsonrpc",
@@ -3232,7 +5229,9 @@ export const gatewaySchemas = {
           "format": "int64",
           "type": "integer"
         },
-        "data": true,
+        "data": {
+          "default": null
+        },
         "message": {
           "type": "string"
         }
@@ -3284,7 +5283,9 @@ export const gatewaySchemas = {
       "format": "int64",
       "type": "integer"
     },
-    "data": true,
+    "data": {
+      "default": null
+    },
     "message": {
       "type": "string"
     }
@@ -3302,6 +5303,7 @@ export const gatewaySchemas = {
     "ClarifyRespondParams": {
       "properties": {
         "answers": {
+          "default": null,
           "items": {
             "items": {
               "type": "string"
@@ -3314,6 +5316,7 @@ export const gatewaySchemas = {
           ]
         },
         "cancel": {
+          "default": null,
           "type": [
             "boolean",
             "null"
@@ -3323,6 +5326,7 @@ export const gatewaySchemas = {
           "type": "string"
         },
         "threadId": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -3334,22 +5338,53 @@ export const gatewaySchemas = {
       ],
       "type": "object"
     },
-    "DebugEventsParams": {
+    "CommandExecuteParams": {
       "properties": {
-        "limit": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
+        "command": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/definitions/GatewayRequestScope"
         },
         "threadId": {
-          "type": "string"
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
-        "threadId"
+        "command",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "CompletionListParams": {
+      "properties": {
+        "cursor": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "scope": {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        "text": {
+          "type": "string"
+        },
+        "threadId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "cursor",
+        "scope",
+        "text"
       ],
       "type": "object"
     },
@@ -3459,6 +5494,167 @@ export const gatewaySchemas = {
         }
       ]
     },
+    "GatewayMention": {
+      "properties": {
+        "range": {
+          "$ref": "#/definitions/GatewayMentionRange"
+        },
+        "target": {
+          "$ref": "#/definitions/GatewayMentionTarget"
+        },
+        "visibleText": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "range",
+        "target",
+        "visibleText"
+      ],
+      "type": "object"
+    },
+    "GatewayMentionRange": {
+      "properties": {
+        "end": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "start": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "end",
+        "start"
+      ],
+      "type": "object"
+    },
+    "GatewayMentionTarget": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "skill"
+              ],
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "path": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "backend_ref": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "entrypoints": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "agent"
+              ],
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "source": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "file"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "relative_path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path",
+            "relative_path"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "capability"
+              ],
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "target_kind": {
+              "type": "string"
+            },
+            "uri": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "label",
+            "target_kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "GatewayRequestScope": {
       "properties": {
         "source": {
@@ -3487,16 +5683,21 @@ export const gatewaySchemas = {
             {
               "type": "null"
             }
-          ]
+          ],
+          "default": null
         },
         "rawId": {
+          "default": null,
           "type": [
             "string",
             "null"
           ]
         },
-        "rawIdentity": true,
+        "rawIdentity": {
+          "default": null
+        },
         "visibleName": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -3537,6 +5738,7 @@ export const gatewaySchemas = {
           "type": "string"
         },
         "threadId": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -3552,6 +5754,7 @@ export const gatewaySchemas = {
     "SettingsReadParams": {
       "properties": {
         "workdir": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -3585,12 +5788,14 @@ export const gatewaySchemas = {
     "ThreadListParams": {
       "properties": {
         "archived": {
+          "default": null,
           "type": [
             "boolean",
             "null"
           ]
         },
         "limit": {
+          "default": null,
           "format": "uint",
           "minimum": 0.0,
           "type": [
@@ -3599,6 +5804,7 @@ export const gatewaySchemas = {
           ]
         },
         "workdir": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -3643,9 +5849,11 @@ export const gatewaySchemas = {
             {
               "type": "null"
             }
-          ]
+          ],
+          "default": null
         },
         "threadId": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -3668,12 +5876,14 @@ export const gatewaySchemas = {
     "TurnInterruptParams": {
       "properties": {
         "sourceKey": {
+          "default": null,
           "type": [
             "string",
             "null"
           ]
         },
         "threadId": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -3684,6 +5894,13 @@ export const gatewaySchemas = {
     },
     "TurnStartParams": {
       "properties": {
+        "agentName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "input": {
           "default": [],
           "items": {
@@ -3691,13 +5908,22 @@ export const gatewaySchemas = {
           },
           "type": "array"
         },
+        "mentions": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/GatewayMention"
+          },
+          "type": "array"
+        },
         "model": {
+          "default": null,
           "type": [
             "string",
             "null"
           ]
         },
         "reasoningEffort": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -3707,12 +5933,14 @@ export const gatewaySchemas = {
           "$ref": "#/definitions/GatewayRequestScope"
         },
         "text": {
+          "default": null,
           "type": [
             "string",
             "null"
           ]
         },
         "threadId": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -3733,6 +5961,7 @@ export const gatewaySchemas = {
           "type": "string"
         },
         "threadId": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -3967,6 +6196,42 @@ export const gatewaySchemas = {
       "properties": {
         "method": {
           "enum": [
+            "completion/list"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/CompletionListParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "command/execute"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/CommandExecuteParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
             "source/reset"
           ],
           "type": "string"
@@ -4034,24 +6299,6 @@ export const gatewaySchemas = {
         "params"
       ],
       "type": "object"
-    },
-    {
-      "properties": {
-        "method": {
-          "enum": [
-            "debug/events"
-          ],
-          "type": "string"
-        },
-        "params": {
-          "$ref": "#/definitions/DebugEventsParams"
-        }
-      },
-      "required": [
-        "method",
-        "params"
-      ],
-      "type": "object"
     }
   ],
   "title": "ClientRequest"
@@ -4072,6 +6319,7 @@ export const gatewaySchemas = {
           "$ref": "#/definitions/BackendKind"
         },
         "nativeId": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -4088,6 +6336,7 @@ export const gatewaySchemas = {
         {
           "properties": {
             "selectedSkills": {
+              "default": [],
               "items": {
                 "$ref": "#/definitions/GatewaySelectedSkill"
               },
@@ -4147,6 +6396,13 @@ export const gatewaySchemas = {
         },
         {
           "properties": {
+            "committedEntries": {
+              "default": [],
+              "items": {
+                "$ref": "#/definitions/TranscriptEntry"
+              },
+              "type": "array"
+            },
             "outcome": {
               "type": [
                 "string",
@@ -4177,10 +6433,16 @@ export const gatewaySchemas = {
         },
         {
           "properties": {
+            "blockId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "delta": {
               "type": "string"
             },
-            "itemId": {
+            "entryId": {
               "type": [
                 "string",
                 "null"
@@ -4191,7 +6453,7 @@ export const gatewaySchemas = {
             },
             "type": {
               "enum": [
-                "itemDelta"
+                "entryDelta"
               ],
               "type": "string"
             }
@@ -4205,21 +6467,21 @@ export const gatewaySchemas = {
         },
         {
           "properties": {
-            "item": {
-              "$ref": "#/definitions/TimelineItem"
+            "entry": {
+              "$ref": "#/definitions/TranscriptEntry"
             },
             "turnId": {
               "type": "string"
             },
             "type": {
               "enum": [
-                "itemStarted"
+                "entryStarted"
               ],
               "type": "string"
             }
           },
           "required": [
-            "item",
+            "entry",
             "turnId",
             "type"
           ],
@@ -4227,21 +6489,21 @@ export const gatewaySchemas = {
         },
         {
           "properties": {
-            "item": {
-              "$ref": "#/definitions/TimelineItem"
+            "entry": {
+              "$ref": "#/definitions/TranscriptEntry"
             },
             "turnId": {
               "type": "string"
             },
             "type": {
               "enum": [
-                "itemUpdated"
+                "entryUpdated"
               ],
               "type": "string"
             }
           },
           "required": [
-            "item",
+            "entry",
             "turnId",
             "type"
           ],
@@ -4249,21 +6511,21 @@ export const gatewaySchemas = {
         },
         {
           "properties": {
-            "item": {
-              "$ref": "#/definitions/TimelineItem"
+            "entry": {
+              "$ref": "#/definitions/TranscriptEntry"
             },
             "turnId": {
               "type": "string"
             },
             "type": {
               "enum": [
-                "itemCompleted"
+                "entryCompleted"
               ],
               "type": "string"
             }
           },
           "required": [
-            "item",
+            "entry",
             "turnId",
             "type"
           ],
@@ -4418,24 +6680,6 @@ export const gatewaySchemas = {
             "type"
           ],
           "type": "object"
-        },
-        {
-          "properties": {
-            "turnId": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "debugAvailable"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "turnId",
-            "type"
-          ],
-          "type": "object"
         }
       ]
     },
@@ -4463,6 +6707,7 @@ export const gatewaySchemas = {
           "type": "string"
         },
         "sourceKey": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -4513,7 +6758,7 @@ export const gatewaySchemas = {
       ],
       "type": "string"
     },
-    "TimelineItem": {
+    "TranscriptBlock": {
       "properties": {
         "artifactIds": {
           "items": {
@@ -4541,35 +6786,37 @@ export const gatewaySchemas = {
           "type": "string"
         },
         "kind": {
-          "$ref": "#/definitions/TimelineItemKind"
+          "$ref": "#/definitions/TranscriptBlockKind"
         },
         "metadata": true,
+        "order": {
+          "format": "int64",
+          "type": "integer"
+        },
         "preview": {
           "type": [
             "string",
             "null"
           ]
         },
-        "sequence": {
-          "format": "int64",
-          "type": "integer"
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TranscriptToolResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "source": {
           "type": "string"
         },
         "status": {
-          "$ref": "#/definitions/TimelineItemStatus"
-        },
-        "threadId": {
-          "type": "string"
+          "$ref": "#/definitions/TranscriptBlockStatus"
         },
         "title": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "turnId": {
           "type": [
             "string",
             "null"
@@ -4585,19 +6832,19 @@ export const gatewaySchemas = {
         "createdAtMs",
         "id",
         "kind",
-        "sequence",
+        "order",
         "source",
         "status",
-        "threadId",
         "updatedAtMs"
       ],
       "type": "object"
     },
-    "TimelineItemKind": {
+    "TranscriptBlockKind": {
       "enum": [
-        "prompt",
-        "assistant",
+        "text",
         "reasoning",
+        "toolCall",
+        "toolResult",
         "tool",
         "shell",
         "file",
@@ -4614,7 +6861,7 @@ export const gatewaySchemas = {
       ],
       "type": "string"
     },
-    "TimelineItemStatus": {
+    "TranscriptBlockStatus": {
       "enum": [
         "pending",
         "running",
@@ -4625,6 +6872,111 @@ export const gatewaySchemas = {
         "info"
       ],
       "type": "string"
+    },
+    "TranscriptEntry": {
+      "properties": {
+        "accounting": true,
+        "blocks": {
+          "items": {
+            "$ref": "#/definitions/TranscriptBlock"
+          },
+          "type": "array"
+        },
+        "createdAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "messageSeq": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "metadata": true,
+        "role": {
+          "$ref": "#/definitions/TranscriptEntryRole"
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/TranscriptBlockStatus"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "usage": true
+      },
+      "required": [
+        "blocks",
+        "createdAtMs",
+        "id",
+        "role",
+        "source",
+        "status",
+        "threadId",
+        "updatedAtMs"
+      ],
+      "type": "object"
+    },
+    "TranscriptEntryRole": {
+      "enum": [
+        "user",
+        "assistant",
+        "diagnostic"
+      ],
+      "type": "string"
+    },
+    "TranscriptToolResult": {
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "createdAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "isError": {
+          "type": "boolean"
+        },
+        "metadata": {
+          "default": null
+        },
+        "resultMessageSeq": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/definitions/TranscriptBlockStatus"
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "content",
+        "createdAtMs",
+        "isError",
+        "resultMessageSeq",
+        "status",
+        "updatedAtMs"
+      ],
+      "type": "object"
     },
     "TurnErrorPayload": {
       "properties": {
@@ -4639,6 +6991,13 @@ export const gatewaySchemas = {
     },
     "TurnResultPayload": {
       "properties": {
+        "committedEntries": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/TranscriptEntry"
+          },
+          "type": "array"
+        },
         "result": {
           "$ref": "#/definitions/TurnRunResult"
         },
@@ -4662,6 +7021,7 @@ export const gatewaySchemas = {
           "type": "string"
         },
         "model": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -4671,6 +7031,7 @@ export const gatewaySchemas = {
           "type": "string"
         },
         "provider": {
+          "default": null,
           "type": [
             "string",
             "null"

@@ -10,6 +10,14 @@ pub(crate) fn prompt_prefix_hash(metadata: &Option<Value>) -> Option<&str> {
         .filter(|value| !value.trim().is_empty())
 }
 
+pub(crate) fn prompt_prefix_version(metadata: &Option<Value>) -> Option<i64> {
+    metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("prompt_prefix"))
+        .and_then(|prefix| prefix.get("version"))
+        .and_then(Value::as_i64)
+}
+
 pub(crate) fn prefix_prompt_instruction_values(prefix: &PromptPrefixRecord) -> Vec<Value> {
     let mut slots = prefix
         .slots
@@ -482,6 +490,20 @@ pub(crate) fn filter_tool_declarations(
         .filter(|tool| effective.contains(tool.name.as_str()))
         .cloned()
         .collect()
+}
+
+pub(crate) fn tool_declarations_hash_from_declarations(declarations: &[ToolDeclaration]) -> String {
+    let values = declarations
+        .iter()
+        .map(|tool| {
+            serde_json::json!({
+                "name": &tool.name,
+                "description": &tool.description,
+                "parameters": &tool.parameters,
+            })
+        })
+        .collect::<Vec<_>>();
+    crate::prompt_assembly::stable_hash_hex(&serde_json::to_string(&values).unwrap_or_default())
 }
 
 pub(crate) fn export_document<'a>(

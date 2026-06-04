@@ -193,7 +193,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
     } else {
         None
     };
-    let tool_surface = assemble_tool_surface_with_capabilities(ToolSurfaceAssembly {
+    let tool_surface = assemble_tool_surface_with_warnings(ToolSurfaceAssembly {
         workdir: workdir.clone(),
         task_id: summary.id.clone(),
         mode,
@@ -209,16 +209,10 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
         extension_tools: Vec::new(),
         agents: agent_tools,
     });
-    let mut capability_parts = tool_surface.capability_parts;
     let mut tools = tool_surface.tools;
     tools = apply_agent_tool_policy(tools, selected_agent.as_ref(), mode);
     tools = apply_agent_hooks(tools, selected_agent.as_ref(), &workdir);
     let effective_tool_names = effective_tool_names(&tools);
-    let final_tool_names = effective_tool_names
-        .iter()
-        .cloned()
-        .collect::<std::collections::BTreeSet<_>>();
-    capability_parts.retain_selected_tools(&final_tool_names, "omitted by runtime tool policy");
     let prompt_agents = if options.no_agents {
         Vec::new()
     } else {
@@ -239,45 +233,6 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
         .then(|| developer_provider_role(&model_metadata.capabilities).to_string());
     let tool_declarations_hash = tool_declarations_hash(&tools);
     let selected_agent_summary = selected_agent_for_result(selected_agent.as_ref());
-    let provider_label = metadata
-        .get("provider_label")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or(summary.provider.as_str());
-    add_provider_capability(
-        &mut capability_parts,
-        ProviderCapabilityInput {
-            provider: &summary.provider,
-            provider_label,
-            model: &summary.model,
-            base_url: metadata.get("base_url").and_then(serde_json::Value::as_str),
-            api_key_env: metadata
-                .get("api_key_env")
-                .and_then(serde_json::Value::as_str),
-            reasoning_effort: metadata
-                .get("reasoning_effort")
-                .and_then(serde_json::Value::as_str),
-            context_limit: metadata
-                .get("context_limit")
-                .and_then(serde_json::Value::as_u64),
-        },
-    );
-    add_agent_capabilities(
-        &mut capability_parts,
-        selected_agent_summary.as_ref(),
-        !options.no_agents,
-        agent_catalog.agents.len(),
-        prompt_agents
-            .iter()
-            .map(|agent| agent.name.clone())
-            .collect(),
-    );
-    add_skill_capabilities(
-        &mut capability_parts,
-        &[],
-        !options.no_skills,
-        skill_catalog.skills.len(),
-        !prompt_skills.is_empty(),
-    );
     let assembly = assemble_main_prompt_prefix(MainPromptPrefixInput {
         mode,
         workdir: &workdir,
@@ -313,8 +268,6 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
         })),
     });
     let record = store.upsert_session_prompt_prefix(record)?;
-    let capability_snapshot = build_capability_snapshot(&summary.id, &record, capability_parts);
-    store.upsert_capability_snapshot(&capability_snapshot)?;
     if let Some(notice) = options.notice {
         store.set_session_metadata_field(
             &summary.id,

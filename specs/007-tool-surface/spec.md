@@ -57,8 +57,13 @@ defines agent tool-policy normalization.
 Tool implementations may come from built-in or external sources, but source mechanics do not define the tool surface contract.
 
 The AI generation request may include a refreshable tool snapshot from the agent-invocation scoped tool surface. The model-visible snapshot contains only declaration material required by the provider-facing tool API, such as the tool name, description, and input parameters. UI-only display metadata must remain outside this generation-request tool snapshot. Tool refresh does not define a dynamic tool API, hook API, plugin API, or model-visible toolset concept. [003 AI Protocol](../003-ai-protocol/spec.md) owns provider-neutral generation request semantics and provider-facing normalization.
+Prompt-prefix metadata may retain the effective tool names and declaration
+hash used for request reconstruction. The full declaration payload is
+reconstructable from the current registry by default; if the reconstructed
+payload does not match the recorded declaration hash, the request
+reconstruction must be labeled approximate.
 
-Tool surface facts may contribute to durable evidence for agent-invocation inspection. These facts may include selected toolsets, expanded tools, declaration snapshots, refresh facts, omitted unavailable tools, execution bindings, tool requests, execution outcomes, and tool-result relationships. [005 Durable Evidence](../005-durable-evidence/spec.md) defines which relationships must be representable.
+Tool surface facts may contribute to durable evidence for agent-invocation inspection. These facts may include selected toolsets, expanded tool names, declaration hashes, refresh facts, omitted unavailable tools, execution bindings, tool requests, execution outcomes, and tool-result relationships. [005 Durable Evidence](../005-durable-evidence/spec.md) defines which relationships must be representable. Ordinary durable evidence does not require persisting a full capability snapshot or full model-visible tool declaration payload.
 
 ## Toolsets
 

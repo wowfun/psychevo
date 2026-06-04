@@ -9,6 +9,6 @@
     "needsInput",
     "info"
   ],
-  "title": "TimelineItemStatus",
+  "title": "TranscriptBlockStatus",
   "type": "string"
 }

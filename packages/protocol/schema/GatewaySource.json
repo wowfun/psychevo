@@ -20,8 +20,11 @@
     "rawId": {
       "type": "string"
     },
-    "rawIdentity": true,
+    "rawIdentity": {
+      "default": null
+    },
     "visibleName": {
+      "default": null,
       "type": [
         "string",
         "null"

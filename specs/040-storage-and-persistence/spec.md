@@ -11,7 +11,7 @@ Define Psychevo's storage and persistence boundary for durable semantic facts.
 - persistence substrate for durable evidence
 - optional persistence boundary for session continuity
 - optional persistence boundary for memory
-- optional persistence boundary for capability extension facts that affect agent-invocation assembly
+- optional persistence boundary for exceptional capability extension facts that affect agent-invocation inspection
 - optional persistence boundary for gateway source-to-thread bindings
 - persistence attempt and outcome observability
 - retrieval by semantic relationship
@@ -45,7 +45,7 @@ Session continuity facts from [008 Session Continuity](../008-session-continuity
 
 Memory facts from [010 Memory System](../010-memory-system/spec.md) may be persisted when optional memory is enabled. Memory persistence must not replace durable evidence or session continuity as execution truth.
 
-Capability extension facts from [050 Capability Extensions](../050-capability-extensions/spec.md) may be persisted when they affect agent-invocation assembly or evidence inspection. Persistence must not turn storage into the source of extension semantics.
+Capability extension facts from [050 Capability Extensions](../050-capability-extensions/spec.md) are reconstructable by default from runtime assembly inputs, prompt-prefix metadata, message metadata, context evidence, and current capability discovery. Implementations may persist exceptional capability facts only when another spec requires inspection of a non-default decision such as conflict, rejection, unavailability, or degradation. Persistence must not turn storage into the source of extension semantics or require a full durable capability snapshot for ordinary request reconstruction.
 
 Gateway source-to-thread bindings from [021 Gateway](../021-gateway/spec.md) may be persisted when a caller-facing source uses `Persistent` lifetime and needs continuity across process restarts or transport reconnects. Persistence stores routing and lineage facts only; invocation-scoped and process-scoped source bindings are not persisted, and runtime sessions and durable evidence remain the execution truth.
 
@@ -60,6 +60,10 @@ A persistence outcome is the observable success or failure of a persistence atte
 This spec does not require runtime to fail closed, retry, block, abort an agent invocation, mark an agent invocation as failed, or use ACID transactions when persistence fails. Outcome presentation and execution impact belong to runtime and interface behavior outside this spec unless another spec defines a stricter rule.
 
 The baseline is final-fact persistence. Implementations may persist intermediate updates, streaming progress, or implementation records, but this spec does not require event-by-event persistence.
+Generic runtime debug observations are not part of the baseline persistence
+boundary. Persisting raw runtime/provider payloads or hidden event diagnostics
+requires a separate domain-specific sidecar spec with explicit retention and
+payload policy.
 
 Per-message metadata may carry durable metric facts for the message they
 annotate. For tool-result messages, implementations may persist tool execution

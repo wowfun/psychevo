@@ -92,6 +92,10 @@ Instruction context, attached context, and summary context may be model-visible 
 The assembled model context is an input to the generation request defined by [003 AI Protocol](../003-ai-protocol/spec.md). Model target, tool declarations, and generation controls are adjacent generation request inputs and remain outside model context. [007 Tool Surface](../007-tool-surface/spec.md) defines tool declaration semantics.
 
 Context assembly facts needed for agent-invocation inspection must be connectable to durable evidence. [005 Durable Evidence](../005-durable-evidence/spec.md) defines which durable evidence facts must be representable; this spec does not require full prompt snapshots.
+Versioned prompt-prefix records may retain prompt slot metadata and rendered
+slot text needed for request reconstruction. Capability assembly summaries are
+not context facts unless runtime projects their material into model-visible
+context.
 
 Context projection is not required to write source material or projected
 material into session messages. Runtime may persist model-visible runtime

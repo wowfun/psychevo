@@ -6,6 +6,10 @@ pub(crate) use std::time::Duration;
 
 pub(crate) use serde_json::{Value, json};
 
+pub(crate) use crate::agents::{
+    AgentBackendConfig, AgentBackendKind, AgentEntrypoint, default_peer_agent_entrypoints,
+    default_peer_client_capabilities, valid_agent_name,
+};
 pub(crate) use crate::error::{Error, Result};
 pub(crate) use crate::paths::canonical_workdir;
 pub(crate) use crate::types::{
@@ -28,11 +32,13 @@ pub(crate) struct RunConfig {
     pub(crate) project_context: ProjectContextConfig,
     pub(crate) tools: ToolSelectionConfig,
     pub(crate) toolsets: BTreeMap<String, CustomToolsetConfig>,
+    pub(crate) agent_backends: BTreeMap<String, AgentBackendConfig>,
 }
 
 // Configuration internals are split by loading, parsing, resolution, and catalog concerns.
 #[path = "config/types.rs"]
 pub(crate) mod config_types;
+pub use config_types::load_agent_backend_configs;
 #[allow(unused_imports)]
 pub(crate) use config_types::*;
 #[path = "config/file_env.rs"]

@@ -107,6 +107,167 @@
         }
       ]
     },
+    "GatewayMention": {
+      "properties": {
+        "range": {
+          "$ref": "#/definitions/GatewayMentionRange"
+        },
+        "target": {
+          "$ref": "#/definitions/GatewayMentionTarget"
+        },
+        "visibleText": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "range",
+        "target",
+        "visibleText"
+      ],
+      "type": "object"
+    },
+    "GatewayMentionRange": {
+      "properties": {
+        "end": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "start": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "end",
+        "start"
+      ],
+      "type": "object"
+    },
+    "GatewayMentionTarget": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "skill"
+              ],
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "path": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "backend_ref": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "entrypoints": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "agent"
+              ],
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "source": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "file"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "relative_path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path",
+            "relative_path"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "capability"
+              ],
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "target_kind": {
+              "type": "string"
+            },
+            "uri": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "label",
+            "target_kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "GatewayRequestScope": {
       "properties": {
         "source": {
@@ -135,16 +296,21 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "default": null
         },
         "rawId": {
+          "default": null,
           "type": [
             "string",
             "null"
           ]
         },
-        "rawIdentity": true,
+        "rawIdentity": {
+          "default": null
+        },
         "visibleName": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -166,6 +332,13 @@
     }
   },
   "properties": {
+    "agentName": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "input": {
       "default": [],
       "items": {
@@ -173,13 +346,22 @@
       },
       "type": "array"
     },
+    "mentions": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/GatewayMention"
+      },
+      "type": "array"
+    },
     "model": {
+      "default": null,
       "type": [
         "string",
         "null"
       ]
     },
     "reasoningEffort": {
+      "default": null,
       "type": [
         "string",
         "null"
@@ -189,12 +371,14 @@
       "$ref": "#/definitions/GatewayRequestScope"
     },
     "text": {
+      "default": null,
       "type": [
         "string",
         "null"
       ]
     },
     "threadId": {
+      "default": null,
       "type": [
         "string",
         "null"

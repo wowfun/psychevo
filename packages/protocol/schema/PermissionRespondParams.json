@@ -19,6 +19,7 @@
       "type": "string"
     },
     "threadId": {
+      "default": null,
       "type": [
         "string",
         "null"

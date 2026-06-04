@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "accepted": {
+      "type": "boolean"
+    },
+    "action": {
+      "default": null
+    },
+    "command": {
+      "type": "string"
+    },
+    "message": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "accepted",
+    "command"
+  ],
+  "title": "CommandExecuteResult",
+  "type": "object"
+}

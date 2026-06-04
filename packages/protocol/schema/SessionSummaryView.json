@@ -1,7 +1,46 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayActivityView": {
+      "properties": {
+        "activeTurnId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "queuedTurns": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "running": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "queuedTurns",
+        "running"
+      ],
+      "type": "object"
+    }
+  },
   "properties": {
+    "activity": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/GatewayActivityView"
+        }
+      ],
+      "default": {
+        "activeTurnId": null,
+        "queuedTurns": 0,
+        "running": false
+      }
+    },
     "archivedAtMs": {
+      "default": null,
       "format": "int64",
       "type": [
         "integer",
@@ -9,12 +48,14 @@
       ]
     },
     "endReason": {
+      "default": null,
       "type": [
         "string",
         "null"
       ]
     },
     "endedAtMs": {
+      "default": null,
       "format": "int64",
       "type": [
         "integer",
@@ -30,12 +71,14 @@
       "type": "integer"
     },
     "model": {
+      "default": null,
       "type": [
         "string",
         "null"
       ]
     },
     "provider": {
+      "default": null,
       "type": [
         "string",
         "null"
@@ -49,6 +92,7 @@
       "type": "integer"
     },
     "title": {
+      "default": null,
       "type": [
         "string",
         "null"
@@ -60,6 +104,7 @@
       "type": "integer"
     },
     "updatedAtMs": {
+      "default": null,
       "format": "int64",
       "type": [
         "integer",

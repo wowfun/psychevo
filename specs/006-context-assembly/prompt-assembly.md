@@ -99,8 +99,8 @@ It must not claim read, write, edit, shell, agent, or skill capability.
 
 ## Prefix Snapshot
 
-Runtime persists the latest session prefix snapshot keyed by session id. The
-snapshot stores the complete slot content for the session-stable prefix plus:
+Runtime persists session prefix snapshots by session id and snapshot version.
+The snapshot stores the complete slot content for the session-stable prefix plus:
 
 - prefix hash
 - tool declaration hash
@@ -109,10 +109,12 @@ snapshot stores the complete slot content for the session-stable prefix plus:
 - created time
 - invalidation reason
 
-Only the latest full prefix snapshot is retained. If a prior turn used an
-older prefix and the full old snapshot is no longer available, export/share
-surfaces must mark that prefix as approximate or unavailable instead of
-silently applying the latest full text.
+The latest prefix snapshot is used for the next accepted turn. Export/share
+surfaces reconstruct a prior request from the prefix version and hash recorded
+with that prompt or assistant generation. If that version is unavailable, or if
+the stored hash differs from the message metadata, the reconstruction must be
+marked approximate or unavailable instead of silently applying the latest full
+text.
 
 Runtime lazily creates a missing prefix snapshot on the next accepted turn
 using the current config and files. Current sessions do not automatically

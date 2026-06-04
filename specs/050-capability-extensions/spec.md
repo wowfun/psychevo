@@ -94,8 +94,9 @@ permission approval.
 
 The first implementation slice normalizes current runtime-owned capabilities
 without changing user-visible behavior. Runtime records the source,
-contribution, selection, snapshot, and evidence vocabulary for the capability
-surfaces it already assembles.
+contribution, selection, and evidence vocabulary for the capability surfaces it
+already assembles while treating ordinary capability assembly as reconstructable
+runtime state.
 
 This slice covers current tools, toolsets, MCP tool inputs, skills, agents,
 providers, and context assembly facts. Memory and resource categories may appear
@@ -105,34 +106,34 @@ behavior to satisfy this normalization layer.
 
 Tool contributions enter a runtime-owned tool router. The router is responsible
 for the model-visible tool declaration snapshot, dispatch lookup, duplicate
-visible-name rejection, and capability snapshot facts. It may represent direct,
-deferred, and hidden exposure, but the first slice does not add model-visible
-tool search or model-initiated dynamic activation. Deferred activation is an
-internal runtime API until a later spec defines caller-facing or model-facing
-activation behavior.
+visible-name rejection, and current invocation dispatch facts. It may represent
+direct, deferred, and hidden exposure, but the first slice does not add
+model-visible tool search or model-initiated dynamic activation. Deferred
+activation is an internal runtime API until a later spec defines caller-facing
+or model-facing activation behavior.
 
-Selection snapshots are frozen at the prompt-prefix boundary. A persisted
-capability snapshot is associated with the session and prompt-prefix version
-whose assembly it describes. Background refresh, later discovery, or deleted
-capabilities must not change that frozen snapshot; a new prompt-prefix version
-or new session records a new snapshot.
+Prompt-prefix records freeze the request reconstruction boundary. They retain
+the prompt slots, prompt hash, model-visible tool declaration hash, and minimal
+runtime metadata needed to reconstruct or mark approximate a later provider
+request. Ordinary selected/omitted capability lists are not a separate durable
+truth source.
 
-The first persistence shape is a canonical capability snapshot plus ordered
-selection events. It records enough facts to explain selected, omitted,
-rejected, unavailable, degraded, or deferred contributions without requiring a
-full append-only trace, a replay reducer, or relational decomposition of every
-source and contribution. Later storage specs may project the same facts into
-more queryable tables or traces.
+Capability conflicts, unavailable sources, rejected contributions, degraded
+sources, or deferred activation outcomes may be surfaced as current-run
+warnings or future explicit evidence records when another spec requires durable
+inspection. The first slice does not persist a canonical capability snapshot,
+ordered selection event list, or full selected contribution inventory.
 
 Because Psychevo is still pre-release, this slice may advance the local state
 schema directly instead of carrying migration code for earlier internal schema
 versions. Old development databases may require reset or replacement.
 
-Snapshot summaries must avoid storing capability payloads that already belong
-to adjacent evidence surfaces. Skill bodies, agent instructions, provider
-secrets, raw provider payloads, and full context text do not belong in the
-capability snapshot. Context content remains governed by [006 Context
-Assembly](../006-context-assembly/spec.md) and current context evidence.
+Capability summaries must avoid storing payloads that already belong to
+adjacent evidence surfaces. Skill bodies, agent instructions, provider secrets,
+raw provider payloads, full context text, and full tool declaration payloads do
+not belong in capability extension state by default. Context content remains
+governed by [006 Context Assembly](../006-context-assembly/spec.md) and current
+context evidence.
 
 ## Related Topics
 

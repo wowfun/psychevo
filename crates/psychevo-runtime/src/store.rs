@@ -15,7 +15,6 @@ pub(crate) use serde::{Deserialize, Serialize};
 pub(crate) use serde_json::{Map, Value, json};
 pub(crate) use uuid::Uuid;
 
-pub(crate) use crate::capabilities::CapabilitySnapshot;
 pub(crate) use crate::error::{Error, Result};
 pub(crate) use crate::messages::{sanitize_message_for_output, sanitize_message_for_tui_history};
 pub(crate) use crate::run::normalize_session_title;
@@ -24,7 +23,7 @@ pub(crate) use crate::types::{
     TuiMessageSummary,
 };
 
-pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 15;
+pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 18;
 pub(crate) const SESSION_REVERT_METADATA_KEY: &str = "revert";
 pub(crate) const MESSAGE_UNDO_METADATA_KEY: &str = "undo";
 pub(crate) const MESSAGE_PRE_SNAPSHOT_KEY: &str = "pre_snapshot";
@@ -207,205 +206,6 @@ pub struct SessionMessageRecord {
     pub message: Message,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TimelineItemKind {
-    Prompt,
-    Assistant,
-    Reasoning,
-    Tool,
-    Shell,
-    File,
-    Web,
-    Mcp,
-    Clarify,
-    Permission,
-    Skill,
-    Agent,
-    Mailbox,
-    Status,
-    Diff,
-    Artifact,
-}
-
-impl TimelineItemKind {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Prompt => "prompt",
-            Self::Assistant => "assistant",
-            Self::Reasoning => "reasoning",
-            Self::Tool => "tool",
-            Self::Shell => "shell",
-            Self::File => "file",
-            Self::Web => "web",
-            Self::Mcp => "mcp",
-            Self::Clarify => "clarify",
-            Self::Permission => "permission",
-            Self::Skill => "skill",
-            Self::Agent => "agent",
-            Self::Mailbox => "mailbox",
-            Self::Status => "status",
-            Self::Diff => "diff",
-            Self::Artifact => "artifact",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "prompt" => Some(Self::Prompt),
-            "assistant" => Some(Self::Assistant),
-            "reasoning" => Some(Self::Reasoning),
-            "tool" => Some(Self::Tool),
-            "shell" => Some(Self::Shell),
-            "file" => Some(Self::File),
-            "web" => Some(Self::Web),
-            "mcp" => Some(Self::Mcp),
-            "clarify" => Some(Self::Clarify),
-            "permission" => Some(Self::Permission),
-            "skill" => Some(Self::Skill),
-            "agent" => Some(Self::Agent),
-            "mailbox" => Some(Self::Mailbox),
-            "status" => Some(Self::Status),
-            "diff" => Some(Self::Diff),
-            "artifact" => Some(Self::Artifact),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TimelineItemStatus {
-    Pending,
-    Running,
-    Completed,
-    Failed,
-    Cancelled,
-    NeedsInput,
-    Info,
-}
-
-impl TimelineItemStatus {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Running => "running",
-            Self::Completed => "completed",
-            Self::Failed => "failed",
-            Self::Cancelled => "cancelled",
-            Self::NeedsInput => "needs_input",
-            Self::Info => "info",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "pending" => Some(Self::Pending),
-            "running" => Some(Self::Running),
-            "completed" => Some(Self::Completed),
-            "failed" => Some(Self::Failed),
-            "cancelled" => Some(Self::Cancelled),
-            "needs_input" => Some(Self::NeedsInput),
-            "info" => Some(Self::Info),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TimelineItemInput {
-    pub session_id: String,
-    pub item_id: String,
-    pub turn_id: Option<String>,
-    pub kind: TimelineItemKind,
-    pub status: TimelineItemStatus,
-    pub source: String,
-    pub title: Option<String>,
-    pub body_text: Option<String>,
-    pub preview_text: Option<String>,
-    pub detail_text: Option<String>,
-    pub artifact_ids: Vec<String>,
-    pub metadata: Option<Value>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TimelineItemRecord {
-    pub id: i64,
-    pub session_id: String,
-    pub item_seq: i64,
-    pub item_id: String,
-    pub turn_id: Option<String>,
-    pub kind: TimelineItemKind,
-    pub status: TimelineItemStatus,
-    pub source: String,
-    pub title: Option<String>,
-    pub body_text: Option<String>,
-    pub preview_text: Option<String>,
-    pub detail_text: Option<String>,
-    pub artifact_ids: Vec<String>,
-    pub metadata: Option<Value>,
-    pub created_at_ms: i64,
-    pub updated_at_ms: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TimelineArtifactInput {
-    pub session_id: String,
-    pub artifact_id: String,
-    pub kind: String,
-    pub mime_type: Option<String>,
-    pub title: Option<String>,
-    pub preview_text: Option<String>,
-    pub path: Option<String>,
-    pub metadata: Option<Value>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TimelineArtifactRecord {
-    pub id: i64,
-    pub session_id: String,
-    pub artifact_id: String,
-    pub kind: String,
-    pub mime_type: Option<String>,
-    pub title: Option<String>,
-    pub preview_text: Option<String>,
-    pub path: Option<String>,
-    pub metadata: Option<Value>,
-    pub created_at_ms: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TimelineDebugEventInput {
-    pub session_id: String,
-    pub turn_id: Option<String>,
-    pub event_type: String,
-    pub source: String,
-    pub scope: Option<Value>,
-    pub status: Option<String>,
-    pub summary: Option<String>,
-    pub payload: Option<Value>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TimelineDebugEventRecord {
-    pub id: i64,
-    pub session_id: String,
-    pub turn_id: Option<String>,
-    pub event_type: String,
-    pub source: String,
-    pub scope: Option<Value>,
-    pub status: Option<String>,
-    pub summary: Option<String>,
-    pub payload: Option<Value>,
-    pub created_at_ms: i64,
-}
-
 #[derive(Clone)]
 pub struct SqliteStore {
     pub(crate) inner: Arc<SqliteStoreInner>,
@@ -441,10 +241,6 @@ use store_context_evidence::*;
 pub(crate) mod store_prompt_prefix;
 #[allow(unused_imports)]
 use store_prompt_prefix::*;
-#[path = "store/capability_snapshots.rs"]
-pub(crate) mod store_capability_snapshots;
-#[allow(unused_imports)]
-use store_capability_snapshots::*;
 #[path = "store/agents.rs"]
 pub(crate) mod store_agents;
 pub use store_agents::*;
@@ -458,10 +254,6 @@ pub(crate) mod store_compactions;
 use store_compactions::*;
 #[path = "store/gateway_bindings.rs"]
 pub(crate) mod store_gateway_bindings;
-#[path = "store/timeline.rs"]
-pub(crate) mod store_timeline;
-#[allow(unused_imports)]
-use store_timeline::*;
 #[path = "store/lifecycle.rs"]
 pub(crate) mod store_lifecycle;
 #[allow(unused_imports)]

@@ -387,6 +387,143 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn export_last_provider_request_uses_message_prompt_prefix_version() {
+        let tmp = TempDir::new().expect("tmp");
+        let db = tmp.path().join("state.db");
+        let store = SqliteStore::open(&db).expect("store");
+        let session = store
+            .create_session_with_metadata(
+                tmp.path(),
+                "run",
+                "model",
+                "provider",
+                Some(serde_json::json!({
+                    "base_url": "https://example.test/v1",
+                    "mode": "default",
+                    "model_metadata": {
+                        "capabilities": {
+                            "tool_call": true
+                        }
+                    }
+                })),
+            )
+            .expect("session");
+        store
+            .upsert_session_prompt_prefix(PromptPrefixRecord {
+                session_id: session.clone(),
+                version: 0,
+                created_at_ms: 1,
+                provider: "provider".to_string(),
+                model: "model".to_string(),
+                prefix_hash: "old-prefix".to_string(),
+                tool_declarations_hash: "old-tools-hash".to_string(),
+                invalidation_reason: Some("new_session".to_string()),
+                slots: vec![PromptPrefixSlotRecord {
+                    slot: "base/mode".to_string(),
+                    tier: "base".to_string(),
+                    semantic_role: "base_policy".to_string(),
+                    provider_role: "system".to_string(),
+                    order: 0,
+                    content: "old prefix content".to_string(),
+                    content_hash: "old".to_string(),
+                    source_kind: Some("runtime".to_string()),
+                    source_name: Some("mode".to_string()),
+                    source_path: None,
+                }],
+                metadata: Some(serde_json::json!({
+                    "mode": "default",
+                    "effective_tools": []
+                })),
+            })
+            .expect("old prefix");
+        store
+            .upsert_session_prompt_prefix(PromptPrefixRecord {
+                session_id: session.clone(),
+                version: 0,
+                created_at_ms: 2,
+                provider: "provider".to_string(),
+                model: "model".to_string(),
+                prefix_hash: "new-prefix".to_string(),
+                tool_declarations_hash: "new-tools-hash".to_string(),
+                invalidation_reason: Some("runtime_context_changed".to_string()),
+                slots: vec![PromptPrefixSlotRecord {
+                    slot: "base/mode".to_string(),
+                    tier: "base".to_string(),
+                    semantic_role: "base_policy".to_string(),
+                    provider_role: "system".to_string(),
+                    order: 0,
+                    content: "new prefix content".to_string(),
+                    content_hash: "new".to_string(),
+                    source_kind: Some("runtime".to_string()),
+                    source_name: Some("mode".to_string()),
+                    source_path: None,
+                }],
+                metadata: Some(serde_json::json!({
+                    "mode": "default",
+                    "effective_tools": []
+                })),
+            })
+            .expect("new prefix");
+        store
+            .append_message_with_undo_snapshot_metadata_and_context_evidence(
+                &session,
+                &user_text_message("use old prefix"),
+                Some(serde_json::json!({
+                    "prompt_prefix": {
+                        "hash": "old-prefix",
+                        "version": 1,
+                        "created_at_ms": 1,
+                        "provider": "provider",
+                        "model": "model",
+                        "tool_declarations_hash": "old-tools-hash",
+                        "effective_tools": []
+                    }
+                })),
+                None,
+                &[],
+            )
+            .expect("append user");
+        store
+            .append_message(
+                &session,
+                &Message::Assistant {
+                    content: vec![AssistantBlock::Text {
+                        text: "done".to_string(),
+                    }],
+                    timestamp_ms: 3,
+                    finish_reason: Some("stop".to_string()),
+                    outcome: Outcome::Normal,
+                    model: Some("model".to_string()),
+                    provider: Some("provider".to_string()),
+                },
+            )
+            .expect("append assistant");
+
+        let artifact = render_session_export(
+            &store,
+            &session,
+            SessionExportOptions {
+                format: SessionExportFormat::Json,
+                include: SessionExportIncludeSet::from_values([
+                    SessionExportInclude::Header,
+                    SessionExportInclude::LastProviderRequest,
+                ]),
+                artifact_kind: SessionArtifactKind::Export,
+            },
+        )
+        .expect("export");
+        let value: Value = serde_json::from_str(&artifact.content).expect("json");
+        assert_eq!(
+            value["header"]["prompt_prefix"]["prefix_hash"],
+            serde_json::json!("new-prefix")
+        );
+        let body_text =
+            serde_json::to_string(&value["last_provider_request"]["body"]).expect("body");
+        assert!(body_text.contains("old prefix content"));
+        assert!(!body_text.contains("new prefix content"));
+    }
+
+    #[test]
     fn export_last_provider_request_reconstructs_clarify_declaration() {
         let tmp = TempDir::new().expect("tmp");
         let db = tmp.path().join("state.db");

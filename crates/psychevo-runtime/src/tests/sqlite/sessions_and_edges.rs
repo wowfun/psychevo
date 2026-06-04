@@ -1,13 +1,10 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
-use crate::capabilities::{
-    CapabilityCategory, CapabilityContributionRecord, CapabilitySnapshot, CapabilitySnapshotParts,
-    source_record,
-};
+use crate::store::{PromptPrefixRecord, PromptPrefixSlotRecord};
 
 #[test]
-pub(crate) fn sqlite_schema_v15_rejects_old_state_databases() {
-    for version in 1..=14 {
+pub(crate) fn sqlite_schema_v18_rejects_old_state_databases() {
+    for version in 1..=17 {
         let temp = tempdir().expect("temp");
         let db = temp.path().join(format!("v{version}.db"));
         {
@@ -32,7 +29,7 @@ pub(crate) fn sqlite_schema_v15_rejects_old_state_databases() {
 }
 
 #[test]
-pub(crate) fn sqlite_schema_v15_rejects_unknown_state_database() {
+pub(crate) fn sqlite_schema_v18_rejects_unknown_state_database() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("old.db");
     {
@@ -52,7 +49,8 @@ pub(crate) fn sqlite_schema_v15_rejects_unknown_state_database() {
 }
 
 #[test]
-pub(crate) fn sqlite_schema_v15_stores_timeline_capability_snapshots_and_gateway_bindings() {
+pub(crate) fn sqlite_schema_v18_stores_prompt_prefixes_and_gateway_bindings_without_runtime_debug()
+{
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
@@ -69,104 +67,27 @@ pub(crate) fn sqlite_schema_v15_stores_timeline_capability_snapshots_and_gateway
         )
         .expect("message");
 
-    let item = store
-        .upsert_timeline_item(TimelineItemInput {
-            session_id: session_id.clone(),
-            item_id: "diff:1".to_string(),
-            turn_id: Some("turn:1".to_string()),
-            kind: TimelineItemKind::Diff,
-            status: TimelineItemStatus::Completed,
-            source: "slash:/diff".to_string(),
-            title: Some("D I F F".to_string()),
-            body_text: Some("diff --git a/a b/a\n".to_string()),
-            preview_text: Some("a/a".to_string()),
-            detail_text: None,
-            artifact_ids: vec!["artifact:diff:1".to_string()],
-            metadata: Some(json!({
-                "message_session_seq": message_seq,
-                "truncated": false,
-            })),
-        })
-        .expect("timeline item");
-    store
-        .upsert_timeline_artifact(TimelineArtifactInput {
-            session_id: session_id.clone(),
-            artifact_id: "artifact:diff:1".to_string(),
-            kind: "diff".to_string(),
-            mime_type: Some("text/x-diff".to_string()),
-            title: Some("D I F F".to_string()),
-            preview_text: Some("diff --git a/a b/a".to_string()),
-            path: None,
-            metadata: Some(json!({ "truncated": false })),
-        })
-        .expect("timeline artifact");
-    store
-        .append_timeline_debug_event(TimelineDebugEventInput {
-            session_id: session_id.clone(),
-            turn_id: Some("turn:1".to_string()),
-            event_type: "hook.completed".to_string(),
-            source: "test".to_string(),
-            scope: Some(json!({ "tool": "diff" })),
-            status: Some("ok".to_string()),
-            summary: Some("hook finished".to_string()),
-            payload: Some(json!({ "duration_ms": 5 })),
-        })
-        .expect("debug event");
-
-    assert_eq!(item.item_seq, 1);
+    assert_eq!(message_seq, 1);
     let conn = Connection::open(&db).expect("db");
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 15);
+    assert_eq!(user_version, 18);
+    assert!(sqlite_columns(&conn, "timeline_items").is_empty());
+    assert!(sqlite_columns(&conn, "timeline_artifacts").is_empty());
+    assert!(sqlite_columns(&conn, "timeline_debug_events").is_empty());
+    assert!(sqlite_columns(&conn, "runtime_debug_events").is_empty());
+    assert!(sqlite_columns(&conn, "capability_snapshots").is_empty());
     assert!(
-        sqlite_columns(&conn, "timeline_items")
+        sqlite_columns(&conn, "session_prompt_prefixes")
             .iter()
-            .any(|name| name == "kind")
-    );
-    assert!(
-        sqlite_columns(&conn, "timeline_artifacts")
-            .iter()
-            .any(|name| name == "preview_text")
-    );
-    assert!(
-        sqlite_columns(&conn, "timeline_debug_events")
-            .iter()
-            .any(|name| name == "payload_json")
-    );
-    assert!(
-        sqlite_columns(&conn, "capability_snapshots")
-            .iter()
-            .any(|name| name == "snapshot_json")
+            .any(|name| name == "slots_json")
     );
     assert!(
         sqlite_columns(&conn, "gateway_source_bindings")
             .iter()
             .any(|name| name == "raw_identity_json")
     );
-    let items = store.load_timeline_items(&session_id).expect("items");
-    assert_eq!(items.len(), 1);
-    assert_eq!(items[0].kind, TimelineItemKind::Diff);
-    assert_eq!(items[0].status, TimelineItemStatus::Completed);
-    assert_eq!(items[0].artifact_ids, vec!["artifact:diff:1"]);
-    assert_eq!(
-        items[0].metadata,
-        Some(json!({
-            "message_session_seq": message_seq,
-            "truncated": false,
-        }))
-    );
-    let artifacts = store
-        .load_timeline_artifacts(&session_id)
-        .expect("artifacts");
-    assert_eq!(artifacts.len(), 1);
-    assert_eq!(artifacts[0].artifact_id, "artifact:diff:1");
-    let debug = store
-        .load_timeline_debug_events(&session_id, 10)
-        .expect("debug events");
-    assert_eq!(debug.len(), 1);
-    assert_eq!(debug[0].event_type, "hook.completed");
-    assert_eq!(debug[0].payload, Some(json!({ "duration_ms": 5 })));
 }
 
 #[test]
@@ -252,7 +173,7 @@ pub(crate) fn sqlite_gateway_source_binding_round_trips_and_rebinds() {
 }
 
 #[test]
-pub(crate) fn sqlite_capability_snapshot_round_trips_by_session_and_prefix_version() {
+pub(crate) fn sqlite_prompt_prefixes_round_trip_by_session_and_version() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
@@ -261,41 +182,74 @@ pub(crate) fn sqlite_capability_snapshot_round_trips_by_session_and_prefix_versi
         .create_session_with_metadata(&workdir, "run", "model", "provider", None)
         .expect("session");
 
-    let mut parts = CapabilitySnapshotParts::default();
-    parts.push_source(source_record(
-        "provider:mock",
-        "provider_adapter",
-        "mock",
-        Some("Mock".to_string()),
-        "session_snapshot",
-        None,
-    ));
-    parts.push_selected(CapabilityContributionRecord {
-        id: "provider:mock:model:fake".to_string(),
-        source_id: "provider:mock".to_string(),
-        category: CapabilityCategory::Provider,
-        raw_name: "mock/fake".to_string(),
-        visible_name: Some("mock/fake".to_string()),
-        exposure: None,
-        status: "selected".to_string(),
-        reason: None,
-        metadata: Some(json!({ "model": "fake" })),
-    });
-    let snapshot = CapabilitySnapshot::from_parts(session_id.clone(), 7, 42, parts);
-    store
-        .upsert_capability_snapshot(&snapshot)
-        .expect("snapshot");
+    let first = store
+        .upsert_session_prompt_prefix(PromptPrefixRecord {
+            session_id: session_id.clone(),
+            version: 0,
+            created_at_ms: 10,
+            provider: "provider".to_string(),
+            model: "model".to_string(),
+            prefix_hash: "prefix-a".to_string(),
+            tool_declarations_hash: "tools-a".to_string(),
+            invalidation_reason: Some("new_session".to_string()),
+            slots: vec![PromptPrefixSlotRecord {
+                slot: "base/mode".to_string(),
+                tier: "base".to_string(),
+                semantic_role: "instruction".to_string(),
+                provider_role: "system".to_string(),
+                order: 0,
+                content: "mode a".to_string(),
+                content_hash: "hash-a".to_string(),
+                source_kind: Some("runtime".to_string()),
+                source_name: Some("mode".to_string()),
+                source_path: None,
+            }],
+            metadata: Some(json!({ "effective_tools": ["read"] })),
+        })
+        .expect("first prefix");
+    let second = store
+        .upsert_session_prompt_prefix(PromptPrefixRecord {
+            session_id: session_id.clone(),
+            version: 0,
+            created_at_ms: 20,
+            provider: "provider".to_string(),
+            model: "model".to_string(),
+            prefix_hash: "prefix-b".to_string(),
+            tool_declarations_hash: "tools-b".to_string(),
+            invalidation_reason: Some("runtime_context_changed".to_string()),
+            slots: vec![PromptPrefixSlotRecord {
+                slot: "base/mode".to_string(),
+                tier: "base".to_string(),
+                semantic_role: "instruction".to_string(),
+                provider_role: "system".to_string(),
+                order: 0,
+                content: "mode b".to_string(),
+                content_hash: "hash-b".to_string(),
+                source_kind: Some("runtime".to_string()),
+                source_name: Some("mode".to_string()),
+                source_path: None,
+            }],
+            metadata: Some(json!({ "effective_tools": ["read", "write"] })),
+        })
+        .expect("second prefix");
 
-    let loaded = store
-        .load_capability_snapshot(&session_id, 7)
-        .expect("load snapshot")
-        .expect("snapshot exists");
-    assert_eq!(loaded, snapshot);
+    assert_eq!(first.version, 1);
+    assert_eq!(second.version, 2);
     assert_eq!(
         store
-            .load_latest_capability_snapshot(&session_id)
-            .expect("latest snapshot"),
-        Some(snapshot)
+            .load_session_prompt_prefix_version(&session_id, 1)
+            .expect("load v1")
+            .expect("v1")
+            .prefix_hash,
+        "prefix-a"
+    );
+    assert_eq!(
+        store
+            .load_session_prompt_prefix(&session_id)
+            .expect("load latest")
+            .expect("latest")
+            .prefix_hash,
+        "prefix-b"
     );
 }
 

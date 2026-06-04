@@ -29,16 +29,21 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "default": null
         },
         "rawId": {
+          "default": null,
           "type": [
             "string",
             "null"
           ]
         },
-        "rawIdentity": true,
+        "rawIdentity": {
+          "default": null
+        },
         "visibleName": {
+          "default": null,
           "type": [
             "string",
             "null"

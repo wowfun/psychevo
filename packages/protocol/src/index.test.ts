@@ -16,21 +16,36 @@ describe("ThreadSnapshotSchema", () => {
         backend: { kind: "psychevo", nativeId: "s1" },
         sourceKey: "web:workdir:abc"
       },
-      items: [
+      entries: [
         {
-          id: "message:1:prompt",
+          id: "message:1:user",
           threadId: "s1",
           turnId: "message:1",
-          sequence: 1,
-          kind: "prompt",
+          messageSeq: 1,
+          role: "user",
           status: "completed",
           source: "runtime.message",
-          title: null,
-          body: "hello",
-          preview: "hello",
-          detail: "hello",
-          artifactIds: [],
+          blocks: [
+            {
+              id: "message:1:user:text",
+              kind: "text",
+              status: "completed",
+              order: 0,
+              source: "runtime.message",
+              title: null,
+              body: "hello",
+              preview: "hello",
+              detail: "hello",
+              artifactIds: [],
+              metadata: null,
+              result: null,
+              createdAtMs: 1,
+              updatedAtMs: 1
+            }
+          ],
           metadata: null,
+          usage: null,
+          accounting: null,
           createdAtMs: 1,
           updatedAtMs: 1
         },
@@ -38,16 +53,31 @@ describe("ThreadSnapshotSchema", () => {
           id: "message:2:assistant",
           threadId: "s1",
           turnId: "message:2",
-          sequence: 2,
-          kind: "assistant",
+          messageSeq: 2,
+          role: "assistant",
           status: "completed",
           source: "runtime.message",
-          title: null,
-          body: "hi",
-          preview: "hi",
-          detail: "hi",
-          artifactIds: [],
+          blocks: [
+            {
+              id: "message:2:assistant:text",
+              kind: "text",
+              status: "completed",
+              order: 0,
+              source: "runtime.message",
+              title: null,
+              body: "hi",
+              preview: "hi",
+              detail: "hi",
+              artifactIds: [],
+              metadata: null,
+              result: null,
+              createdAtMs: 2,
+              updatedAtMs: 2
+            }
+          ],
           metadata: null,
+          usage: null,
+          accounting: null,
           createdAtMs: 2,
           updatedAtMs: 2
         }
@@ -58,6 +88,6 @@ describe("ThreadSnapshotSchema", () => {
     });
 
     expect(parsed.thread?.id).toBe("s1");
-    expect(parsed.items).toHaveLength(2);
+    expect(parsed.entries).toHaveLength(2);
   });
 });

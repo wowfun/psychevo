@@ -5,11 +5,13 @@ psychevo_self_edit: deny
 
 # 211. pevo TUI Rendering Evidence Projection
 
-Define how runtime events become semantic ledger evidence and expandable transcript rows.
+Define how shared transcript blocks and live Gateway observations become
+semantic ledger evidence and expandable transcript rows.
 
 ## Evidence Projection
 
-TUI renders runtime events into semantic ledger evidence:
+TUI renders transcript blocks and live observations into semantic ledger
+evidence:
 
 - user prompts become unlabeled dark prompt blocks without a left rail
 - folded reasoning becomes flat `Thinking` evidence; explicit new paragraphs in
@@ -20,11 +22,11 @@ TUI renders runtime events into semantic ledger evidence:
   `web_fetch <url>`. Built-in and extension tools use the same title shape;
   unknown tools fall back to `tool_name <primary argument>` or `tool_name`
   and must not render as a separate `Tool <name>` style.
-- tool display metadata is UI-only. Runtime may attach a display snapshot to
-  pending and execution events so TUI can choose title, summary, and detail
-  fields without hardcoding every tool name, but that metadata must not enter
-  provider-facing tool declarations, system prompts, or model-visible tool
-  results.
+- tool display metadata is UI-only. Runtime or Gateway may attach a display
+  snapshot to pending and execution observations so TUI can choose title,
+  summary, and detail fields without hardcoding every tool name, but that
+  metadata must not enter provider-facing tool declarations, system prompts, or
+  model-visible tool results.
 - TUI prefers display snapshots when available, otherwise it uses a generic
   presenter fallback over common argument and result fields. The fallback must
   keep rows tool-name-first and must prefer compact summaries over large
@@ -53,8 +55,8 @@ TUI renders runtime events into semantic ledger evidence:
   writes render as compact terminal interaction evidence, not as ordinary
   `write_stdin` tool rows.
 - before a tool completes, fullscreen TUI may project transient active evidence
-  from streaming assistant tool-call blocks, runtime pending tool-call input
-  events, and tool-execution start events. Active and completed rows keep the
+  from streaming assistant tool-call blocks, pending tool-call input
+  observations, and tool-execution start observations. Active and completed rows keep the
   same tool-name-first title language; completion updates the same row in place
   and may fill in a more concrete path, query, or command. Active rows should
   not show a redundant body line that says only `running` or `preparing`; the
@@ -89,14 +91,15 @@ resuming the session to continue.
 User-confirmed interrupted turns show `interrupted` in turn metadata instead of
 counting the interrupted tool as `1 failure`.
 
-Active tool evidence is local TUI projection only. Runtime must surface a
-named pending tool-call input event as soon as a provider streams the tool name,
-before waiting for complete JSON arguments or local execution. While the model
-is still producing tool input, the transcript shows a short `preparing` body
-with the tool name if arguments are not yet complete, for example `write`,
-`read`, or `exec_command`. Once complete arguments are available, or once the
-corresponding `tool_execution_start` arrives, the active title should update to
-the concrete path/query/command without inserting a duplicate row. Active tool
+Active tool evidence is local TUI projection only. The live transcript stream
+must surface a named pending tool-call input observation as soon as a provider
+streams the tool name, before waiting for complete JSON arguments or local
+execution. While the model is still producing tool input, the transcript shows
+a short `preparing` body with the tool name if arguments are not yet complete,
+for example `write`, `read`, or `exec_command`. Once complete arguments are
+available, or once the corresponding `tool_execution_start` arrives, the active
+title should update to the concrete path/query/command without inserting a
+duplicate row. Active tool
 rows match primarily by `tool_call_id`; if the id has not arrived yet,
 fullscreen TUI uses the assistant tool-call `content_index:call_index` pair
 scoped to the current assistant message as a temporary key and migrates it when
@@ -127,22 +130,25 @@ Transcript folding is row-level only. The renderer must not synthesize
 `Thinking` or `Tool calls (N)` section headers. `Thinking` rows and tool
 evidence rows are rendered through the same ledger evidence row component and
 are individually foldable when they have rendered detail text. Short rows
-default open; selecting an open foldable row shows `▾ collapse`, and collapsed
-short rows show `▸ details`. Long `exec_command` command titles stay
-single-line with ellipsis in the title row so elapsed time remains visible, but
-rows with long command titles can expand to show the complete wrapped command
-below the title.
+default open and keep a two-state interaction: open body with `▾ collapse`, or
+title-only with `▸ details`. Long body rows use a three-state interaction:
+middle-folded preview, full body with `▾ collapse`, and title-only with
+`▸ details`; toggling cycles preview -> full -> title-only -> preview. Long
+`exec_command` command titles stay single-line with ellipsis in the title row
+so elapsed time remains visible, but rows with long command titles can expand
+to show the complete wrapped command below the title.
 Long Thinking bodies and long tool
 outputs use the same default collapse threshold: eight logical lines, 200
 display tokens, or roughly 1200 display cells. Display-token counting is a
 local UI heuristic: ordinary whitespace-delimited spans count as one token, and
 long unbroken spans such as table separators, URLs, minified JSON, or CJK runs
 are charged in display-cell chunks so they cannot bypass the token threshold.
-Line-count previews are still subject to the display-token and display-cell
-budgets; if the first visible logical lines would exceed either budget, the row
-uses a bounded token/width preview instead of showing all of those lines.
-Line-count collapses show `▸ N more lines`; token- or width-only collapses
-whose omitted line count is not meaningful show `▸ more output`.
+Line-count previews keep the first 2 logical lines and last 4 logical lines.
+They are still subject to the display-token and display-cell budgets; if the
+visible logical lines would exceed either budget, the row uses a bounded
+token/width preview instead of showing all of those lines. Line-count collapses
+show `▸ N more lines`; token- or width-only collapses whose omitted line count
+is not meaningful show `▸ more output`.
 This folding is a safety valve after the presenter has selected a visible body.
 Tools that return large content, such as fetched web pages, should display a
 compact status summary by default and keep the returned content available only

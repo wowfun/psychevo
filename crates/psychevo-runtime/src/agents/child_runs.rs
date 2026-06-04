@@ -49,6 +49,12 @@ pub(crate) async fn spawn_subagent(
         .find(|agent| agent.name == agent_name)
         .cloned()
         .ok_or_else(|| Error::Config(format!("unknown agent: {agent_name}")))?;
+    if !agent.supports_entrypoint(AgentEntrypoint::Subagent) {
+        return Err(Error::Config(format!(
+            "agent `{}` does not support subagent execution",
+            agent.name
+        )));
+    }
     if let Some(allowed) = &context.allowed_agent_names
         && !allowed.contains(&agent.name)
     {
@@ -472,7 +478,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     child_agent_tool_context.parent_context_snapshot = previous_messages.clone();
     child_agent_tool_context.required_agent_names = Vec::new();
     child_agent_tool_context.spawn_depth_remaining = Some(child.spawn_depth_remaining);
-    let tool_surface = assemble_tool_surface_with_capabilities(ToolSurfaceAssembly {
+    let tool_surface = assemble_tool_surface_with_warnings(ToolSurfaceAssembly {
         workdir: child.context.workdir.clone(),
         task_id: child_session.clone(),
         mode: child.context.mode,
@@ -488,7 +494,6 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         extension_tools: Vec::new(),
         agents: Some(child_agent_tool_context),
     });
-    let mut capability_parts = tool_surface.capability_parts;
     let mut tools = tool_surface.tools;
     tools = apply_agent_tool_policy(tools, Some(&child.agent), child.context.mode);
     tools = apply_agent_hooks(tools, Some(&child.agent), &child.context.workdir);
@@ -505,37 +510,12 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     );
     tools = permission_runtime.wrap_tools(tools);
     let effective_tool_names = effective_tool_names(&tools);
-    let final_tool_names = effective_tool_names
-        .iter()
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    capability_parts.retain_selected_tools(&final_tool_names, "omitted by runtime tool policy");
     let tool_declarations_hash = tool_declarations_hash(&tools);
     let selected_agent = SelectedAgent {
         name: child.agent.name.clone(),
         source: child.agent.source.as_str().to_string(),
         path: child.agent.file_path.clone(),
     };
-    add_provider_capability(
-        &mut capability_parts,
-        ProviderCapabilityInput {
-            provider: &child.context.model_provider,
-            provider_label: &child.context.provider_label,
-            model: &child_model,
-            base_url: Some(&child.context.base_url),
-            api_key_env: child.context.api_key_env.as_deref(),
-            reasoning_effort: child.context.reasoning_effort.as_deref(),
-            context_limit: child.context.context_limit,
-        },
-    );
-    add_agent_capabilities(
-        &mut capability_parts,
-        Some(&selected_agent),
-        true,
-        child.context.catalog.agents.len(),
-        Vec::new(),
-    );
-    add_skill_capabilities(&mut capability_parts, &[], false, 0, false);
     let prompt_assembly = assemble_child_prompt_prefix(
         child.context.mode,
         &child.context.workdir,
@@ -580,13 +560,6 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         .state
         .store()
         .upsert_session_prompt_prefix(prefix_record)?;
-    let capability_snapshot =
-        build_capability_snapshot(&child_session, &prefix_record, capability_parts);
-    child
-        .context
-        .state
-        .store()
-        .upsert_capability_snapshot(&capability_snapshot)?;
     let prompt_prefix_metadata = json!({
         "hash": prefix_record.prefix_hash,
         "version": prefix_record.version,
