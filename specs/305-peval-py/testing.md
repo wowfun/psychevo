@@ -41,6 +41,16 @@ Coverage must verify:
 - tool execution duration prefers `metadata.elapsed_ms` and falls back to
   timestamp differences when metadata is absent.
 - common JSONL conversion works through the OpenCode and Hermes adapters.
+- built-in adapter registry discovery includes Psychevo, OpenCode, and Hermes.
+- installed Python entry points in the `peval_py.adapters` group can register a
+  third-party adapter without editing the core adapter list.
+- duplicate adapter ids and unknown adapter ids fail with clear diagnostics.
+- adapter TOML tables under `[adapters.<adapter-id>]` are passed to the
+  selected adapter as raw options, including when CLI `--adapter` overrides the
+  configured default.
+- path adapters can handle `-p/--path` without the default JSONL loader.
+- path-only adapters used with `--db` fail with a clear unsupported-input
+  diagnostic.
 - malformed JSONL lines fail with a clear line-number diagnostic.
 - ATIF step ids are sequential and tool observations link to source tool calls.
 - final metrics aggregate available usage, accounting, turn, tool-call, and

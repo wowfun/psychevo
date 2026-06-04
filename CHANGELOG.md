@@ -6,6 +6,9 @@
   projecting runtime reasoning as ACP thought chunks, improving
   `exec_command` tool cards, and adding opt-in terminal-output display metadata
   without delegating command execution to the client.
+- Added `peval-py` adapter auto-registration through Python entry points, with
+  path-adapter support, adapter-specific TOML options, custom adapter docs, and
+  deterministic plugin registry tests.
 
 ## 2026-06-03
 

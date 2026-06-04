@@ -64,7 +64,7 @@ The command surface follows a peval-style verb and scenario shape:
 Common trajectory flags use both long and short forms:
 
 - `-c, --config PATH`
-- `-a, --adapter psychevo|opencode|hermes`
+- `-a, --adapter ADAPTER`
 - `-o, --output [PATH]`
 - `-f, --format json|html` for `view trajectory`
 - `-n, --note N=TEXT` for `view trajectory`, where `0` is report-level and
@@ -84,7 +84,9 @@ multiple `-s` values must fail clearly for export.
 
 TOML config uses `defaults.adapter` for the input adapter default. Older
 `defaults.agent` config keys may be accepted for local compatibility, but the
-public CLI and docs use `adapter`.
+public CLI and docs use `adapter`. Adapter-specific options live under
+`[adapters.<adapter-id>]`. `peval-py` passes the selected adapter's raw option
+table through to that adapter and does not define adapter-specific CLI flags.
 
 JSONL accepts either direct message objects or wrapper objects containing
 `message`, optional `usage`, optional `metadata`, optional `accounting`, and
@@ -100,7 +102,7 @@ is not duplicated inside individual message rows. ATIF output must set
 
 ## Adapters
 
-`-a, --adapter` selects one adapter:
+`-a, --adapter` selects one adapter. Built-in adapters are always available:
 
 - `psychevo` supports current Psychevo retained messages with
   `role=user|assistant|tool_result`, user text blocks, assistant text,
@@ -108,6 +110,21 @@ is not duplicated inside individual message rows. ATIF output must set
 - `opencode` and `hermes` are separate adapter modules from v1. They support a
   common single-session message JSONL shape and provide agent-specific defaults
   so native formats can be added without changing the CLI surface.
+
+Third-party adapters register through installed Python package entry points in
+the `peval_py.adapters` group. The entry point name is the adapter id after
+lowercase normalization. Unknown adapters fail with a diagnostic that lists
+available adapter ids, and duplicate ids fail clearly instead of shadowing an
+existing adapter.
+
+Adapters may implement the normal record conversion contract,
+`convert(records, config)`, for JSONL and SQLite inputs. Adapters that need to
+parse a source file directly may also implement `convert_path(path, config)`.
+For `-p/--path`, `peval-py` calls `convert_path` when the selected adapter
+provides it; otherwise it reads JSONL into `MessageRecord` values and calls
+`convert`. For `-d/--db`, `peval-py` always reads SQLite `messages` rows and
+requires a record adapter. A path-only adapter used with `--db` must fail with
+a clear unsupported-input diagnostic.
 
 Adapters may preserve source metadata in report sidecars, but ATIF output must
 stay standard and must not include peval-only fields.

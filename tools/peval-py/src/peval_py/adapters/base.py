@@ -57,5 +57,12 @@ class ConversionResult:
 class Adapter(Protocol):
     agent_id: str
 
+
+class RecordAdapter(Adapter, Protocol):
     def convert(self, records: list[MessageRecord], config: ToolConfig) -> ConversionResult:
+        ...
+
+
+class PathAdapter(Adapter, Protocol):
+    def convert_path(self, path: str, config: ToolConfig) -> ConversionResult:
         ...

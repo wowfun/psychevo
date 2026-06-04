@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import tomllib
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +29,11 @@ class ToolConfig:
     max_content_chars: int = 16 * 1024
     redact: bool = True
     db: DbMapping = DbMapping()
+    adapter_options: dict[str, Any] = field(default_factory=dict)
+    adapter_options_by_id: dict[str, dict[str, Any]] = field(
+        default_factory=dict,
+        repr=False,
+    )
 
 
 def load_config(path: str | None) -> ToolConfig:
@@ -78,6 +83,13 @@ def load_config(path: str | None) -> ToolConfig:
             ),
         )
         config = replace(config, db=mapping)
+    adapter_options_by_id = _adapter_options_by_id(data.get("adapters", {}))
+    if adapter_options_by_id:
+        config = replace(
+            config,
+            adapter_options_by_id=adapter_options_by_id,
+            adapter_options=_adapter_options_for(config.adapter, adapter_options_by_id),
+        )
     return config
 
 
@@ -96,7 +108,33 @@ def apply_overrides(config: ToolConfig, args: Any) -> ToolConfig:
             updates[field] = value
     if getattr(args, "no_redact", False):
         updates["redact"] = False
+    adapter = str(updates.get("adapter", config.adapter))
+    if updates or config.adapter_options_by_id:
+        updates["adapter_options"] = _adapter_options_for(
+            adapter,
+            config.adapter_options_by_id,
+        )
     return replace(config, **updates)
+
+
+def _adapter_options_by_id(value: object) -> dict[str, dict[str, Any]]:
+    if not value:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("adapters config must be a TOML table")
+    options: dict[str, dict[str, Any]] = {}
+    for key, raw_options in value.items():
+        if not isinstance(raw_options, dict):
+            raise ValueError(f"adapter options for {key} must be a TOML table")
+        options[str(key).strip().lower()] = dict(raw_options)
+    return options
+
+
+def _adapter_options_for(
+    adapter: str,
+    adapter_options_by_id: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    return dict(adapter_options_by_id.get(str(adapter).strip().lower(), {}))
 
 
 def _safe_identifier(value: object) -> str:

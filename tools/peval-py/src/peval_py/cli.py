@@ -7,11 +7,12 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from peval_py.atif import convert_records
+from peval_py.atif import convert_path, convert_records
+from peval_py.adapters.base import ConversionResult
 from peval_py.config import apply_overrides, load_config
 from peval_py.html import render_html
 from peval_py.report import NoteInput, ReportSession, build_multi_report
-from peval_py.sources import MessageRecord, read_jsonl, read_sqlite_messages
+from peval_py.sources import MessageRecord, read_sqlite_messages
 
 DEFAULT_OUTPUT = object()
 FILENAME_PART_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -19,7 +20,7 @@ FILENAME_PART_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 @dataclass(frozen=True)
 class LoadedSession:
-    records: list[MessageRecord]
+    records: list[MessageRecord] | None
     input_label: str
     input_path: str | None = None
     session_hint: str | None = None
@@ -32,13 +33,13 @@ def main(argv: list[str] | None = None) -> int:
         config = apply_overrides(load_config(args.config), args)
         sessions = load_sessions(args, config)
         if args.command == "export":
-            conversion = convert_records(sessions[0].records, config)
+            conversion = convert_session(sessions[0], config)
             payload = conversion.trajectory
             write_json(payload, resolve_export_output(args, conversion.trajectory, config))
             return 0
         report_sessions = [
             ReportSession(
-                conversion=convert_records(session.records, config),
+                conversion=convert_session(session, config),
                 input_label=session.input_label,
                 input_path=session.input_path,
                 session_hint=session.session_hint,
@@ -129,8 +130,7 @@ def add_shared_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "-a",
         "--adapter",
-        choices=["psychevo", "opencode", "hermes"],
-        help="input adapter; defaults to config or psychevo",
+        help="input adapter id; defaults to config or psychevo",
     )
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument(
@@ -174,7 +174,7 @@ def load_sessions(args: argparse.Namespace, config) -> list[LoadedSession]:
             raise ValueError("export trajectory accepts exactly one --path")
         return [
             LoadedSession(
-                records=read_jsonl(path),
+                records=None,
                 input_label=Path(path).name,
                 input_path=str(Path(path)),
                 session_hint=Path(path).stem or "session",
@@ -198,6 +198,14 @@ def load_sessions(args: argparse.Namespace, config) -> list[LoadedSession]:
             for session_id in session_ids
         ]
     raise ValueError("missing input source")
+
+
+def convert_session(session: LoadedSession, config) -> ConversionResult:
+    if session.records is None:
+        if not session.input_path:
+            raise ValueError("path input is missing a source path")
+        return convert_path(session.input_path, config)
+    return convert_records(session.records, config)
 
 
 def parse_notes(raw_notes: list[str], session_count: int) -> list[NoteInput]:

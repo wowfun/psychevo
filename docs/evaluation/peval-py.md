@@ -1,31 +1,12 @@
 # peval-py Lightweight Trajectory Reports
 
-`peval-py` is a lightweight Python edition of peval that can be installed and
-used on its own. Today it focuses on retained agent trajectories: it reads
-JSONL or SQLite `messages` rows and writes derived ATIF trajectories or static
-peval-style reports. It does not run agents, score tasks, or mutate peval
-workspaces.
+`peval-py` is a lightweight Python edition of peval for retained agent
+trajectories. It reads JSONL or SQLite `messages` rows and writes derived ATIF
+trajectories or static peval-style reports. It does not run agents, score
+tasks, or mutate peval workspaces.
 
-## Install From A Checkout
-
-Install the local Python tool once with `uv`:
-
-```bash
-uv tool install --editable ./tools/peval-py
-```
-
-Then use the shorter command directly:
-
-```bash
-peval-py --help
-peval-py view tr --help
-```
-
-If you do not want to install it, run it from the source tree:
-
-```bash
-uv run --project tools/peval-py peval-py --help
-```
+For install, source-tree usage, and local binary packaging, see
+[tools/peval-py/README.md](../../tools/peval-py/README.md).
 
 ## Convert A JSONL Session
 
@@ -47,6 +28,86 @@ Use `-a` when the source is not the default Psychevo adapter:
 peval-py export tr -a opencode -p session.jsonl -o
 peval-py export tr -a hermes -p session.jsonl -o
 ```
+
+## Custom Agent Adapters
+
+`peval-py` can load installed adapter packages through Python entry points.
+Use this when a custom agent writes a transcript format that the built-in
+Psychevo, OpenCode, and Hermes adapters do not parse.
+
+In the adapter package, register an entry point in the `peval_py.adapters`
+group. The entry point name is the adapter id users pass to `--adapter`:
+
+```toml
+[project.entry-points."peval_py.adapters"]
+custom = "custom_peval_adapter:CustomAdapter"
+```
+
+Adapters may expose either `convert(records, config)` or `convert_path(path,
+config)`. Use `convert` when the source can use the normal JSONL or SQLite
+`messages` loaders. Use `convert_path` when the adapter needs to parse the
+input file itself.
+
+```python
+from peval_py.adapters.base import ConversionResult, StepMeta
+
+
+class CustomAdapter:
+    agent_id = "custom"
+
+    def convert_path(self, path, config):
+        return ConversionResult(
+            trajectory={
+                "schema_version": "ATIF-v1.7",
+                "trajectory_id": "custom:t001",
+                "agent": {
+                    "name": config.agent_name or "custom",
+                    "version": config.agent_version,
+                },
+                "steps": [
+                    {
+                        "step_id": 1,
+                        "source": "user",
+                        "message": "converted custom transcript",
+                    }
+                ],
+                "final_metrics": {
+                    "total_steps": 1,
+                    "total_turns": 1,
+                    "total_tool_calls": 0,
+                    "total_tool_errors": 0,
+                },
+            },
+            steps_meta=[StepMeta(step_id=1, source="user")],
+            warnings=[],
+            total_events=1,
+            unmapped_events=0,
+            started_at_ms=None,
+            finished_at_ms=None,
+        )
+```
+
+Adapter-specific settings go in TOML, not CLI flags. `peval-py` passes the
+selected adapter's table to `config.adapter_options`:
+
+```toml
+[defaults]
+adapter = "custom"
+
+[adapters.custom]
+input_mode = "transcript"
+```
+
+Run the adapter like any built-in adapter:
+
+```bash
+peval-py view tr -c custom.toml -p custom-session.log -o
+peval-py export tr -a custom -p custom-session.log -o
+```
+
+If a custom adapter only implements `convert_path`, use it with `-p/--path`.
+SQLite `-d/--db` input requires `convert(records, config)` because `peval-py`
+loads `messages` rows before conversion.
 
 ## Report From A Psychevo State DB
 
@@ -124,11 +185,13 @@ the same display style as `peval view`.
 
 ## Useful Flags
 
-- `-p, --path PATH`: read a JSONL session path.
+- `-p, --path PATH`: read a session path. Built-in adapters treat it as JSONL;
+  custom path adapters may parse their own file format.
 - `-d, --db PATH`: read a SQLite state database.
 - `-s, --session-id ID`: select a DB session. Repeat it with `view tr` to
   compare sessions from the same DB.
-- `-a, --adapter psychevo|opencode|hermes`: select an adapter.
+- `-a, --adapter ADAPTER`: select a built-in adapter or an installed adapter
+  entry point.
 - `-f, --format json|html`: force report format.
 - `-o, --output [PATH]`: write to a file instead of stdout. Bare `-o` writes
   `trajectory-<adapter>-<session>.json` for export,

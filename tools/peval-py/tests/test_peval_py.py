@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import shutil
 import sqlite3
@@ -8,9 +10,13 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from peval_py.atif import convert_records
-from peval_py.config import ToolConfig, load_config
+from peval_py.adapters import adapter_for, available_adapter_ids
+from peval_py.adapters.base import ConversionResult, StepMeta
+from peval_py.config import ToolConfig, apply_overrides, load_config
 from peval_py.html import render_html
 from peval_py.report import NoteInput, ReportSession, build_multi_report, build_report
 from peval_py.sources import (
@@ -21,6 +27,72 @@ from peval_py.sources import (
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+class FakeEntryPoint:
+    def __init__(self, name: str, value) -> None:
+        self.name = name
+        self.value = value
+        self.load_count = 0
+
+    def load(self):
+        self.load_count += 1
+        return self.value
+
+
+class FakeEntryPoints:
+    def __init__(self, entries: list[FakeEntryPoint]) -> None:
+        self.entries = entries
+
+    def select(self, group: str) -> list[FakeEntryPoint]:
+        if group == "peval_py.adapters":
+            return self.entries
+        return []
+
+
+class BrokenEntryPoint(FakeEntryPoint):
+    def load(self):
+        self.load_count += 1
+        raise AssertionError(f"{self.name} should not be loaded")
+
+
+class CustomPathAdapter:
+    agent_id = "custom"
+
+    def convert_path(self, path: str, config: ToolConfig) -> ConversionResult:
+        source = Path(path)
+        prefix = str(config.adapter_options.get("label_prefix", "custom"))
+        session_id = f"{prefix}:{source.stem}"
+        return ConversionResult(
+            trajectory={
+                "schema_version": "ATIF-v1.7",
+                "trajectory_id": f"custom:{source.stem}",
+                "session_id": session_id,
+                "agent": {
+                    "name": config.agent_name or "custom",
+                    "version": config.agent_version,
+                },
+                "steps": [
+                    {
+                        "step_id": 1,
+                        "source": "user",
+                        "message": source.read_text(encoding="utf-8").strip(),
+                    }
+                ],
+                "final_metrics": {
+                    "total_steps": 1,
+                    "total_turns": 1,
+                    "total_tool_calls": 0,
+                    "total_tool_errors": 0,
+                },
+            },
+            steps_meta=[StepMeta(step_id=1, source="user", timestamp_ms=100)],
+            warnings=[],
+            total_events=1,
+            unmapped_events=0,
+            started_at_ms=100,
+            finished_at_ms=100,
+        )
 
 
 def create_messages_db(path: Path) -> None:
@@ -115,6 +187,171 @@ class PevalPyTests(unittest.TestCase):
                 encoding="utf-8",
             )
             self.assertEqual(load_config(str(legacy_config)).adapter, "hermes")
+
+    def test_config_passes_selected_adapter_options(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "adapters.toml"
+            config_path.write_text(
+                """
+[defaults]
+adapter = "opencode"
+
+[adapters.custom]
+label_prefix = "configured"
+enabled = true
+""",
+                encoding="utf-8",
+            )
+            config = load_config(str(config_path))
+            self.assertEqual(config.adapter, "opencode")
+            self.assertEqual(config.adapter_options, {})
+
+            overridden = apply_overrides(
+                config,
+                SimpleNamespace(adapter="custom", no_redact=False),
+            )
+            self.assertEqual(overridden.adapter, "custom")
+            self.assertEqual(
+                overridden.adapter_options,
+                {"label_prefix": "configured", "enabled": True},
+            )
+
+    def test_adapter_registry_discovers_builtins_and_entry_points_lazily(self) -> None:
+        custom_entry = FakeEntryPoint("custom", CustomPathAdapter)
+        unused_entry = BrokenEntryPoint("unused", object())
+        with patch(
+            "peval_py.adapters.entry_points",
+            return_value=FakeEntryPoints([custom_entry, unused_entry]),
+        ):
+            self.assertEqual(adapter_for("psychevo").agent_id, "psychevo")
+            self.assertIn("custom", available_adapter_ids())
+            self.assertEqual(custom_entry.load_count, 0)
+            self.assertEqual(unused_entry.load_count, 0)
+
+            adapter = adapter_for("custom")
+            self.assertEqual(adapter.agent_id, "custom")
+            self.assertEqual(custom_entry.load_count, 1)
+            self.assertEqual(unused_entry.load_count, 0)
+
+    def test_adapter_registry_accepts_class_factory_and_instance_entry_points(self) -> None:
+        values = [CustomPathAdapter, lambda: CustomPathAdapter(), CustomPathAdapter()]
+        for value in values:
+            with self.subTest(value=type(value).__name__):
+                with patch(
+                    "peval_py.adapters.entry_points",
+                    return_value=FakeEntryPoints([FakeEntryPoint("custom", value)]),
+                ):
+                    adapter = adapter_for("custom")
+                    self.assertTrue(callable(getattr(adapter, "convert_path", None)))
+
+    def test_adapter_registry_reports_duplicate_and_unknown_ids(self) -> None:
+        duplicate = FakeEntryPoint("opencode", CustomPathAdapter)
+        with patch(
+            "peval_py.adapters.entry_points",
+            return_value=FakeEntryPoints([duplicate]),
+        ):
+            with self.assertRaisesRegex(ValueError, "duplicate adapter id: opencode"):
+                available_adapter_ids()
+            self.assertEqual(duplicate.load_count, 0)
+
+        custom = FakeEntryPoint("custom", CustomPathAdapter)
+        with patch(
+            "peval_py.adapters.entry_points",
+            return_value=FakeEntryPoints([custom]),
+        ):
+            with self.assertRaisesRegex(ValueError, "unsupported adapter: missing"):
+                adapter_for("missing")
+            self.assertEqual(custom.load_count, 0)
+
+    def test_cli_uses_custom_path_adapter_and_rejects_db_when_path_only(self) -> None:
+        from peval_py.cli import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            first = tmp_path / "first.txt"
+            second = tmp_path / "second.txt"
+            first.write_text("first prompt\n", encoding="utf-8")
+            second.write_text("second prompt\n", encoding="utf-8")
+            config_path = tmp_path / "custom.toml"
+            config_path.write_text(
+                """
+[defaults]
+adapter = "custom"
+
+[adapters.custom]
+label_prefix = "configured"
+""",
+                encoding="utf-8",
+            )
+            export_out = tmp_path / "trajectory.json"
+            view_out = tmp_path / "report.json"
+            entry = FakeEntryPoint("custom", CustomPathAdapter)
+            with patch(
+                "peval_py.adapters.entry_points",
+                return_value=FakeEntryPoints([entry]),
+            ):
+                result = main(
+                    [
+                        "export",
+                        "tr",
+                        "-c",
+                        str(config_path),
+                        "-p",
+                        str(first),
+                        "-o",
+                        str(export_out),
+                    ]
+                )
+                self.assertEqual(result, 0)
+                payload = json.loads(export_out.read_text(encoding="utf-8"))
+                self.assertEqual(payload["session_id"], "configured:first")
+                self.assertEqual(payload["steps"][0]["message"], "first prompt")
+
+                result = main(
+                    [
+                        "view",
+                        "tr",
+                        "-c",
+                        str(config_path),
+                        "-p",
+                        str(first),
+                        "-p",
+                        str(second),
+                        "-f",
+                        "json",
+                        "-o",
+                        str(view_out),
+                    ]
+                )
+                self.assertEqual(result, 0)
+                payload = json.loads(view_out.read_text(encoding="utf-8"))
+                self.assertEqual(
+                    [item["session_id"] for item in payload["trajectory"]],
+                    ["configured:first", "configured:second"],
+                )
+
+                db_path = tmp_path / "state.db"
+                create_messages_db(db_path)
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr):
+                    result = main(
+                        [
+                            "view",
+                            "tr",
+                            "-c",
+                            str(config_path),
+                            "-d",
+                            str(db_path),
+                            "-s",
+                            "db-a",
+                            "-f",
+                            "json",
+                            "-o",
+                            str(tmp_path / "db-report.json"),
+                        ]
+                    )
+                self.assertNotEqual(result, 0)
+                self.assertIn("does not support record input", stderr.getvalue())
 
     def test_psychevo_sqlite_messages_are_ordered_by_session_seq(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
