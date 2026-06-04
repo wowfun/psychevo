@@ -63,6 +63,10 @@ cannot express: Trial identity, variant, relative cell root, result status,
 score, score details, warnings, started/finished timing, source
 `trajectory.jsonl` reference, event counts, prompt unavailability, derivation
 errors, and per-step timing/truncation/tool-status hints.
+Shared trajectory timing and visualization semantics are defined in
+[340 Trajectory](../340-agent-evaluation/trajectory.md). This attachment
+defines peval-specific view schema, comparison, and rendering behavior around
+those shared semantics.
 
 `comparison` contains `summary`, `groups`, `matrix`, `leaderboard`, and
 `default_metric`. These are projections over core Trials and must carry only
@@ -242,12 +246,13 @@ usage totals; ACP agents that expose only final prompt usage show total tokens
 in Result and Usage evidence, while individual Step rows omit unavailable token
 cues. The collapsed Step row preview uses only the Step message content, not
 reasoning, tool-call, or observation summaries; when a Step has no message
-content, the preview is `(No Message)`. The collapsed row rail shows `N/M tools`
-as its own chip, shows ordered `tool name + execution time` labels as a
-separate chip, keeps any token count on the left, then shows only the `step span
-/ elapsed` information on the far right with one-decimal second precision. Step
-span and elapsed render as separate chips labeled `step <duration>` and
-`elapsed <duration>`; `tool` timing remains absent from the collapsed rail.
+content, the preview is `(No Message)`. The collapsed row rail follows
+[340 Trajectory](../340-agent-evaluation/trajectory.md): summary chips such as
+`N/M tools`, compact `M.Nk tok` token counts, step span, and elapsed offset stay
+on the first line, while ordered `tool name + execution time` chips move to a
+second line. Detailed usage sections keep full numeric values. Step span and
+elapsed render as separate chips labeled `step <duration>` and
+`elapsed <duration>`; `tool` timing remains absent from the first-line summary.
 Expanded Steps do not render a separate Metrics block; Tool Calls show `tool
 exec` directly after the tool name when execution duration is available. Step duration represents the current
 Step's observed span, using an explicit grouped-step end timestamp when the
@@ -354,4 +359,5 @@ the full prompt, or full context.
 ## Related Topics
 
 - [090 Artifacts](../090-evaluation/artifacts.md)
+- [340 Trajectory](../340-agent-evaluation/trajectory.md)
 - [300 Commands](commands.md)

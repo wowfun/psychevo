@@ -216,7 +216,7 @@ pub(crate) fn view_output_cli_accepts_short_alias_and_optional_value() {
     let view = Cli::try_parse_from([
         "peval",
         "view",
-        "--note",
+        "-n",
         "0=report = note",
         "--note",
         "1=first trial",

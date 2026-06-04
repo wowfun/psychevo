@@ -120,6 +120,7 @@ may include artifact paths for explicit follow-up inspection.
 ## More Detail
 
 - [peval CLI Workflows](peval-cli.md)
+- [peval-py Lightweight Trajectory Reports](peval-py.md)
 - [Authoring Eval Configs And Benchmarks](authoring.md)
 - [Live Psychevo Evaluation](live-psychevo.md)
 - Specs: [peval CLI](../../specs/300-peval-cli/spec.md),

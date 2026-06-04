@@ -118,6 +118,11 @@ const fmtScore = value => value === null || value === undefined || Number.isNaN(
 const fmtCost = value => value === null || value === undefined || Number.isNaN(Number(value)) ? "-" : `$${Number(value).toFixed(4)}`;
 const fmtMs = value => fmtDurationMs(value);
 const fmtRailMs = value => fmtDurationMs(value);
+function fmtRailTokens(value) {
+  if (value === null || value === undefined || value === "" || Number.isNaN(Number(value))) return "-";
+  const number = Number(value);
+  return Math.abs(number) >= 1000 ? `${(number / 1000).toFixed(1)}k` : fmtNum(number);
+}
 function fmtDurationMs(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
   const seconds = Math.max(0, Number(value) / 1000);
@@ -584,44 +589,45 @@ function hasMetricValue(value) {
 function toolExecutionText(toolMeta) {
   return hasMetricValue(toolMeta?.execution_duration_ms) ? fmtRailMs(toolMeta.execution_duration_ms) : "";
 }
-function renderToolNameChip(tool, toolMeta) {
+function toolFailed(toolMeta) {
+  const status = lower(toolMeta?.status);
+  return status === "error" || status === "failed";
+}
+function renderToolNameChip(tool, toolMeta, extraClass = "") {
   const exec = toolExecutionText(toolMeta);
   const title = exec ? ` title="${esc(`tool exec ${exec}`)}"` : "";
   const execHtml = exec ? ` <span class="tool-exec-inline">${esc(exec)}</span>` : "";
-  return `<span class="chip tool-name-chip"${title}>${esc(tool.function_name)}${execHtml}</span>`;
+  const classes = ["chip", "tool-name-chip", extraClass, toolFailed(toolMeta) ? "tool-error-chip" : ""].filter(Boolean).join(" ");
+  return `<span class="${esc(classes)}"${title}>${esc(tool.function_name)}${execHtml}</span>`;
 }
 function renderToolTiming(toolMeta) {
   const parts = [];
   if (hasMetricValue(toolMeta?.generation_duration_ms)) parts.push(`generation ${fmtMs(toolMeta.generation_duration_ms)}`);
   return parts.length ? ` / ${parts.map(esc).join(" / ")}` : "";
 }
-function stepToolLabels(step, meta) {
-  const labels = [];
+function stepToolChips(step, meta) {
+  const chips = [];
   (step.tool_calls || []).forEach(tool => {
     const name = String(tool.function_name || "").trim();
     if (!name) return;
-    const exec = toolExecutionText(toolMetaFor(meta, tool.tool_call_id));
-    labels.push(exec ? `${name} ${exec}` : name);
+    chips.push(renderToolNameChip(tool, toolMetaFor(meta, tool.tool_call_id), "rail-chip-tool-list"));
   });
-  return labels;
+  return chips;
 }
 function renderStepRail(step, meta) {
-  const toolItems = [];
+  const summaryItems = [];
   const toolCalls = (step.tool_calls || []).length;
   const toolErrors = meta?.tool_error ? 1 : 0;
   if (toolCalls || toolErrors) {
-    toolItems.push(`<span class="rail-chip rail-chip-tools">${esc(toolCallRatio(toolCalls, toolErrors))} tools</span>`);
-    const toolLabels = stepToolLabels(step, meta);
-    if (toolLabels.length) {
-      const text = toolLabels.join(", ");
-      toolItems.push(`<span class="rail-chip rail-chip-tool-list" title="${esc(text)}">${esc(text)}</span>`);
-    }
+    summaryItems.push(`<span class="rail-chip rail-chip-tools">${esc(toolCallRatio(toolCalls, toolErrors))} tools</span>`);
   }
   const tokens = stepTokenTotal(step, meta);
-  if (tokens !== null && tokens !== undefined) toolItems.push(`<span class="rail-chip rail-chip-tokens">${fmtNum(tokens)} tok</span>`);
-  const tools = toolItems.length ? `<div class="rail-tools">${toolItems.join("")}</div>` : `<div class="rail-tools"></div>`;
+  if (tokens !== null && tokens !== undefined) summaryItems.push(`<span class="rail-chip rail-chip-tokens" title="${esc(`${fmtNum(tokens)} tokens`)}">${esc(fmtRailTokens(tokens))} tok</span>`);
   const time = `<div class="rail-time"><span class="rail-chip rail-chip-step-time" title="step span">step ${esc(fmtRailMs(meta?.duration_ms))}</span><span class="rail-chip rail-chip-elapsed-time" title="elapsed since trajectory start">elapsed ${esc(fmtRailMs(meta?.elapsed_ms))}</span></div>`;
-  return `${tools}${time}`;
+  const summary = `<div class="rail-summary">${summaryItems.join("")}${time}</div>`;
+  const toolChips = stepToolChips(step, meta);
+  const tools = toolChips.length ? `<div class="rail-tool-row">${toolChips.join("")}</div>` : "";
+  return `${summary}${tools}`;
 }
 function stepMeta(meta, stepId) {
   return (meta?.steps || []).find(item => item.step_id === stepId) || null;

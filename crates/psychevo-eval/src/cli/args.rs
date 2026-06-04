@@ -35,7 +35,7 @@ pub(crate) enum Commands {
         about = "Create and verify human-in-loop task environments"
     )]
     Env(TaskEnvCommands),
-    #[command(about = "Render dynamic views over stored cell artifacts")]
+    #[command(about = "Render reports, comparisons, trajectories, and notes")]
     View(ViewArgs),
     #[command(about = "Serve the local peval workspace viewer")]
     Serve(ServeArgs),
@@ -218,34 +218,81 @@ pub(crate) struct TaskEnvVerifyArgs {
 }
 
 #[derive(Debug, Parser)]
+#[command(
+    about = "Render peval reports over stored cell artifacts",
+    long_about = "Render peval reports over stored cell artifacts. Use filters or repeated -p/--path values to scope visible Trials, choose JSON/HTML/Markdown with --format, and add manual report or Trial notes with -n/--note INDEX=TEXT."
+)]
 pub(crate) struct ViewArgs {
-    #[arg(short = 'c', long = "config", value_name = "PATH")]
+    #[arg(
+        short = 'c',
+        long = "config",
+        value_name = "PATH",
+        help = "Eval config path"
+    )]
     pub(crate) config: Option<PathBuf>,
-    #[arg(long = "benchmark", value_name = "ID_OR_PATH")]
+    #[arg(
+        long = "benchmark",
+        value_name = "ID_OR_PATH",
+        help = "Benchmark id or manifest path"
+    )]
     pub(crate) benchmark: Option<String>,
-    #[arg(long = "report", value_name = "KEY")]
+    #[arg(
+        long = "report",
+        value_name = "KEY",
+        help = "Named report profile from config"
+    )]
     pub(crate) report: Option<String>,
-    #[arg(short = 'r', long = "root", value_name = "DIR")]
+    #[arg(
+        short = 'r',
+        long = "root",
+        value_name = "DIR",
+        help = "peval workspace root"
+    )]
     pub(crate) store_root: Option<PathBuf>,
-    #[arg(short = 'p', long = "path", value_name = "PATH")]
+    #[arg(
+        short = 'p',
+        long = "path",
+        value_name = "PATH",
+        help = "Restrict to a run/cell path; repeat to compare paths as variants"
+    )]
     pub(crate) paths: Vec<PathBuf>,
-    #[arg(long = "task-set")]
+    #[arg(long = "task-set", help = "Filter visible Trials by task set")]
     pub(crate) task_set: Option<String>,
-    #[arg(long)]
+    #[arg(long, help = "Filter visible Trials by agent id")]
     pub(crate) agent: Option<String>,
-    #[arg(long)]
+    #[arg(long, help = "Filter visible Trials by task id")]
     pub(crate) task: Option<String>,
-    #[arg(long, value_enum)]
+    #[arg(long, value_enum, help = "Filter visible Trials by status")]
     pub(crate) status: Option<CaseStatusFilter>,
-    #[arg(long = "group-by", value_name = "ITEMS")]
+    #[arg(
+        long = "group-by",
+        value_name = "ITEMS",
+        help = "Comma-separated comparison grouping"
+    )]
     pub(crate) group_by: Vec<String>,
-    #[arg(short = 'i', long = "include", value_name = "ITEMS")]
+    #[arg(
+        short = 'i',
+        long = "include",
+        value_name = "ITEMS",
+        help = "Comma-separated report sections"
+    )]
     pub(crate) include: Vec<String>,
-    #[arg(long = "note", value_name = "INDEX=TEXT")]
+    #[arg(
+        short = 'n',
+        long = "note",
+        value_name = "INDEX=TEXT",
+        help = "Add a manual note: 0 is report-level, 1..N target visible Trials"
+    )]
     pub(crate) notes: Vec<String>,
-    #[arg(long, value_enum)]
+    #[arg(long, value_enum, help = "Output format")]
     pub(crate) format: Option<ViewFormat>,
-    #[arg(short = 'o', long, value_name = "PATH", num_args = 0..=1)]
+    #[arg(
+        short = 'o',
+        long,
+        value_name = "PATH",
+        num_args = 0..=1,
+        help = "Write to PATH; bare -o writes the default views/index file"
+    )]
     pub(crate) output: Option<Option<PathBuf>>,
 }
 

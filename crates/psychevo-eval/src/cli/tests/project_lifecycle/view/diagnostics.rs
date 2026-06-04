@@ -517,8 +517,14 @@ command = {{ command = "sh", args = ["{}"], model = "test-model" }}
     assert!(!html.stdout.contains("tool time"));
     assert!(html.stdout.contains("fmtRailMs(meta?.duration_ms)"));
     assert!(html.stdout.contains("fmtRailMs(meta?.elapsed_ms)"));
-    assert!(html.stdout.contains("stepToolLabels(step, meta)"));
-    assert!(html.stdout.contains("rail-tools"));
+    assert!(html.stdout.contains("function toolFailed(toolMeta)"));
+    assert!(html.stdout.contains("tool-error-chip"));
+    assert!(html.stdout.contains("stepToolChips(step, meta)"));
+    assert!(html.stdout.contains(
+        "renderToolNameChip(tool, toolMetaFor(meta, tool.tool_call_id), \"rail-chip-tool-list\")"
+    ));
+    assert!(html.stdout.contains("rail-summary"));
+    assert!(html.stdout.contains("rail-tool-row"));
     assert!(html.stdout.contains("rail-time"));
     assert!(html.stdout.contains("rail-chip-tools"));
     assert!(html.stdout.contains("rail-chip-tool-list"));
@@ -535,11 +541,17 @@ command = {{ command = "sh", args = ["{}"], model = "test-model" }}
     );
     assert!(!html.stdout.contains("step span / elapsed"));
     assert!(html.stdout.contains("rail-chip-tokens"));
+    assert!(html.stdout.contains("fmtRailTokens(tokens)"));
+    assert!(html.stdout.contains("${esc(`${fmtNum(tokens)} tokens`)}"));
     assert!(
         html.stdout
             .contains("${esc(toolCallRatio(toolCalls, toolErrors))} tools")
     );
-    assert!(html.stdout.contains("${esc(text)}"));
+    assert!(
+        html.stdout
+            .contains("const toolChips = stepToolChips(step, meta);")
+    );
+    assert!(!html.stdout.contains("rail-tools"));
     assert!(
         !html
             .stdout

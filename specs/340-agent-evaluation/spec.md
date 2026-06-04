@@ -80,6 +80,8 @@ separate live gate.
 - [Psychevo](psychevo.md) defines the native Psychevo adapter.
 - [OpenCode](opencode.md) defines the OpenCode wrapper and collector strategy.
 - [Hermes](hermes.md) defines the Hermes wrapper and collector strategy.
+- [Trajectory](trajectory.md) defines shared trajectory semantics and
+  visualization rules.
 - [Testing](testing.md) defines deterministic adapter validation.
 
 ## Related Topics

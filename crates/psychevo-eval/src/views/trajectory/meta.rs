@@ -36,7 +36,11 @@ pub(crate) fn step_duration_ms(
     next_timestamp_ms: Option<u128>,
 ) -> Option<u128> {
     let timestamp_ms = timestamp_ms?;
+    let grouped_end_ms = grouped_step_end_timestamp_ms(step);
     atif_step_end_timestamp_ms(step)
+        .into_iter()
+        .chain(grouped_end_ms)
+        .max()
         .or_else(|| {
             (step.source == "agent")
                 .then_some(next_timestamp_ms)
@@ -194,6 +198,30 @@ pub(crate) fn atif_step_end_timestamp_ms(step: &AtifStep) -> Option<u128> {
         .and_then(json_u128)
 }
 
+pub(crate) fn grouped_step_end_timestamp_ms(step: &AtifStep) -> Option<u128> {
+    let observation_end = step
+        .observation
+        .as_ref()
+        .into_iter()
+        .flat_map(|observation| observation.results.iter())
+        .filter_map(|result| extra_u128(result.extra.as_ref(), "timestamp_ms"))
+        .max();
+    let tool_end = step
+        .tool_calls
+        .iter()
+        .filter_map(tool_end_timestamp_ms)
+        .max();
+    observation_end.into_iter().chain(tool_end).max()
+}
+
+pub(crate) fn tool_end_timestamp_ms(tool: &AtifToolCall) -> Option<u128> {
+    let extra = tool.extra.as_ref();
+    let execution_duration_ms = extra_u128(extra, "execution_duration_ms")?;
+    extra_u128(extra, "execution_start_timestamp_ms")
+        .or_else(|| extra_u128(extra, "timestamp_ms"))
+        .map(|started| started.saturating_add(execution_duration_ms))
+}
+
 pub(crate) fn extra_string(extra: Option<&Value>, key: &str) -> Option<String> {
     extra
         .and_then(|extra| extra.get(key))
@@ -256,6 +284,54 @@ mod tests {
         assert_eq!(steps[1].duration_ms, Some(400));
         assert_eq!(steps[2].duration_ms, Some(900));
         assert_eq!(steps[2].elapsed_ms, Some(19_000));
+    }
+
+    #[test]
+    fn step_duration_uses_grouped_observation_end_before_next_step_fallback() {
+        let atif = AtifTrajectory {
+            schema_version: "ATIF-v1.7".to_string(),
+            session_id: Some("session".to_string()),
+            trajectory_id: Some("trial:t001".to_string()),
+            agent: AtifAgent {
+                name: "agent".to_string(),
+                version: "test".to_string(),
+                model_name: None,
+                extra: None,
+            },
+            steps: vec![
+                AtifStep {
+                    step_id: 1,
+                    source: "agent".to_string(),
+                    message: Value::String(String::new()),
+                    reasoning_content: None,
+                    tool_calls: vec![AtifToolCall {
+                        tool_call_id: "call-1".to_string(),
+                        function_name: "read".to_string(),
+                        arguments: json!({ "path": "add.py" }),
+                        extra: Some(json!({ "timestamp_ms": 1_100 })),
+                    }],
+                    observation: Some(AtifObservation {
+                        results: vec![AtifObservationResult {
+                            source_call_id: Some("call-1".to_string()),
+                            content: Some(json!({ "ok": true })),
+                            extra: Some(json!({ "timestamp_ms": 1_800 })),
+                        }],
+                    }),
+                    metrics: None,
+                    extra: Some(json!({ "timestamp_ms": 1_000 })),
+                    llm_call_count: Some(1),
+                },
+                timed_step(2, "agent", 5_000, Some(5_100)),
+            ],
+            notes: None,
+            final_metrics: None,
+            extra: None,
+        };
+
+        let steps = view_trajectory_steps(&atif);
+
+        assert_eq!(steps[0].duration_ms, Some(800));
+        assert_eq!(steps[1].duration_ms, Some(100));
     }
 
     #[test]
