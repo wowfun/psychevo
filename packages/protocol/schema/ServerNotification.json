@@ -453,6 +453,56 @@
       ],
       "type": "string"
     },
+    "ShellErrorPayload": {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "threadId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "type": "object"
+    },
+    "ShellResultPayload": {
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "committedEntries": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/TranscriptEntry"
+          },
+          "type": "array"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "thread": {
+          "$ref": "#/definitions/GatewayThread"
+        },
+        "toolFailures": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "command",
+        "outcome",
+        "thread",
+        "toolFailures"
+      ],
+      "type": "object"
+    },
     "TranscriptBlock": {
       "properties": {
         "artifactIds": {
@@ -797,6 +847,42 @@
         },
         "params": {
           "$ref": "#/definitions/TurnErrorPayload"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "shell/result"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ShellResultPayload"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "shell/error"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ShellErrorPayload"
         }
       },
       "required": [

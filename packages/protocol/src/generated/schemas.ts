@@ -3709,6 +3709,197 @@ export const gatewaySchemas = {
   "title": "CompletionListResult",
   "type": "object"
 },
+  CommandListParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "threadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "CommandListParams",
+  "type": "object"
+},
+  CommandListItem: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "aliases": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "argumentKind": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "slash": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "usage": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "argumentKind",
+    "name",
+    "slash",
+    "source",
+    "summary",
+    "usage"
+  ],
+  "title": "CommandListItem",
+  "type": "object"
+},
+  CommandListResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "CommandListItem": {
+      "properties": {
+        "aliases": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "argumentKind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "slash": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "usage": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "argumentKind",
+        "name",
+        "slash",
+        "source",
+        "summary",
+        "usage"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "commands": {
+      "items": {
+        "$ref": "#/definitions/CommandListItem"
+      },
+      "type": "array"
+    },
+    "hiddenDynamic": {
+      "default": 0,
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "commands"
+  ],
+  "title": "CommandListResult",
+  "type": "object"
+},
   CommandExecuteParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
@@ -3822,6 +4013,121 @@ export const gatewaySchemas = {
     "command"
   ],
   "title": "CommandExecuteResult",
+  "type": "object"
+},
+  ShellStartParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "command": {
+      "type": "string"
+    },
+    "scope": {
+      "$ref": "#/definitions/GatewayRequestScope"
+    },
+    "threadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "command",
+    "scope"
+  ],
+  "title": "ShellStartParams",
+  "type": "object"
+},
+  ShellStartResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "accepted": {
+      "type": "boolean"
+    },
+    "message": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "threadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "accepted"
+  ],
+  "title": "ShellStartResult",
   "type": "object"
 },
   TurnStartParams: {
@@ -4724,6 +5030,329 @@ export const gatewaySchemas = {
   "title": "TurnErrorPayload",
   "type": "object"
 },
+  ShellResultPayload: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "BackendKind": {
+      "enum": [
+        "psychevo",
+        "peerAgent"
+      ],
+      "type": "string"
+    },
+    "GatewayBackendInfo": {
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/BackendKind"
+        },
+        "nativeId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewayThread": {
+      "properties": {
+        "backend": {
+          "$ref": "#/definitions/GatewayBackendInfo"
+        },
+        "id": {
+          "type": "string"
+        },
+        "sourceKey": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "backend",
+        "id"
+      ],
+      "type": "object"
+    },
+    "TranscriptBlock": {
+      "properties": {
+        "artifactIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "body": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/TranscriptBlockKind"
+        },
+        "metadata": true,
+        "order": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "preview": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TranscriptToolResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/TranscriptBlockStatus"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifactIds",
+        "createdAtMs",
+        "id",
+        "kind",
+        "order",
+        "source",
+        "status",
+        "updatedAtMs"
+      ],
+      "type": "object"
+    },
+    "TranscriptBlockKind": {
+      "enum": [
+        "text",
+        "reasoning",
+        "toolCall",
+        "toolResult",
+        "tool",
+        "shell",
+        "file",
+        "web",
+        "mcp",
+        "clarify",
+        "permission",
+        "skill",
+        "agent",
+        "mailbox",
+        "status",
+        "diff",
+        "artifact"
+      ],
+      "type": "string"
+    },
+    "TranscriptBlockStatus": {
+      "enum": [
+        "pending",
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+        "needsInput",
+        "info"
+      ],
+      "type": "string"
+    },
+    "TranscriptEntry": {
+      "properties": {
+        "accounting": true,
+        "blocks": {
+          "items": {
+            "$ref": "#/definitions/TranscriptBlock"
+          },
+          "type": "array"
+        },
+        "createdAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "messageSeq": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "metadata": true,
+        "role": {
+          "$ref": "#/definitions/TranscriptEntryRole"
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/TranscriptBlockStatus"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "usage": true
+      },
+      "required": [
+        "blocks",
+        "createdAtMs",
+        "id",
+        "role",
+        "source",
+        "status",
+        "threadId",
+        "updatedAtMs"
+      ],
+      "type": "object"
+    },
+    "TranscriptEntryRole": {
+      "enum": [
+        "user",
+        "assistant",
+        "diagnostic"
+      ],
+      "type": "string"
+    },
+    "TranscriptToolResult": {
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "createdAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "isError": {
+          "type": "boolean"
+        },
+        "metadata": {
+          "default": null
+        },
+        "resultMessageSeq": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/definitions/TranscriptBlockStatus"
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "content",
+        "createdAtMs",
+        "isError",
+        "resultMessageSeq",
+        "status",
+        "updatedAtMs"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "command": {
+      "type": "string"
+    },
+    "committedEntries": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/TranscriptEntry"
+      },
+      "type": "array"
+    },
+    "outcome": {
+      "type": "string"
+    },
+    "thread": {
+      "$ref": "#/definitions/GatewayThread"
+    },
+    "toolFailures": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "command",
+    "outcome",
+    "thread",
+    "toolFailures"
+  ],
+  "title": "ShellResultPayload",
+  "type": "object"
+},
+  ShellErrorPayload: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "message": {
+      "type": "string"
+    },
+    "threadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "message"
+  ],
+  "title": "ShellErrorPayload",
+  "type": "object"
+},
   PermissionRespondParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
@@ -5360,6 +5989,29 @@ export const gatewaySchemas = {
       ],
       "type": "object"
     },
+    "CommandListParams": {
+      "properties": {
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewayRequestScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "threadId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "CompletionListParams": {
       "properties": {
         "cursor": {
@@ -5761,6 +6413,28 @@ export const gatewaySchemas = {
           ]
         }
       },
+      "type": "object"
+    },
+    "ShellStartParams": {
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        "threadId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "command",
+        "scope"
+      ],
       "type": "object"
     },
     "SourceResetParams": {
@@ -6214,12 +6888,48 @@ export const gatewaySchemas = {
       "properties": {
         "method": {
           "enum": [
+            "command/list"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/CommandListParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
             "command/execute"
           ],
           "type": "string"
         },
         "params": {
           "$ref": "#/definitions/CommandExecuteParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "shell/start"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ShellStartParams"
         }
       },
       "required": [
@@ -6758,6 +7468,56 @@ export const gatewaySchemas = {
       ],
       "type": "string"
     },
+    "ShellErrorPayload": {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "threadId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "type": "object"
+    },
+    "ShellResultPayload": {
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "committedEntries": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/TranscriptEntry"
+          },
+          "type": "array"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "thread": {
+          "$ref": "#/definitions/GatewayThread"
+        },
+        "toolFailures": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "command",
+        "outcome",
+        "thread",
+        "toolFailures"
+      ],
+      "type": "object"
+    },
     "TranscriptBlock": {
       "properties": {
         "artifactIds": {
@@ -7102,6 +7862,42 @@ export const gatewaySchemas = {
         },
         "params": {
           "$ref": "#/definitions/TurnErrorPayload"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "shell/result"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ShellResultPayload"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "shell/error"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ShellErrorPayload"
         }
       },
       "required": [

@@ -18,7 +18,8 @@ contract expectations that concrete product surfaces specialize.
 - command discovery and help behavior
 - canonical names, hidden aliases, and command status semantics
 - argument-shape and bounded-error conventions
-- surface capability filtering across TUI, ACP, and future messaging adapters
+- surface capability filtering across TUI, Web/Desktop, ACP, and future
+  messaging adapters
 - command output-kind and execution-effect conventions across projections
 
 Out of scope:
@@ -115,13 +116,20 @@ pass-through prompt so prompt-bearing user surfaces can send it to the model
 with the original submitted text.
 
 Gateway exposes the same command catalog to reconnectable clients through
-`command/list` and `command/execute`. TUI, Web, Desktop, ACP, and messaging
-surfaces must project the shared catalog rather than inventing separate slash
-semantics.
+typed `command/list` and `command/execute` methods. `command/list` returns
+`CommandListResult { commands: CommandListItem[] }`, where each item carries
+the command name, slash label, usage, summary, aliases, argument kind, and
+source. TUI, Web, Desktop, ACP, and messaging surfaces must project the shared
+catalog rather than inventing separate slash semantics.
 Web and Desktop shells present the shared catalog as a command utility panel.
 Executing `/help` or `/commands` opens that panel, `/agents` opens the agents
 panel, `/status` opens status, and `/sessions` or `/history` opens history.
 These panel switches are host display effects, not ordinary transcript facts.
+The Web/Desktop catalog is capability-filtered by the runtime registry and may
+include dynamic backend-provided commands when runtime exposes them. Client-side
+presentation may hide only commands that the Gateway/runtime marks unavailable
+for that host capability set; it must not drop unknown extension commands from
+completion or execution merely because the frontend does not know their names.
 
 Shared execution returns an effect rather than directly manipulating a UI. The
 effect vocabulary includes local text, pass-through prompt, prompt submission,
@@ -129,6 +137,10 @@ steer, queue, pending cancel, session switch, state patch, artifact result,
 structured diff result, unsupported guidance, and approval required. Surfaces
 apply these effects to their own transcript, panes, protocol updates, queues,
 or approval UI.
+Web/Desktop `command/execute` maps these shared effects to typed host actions
+where a first-slice host action exists. Effects without a Web/Desktop action
+return bounded unsupported guidance instead of falling through to arbitrary
+frontend behavior.
 
 Peer-agent ACP commands are dynamic catalog entries sourced from ACP
 `available_commands_update`. They are exposed as namespaced commands of the

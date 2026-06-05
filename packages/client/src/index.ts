@@ -5,6 +5,8 @@ import {
   type ClarifyRespondParams,
   type CommandExecuteParams,
   type CommandExecuteResult,
+  type CommandListParams,
+  type CommandListResult,
   type CompletionListParams,
   type CompletionListResult,
   type GatewayRequestScope,
@@ -15,6 +17,8 @@ import {
   type RpcNotification,
   type SettingsReadParams,
   type SettingsReadResult,
+  type ShellStartParams,
+  type ShellStartResult,
   type SourceResetParams,
   type ThreadDeleteResult,
   type ThreadIdParams,
@@ -47,11 +51,12 @@ export interface GatewayRequestParams {
   "backend/list": { scope?: GatewayRequestScope | null };
   "clarify/respond": ClarifyRespondParams;
   "command/execute": CommandExecuteParams;
-  "command/list": { scope?: GatewayRequestScope | null; threadId?: string | null };
+  "command/list": CommandListParams;
   "completion/list": CompletionListParams;
   "initialize": InitializeParams;
   "permission/respond": PermissionRespondParams;
   "settings/read": SettingsReadParams;
+  "shell/start": ShellStartParams;
   "source/reset": SourceResetParams;
   "thread/archive": ThreadIdParams;
   "thread/delete": ThreadIdParams;
@@ -71,11 +76,12 @@ export interface GatewayRequestResults {
   "backend/list": unknown;
   "clarify/respond": InteractionRespondResult;
   "command/execute": CommandExecuteResult;
-  "command/list": unknown;
+  "command/list": CommandListResult;
   "completion/list": CompletionListResult;
   "initialize": InitializeResult;
   "permission/respond": InteractionRespondResult;
   "settings/read": SettingsReadResult;
+  "shell/start": ShellStartResult;
   "source/reset": ThreadSnapshot;
   "thread/archive": ThreadMutationResult;
   "thread/delete": ThreadDeleteResult;

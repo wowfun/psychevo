@@ -95,6 +95,11 @@ The generic shell build reuses the same React/Vite source with an explicit
 Gateway endpoint requirement. Shell builds disable service workers, PWA install
 prompts, and browser-only origin inference. Native Android, iOS, Harmony, or
 desktop bridge projects are deferred.
+Generic Desktop shell capability is therefore implemented first by sharing the
+same Workbench source, protocol client, host adapter contract, and components
+used by managed Web. A feature that works in the shared Workbench path is
+available to future Desktop shells when the shell host supplies an explicit
+Gateway endpoint and source scope; native packaging remains outside this topic.
 
 ## Components
 
@@ -143,6 +148,14 @@ unless an IME composition is active or a completion item is being accepted.
 Shift+Enter, Ctrl+Enter, Alt+Enter, and Ctrl+J insert a newline. During an
 active turn, plain prompt submission steers the running turn by default; queueing
 the next turn is an explicit mode or command.
+The composer also owns an explicit shell input mode shared by Web and generic
+Desktop shells. Typing `!` in an empty composer switches to shell mode without
+putting a literal bang in the editable text; imported, pasted, or restored text
+that begins with `!` is interpreted as shell mode and edited without that
+prefix. Shell submission calls a dedicated shell callback with the stripped
+command. Empty shell mode presents bounded shell help, and Escape or backspace
+on an empty shell editor returns to prompt mode. Slash completion is suppressed
+in shell mode, while `@` file completion remains available.
 
 Completion popovers are shared controlled components. `/` lists Gateway slash
 commands, `$` lists skills, local agents, and ACP capability mentions, and `@`
@@ -171,9 +184,11 @@ text even when the same assistant message also contains tool calls.
 Transcript rendering supports Markdown for user and assistant text, including
 CommonMark block structure, GFM tables/task lists, links, inline code, fenced
 code blocks, and streaming caret placement at the end of the final rendered
-block. Reasoning blocks are collapsible, default-expanded while running, and
-render incrementally before assistant text. Tool/evidence rows render one
-summary header and one expandable detail body; arguments or results must not be
+block. The transcript panel header, user text, assistant text, reasoning rows,
+and tool/evidence rows do not render decorative role, cognition, or kind icons.
+Reasoning blocks are collapsible, default-expanded while running, and render
+incrementally before assistant text. Tool/evidence rows render one summary
+header and one expandable detail body; arguments or results must not be
 duplicated between preview and detail.
 Completed protocol status is not shown as a default badge for ordinary
 completed transcript rows. Status badges are reserved for actionable states such

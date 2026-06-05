@@ -8,6 +8,7 @@ mod transcript;
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -16,9 +17,10 @@ use psychevo_runtime::{
     AgentDiscoveryOptions, AgentEntrypoint, ApprovalHandler, ClarifyResult, Error,
     GatewaySourceBindingInput, ImageInput, PermissionApprovalDecision, PermissionApprovalOutcome,
     PermissionApprovalRequest, RunControl, RunControlHandle, RunOptions, RunResult, RunStreamEvent,
-    RunStreamSink, StateRuntime, discover_agents, load_agent_backend_configs,
-    resolve_agent_definition, resolve_skills_home, run_control, run_live, run_live_streaming,
-    run_live_streaming_controlled,
+    RunStreamSink, StateRuntime, UserShellContextOptions, UserShellOptions, UserShellResult,
+    discover_agents, load_agent_backend_configs, resolve_agent_definition, resolve_skills_home,
+    run_control, run_live, run_live_streaming, run_live_streaming_controlled,
+    run_user_shell_command_streaming_controlled,
 };
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
@@ -125,11 +127,13 @@ impl Gateway {
                 let queued_request = request.take().expect("gateway request missing");
                 let event_sink = queued_request.event_sink.clone();
                 let thread_id = queued_request.thread_id.clone();
-                state.queued.push_back(PendingQueuedTurn {
-                    turn_id: turn_id.clone(),
-                    request: queued_request,
-                    responder,
-                });
+                state
+                    .queued
+                    .push_back(PendingQueuedActivity::Turn(Box::new(PendingQueuedTurn {
+                        turn_id: turn_id.clone(),
+                        request: queued_request,
+                        responder,
+                    })));
                 Some((receiver, event_sink, thread_id, queue_position))
             } else {
                 state.running = true;
@@ -157,8 +161,66 @@ impl Gateway {
                 turn_id,
             )
             .await;
-        self.finish_turn_and_spawn_next(queue_key);
+        self.finish_activity_and_spawn_next(queue_key);
         result
+    }
+
+    pub async fn send_shell(
+        &self,
+        request: SendShellRequest,
+    ) -> psychevo_runtime::Result<GatewayShellResult> {
+        let queue_key = self.queue_key_for_shell_request(&request)?;
+        let shell_id = Uuid::now_v7().to_string();
+        let mut request = Some(request);
+        let active = {
+            let mut active = self.active.lock().expect("gateway active map poisoned");
+            let state = active.entry(queue_key.clone()).or_default();
+            if state.running {
+                if state.active_kind == Some(ActiveActivityKind::Turn)
+                    && let Some(control) = state.control.clone()
+                {
+                    ShellStartState::Auxiliary(control)
+                } else {
+                    let (responder, receiver) = oneshot::channel();
+                    state
+                        .queued
+                        .push_back(PendingQueuedActivity::Shell(Box::new(PendingQueuedShell {
+                            shell_id: shell_id.clone(),
+                            request: request.take().expect("gateway shell request missing"),
+                            responder,
+                        })));
+                    ShellStartState::Queued(receiver)
+                }
+            } else {
+                state.running = true;
+                ShellStartState::Standalone
+            }
+        };
+
+        match active {
+            ShellStartState::Queued(receiver) => receiver
+                .await
+                .map_err(|_| Error::Message("gateway shell queue closed".to_string()))?,
+            ShellStartState::Auxiliary(inject_into) => {
+                self.run_shell_auxiliary(
+                    request.take().expect("gateway shell request missing"),
+                    shell_id,
+                    inject_into,
+                )
+                .await
+            }
+            ShellStartState::Standalone => {
+                let result = self
+                    .run_shell_now(
+                        &queue_key,
+                        request.take().expect("gateway shell request missing"),
+                        shell_id,
+                    )
+                    .await;
+                self.finish_activity_and_spawn_next(queue_key);
+                result
+            }
+        }
     }
 
     pub fn steer_turn(
@@ -253,9 +315,18 @@ impl Gateway {
         }
         let count = dropped.len();
         for pending in dropped {
-            let _ = pending.responder.send(Err(Error::Message(
-                "gateway turn queue cleared".to_string(),
-            )));
+            match pending {
+                PendingQueuedActivity::Turn(pending) => {
+                    let _ = pending.responder.send(Err(Error::Message(
+                        "gateway turn queue cleared".to_string(),
+                    )));
+                }
+                PendingQueuedActivity::Shell(pending) => {
+                    let _ = pending.responder.send(Err(Error::Message(
+                        "gateway shell queue cleared".to_string(),
+                    )));
+                }
+            }
         }
         count
     }
@@ -403,7 +474,12 @@ impl Gateway {
             None => (None, None),
         };
 
-        self.register_active(queue_key, turn_id.clone(), control_handle);
+        self.register_active(
+            queue_key,
+            turn_id.clone(),
+            control_handle,
+            ActiveActivityKind::Turn,
+        );
 
         let stream = wrap_stream(
             request.stream,
@@ -497,7 +573,125 @@ impl Gateway {
         })
     }
 
-    fn finish_turn_and_spawn_next(&self, queue_key: String) {
+    async fn run_shell_now(
+        &self,
+        queue_key: &str,
+        request: SendShellRequest,
+        shell_id: String,
+    ) -> psychevo_runtime::Result<GatewayShellResult> {
+        let (control_handle, control) = run_control();
+        self.register_active(
+            queue_key,
+            shell_id.clone(),
+            Some(control_handle),
+            ActiveActivityKind::Shell,
+        );
+        self.run_shell_with_control(request, shell_id, control, None)
+            .await
+    }
+
+    async fn run_shell_auxiliary(
+        &self,
+        request: SendShellRequest,
+        shell_id: String,
+        inject_into: RunControlHandle,
+    ) -> psychevo_runtime::Result<GatewayShellResult> {
+        let (_control_handle, control) = run_control();
+        self.run_shell_with_control(request, shell_id, control, Some(inject_into))
+            .await
+    }
+
+    async fn run_shell_with_control(
+        &self,
+        request: SendShellRequest,
+        shell_id: String,
+        control: RunControl,
+        inject_into: Option<RunControlHandle>,
+    ) -> psychevo_runtime::Result<GatewayShellResult> {
+        let mut context = request.context;
+        context.state = self.state.clone();
+        let active_thread_id = request
+            .thread_id
+            .clone()
+            .or_else(|| context.session.clone())
+            .or_else(|| {
+                request
+                    .source
+                    .as_ref()
+                    .and_then(|source| self.lookup_source_thread(source).ok().flatten())
+            });
+        if let Some(thread_id) = active_thread_id.clone() {
+            context.session = Some(thread_id);
+            context.continue_latest = false;
+        }
+        let first_committed_seq = active_thread_id
+            .as_deref()
+            .and_then(|thread_id| {
+                self.state
+                    .store()
+                    .load_tui_message_summaries(thread_id)
+                    .ok()
+            })
+            .and_then(|summaries| summaries.last().map(|summary| summary.session_seq + 1))
+            .unwrap_or(1);
+        let event_sink_for_completion = request.event_sink.clone();
+        let shell_event_id = shell_id.clone();
+        let stream = wrap_stream(
+            request.stream,
+            request.event_sink,
+            shell_id,
+            active_thread_id.clone(),
+        );
+        let stream = stream.unwrap_or_else(|| Arc::new(|_| {}));
+        let result = run_user_shell_command_streaming_controlled(
+            UserShellOptions {
+                workdir: request.workdir,
+                command: request.command,
+                context: Some(context),
+                inject_into,
+            },
+            stream,
+            control,
+        )
+        .await?;
+        let session_id = result
+            .session_id
+            .clone()
+            .or(active_thread_id)
+            .ok_or_else(|| Error::Message("shell command did not resolve a session".to_string()))?;
+        let backend = GatewayBackendInfo {
+            kind: BackendKind::Psychevo,
+            native_id: Some(session_id.clone()),
+        };
+        if let Some(source) = &request.source {
+            self.bind_source_thread(source, &session_id, &backend, request.lineage)?;
+        }
+        let summaries = self.state.store().load_tui_message_summaries(&session_id)?;
+        let committed_entries = transcript::project_committed_turn_entries(
+            &session_id,
+            &summaries,
+            first_committed_seq,
+        );
+        if let Some(event_sink) = event_sink_for_completion {
+            for entry in committed_entries.clone() {
+                event_sink(GatewayEvent::EntryUpdated {
+                    turn_id: shell_event_id.clone(),
+                    entry,
+                });
+            }
+        }
+        Ok(GatewayShellResult {
+            thread: GatewayThread {
+                id: session_id,
+                backend,
+                source_key: request.source.as_ref().map(GatewaySource::source_key),
+            },
+            result,
+            committed_entries,
+        })
+    }
+
+    fn finish_activity_and_spawn_next(&self, queue_key: String) {
         let next = {
             let mut active = self.active.lock().expect("gateway active map poisoned");
             let Some(state) = active.get_mut(&queue_key) else {
@@ -505,6 +699,7 @@ impl Gateway {
             };
             state.control = None;
             state.active_turn_id = None;
+            state.active_kind = None;
             if let Some(next) = state.queued.pop_front() {
                 state.running = true;
                 Some(next)
@@ -516,13 +711,26 @@ impl Gateway {
         if let Some(next) = next {
             let gateway = self.clone();
             let run_key = queue_key.clone();
-            tokio::spawn(async move {
-                let result = gateway
-                    .run_turn_now(&run_key, next.request, next.turn_id)
-                    .await;
-                let _ = next.responder.send(result);
-                gateway.finish_turn_and_spawn_next(run_key);
-            });
+            match next {
+                PendingQueuedActivity::Turn(next) => {
+                    tokio::spawn(async move {
+                        let result = gateway
+                            .run_turn_now(&run_key, next.request, next.turn_id)
+                            .await;
+                        let _ = next.responder.send(result);
+                        gateway.finish_activity_and_spawn_next(run_key);
+                    });
+                }
+                PendingQueuedActivity::Shell(next) => {
+                    tokio::spawn(async move {
+                        let result = gateway
+                            .run_shell_now(&run_key, next.request, next.shell_id)
+                            .await;
+                        let _ = next.responder.send(result);
+                        gateway.finish_activity_and_spawn_next(run_key);
+                    });
+                }
+            }
         }
     }
 
@@ -542,6 +750,25 @@ impl Gateway {
             return Ok(thread_key(thread_id));
         }
         Ok(format!("invocation:{}", Uuid::now_v7()))
+    }
+
+    fn queue_key_for_shell_request(
+        &self,
+        request: &SendShellRequest,
+    ) -> psychevo_runtime::Result<String> {
+        if let Some(thread_id) = &request.thread_id {
+            return Ok(thread_key(thread_id));
+        }
+        if let Some(source) = &request.source {
+            if let Some(thread_id) = self.lookup_source_thread(source)? {
+                return Ok(thread_key(&thread_id));
+            }
+            return Ok(source_key_key(&source.source_key()));
+        }
+        if let Some(thread_id) = &request.context.session {
+            return Ok(thread_key(thread_id));
+        }
+        Ok(format!("shell:{}", Uuid::now_v7()))
     }
 
     fn lookup_source_thread(
@@ -598,11 +825,18 @@ impl Gateway {
         Ok(())
     }
 
-    fn register_active(&self, key: &str, turn_id: String, control: Option<RunControlHandle>) {
+    fn register_active(
+        &self,
+        key: &str,
+        turn_id: String,
+        control: Option<RunControlHandle>,
+        kind: ActiveActivityKind,
+    ) {
         let mut active = self.active.lock().expect("gateway active map poisoned");
         let state = active.entry(key.to_string()).or_default();
         state.active_turn_id = Some(turn_id);
         state.control = control;
+        state.active_kind = Some(kind);
     }
 
     fn control_for_selector(
@@ -722,8 +956,27 @@ pub struct GatewayActivity {
 struct ActiveThreadState {
     running: bool,
     active_turn_id: Option<String>,
+    active_kind: Option<ActiveActivityKind>,
     control: Option<RunControlHandle>,
-    queued: VecDeque<PendingQueuedTurn>,
+    queued: VecDeque<PendingQueuedActivity>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActiveActivityKind {
+    Turn,
+    Shell,
+}
+
+enum ShellStartState {
+    Standalone,
+    Auxiliary(RunControlHandle),
+    Queued(oneshot::Receiver<psychevo_runtime::Result<GatewayShellResult>>),
+}
+
+#[derive(Debug)]
+enum PendingQueuedActivity {
+    Turn(Box<PendingQueuedTurn>),
+    Shell(Box<PendingQueuedShell>),
 }
 
 #[derive(Debug)]
@@ -731,6 +984,13 @@ struct PendingQueuedTurn {
     turn_id: String,
     request: SendTurnRequest,
     responder: oneshot::Sender<psychevo_runtime::Result<GatewayTurnResult>>,
+}
+
+#[derive(Debug)]
+struct PendingQueuedShell {
+    shell_id: String,
+    request: SendShellRequest,
+    responder: oneshot::Sender<psychevo_runtime::Result<GatewayShellResult>>,
 }
 
 type PendingPermissionMap = Arc<Mutex<HashMap<String, PendingPermission>>>;
@@ -875,11 +1135,45 @@ impl fmt::Debug for SendTurnRequest {
     }
 }
 
+pub struct SendShellRequest {
+    pub thread_id: Option<String>,
+    pub source: Option<GatewaySource>,
+    pub workdir: PathBuf,
+    pub command: String,
+    pub context: UserShellContextOptions,
+    pub stream: Option<RunStreamSink>,
+    pub event_sink: Option<GatewayEventSink>,
+    pub lineage: Option<Value>,
+}
+
+impl fmt::Debug for SendShellRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SendShellRequest")
+            .field("thread_id", &self.thread_id)
+            .field("source", &self.source)
+            .field("workdir", &self.workdir)
+            .field("command", &self.command)
+            .field("context", &self.context)
+            .field("has_stream", &self.stream.is_some())
+            .field("has_event_sink", &self.event_sink.is_some())
+            .field("lineage", &self.lineage)
+            .finish()
+    }
+}
+
 #[derive(Debug)]
 pub struct GatewayTurnResult {
     pub thread: GatewayThread,
     pub turn: GatewayTurn,
     pub result: RunResult,
+    pub committed_entries: Vec<TranscriptEntry>,
+}
+
+#[derive(Debug)]
+pub struct GatewayShellResult {
+    pub thread: GatewayThread,
+    pub result: UserShellResult,
     pub committed_entries: Vec<TranscriptEntry>,
 }
 

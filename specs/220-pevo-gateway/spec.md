@@ -171,6 +171,42 @@ The Web Shell executes shared slash commands through `command/execute` when the
 command has a Gateway representation. Host-only results such as copy, export,
 share, and download are returned as structured client actions and performed by
 the host adapter.
+`command/list` is a typed Gateway protocol method returning the same
+capability-filtered catalog used by slash completion. The catalog and
+`command/execute` behavior are projected from the runtime command registry;
+Web must not carry a separate hard-coded slash inventory beyond applying typed
+host actions returned by Gateway. Unknown slash-looking input, including
+absolute-path-looking input, is returned as prompt passthrough instead of a
+local command error.
+
+The Web Shell supports TUI-compatible shell mode through `shell/start`.
+`shell/start` accepts `scope`, optional `threadId`, and a stripped local shell
+`command`; it returns whether the command was accepted plus the owning thread
+id when known. Execution uses the runtime user-shell executor, not the
+provider-callable `exec_command` tool surface. Live shell start/end events are
+projected through the ordinary Gateway event stream as shell evidence rows.
+After completion or error, Gateway sends a notification that lets Workbench
+refresh the owning snapshot and history.
+
+Shell mode is an explicit composer mode, not a literal prompt prefix. Entering
+`!` in an empty composer switches into shell mode and displays the shell marker;
+submitting sends only the stripped command to `shell/start`. Imported, pasted,
+or history-restored composer text that begins with `!` enters shell mode with
+the bang stripped. Empty shell mode shows bounded shell help, and Escape or
+backspace on an empty shell composer exits shell mode. Slash completion is
+disabled in shell mode; `@` completion remains available.
+
+If no agent turn is active, `shell/start` runs as the thread's active local
+activity and participates in interrupt and queue state. If an agent turn is
+active for the same thread, shell mode starts an auxiliary shell task and
+injects the bounded result into the active turn context. If a standalone shell
+activity is already active, later prompt or shell submissions are queued behind
+that activity.
+
+Persisted user-shell context must reload as shell evidence, not as raw
+`<user_shell_command>` XML prompt text. The visible command line uses the
+prompt-surface `!<command>` label while model-visible context continues to use
+the bounded runtime user-shell XML record.
 
 ## Workbench Layout
 
@@ -192,6 +228,10 @@ The composer matches TUI keyboard behavior: plain Enter submits, modifier Enter
 variants insert newline, IME composition is respected, and running-turn prompt
 submission steers by default. Queueing remains available as an explicit composer
 mode and via `/queue`.
+The same shared composer provides Web and generic Desktop shell mode. The
+generic Desktop shell reuses this Workbench/Gateway behavior and identifies
+itself through the host/source scope; this topic does not introduce native
+desktop packaging.
 
 The transcript renders user and assistant Markdown, streams assistant and
 reasoning updates without waiting for turn completion, keeps observed block

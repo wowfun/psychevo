@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "accepted": {
+      "type": "boolean"
+    },
+    "message": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "threadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "accepted"
+  ],
+  "title": "ShellStartResult",
+  "type": "object"
+}

@@ -672,6 +672,36 @@ pub struct CommandExecuteParams {
     pub command: String,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandListParams {
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+    #[serde(default)]
+    pub thread_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandListItem {
+    pub name: String,
+    pub slash: String,
+    pub usage: String,
+    pub summary: String,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    pub argument_kind: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandListResult {
+    pub commands: Vec<CommandListItem>,
+    #[serde(default)]
+    pub hidden_dynamic: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandExecuteResult {
@@ -682,6 +712,25 @@ pub struct CommandExecuteResult {
     #[serde(default)]
     #[ts(type = "unknown | null")]
     pub action: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellStartParams {
+    pub scope: GatewayRequestScope,
+    #[serde(default)]
+    pub thread_id: Option<String>,
+    pub command: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellStartResult {
+    pub accepted: bool,
+    #[serde(default)]
+    pub thread_id: Option<String>,
+    #[serde(default)]
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -766,6 +815,25 @@ pub struct TurnRunResult {
 #[serde(rename_all = "camelCase")]
 pub struct TurnErrorPayload {
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellResultPayload {
+    pub thread: GatewayThread,
+    pub command: String,
+    pub outcome: String,
+    pub tool_failures: usize,
+    #[serde(rename = "committedEntries", default)]
+    pub committed_entries: Vec<TranscriptEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellErrorPayload {
+    pub message: String,
+    #[serde(default)]
+    pub thread_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -942,8 +1010,12 @@ pub enum ClientRequest {
     TurnInterrupt(TurnInterruptParams),
     #[serde(rename = "completion/list")]
     CompletionList(CompletionListParams),
+    #[serde(rename = "command/list")]
+    CommandList(CommandListParams),
     #[serde(rename = "command/execute")]
     CommandExecute(CommandExecuteParams),
+    #[serde(rename = "shell/start")]
+    ShellStart(ShellStartParams),
     #[serde(rename = "source/reset")]
     SourceReset(SourceResetParams),
     #[serde(rename = "permission/respond")]
@@ -963,6 +1035,10 @@ pub enum ServerNotification {
     TurnResult(TurnResultPayload),
     #[serde(rename = "turn/error")]
     TurnError(TurnErrorPayload),
+    #[serde(rename = "shell/result")]
+    ShellResult(ShellResultPayload),
+    #[serde(rename = "shell/error")]
+    ShellError(ShellErrorPayload),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1149,8 +1225,13 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(CompletionReplacement),
         exported_type!(CompletionItem),
         exported_type!(CompletionListResult),
+        exported_type!(CommandListParams),
+        exported_type!(CommandListItem),
+        exported_type!(CommandListResult),
         exported_type!(CommandExecuteParams),
         exported_type!(CommandExecuteResult),
+        exported_type!(ShellStartParams),
+        exported_type!(ShellStartResult),
         exported_type!(TurnStartParams),
         exported_type!(TurnSteerParams),
         exported_type!(TurnInterruptParams),
@@ -1159,6 +1240,8 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(TurnResultPayload),
         exported_type!(TurnRunResult),
         exported_type!(TurnErrorPayload),
+        exported_type!(ShellResultPayload),
+        exported_type!(ShellErrorPayload),
         exported_type!(PermissionRespondParams),
         exported_type!(ClarifyRespondParams),
         exported_type!(InteractionRespondResult),

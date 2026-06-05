@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "aliases": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "argumentKind": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "slash": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "usage": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "argumentKind",
+    "name",
+    "slash",
+    "source",
+    "summary",
+    "usage"
+  ],
+  "title": "CommandListItem",
+  "type": "object"
+}

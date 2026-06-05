@@ -678,6 +678,16 @@ pub(crate) mod tests {
         assert_eq!(invocation.spec.canonical, "/usage");
         assert_eq!(invocation.command, "/stats");
 
+        let SlashCommandParse::Known(invocation) = parse_slash_command_line("/commands") else {
+            panic!("expected known command");
+        };
+        assert_eq!(invocation.spec.canonical, "/help");
+
+        let SlashCommandParse::Known(invocation) = parse_slash_command_line("/history") else {
+            panic!("expected known command");
+        };
+        assert_eq!(invocation.spec.canonical, "/sessions");
+
         let SlashCommandParse::Unknown { command, args, .. } =
             parse_slash_command_line("/made-up hello")
         else {
@@ -760,6 +770,23 @@ pub(crate) mod tests {
         )
         .expect("diff effect");
         assert_eq!(effect, SlashCommandEffect::Diff);
+    }
+
+    #[test]
+    fn web_desktop_surface_returns_surface_specific_guidance() {
+        let SlashCommandParse::Known(invocation) = parse_slash_command_line("/image ./a.png")
+        else {
+            panic!("expected known command");
+        };
+        let effect =
+            slash_invocation_effect(&invocation, &[], SlashCommandSurface::WebDesktop, false)
+                .expect("unsupported effect");
+        assert_eq!(
+            effect,
+            SlashCommandEffect::Unsupported(
+                "/image is not advertised here; attach images with the Web/Desktop shell's native attachment flow when available.".to_string(),
+            )
+        );
     }
 
     #[test]

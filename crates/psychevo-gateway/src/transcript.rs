@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
 use psychevo_runtime::{
-    AssistantBlock, Message, TUI_DISPLAY_METADATA_KEY, TuiMessageSummary, UserContentBlock,
+    AssistantBlock, Message, TUI_DISPLAY_METADATA_KEY, TuiMessageSummary, USER_SHELL_METADATA_KEY,
+    UserContentBlock,
 };
 use serde_json::{Value, json};
 
@@ -40,6 +41,16 @@ fn project_message_entry(thread_id: &str, summary: &TuiMessageSummary) -> Option
             content,
             timestamp_ms,
         } => {
+            if let Some(shell_block) = user_shell_block(summary, *timestamp_ms) {
+                return Some(entry(
+                    thread_id,
+                    summary,
+                    TranscriptEntryRole::User,
+                    shell_block.status,
+                    vec![shell_block],
+                    *timestamp_ms,
+                ));
+            }
             let text = user_content_text(content, summary.metadata.as_ref());
             let mut blocks = Vec::new();
             if !text.trim().is_empty() {
@@ -194,6 +205,61 @@ fn project_message_entry(thread_id: &str, summary: &TuiMessageSummary) -> Option
         }
         Message::ToolResult { .. } => None,
     }
+}
+
+fn user_shell_block(summary: &TuiMessageSummary, timestamp_ms: i64) -> Option<TranscriptBlock> {
+    let metadata = summary
+        .metadata
+        .as_ref()?
+        .get(USER_SHELL_METADATA_KEY)?
+        .as_object()?;
+    let command = metadata.get("command").and_then(Value::as_str)?.to_string();
+    let result = metadata.get("result").cloned().unwrap_or(Value::Null);
+    let is_error = metadata
+        .get("is_error")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let outcome = metadata
+        .get("outcome")
+        .and_then(Value::as_str)
+        .unwrap_or(if is_error { "failed" } else { "normal" });
+    let status = if is_error || !matches!(outcome, "normal") {
+        TranscriptBlockStatus::Failed
+    } else {
+        TranscriptBlockStatus::Completed
+    };
+    let mut block_metadata = serde_json::Map::new();
+    block_metadata.insert("projection".to_string(), json!("tool"));
+    block_metadata.insert("tool_name".to_string(), json!("exec_command"));
+    block_metadata.insert("tool_call_id".to_string(), json!("user_shell"));
+    block_metadata.insert("args".to_string(), json!({"cmd": command}));
+    block_metadata.insert("result".to_string(), result.clone());
+    block_metadata.insert("outcome".to_string(), json!(outcome));
+    block_metadata.insert("is_error".to_string(), json!(is_error));
+    block_metadata.insert(
+        "message_session_seq".to_string(),
+        json!(summary.session_seq),
+    );
+    block_metadata.insert(
+        USER_SHELL_METADATA_KEY.to_string(),
+        Value::Object(metadata.clone()),
+    );
+    if let Some(elapsed_ms) = metadata.get("elapsed_ms") {
+        block_metadata.insert("elapsed_ms".to_string(), elapsed_ms.clone());
+    }
+    let detail = serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string());
+    Some(block(
+        format!("user-shell:{}", summary.session_seq),
+        TranscriptBlockKind::Shell,
+        status,
+        0,
+        "runtime.user_shell",
+        Some("exec_command".to_string()),
+        Some(detail.clone()),
+        Some(detail),
+        Some(Value::Object(block_metadata)),
+        timestamp_ms,
+    ))
 }
 
 fn entry(
@@ -778,6 +844,53 @@ mod tests {
             entries[0].blocks[0].metadata.as_ref().unwrap()["prompt_prefix"]["selected_skills"][0]
                 ["path"],
             "/tmp/x/SKILL.md"
+        );
+    }
+
+    #[test]
+    fn projector_reloads_user_shell_metadata_as_shell_evidence() {
+        let mut user = summary(
+            1,
+            Message::User {
+                content: vec![UserContentBlock::text(
+                    "<user_shell_command><command>printf ok</command></user_shell_command>",
+                )],
+                timestamp_ms: 1,
+            },
+        );
+        user.metadata = Some(json!({
+            "user_shell": {
+                "command": "printf ok",
+                "workdir": "/tmp/work",
+                "outcome": "normal",
+                "is_error": false,
+                "exit_code": 0,
+                "truncated": false,
+                "elapsed_ms": 12,
+                "result": {
+                    "exit_code": 0,
+                    "output": "ok"
+                }
+            }
+        }));
+
+        let entries = project_transcript_entries("thread-1", &[user]);
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].role, TranscriptEntryRole::User);
+        assert_eq!(entries[0].blocks.len(), 1);
+        let block = &entries[0].blocks[0];
+        assert_eq!(block.kind, TranscriptBlockKind::Shell);
+        assert_eq!(block.source, "runtime.user_shell");
+        assert_eq!(block.title.as_deref(), Some("exec_command"));
+        assert_eq!(block.metadata.as_ref().unwrap()["args"]["cmd"], "printf ok");
+        assert_eq!(block.metadata.as_ref().unwrap()["result"]["output"], "ok");
+        assert!(
+            !block
+                .body
+                .as_deref()
+                .unwrap_or_default()
+                .contains("<user_shell_command>")
         );
     }
 

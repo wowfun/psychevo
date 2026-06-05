@@ -100,6 +100,7 @@ pub enum SlashCommandAction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SlashCommandSurface {
     Tui,
+    WebDesktop,
     Acp,
     Messaging,
 }
@@ -171,6 +172,7 @@ impl SlashCommandSpec {
                     SlashCommandSurface::Acp => "ACP client",
                     SlashCommandSurface::Messaging => "messaging client",
                     SlashCommandSurface::Tui => "TUI",
+                    SlashCommandSurface::WebDesktop => "Web/Desktop shell",
                 };
                 format!(
                     "{} is not advertised here; attach images with the {surface}'s native attachment flow when available.",
@@ -224,7 +226,7 @@ pub(crate) const COMMANDS: CommandGroup = CommandGroup::Commands;
 pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         canonical: "/help",
-        aliases: &[],
+        aliases: &["/commands"],
         usage: "/help",
         summary: "show commands and shortcuts",
         help_detail: Some(
@@ -272,7 +274,7 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     },
     SlashCommandSpec {
         canonical: "/sessions",
-        aliases: &[],
+        aliases: &["/history"],
         usage: "/sessions",
         summary: "list sessions",
         help_detail: Some(

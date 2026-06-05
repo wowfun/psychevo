@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "CommandListItem": {
+      "properties": {
+        "aliases": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "argumentKind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "slash": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "usage": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "argumentKind",
+        "name",
+        "slash",
+        "source",
+        "summary",
+        "usage"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "commands": {
+      "items": {
+        "$ref": "#/definitions/CommandListItem"
+      },
+      "type": "array"
+    },
+    "hiddenDynamic": {
+      "default": 0,
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "commands"
+  ],
+  "title": "CommandListResult",
+  "type": "object"
+}

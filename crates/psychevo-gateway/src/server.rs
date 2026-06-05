@@ -17,18 +17,20 @@ use axum::routing::{get, post};
 use futures::{SinkExt, StreamExt};
 use psychevo_gateway_protocol as wire;
 use psychevo_runtime::command_registry::{
-    AvailableSlashCommand, CommandArgumentKind, CommandCapability,
-    available_slash_commands_for_surface,
+    AvailableSlashCommand, CommandArgumentKind, CommandCapability, DynamicSlashCommand,
+    SlashCommandAction, SlashCommandEffect, SlashCommandParse, SlashCommandSurface,
+    available_slash_commands_for_surface, dynamic_slash_command_effect, parse_slash_command_line,
+    skill_prompt_marker, slash_invocation_effect,
 };
 use psychevo_runtime::{
     AgentBackendConfig, AgentDiscoveryOptions, AgentEntrypoint, ClarifyAnswer, ClarifyResponse,
     ClarifyResult, Error, ListSkillsOptions, Message as RuntimeMessage, PermissionApprovalDecision,
     PermissionApprovalOutcome, PermissionMode, RunMode, RunOptions, SessionArtifactKind,
     SessionExportFormat, SessionExportIncludeSet, SessionExportOptions, SessionSummary,
-    SkillDiscoveryOptions, StateRuntime, UserContentBlock, canonicalize_workdir, discover_agents,
-    discover_skills, list_agents_value, list_skills_value_with_options, load_agent_backend_configs,
-    render_session_export, resolve_agent_definition, valid_agent_name,
-    view_agent_value_with_catalog,
+    SkillDiscoveryOptions, StateRuntime, UserContentBlock, UserShellContextOptions,
+    canonicalize_workdir, discover_agents, discover_skills, list_agents_value, list_skill_bundles,
+    list_skills_value_with_options, load_agent_backend_configs, render_session_export,
+    resolve_agent_definition, valid_agent_name, view_agent_value_with_catalog,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -38,11 +40,12 @@ use uuid::Uuid;
 
 use crate::{
     BackendKind, Gateway, GatewayActivity, GatewayBackendInfo, GatewayEvent, GatewayEventSink,
-    GatewayInputPart, GatewaySource, GatewaySourceLifetime, GatewayThread, GatewayThreadSelector,
-    GatewayTurnResult, PermissionDecision, SourceKey, gateway_now_ms,
+    GatewayInputPart, GatewayShellResult, GatewaySource, GatewaySourceLifetime, GatewayThread,
+    GatewayThreadSelector, GatewayTurnResult, PermissionDecision, SendShellRequest, SourceKey,
+    gateway_now_ms,
 };
 
-const HISTORY_SOURCES: &[&str] = &["run", "tui", "web", "peer_agent"];
+const HISTORY_SOURCES: &[&str] = &["run", "tui", "web", "desktop", "peer_agent"];
 const MAX_COMPLETION_ITEMS: usize = 50;
 const MAX_FILE_COMPLETION_ITEMS: usize = 80;
 const MAX_FILE_COMPLETION_DEPTH: usize = 8;
@@ -488,13 +491,6 @@ struct BackendListParams {
 #[serde(rename_all = "camelCase")]
 struct BackendDoctorParams {
     id: String,
-    scope: Option<wire::GatewayRequestScope>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CommandListParams {
-    thread_id: Option<String>,
     scope: Option<wire::GatewayRequestScope>,
 }
 
@@ -1015,7 +1011,7 @@ async fn handle_rpc(
             Ok(backend_doctor_value(backend, &state.inner.inherited_env)?)
         }
         "command/list" => {
-            let params = request.params::<CommandListParams>()?;
+            let params = request.params::<wire::CommandListParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
             let active_turn = if let Some(thread_id) = params.thread_id.as_deref() {
                 authorize_thread(&state, &auth, thread_id)?;
@@ -1023,7 +1019,7 @@ async fn handle_rpc(
             } else {
                 state.activity(&scope.source, None).running
             };
-            Ok(command_list_value(active_turn))
+            command_list_value(&state, &scope, active_turn)
         }
         "command/execute" => {
             let params = request.required_params::<wire::CommandExecuteParams>()?;
@@ -1032,6 +1028,76 @@ async fn handle_rpc(
                 authorize_thread(&state, &auth, thread_id)?;
             }
             command_execute_value(&state, &scope, params)
+        }
+        "shell/start" => {
+            let params = request.required_params::<wire::ShellStartParams>()?;
+            let scope = resolve_required_scope(&state, &auth, params.scope.clone())?;
+            let command = params.command.trim().to_string();
+            if command.is_empty() {
+                return Ok(serde_json::to_value(wire::ShellStartResult {
+                    accepted: false,
+                    thread_id: params.thread_id,
+                    message: Some(
+                        "shell mode: type !<command> to run a local shell command".to_string(),
+                    ),
+                })?);
+            }
+            let thread_id = match params.thread_id.clone() {
+                Some(thread_id) => {
+                    authorize_thread(&state, &auth, &thread_id)?;
+                    thread_id
+                }
+                None => ensure_source_thread_for_shell(&state, &scope)?,
+            };
+            if state
+                .inner
+                .gateway
+                .resolve_source_thread(&scope.source)?
+                .as_deref()
+                != Some(thread_id.as_str())
+            {
+                bind_source_to_thread(&state, &scope, &thread_id)?;
+            }
+            let event_state = state.clone();
+            let event_tx = out_tx.clone();
+            let event_sink: GatewayEventSink = Arc::new(move |event| {
+                event_state.record_event(&event);
+                let _ = event_tx.send(rpc_notification("gateway/event", json!(event)));
+            });
+            let context = user_shell_context_options(&state, &scope, Some(thread_id.clone()));
+            let gateway = state.inner.gateway.clone();
+            let source = scope.source.clone();
+            let workdir = scope.workdir.clone();
+            let result_thread_id = thread_id.clone();
+            tokio::spawn(async move {
+                let result = gateway
+                    .send_shell(SendShellRequest {
+                        thread_id: Some(result_thread_id.clone()),
+                        source: Some(source),
+                        workdir,
+                        command,
+                        context,
+                        stream: None,
+                        event_sink: Some(event_sink),
+                        lineage: Some(json!({"reason": "shell_start"})),
+                    })
+                    .await;
+                let notification = match result {
+                    Ok(result) => {
+                        rpc_notification("shell/result", gateway_shell_result_value(result))
+                    }
+                    Err(err) => rpc_notification(
+                        "shell/error",
+                        json!({"message": err.to_string(), "threadId": result_thread_id}),
+                    ),
+                };
+                let _ = out_tx.send(notification);
+            });
+            Ok(serde_json::to_value(wire::ShellStartResult {
+                accepted: true,
+                thread_id: Some(thread_id),
+                message: None,
+            })?)
         }
         "settings/read" => {
             let params = request.params::<wire::SettingsReadParams>()?;
@@ -1085,6 +1151,21 @@ fn ensure_source_thread_for_turn(
     state: &WebState,
     scope: &ResolvedScope,
 ) -> psychevo_runtime::Result<String> {
+    ensure_source_thread(state, scope, "turn_start")
+}
+
+fn ensure_source_thread_for_shell(
+    state: &WebState,
+    scope: &ResolvedScope,
+) -> psychevo_runtime::Result<String> {
+    ensure_source_thread(state, scope, "shell_start")
+}
+
+fn ensure_source_thread(
+    state: &WebState,
+    scope: &ResolvedScope,
+    reason: &str,
+) -> psychevo_runtime::Result<String> {
     if let Some(thread_id) = state.inner.gateway.resolve_source_thread(&scope.source)? {
         return Ok(thread_id);
     }
@@ -1096,7 +1177,7 @@ fn ensure_source_thread_for_turn(
             kind: BackendKind::Psychevo,
             native_id: Some(session_id.clone()),
         },
-        Some(json!({"reason": "turn_start"})),
+        Some(json!({"reason": reason})),
     )?;
     Ok(session_id)
 }
@@ -1149,6 +1230,28 @@ fn bind_source_to_thread(
         Some(json!({"reason": "thread_resume"})),
     )?;
     Ok(())
+}
+
+fn user_shell_context_options(
+    state: &WebState,
+    scope: &ResolvedScope,
+    thread_id: Option<String>,
+) -> UserShellContextOptions {
+    UserShellContextOptions {
+        state: state.inner.state.clone(),
+        session: thread_id,
+        continue_latest: false,
+        source: scope.source.kind.clone(),
+        continue_sources: HISTORY_SOURCES
+            .iter()
+            .map(|source| (*source).to_string())
+            .collect(),
+        config_path: state.inner.config_path.clone(),
+        model: None,
+        reasoning_effort: None,
+        mode: RunMode::Default,
+        inherited_env: Some(state.inner.inherited_env.clone()),
+    }
 }
 
 fn gateway_backend_info_for_thread(
@@ -1265,6 +1368,36 @@ fn discover_gateway_skills(
     })
 }
 
+fn dynamic_slash_commands(
+    state: &WebState,
+    scope: &ResolvedScope,
+) -> psychevo_runtime::Result<Vec<DynamicSlashCommand>> {
+    let mut commands = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for bundle in list_skill_bundles(&state.inner.home, &scope.workdir)? {
+        if seen.insert(bundle.slug.clone()) {
+            commands.push(DynamicSlashCommand {
+                name: bundle.slug.clone(),
+                summary: bundle.description,
+                prompt: skill_prompt_marker(&bundle.slug, ""),
+            });
+        }
+    }
+    for skill in discover_gateway_skills(state, scope)?.skills {
+        if skill.disable_model_invocation || !skill.supported_on_current_platform {
+            continue;
+        }
+        if seen.insert(skill.name.clone()) {
+            commands.push(DynamicSlashCommand {
+                name: skill.name.clone(),
+                summary: skill.description,
+                prompt: skill_prompt_marker(&skill.name, ""),
+            });
+        }
+    }
+    Ok(commands)
+}
+
 #[derive(Debug, Clone)]
 struct CompletionToken {
     sigil: char,
@@ -1286,7 +1419,7 @@ fn completion_list_value(
     };
     let query = token.query.to_ascii_lowercase();
     let mut items = match token.sigil {
-        '/' => slash_completion_items(state, scope, params.thread_id.as_deref(), &query),
+        '/' => slash_completion_items(state, scope, params.thread_id.as_deref(), &query)?,
         '$' => dollar_completion_items(state, scope, &query)?,
         '@' => file_completion_items(&scope.workdir, &query)?,
         _ => Vec::new(),
@@ -1336,17 +1469,18 @@ fn slash_completion_items(
     scope: &ResolvedScope,
     thread_id: Option<&str>,
     query: &str,
-) -> Vec<wire::CompletionItem> {
+) -> psychevo_runtime::Result<Vec<wire::CompletionItem>> {
     let active_turn = thread_id
         .map(|thread_id| state.activity(&scope.source, Some(thread_id)).running)
         .unwrap_or_else(|| state.activity(&scope.source, None).running);
+    let dynamic = dynamic_slash_commands(state, scope)?;
     let available = available_slash_commands_for_surface(
         &gateway_command_capabilities(),
         active_turn,
-        &[],
+        &dynamic,
         MAX_COMPLETION_ITEMS,
     );
-    available
+    Ok(available
         .commands
         .into_iter()
         .filter(|command| command_matches(command, query))
@@ -1360,7 +1494,7 @@ fn slash_completion_items(
             target: None,
             sort_text: Some(format!("command:{}", command.name)),
         })
-        .collect()
+        .collect())
 }
 
 fn command_matches(command: &AvailableSlashCommand, query: &str) -> bool {
@@ -1562,101 +1696,195 @@ fn should_skip_completion_path(name: &str) -> bool {
 }
 
 fn command_execute_value(
-    _state: &WebState,
-    _scope: &ResolvedScope,
+    state: &WebState,
+    scope: &ResolvedScope,
     params: wire::CommandExecuteParams,
 ) -> psychevo_runtime::Result<Value> {
     let raw = params.command.trim().to_string();
     let thread_id = params.thread_id.clone();
-    let command = raw.trim_start_matches('/');
-    let mut parts = command.splitn(2, char::is_whitespace);
-    let name = parts.next().unwrap_or_default();
-    let args = parts.next().unwrap_or_default().trim();
-    let result = match name {
-        "" => wire::CommandExecuteResult {
+    if raw.is_empty() {
+        return Ok(serde_json::to_value(wire::CommandExecuteResult {
             accepted: false,
-            command: raw.to_string(),
+            command: raw,
             message: Some("empty command".to_string()),
             action: None,
+        })?);
+    }
+    let active_turn = thread_id
+        .as_deref()
+        .map(|thread_id| state.activity(&scope.source, Some(thread_id)).running)
+        .unwrap_or_else(|| state.activity(&scope.source, None).running);
+    let dynamic = dynamic_slash_commands(state, scope)?;
+    let result = match parse_slash_command_line(&raw) {
+        SlashCommandParse::Known(invocation) => match slash_invocation_effect(
+            &invocation,
+            &gateway_command_capabilities(),
+            SlashCommandSurface::WebDesktop,
+            active_turn,
+        ) {
+            Ok(effect) => {
+                command_result_from_effect(&raw, invocation.spec.action, effect, thread_id)
+            }
+            Err(message) => wire::CommandExecuteResult {
+                accepted: false,
+                command: raw,
+                message: Some(message),
+                action: None,
+            },
         },
-        "new" | "clear" => wire::CommandExecuteResult {
-            accepted: true,
-            command: name.to_string(),
-            message: None,
-            action: Some(json!({"type": "threadStart"})),
-        },
-        "sessions" | "history" => wire::CommandExecuteResult {
-            accepted: true,
-            command: name.to_string(),
-            message: None,
-            action: Some(json!({"type": "showPanel", "panel": "history"})),
-        },
-        "archive" => wire::CommandExecuteResult {
-            accepted: true,
-            command: name.to_string(),
-            message: None,
-            action: Some(json!({"type": "threadArchive", "threadId": thread_id.clone()})),
-        },
-        "delete" => wire::CommandExecuteResult {
-            accepted: true,
-            command: name.to_string(),
-            message: None,
-            action: Some(json!({"type": "threadDelete", "threadId": thread_id.clone()})),
-        },
-        "stop" | "cancel" | "interrupt" => wire::CommandExecuteResult {
-            accepted: true,
-            command: name.to_string(),
-            message: None,
-            action: Some(json!({"type": "turnInterrupt", "threadId": thread_id.clone()})),
-        },
-        "queue" => wire::CommandExecuteResult {
-            accepted: true,
-            command: name.to_string(),
-            message: None,
-            action: Some(json!({"type": "queuePrompt", "text": args})),
-        },
-        "export" => wire::CommandExecuteResult {
-            accepted: true,
-            command: name.to_string(),
-            message: None,
-            action: Some(
-                json!({"type": "downloadSession", "kind": "export", "threadId": thread_id.clone()}),
-            ),
-        },
-        "share" => wire::CommandExecuteResult {
-            accepted: true,
-            command: name.to_string(),
-            message: None,
-            action: Some(
-                json!({"type": "downloadSession", "kind": "share", "threadId": thread_id.clone()}),
-            ),
-        },
-        "agents" => wire::CommandExecuteResult {
-            accepted: true,
-            command: name.to_string(),
-            message: None,
-            action: Some(json!({"type": "showPanel", "panel": "agents"})),
-        },
-        "status" => wire::CommandExecuteResult {
-            accepted: true,
-            command: name.to_string(),
-            message: None,
-            action: Some(json!({"type": "showPanel", "panel": "status"})),
-        },
-        "help" | "commands" => wire::CommandExecuteResult {
-            accepted: true,
-            command: name.to_string(),
-            message: None,
-            action: Some(json!({"type": "showPanel", "panel": "commands"})),
-        },
-        _ => wire::CommandExecuteResult {
+        SlashCommandParse::Unknown {
+            original,
+            command,
+            args,
+        } => {
+            if let Some(effect) = dynamic_slash_command_effect(&command, &args, &dynamic) {
+                command_result_from_effect(&raw, SlashCommandAction::SkillInvoke, effect, thread_id)
+            } else {
+                wire::CommandExecuteResult {
+                    accepted: false,
+                    command,
+                    message: None,
+                    action: Some(json!({"type": "passThroughPrompt", "text": original})),
+                }
+            }
+        }
+        SlashCommandParse::NotSlash => wire::CommandExecuteResult {
             accepted: false,
-            command: name.to_string(),
-            message: Some(format!("unsupported command: /{name}")),
-            action: None,
+            command: raw.clone(),
+            message: None,
+            action: Some(json!({"type": "passThroughPrompt", "text": raw})),
         },
     };
     Ok(serde_json::to_value(result)?)
+}
+
+fn command_result_from_effect(
+    raw: &str,
+    action: SlashCommandAction,
+    effect: SlashCommandEffect,
+    thread_id: Option<String>,
+) -> wire::CommandExecuteResult {
+    match effect {
+        SlashCommandEffect::LocalText => match action {
+            SlashCommandAction::Help => {
+                command_action(raw, json!({"type": "showPanel", "panel": "commands"}))
+            }
+            SlashCommandAction::Status => {
+                command_action(raw, json!({"type": "showPanel", "panel": "status"}))
+            }
+            SlashCommandAction::Usage | SlashCommandAction::Context => command_unsupported(
+                raw,
+                format!(
+                    "{} is not available in Web/Desktop yet.",
+                    raw.split_whitespace().next().unwrap_or(raw)
+                ),
+            ),
+            _ => command_accepted_message(raw, None),
+        },
+        SlashCommandEffect::PassThroughPrompt(text) => {
+            command_action(raw, json!({"type": "passThroughPrompt", "text": text}))
+        }
+        SlashCommandEffect::SubmitPrompt(text) => {
+            command_action(raw, json!({"type": "submitPrompt", "text": text}))
+        }
+        SlashCommandEffect::Steer(text) => {
+            command_action(raw, json!({"type": "steerPrompt", "text": text}))
+        }
+        SlashCommandEffect::Queue(text) => {
+            command_action(raw, json!({"type": "queuePrompt", "text": text}))
+        }
+        SlashCommandEffect::PendingCancel => {
+            command_action(raw, json!({"type": "turnInterrupt", "threadId": thread_id}))
+        }
+        SlashCommandEffect::NewSession => command_action(raw, json!({"type": "threadStart"})),
+        SlashCommandEffect::SessionsList => {
+            command_action(raw, json!({"type": "showPanel", "panel": "history"}))
+        }
+        SlashCommandEffect::Agents => {
+            command_action(raw, json!({"type": "showPanel", "panel": "agents"}))
+        }
+        SlashCommandEffect::Export { .. } => command_action(
+            raw,
+            json!({"type": "downloadSession", "kind": "export", "threadId": thread_id}),
+        ),
+        SlashCommandEffect::Share { .. } => command_action(
+            raw,
+            json!({"type": "downloadSession", "kind": "share", "threadId": thread_id}),
+        ),
+        SlashCommandEffect::Fork(prompt) => {
+            command_action(raw, json!({"type": "submitPrompt", "text": prompt}))
+        }
+        SlashCommandEffect::Compact { instructions } => command_action(
+            raw,
+            json!({"type": "submitPrompt", "text": compact_prompt_text(instructions)}),
+        ),
+        SlashCommandEffect::Diff => command_unsupported(
+            raw,
+            "/diff is not available in Web/Desktop yet.".to_string(),
+        ),
+        SlashCommandEffect::Unsupported(message) => command_unsupported(raw, message),
+        SlashCommandEffect::ResumeSession { .. }
+        | SlashCommandEffect::ShowModel
+        | SlashCommandEffect::SetModel { .. }
+        | SlashCommandEffect::SetVariant(_)
+        | SlashCommandEffect::SetMode(_)
+        | SlashCommandEffect::PermissionsShow
+        | SlashCommandEffect::PermissionAdd { .. }
+        | SlashCommandEffect::PermissionRemove { .. }
+        | SlashCommandEffect::ToolsShow
+        | SlashCommandEffect::ToolsetSet { .. }
+        | SlashCommandEffect::Rename(_)
+        | SlashCommandEffect::Undo
+        | SlashCommandEffect::Redo
+        | SlashCommandEffect::Skills { .. }
+        | SlashCommandEffect::Bundles { .. }
+        | SlashCommandEffect::Curator { .. } => command_unsupported(
+            raw,
+            format!(
+                "{} is not available in Web/Desktop yet.",
+                raw.split_whitespace().next().unwrap_or(raw)
+            ),
+        ),
+    }
+}
+
+fn command_action(raw: &str, action: Value) -> wire::CommandExecuteResult {
+    wire::CommandExecuteResult {
+        accepted: true,
+        command: raw.to_string(),
+        message: None,
+        action: Some(action),
+    }
+}
+
+fn command_accepted_message(raw: &str, message: Option<String>) -> wire::CommandExecuteResult {
+    wire::CommandExecuteResult {
+        accepted: true,
+        command: raw.to_string(),
+        message,
+        action: None,
+    }
+}
+
+fn command_unsupported(raw: &str, message: String) -> wire::CommandExecuteResult {
+    wire::CommandExecuteResult {
+        accepted: false,
+        command: raw.to_string(),
+        message: Some(message),
+        action: None,
+    }
+}
+
+fn compact_prompt_text(instructions: Option<String>) -> String {
+    match instructions {
+        Some(instructions) if !instructions.trim().is_empty() => {
+            format!(
+                "Compact this session with these instructions:\n\n{}",
+                instructions.trim()
+            )
+        }
+        _ => "Compact this session.".to_string(),
+    }
 }
 
 fn write_project_agent_definition(
@@ -1901,29 +2129,53 @@ fn resolve_command_path(command: &str, env: &BTreeMap<String, String>) -> Option
         .find(|path| path.is_file())
 }
 
-fn command_list_value(active_turn: bool) -> Value {
+fn command_list_value(
+    state: &WebState,
+    scope: &ResolvedScope,
+    active_turn: bool,
+) -> psychevo_runtime::Result<Value> {
+    let dynamic = dynamic_slash_commands(state, scope)?;
+    let dynamic_names = dynamic
+        .iter()
+        .map(|command| command.name.trim_start_matches('/').to_string())
+        .collect::<std::collections::BTreeSet<_>>();
     let available = available_slash_commands_for_surface(
         &gateway_command_capabilities(),
         active_turn,
-        &[],
+        &dynamic,
         256,
     );
-    json!({
-        "commands": available.commands.iter().map(command_value).collect::<Vec<_>>(),
-        "hiddenDynamic": available.hidden_dynamic,
-    })
+    Ok(serde_json::to_value(wire::CommandListResult {
+        commands: available
+            .commands
+            .iter()
+            .map(|command| command_value(command, &dynamic_names))
+            .collect(),
+        hidden_dynamic: available.hidden_dynamic,
+    })?)
 }
 
-fn command_value(command: &AvailableSlashCommand) -> Value {
-    json!({
-        "name": command.name,
-        "slash": format!("/{}", command.name),
-        "usage": command.usage,
-        "summary": command.summary,
-        "aliases": command.aliases,
-        "argumentKind": command_argument_kind(command.argument_kind),
-        "source": "core",
-    })
+fn command_value(
+    command: &AvailableSlashCommand,
+    dynamic_names: &std::collections::BTreeSet<String>,
+) -> wire::CommandListItem {
+    wire::CommandListItem {
+        name: command.name.clone(),
+        slash: format!("/{}", command.name),
+        usage: command.usage.clone(),
+        summary: command.summary.clone(),
+        aliases: command
+            .aliases
+            .iter()
+            .map(|alias| alias.trim_start_matches('/').to_string())
+            .collect(),
+        argument_kind: command_argument_kind(command.argument_kind).to_string(),
+        source: if dynamic_names.contains(&command.name) {
+            "dynamic".to_string()
+        } else {
+            "core".to_string()
+        },
+    }
 }
 
 fn command_argument_kind(kind: CommandArgumentKind) -> &'static str {
@@ -2362,6 +2614,16 @@ fn gateway_turn_result_value(result: GatewayTurnResult) -> Value {
             "provider": result.result.provider,
             "model": result.result.model,
         },
+        "committedEntries": result.committed_entries,
+    })
+}
+
+fn gateway_shell_result_value(result: GatewayShellResult) -> Value {
+    json!({
+        "thread": result.thread,
+        "command": result.result.command,
+        "outcome": result.result.outcome.as_str(),
+        "toolFailures": result.result.tool_failures,
         "committedEntries": result.committed_entries,
     })
 }
@@ -2892,6 +3154,129 @@ command = "cursor-agent"
             assert_eq!(result["action"]["type"], "showPanel");
             assert_eq!(result["action"]["panel"], panel);
         }
+    }
+
+    #[tokio::test]
+    async fn command_list_and_execute_include_dynamic_skill_commands() {
+        let (_temp, state) = web_state();
+        write_project_skill(&state, "x-daily", "Fetch X daily posts.");
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let list = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "command/list".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "threadId": null
+                })),
+            },
+        )
+        .await
+        .expect("command/list");
+        let dynamic = list["commands"]
+            .as_array()
+            .expect("commands")
+            .iter()
+            .find(|command| command["name"] == "x-daily")
+            .expect("dynamic command");
+        assert_eq!(dynamic["source"], "dynamic");
+        assert_eq!(dynamic["slash"], "/x-daily");
+
+        let result = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("2")),
+                method: "command/execute".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "command": "/x-daily latest",
+                    "threadId": null
+                })),
+            },
+        )
+        .await
+        .expect("command/execute");
+        assert_eq!(result["accepted"], true);
+        assert_eq!(result["action"]["type"], "submitPrompt");
+        assert_eq!(result["action"]["text"], "$x-daily latest");
+    }
+
+    #[tokio::test]
+    async fn command_execute_unknown_slash_returns_prompt_passthrough() {
+        let (_temp, state) = web_state();
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        for command in ["/made-up hello", "/tmp/output.txt"] {
+            let result = handle_rpc(
+                state.clone(),
+                AuthContext::Bearer,
+                tx.clone(),
+                RpcRequest {
+                    jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                    id: Some(json!("1")),
+                    method: "command/execute".to_string(),
+                    params: Some(json!({
+                        "scope": scope,
+                        "command": command,
+                        "threadId": null
+                    })),
+                },
+            )
+            .await
+            .expect("command/execute");
+
+            assert_eq!(result["accepted"], false);
+            assert_eq!(result["action"]["type"], "passThroughPrompt");
+            assert_eq!(result["action"]["text"], command);
+            assert!(result["message"].is_null());
+        }
+    }
+
+    #[tokio::test]
+    async fn shell_start_empty_command_returns_bounded_help_without_spawning() {
+        let (_temp, state) = web_state();
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let result = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "shell/start".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "command": "  ",
+                    "threadId": null
+                })),
+            },
+        )
+        .await
+        .expect("shell/start");
+
+        assert_eq!(result["accepted"], false);
+        assert_eq!(
+            result["message"],
+            "shell mode: type !<command> to run a local shell command"
+        );
     }
 
     #[tokio::test]

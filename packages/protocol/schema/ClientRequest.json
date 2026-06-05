@@ -61,6 +61,29 @@
       ],
       "type": "object"
     },
+    "CommandListParams": {
+      "properties": {
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewayRequestScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "threadId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "CompletionListParams": {
       "properties": {
         "cursor": {
@@ -462,6 +485,28 @@
           ]
         }
       },
+      "type": "object"
+    },
+    "ShellStartParams": {
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        "threadId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "command",
+        "scope"
+      ],
       "type": "object"
     },
     "SourceResetParams": {
@@ -915,12 +960,48 @@
       "properties": {
         "method": {
           "enum": [
+            "command/list"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/CommandListParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
             "command/execute"
           ],
           "type": "string"
         },
         "params": {
           "$ref": "#/definitions/CommandExecuteParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "shell/start"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ShellStartParams"
         }
       },
       "required": [
