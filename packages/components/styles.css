@@ -251,9 +251,7 @@
 }
 
 .pevo-message {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  gap: 9px;
+  display: block;
   max-width: min(760px, 100%);
   padding: 12px 14px;
   border-radius: var(--pevo-radius);
@@ -394,11 +392,11 @@
 }
 
 .pevo-reasoningHeader {
-  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
 .pevo-evidenceLine {
-  grid-template-columns: auto auto minmax(0, 16ch) minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 16ch) minmax(0, 1fr) auto;
 }
 
 .pevo-reasoningHeader span,
@@ -580,6 +578,41 @@
   padding: 10px 12px;
   line-height: 1.45;
   box-shadow: inset 0 1px 2px rgb(21 28 36 / 5%);
+}
+
+.pevo-composerInput {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+
+.pevo-composer.is-shellMode .pevo-composerInput {
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.pevo-shellMarker {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  min-height: 74px;
+  color: var(--pevo-code-bg);
+  background: var(--pevo-panel-muted);
+  border: 1px solid var(--pevo-border-strong);
+  border-right: 0;
+  border-radius: var(--pevo-radius-sm) 0 0 var(--pevo-radius-sm);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 700;
+}
+
+.pevo-composer.is-shellMode textarea {
+  border-radius: 0 var(--pevo-radius-sm) var(--pevo-radius-sm) 0;
+}
+
+.pevo-shellHelp {
+  grid-column: 1 / -1;
+  color: var(--pevo-muted);
+  font-size: 0.78rem;
 }
 
 .pevo-composerActions {

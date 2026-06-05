@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Bot, MessageSquare, PanelLeft, PanelRight, PlugZap, TerminalSquare } from "lucide-react";
+import { AlertTriangle, MessageSquare, PanelLeft, PanelRight, PlugZap, TerminalSquare } from "lucide-react";
 import {
   Composer,
   HistoryPanel,
@@ -156,6 +156,26 @@ export function App() {
           }
         }
       }
+      if (notification.method === "shell/result") {
+        const record = asRecord(notification.params);
+        const thread = asRecord(record.thread);
+        const threadId = optionalStringField(thread.id);
+        if (threadId) {
+          void refreshSnapshot(nextClient, threadId, undefined, true);
+        } else {
+          void refreshSnapshot(nextClient);
+        }
+        void refreshHistory(nextClient, archived);
+      }
+      if (notification.method === "shell/error") {
+        const record = asRecord(notification.params);
+        setError(optionalStringField(record.message) ?? "Shell command failed");
+        const threadId = optionalStringField(record.threadId);
+        if (threadId) {
+          void refreshSnapshot(nextClient, threadId, undefined, true);
+        }
+        void refreshHistory(nextClient, archived);
+      }
       if (notification.method === "turn/result" || notification.method === "turn/error") {
         void refreshSnapshot(nextClient);
         void refreshHistory(nextClient, archived);
@@ -266,6 +286,10 @@ export function App() {
       return;
     }
     const record = asRecord(result);
+    if (asRecord(record.action).type === "passThroughPrompt") {
+      await runHostAction(record.action);
+      return;
+    }
     if (record.accepted !== true && !isKnownCommand(command, commands)) {
       await submitTurn(command, []);
       return;
@@ -322,6 +346,35 @@ export function App() {
         }
         break;
       }
+      case "passThroughPrompt":
+      case "submitPrompt": {
+        const text = stringField(record.text).trim();
+        if (text) {
+          await submitTurn(text, []);
+        }
+        break;
+      }
+      case "steerPrompt": {
+        const text = stringField(record.text).trim();
+        if (text && activity.activeTurnId) {
+          setSnapshot((current) => appendOptimisticPrompt(current, text));
+          await client?.request("turn/steer", {
+            expectedTurnId: activity.activeTurnId,
+            threadId: snapshot.thread?.id ?? null,
+            text
+          });
+          await refreshHistory();
+        } else if (text) {
+          setCommandFeedback({
+            accepted: false,
+            command: "/steer",
+            message: "/steer is only available while a turn is running."
+          });
+          setUtilityPanel("commands");
+          setMobilePanel("status");
+        }
+        break;
+      }
       case "downloadSession":
         if (endpoint && snapshot.thread?.id) {
           const kind = stringField(record.kind) === "share" ? "share" : "export";
@@ -370,6 +423,31 @@ export function App() {
       threadId: snapshot.thread?.id ?? null,
       text
     });
+    await refreshHistory();
+  }
+
+  async function startShell(command: string) {
+    const scope = init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
+    const result = await client?.request("shell/start", {
+      command,
+      scope,
+      threadId: snapshot.thread?.id ?? null
+    });
+    const record = asRecord(result);
+    if (record.accepted !== true) {
+      setCommandFeedback({
+        accepted: false,
+        command: `!${command}`,
+        message: optionalStringField(record.message) ?? "Shell command was not accepted."
+      });
+      setUtilityPanel("commands");
+      setMobilePanel("status");
+      return;
+    }
+    const threadId = optionalStringField(record.threadId);
+    if (threadId && !snapshot.thread?.id) {
+      await refreshSnapshot(client, threadId);
+    }
     await refreshHistory();
   }
 
@@ -500,6 +578,7 @@ export function App() {
                 await client?.request("turn/interrupt", { threadId: snapshot.thread?.id ?? null });
                 await refreshSnapshot();
               })}
+              onShell={(command) => void runAction(async () => startShell(command))}
               onSteer={(text) => void runAction(async () => {
                 if (!activity.activeTurnId) {
                   return;
@@ -571,7 +650,7 @@ function AgentRunSelector({
 }) {
   return (
     <label className="agentRunSelector">
-      <span><Bot size={14} aria-hidden /> Agent</span>
+      <span>Agent</span>
       <select
         aria-label="Run agent"
         disabled={disabled || agents.length === 0}
@@ -601,7 +680,7 @@ function AgentSurfacePanel({
   return (
     <section className="agentSurfacePanel" aria-label="Agents and commands">
       <header>
-        <span><Bot size={15} /> Agents</span>
+        <span>Agents</span>
         <b>{agents.length}</b>
       </header>
       <div className="agentSurfaceList">
@@ -681,7 +760,7 @@ function AgentsPanel({
   return (
     <section className="agentSurfacePanel" aria-label="Agents">
       <header>
-        <span><Bot size={15} /> Agents</span>
+        <span>Agents</span>
         <b>{agents.length}</b>
       </header>
       <div className="agentSurfaceList">

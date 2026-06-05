@@ -81,6 +81,64 @@ describe("component fallback rendering", () => {
     expect(html).not.toContain("No messages yet");
   });
 
+  it("does not render decorative transcript role or evidence icons", () => {
+    const html = renderToStaticMarkup(
+      <TranscriptPanel
+        entries={[
+          transcriptEntry({
+            id: "message:user",
+            role: "user",
+            blocks: [
+              transcriptBlock({
+                id: "message:user:text",
+                body: "$x-daily",
+                preview: "$x-daily",
+                detail: "$x-daily"
+              })
+            ]
+          }),
+          transcriptEntry({
+            id: "message:assistant",
+            messageSeq: 2,
+            role: "assistant",
+            blocks: [
+              transcriptBlock({
+                id: "message:assistant:reasoning",
+                kind: "reasoning",
+                title: "Thinking",
+                body: "thinking",
+                preview: "thinking",
+                detail: "thinking"
+              }),
+              transcriptBlock({
+                id: "message:assistant:text",
+                order: 1,
+                body: "assistant text",
+                preview: "assistant text",
+                detail: "assistant text"
+              }),
+              transcriptBlock({
+                id: "message:assistant:tool",
+                kind: "shell",
+                order: 2,
+                title: "exec_command",
+                body: "printf ok",
+                preview: "printf ok",
+                detail: "printf ok"
+              })
+            ]
+          })
+        ]}
+      />
+    );
+
+    expect(html).toContain("Transcript");
+    expect(html).toContain("$x-daily");
+    expect(html).toContain("Thinking");
+    expect(html).toContain("exec_command");
+    expect(html).not.toMatch(/lucide-(activity|user|bot|brain|wrench|terminal|file-text)/);
+  });
+
   it("renders partial settings and missing activity as idle status", () => {
     const settings = { workdir: "/tmp/project" } as SettingsReadResult;
 

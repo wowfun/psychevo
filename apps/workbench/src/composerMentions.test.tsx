@@ -228,4 +228,96 @@ describe("Composer completion mentions", () => {
       });
     }
   });
+
+  it("enters shell mode from bang and submits the stripped shell command", () => {
+    const onShell = vi.fn();
+    const onSubmit = vi.fn();
+
+    render(
+      <Composer
+        running={false}
+        onInterrupt={vi.fn()}
+        onShell={onShell}
+        onSteer={vi.fn()}
+        onSubmit={onSubmit}
+      />
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask pevo...") as HTMLTextAreaElement;
+    fireEvent.keyDown(textarea, { key: "!" });
+
+    const shellTextarea = screen.getByPlaceholderText("shell command") as HTMLTextAreaElement;
+    expect(screen.getByText("shell mode: type !<command> to run a local shell command")).toBeTruthy();
+
+    fireEvent.change(shellTextarea, { target: { value: "pwd" } });
+    fireEvent.submit(shellTextarea.closest("form")!);
+
+    expect(onShell).toHaveBeenCalledWith("pwd");
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByPlaceholderText("Ask pevo...")).toBeTruthy();
+  });
+
+  it("imports pasted bang-prefixed text as shell mode without the bang", () => {
+    const onShell = vi.fn();
+
+    render(
+      <Composer
+        running={false}
+        onInterrupt={vi.fn()}
+        onShell={onShell}
+        onSteer={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask pevo...") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "!printf ok" } });
+
+    const shellTextarea = screen.getByPlaceholderText("shell command") as HTMLTextAreaElement;
+    expect(shellTextarea.value).toBe("printf ok");
+
+    fireEvent.submit(shellTextarea.closest("form")!);
+    expect(onShell).toHaveBeenCalledWith("printf ok");
+  });
+
+  it("suppresses slash completion in shell mode but keeps file completion", async () => {
+    const completionProvider = vi.fn(async (): Promise<CompletionListResult> => ({
+      replacement: { start: 0, end: 4 },
+      items: [
+        {
+          id: "file:src",
+          sigil: "@",
+          label: "@src/",
+          insertText: "@src/",
+          kind: "directory",
+          detail: "src/",
+          sortText: "src",
+          target: null
+        }
+      ]
+    }));
+
+    render(
+      <Composer
+        completionProvider={completionProvider}
+        running={false}
+        onInterrupt={vi.fn()}
+        onShell={vi.fn()}
+        onSteer={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask pevo...") as HTMLTextAreaElement;
+    fireEvent.keyDown(textarea, { key: "!" });
+    const shellTextarea = screen.getByPlaceholderText("shell command") as HTMLTextAreaElement;
+
+    fireEvent.change(shellTextarea, { target: { value: "/h" } });
+    expect(completionProvider).not.toHaveBeenCalled();
+    expect(screen.queryByRole("listbox")).toBeNull();
+
+    fireEvent.change(shellTextarea, { target: { value: "@src" } });
+    await waitFor(() => expect(completionProvider).toHaveBeenCalled());
+    expect(await screen.findByRole("option", { name: /@src\// })).toBeTruthy();
+  });
 });

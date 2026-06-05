@@ -1,14 +1,10 @@
 import {
-  Activity,
   Archive,
-  Bot,
-  Brain,
   Check,
   ChevronDown,
   ChevronRight,
   CircleSlash,
   Download,
-  FileText,
   History,
   Pencil,
   Plus,
@@ -19,8 +15,6 @@ import {
   Square,
   Terminal,
   Trash2,
-  User,
-  Wrench,
   X
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
@@ -195,7 +189,6 @@ export function TranscriptPanel({ activity, entries }: TranscriptPanelProps) {
     <section className="pevo-panel pevo-transcript" aria-label="Transcript">
       <header className="pevo-panelHeader pevo-transcriptHeader">
         <div className="pevo-titleLine">
-          <Activity size={17} aria-hidden />
           <h2>Transcript</h2>
         </div>
         <span className="pevo-countPill">{entryCountLabel}</span>
@@ -234,6 +227,7 @@ export interface ComposerProps {
   running: boolean;
   onCommand?(command: string): void;
   onInterrupt(): void;
+  onShell?(command: string): void;
   onSteer(text: string): void;
   onSubmit(text: string, mentions: GatewayMention[]): void;
 }
@@ -244,11 +238,13 @@ export function Composer({
   running,
   onCommand,
   onInterrupt,
+  onShell,
   onSteer,
   onSubmit
 }: ComposerProps) {
   const [draft, setDraft] = useState("");
-  const [mode, setMode] = useState<"turn" | "steer">("steer");
+  const [turnMode, setTurnMode] = useState<"turn" | "steer">("steer");
+  const [inputMode, setInputMode] = useState<"prompt" | "shell">("prompt");
   const [completion, setCompletion] = useState<CompletionListResult | null>(null);
   const [activeCompletion, setActiveCompletion] = useState(0);
   const mentionsRef = useRef<GatewayMention[]>([]);
@@ -258,6 +254,7 @@ export function Composer({
   const completionSequence = useRef(0);
   const trimmed = draft.trim();
   const completionItems = completion?.items ?? [];
+  const shellMode = inputMode === "shell";
 
   useEffect(() => () => {
     if (completionTimer.current !== null) {
@@ -278,13 +275,20 @@ export function Composer({
       return;
     }
     cancelCompletion();
+    if (shellMode) {
+      onShell?.(trimmed);
+      setDraft("");
+      setInputMode("prompt");
+      updateMentions([]);
+      return;
+    }
     if (trimmed.startsWith("/") && !trimmed.includes("\n") && onCommand) {
       onCommand(trimmed);
       setDraft("");
       updateMentions([]);
       return;
     }
-    if (running && mode === "steer") {
+    if (running && turnMode === "steer") {
       onSteer(trimmed);
     } else {
       onSubmit(trimmed, activeMentionsForDraft(draft, mentionsRef.current));
@@ -302,8 +306,12 @@ export function Composer({
     setCompletion(null);
   }
 
-  function scheduleCompletion(text: string, cursor: number) {
+  function scheduleCompletion(text: string, cursor: number, nextInputMode = inputMode) {
     if (!completionProvider) {
+      return;
+    }
+    if (nextInputMode === "shell" && activeCompletionSigil(text, cursor) === "/") {
+      cancelCompletion();
       return;
     }
     if (completionTimer.current !== null) {
@@ -371,6 +379,18 @@ function acceptCompletion(item = completionItems[activeCompletion]) {
     if (event.nativeEvent.isComposing) {
       return;
     }
+    if (!completionItems.length && shellMode && !draft && (event.key === "Escape" || event.key === "Backspace")) {
+      event.preventDefault();
+      setInputMode("prompt");
+      cancelCompletion();
+      return;
+    }
+    if (!completionItems.length && inputMode === "prompt" && !draft && event.key === "!") {
+      event.preventDefault();
+      setInputMode("shell");
+      cancelCompletion();
+      return;
+    }
     if (completionItems.length > 0) {
       if (event.key === "ArrowDown" || (event.ctrlKey && event.key.toLowerCase() === "n")) {
         event.preventDefault();
@@ -400,32 +420,44 @@ function acceptCompletion(item = completionItems[activeCompletion]) {
   }
 
   return (
-    <form className="pevo-composer" onSubmit={submit}>
+    <form className={`pevo-composer ${shellMode ? "is-shellMode" : ""}`} onSubmit={submit}>
       {running && (
         <div className="pevo-segmented" role="tablist" aria-label="Turn mode">
-          <button className={mode === "turn" ? "is-selected" : ""} onClick={() => setMode("turn")} type="button">
+          <button className={turnMode === "turn" ? "is-selected" : ""} onClick={() => setTurnMode("turn")} type="button">
             Queue
           </button>
-          <button className={mode === "steer" ? "is-selected" : ""} onClick={() => setMode("steer")} type="button">
+          <button className={turnMode === "steer" ? "is-selected" : ""} onClick={() => setTurnMode("steer")} type="button">
             Steer
           </button>
         </div>
       )}
-      <textarea
-        ref={textareaRef}
-        value={draft}
-        onChange={(event) => {
-          const nextDraft = event.target.value;
-          setDraft(nextDraft);
-          updateMentions(activeMentionsForDraft(nextDraft, mentionsRef.current));
-          scheduleCompletion(nextDraft, event.target.selectionStart);
-        }}
-        onKeyDown={handleKeyDown}
-        onSelect={(event) => scheduleCompletion(event.currentTarget.value, event.currentTarget.selectionStart)}
-        placeholder="Ask pevo..."
-        rows={3}
-        disabled={disabled}
-      />
+      <div className="pevo-composerInput">
+        {shellMode && <span className="pevo-shellMarker" aria-hidden>!</span>}
+        <textarea
+          ref={textareaRef}
+          value={draft}
+          onChange={(event) => {
+            const nextRawDraft = event.target.value;
+            const enteringShell = inputMode === "prompt" && nextRawDraft.startsWith("!");
+            const nextMode = enteringShell ? "shell" : inputMode;
+            const nextDraft = enteringShell ? nextRawDraft.slice(1) : nextRawDraft;
+            if (enteringShell) {
+              setInputMode("shell");
+            }
+            setDraft(nextDraft);
+            updateMentions(activeMentionsForDraft(nextDraft, mentionsRef.current));
+            scheduleCompletion(nextDraft, enteringShell ? Math.max(0, event.target.selectionStart - 1) : event.target.selectionStart, nextMode);
+          }}
+          onKeyDown={handleKeyDown}
+          onSelect={(event) => scheduleCompletion(event.currentTarget.value, event.currentTarget.selectionStart)}
+          placeholder={shellMode ? "shell command" : "Ask pevo..."}
+          rows={3}
+          disabled={disabled}
+        />
+      </div>
+      {shellMode && !trimmed && (
+        <div className="pevo-shellHelp">shell mode: type !&lt;command&gt; to run a local shell command</div>
+      )}
       {completionItems.length > 0 && (
         <div className="pevo-completionPopover" role="listbox">
           {completionItems.map((item, index) => (
@@ -456,9 +488,9 @@ function acceptCompletion(item = completionItems[activeCompletion]) {
             <Square size={17} />
           </IconButton>
         )}
-        <button className="pevo-primaryButton" disabled={!trimmed || disabled} type="submit">
-          <Send size={17} aria-hidden />
-          <span>{running && mode === "steer" ? "Steer" : "Send"}</span>
+        <button className="pevo-primaryButton" disabled={!trimmed || disabled || (shellMode && !onShell)} type="submit">
+          {shellMode ? <Terminal size={17} aria-hidden /> : <Send size={17} aria-hidden />}
+          <span>{shellMode ? "Run" : running && turnMode === "steer" ? "Steer" : "Send"}</span>
         </button>
       </div>
     </form>
@@ -621,7 +653,6 @@ function TranscriptBlockView({ block, entry }: { block: TranscriptBlock; entry: 
   if (block.kind === "text" && entry.role === "user") {
     return (
       <article className="pevo-message is-user" {...transcriptBlockDataAttributes(entry, block)}>
-        <User size={16} aria-hidden />
         <MarkdownText text={text} />
       </article>
     );
@@ -632,7 +663,6 @@ function TranscriptBlockView({ block, entry }: { block: TranscriptBlock; entry: 
         className={`pevo-message is-assistant ${block.status === "running" ? "is-streaming" : ""}`}
         {...transcriptBlockDataAttributes(entry, block)}
       >
-        <Bot size={16} aria-hidden />
         <MarkdownText streaming={block.status === "running"} text={text} />
       </article>
     );
@@ -646,7 +676,6 @@ function TranscriptBlockView({ block, entry }: { block: TranscriptBlock; entry: 
       >
         <button className="pevo-reasoningHeader" onClick={() => setOpen((value) => !value)} type="button">
           {open ? <ChevronDown size={15} aria-hidden /> : <ChevronRight size={15} aria-hidden />}
-          <Brain size={16} aria-hidden />
           <span>{reasoningTitle()}</span>
           {status && <em>{status}</em>}
         </button>
@@ -654,13 +683,11 @@ function TranscriptBlockView({ block, entry }: { block: TranscriptBlock; entry: 
       </article>
     );
   }
-  const Icon = block.kind === "shell" ? Terminal : block.kind === "file" || block.kind === "diff" ? FileText : Wrench;
   const display = evidenceDisplay(block, text);
   return (
     <article className={`pevo-evidence is-${block.status}`} {...transcriptBlockDataAttributes(entry, block)}>
       <button className="pevo-evidenceLine" onClick={() => setOpen((value) => !value)} type="button">
         {open ? <ChevronDown size={15} aria-hidden /> : <ChevronRight size={15} aria-hidden />}
-        <Icon size={16} aria-hidden />
         <code>{block.title ?? block.kind}</code>
         <span>{display.summary}</span>
         {status && <em>{status}</em>}
@@ -738,6 +765,20 @@ function completionInsertTextWithSpacing(item: CompletionItem): string {
 
 function activeMentionsForDraft(draft: string, mentions: GatewayMention[]): GatewayMention[] {
   return mentions.filter((mention) => draft.slice(mention.range.start, mention.range.end) === mention.visibleText);
+}
+
+function activeCompletionSigil(text: string, cursor: number): "/" | "$" | "@" | null {
+  const prefix = text.slice(0, Math.max(0, cursor));
+  for (let index = prefix.length - 1; index >= 0; index -= 1) {
+    const ch = prefix.charAt(index);
+    if (/\s/.test(ch)) {
+      return null;
+    }
+    if (ch === "/" || ch === "$" || ch === "@") {
+      return ch;
+    }
+  }
+  return null;
 }
 
 function evidenceDisplay(block: TranscriptBlock, fallbackText: string): { detail: string | null; summary: string } {

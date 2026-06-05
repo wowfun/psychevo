@@ -2,6 +2,9 @@
 
 ## 2026-06-04
 
+- Added shared Web/Desktop shell mode and runtime-backed slash commands, with
+  typed Gateway protocol support, persisted shell evidence, and a cleaner
+  icon-light Workbench transcript surface.
 - Fixed `pevo acp` Zed visibility by upgrading the ACP SDK to 0.13.1,
   projecting runtime reasoning as ACP thought chunks, improving
   `exec_command` tool cards, and adding opt-in terminal-output display metadata
