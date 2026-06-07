@@ -19,6 +19,7 @@ from peval_py.adapters import adapter_for, available_adapter_ids
 from peval_py.adapters.base import ConversionResult, StepMeta
 from peval_py.config import ToolConfig, apply_overrides, config_for_adapter, load_config
 from peval_py.html import load_asset_text, render_html
+from peval_py.input_table import read_input_table
 from peval_py.report import NoteInput, ReportSession, build_multi_report, build_report
 from peval_py.sources import (
     ACCOUNTING_COLUMNS,
@@ -1583,27 +1584,87 @@ label_prefix = "selected"
             report["trajectory_meta"][1]["trial_key"],
         )
 
+        before_html_render = json.loads(json.dumps(report))
         html = render_html(report)
+        self.assertEqual(report, before_html_render)
         self.assertNotIn("<h3>Summary</h3>", html)
         self.assertNotIn("Session Heatmap", html)
         self.assertNotIn("Session Table", html)
         self.assertIn("report-note-list", html)
         self.assertIn("report-note", html)
-        self.assertIn("Visible Heatmap", html)
+        self.assertNotIn("Visible Heatmap", html)
+        self.assertNotIn("visible_heatmap", html)
         self.assertNotIn("visible_heatmap_eyebrow", html)
-        self.assertIn("session-axis", html)
+        self.assertNotIn("session-axis", html)
+        self.assertNotIn("visible-grid", html)
         self.assertIn("grid-template-columns:minmax(150px,220px) minmax(0,1fr)", html)
         self.assertNotIn("repeat(${Math.max(rows.length, 1)}, minmax(150px, 1fr))", html)
-        self.assertIn("metric-button", html)
-        self.assertIn('labelKey: "duration"', html)
-        self.assertIn('labelKey: "tokens"', html)
-        self.assertIn('labelKey: "tool_calls"', html)
-        self.assertIn('labelKey: "turns"', html)
+        self.assertNotIn("metric-button", html)
+        self.assertIn('label: t("agent", "Agent")', html)
+        self.assertIn("agentNameFor(row)", html)
+        self.assertIn("metricCellShade(row, column, rows)", html)
+        self.assertIn("metric-shade-4", html)
+        self.assertIn('key: "session_id", label: t("session", "Session"), width: "180px", filterable: true', html)
+        self.assertIn('key: "agent", label: t("agent", "Agent"), width: "120px", filterable: true', html)
+        self.assertIn('key: "model", label: t("model", "Model"), width: "150px", filterable: true', html)
+        self.assertIn('key: "status", label: t("result", "Result"), width: "104px", filterable: true', html)
+        self.assertIn("function applyLeaderboardFilters(rows)", html)
+        self.assertIn("columns.every(column =>", html)
+        self.assertIn("selected.includes(filterValue(row, column))", html)
+        self.assertIn("return applyTableControls(applyLeaderboardFilters(reportRows()))", html)
+        self.assertIn("filter-control", html)
+        self.assertIn("filter-option", html)
+        self.assertIn("table-head-inline", html)
+        self.assertIn("filter-icon", html)
+        self.assertIn("data-filter-key", html)
+        self.assertIn("data-filter-clear", html)
+        self.assertIn("metric: true, value: row => row.duration_ms", html)
+        self.assertIn("metric: true, value: row => row.tokens", html)
+        self.assertIn("metric: true, value: row => row.total_tool_calls", html)
+        self.assertIn("metric: true, value: row => row.turns", html)
+        self.assertIn('key: "cost_usd"', html)
+        self.assertNotIn("metric: true, value: row => row.cost_usd", html)
         self.assertIn("Leaderboard", html)
         self.assertNotIn("leaderboard_eyebrow", html)
         self.assertIn("data-table-sort", html)
         self.assertIn("selected-row", html)
         self.assertIn("data-trial-key", html)
+        self.assertIn("Trajectory Overview", html)
+        self.assertIn("trajectory-overview-title", html)
+        self.assertIn("trajectory-node", html)
+        self.assertIn("trajectory-node-letter", html)
+        self.assertIn('if (role === "system") return "S"', html)
+        self.assertIn('if (role === "user") return "U"', html)
+        self.assertIn('if (role === "agent") return "A"', html)
+        self.assertIn('return "?"', html)
+        self.assertNotIn("trajectory-node.role-system", html)
+        self.assertNotIn("trajectory-node.role-user", html)
+        self.assertNotIn("trajectory-node.role-agent", html)
+        self.assertIn("--step-count", html)
+        self.assertIn("renderLeaderboard(rows);", html)
+        self.assertIn("renderTrajectoryOverview(rows);", html)
+        self.assertIn("function renderTrajectoryOverview(rows = leaderboardRows())", html)
+        self.assertIn('id="step-drawer"', html)
+        self.assertIn("function renderStepDrawer()", html)
+        self.assertIn("data-step-id", html)
+        self.assertIn("data-step-drawer-close", html)
+        self.assertIn('event.key !== "Escape"', html)
+        self.assertIn('document.addEventListener("click"', html)
+        self.assertIn('target?.closest?.("#step-drawer")', html)
+        self.assertIn('target?.closest?.("[data-step-id]")', html)
+        self.assertIn("function setStepDrawerOpen(open)", html)
+        self.assertIn('document.body.classList.toggle("step-drawer-open", Boolean(open))', html)
+        self.assertIn("renderStep(step, trial, timingStats, { open: true })", html)
+        self.assertIn("step-drawer", html)
+        self.assertIn("--step-drawer-width:min(760px,44vw)", html)
+        self.assertIn("--step-drawer-gap:24px", html)
+        self.assertIn(".step-drawer-open .workspace{max-width:calc(100vw - var(--step-drawer-width) - var(--step-drawer-gap));margin-left:0;margin-right:calc(var(--step-drawer-width) + var(--step-drawer-gap))}", html)
+        self.assertIn("width:var(--step-drawer-width)", html)
+        self.assertIn("height:100vh", html)
+        self.assertIn("overflow:auto", html)
+        self.assertIn("grid-template-rows:auto minmax(0,1fr)", html)
+        self.assertIn(".step-drawer .step-body{min-height:0;display:grid;grid-auto-rows:minmax(120px,1fr);overflow:visible}", html)
+        self.assertIn(".step-drawer .block pre{flex:1 1 auto;min-height:0;max-height:none;overflow:auto}", html)
         self.assertIn("selected trial trajectory", html)
         self.assertIn("note-list", html)
         self.assertIn("note-snippet", html)
@@ -1639,15 +1700,29 @@ label_prefix = "selected"
 
         self.assertIn('<html lang="en">', english_html)
         self.assertIn("<h1>Agent Trajectory Report</h1>", english_html)
-        self.assertIn("Visible Heatmap", english_html)
         self.assertIn("Leaderboard", english_html)
+        self.assertIn("Trajectory Overview", english_html)
+        self.assertIn('"agent": "Agent"', english_html)
+        self.assertIn('"filter": "Filter"', english_html)
+        self.assertIn('"clear": "Clear"', english_html)
+        self.assertIn('"selected_count": "selected"', english_html)
+        self.assertIn('"step_details": "Step details"', english_html)
+        self.assertIn('"close": "Close"', english_html)
         self.assertNotIn("Agent 轨迹报告", english_html)
         self.assertNotIn("可见热力图", english_html)
+        self.assertNotIn("visible_heatmap", english_html)
 
         self.assertIn('<html lang="zh-CN">', zh_html)
         self.assertIn("<h1>Agent 轨迹报告</h1>", zh_html)
-        self.assertIn('"visible_heatmap": "可见热力图"', zh_html)
         self.assertIn('"leaderboard": "Leaderboard"', zh_html)
+        self.assertIn('"agent": "Agent"', zh_html)
+        self.assertIn('"trajectory_overview": "轨迹概览"', zh_html)
+        self.assertIn('"filter": "筛选"', zh_html)
+        self.assertIn('"clear": "清除"', zh_html)
+        self.assertIn('"selected_count": "已选"', zh_html)
+        self.assertIn('"step_details": "Step 详情"', zh_html)
+        self.assertIn('"close": "关闭"', zh_html)
+        self.assertNotIn('"visible_heatmap"', zh_html)
         self.assertNotIn("visible_heatmap_eyebrow", zh_html)
         self.assertNotIn("leaderboard_eyebrow", zh_html)
         self.assertIn('"duration": "耗时"', zh_html)
@@ -1655,6 +1730,7 @@ label_prefix = "selected"
         self.assertIn('"session": "Session"', zh_html)
         self.assertIn('"result": "Result"', zh_html)
         self.assertIn('"notes": "Notes"', zh_html)
+        self.assertNotIn('"agent": "代理"', zh_html)
         self.assertIn('"selected_trial_trajectory": "selected trial trajectory"', zh_html)
         self.assertIn('"run": "Run"', zh_html)
         self.assertIn('"variant": "variant"', zh_html)
@@ -1672,6 +1748,7 @@ label_prefix = "selected"
         self.assertNotIn('"session": "会话"', zh_html)
         self.assertNotIn('"result": "结果"', zh_html)
         self.assertNotIn('"notes": "备注"', zh_html)
+        self.assertNotIn('"trajectory_overview": "Trajectory Overview"', zh_html)
         self.assertNotIn('"selected_trial_trajectory": "选中的 Trial 轨迹"', zh_html)
         self.assertNotIn('"run": "运行"', zh_html)
         self.assertNotIn('"variant": "变体"', zh_html)
@@ -1749,6 +1826,236 @@ label_prefix = "selected"
             )
             self.assertNotEqual(bad_note.returncode, 0)
             self.assertIn("out of range", bad_note.stderr)
+
+    def test_cli_input_table_csv_expands_sessions_and_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copy(FIXTURES / "common_session.jsonl", root / "common_session.jsonl")
+            db_path = root / "state.db"
+            create_messages_db(db_path)
+            table = root / "inputs.csv"
+            table.write_text(
+                "\n".join(
+                    [
+                        "p,db,session,adapter,n,report_note,agent_name,agent_version,model",
+                        "common_session.jsonl,,,"
+                        "opencode,CSV row note,,csv-agent,9.9.9,csv-model",
+                        ",state.db,db-b,psychevo,2=DB indexed note,CSV report note,,,",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            out_path = root / "report.json"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "peval_py.cli",
+                    "view",
+                    "tr",
+                    "--agent-name",
+                    "global-agent",
+                    "--model",
+                    "global-model",
+                    "-i",
+                    str(table),
+                    "-f",
+                    "json",
+                    "-o",
+                    str(out_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(result.stderr, "")
+            payload = json.loads(out_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                [item["session_id"] for item in payload["trajectory"]],
+                ["common_session", "db-b"],
+            )
+            self.assertEqual(
+                [item["adapter"] for item in payload["trajectory_meta"]],
+                ["opencode", "psychevo"],
+            )
+            self.assertEqual(payload["trajectory"][0]["agent"]["name"], "csv-agent")
+            self.assertEqual(payload["trajectory"][0]["agent"]["version"], "9.9.9")
+            self.assertEqual(payload["trajectory"][0]["agent"]["model_name"], "csv-model")
+            self.assertEqual(payload["trajectory"][1]["agent"]["name"], "global-agent")
+            self.assertEqual(payload["trajectory"][1]["agent"]["model_name"], "global-model")
+            self.assertEqual(payload["annotations"]["report_notes"][0]["markdown"], "CSV report note")
+            self.assertEqual(
+                [item["markdown"] for item in payload["annotations"]["notes"]],
+                ["CSV row note", "DB indexed note"],
+            )
+
+    def test_cli_input_table_json_forms_notes_and_export_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copy(FIXTURES / "common_session.jsonl", root / "common_session.jsonl")
+            db_path = root / "state.db"
+            create_messages_db(db_path)
+            table = root / "inputs.json"
+            table.write_text(
+                json.dumps(
+                    {
+                        "report_notes": ["JSON report"],
+                        "rows": [
+                            {
+                                "path": "common_session.jsonl",
+                                "adapter": "opencode",
+                                "notes": ["JSON path note", "0=JSON inline report"],
+                            },
+                            {
+                                "db": "state.db",
+                                "session_id": "db-a",
+                                "adapter": "psychevo",
+                                "note": "JSON DB note",
+                                "model": "json-db-model",
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            out_path = root / "report.json"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "peval_py.cli",
+                    "view",
+                    "tr",
+                    "-i",
+                    str(table),
+                    "-f",
+                    "json",
+                    "-o",
+                    str(out_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(result.stderr, "")
+            payload = json.loads(out_path.read_text(encoding="utf-8"))
+            self.assertEqual([item["session_id"] for item in payload["trajectory"]], ["common_session", "db-a"])
+            self.assertEqual(payload["trajectory"][1]["agent"]["model_name"], "json-db-model")
+            self.assertEqual(
+                [item["markdown"] for item in payload["annotations"]["report_notes"]],
+                ["JSON report", "JSON inline report"],
+            )
+            self.assertEqual(
+                [item["markdown"] for item in payload["annotations"]["notes"]],
+                ["JSON path note", "JSON DB note"],
+            )
+
+            export_multi = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "peval_py.cli",
+                    "export",
+                    "tr",
+                    "-i",
+                    str(table),
+                ],
+                check=False,
+                text=True,
+                capture_output=True,
+            )
+            self.assertNotEqual(export_multi.returncode, 0)
+            self.assertIn("exactly one input session", export_multi.stderr)
+
+            single_table = root / "single.json"
+            single_table.write_text(
+                json.dumps([{"path": "common_session.jsonl", "adapter": "opencode"}]),
+                encoding="utf-8",
+            )
+            export_out = root / "trajectory.json"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "peval_py.cli",
+                    "export",
+                    "tr",
+                    "-i",
+                    str(single_table),
+                    "-o",
+                    str(export_out),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(result.stderr, "")
+            payload = json.loads(export_out.read_text(encoding="utf-8"))
+            self.assertEqual(payload["agent"]["name"], "opencode")
+
+            direct_plus_table = root / "direct-plus-table.json"
+            direct_plus_table.write_text(
+                json.dumps([{"db": "state.db", "session_id": "db-a", "adapter": "psychevo"}]),
+                encoding="utf-8",
+            )
+            direct_plus_out = root / "direct-plus-report.json"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "peval_py.cli",
+                    "view",
+                    "tr",
+                    "-a",
+                    "opencode",
+                    "-p",
+                    str(root / "common_session.jsonl"),
+                    "-i",
+                    str(direct_plus_table),
+                    "-f",
+                    "json",
+                    "-o",
+                    str(direct_plus_out),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(result.stderr, "")
+            payload = json.loads(direct_plus_out.read_text(encoding="utf-8"))
+            self.assertEqual(
+                [item["session_id"] for item in payload["trajectory"]],
+                ["common_session", "db-a"],
+            )
+
+    def test_input_table_validation_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cases = {
+                "unknown.csv": ("wat\nx\n", "unknown input table column"),
+                "duplicate.csv": ("path,p\none,two\n", "duplicate input table column"),
+                "both.csv": ("path,db\none.jsonl,state.db\n", "provide exactly one"),
+                "neither.csv": ("adapter\nopencode\n", "provide exactly one"),
+                "path_session.csv": ("path,session_id\none.jsonl,s1\n", "session_id is only valid"),
+            }
+            for name, (content, message) in cases.items():
+                with self.subTest(name=name):
+                    path = root / name
+                    path.write_text(content, encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, message):
+                        read_input_table(str(path))
+
+            xls_path = root / "inputs.xls"
+            xls_path.write_text("not excel", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, ".xls input tables are unsupported"):
+                read_input_table(str(xls_path))
+
+            xlsx_path = root / "inputs.xlsx"
+            xlsx_path.write_text("not excel", encoding="utf-8")
+            with patch("peval_py.input_table.import_module", side_effect=ImportError):
+                with self.assertRaisesRegex(ValueError, "requires optional dependency openpyxl"):
+                    read_input_table(str(xlsx_path))
 
     def test_cli_multi_path_rules_and_export_single_session_boundary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2272,6 +2579,8 @@ label_prefix = "selected"
             )
             self.assertIn("-p", result.stdout)
             self.assertIn("--path", result.stdout)
+            self.assertIn("-i", result.stdout)
+            self.assertIn("--input-table", result.stdout)
             self.assertIn("-n", result.stdout)
             self.assertIn("--note", result.stdout)
 
@@ -2327,10 +2636,16 @@ label_prefix = "selected"
             self.assertIn("<h1>Agent 轨迹报告</h1>", html)
             self.assertIn('"run": "Run"', html)
             self.assertIn('"session": "Session"', html)
+            self.assertIn('"agent": "Agent"', html)
+            self.assertIn('"trajectory_overview": "轨迹概览"', html)
+            self.assertIn('"filter": "筛选"', html)
+            self.assertIn('"step_details": "Step 详情"', html)
+            self.assertIn('"close": "关闭"', html)
             self.assertIn('"evidence": "Evidence"', html)
             self.assertIn('"turns": "Turns"', html)
             self.assertIn('"tool_calls": "Tool Calls"', html)
             self.assertIn('"tool_success_total": "tool success / total"', html)
+            self.assertNotIn('"visible_heatmap"', html)
             self.assertNotIn('"run": "运行"', html)
             self.assertNotIn('"turns": "轮次"', html)
             self.assertNotIn('"tool_calls": "工具调用"', html)

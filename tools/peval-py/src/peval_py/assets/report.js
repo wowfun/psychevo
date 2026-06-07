@@ -19,13 +19,7 @@ function fmtCost(value) { return hasMetricValue(value) ? `$${Number(value).toFix
 function fmtScore(value) { return hasMetricValue(value) ? Number(value).toLocaleString() : "-"; }
 function hasMetricValue(value) { return value !== null && value !== undefined && value !== "" && !Number.isNaN(Number(value)); }
 function data() { return JSON.parse($("peval-py-data").textContent || "{}"); }
-const state = { view: null, metricMode: "duration", metricInitialized: false, selectedTrial: null, tables: { leaderboard: { sort: null, direction: "asc" } } };
-const METRICS = [
-  { key: "duration", labelKey: "duration", fallback: "Duration" },
-  { key: "tokens", labelKey: "tokens", fallback: "Tokens" },
-  { key: "tools", labelKey: "tool_calls", fallback: "Tool Calls" },
-  { key: "turns", labelKey: "turns", fallback: "Turns" }
-];
+const state = { view: null, selectedTrial: null, selectedStep: null, filters: {}, tables: { leaderboard: { sort: null, direction: "asc" } }, boundGlobalControls: false };
 function reportRows() {
   return state.view?.comparison?.leaderboard?.entries || state.view?.comparison?.session_table?.rows || [];
 }
@@ -50,17 +44,15 @@ function finalMetricsFor(trialKey) { return trajectoryFor(trialKey)?.final_metri
 function stepMeta(meta, stepId) { return (meta.steps || []).find(item => item.step_id === stepId) || {}; }
 function render(view) {
   state.view = view;
-  if (view.comparison?.default_metric && !state.metricInitialized) {
-    state.metricMode = view.comparison.default_metric === "status" ? "duration" : view.comparison.default_metric;
-    state.metricInitialized = true;
-  }
   if (!state.selectedTrial) {
     const firstFailed = reportRows().find(row => lower(row.status) !== "passed");
     state.selectedTrial = (firstFailed || reportRows()[0])?.trial_key || view.trajectory_meta?.[0]?.trial_key || null;
   }
+  bindGlobalControls();
   renderReportNotes(view.annotations?.report_notes || []);
   renderComparison();
   renderTrace();
+  renderStepDrawer();
 }
 function renderReportNotes(notes) {
   $("report-notes").innerHTML = notes.length ? `<div class="report-note-list">${notes.map(note => `<article class="report-note"><strong>${esc(note.label || t("report_note", "Report note"))}</strong><div class="note-body">${renderMarkdown(note.markdown || "")}</div></article>`).join("")}</div>` : "";
@@ -72,61 +64,10 @@ function renderComparison() {
     return;
   }
   $("comparison").innerHTML = `
-    <section class="panel" aria-labelledby="heatmap-title">
-      <div class="panel-head"><div><h2 id="heatmap-title">${esc(t("visible_heatmap", "Visible Heatmap"))}</h2><p class="copy">${esc(t("visible_heatmap_copy", "Hue follows outcome. Shade follows the selected metric across visible sessions."))}</p></div><div class="metric-controls"><div class="segmented" id="metric-buttons"></div></div></div>
-      <div class="visible-grid" id="visible-heatmap"></div>
-    </section>
     <section class="leaderboard panel" aria-labelledby="leaderboard-title" id="leaderboard"></section>
+    <section class="trajectory-overview panel" aria-labelledby="trajectory-overview-title" id="trajectory-overview"></section>
   `;
-  renderMetricControls();
-  renderVisibleHeatmap();
-  renderLeaderboard();
-}
-function renderMetricControls() {
-  const target = $("metric-buttons");
-  if (!target) return;
-  target.innerHTML = METRICS.map(metric => `<button class="metric-button ${metric.key === state.metricMode ? "active" : ""}" type="button" data-metric="${esc(metric.key)}">${esc(t(metric.labelKey, metric.fallback))}</button>`).join("");
-  document.querySelectorAll("[data-metric]").forEach(button => {
-    button.addEventListener("click", () => {
-      state.metricMode = button.dataset.metric;
-      renderMetricControls();
-      renderVisibleHeatmap();
-    });
-  });
-}
-function metricValue(row) {
-  if (state.metricMode === "duration") return row.duration_ms;
-  if (state.metricMode === "tokens") return row.tokens;
-  if (state.metricMode === "tools") return row.total_tool_calls;
-  if (state.metricMode === "turns") return row.turns;
-  return row.duration_ms;
-}
-function formatMetric(value) {
-  if (state.metricMode === "duration") return fmtMs(value);
-  return hasMetricValue(value) ? fmtNum(value) : "-";
-}
-function shadeFor(row, rows) {
-  const values = rows.map(metricValue).filter(hasMetricValue).map(Number);
-  const value = metricValue(row);
-  if (!values.length || !hasMetricValue(value)) return "shade-3 missing-metric";
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  if (min === max) return "shade-2";
-  const bucket = Math.max(0, Math.min(4, Math.round(((Number(value) - min) / (max - min)) * 4)));
-  return `shade-${bucket}`;
-}
-function renderVisibleHeatmap() {
-  const rows = reportRows();
-  const target = $("visible-heatmap");
-  if (!target) return;
-  target.innerHTML = rows.map(row => {
-    const status = lower(row.status || "passed");
-    const session = row.session_id || row.trial_key || "-";
-    const adapter = row.adapter || "-";
-    const model = row.model || "-";
-    return `<div class="session-axis"><strong>${esc(session)}</strong><span>${esc(adapter)} ${esc(model)}</span></div><button class="cell ${status} ${shadeFor(row, rows)} ${row.trial_key === selectedKey() ? "selected" : ""}" type="button" data-trial-key="${esc(row.trial_key)}"><strong>${esc(formatMetric(metricValue(row)))}</strong><span>${esc(statusLabel(row.status))} / ${esc(session)}<br>${esc(adapter)} ${esc(model)}</span></button>`;
-  }).join("");
-  bindTrialSelection();
+  renderComparisonPanels({ trace: false });
 }
 function notesFor(trialKey) {
   return (state.view?.annotations?.notes || []).filter(note => note.trial_key === trialKey);
@@ -143,34 +84,106 @@ function renderNotesCell(trialKey) {
   const summary = noteSnippetFor(trialKey);
   return summary === "-" ? `<span class="muted">-</span>` : `<span class="note-snippet">${esc(summary)}</span>`;
 }
+function renderComparisonPanels(options = {}) {
+  const rows = leaderboardRows();
+  syncSelectionWithVisibleRows(rows);
+  renderLeaderboard(rows);
+  renderTrajectoryOverview(rows);
+  if (options.trace !== false) renderTrace();
+  renderStepDrawer();
+}
 function leaderboardColumns() {
   return [
-    { key: "session_id", label: t("session", "Session"), width: "180px", value: row => row.session_id || row.trial_key },
-    { key: "adapter", label: t("adapter", "Adapter"), width: "120px", value: row => row.adapter || "-" },
-    { key: "model", label: t("model", "Model"), width: "150px", value: row => row.model || "-" },
-    { key: "status", label: t("result", "Result"), width: "104px", value: row => row.status || "-", html: row => `<span class="stamp ${lower(row.status || "passed")}">${esc(statusLabel(row.status))}</span>` },
-    { key: "duration_ms", label: t("duration", "Duration"), width: "104px", type: "number", numeric: true, sortable: true, value: row => row.duration_ms, format: fmtMs },
-    { key: "turns", label: t("turns", "Turns"), width: "82px", type: "number", numeric: true, sortable: true, value: row => row.turns, format: fmtNum },
-    { key: "total_tool_calls", label: t("tool_calls", "Tool Calls"), width: "106px", type: "number", numeric: true, sortable: true, value: row => row.total_tool_calls, format: value => hasMetricValue(value) ? fmtNum(value) : "-" },
-    { key: "tokens", label: t("tokens", "Tokens"), width: "100px", type: "number", numeric: true, sortable: true, value: row => row.tokens, format: fmtNum },
+    { key: "session_id", label: t("session", "Session"), width: "180px", filterable: true, value: row => row.session_id || row.trial_key },
+    { key: "agent", label: t("agent", "Agent"), width: "120px", filterable: true, value: row => agentNameFor(row) },
+    { key: "model", label: t("model", "Model"), width: "150px", filterable: true, value: row => row.model || "-" },
+    { key: "status", label: t("result", "Result"), width: "104px", filterable: true, value: row => row.status || "-", filterLabel: value => statusLabel(value), html: row => `<span class="stamp ${lower(row.status || "passed")}">${esc(statusLabel(row.status))}</span>` },
+    { key: "duration_ms", label: t("duration", "Duration"), width: "104px", type: "number", numeric: true, sortable: true, metric: true, value: row => row.duration_ms, format: fmtMs },
+    { key: "turns", label: t("turns", "Turns"), width: "82px", type: "number", numeric: true, sortable: true, metric: true, value: row => row.turns, format: fmtNum },
+    { key: "total_tool_calls", label: t("tool_calls", "Tool Calls"), width: "106px", type: "number", numeric: true, sortable: true, metric: true, value: row => row.total_tool_calls, format: value => hasMetricValue(value) ? fmtNum(value) : "-" },
+    { key: "tokens", label: t("tokens", "Tokens"), width: "100px", type: "number", numeric: true, sortable: true, metric: true, value: row => row.tokens, format: fmtNum },
     { key: "cost_usd", label: t("cost", "Cost"), width: "92px", type: "number", numeric: true, sortable: true, value: row => row.cost_usd, format: fmtCost },
     { key: "notes", label: t("notes", "Notes"), width: "220px", value: row => noteSnippetFor(row.trial_key), html: row => renderNotesCell(row.trial_key), cellTitle: row => notesPlainText(notesFor(row.trial_key)) }
   ];
 }
-function renderLeaderboard() {
+function agentNameFor(row) {
+  const name = trajectoryFor(row?.trial_key)?.agent?.name;
+  return name || row?.adapter || "-";
+}
+function renderLeaderboard(rows = leaderboardRows()) {
   const target = $("leaderboard");
   if (!target) return;
-  const rows = applyTableControls(reportRows());
   const columns = leaderboardColumns();
   target.innerHTML = `
-    <div class="panel-head"><div><h2 id="leaderboard-title">${esc(t("leaderboard", "Leaderboard"))}</h2><p class="copy">${esc(t("leaderboard_copy", "Each row is one visible session-as-Trial. Numeric columns sort; rows update the selected Trial."))}</p></div></div>
+    <div class="panel-head"><div><h2 id="leaderboard-title">${esc(t("leaderboard", "Leaderboard"))}</h2><p class="copy">${esc(t("leaderboard_copy", "Each row is one visible session-as-Trial. Numeric cells shade by column value; rows update the selected Trial."))}</p></div></div>
     ${renderInteractiveTable(columns, rows)}
   `;
   bindLeaderboardControls();
 }
+function leaderboardRows() {
+  return applyTableControls(applyLeaderboardFilters(reportRows()));
+}
 function tableControls() {
   state.tables.leaderboard ||= { sort: null, direction: "asc" };
   return state.tables.leaderboard;
+}
+function filterableColumns() {
+  return leaderboardColumns().filter(column => column.filterable);
+}
+function activeFilterValues(key) {
+  const values = state.filters?.[key];
+  return Array.isArray(values) ? values : [];
+}
+function filterValue(row, column) {
+  const raw = column.filterValue ? column.filterValue(row) : column.value(row);
+  const text = raw === null || raw === undefined || raw === "" ? "-" : String(raw);
+  return text;
+}
+function filterLabel(column, value) {
+  return column.filterLabel ? column.filterLabel(value) : value;
+}
+function applyLeaderboardFilters(rows) {
+  const columns = filterableColumns();
+  return rows.filter(row => columns.every(column => {
+    const selected = activeFilterValues(column.key);
+    if (!selected.length) return true;
+    return selected.includes(filterValue(row, column));
+  }));
+}
+function filterOptions(column) {
+  const values = reportRows().map(row => filterValue(row, column));
+  return Array.from(new Set(values)).sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }));
+}
+function setFilterValue(key, value, checked) {
+  const selected = new Set(activeFilterValues(key));
+  if (checked) selected.add(value);
+  else selected.delete(value);
+  const values = Array.from(selected);
+  if (values.length) state.filters[key] = values;
+  else delete state.filters[key];
+}
+function clearFilter(key) {
+  delete state.filters[key];
+}
+function syncSelectionWithVisibleRows(rows) {
+  const key = selectedKey();
+  const selectedVisible = rows.some(row => row.trial_key === key);
+  if (!rows.length) {
+    if (state.selectedStep) state.selectedStep = null;
+    return;
+  }
+  if (!selectedVisible) {
+    state.selectedTrial = rows[0].trial_key;
+    state.selectedStep = null;
+    return;
+  }
+  if (!selectedStepVisible(rows)) state.selectedStep = null;
+}
+function selectedStepVisible(rows) {
+  if (!state.selectedStep) return true;
+  const { trialKey, stepId } = state.selectedStep;
+  if (!rows.some(row => row.trial_key === trialKey)) return false;
+  return (trajectoryFor(trialKey)?.steps || []).some(step => String(step.step_id) === String(stepId));
 }
 function compareTableValues(left, right, type, direction) {
   const leftMissing = left === null || left === undefined || left === "" || (type === "number" && Number.isNaN(Number(left)));
@@ -194,27 +207,55 @@ function tableText(row, column) {
 function renderInteractiveTable(columns, rows) {
   const controls = tableControls();
   const colgroup = columns.map(column => `<col ${column.width ? `style="width:${esc(column.width)}"` : ""}>`).join("");
-  const headers = columns.map(column => {
-    const active = controls.sort === column.key;
-    const mark = active ? (controls.direction === "desc" ? "&#9660;" : "&#9650;") : "&#8597;";
-    if (!column.sortable) return `<th class="${column.numeric ? "num" : ""}" title="${esc(column.label)}"><span class="static-head">${esc(column.label)}</span></th>`;
-    return `<th class="${column.numeric ? "num" : ""}" title="${esc(column.label)}"><button class="sort-button ${active ? "active" : ""}" type="button" data-table-sort="${esc(column.key)}" aria-label="${esc(t("sort", "Sort"))} ${esc(column.label)}"><span class="sort-label">${esc(column.label)}</span><span class="sort-mark">${mark}</span></button></th>`;
-  }).join("");
-  const body = rows.length ? rows.map(row => renderTableRow(row, columns)).join("") : `<tr><td class="table-empty" colspan="${columns.length}">${esc(t("no_matching_rows", "No matching rows"))}</td></tr>`;
+  const headers = columns.map(column => renderTableHeader(column, controls)).join("");
+  const body = rows.length ? rows.map(row => renderTableRow(row, columns, rows)).join("") : `<tr><td class="table-empty" colspan="${columns.length}">${esc(t("no_matching_rows", "No matching rows"))}</td></tr>`;
   return `<div class="table-shell"><div class="table-wrap"><table class="data-table"><colgroup>${colgroup}</colgroup><thead><tr>${headers}</tr></thead><tbody>${body}</tbody></table></div></div>`;
 }
-function renderTableRow(row, columns) {
-  const selected = row.trial_key === selectedKey();
-  return `<tr class="clickable-row ${selected ? "selected-row" : ""}" data-trial-key="${esc(row.trial_key)}" title="${esc(row.trial_key)}">${columns.map(column => renderDataCell(row, column)).join("")}</tr>`;
+function renderTableHeader(column, controls) {
+  const active = controls.sort === column.key;
+  const mark = active ? (controls.direction === "desc" ? "&#9660;" : "&#9650;") : "&#8597;";
+  const label = column.sortable
+    ? `<button class="sort-button ${active ? "active" : ""}" type="button" data-table-sort="${esc(column.key)}" aria-label="${esc(t("sort", "Sort"))} ${esc(column.label)}"><span class="sort-label">${esc(column.label)}</span><span class="sort-mark">${mark}</span></button>`
+    : `<span class="static-head">${esc(column.label)}</span>`;
+  const filter = column.filterable ? renderFilterControl(column) : "";
+  const contentClass = column.filterable ? "table-head-cell table-head-inline" : "table-head-cell";
+  return `<th class="${column.numeric ? "num" : ""}" title="${esc(column.label)}"><div class="${contentClass}">${label}${filter}</div></th>`;
 }
-function renderDataCell(row, column) {
-  const classes = [column.numeric ? "num" : "", column.className || ""].filter(Boolean).join(" ");
+function renderFilterControl(column) {
+  const selected = new Set(activeFilterValues(column.key));
+  const options = filterOptions(column);
+  const count = selected.size;
+  const countText = count ? `<span class="filter-count">${esc(`${count} ${t("selected_count", "selected")}`)}</span>` : "";
+  const optionHtml = options.length
+    ? options.map(value => `<label class="filter-option"><input type="checkbox" data-filter-key="${esc(column.key)}" value="${esc(value)}" ${selected.has(value) ? "checked" : ""}><span>${esc(filterLabel(column, value))}</span></label>`).join("")
+    : `<p class="filter-empty">${esc(t("no_matching_rows", "No matching rows"))}</p>`;
+  return `<details class="filter-control ${count ? "active" : ""}" data-filter-menu="${esc(column.key)}"><summary class="filter-button" aria-label="${esc(t("filter", "Filter"))} ${esc(column.label)}"><span class="filter-icon">&#9662;</span>${countText}</summary><div class="filter-menu"><div class="filter-menu-head"><strong>${esc(column.label)}</strong><button class="filter-clear" type="button" data-filter-clear="${esc(column.key)}" ${count ? "" : "disabled"}>${esc(t("clear", "Clear"))}</button></div><div class="filter-options">${optionHtml}</div></div></details>`;
+}
+function renderTableRow(row, columns, rows) {
+  const selected = row.trial_key === selectedKey();
+  return `<tr class="clickable-row ${selected ? "selected-row" : ""}" data-trial-key="${esc(row.trial_key)}" title="${esc(row.trial_key)}">${columns.map(column => renderDataCell(row, column, rows)).join("")}</tr>`;
+}
+function renderDataCell(row, column, rows) {
+  const classes = [column.numeric ? "num" : "", column.metric ? metricCellShade(row, column, rows) : "", column.className || ""].filter(Boolean).join(" ");
   const html = column.html ? column.html(row) : esc(tableText(row, column));
   const title = column.cellTitle ? column.cellTitle(row) : "";
   return `<td class="${classes}" ${title ? `title="${esc(title)}"` : ""}>${html}</td>`;
 }
+function metricCellShade(row, column, rows) {
+  const value = column.value(row);
+  if (!hasMetricValue(value)) return "metric-cell metric-missing";
+  const values = rows.map(item => column.value(item)).filter(hasMetricValue).map(Number);
+  if (!values.length) return "metric-cell metric-missing";
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  if (min === max) return "metric-cell metric-shade-2";
+  const bucket = Math.max(0, Math.min(4, Math.round(((Number(value) - min) / (max - min)) * 4)));
+  return `metric-cell metric-shade-${bucket}`;
+}
 function bindLeaderboardControls() {
-  document.querySelectorAll("[data-table-sort]").forEach(button => {
+  const target = $("leaderboard");
+  if (!target) return;
+  target.querySelectorAll("[data-table-sort]").forEach(button => {
     button.addEventListener("click", event => {
       event.stopPropagation();
       const controls = tableControls();
@@ -224,20 +265,100 @@ function bindLeaderboardControls() {
         controls.sort = button.dataset.tableSort;
         controls.direction = "asc";
       }
-      renderLeaderboard();
+      renderComparisonPanels();
     });
   });
-  bindTrialSelection();
+  target.querySelectorAll("[data-filter-key]").forEach(input => {
+    input.addEventListener("change", event => {
+      event.stopPropagation();
+      setFilterValue(input.dataset.filterKey, input.value, input.checked);
+      renderComparisonPanels();
+    });
+  });
+  target.querySelectorAll("[data-filter-clear]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.stopPropagation();
+      clearFilter(button.dataset.filterClear);
+      renderComparisonPanels();
+    });
+  });
+  bindTrialSelection(target);
 }
-function bindTrialSelection() {
-  document.querySelectorAll("[data-trial-key]").forEach(node => {
-    node.addEventListener("click", () => {
+function bindTrialSelection(root) {
+  root.querySelectorAll("[data-trial-key]").forEach(node => {
+    node.addEventListener("click", event => {
+      event.stopPropagation();
       state.selectedTrial = node.getAttribute("data-trial-key");
-      renderVisibleHeatmap();
-      renderLeaderboard();
-      renderTrace();
+      state.selectedStep = null;
+      renderComparisonPanels();
     });
   });
+}
+function renderTrajectoryOverview(rows = leaderboardRows()) {
+  const target = $("trajectory-overview");
+  if (!target) return;
+  const maxSteps = Math.max(1, ...rows.map(row => (trajectoryFor(row.trial_key)?.steps || []).length));
+  const body = rows.length
+    ? rows.map(row => renderTrajectoryOverviewRow(row, maxSteps)).join("")
+    : `<div class="trajectory-empty">${esc(t("no_matching_rows", "No matching rows"))}</div>`;
+  target.innerHTML = `
+    <div class="panel-head"><div><h2 id="trajectory-overview-title">${esc(t("trajectory_overview", "Trajectory Overview"))}</h2><p class="copy">${esc(t("trajectory_overview_copy", "Rows follow the current Leaderboard order. Nodes align by step index and show role initials."))}</p></div></div>
+    <div class="trajectory-overview-list">${body}</div>
+  `;
+  bindTrajectoryControls(target);
+}
+function renderTrajectoryOverviewRow(row, maxSteps) {
+  const trajectory = trajectoryFor(row.trial_key);
+  const steps = trajectory?.steps || [];
+  const selected = row.trial_key === selectedKey();
+  const session = row.session_id || row.trial_key || "-";
+  const agent = agentNameFor(row);
+  return `<div class="trajectory-row ${selected ? "selected-row" : ""}" data-trial-key="${esc(row.trial_key)}" title="${esc(row.trial_key)}"><div class="trajectory-label"><strong>${esc(session)}</strong><span>${esc(agent)}</span></div><div class="trajectory-track" style="--step-count:${esc(maxSteps)}">${steps.map((step, index) => renderTrajectoryNode(step, index, row.trial_key)).join("")}</div></div>`;
+}
+function renderTrajectoryNode(step, index, trialKey) {
+  const stepId = String(step?.step_id ?? index + 1);
+  const selected = state.selectedStep?.trialKey === trialKey && String(state.selectedStep?.stepId) === stepId;
+  const label = stepTitle(step, index);
+  return `<button class="trajectory-node ${selected ? "selected-node" : ""}" type="button" data-trial-key="${esc(trialKey)}" data-step-id="${esc(stepId)}" style="grid-column:${esc(index + 1)}" title="${esc(label)}" aria-label="${esc(label)}"><span class="trajectory-node-letter">${esc(roleLetter(step?.source))}</span></button>`;
+}
+function roleLetter(source) {
+  const role = lower(source);
+  if (role === "system") return "S";
+  if (role === "user") return "U";
+  if (role === "agent") return "A";
+  return "?";
+}
+function stepTitle(step, index) {
+  const id = step?.step_id ?? index + 1;
+  const role = step?.source || "unknown";
+  const preview = shortText(valuePreview(step?.message).trim() || valuePreview(step?.reasoning_content).trim() || firstToolName(step));
+  return preview ? `#${id} ${role}: ${preview}` : `#${id} ${role}`;
+}
+function bindTrajectoryControls(target) {
+  target.querySelectorAll("[data-step-id]").forEach(node => {
+    node.addEventListener("click", event => {
+      event.stopPropagation();
+      state.selectedTrial = node.dataset.trialKey;
+      state.selectedStep = { trialKey: node.dataset.trialKey, stepId: node.dataset.stepId };
+      renderComparisonPanels();
+    });
+  });
+  target.querySelectorAll(".trajectory-row[data-trial-key]").forEach(row => {
+    row.addEventListener("click", event => {
+      event.stopPropagation();
+      state.selectedTrial = row.getAttribute("data-trial-key");
+      state.selectedStep = null;
+      renderComparisonPanels();
+    });
+  });
+}
+function firstToolName(step) {
+  const tool = (step?.tool_calls || [])[0];
+  return tool?.function_name || "";
+}
+function shortText(value) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length > 80 ? `${text.slice(0, 80)}...` : text;
 }
 function renderTrace() {
   const trial = metaFor(selectedKey());
@@ -278,6 +399,67 @@ function renderTrace() {
     <div class="step-list" id="step-list">${(trajectory?.steps || []).map(step => renderStep(step, trial, timingStats)).join("")}</div>
   `;
   bindStepToggle();
+}
+function renderStepDrawer() {
+  const target = $("step-drawer");
+  if (!target) return;
+  if (!state.selectedStep) {
+    setStepDrawerOpen(false);
+    target.hidden = true;
+    target.innerHTML = "";
+    return;
+  }
+  const { trialKey, stepId } = state.selectedStep;
+  const metas = state.view?.trajectory_meta || [];
+  const index = metas.findIndex(meta => meta.trial_key === trialKey);
+  const trial = index >= 0 ? metas[index] : null;
+  const trajectory = index >= 0 ? (state.view?.trajectory || [])[index] : null;
+  const step = (trajectory?.steps || []).find(item => String(item.step_id) === String(stepId));
+  if (!trial || !trajectory || !step) {
+    state.selectedStep = null;
+    setStepDrawerOpen(false);
+    target.hidden = true;
+    target.innerHTML = "";
+    return;
+  }
+  const timingStats = stepTimingStats(trial);
+  setStepDrawerOpen(true);
+  target.hidden = false;
+  target.innerHTML = `
+    <div class="step-drawer-panel" role="dialog" aria-modal="false" aria-labelledby="step-drawer-title">
+      <div class="step-drawer-head">
+        <div><p class="eyebrow">${esc(t("step_details", "Step details"))}</p><h2 id="step-drawer-title">#${esc(step.step_id)}</h2><p class="copy">${esc(trial.trial_key || "-")}</p></div>
+        <button class="step-drawer-close" type="button" data-step-drawer-close aria-label="${esc(t("close", "Close"))}">${esc(t("close", "Close"))}</button>
+      </div>
+      <div class="step-drawer-body">${renderStep(step, trial, timingStats, { open: true })}</div>
+    </div>
+  `;
+  target.querySelectorAll("[data-step-drawer-close]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.stopPropagation();
+      state.selectedStep = null;
+      renderComparisonPanels();
+    });
+  });
+}
+function setStepDrawerOpen(open) {
+  document.body.classList.toggle("step-drawer-open", Boolean(open));
+}
+function bindGlobalControls() {
+  if (state.boundGlobalControls) return;
+  document.addEventListener("keydown", event => {
+    if (event.key !== "Escape" || !state.selectedStep) return;
+    state.selectedStep = null;
+    renderComparisonPanels();
+  });
+  document.addEventListener("click", event => {
+    if (!state.selectedStep) return;
+    const target = event.target;
+    if (target?.closest?.("#step-drawer") || target?.closest?.("[data-step-id]")) return;
+    state.selectedStep = null;
+    renderComparisonPanels();
+  });
+  state.boundGlobalControls = true;
 }
 function infoGrid(items) {
   return `<div class="info-grid">${items.map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join("")}</div>`;
@@ -367,10 +549,10 @@ function valuePreview(value) {
   if (typeof value === "string") return value;
   return JSON.stringify(value, null, 2);
 }
-function renderStep(step, meta, timingStats) {
+function renderStep(step, meta, timingStats, options = {}) {
   const sm = stepMeta(meta, step.step_id);
   const preview = valuePreview(step.message).trim() || "(No Message)";
-  return `<details class="step" data-step="${esc(step.step_id)}"><summary><div class="step-row"><span class="step-id">#${esc(step.step_id)}</span><span class="role ${esc(step.source)}">${esc(step.source)}</span><span class="preview">${esc(preview)}</span></div><div class="rail">${renderStepRail(step, sm, meta?.trial_key, timingStats)}</div></summary><div class="step-body">${renderBlocks(step, sm, timingStats)}</div></details>`;
+  return `<details class="step" data-step="${esc(step.step_id)}"${options.open ? " open" : ""}><summary><div class="step-row"><span class="step-id">#${esc(step.step_id)}</span><span class="role ${esc(step.source)}">${esc(step.source)}</span><span class="preview">${esc(preview)}</span></div><div class="rail">${renderStepRail(step, sm, meta?.trial_key, timingStats)}</div></summary><div class="step-body">${renderBlocks(step, sm, timingStats)}</div></details>`;
 }
 function renderBlocks(step, meta, timingStats) {
   let html = "";

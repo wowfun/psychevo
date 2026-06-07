@@ -183,6 +183,7 @@ __CSS__
   <section class="panel-stack" id="comparison"></section>
   <section class="trace-panel" id="trace"></section>
 </div>
+<aside class="step-drawer" id="step-drawer" hidden></aside>
 <script type="application/json" id="peval-py-data">__DATA__</script>
 <script type="application/json" id="peval-py-token-estimates">__TOKEN_ESTIMATES__</script>
 <script type="application/json" id="peval-py-i18n">__I18N__</script>

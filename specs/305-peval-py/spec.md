@@ -52,11 +52,17 @@ The command supports path and DB input sources:
   may parse other path formats directly.
 - `-d, --db PATH` reads an adapter-owned SQLite persistence format. `view
   trajectory` may repeat `-d` to compare sessions across adapters.
+- `-i, --input-table PATH` reads a structured input manifest and appends its
+  rows after any direct `-p/--path` and `-d/--db` inputs. CSV and JSON manifests
+  use only the Python standard library. `.xlsx` manifests are supported only
+  when the optional `openpyxl` package is importable; `.xls` is unsupported and
+  must fail with guidance to use `.xlsx` or CSV.
 
 `view trajectory` may mix repeated `-p` and repeated `-d` inputs in one
-invocation. Each loaded path or DB session becomes one Trial in the report.
-`export trajectory` remains single-session only and must fail clearly when the
-effective input set contains more than one session.
+invocation, and may also use repeated `-i/--input-table` manifests. Each loaded
+path, DB session, or manifest row becomes one Trial in the report. `export
+trajectory` remains single-session only and must fail clearly when the effective
+input set contains more than one session.
 
 `-s, --session-id` is valid only when at least one `-d, --db` input is present.
 With one DB input, bare `-s ID` remains valid and may be repeated to compare
@@ -78,6 +84,7 @@ Common trajectory flags use both long and short forms:
 
 - `-c, --config PATH`
 - `-a, --adapter ADAPTER`
+- `-i, --input-table PATH`
 - `-o, --output [PATH]`
 - `-f, --format json|html` for `view trajectory`
 - `-n, --note N=TEXT` for `view trajectory`, where `0` is report-level and
@@ -90,6 +97,27 @@ adapter starts from config, the last bare `-a ADAPTER` overrides that default,
 and selector forms override only their matching input. Invalid selectors,
 duplicate selectors, selectors that reference missing inputs, and unknown
 adapter ids must fail clearly and list available adapters for unknown ids.
+Selector forms apply only to directly supplied `-p/--path` and `-d/--db`
+inputs. Manifest rows use their own `adapter` or `a` column for row-level
+adapter selection, falling back to the effective default adapter when omitted.
+
+Input table manifests are input lists, not batch job runners: they do not
+introduce per-row output paths or multiple command executions. CSV manifests use
+the first row as a header, read with `utf-8-sig`, preserve cell newlines, skip
+blank data rows, and resolve relative `path` or `db` values relative to the
+manifest file's directory. JSON manifests may be a top-level array of row
+objects or an object with `rows` and optional `report_notes`. `.xlsx` manifests
+use the active worksheet with the first row as a header. Headers are normalized
+by removing leading dashes, lowercasing, and converting hyphens and spaces to
+underscores. Supported manifest columns are `path`/`p`, `db`/`d`,
+`session_id`/`session`/`s`, `adapter`/`a`, `note`/`notes`/`n`,
+`report_note`/`report_notes`, `agent_name`, `agent_version`, and `model`.
+Unknown or duplicate columns must fail clearly. Each non-blank row must provide
+exactly one of `path` or `db`; `session_id` is valid only for `db` rows. A DB
+with multiple selected sessions is represented by multiple manifest rows.
+Existing CLI `--agent-name`, `--agent-version`, and `--model` values are
+defaults for every session; manifest row values override those defaults only
+for that row's conversion.
 
 When `-o/--output` is omitted, commands write to stdout. When `-o/--output` is
 present without a path, the default file name includes the effective adapter and
@@ -198,19 +226,57 @@ writes either JSON or HTML:
   and code blocks no smaller than 12px.
 
 Single-session HTML renders the current Run, Result, Evidence, and Steps
-sections. Multi-session HTML follows the Rust `peval view` report structure:
-Report Notes, Visible Heatmap, Leaderboard, then the selected Trial trajectory.
-Visible Heatmap and Leaderboard comparison panels render one primary section
-title without a duplicate eyebrow label. `Leaderboard` is a preserved report UI
-term and remains English in localized reports.
-`peval-py` treats each input session as one Trial. The Visible Heatmap supports
-metric switching for duration, tokens, tool calls, and turns. It uses a
-session/trial row axis: each input session occupies one row with a left-side
-session label and one heatmap cell, so large comparisons grow vertically rather
-than as an unbounded horizontal row. The Leaderboard shows session,
-adapter/model, result, duration, turns, tools, tokens, cost, and notes. The
-rendered comparison sections must not show benchmark, task, task-set,
+sections. Multi-session HTML renders Report Notes, Leaderboard, Trajectory
+Overview, then the selected Trial trajectory. The comparison panels render one
+primary section title without a duplicate eyebrow label. `Leaderboard` is a
+preserved report UI term and remains English in localized reports.
+`peval-py` treats each input session as one Trial. Multi-session HTML no longer
+renders a separate Visible Heatmap panel. The Leaderboard shows session, agent,
+model, result, duration, turns, tools, tokens, cost, and notes. The Agent column
+uses the trajectory agent name and falls back to the adapter id when the
+trajectory does not provide an agent name. The Session, Agent, Model, and
+Result columns provide multi-value filters whose values are collected from the
+complete Leaderboard row set. Empty selections are equivalent to no filter,
+values within one column are OR-ed, and multiple filtered columns are AND-ed.
+Filtering happens before sorting and before metric shading. If filters hide the
+currently selected Trial and visible rows remain, HTML selects the first visible
+Trial; if filters hide all rows, the selected Trial detail remains visible but
+no Leaderboard row is selected. Leaderboard duration, tokens, Tool Calls, and
+Turns cells show per-column metric intensity directly as cell background
+shading; each metric column computes its own scale from the currently visible
+filtered rows, missing values remain unshaded, and Cost is not shaded. The
+filter control appears inline on the right side of the filtered column label,
+similar to a spreadsheet table header, instead of occupying a second header
+line. The rendered comparison sections must not show benchmark, task, task-set,
 task-family, or matrix task-axis fields.
+
+The Trajectory Overview section below the Leaderboard renders one row per
+session in the same order as the currently filtered and sorted Leaderboard
+rows; its row count and row order must exactly match the rendered Leaderboard.
+Each row shows a compact left-to-right node track where each ATIF step is one
+node. Overview nodes use a neutral visual style and show source initials:
+`S` for system, `U` for user, `A` for agent, and `?` for unknown or unsupported
+sources. All rows share a grid width based on the largest step count among
+visible sessions, so nodes at the same step index align vertically and shorter
+trajectories leave empty positions at the end. Clicking a Trajectory Overview
+row selects that Trial. Clicking a node selects that Trial and opens a fixed
+right-side Step details drawer showing the same expanded step markup and block
+content used by the final Steps section. On desktop, the drawer uses a wider
+inspection width than the initial compact rail so longer reasoning, tool, and
+observation content can be read without excessive wrapping. The widened drawer
+must not obscure the middle report content: when it opens on desktop, the page
+layout reserves the drawer's right-side width and constrains the main workspace
+to the remaining viewport. Its expanded step layout stretches to the available
+drawer height: the step summary stays at the top, visible content blocks share
+the remaining height where possible, and long block payloads scroll inside their
+own blocks instead of leaving unused drawer space below. When browser zoom or a
+short viewport leaves less vertical room than the drawer content needs, the
+drawer itself remains scrollable so lower blocks and controls stay reachable
+instead of being clipped. The drawer supports a close button, Escape, and
+clicking blank page space outside the drawer. Clicking another node replaces
+the drawer content; filtering that hides the drawer's selected node closes the
+drawer. On narrow screens, the drawer appears as a bottom sheet. Node titles
+provide step id, role, and a short preview.
 
 Step token chips prefer real per-step metrics from the trajectory. When a
 visible step lacks per-step token metrics, HTML may show an estimated token
@@ -233,10 +299,11 @@ Trial wall duration when available, falling back to the largest elapsed step
 value.
 
 HTML localization covers the report title, report-level chrome, comparison
-section titles, metric labels, comparison table headers, comparison empty
-states, buttons, aria labels, comparison status labels, and the selected Trial
-summary, notes, result, and evidence sections. Only the final selected Trial
-Steps detail section remains English in this version. English is the default.
+section titles, metric labels, comparison table headers, comparison filters,
+drawer chrome, comparison empty states, buttons, aria labels, comparison status
+labels, and the selected Trial summary, notes, result, and evidence sections.
+Only the final selected Trial Steps detail section remains English in this
+version. English is the default.
 Simplified Chinese is selected with `defaults.locale = "zh-CN"` or the `zh`
 alias. In Simplified Chinese reports, domain terms such as Run, Result, Notes,
 Evidence, Steps, events, Session, variant, evaluator, reasoning, selected
@@ -288,7 +355,11 @@ to the one-based input session index after ordering. Repeated notes append in
 CLI order. Invalid note syntax or out-of-range indexes must fail clearly. JSON
 preserves note `markdown` text; HTML renders report notes, Leaderboard note
 snippets, and selected Trial notes with peval-style note markup. Raw HTML in
-notes must be escaped before Markdown display and must not execute.
+notes must be escaped before Markdown display and must not execute. Manifest
+`note`/`notes`/`n` values without `N=` bind to that row's expanded session
+index; values with `N=TEXT` reuse the CLI note syntax. Manifest `report_note`
+or `report_notes` values are report-level notes equivalent to `-n 0=TEXT`.
+JSON note fields may be strings or arrays of strings.
 
 ## Redaction
 

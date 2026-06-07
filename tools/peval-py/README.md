@@ -29,10 +29,11 @@ uv run --project tools/peval-py peval-py --help
 
 ## Build A Local Binary
 
-`peval-py` has no runtime dependencies outside the Python standard library, so
-you can package it as a local executable. Build on the same operating system and
-CPU architecture where you plan to run the file. Keep generated artifacts under
-`.local/`; the repository ignores that directory.
+`peval-py` has no default runtime dependencies outside the Python standard
+library, so you can package it as a local executable. Reading `.xlsx` input
+manifests is optional and requires `openpyxl` at runtime. Build on the same
+operating system and CPU architecture where you plan to run the file. Keep
+generated artifacts under `.local/`; the repository ignores that directory.
 
 PyInstaller is the simplest single-file path:
 
@@ -71,6 +72,47 @@ platform before choosing it.
 Use `-a ADAPTER` to set the default adapter for all inputs. For comparison
 reports, repeat `-a` with `pN=ADAPTER` or `dN=ADAPTER` to parse individual
 path or DB inputs with different adapters.
+
+Use `-i, --input-table PATH` when the inputs are easier to maintain as a CSV,
+JSON, or `.xlsx` manifest. Each table row becomes one session in the same
+report. Direct `-p/--path` and `-d/--db` inputs are loaded first, then table
+rows are appended in file order. Relative `path` and `db` values resolve from
+the manifest directory. `.xlsx` works only when `openpyxl` is installed; save
+as CSV when you want the standard-library-only path.
+
+CSV example:
+
+```csv
+path,db,session_id,adapter,n,report_note,agent_name,agent_version,model
+runs/hermes.jsonl,,,,Hermes row note,Cross-agent comparison,Hermes,,deepseek-v4-flash
+,state.db,ses_123,opencode,OpenCode row note,,,,
+```
+
+Then render one multi-session HTML report:
+
+```bash
+peval-py view tr \
+  -a psychevo \
+  -i inputs.csv \
+  -f html \
+  -o report.html
+```
+
+JSON manifests may be a top-level array or an object with `rows` and
+`report_notes`:
+
+```json
+{
+  "report_notes": ["Local cross-agent comparison."],
+  "rows": [
+    {"path": "runs/hermes.jsonl", "adapter": "hermes", "note": "Hermes row"},
+    {"db": "opencode.db", "session_id": "ses_123", "adapter": "opencode"}
+  ]
+}
+```
+
+`export tr -i` is still single-session only after expansion. Use `view tr -i`
+for a manifest with multiple rows.
 
 For reporting, comparison, and custom adapter examples, read
 [peval-py Lightweight Trajectory Reports](../../docs/evaluation/peval-py.md).

@@ -29,8 +29,9 @@ uv run --project tools/peval-py peval-py --help
 
 ## 构建本地二进制
 
-`peval-py` 的运行时只依赖 Python 标准库，可以打包成本地可执行文件。请在目标
-操作系统和 CPU 架构上构建。生成物建议放在 `.local/` 下，仓库会忽略这个目录。
+`peval-py` 默认运行路径只依赖 Python 标准库，可以打包成本地可执行文件。读取
+`.xlsx` 输入清单是可选能力，运行时需要 `openpyxl`。请在目标操作系统和 CPU 架构
+上构建。生成物建议放在 `.local/` 下，仓库会忽略这个目录。
 
 PyInstaller 是最简单的单文件打包方式：
 
@@ -67,6 +68,44 @@ Nuitka 也是一种选择，适合想做 compiled-Python 构建并且本机有 C
 
 用 `-a ADAPTER` 为所有输入设置默认 adapter。生成对比报告时，可以重复传入
 `-a pN=ADAPTER` 或 `-a dN=ADAPTER`，让单个 path 或 DB 输入使用不同 adapter。
+
+当输入更适合放在 CSV、JSON 或 `.xlsx` 清单中维护时，使用
+`-i, --input-table PATH`。表格每一行都会展开成同一份报告中的一个 session。
+直接传入的 `-p/--path` 和 `-d/--db` 会先加载，然后按文件顺序追加表格行。
+相对 `path` 和 `db` 会按清单文件所在目录解析。`.xlsx` 只在本机已安装
+`openpyxl` 时可用；如果希望保持标准库路径，请另存为 CSV。
+
+CSV 示例：
+
+```csv
+path,db,session_id,adapter,n,report_note,agent_name,agent_version,model
+runs/hermes.jsonl,,,,Hermes row note,跨 agent 对比,Hermes,,deepseek-v4-flash
+,state.db,ses_123,opencode,OpenCode row note,,,,
+```
+
+生成一份多 session HTML 报告：
+
+```bash
+peval-py view tr \
+  -a psychevo \
+  -i inputs.csv \
+  -f html \
+  -o report.html
+```
+
+JSON 清单可以是顶层 array，也可以是带有 `rows` 和 `report_notes` 的对象：
+
+```json
+{
+  "report_notes": ["本地跨 agent 对比。"],
+  "rows": [
+    {"path": "runs/hermes.jsonl", "adapter": "hermes", "note": "Hermes row"},
+    {"db": "opencode.db", "session_id": "ses_123", "adapter": "opencode"}
+  ]
+}
+```
+
+`export tr -i` 展开后仍只能有一个 session。多行清单请使用 `view tr -i`。
 
 报告生成、session 对比和自定义 adapter 示例见
 [peval-py 轻量轨迹报告](../../docs/i18n/zh-CN/evaluation/peval-py.md)。

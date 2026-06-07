@@ -33,28 +33,33 @@ MESSAGES: dict[str, dict[str, str]] = {
     "en": {
         "title": "Agent Trajectory Report",
         "report_note": "Report note",
-        "visible_heatmap": "Visible Heatmap",
-        "visible_heatmap_copy": (
-            "Hue follows outcome. Shade follows the selected metric across visible "
-            "sessions."
-        ),
         "leaderboard": "Leaderboard",
         "leaderboard_copy": (
-            "Each row is one visible session-as-Trial. Numeric columns sort; rows "
-            "update the selected Trial."
+            "Each row is one visible session-as-Trial. Numeric cells shade by "
+            "column value; rows update the selected Trial."
+        ),
+        "trajectory_overview": "Trajectory Overview",
+        "trajectory_overview_copy": (
+            "Rows follow the current Leaderboard order. Nodes align by step index "
+            "and show role initials."
         ),
         "duration": "Duration",
         "tokens": "Tokens",
         "tool_calls": "Tool Calls",
         "turns": "Turns",
         "session": "Session",
-        "adapter": "Adapter",
+        "agent": "Agent",
         "model": "Model",
         "result": "Result",
         "status": "status",
         "cost": "Cost",
         "notes": "Notes",
         "sort": "Sort",
+        "filter": "Filter",
+        "clear": "Clear",
+        "selected_count": "selected",
+        "step_details": "Step details",
+        "close": "Close",
         "no_matching_rows": "No matching rows",
         "selected_trial_trajectory": "selected trial trajectory",
         "run": "Run",
@@ -91,22 +96,27 @@ MESSAGES: dict[str, dict[str, str]] = {
     "zh-CN": {
         "title": "Agent 轨迹报告",
         "report_note": "报告备注",
-        "visible_heatmap": "可见热力图",
-        "visible_heatmap_copy": "颜色表示 Result，深浅表示当前指标在 visible sessions 中的相对大小。",
         "leaderboard": "Leaderboard",
-        "leaderboard_copy": "每一行是一条 visible session-as-Trial。数值列可排序，点击行会更新选中的 Trial。",
+        "leaderboard_copy": "每一行是一条 visible session-as-Trial。数值单元格按列值显示深浅，点击行会更新选中的 Trial。",
+        "trajectory_overview": "轨迹概览",
+        "trajectory_overview_copy": "行顺序跟随当前 Leaderboard；节点按 step 序号对齐，并显示 role 首字母。",
         "duration": "耗时",
         "tokens": "Token",
         "tool_calls": "Tool Calls",
         "turns": "Turns",
         "session": "Session",
-        "adapter": "适配器",
+        "agent": "Agent",
         "model": "模型",
         "result": "Result",
         "status": "状态",
         "cost": "费用",
         "notes": "Notes",
         "sort": "排序",
+        "filter": "筛选",
+        "clear": "清除",
+        "selected_count": "已选",
+        "step_details": "Step 详情",
+        "close": "关闭",
         "no_matching_rows": "没有匹配的行",
         "selected_trial_trajectory": "selected trial trajectory",
         "run": "Run",

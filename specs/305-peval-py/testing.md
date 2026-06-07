@@ -83,10 +83,26 @@ Coverage must verify:
 - repeated `-d` inputs may use different adapters and generate one comparison
   report.
 - JSONL path and DB input families can be mixed in `view trajectory`.
+- `-i/--input-table` reads CSV, JSON top-level arrays, and JSON
+  `{ rows, report_notes }` manifests, appending rows after direct CLI inputs in
+  manifest order.
+- input table rows support `path`/`p`, `db`/`d`, `session_id`/`session`/`s`,
+  `adapter`/`a`, `note`/`notes`/`n`, `report_note`/`report_notes`,
+  `agent_name`, `agent_version`, and `model`; row-level adapter and
+  agent/model fields override command defaults for only that row.
+- input table relative path and DB values resolve against the table file's
+  directory; row notes bind to the expanded row index unless they use explicit
+  `N=TEXT` syntax, and report notes bind to index `0`.
+- input table validation fails clearly for unknown or duplicate headers, rows
+  with both path and DB, rows with neither path nor DB, path rows with
+  session ids, unsupported `.xls`, and `.xlsx` files when `openpyxl` is not
+  importable.
 - with multiple DB inputs, `-s dN=ID` binds session ids to the one-based DB
   input, while bare `-s ID` fails clearly.
 - with one DB input, bare `-s ID` remains compatible.
 - `export trajectory` rejects multiple sessions clearly.
+- `export trajectory` accepts `-i/--input-table` only when the expanded input
+  set contains exactly one session.
 - JSONL view inputs without an embedded session id use the file stem as the
   displayed session id.
 - `-n/--note 0=TEXT` creates report-level notes, `-n/--note N=TEXT` attaches
@@ -101,18 +117,37 @@ Coverage must verify:
   still inlined into the emitted offline HTML report.
 - HTML does not render the old Summary, Session Heatmap, or Session Table
   labels in multi-session reports.
-- HTML renders Report Notes, Visible Heatmap, metric controls, Leaderboard,
-  selected Trial details, selected-state cues, note snippets, selected Trial
-  notes, and safe note Markdown for multi-session reports.
-- Visible Heatmap and Leaderboard comparison panels render only their primary
-  heading, without duplicate eyebrow text; `Leaderboard` remains English in
-  localized reports.
-- Visible Heatmap renders one session/trial row per input with a left-side
-  session axis label and one heatmap cell; it does not create an unbounded
-  horizontal column for every session.
-- Visible Heatmap metric buttons switch displayed values for duration, tokens,
-  tool calls, and turns, and heatmap/Leaderboard clicks update the selected
-  Trial panel.
+- HTML renders Report Notes, Leaderboard, Trajectory Overview, selected Trial
+  details, selected-state cues, note snippets, selected Trial notes, and safe
+  note Markdown for multi-session reports.
+- Leaderboard and Trajectory Overview comparison panels render only their
+  primary heading, without duplicate eyebrow text; `Leaderboard` remains English
+  in localized reports.
+- Multi-session HTML does not render the old Visible Heatmap panel, metric
+  controls, visible-grid, or session-axis layout.
+- Leaderboard renders Agent from the trajectory agent name with adapter fallback,
+  and duration, tokens, Tool Calls, and Turns cells show per-column metric
+  intensity classes while Cost remains unshaded.
+- Leaderboard exposes multi-value filters for Session, Agent, Model, and Result;
+  filter options come from the complete row set, values within a column are
+  OR-ed, filtered columns are AND-ed, metric shading uses filtered visible rows,
+  the Trajectory Overview reuses the same filtered and sorted rows, and filter
+  buttons render inline to the right of each filterable column label.
+- Trajectory Overview renders one session row per currently filtered and sorted
+  Leaderboard row, preserving the same row count and order, aligns step nodes by
+  the largest visible step count, renders neutral lettered nodes for `S`
+  system, `U` user, `A` agent, and `?` unknown roles, and row/node clicks
+  update the selected Trial panel.
+- Clicking a Trajectory Overview node opens a Step details drawer that reuses
+  the final Steps section's expanded step markup, supports close and Escape,
+  closes when the user clicks blank page space outside the drawer, swaps content
+  when another node is clicked, and closes when filtering hides the selected
+  node. The drawer is wide enough for readable inspection on desktop and its
+  expanded step blocks fill the drawer's available height without leaving a
+  large empty bottom region. When the desktop drawer is open, the main workspace
+  reserves the drawer width so report content is not hidden behind it. The
+  drawer remains scrollable when browser zoom or short viewports make its
+  content taller than the available screen height.
 - HTML renders the peval-style Run, Result, Evidence, and Usage Breakdown
   sections for single-session reports.
 - HTML report typography keeps the body text baseline at 15px and compact
@@ -139,7 +174,7 @@ Coverage must verify:
   previous-step gap.
 - CLI smoke commands cover `view trajectory`, `export trajectory`, the `tr`
   scenario alias, localized HTML output from `[defaults].locale = "zh-CN"`, and
-  short flags including `-p`, `-a`, `-n`, and `-o`.
+  short flags including `-p`, `-a`, `-i`, `-n`, and `-o`.
 - legacy top-level `report` and `convert` commands are rejected.
 - translated evaluation docs exist under `docs/i18n/zh-CN/...`, the peval-py
   tool README translation exists beside `tools/peval-py/README.md`, English

@@ -4,7 +4,7 @@ import argparse
 import json
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from peval_py.atif import convert_db, convert_path, convert_records, is_atif_json_path
@@ -12,6 +12,7 @@ from peval_py.adapters import available_adapter_ids, normalize_adapter_id
 from peval_py.adapters.base import ConversionResult
 from peval_py.config import ToolConfig, apply_overrides, config_for_adapter, load_config
 from peval_py.html import render_html
+from peval_py.input_table import InputTableRow, read_input_tables
 from peval_py.report import NoteInput, ReportSession, build_multi_report
 from peval_py.sources import MessageRecord
 
@@ -36,6 +37,15 @@ class LoadedSession:
     input_path: str | None = None
     db_path: str | None = None
     session_hint: str | None = None
+    agent_name: str | None = None
+    agent_version: str | None = None
+    model: str | None = None
+
+
+@dataclass(frozen=True)
+class LoadedInputs:
+    sessions: list[LoadedSession]
+    notes: list[str]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -48,7 +58,8 @@ def main(argv: list[str] | None = None) -> int:
             config.adapter,
         )
         config = config_for_adapter(config, adapter_assignments.default_adapter)
-        sessions = load_sessions(args, adapter_assignments)
+        loaded_inputs = load_inputs(args, adapter_assignments)
+        sessions = loaded_inputs.sessions
         if args.command == "export":
             session_config = config_for_session(sessions[0], config)
             conversion = convert_session(sessions[0], config)
@@ -68,7 +79,10 @@ def main(argv: list[str] | None = None) -> int:
             )
             for session in sessions
         ]
-        notes = parse_notes(getattr(args, "note", None) or [], len(report_sessions))
+        notes = parse_notes(
+            [*(getattr(args, "note", None) or []), *loaded_inputs.notes],
+            len(report_sessions),
+        )
         report = build_multi_report(report_sessions, config, notes)
         fmt = resolve_report_format(args)
         output = resolve_report_output(args, fmt, report, config)
@@ -177,6 +191,13 @@ def add_shared_args(parser: argparse.ArgumentParser) -> None:
         metavar="ID",
         help="DB session id; use dN=ID when multiple DB inputs are present",
     )
+    parser.add_argument(
+        "-i",
+        "--input-table",
+        action="append",
+        metavar="PATH",
+        help="CSV, JSON, or .xlsx input manifest; repeatable",
+    )
     parser.add_argument("--agent-name", help="override ATIF agent name")
     parser.add_argument("--agent-version", help="override ATIF agent version")
     parser.add_argument("--model", help="override ATIF agent model name")
@@ -237,8 +258,8 @@ def load_sessions(
 ) -> list[LoadedSession]:
     paths = list(getattr(args, "path", None) or [])
     dbs = list(getattr(args, "db", None) or [])
-    if not paths and not dbs:
-        raise ValueError("missing input source; pass --path or --db")
+    if not paths and not dbs and not getattr(args, "input_table", None):
+        raise ValueError("missing input source; pass --path, --db, or --input-table")
     validate_adapter_selector_range(
         adapter_assignments,
         path_count=len(paths),
@@ -293,10 +314,74 @@ def load_sessions(
                 )
             )
 
+    return sessions
+
+
+def load_inputs(
+    args: argparse.Namespace,
+    adapter_assignments: AdapterAssignments,
+) -> LoadedInputs:
+    sessions = load_sessions(args, adapter_assignments)
+    notes: list[str] = []
+    table_data = read_input_tables(getattr(args, "input_table", None) or [])
+    notes.extend(f"0={note}" for note in table_data.report_notes)
+    for row in table_data.rows:
+        session_index = len(sessions) + 1
+        sessions.append(
+            loaded_session_from_table_row(row, adapter_assignments.default_adapter)
+        )
+        notes.extend(table_note_for_session(note, session_index) for note in row.notes)
+        notes.extend(f"0={note}" for note in row.report_notes)
     if args.command == "export" and len(sessions) != 1:
         raise ValueError("export trajectory accepts exactly one input session")
     validate_required_adapters(sessions)
-    return sessions
+    return LoadedInputs(sessions=sessions, notes=notes)
+
+
+def loaded_session_from_table_row(
+    row: InputTableRow,
+    default_adapter: str,
+) -> LoadedSession:
+    if row.path is not None:
+        source_path = Path(row.path)
+        is_atif = is_atif_json_path(str(source_path))
+        adapter_id = (
+            "atif"
+            if is_atif
+            else normalize_adapter_id(row.adapter or default_adapter)
+        )
+        return LoadedSession(
+            records=None,
+            input_label=source_path.name,
+            adapter_id=adapter_id,
+            input_path=str(source_path),
+            session_hint=None if is_atif else source_path.stem or "session",
+            agent_name=row.agent_name,
+            agent_version=row.agent_version,
+            model=row.model,
+        )
+    if row.db is None:
+        raise ValueError(f"{row.table_path}: row {row.row_number}: missing input source")
+    db_path = Path(row.db)
+    return LoadedSession(
+        records=None,
+        input_label=f"{db_path.name}:{row.session_id}" if row.session_id else db_path.name,
+        adapter_id=normalize_adapter_id(row.adapter or default_adapter),
+        input_path=str(db_path),
+        db_path=str(db_path),
+        session_hint=row.session_id,
+        agent_name=row.agent_name,
+        agent_version=row.agent_version,
+        model=row.model,
+    )
+
+
+def table_note_for_session(note: str, session_index: int) -> str:
+    if "=" in note:
+        raw_index, _ = note.split("=", 1)
+        if raw_index.isdigit():
+            return note
+    return f"{session_index}={note}"
 
 
 def validate_adapter_selector_range(
@@ -359,7 +444,15 @@ def validate_required_adapters(sessions: list[LoadedSession]) -> None:
 
 
 def config_for_session(session: LoadedSession, config: ToolConfig) -> ToolConfig:
-    return config_for_adapter(config, session.adapter_id)
+    session_config = config_for_adapter(config, session.adapter_id)
+    updates: dict[str, str] = {}
+    if session.agent_name is not None:
+        updates["agent_name"] = session.agent_name
+    if session.agent_version is not None:
+        updates["agent_version"] = session.agent_version
+    if session.model is not None:
+        updates["model"] = session.model
+    return replace(session_config, **updates) if updates else session_config
 
 
 def convert_session(session: LoadedSession, config: ToolConfig) -> ConversionResult:
