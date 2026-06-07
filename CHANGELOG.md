@@ -1,5 +1,48 @@
 # Changelog
 
+## 2026-06-07
+
+- Reworked Workbench around global project-grouped sessions, guarded session
+  selection chrome, host-backed preferences and pins, Files/Status/Debug
+  inspector panes, file/diff previews, composer attachments, and quieter
+  transcript hover affordances.
+- Tightened the Workbench visual system into a denser ledger surface with dark
+  defaults, neutral light-mode highlights, reduced card chrome, softer active
+  shadows, stable-on-hover scrollbars, and non-overflowing composer controls.
+- Split shared Workbench components and generated protocol schemas into
+  semantic modules, then added stable Vite manual chunks so production builds
+  stay below the default chunk-size warning threshold.
+
+## 2026-06-06
+
+- Reworked GUI/TUI session history around a shared global session model:
+  Workbench lists sessions across projects with project grouping and persistent
+  pin/unpin controls, Gateway/TUI hide internal child/side sessions instead of
+  partitioning by source, and cross-project resume switches the active scope to
+  the session's stored workdir.
+
+## 2026-06-05
+
+- Reworked the Web/Desktop Workbench shell toward the v0 ledger layout, with
+  collapsible sidebars, global Pinned and project session sections,
+  project-scoped Files, Status/Files/Debug inspector tabs, inline file and diff
+  previews, composer-local approval and clarify panels, clickable
+  permission/mode/model/variant controls, context popovers, Settings appearance
+  and Debug toggles, session/message Search, composer attachments, and no
+  tokenizer/context-scope UI.
+- Made Web/Gateway session creation lazy so startup, reconnect, New, and reset
+  no longer create persisted pending sessions before the first valid prompt or
+  user shell request.
+- Fixed Workbench new-thread drafts so delayed background turn events, shell
+  results, and snapshot refreshes no longer jump the Web view back to an older
+  real session after clicking New.
+- Added a visible Workbench History draft row for new Web sessions so clicking
+  New shows the detached draft immediately without creating a persisted runtime
+  session.
+- Added `peval-py` structured input manifests and improved multi-session HTML
+  reports with Leaderboard filters, metric shading, Trajectory Overview rows,
+  and a reserved Step details drawer.
+
 ## 2026-06-04
 
 - Added shared Web/Desktop shell mode and runtime-backed slash commands, with
