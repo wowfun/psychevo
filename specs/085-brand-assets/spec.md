@@ -44,6 +44,10 @@ unless a later spec explicitly replaces the canonical source.
 Tracked Markdown and documentation should reference the canonical SVG directly
 when the target surface supports SVG. Logo images must use descriptive alt text,
 with `Psychevo` as the default alt text for ordinary brand placement.
+GUI brand placement uses `Psychevo` as the formal product name by default.
+`pevo` is the CLI command shorthand and should not replace the product name in
+Workbench or future shell chrome unless the surface is explicitly documenting a
+command invocation.
 
 The canonical logo is an icon-only asset. Wordmarks, lockups, and raster
 fallbacks are separate derived assets and should not replace

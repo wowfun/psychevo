@@ -28,10 +28,9 @@ class WorkbenchErrorBoundary extends React.Component<React.PropsWithChildren, Er
         <main className="appShell">
           <header className="topBar">
             <div className="brandMark">
-              <span className="brandGlyph">p</span>
+              <span className="brandGlyph">P</span>
               <div>
-                <h1>pevo</h1>
-                <p>workbench</p>
+                <h1>Psychevo</h1>
               </div>
             </div>
           </header>

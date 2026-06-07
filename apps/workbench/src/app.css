@@ -4,17 +4,16 @@
 }
 
 .appShell {
-  display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   min-height: 100dvh;
   height: 100dvh;
   overflow: hidden;
-  padding: 14px;
-  gap: 12px;
+  padding: 4px;
+  gap: 4px;
 }
 
 .topBar {
-  grid-row: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -34,11 +33,18 @@
   width: 40px;
   height: 40px;
   place-items: center;
-  color: var(--pevo-accent-ink);
-  background: var(--pevo-ink);
+  background: transparent;
   border-radius: 8px;
-  font-weight: 800;
-  box-shadow: 0 8px 18px rgb(21 28 36 / 16%);
+}
+
+.brandGlyph img {
+  width: 30px;
+  height: 30px;
+  filter: invert(1);
+}
+
+html[data-pevo-appearance="light"] .brandGlyph img {
+  filter: none;
 }
 
 .brandMark h1,
@@ -50,7 +56,7 @@
 }
 
 .brandMark h1 {
-  font-size: 1.16rem;
+  font-size: 1.08rem;
   line-height: 1.1;
   font-weight: 650;
 }
@@ -68,6 +74,18 @@
   gap: 8px;
 }
 
+.topIconButton {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  color: var(--pevo-muted);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
 .endpointPill {
   overflow: hidden;
   max-width: 30vw;
@@ -78,7 +96,7 @@
 .statePill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   min-height: 28px;
   padding: 0 10px;
   color: var(--pevo-ink);
@@ -107,7 +125,6 @@
 }
 
 .errorBand {
-  grid-row: 2;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -120,17 +137,28 @@
 }
 
 .mobileTabs {
-  grid-row: 3;
   display: none;
 }
 
 .workbench {
-  grid-row: 4;
+  flex: 1 1 auto;
   display: grid;
   grid-template-columns: minmax(220px, 280px) minmax(0, 1fr) minmax(260px, 330px);
-  gap: 12px;
+  gap: 6px;
   height: 100%;
   min-height: 0;
+}
+
+.workbench.is-leftCollapsed {
+  grid-template-columns: 54px minmax(0, 1fr) minmax(260px, 330px);
+}
+
+.workbench.is-rightCollapsed {
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+}
+
+.workbench.is-leftCollapsed.is-rightCollapsed {
+  grid-template-columns: 54px minmax(0, 1fr);
 }
 
 .historyColumn,
@@ -141,16 +169,309 @@
   display: grid;
 }
 
+.leftChrome {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  gap: 4px;
+}
+
+.leftBrandRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 0;
+}
+
+.sidebarToggle,
+.rightInspectorToggle {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.sidebarToggleLogo {
+  display: block;
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+.leftActions {
+  display: grid;
+  gap: 2px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.leftActions button,
+.leftUtilityRail button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 6px;
+  color: var(--pevo-muted);
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.leftActions button.is-selected {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 34%);
+  border-color: transparent;
+  box-shadow: var(--pevo-shadow-active);
+}
+
+@media (hover: hover) {
+  .leftActions button:hover,
+  .leftUtilityRail button:hover {
+    color: var(--pevo-ink);
+    background: color-mix(in oklch, var(--pevo-panel-muted), transparent 82%);
+    border-color: transparent;
+  }
+}
+
+.leftUtilityRail button.is-selected {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 34%);
+  border-color: transparent;
+  box-shadow: var(--pevo-shadow-active);
+}
+
+.leftActions span,
+.leftUtilityRail span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leftPinnedPanel {
+  min-width: 0;
+  padding: 4px 2px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.leftPinnedPanel {
+  display: grid;
+  gap: 6px;
+}
+
+.leftPinnedPanel header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  color: var(--pevo-ink);
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
+.leftPinnedPanel p {
+  margin: 0;
+  color: var(--pevo-muted);
+  font-size: 0.74rem;
+}
+
+.pinnedSessionList {
+  display: grid;
+  gap: 4px;
+}
+
+.pinnedSessionRow {
+  align-items: center;
+  display: grid;
+  gap: 4px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.pinnedSessionRow > button {
+  min-width: 0;
+}
+
+.pinnedSessionRow > button:first-child {
+  align-items: start;
+  background: transparent;
+  border: 0;
+  color: var(--pevo-ink);
+  display: grid;
+  gap: 2px;
+  padding: 4px 2px;
+  text-align: left;
+}
+
+.pinnedSessionRow > button:first-child span,
+.pinnedSessionRow > button:first-child small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pinnedSessionRow > button:first-child small {
+  color: var(--pevo-muted);
+  font-size: 0.72rem;
+}
+
+.pinnedSessionRow > button:last-child {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--pevo-muted);
+  display: inline-flex;
+  height: 24px;
+  justify-content: center;
+  width: 24px;
+}
+
+.pinnedSessionRow.is-active > button:first-child {
+  color: var(--pevo-accent);
+}
+
+.historyColumn.is-collapsed .leftChrome {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
+.historyColumn.is-collapsed .leftBrandRow {
+  grid-template-columns: 1fr;
+  justify-items: center;
+  padding: 0;
+}
+
+.historyColumn.is-collapsed .leftBrandRow .brandMark {
+  display: none;
+}
+
+.historyColumn.is-collapsed .sidebarToggle {
+  width: 38px;
+  height: 38px;
+}
+
+.historyColumn.is-collapsed .sidebarToggleLogo {
+  width: 25px;
+  height: 25px;
+}
+
+.historyColumn.is-collapsed .leftActions,
+.historyColumn.is-collapsed .leftUtilityRail {
+  padding: 6px;
+}
+
+.historyColumn.is-collapsed .leftActions button,
+.historyColumn.is-collapsed .leftUtilityRail button {
+  grid-template-columns: 1fr;
+  place-items: center;
+  width: 38px;
+  min-width: 38px;
+  height: 38px;
+  min-height: 38px;
+  padding: 0;
+}
+
+.historyColumn.is-collapsed .leftActions span,
+.historyColumn.is-collapsed .leftUtilityRail span,
+.historyColumn.is-collapsed .leftPinnedPanel,
+.historyColumn.is-collapsed .pevo-history {
+  display: none;
+}
+
+.leftUtilityRail {
+  display: grid;
+  grid-row: -2 / -1;
+  gap: 5px;
+  padding: 2px 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.historyColumn .pevo-history {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.historyColumn .pevo-sessionsHeader {
+  min-height: 34px;
+  padding: 2px 0;
+  border-bottom-color: transparent;
+}
+
+.historyColumn .pevo-sessionList {
+  padding: 0 0 8px;
+}
+
+.historyColumn .pevo-sessionRow {
+  background: transparent;
+  border-color: transparent;
+}
+
+.historyColumn .pevo-sessionRow.is-active {
+  background: color-mix(in oklch, var(--pevo-panel), transparent 34%);
+  border-color: transparent;
+}
+
 .statusColumn {
   align-content: start;
-  gap: 12px;
+  gap: 4px;
   overflow: auto;
 }
 
 .conversationColumn {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  gap: 12px;
+  grid-template-rows: 34px minmax(0, 1fr) auto;
+  gap: 4px;
+}
+
+.conversationChrome {
+  display: grid;
+  min-width: 0;
+  min-height: 34px;
+  align-items: start;
+  justify-items: end;
+}
+
+.rightInspectorToggle {
+  width: 34px;
+  height: 34px;
+  color: var(--pevo-muted);
+  background: transparent;
+  border-color: transparent;
+}
+
+.centerWorkspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  gap: 4px;
+}
+
+.conversationColumn .pevo-threadItems {
+  padding: 4px 8px 24px;
+}
+
+.centerWorkspace.has-preview {
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 38%);
 }
 
 .composerDock {
@@ -159,9 +480,9 @@
 }
 
 .agentRunSelector {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 8px;
   min-width: 0;
   color: var(--pevo-muted);
@@ -176,7 +497,7 @@
 }
 
 .agentRunSelector select {
-  width: min(210px, 55vw);
+  width: min(180px, 45vw);
   min-height: 30px;
   padding: 0 28px 0 9px;
   color: var(--pevo-ink);
@@ -184,6 +505,648 @@
   border: 1px solid var(--pevo-border);
   border-radius: var(--pevo-radius-sm);
   font: inherit;
+}
+
+.rightTabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  padding: 0 0 4px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.rightTabs.has-debug {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.rightTabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 28px;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.rightTabs button.is-selected {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 30%);
+  box-shadow: var(--pevo-shadow-active);
+}
+
+.rightTabs span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversationColumn .pevo-transcript,
+.statusColumn .pevo-panel {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.statusColumn .pevo-panelHeader {
+  min-height: 32px;
+  padding: 0 0 6px;
+  border-bottom: 0;
+}
+
+.statusColumn .pevo-titleLine {
+  gap: 7px;
+}
+
+.statusColumn .pevo-statusGrid {
+  padding: 2px 0 8px;
+}
+
+.statusColumn .pevo-stack {
+  gap: 7px;
+  padding: 8px 0;
+  border-top: 0;
+}
+
+.statusColumn .pevo-stack h3 {
+  font-size: 0.88rem;
+}
+
+.statusColumn .pevo-changedFiles {
+  gap: 0;
+}
+
+.statusColumn .pevo-changedFiles button {
+  min-height: 28px;
+  padding: 2px 0;
+  border-radius: var(--pevo-radius-xs);
+}
+
+.statusColumn .pevo-iconButton:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 82%);
+  border-color: transparent;
+}
+
+.centerPage,
+.previewPane,
+.filesPanel,
+.debugPanel {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.previewPane {
+  background: var(--pevo-panel);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 40%);
+  border-radius: var(--pevo-radius);
+}
+
+.centerPage,
+.filesPanel,
+.debugPanel {
+  display: grid;
+  align-content: start;
+}
+
+.centerPage > header,
+.previewPane > header,
+.filesPanel > header,
+.debugPanel > header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 6px 4px;
+  border-bottom: 0;
+}
+
+.centerPage h2,
+.previewPane h2,
+.filesPanel h2,
+.debugPanel h2 {
+  overflow: hidden;
+  margin: 0;
+  color: var(--pevo-ink);
+  font-size: 0.92rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.centerPage p,
+.previewPane p,
+.filesPanel p,
+.debugPanel p {
+  margin: 2px 0 0;
+  color: var(--pevo-muted);
+  font-size: 0.8rem;
+}
+
+.settingsRows {
+  display: grid;
+  gap: 6px;
+  padding: 4px 0 0;
+}
+
+.settingsPage {
+  width: min(900px, 100%);
+}
+
+.settingsRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 6px 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.settingsRow strong,
+.settingsRow span {
+  display: block;
+}
+
+.settingsRow span {
+  color: var(--pevo-muted);
+  font-size: 0.8rem;
+}
+
+.segmentedControl {
+  display: inline-flex;
+  gap: 2px;
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+}
+
+.segmentedControl button,
+.switchControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 6px;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-xs);
+  cursor: pointer;
+}
+
+.segmentedControl button.is-selected {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 28%);
+  box-shadow: var(--pevo-shadow-active);
+}
+
+.switchControl {
+  background: transparent;
+  border: 0;
+}
+
+.switchControl input {
+  margin: 0;
+}
+
+.searchPage {
+  gap: 8px;
+}
+
+.searchPage input {
+  min-height: 38px;
+  margin: 4px 0 0;
+  padding: 0 10px;
+  color: var(--pevo-ink);
+  background: var(--pevo-bg-raised);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.emptyLedger {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 4px 0;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.emptyLedger button {
+  justify-self: start;
+  min-height: 32px;
+  padding: 0 10px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.searchResults {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  max-height: min(560px, 62dvh);
+  overflow: auto;
+  margin: 0;
+}
+
+.searchResults button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 10px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 6px 0;
+  color: var(--pevo-ink);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-xs);
+  cursor: pointer;
+}
+
+.searchResults button:hover {
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 82%);
+}
+
+.searchResults strong,
+.searchResults span,
+.searchResults small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.searchResults strong {
+  font-size: 0.84rem;
+}
+
+.searchResults span,
+.searchResults small {
+  color: var(--pevo-muted);
+  font-size: 0.76rem;
+}
+
+.searchResults small {
+  grid-column: 1 / -1;
+}
+
+.previewPane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.previewPane > header {
+  justify-content: space-between;
+}
+
+.previewPane > header span {
+  display: block;
+  color: var(--pevo-muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.previewPane > header button {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.previewPane pre,
+.debugPanel pre {
+  min-width: 0;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  color: var(--pevo-code-ink);
+  background: var(--pevo-code-bg);
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.fileTree,
+.debugList {
+  display: grid;
+  gap: 3px;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+
+.fileTree button {
+  display: grid;
+  grid-template-columns: 14px 14px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 8px;
+  padding-left: calc(8px + var(--depth, 0) * 14px);
+  color: var(--pevo-ink);
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.fileTree button.is-directory {
+  color: var(--pevo-muted);
+}
+
+.fileTree button:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.fileTree button:hover {
+  background: var(--pevo-panel-muted);
+  border-color: var(--pevo-border);
+}
+
+.fileTree button:disabled:hover {
+  background: transparent;
+  border-color: transparent;
+}
+
+.fileTreeDisclosure {
+  display: grid;
+  width: 14px;
+  height: 14px;
+  place-items: center;
+}
+
+.fileTree span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filesPanel footer {
+  padding: 8px 12px;
+  color: var(--pevo-muted);
+  border-top: 1px solid var(--pevo-border);
+  font-size: 0.78rem;
+}
+
+.debugList details {
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.debugList summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.debugList code {
+  color: var(--pevo-ink);
+  font-size: 0.75rem;
+}
+
+.debugList span {
+  color: var(--pevo-muted);
+  font-size: 0.72rem;
+}
+
+.composerRequests {
+  display: grid;
+  gap: 8px;
+}
+
+.composerRequest {
+  display: grid;
+  gap: 7px;
+  padding: 9px;
+  background: var(--pevo-bg-raised);
+  border: 1px solid var(--pevo-border-strong);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.composerRequest p,
+.composerRequest pre {
+  margin: 0;
+  color: var(--pevo-muted);
+  font-size: 0.82rem;
+}
+
+.composerRequest pre {
+  max-height: 120px;
+  overflow: auto;
+  padding: 8px;
+  color: var(--pevo-code-ink);
+  background: var(--pevo-code-bg);
+}
+
+.composerRequest div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.composerRequest input {
+  flex: 1 1 180px;
+  min-height: 32px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.composerRequest button {
+  min-height: 32px;
+  padding: 0 10px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.composerStatusLine {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+  color: var(--pevo-muted);
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.statusSelect select,
+.composerStatusLine button {
+  min-height: 24px;
+  max-width: 180px;
+  padding: 0;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 0;
+  font: inherit;
+}
+
+.statusSelect {
+  min-width: 0;
+}
+
+.statusSelect[data-status="permission-mode"] select,
+.statusSelect[data-status="mode"] select {
+  max-width: 88px;
+}
+
+.statusSelect[data-status="model"] select {
+  max-width: 210px;
+}
+
+.statusSelect[data-status="variant"] select {
+  max-width: 78px;
+}
+
+.composerStatusContext {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.contextStatusButton {
+  display: grid;
+  width: 24px;
+  min-width: 24px;
+  place-items: center;
+}
+
+.contextStatusButton span {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: conic-gradient(var(--pevo-accent) var(--pevo-context-percent, 0%), var(--pevo-panel-muted) 0);
+}
+
+.composerContextPopover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  z-index: 40;
+  display: grid;
+  width: min(320px, calc(100vw - 24px));
+  gap: 10px;
+  padding: 12px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border-strong);
+  border-radius: var(--pevo-radius);
+  box-shadow: var(--pevo-shadow-panel);
+  transform: translateX(-50%);
+  white-space: normal;
+}
+
+.composerContextSummary {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.composerContextSummary > span {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  color: var(--pevo-ink);
+  background:
+    radial-gradient(circle, var(--pevo-panel) 52%, transparent 54%),
+    conic-gradient(var(--pevo-accent) var(--pevo-context-percent, 0%), var(--pevo-panel-muted) 0);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.composerContextSummary strong,
+.composerContextSummary small,
+.composerContextBar span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composerContextSummary strong {
+  display: block;
+  font-size: 0.85rem;
+}
+
+.composerContextSummary small,
+.composerContextPopover p {
+  color: var(--pevo-muted);
+  font-size: 0.76rem;
+}
+
+.composerContextPopover p {
+  margin: 0;
+}
+
+.composerContextBars {
+  display: grid;
+  gap: 7px;
+}
+
+.composerContextBar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px;
+  align-items: center;
+  gap: 8px;
+  color: var(--pevo-muted);
+  font-size: 0.76rem;
+}
+
+.composerContextBar meter {
+  width: 100%;
+  height: 6px;
+}
+
+.pathStatusButton {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+}
+
+.branchStatusButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
 }
 
 .agentRunSelector select:disabled {
@@ -400,11 +1363,19 @@
 
 @media (max-width: 1120px) {
   .workbench {
-    grid-template-columns: minmax(200px, 250px) minmax(0, 1fr);
+    grid-template-columns: minmax(190px, 230px) minmax(0, 1fr) minmax(230px, 290px);
   }
 
-  .statusColumn {
-    display: none;
+  .workbench.is-leftCollapsed {
+    grid-template-columns: 54px minmax(0, 1fr) minmax(230px, 290px);
+  }
+
+  .workbench.is-rightCollapsed {
+    grid-template-columns: minmax(190px, 230px) minmax(0, 1fr);
+  }
+
+  .workbench.is-leftCollapsed.is-rightCollapsed {
+    grid-template-columns: 54px minmax(0, 1fr);
   }
 }
 
@@ -463,7 +1434,10 @@
     box-shadow: 0 1px 2px rgb(21 28 36 / 9%);
   }
 
-  .workbench {
+  .workbench,
+  .workbench.is-leftCollapsed,
+  .workbench.is-rightCollapsed,
+  .workbench.is-leftCollapsed.is-rightCollapsed {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -481,5 +1455,68 @@
 
   .conversationColumn {
     min-height: 0;
+  }
+}
+
+@media (max-width: 620px) {
+  .composerStatusLine {
+    gap: 6px;
+    overflow: hidden;
+  }
+
+  .branchStatusButton {
+    display: none;
+  }
+
+  .statusSelect[data-status="permission-mode"] select,
+  .statusSelect[data-status="mode"] select {
+    max-width: 68px;
+  }
+
+  .statusSelect[data-status="model"] select {
+    max-width: 124px;
+  }
+
+  .statusSelect[data-status="variant"] select {
+    max-width: 58px;
+  }
+
+  .pathStatusButton {
+    flex: 0 1 76px;
+    max-width: 76px;
+  }
+}
+
+@media (max-width: 420px) {
+  .composerStatusLine {
+    gap: 5px;
+    font-size: 0.72rem;
+  }
+
+  .statusSelect[data-status="permission-mode"] select,
+  .statusSelect[data-status="mode"] select {
+    max-width: 55px;
+  }
+
+  .statusSelect[data-status="model"] select {
+    max-width: 104px;
+  }
+
+  .statusSelect[data-status="variant"] select {
+    max-width: 48px;
+  }
+
+  .contextStatusButton {
+    width: 20px;
+    min-width: 20px;
+  }
+
+  .contextStatusButton span {
+    width: 14px;
+    height: 14px;
+  }
+
+  .pathStatusButton {
+    max-width: 50px;
   }
 }

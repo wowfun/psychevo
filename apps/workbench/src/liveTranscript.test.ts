@@ -63,6 +63,51 @@ describe("applyLiveTranscriptEvent", () => {
     expect(next.entries[0]?.blocks[0]?.body).toBe("committed answer");
   });
 
+  it("binds an empty snapshot to the real thread on first turn completion", () => {
+    const empty = {
+      ...snapshot(),
+      thread: null,
+      entries: [],
+      activity: {
+        running: false,
+        activeTurnId: null,
+        queuedTurns: 0
+      }
+    };
+    const optimistic = appendOptimisticPrompt(empty, "hello", 10);
+    const started = applyLiveTranscriptEvent(optimistic, {
+      type: "turnStarted",
+      threadId: null,
+      turnId: "turn-1",
+      selectedSkills: []
+    });
+    const withLive = applyLiveTranscriptEvent(started, eventWithEntry("entryUpdated", entry({
+      threadId: "",
+      blocks: [block({ body: "live answer" })]
+    })));
+    const committed = entry({
+      id: "message:1:user",
+      threadId: "thread-1",
+      messageSeq: 1,
+      role: "user",
+      status: "completed",
+      source: "runtime.message",
+      blocks: [block({ id: "message:1:user:text", body: "hello", status: "completed" })]
+    });
+
+    const next = applyLiveTranscriptEvent(withLive, {
+      type: "turnCompleted",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      outcome: "normal",
+      committedEntries: [committed]
+    });
+
+    expect(next.thread?.id).toBe("thread-1");
+    expect(next.entries.map((candidate) => candidate.id)).toEqual(["message:1:user"]);
+    expect(next.entries[0]?.blocks[0]?.body).toBe("hello");
+  });
+
   it("treats missing committed entries on turn completion as an empty committed slice", () => {
     const current = {
       ...snapshot(),
@@ -389,8 +434,9 @@ describe("applyLiveTranscriptEvent", () => {
       thread: null,
       activity: { running: false, activeTurnId: null, queuedTurns: 0 }
     };
+    const optimistic = appendOptimisticPrompt(idleSnapshot, "hello", 10);
 
-    const started = applyLiveTranscriptEvent(idleSnapshot, {
+    const started = applyLiveTranscriptEvent(optimistic, {
       type: "turnStarted",
       threadId: "thread-2",
       turnId: "turn-2",
@@ -949,6 +995,16 @@ function snapshot(): ThreadSnapshot {
       lifetime: "persistent",
       rawIdentity: null,
       visibleName: null
+    },
+    scope: {
+      workdir: "/tmp/project",
+      source: {
+        kind: "web",
+        rawId: "test",
+        lifetime: "persistent",
+        rawIdentity: null,
+        visibleName: null
+      }
     },
     thread: {
       id: "thread-1",

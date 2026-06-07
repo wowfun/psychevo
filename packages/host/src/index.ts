@@ -85,8 +85,8 @@ export interface ClipboardHost {
 }
 
 export interface FilePickerHost {
-  pickImage(): Promise<HostCapabilityResult<Blob>>;
-  pickFile(): Promise<HostCapabilityResult<Blob>>;
+  pickImage(): Promise<HostCapabilityResult<File>>;
+  pickFile(): Promise<HostCapabilityResult<File>>;
 }
 
 export interface OpenHost {
@@ -127,7 +127,7 @@ export function createBrowserHost(location: BrowserLocationLike, storage: Storag
   return {
     clipboard: browserClipboard(),
     endpoint: browserGatewayEndpoint(location),
-    files: unsupportedFiles(),
+    files: browserFiles(),
     lifecycle: browserLifecycle(),
     notifications: browserNotifications(),
     open: browserOpen(),
@@ -160,15 +160,42 @@ function browserClipboard(): ClipboardHost {
   };
 }
 
-function unsupportedFiles(): FilePickerHost {
+function browserFiles(): FilePickerHost {
   return {
     async pickFile() {
-      return unsupported("files.pickFile");
+      return pickBrowserFile();
     },
     async pickImage() {
-      return unsupported("files.pickImage");
+      return pickBrowserFile("image/*");
     }
   };
+}
+
+function pickBrowserFile(accept?: string): Promise<HostCapabilityResult<File>> {
+  if (typeof document === "undefined") {
+    return Promise.resolve(unsupported("files.pickFile"));
+  }
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    if (accept) {
+      input.accept = accept;
+    }
+    input.style.position = "fixed";
+    input.style.left = "-9999px";
+    input.style.top = "-9999px";
+    input.addEventListener("change", () => {
+      const file = input.files?.[0] ?? null;
+      input.remove();
+      if (!file) {
+        resolve(unsupported("files.pickFile"));
+        return;
+      }
+      resolve({ ok: true, value: file });
+    }, { once: true });
+    document.body.append(input);
+    input.click();
+  });
 }
 
 function browserOpen(): OpenHost {

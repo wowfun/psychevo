@@ -67,6 +67,8 @@
 .pevo-evidenceLine:focus-visible,
 .pevo-reasoningHeader:focus-visible,
 .pevo-sessionMain:focus-visible,
+.pevo-sessionMenu summary:focus-visible,
+.pevo-sessionMenu button:focus-visible,
 .pevo-segmented button:focus-visible,
 .pevo-rename input:focus-visible,
 .pevo-request input:focus-visible,
@@ -107,47 +109,138 @@
   place-items: center;
 }
 
-.pevo-history,
 .pevo-utility {
+  overflow: hidden;
+}
+
+.pevo-history {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
   overflow: hidden;
 }
 
 .pevo-sessionList {
   display: grid;
-  gap: 7px;
-  max-height: calc(100dvh - 96px);
+  grid-auto-rows: max-content;
+  align-content: start;
+  gap: 4px;
+  min-height: 0;
   overflow: auto;
-  padding: 10px;
+  padding: 4px 2px 8px 0;
+  scrollbar-color: transparent transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.pevo-sessionList:hover,
+.pevo-sessionList:has(:focus-visible) {
+  scrollbar-color: color-mix(in oklch, var(--pevo-muted), transparent 46%) transparent;
+}
+
+.pevo-sessionList::-webkit-scrollbar {
+  width: 6px;
+}
+
+.pevo-sessionList::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.pevo-sessionList::-webkit-scrollbar-thumb {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+
+.pevo-sessionList:hover::-webkit-scrollbar-thumb,
+.pevo-sessionList:has(:focus-visible)::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--pevo-muted), transparent 48%);
+}
+
+.pevo-sessionGroup {
+  display: grid;
+  gap: 3px;
+}
+
+.pevo-sessionGroupHeader {
+  align-items: center;
+  color: var(--pevo-text-muted);
+  display: flex;
+  font-size: 11px;
+  justify-content: space-between;
+  min-height: 28px;
+  padding: 0 1px 0 0;
+}
+
+.pevo-sessionGroupToggle {
+  align-items: center;
+  display: flex;
+  min-width: 0;
+  gap: 5px;
+  padding: 5px 4px;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.pevo-sessionGroupToggle span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--pevo-text);
+  font-weight: 700;
+}
+
+.pevo-sessionProjectNew {
+  width: 28px;
+  height: 28px;
 }
 
 .pevo-sessionRow {
+  position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 7px;
-  padding: 8px;
-  background: var(--pevo-bg-raised);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px;
+  overflow: visible;
+  padding: 5px 2px 5px 8px;
+  background: transparent;
   border: 1px solid transparent;
-  border-radius: var(--pevo-radius);
+  border-radius: var(--pevo-radius-sm);
   transition-duration: 140ms;
-  transition-property: background-color, border-color, transform;
+  transition-property: background-color, border-color, box-shadow, transform;
   transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .pevo-sessionRow.is-active {
-  border-color: var(--pevo-accent);
-  background: var(--pevo-accent-soft);
+  border-color: transparent;
+  background: color-mix(in oklch, var(--pevo-panel), transparent 34%);
+  box-shadow: var(--pevo-shadow-active);
+}
+
+.pevo-sessionRow.is-draft {
+  grid-template-columns: minmax(0, 1fr);
+  border-style: dashed;
+}
+
+.pevo-sessionRow.is-draft .pevo-sessionTitle {
+  font-style: italic;
 }
 
 @media (hover: hover) {
   .pevo-sessionRow:hover {
-    background: var(--pevo-panel-muted);
+    background: color-mix(in oklch, var(--pevo-panel-muted), transparent 72%);
   }
 }
 
 .pevo-sessionMain {
   display: grid;
   min-width: 0;
-  gap: 4px;
+  gap: 2px;
   padding: 0;
   text-align: left;
   color: inherit;
@@ -156,31 +249,51 @@
   cursor: pointer;
 }
 
-.pevo-sessionMain span,
-.pevo-sessionMain small {
+.pevo-sessionTitle,
+.pevo-sessionTime {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.pevo-sessionMain span {
+.pevo-sessionTitleRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+}
+
+.pevo-sessionTitle {
   font-size: 0.9rem;
   font-weight: 600;
 }
 
-.pevo-sessionMain small,
-.pevo-muted {
-  color: var(--pevo-muted);
-}
-
-.pevo-sessionMain small {
-  display: flex;
+.pevo-sessionMeta {
+  display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
   min-width: 0;
   gap: 5px;
 }
 
-.pevo-sessionMain small b {
+.pevo-sessionTime,
+.pevo-muted {
+  color: var(--pevo-muted);
+}
+
+.pevo-sessionRow .pevo-sessionTime {
+  opacity: 0;
+  transition: none;
+}
+
+.pevo-sessionRow:hover .pevo-sessionTime,
+.pevo-sessionRow:has(:focus-visible) .pevo-sessionTime {
+  opacity: 1;
+  transition: opacity 80ms ease;
+}
+
+.pevo-sessionMeta b {
   flex: 0 0 auto;
   padding: 1px 5px;
   color: var(--pevo-accent-ink);
@@ -191,15 +304,93 @@
 }
 
 .pevo-sessionRow.is-running:not(.is-active) {
-  border-color: color-mix(in oklch, var(--pevo-accent), white 46%);
+  border-color: transparent;
+  background: color-mix(in oklch, var(--pevo-panel), transparent 48%);
+  box-shadow: var(--pevo-shadow-active);
 }
 
-.pevo-sessionActions {
-  justify-content: flex-end;
+.pevo-sessionMenu {
+  position: relative;
+  opacity: 0;
+  pointer-events: none;
+  transition: none;
+}
+
+.pevo-sessionRow:hover .pevo-sessionMenu,
+.pevo-sessionRow:has(:focus-visible) .pevo-sessionMenu,
+.pevo-sessionMenu[open] {
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 80ms ease;
+}
+
+.pevo-sessionMenu summary {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  color: var(--pevo-muted);
+  border-radius: var(--pevo-radius-xs);
+  cursor: pointer;
+  list-style: none;
+}
+
+.pevo-sessionMenu summary::-webkit-details-marker {
+  display: none;
+}
+
+.pevo-sessionMenu summary:hover,
+.pevo-sessionMenu[open] summary {
+  color: var(--pevo-ink);
+  background: var(--pevo-panel-muted);
+}
+
+.pevo-sessionMenuPopover {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  min-width: 156px;
+  gap: 2px;
+  padding: 4px;
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  box-shadow: var(--pevo-shadow);
+}
+
+.pevo-sessionMenuPopover button {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 8px;
+  color: var(--pevo-ink);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-xs);
+  cursor: pointer;
+}
+
+.pevo-sessionMenuPopover button:hover:not(:disabled) {
+  background: var(--pevo-panel-muted);
+}
+
+.pevo-sessionMenuPopover button.is-danger {
+  color: var(--pevo-danger);
+}
+
+.pevo-sessionMenuPopover button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 
 .pevo-rename {
   display: grid;
+  grid-column: 1 / -1;
   grid-template-columns: minmax(0, 1fr) 32px 32px;
   gap: 6px;
 }
@@ -209,7 +400,7 @@
 .pevo-composer textarea {
   width: 100%;
   color: var(--pevo-ink);
-  background: #fff;
+  background: var(--pevo-bg-raised);
   border: 1px solid var(--pevo-border-strong);
   border-radius: var(--pevo-radius-sm);
 }
@@ -222,41 +413,57 @@
 
 .pevo-transcript {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto;
   min-height: 0;
   overflow: hidden;
   position: relative;
 }
 
-.pevo-transcriptHeader {
-  background: var(--pevo-panel);
-}
-
-.pevo-countPill {
-  flex: 0 0 auto;
-  padding: 3px 8px;
-  color: var(--pevo-muted);
-  background: var(--pevo-panel-muted);
-  border-radius: 999px;
-  font-size: 0.78rem;
-}
-
 .pevo-threadItems {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
   overflow: auto;
-  padding: 18px 20px;
-  background: var(--pevo-bg-raised);
+  padding: 8px 14px 28px;
+  background: transparent;
 }
 
 .pevo-message {
   display: block;
-  max-width: min(760px, 100%);
-  padding: 12px 14px;
-  border-radius: var(--pevo-radius);
+  max-width: 100%;
+  padding: 0;
+  border-radius: 0;
   line-height: 1.55;
   white-space: normal;
+}
+
+.pevo-messageFrame {
+  --pevo-messageActionHitArea: 30px;
+  --pevo-messageActionHitOffset: -30px;
+  position: relative;
+  width: fit-content;
+  max-width: min(760px, 100%);
+  min-width: 0;
+  padding-bottom: var(--pevo-messageActionHitArea);
+  margin-bottom: var(--pevo-messageActionHitOffset);
+}
+
+.pevo-messageFrame.is-user {
+  align-self: flex-end;
+}
+
+.pevo-messageFrame.is-assistant {
+  align-self: flex-start;
+}
+
+.pevo-srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .pevo-markdown {
@@ -282,22 +489,18 @@
 }
 
 .pevo-markdown code {
-  padding: 1px 4px;
-  background: color-mix(in oklch, var(--pevo-code-bg), white 88%);
-  border-radius: 4px;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border-radius: 0;
   font-size: 0.92em;
-}
-
-.pevo-message.is-user .pevo-markdown code {
-  color: var(--pevo-accent-ink);
-  background: color-mix(in oklch, var(--pevo-accent-ink), transparent 84%);
 }
 
 .pevo-markdown pre {
   max-width: 100%;
   overflow: auto;
   padding: 10px;
-  color: #dce7ef;
+  color: var(--pevo-code-ink);
   background: var(--pevo-code-bg);
   border-radius: var(--pevo-radius-sm);
 }
@@ -335,15 +538,80 @@
 }
 
 .pevo-message.is-user {
-  align-self: flex-end;
-  background: var(--pevo-accent);
-  color: var(--pevo-accent-ink);
+  padding: 10px 12px;
+  background: var(--pevo-panel);
+  border-radius: var(--pevo-radius);
+  box-shadow: none;
 }
 
 .pevo-message.is-assistant {
-  align-self: flex-start;
-  background: var(--pevo-panel);
-  box-shadow: 0 1px 2px rgb(21 28 36 / 8%);
+  background: transparent;
+  box-shadow: none;
+}
+
+.pevo-messageMeta {
+  position: absolute;
+  top: calc(100% + var(--pevo-messageActionHitOffset) + 4px);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 20px;
+  margin: 0;
+  color: var(--pevo-faint);
+  font-size: 0.76rem;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: auto;
+  transform: translateY(-2px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.pevo-messageFrame.is-assistant .pevo-messageMeta {
+  left: 0;
+}
+
+.pevo-messageFrame.is-user .pevo-messageMeta {
+  right: 0;
+  justify-content: flex-end;
+}
+
+.pevo-messageFrame:hover .pevo-messageMeta,
+.pevo-messageFrame:focus-within .pevo-messageMeta,
+.pevo-messageMeta:hover {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.pevo-messageCopy {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-xs);
+  cursor: pointer;
+}
+
+.pevo-messageCopy:hover,
+.pevo-messageCopy:focus-visible {
+  color: var(--pevo-ink);
+  background: var(--pevo-panel-muted);
+}
+
+.pevo-messageCopy:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--pevo-accent), white 24%);
+  outline-offset: 2px;
+}
+
+.pevo-messageElapsed,
+.pevo-messageTime {
+  font-variant-numeric: tabular-nums;
 }
 
 @keyframes pevo-stream-caret {
@@ -358,11 +626,11 @@
   align-self: flex-start;
   width: min(760px, 100%);
   gap: 7px;
-  padding: 9px 11px;
-  background: var(--pevo-panel);
-  border: 1px solid var(--pevo-border);
-  border-radius: var(--pevo-radius);
-  box-shadow: 0 1px 2px rgb(21 28 36 / 5%);
+  padding: 4px 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .pevo-reasoning {
@@ -414,10 +682,10 @@
 
 .pevo-reasoningHeader em,
 .pevo-evidenceLine em {
-  padding: 1px 6px;
+  padding: 0;
   color: var(--pevo-muted);
-  background: var(--pevo-panel-muted);
-  border-radius: 999px;
+  background: transparent;
+  border-radius: 0;
   font-style: normal;
   white-space: nowrap;
 }
@@ -428,7 +696,7 @@
   overflow: auto;
   margin: 0;
   padding: 8px;
-  color: #dce7ef;
+  color: var(--pevo-code-ink);
   background: var(--pevo-code-bg);
   border-radius: var(--pevo-radius-sm);
   white-space: pre-wrap;
@@ -490,14 +758,14 @@
 
 .pevo-composer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
   position: relative;
-  padding: 12px;
-  background: var(--pevo-panel);
-  border: 1px solid var(--pevo-border);
-  border-radius: var(--pevo-radius);
-  box-shadow: var(--pevo-shadow-panel);
+  padding: 6px 0 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .pevo-completionPopover {
@@ -572,15 +840,20 @@
 }
 
 .pevo-composer textarea {
-  min-height: 74px;
+  min-height: 42px;
   max-height: 180px;
-  resize: vertical;
-  padding: 10px 12px;
+  resize: none;
+  padding: 10px 50px 10px 12px;
   line-height: 1.45;
   box-shadow: inset 0 1px 2px rgb(21 28 36 / 5%);
 }
 
+.pevo-composer.is-running textarea {
+  padding-right: 86px;
+}
+
 .pevo-composerInput {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   min-width: 0;
@@ -615,8 +888,100 @@
   font-size: 0.78rem;
 }
 
+.pevo-attachmentList {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  gap: 6px;
+}
+
+.pevo-attachmentChip {
+  display: inline-grid;
+  grid-template-columns: minmax(0, 1fr) 24px;
+  grid-template-rows: auto auto;
+  align-items: center;
+  max-width: min(280px, 100%);
+  min-height: 34px;
+  padding: 5px 5px 5px 8px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel-muted);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.pevo-attachmentChip strong,
+.pevo-attachmentChip small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pevo-attachmentChip strong {
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.pevo-attachmentChip small {
+  color: var(--pevo-muted);
+  font-size: 0.7rem;
+}
+
+.pevo-attachmentChip button {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.pevo-attachmentChip button:hover {
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+}
+
+.pevo-composerRequestPanel {
+  min-width: 0;
+}
+
+.pevo-composerFooter {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  min-width: 0;
+  min-height: 34px;
+  gap: 10px;
+}
+
+.pevo-composerLeftControls,
 .pevo-composerActions {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+}
+
+.pevo-composerActions {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
   align-self: end;
+  z-index: 2;
+}
+
+.pevo-sendButton {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
 }
 
 .pevo-primaryButton,
@@ -696,12 +1061,146 @@
 .pevo-statusGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: 8px 10px;
   margin: 0;
-  padding: 12px;
+  padding: 8px 4px;
 }
 
-.pevo-statusGrid div,
+.pevo-statusMetric.is-session {
+  grid-column: 1 / -1;
+}
+
+.pevo-statusMetric.is-session dd {
+  overflow-wrap: break-word;
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.pevo-contextLedger {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.pevo-contextRing {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 999px;
+  background:
+    conic-gradient(var(--pevo-muted) var(--pevo-context-percent, 0%), color-mix(in oklch, var(--pevo-muted), transparent 88%) 0),
+    transparent;
+}
+
+.pevo-contextRing span {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  color: var(--pevo-ink);
+  background: var(--pevo-bg);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.pevo-contextLedger strong,
+.pevo-contextLedger small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pevo-contextLedger small {
+  color: var(--pevo-muted);
+  font-size: 0.76rem;
+}
+
+.pevo-contextBars,
+.pevo-changedFiles {
+  display: grid;
+  gap: 2px;
+}
+
+.pevo-contextBar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 82px;
+  align-items: center;
+  gap: 8px;
+  color: var(--pevo-muted);
+  font-size: 0.76rem;
+}
+
+.pevo-contextBar span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pevo-contextBar meter {
+  width: 82px;
+  height: 4px;
+}
+
+.pevo-contextBar meter::-webkit-meter-bar {
+  background: color-mix(in oklch, var(--pevo-muted), transparent 86%);
+  border: 0;
+  border-radius: 999px;
+}
+
+.pevo-contextBar meter::-webkit-meter-optimum-value,
+.pevo-contextBar meter::-webkit-meter-suboptimum-value,
+.pevo-contextBar meter::-webkit-meter-even-less-good-value {
+  background: color-mix(in oklch, var(--pevo-muted), transparent 20%);
+  border-radius: 999px;
+}
+
+.pevo-contextBar meter::-moz-meter-bar {
+  background: color-mix(in oklch, var(--pevo-muted), transparent 20%);
+  border-radius: 999px;
+}
+
+.pevo-changedFiles button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 4px 2px;
+  color: var(--pevo-ink);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-xs);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .pevo-changedFiles button:hover {
+    background: color-mix(in oklch, var(--pevo-panel-muted), transparent 76%);
+  }
+}
+
+.pevo-changedFiles code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  font-size: 0.76rem;
+}
+
+.pevo-changedFiles span {
+  color: var(--pevo-muted);
+  font-size: 0.72rem;
+}
+
+.pevo-statusMetric,
 .pevo-settings div {
   min-width: 0;
 }
@@ -723,8 +1222,8 @@
 .pevo-stack {
   display: grid;
   gap: 8px;
-  padding: 12px;
-  border-top: 1px solid var(--pevo-border);
+  padding: 10px 4px;
+  border-top: 1px solid color-mix(in oklch, var(--pevo-border), transparent 55%);
 }
 
 .pevo-stack h3 {
@@ -751,7 +1250,7 @@
   overflow: auto;
   margin: 0;
   padding: 8px;
-  color: #dce7ef;
+  color: var(--pevo-code-ink);
   background: var(--pevo-code-bg);
   border-radius: var(--pevo-radius-sm);
   white-space: pre-wrap;
@@ -766,11 +1265,6 @@
 @media (max-width: 960px) {
   .pevo-sessionList {
     max-height: none;
-  }
-
-  .pevo-composer {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 8px;
   }
 
   .pevo-composerActions {

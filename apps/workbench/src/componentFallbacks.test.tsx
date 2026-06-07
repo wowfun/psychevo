@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { HistoryPanel, StatusPanel, TranscriptPanel } from "@psychevo/components";
-import type { SessionSummary, SettingsReadResult, TranscriptBlock, TranscriptEntry } from "@psychevo/protocol";
+import type { SessionSummary, TranscriptBlock, TranscriptEntry } from "@psychevo/protocol";
 
 const noop = vi.fn();
 
@@ -9,8 +9,8 @@ describe("component fallback rendering", () => {
   it("renders older session summaries without activity metadata", () => {
     const session = {
       id: "thread-old",
-      source: "web",
       workdir: "/tmp/project",
+      project: { workdir: "/tmp/project", label: "project", displayPath: "/tmp/project" },
       model: null,
       provider: null,
       startedAtMs: 1,
@@ -20,6 +20,10 @@ describe("component fallback rendering", () => {
       archivedAtMs: null,
       messageCount: 1,
       toolCallCount: 0,
+      visibleEntryCount: 1,
+      activity: { running: false, activeTurnId: null, queuedTurns: 0 },
+      displayTitle: "Old session",
+      preview: null,
       title: "Old session"
     } as SessionSummary;
 
@@ -35,12 +39,197 @@ describe("component fallback rendering", () => {
         onRestore={noop}
         onResume={noop}
         onShare={noop}
-        onToggleArchived={noop}
       />
     );
 
     expect(html).toContain("Old session");
-    expect(html).toContain("1 msg");
+    expect(html).not.toContain("entries");
+    expect(html).toContain("title=\"Collapse all projects\"");
+    expect(html).not.toContain("title=\"Expand all projects\"");
+  });
+
+  it("renders pin and unpin controls inside the session actions menu", () => {
+    const html = renderToStaticMarkup(
+      <HistoryPanel
+        archived={false}
+        pinnedSessionIds={["thread-1"]}
+        sessions={[
+          sessionSummary({ id: "thread-1", title: "Pinned session" }),
+          sessionSummary({ id: "thread-2", title: "Unpinned session" })
+        ]}
+        onArchive={noop}
+        onDelete={noop}
+        onExport={noop}
+        onNew={noop}
+        onRename={noop}
+        onRestore={noop}
+        onResume={noop}
+        onShare={noop}
+        onTogglePinned={noop}
+      />
+    );
+
+    expect(html).toContain("pevo-sessionMenu");
+    expect(html).toContain("role=\"menu\"");
+    expect(html).toContain("role=\"menuitem\"");
+    expect(html).toContain("title=\"Unpin\"");
+    expect(html).toContain("title=\"Pin\"");
+    expect(html).not.toContain("pevo-sessionActions");
+  });
+
+  it("does not mark the first history row active without a current thread", () => {
+    const sessions = [
+      sessionSummary({ id: "thread-1", title: "First session" }),
+      sessionSummary({ id: "thread-2", title: "Second session" })
+    ];
+
+    const html = renderToStaticMarkup(
+      <HistoryPanel
+        archived={false}
+        sessions={sessions}
+        onArchive={noop}
+        onDelete={noop}
+        onExport={noop}
+        onNew={noop}
+        onRename={noop}
+        onRestore={noop}
+        onResume={noop}
+        onShare={noop}
+      />
+    );
+
+    expect(html).toContain("First session");
+    expect(html).toContain("Second session");
+    expect(html).not.toContain("is-active");
+  });
+
+  it("renders a local draft row without session actions", () => {
+    const html = renderToStaticMarkup(
+        <HistoryPanel
+          archived={false}
+          draftSession={{ id: "draft:1", title: "New session", createdAtMs: Date.now(), workdir: "/tmp/project" }}
+          sessions={[]}
+        onArchive={noop}
+        onDelete={noop}
+        onExport={noop}
+        onNew={noop}
+        onRename={noop}
+        onRestore={noop}
+        onResume={noop}
+        onResumeDraft={noop}
+        onShare={noop}
+      />
+    );
+
+    expect(html).toContain("New session");
+    expect(html).toContain("project");
+    expect(html).toContain("0d");
+    expect(html).toContain("is-active is-draft");
+    expect(html).not.toContain("title=\"Session actions\"");
+    expect(html).not.toContain("title=\"Rename\"");
+    expect(html).not.toContain("title=\"Export\"");
+    expect(html).not.toContain("title=\"Share\"");
+    expect(html).not.toContain("title=\"Archive\"");
+    expect(html).not.toContain("title=\"Delete\"");
+  });
+
+  it("renders the local draft row inside its project group", () => {
+    const html = renderToStaticMarkup(
+      <HistoryPanel
+        archived={false}
+        draftSession={{ id: "draft:1", title: "New session", createdAtMs: Date.now(), workdir: "/tmp/other" }}
+        sessions={[
+          sessionSummary({ id: "thread-1", title: "First session" }),
+          sessionSummary({
+            id: "thread-2",
+            title: "Other session",
+            workdir: "/tmp/other",
+            project: { workdir: "/tmp/other", label: "other", displayPath: "/tmp/other" }
+          })
+        ]}
+        onArchive={noop}
+        onDelete={noop}
+        onExport={noop}
+        onNew={noop}
+        onRename={noop}
+        onRestore={noop}
+        onResume={noop}
+        onResumeDraft={noop}
+        onShare={noop}
+      />
+    );
+
+    expect(html.indexOf("other")).toBeLessThan(html.indexOf("New session"));
+    expect(html.indexOf("New session")).toBeLessThan(html.indexOf("Other session"));
+  });
+
+  it("does not lift a project group just because its session is active", () => {
+    const html = renderToStaticMarkup(
+      <HistoryPanel
+        archived={false}
+        currentThreadId="thread-older"
+        sessions={[
+          sessionSummary({
+            id: "thread-newer",
+            title: "Newer session",
+            workdir: "/tmp/newer-project",
+            project: { workdir: "/tmp/newer-project", label: "newer-project", displayPath: "/tmp/newer-project" },
+            startedAtMs: 3_000,
+            updatedAtMs: 3_000
+          }),
+          sessionSummary({
+            id: "thread-older",
+            title: "Older active session",
+            workdir: "/tmp/older-project",
+            project: { workdir: "/tmp/older-project", label: "older-project", displayPath: "/tmp/older-project" },
+            startedAtMs: 1_000,
+            updatedAtMs: 1_000
+          })
+        ]}
+        onArchive={noop}
+        onDelete={noop}
+        onExport={noop}
+        onNew={noop}
+        onRename={noop}
+        onRestore={noop}
+        onResume={noop}
+        onShare={noop}
+      />
+    );
+
+    expect(html.indexOf("newer-project")).toBeLessThan(html.indexOf("older-project"));
+    expect(html).toContain("pevo-sessionRow is-active");
+  });
+
+  it("renders compact relative day labels for persisted sessions", () => {
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(86_400_000 * 5);
+    try {
+      const html = renderToStaticMarkup(
+        <HistoryPanel
+          archived={false}
+          sessions={[
+            sessionSummary({
+              id: "thread-1",
+              title: "Recent session",
+              startedAtMs: 86_400_000 * 2,
+              updatedAtMs: 86_400_000 * 2
+            })
+          ]}
+          onArchive={noop}
+          onDelete={noop}
+          onExport={noop}
+          onNew={noop}
+          onRename={noop}
+          onRestore={noop}
+          onResume={noop}
+          onShare={noop}
+        />
+      );
+
+      expect(html).toContain(">3d</time>");
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it("does not render the empty transcript state for visible history entries", () => {
@@ -79,6 +268,55 @@ describe("component fallback rendering", () => {
     expect(html).toContain("hello history");
     expect(html).toContain("hello from assistant");
     expect(html).not.toContain("No messages yet");
+  });
+
+  it("renders hover copy and timestamp affordances on user and assistant rows", () => {
+    const html = renderToStaticMarkup(
+      <TranscriptPanel
+        entries={[
+          transcriptEntry({
+            id: "message:user",
+            role: "user",
+            blocks: [
+              transcriptBlock({
+                id: "message:user:block:0",
+                body: "user text",
+                preview: "user text",
+                detail: "user text",
+                createdAtMs: Date.UTC(2026, 5, 7, 14, 2),
+                updatedAtMs: Date.UTC(2026, 5, 7, 14, 2)
+              })
+            ]
+          }),
+          transcriptEntry({
+            id: "message:assistant",
+            messageSeq: 2,
+            role: "assistant",
+            blocks: [
+              transcriptBlock({
+                id: "message:assistant:block:0",
+                body: "assistant text",
+                preview: "assistant text",
+                detail: "assistant text",
+                createdAtMs: Date.UTC(2026, 5, 7, 14, 3),
+                updatedAtMs: Date.UTC(2026, 5, 7, 14, 3),
+                metadata: { elapsed_ms: 65_000 }
+              })
+            ]
+          })
+        ]}
+        onCopyText={noop}
+      />
+    );
+
+    expect(html).toContain("Message actions");
+    expect(html).toContain("pevo-messageFrame is-user");
+    expect(html).toContain("pevo-messageFrame is-assistant");
+    expect(html).toContain("Copy message");
+    expect(html).toContain("1m05s");
+    expect(html).toContain("2026-06-07T14:02:00.000Z");
+    expect(html).toContain("2026-06-07T14:03:00.000Z");
+    expect(html.match(/Copy message/g)?.length).toBe(2);
   });
 
   it("does not render decorative transcript role or evidence icons", () => {
@@ -132,7 +370,8 @@ describe("component fallback rendering", () => {
       />
     );
 
-    expect(html).toContain("Transcript");
+    expect(html).not.toContain("pevo-transcriptHeader");
+    expect(html).not.toContain("<h2>Transcript</h2>");
     expect(html).toContain("$x-daily");
     expect(html).toContain("Thinking");
     expect(html).toContain("exec_command");
@@ -140,21 +379,19 @@ describe("component fallback rendering", () => {
   });
 
   it("renders partial settings and missing activity as idle status", () => {
-    const settings = { workdir: "/tmp/project" } as SettingsReadResult;
-
     const html = renderToStaticMarkup(
       <StatusPanel
-        settings={settings}
+        sessionId="thread-status"
         status="connected"
-        onClarify={noop}
-        onPermission={noop}
         onRefresh={noop}
       />
     );
 
     expect(html).toContain("idle");
-    expect(html).toContain("status_only");
-    expect(html).toContain("disabled");
+    expect(html).toContain("thread-status");
+    expect(html).toContain("pevo-statusMetric is-session");
+    expect(html).toContain("No active context");
+    expect(html).toContain("No changes");
   });
 
   it("renders tool headers from arguments instead of result JSON", () => {
@@ -308,7 +545,6 @@ describe("component fallback rendering", () => {
       />
     );
 
-    expect(html).toContain("1 entry");
     expect(html).toContain("visible prompt");
     expect(html).not.toContain("empty-prompt");
   });
@@ -601,4 +837,35 @@ function transcriptBlock(overrides: Partial<TranscriptBlock> = {}): TranscriptBl
     updatedAtMs: 1,
     ...overrides
   };
+}
+
+function sessionSummary(overrides: Partial<SessionSummary> = {}): SessionSummary {
+  const summary: SessionSummary = {
+    id: "thread-1",
+    workdir: "/tmp/project",
+    project: { workdir: "/tmp/project", label: "project", displayPath: "/tmp/project" },
+    model: null,
+    provider: null,
+    startedAtMs: 1,
+    updatedAtMs: null,
+    endedAtMs: null,
+    endReason: null,
+    archivedAtMs: null,
+    messageCount: 1,
+    toolCallCount: 0,
+    visibleEntryCount: 1,
+    activity: {
+      running: false,
+      activeTurnId: null,
+      queuedTurns: 0
+    },
+    title: "Session",
+    displayTitle: "Session",
+    preview: null,
+    ...overrides
+  };
+  if (overrides.displayTitle === undefined && overrides.title !== undefined) {
+    summary.displayTitle = overrides.title;
+  }
+  return summary;
 }

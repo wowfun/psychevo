@@ -1,4 +1,40 @@
 :root {
+  color-scheme: dark;
+  --pevo-bg: oklch(14.5% 0.01 95);
+  --pevo-bg-raised: oklch(17.5% 0.012 95);
+  --pevo-panel: oklch(19.5% 0.012 95);
+  --pevo-panel-muted: oklch(23% 0.014 95);
+  --pevo-panel-warm: oklch(22% 0.018 78);
+  --pevo-ink: oklch(91% 0.018 88);
+  --pevo-muted: oklch(68% 0.018 88);
+  --pevo-faint: oklch(52% 0.016 88);
+  --pevo-border: oklch(29% 0.018 92);
+  --pevo-border-strong: oklch(40% 0.02 92);
+  --pevo-accent: oklch(88% 0.012 88);
+  --pevo-accent-ink: oklch(13% 0.008 95);
+  --pevo-accent-soft: oklch(25% 0.016 95);
+  --pevo-brass: oklch(75% 0.09 78);
+  --pevo-brass-soft: oklch(25% 0.035 78);
+  --pevo-caution: oklch(78% 0.1 64);
+  --pevo-danger: oklch(72% 0.12 28);
+  --pevo-code-bg: oklch(12% 0.012 236);
+  --pevo-code-ink: oklch(91% 0.018 88);
+  --pevo-radius: 8px;
+  --pevo-radius-sm: 6px;
+  --pevo-radius-xs: 4px;
+  --pevo-shadow: 0 18px 42px rgb(0 0 0 / 18%);
+  --pevo-shadow-panel: inset 0 0 0 1px color-mix(in oklch, var(--pevo-border), transparent 32%);
+  --pevo-shadow-active: 0 1px 0 rgb(255 255 255 / 4%), 0 6px 16px rgb(0 0 0 / 18%);
+  font-family:
+    "Ubuntu Sans", "Aptos", "Segoe UI Variable", ui-sans-serif, system-ui,
+    -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html[data-pevo-appearance="light"] {
   color-scheme: light;
   --pevo-bg: oklch(96.3% 0.009 220);
   --pevo-bg-raised: oklch(98.5% 0.006 220);
@@ -10,26 +46,18 @@
   --pevo-faint: oklch(63.5% 0.023 235);
   --pevo-border: oklch(87.6% 0.015 222);
   --pevo-border-strong: oklch(76.8% 0.026 225);
-  --pevo-accent: oklch(48.5% 0.095 186);
-  --pevo-accent-ink: oklch(99% 0.004 186);
-  --pevo-accent-soft: oklch(95.2% 0.031 184);
+  --pevo-accent: oklch(52% 0.012 232);
+  --pevo-accent-ink: oklch(99% 0.003 230);
+  --pevo-accent-soft: oklch(91.8% 0.012 232);
   --pevo-brass: oklch(55% 0.112 72);
   --pevo-brass-soft: oklch(94.2% 0.041 78);
   --pevo-caution: oklch(49% 0.12 64);
   --pevo-danger: oklch(48% 0.15 28);
   --pevo-code-bg: oklch(19% 0.027 236);
-  --pevo-radius: 8px;
-  --pevo-radius-sm: 6px;
-  --pevo-radius-xs: 4px;
+  --pevo-code-ink: oklch(91% 0.018 88);
   --pevo-shadow: 0 18px 42px rgb(21 28 36 / 11%);
   --pevo-shadow-panel: 0 1px 2px rgb(21 28 36 / 7%), 0 10px 28px rgb(21 28 36 / 5%);
-  font-family:
-    "Ubuntu Sans", "Aptos", "Segoe UI Variable", ui-sans-serif, system-ui,
-    -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
-  font-variant-numeric: tabular-nums;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  --pevo-shadow-active: 0 1px 3px rgb(21 28 36 / 10%), 0 8px 18px rgb(21 28 36 / 5%);
 }
 
 * {

@@ -35,6 +35,9 @@ packages in the first slice:
 - `@psychevo/protocol`: generated strict JSON-RPC 2.0 envelopes, Gateway wire
   types, JSON Schema artifacts, and Ajv-backed runtime validators. Rust
   Gateway protocol types are the source of truth.
+  Generated TypeScript schema modules are split by protocol domain under
+  `src/generated/schemas/` and re-aggregated through `gatewaySchemas`; callers
+  must not depend on a monolithic generated schema file.
 - `@psychevo/client`: typed Gateway WebSocket client, event store, host runtime
   reconnect handling, and request/notification orchestration. It does not own
   endpoint discovery, host storage, browser download/open helpers, clipboard,
@@ -84,12 +87,21 @@ The browser/managed-Web host implements web-standard capabilities when
 available and returns typed `unsupported` results for native-only operations.
 The first slice does not introduce Tauri, Electron, Capacitor, Android, iOS,
 Harmony, or desktop bridge dependencies.
+Browser file picking is a web-standard host capability. It may return selected
+`File` objects for Workbench attachments, but it must not expose arbitrary host
+paths. Native shells may later provide path or bookmark based file contracts
+through the same host boundary.
 
 ## Web, PWA, And Shell Builds
 
 The Web build may enable PWA installation and service-worker caching for static
 app-shell assets only. API routes, WebSocket routes, session state, tokenized
 URLs, and stateful responses are never service-worker cached.
+Workbench Vite production builds use stable manual chunk boundaries for
+third-party vendor code, icons, workspace packages, and generated protocol
+schema groups so no ordinary production chunk exceeds Vite's default chunk-size
+warning threshold. The build must not silence this warning by raising the
+threshold when a maintainable chunk split is available.
 
 The generic shell build reuses the same React/Vite source with an explicit
 Gateway endpoint requirement. Shell builds disable service workers, PWA install
@@ -106,6 +118,19 @@ Gateway endpoint and source scope; native packaging remains outside this topic.
 Shared components are controlled. They receive state and callbacks from an app
 or client store and do not instantiate Gateway clients, read localStorage, or
 write global config.
+
+Package implementation files follow the same component-family boundary as the
+public package contract. Large `packages/*/src/index.*` files must remain thin
+package entrypoints that re-export semantic modules; transcript, composer,
+history/sessions, status, host runtime, and client reducers should live in
+dedicated files so feature work does not keep expanding a shared monolith.
+App packages follow the same rule. Files such as `apps/*/src/App.*` are
+composition roots for wiring state, host/client calls, and high-level layout;
+semantic UI surfaces, inspector panes, sidebar chrome, composer controls,
+data normalization, and storage helpers must live in separate app-local modules.
+Large app CSS entrypoints should aggregate smaller style files by surface or
+layout area instead of accumulating all page, pane, and component overrides in
+one stylesheet.
 
 First-slice component families include transcript, tool evidence,
 artifact preview/detail, composer, history, status/queue,
@@ -156,6 +181,15 @@ prefix. Shell submission calls a dedicated shell callback with the stripped
 command. Empty shell mode presents bounded shell help, and Escape or backspace
 on an empty shell editor returns to prompt mode. Slash completion is suppressed
 in shell mode, while `@` file completion remains available.
+The composer supports bounded attachments supplied by the host file picker.
+Attachment chips are controlled component state with remove actions, and the
+submit button is enabled when either prompt text or pending attachments are
+present. Attachments are submitted through typed Gateway input parts rather
+than through ordinary transcript history or browser-only file path access.
+Composer send and interrupt controls are anchored inside the input frame's
+right edge and must stay within the textarea border box in compact one-line
+states. The composer does not expose the browser's native textarea resize grip,
+which competes with those controls and can make the action appear to overflow.
 
 Completion popovers are shared controlled components. `/` lists Gateway slash
 commands, `$` lists skills, local agents, and ACP capability mentions, and `@`
@@ -186,6 +220,23 @@ CommonMark block structure, GFM tables/task lists, links, inline code, fenced
 code blocks, and streaming caret placement at the end of the final rendered
 block. The transcript panel header, user text, assistant text, reasoning rows,
 and tool/evidence rows do not render decorative role, cognition, or kind icons.
+Assistant text renders on the ordinary page background. User text aligns right
+and is the only ordinary text message with a filled bubble; fenced code blocks
+and code previews keep a dedicated filled code surface. Inline code remains a
+typographic monospace distinction and does not render as a filled chip.
+Ordinary chat text, reasoning rows, tool/evidence summaries, and assistant
+messages do not use accent fill or permanent card fill. Each text block exposes
+a quiet hover/focus affordance row anchored just outside the bubble, so hidden
+controls do not reserve layout height or inflate the message geometry. User
+rows include a copy action and the block timestamp. Assistant rows include
+copy, compact elapsed
+duration immediately left of the timestamp, and the timestamp, using the same
+completed-turn format as TUI metadata. The action copies the raw Markdown source
+for that text block through the host clipboard boundary. Feedback controls such
+as thumbs up or thumbs down are not part of this first interaction.
+The hover affordance must keep a continuous pointer path from the message block
+to the action row; moving from the text to Copy must not pass through a dead
+zone that hides the controls before the pointer reaches the button.
 Reasoning blocks are collapsible, default-expanded while running, and render
 incrementally before assistant text. Tool/evidence rows render one summary
 header and one expandable detail body; arguments or results must not be
@@ -287,24 +338,100 @@ provider/model reasoning is allowed to become a visible Thinking row.
 
 ## Visual Direction
 
-The first Workbench visual direction is an operator ledger: quiet, dense,
-light-mode workspace chrome with a restrained ink/teal/brass palette,
-transcript rows as the primary surface, and status details held in secondary
-panes. It is an app shell, not a landing page; the first viewport orients the
-user, shows connection/thread status, and enables the next turn without hero
-copy or decorative backgrounds.
+The first Workbench visual direction is a dark precision ledger: quiet, dense,
+local-agent workspace chrome with transcript rows as the primary surface,
+evidence-oriented status details in secondary panes, and only black, white, or
+transparent button/logo backgrounds. It is an app shell, not a landing page;
+the first viewport orients the user, shows current work state, and enables the
+next turn without hero copy or decorative backgrounds.
 
-Surface hierarchy uses background-color steps, fine dividers, and restrained
-shadow. Cards are reserved for bounded repeated items, evidence rows,
-requests, and drawers; page sections should read as panes or rows rather than
-generic floating cards. Buttons use a consistent radius scale and press feedback
-without resizing their layout footprint.
+Surface hierarchy uses compact spacing, fine dividers, ledger rows, and
+restrained shadow. Cards are reserved for bounded repeated items, requests,
+drawers, explicit previews, and code surfaces; ordinary page sections should
+read as continuous panes or rows rather than generic floating cards. Buttons use
+a consistent radius scale and press feedback without resizing their layout
+footprint. The left navigation/sidebar reads as one continuous navigation
+surface: Actions, Pinned, Sessions, and Settings use spacing, typography, and
+soft selection indicators rather than prominent boxed outlines, heavy divider
+lines, left rails, underline rails, or resting card-like row fills. Active
+navigation rows, session rows, tabs, and segmented controls use a shallow tonal
+shadow with a quiet surface step instead of inset rail effects. Logo containers
+are transparent when the mark itself is visible against the dark chrome.
+Settings and Status surfaces follow the same rule: setting rows, status metric
+groups, context usage, and changed-file lists are list-like content on the
+ordinary pane background. They should not render permanent row cards, heavy
+outer panel borders, or filled containers just to separate adjacent controls.
+
+Desktop uses a persistent left history/project pane, center
+transcript/composer, optional inline center preview split, and a right
+Status/Files inspector that is collapsed by default on Web startup. The composer
+status line carries clickable permission mode, chat mode, model, variant,
+context usage, project path, and branch controls outside the input frame. The
+context item is a compact graphical meter with hover/click details, not a token
+table. Right Status changed-file rows open a read-only diff preview in the
+center split. Diff and code preview panes must remain readable in both dark and
+light appearances; dark code surfaces use dedicated code text tokens rather than
+inheriting ordinary page ink. Permission approval and clarify requests render in
+the composer area, where TUI-style bottom interaction lives, and must not be
+displaced into Status, Files, Debug, or passive metrics.
+Project-group ordering in the Sessions pane is based on actual session or
+local draft recency, with label as a deterministic tie-breaker. Selecting or
+resuming a session in a lower project marks that row active but must not lift
+the project group to the top of the Sessions pane. Collapsed project groups
+remain a compact top-stacked list with stable row spacing; empty available space
+belongs below the list and must not be distributed between collapsed projects.
+The Sessions scroller reserves a stable gutter so project add controls do not
+shift, but its scrollbar thumb stays hidden until the Sessions list itself is
+hovered or keyboard-focused.
+Persisted session rows keep the row body focused on the session title. Time
+metadata appears as compact relative days such as `0d` or `3d`, and the time
+metadata plus More affordance appear on row hover or keyboard-visible focus
+instead of staying visible in the resting list. Pointer-only focus must not keep
+those affordances visible after the pointer leaves the row, and leaving the
+hover/focus-visible area hides them immediately rather than fading them out.
+Pin, rename, export, share, archive/restore, and
+delete controls live behind that secondary More menu instead of rendering as a
+permanent action strip under the session name. Local draft rows do not expose
+session management actions until they become persisted sessions.
+Workbench chrome uses `Psychevo` as the visible product name. Project identity
+belongs in the project/session grouping and settings detail surfaces, not as a
+subtitle under the product brand. The left sidebar collapse control sits in the
+same brand row as the logo/name and is icon-only; it must align to the right
+edge of the session column. When the left sidebar is collapsed, the same
+control becomes the expand affordance and uses a scaled Psychevo logo mark
+instead of the generic panel icon. The transcript surface starts directly with
+conversation content rather than a redundant `Transcript` title row, and the
+right inspector starts directly with Status/Files/Debug tabs instead of a
+separate connection endpoint header. The right inspector expand/collapse
+control is fixed to the top-right edge of the transcript column, above the
+transcript surface, so inspector tabs remain only tab choices and collapsed
+inspector state does not reserve a separate right-side rail.
+The Status inspector treats the session id as a primary identifier row spanning
+the inspector width; connection, turn, queued, and similar metrics may remain in
+compact columns below it.
+
+Appearance is a frontend/host preference, not a provider or secret setting.
+In light appearance, Workbench accent surfaces use neutral gray highlight
+tokens so selected controls, status accents, and active UI state read as quiet
+application chrome instead of a saturated brand color.
+The bottom Settings utility entry is a location marker, not a primary action;
+when Settings is active it uses the ordinary sidebar selected surface instead
+of an accent fill.
+Workbench defaults to the dark ledger appearance, and Settings provides a
+light/dark appearance toggle. The choice may be persisted by the host storage
+adapter and applied before ordinary panel rendering when available. Theme
+switching must preserve the same layout, density, button background rules, and
+status/diff preview behavior.
+
+Settings also provides a local Debug switch. When enabled, the right inspector
+adds a `Debug` tab after `Files`; when disabled, the tab is absent. The Debug
+tab shows the current Workbench event stream and Gateway notifications as
+developer diagnostics, separate from ordinary transcript content and hidden by
+default.
 
 Mobile uses the same component tree with compact chrome: top status must not
-crowd the composer or tab rail, and the active panel owns the viewport.
-Desktop uses a persistent
-history/transcript/status layout where the transcript stretches to the available
-height and the composer is a bottom control dock.
+crowd the composer or tab rail, collapsed sidebars must keep fixed-size icon
+buttons, and the active panel owns the viewport.
 
 ## Validation
 

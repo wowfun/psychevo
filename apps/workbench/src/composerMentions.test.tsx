@@ -42,7 +42,7 @@ describe("Composer completion mentions", () => {
       />
     );
 
-    const textarea = screen.getByPlaceholderText("Ask pevo...") as HTMLTextAreaElement;
+    const textarea = screen.getByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: "$x" } });
 
     const option = await screen.findByRole("option", { name: /\$x-daily/ });
@@ -83,7 +83,7 @@ describe("Composer completion mentions", () => {
       />
     );
 
-    const textarea = screen.getByPlaceholderText("Ask pevo...") as HTMLTextAreaElement;
+    const textarea = screen.getByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: "$x" } });
     await waitFor(() => expect(completionProvider).toHaveBeenCalled());
 
@@ -142,7 +142,7 @@ describe("Composer completion mentions", () => {
       />
     );
 
-    const textarea = screen.getByPlaceholderText("Ask pevo...") as HTMLTextAreaElement;
+    const textarea = screen.getByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: "/h" } });
 
     await waitFor(() => expect(screen.getByRole("option", { name: /\/help/ })).toBeTruthy());
@@ -170,7 +170,7 @@ describe("Composer completion mentions", () => {
       />
     );
 
-    const textarea = screen.getByPlaceholderText("Ask pevo...") as HTMLTextAreaElement;
+    const textarea = screen.getByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: "$x" } });
 
     await waitFor(() => expect(completionProvider).toHaveBeenCalled());
@@ -210,7 +210,7 @@ describe("Composer completion mentions", () => {
         />
       );
 
-      const textarea = screen.getByPlaceholderText("Ask pevo...") as HTMLTextAreaElement;
+      const textarea = screen.getByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
       fireEvent.change(textarea, { target: { value: "$" } });
 
       await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(24));
@@ -243,7 +243,7 @@ describe("Composer completion mentions", () => {
       />
     );
 
-    const textarea = screen.getByPlaceholderText("Ask pevo...") as HTMLTextAreaElement;
+    const textarea = screen.getByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
     fireEvent.keyDown(textarea, { key: "!" });
 
     const shellTextarea = screen.getByPlaceholderText("shell command") as HTMLTextAreaElement;
@@ -254,7 +254,7 @@ describe("Composer completion mentions", () => {
 
     expect(onShell).toHaveBeenCalledWith("pwd");
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(screen.getByPlaceholderText("Ask pevo...")).toBeTruthy();
+    expect(screen.getByPlaceholderText("Ask Psychevo...")).toBeTruthy();
   });
 
   it("imports pasted bang-prefixed text as shell mode without the bang", () => {
@@ -270,7 +270,7 @@ describe("Composer completion mentions", () => {
       />
     );
 
-    const textarea = screen.getByPlaceholderText("Ask pevo...") as HTMLTextAreaElement;
+    const textarea = screen.getByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: "!printf ok" } });
 
     const shellTextarea = screen.getByPlaceholderText("shell command") as HTMLTextAreaElement;
@@ -308,7 +308,7 @@ describe("Composer completion mentions", () => {
       />
     );
 
-    const textarea = screen.getByPlaceholderText("Ask pevo...") as HTMLTextAreaElement;
+    const textarea = screen.getByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
     fireEvent.keyDown(textarea, { key: "!" });
     const shellTextarea = screen.getByPlaceholderText("shell command") as HTMLTextAreaElement;
 

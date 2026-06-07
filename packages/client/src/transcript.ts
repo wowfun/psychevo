@@ -52,6 +52,7 @@ export function applyLiveTranscriptEvent(
         : removeEmptyLiveOverlayForTurn(snapshot.entries, event.turnId);
       return {
         ...snapshot,
+        thread: threadForTurn(snapshot, event.threadId),
         entries,
         activity: snapshot.activity.activeTurnId === event.turnId
           ? {
@@ -142,10 +143,14 @@ export function reconcileThreadSnapshot(
 
 function eventAppliesToSnapshot(snapshot: ThreadSnapshot, event: GatewayEvent): boolean {
   const currentThreadId = snapshot.thread?.id ?? null;
+  const eventThreadId = eventThreadIdForEvent(event);
   if ("threadId" in event && event.threadId && currentThreadId && event.threadId !== currentThreadId) {
     return false;
   }
   if ("entry" in event && event.entry.threadId && currentThreadId && event.entry.threadId !== currentThreadId) {
+    return false;
+  }
+  if (!currentThreadId && eventThreadId && !detachedSnapshotCanAcceptThreadedEvent(snapshot, event)) {
     return false;
   }
   if (
@@ -165,6 +170,43 @@ function eventAppliesToSnapshot(snapshot: ThreadSnapshot, event: GatewayEvent): 
     return false;
   }
   return true;
+}
+
+function eventThreadIdForEvent(event: GatewayEvent): string | null {
+  switch (event.type) {
+    case "turnStarted":
+    case "turnQueued":
+      return event.threadId || null;
+    case "turnCompleted":
+      return event.threadId ||
+        (Array.isArray(event.committedEntries)
+          ? event.committedEntries.find((entry) => entry.threadId)?.threadId
+          : null) ||
+        null;
+    case "entryStarted":
+    case "entryUpdated":
+    case "entryCompleted":
+      return event.entry.threadId || null;
+    default:
+      return null;
+  }
+}
+
+function detachedSnapshotCanAcceptThreadedEvent(snapshot: ThreadSnapshot, event: GatewayEvent): boolean {
+  const activeTurnId = snapshot.activity.activeTurnId;
+  if ("turnId" in event && activeTurnId && event.turnId === activeTurnId) {
+    return true;
+  }
+  return event.type === "turnStarted" && hasUnboundOptimisticPrompt(snapshot);
+}
+
+function hasUnboundOptimisticPrompt(snapshot: ThreadSnapshot): boolean {
+  return snapshot.entries.some((entry) =>
+    entry.source === OPTIMISTIC_SOURCE &&
+    entry.role === "user" &&
+    entry.messageSeq === null &&
+    !entry.turnId
+  );
 }
 
 function entryForSnapshot(snapshot: ThreadSnapshot, entry: TranscriptEntry): TranscriptEntry {
