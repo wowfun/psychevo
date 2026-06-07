@@ -10,7 +10,7 @@ impl TuiApp {
     ) -> Result<BottomSelectionPanel> {
         let current_session = self.current_session.as_deref();
         let rows = self
-            .tui_sessions_for_workdir(view)?
+            .tui_sessions(view)?
             .into_iter()
             .map(|session| {
                 let summary = session.summary;
@@ -21,18 +21,27 @@ impl TuiApp {
                     .unwrap_or_else(|| short_session(&summary.id).to_string());
                 let provider_model = format!("{}/{}", summary.provider, summary.model);
                 let description = Some(format!(
-                    "{}  messages={}",
-                    provider_model, session.visible_message_count
+                    "{}  {}  messages={}",
+                    session.project_display_path, provider_model, session.visible_message_count
                 ));
                 let search_text = format!(
-                    "{} {} {} {} {}",
-                    summary.id, title, summary.provider, summary.model, summary.source
+                    "{} {} {} {} {} {}",
+                    summary.id,
+                    title,
+                    session.project_label,
+                    session.project_display_path,
+                    summary.provider,
+                    summary.model
                 );
                 BottomSelectionRow {
                     label: title,
                     description,
-                    detail: Some(format_session_time(summary.updated_at_ms)),
-                    group: Some(format_session_date(summary.updated_at_ms)),
+                    detail: Some(format!(
+                        "{} {}",
+                        format_session_date(summary.updated_at_ms),
+                        format_session_time(summary.updated_at_ms)
+                    )),
+                    group: Some(session.project_label),
                     search_text,
                     is_current: current_session.is_some_and(|id| id == summary.id),
                     is_default: false,

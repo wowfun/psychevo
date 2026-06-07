@@ -72,13 +72,13 @@ pub(crate) fn assistant_text_from_event(value: &Value) -> Option<String> {
 
 pub(crate) fn format_session_line(
     id: &str,
-    source: &str,
+    project: &str,
     provider: &str,
     model: &str,
     messages: i64,
 ) -> String {
     let short = &id[..id.len().min(8)];
-    format!("{short} {source} {provider}/{model} messages={messages}")
+    format!("{short} {project} {provider}/{model} messages={messages}")
 }
 
 #[cfg(test)]

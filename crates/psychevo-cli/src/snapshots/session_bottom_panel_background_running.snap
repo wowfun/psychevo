@@ -16,12 +16,12 @@ size=120x24
 
   Active Sessions                                                                                                  esc
   Search
-  2026-05-06
-  › ● Implement model picker  mock/mock-model  messages=5                                                        12:10
-  2026-05-05
-  ⠼ Review session pane  mock/other-model  messages=3                                                          09:44
+  repo
+  › ● Implement model picker  /repo  mock/mock-model  messages=5                                      2026-05-06 12:10
+  ⠼ Review session pane  /repo  mock/other-model  messages=3                                        2026-05-05 09:44
 
   Enter switch  Tab archived  Ctrl+K manage  Esc close  Type search
+
 
 
 
@@ -42,12 +42,12 @@ mock/model  high  ~/work · main
 [default]
 [default]  [dim]Active Sessions[default]                                                                                                  [dim]esc[default]
 [default]  [dim]Search [default]
-[default]  [cyan]2026-05-06[default]
-[default]  [cyan]› ● Implement model picker  mock/mock-model  messages=5                                                        12:10[default]
-[default]  [cyan]2026-05-05[default]
-[default]  ⠼ Review session pane  mock/other-model  messages=3                                                          09:44
+[default]  [cyan]repo[default]
+[default]  [cyan]› ● Implement model picker  /repo  mock/mock-model  messages=5                                      2026-05-06 12:10[default]
+[default]  ⠼ Review session pane  /repo  mock/other-model  messages=3                                        2026-05-05 09:44
 [default]
 [default]  [dim]Enter switch  Tab archived  Ctrl+K manage  Esc close  Type search[default]
+[default]
 [default]
 [default]
 [default]

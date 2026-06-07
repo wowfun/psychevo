@@ -89,8 +89,9 @@ pub(crate) use crate::env::{
     resolve_psychevo_home, resolve_state_db,
 };
 
-pub(crate) const TUI_SESSION_SOURCES: &[&str] = &["run", "tui"];
 pub(crate) const TUI_SIDE_SESSION_SOURCE: &str = "tui-side";
+pub(crate) const TUI_CONTINUE_SESSION_SOURCES: &[&str] = &["run", "tui"];
+pub(crate) const TUI_INTERNAL_SESSION_SOURCES: &[&str] = &[TUI_SIDE_SESSION_SOURCE];
 pub(crate) const BTW_SIDE_METADATA_KEY: &str = "btw_side";
 pub(crate) const BTW_INHERITED_METADATA_KEY: &str = "btw_inherited";
 pub(crate) const USER_SHELL_HELP: &str = "shell mode: type !<command> to run a local shell command";
@@ -147,9 +148,7 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
     } else if args.new_session {
         None
     } else {
-        state_runtime
-            .store()
-            .latest_session_for_workdir_with_sources(&workdir, TUI_SESSION_SOURCES)?
+        latest_human_visible_session_id(state_runtime.store())?
     };
 
     let color = io::stdout().is_terminal() && env_value("NO_COLOR", &env_map).is_none();

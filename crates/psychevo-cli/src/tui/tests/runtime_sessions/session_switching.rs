@@ -168,6 +168,117 @@ pub(crate) async fn background_session_completion_does_not_steal_current_session
     assert!(ui.auxiliary_agent_tasks.is_empty());
 }
 
+#[test]
+pub(crate) fn sessions_panel_lists_global_sessions_and_opening_switches_workdir() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let config_path = app.home.join("config.toml");
+    fs::write(&config_path, "\n").expect("config");
+    app.config_path = Some(config_path);
+    let other_workdir = temp.path().join("other-work");
+    fs::create_dir_all(&other_workdir).expect("other workdir");
+    let other_workdir = other_workdir.canonicalize().expect("other canonical");
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let session_id = store
+        .create_session_with_metadata(&other_workdir, "web", "mock-model", "mock", None)
+        .expect("session");
+    let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
+    insert_tui_message(
+        &conn,
+        &session_id,
+        1,
+        "user",
+        1,
+        serde_json::json!({
+            "role": "user",
+            "content": [{"text": "global prompt"}],
+            "timestamp_ms": 1
+        }),
+    );
+
+    let panel = app
+        .session_selection_panel(SessionListView::Active)
+        .expect("session panel");
+    let row = panel
+        .rows
+        .iter()
+        .find(|row| matches!(&row.value, BottomSelectionValue::Session(id) if id == &session_id))
+        .expect("global session row");
+    assert_eq!(row.group.as_deref(), Some("other-work"));
+    let expected_description = format!("{}  mock/mock-model  messages=1", other_workdir.display());
+    assert_eq!(
+        row.description.as_deref(),
+        Some(expected_description.as_str())
+    );
+    assert!(row.search_text.contains("other-work"));
+
+    let mut ui = FullscreenUi::new(&app);
+    app.open_session_direct(&mut ui, &session_id)
+        .expect("open global session");
+
+    assert_eq!(app.current_session.as_deref(), Some(session_id.as_str()));
+    assert_eq!(app.workdir, other_workdir);
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| { row.kind == TranscriptKind::Prompt && row.text == "global prompt" })
+    );
+}
+
+#[test]
+pub(crate) fn tui_sessions_exclude_internal_side_and_child_sessions() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let parent = store
+        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .expect("parent");
+    let side = store
+        .create_session_with_metadata(
+            &app.workdir,
+            TUI_SIDE_SESSION_SOURCE,
+            "mock-model",
+            "mock",
+            None,
+        )
+        .expect("side");
+    let child = store
+        .create_child_session_with_metadata(
+            &parent,
+            &app.workdir,
+            "tui",
+            "mock-model",
+            "mock",
+            None,
+        )
+        .expect("child");
+    let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
+    for (index, session_id) in [&parent, &side, &child].into_iter().enumerate() {
+        insert_tui_message(
+            &conn,
+            session_id,
+            1,
+            "user",
+            index as i64 + 1,
+            serde_json::json!({
+                "role": "user",
+                "content": [{"text": "visible"}],
+                "timestamp_ms": index as i64 + 1,
+            }),
+        );
+    }
+
+    let sessions = app.tui_sessions(SessionListView::Active).expect("sessions");
+    let ids = sessions
+        .iter()
+        .map(|session| session.summary.id.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(ids.contains(&parent.as_str()));
+    assert!(!ids.contains(&side.as_str()));
+    assert!(!ids.contains(&child.as_str()));
+}
+
 #[tokio::test]
 pub(crate) async fn new_session_does_not_receive_previous_running_output() {
     let temp = tempdir().expect("temp");
@@ -466,15 +577,14 @@ pub(crate) async fn sessions_panel_action_mode_archives_current_and_restores_fro
     assert!(app.force_new_once);
     assert!(ui.transcript.is_empty());
     assert!(ui.history.is_empty());
-    assert!(
-        store
-            .list_sessions_for_workdir_with_sources(&app.workdir, TUI_SESSION_SOURCES)
+    assert_eq!(
+        app.tui_sessions(SessionListView::Active)
             .expect("active")
-            .is_empty()
+            .len(),
+        0
     );
     assert_eq!(
-        store
-            .list_archived_sessions_for_workdir_with_sources(&app.workdir, TUI_SESSION_SOURCES)
+        app.tui_sessions(SessionListView::Archived)
             .expect("archived")
             .len(),
         1
@@ -783,8 +893,9 @@ pub(crate) fn session_display_messages_count_visible_prompts_and_answers() {
     assert_eq!(
         app.session_list_lines().expect("session list"),
         [format!(
-            "{} tui mock/mock-model messages=2",
-            short_session(&session_id)
+            "{} {} mock/mock-model messages=2",
+            short_session(&session_id),
+            session_project_label(&app.workdir.to_string_lossy())
         )]
     );
     let panel = app
@@ -795,8 +906,9 @@ pub(crate) fn session_display_messages_count_visible_prompts_and_answers() {
         .iter()
         .find(|row| matches!(&row.value, BottomSelectionValue::Session(id) if id == &session_id))
         .expect("session row");
+    let expected_description = format!("{}  mock/mock-model  messages=2", app.workdir.display());
     assert_eq!(
         row.description.as_deref(),
-        Some("mock/mock-model  messages=2")
+        Some(expected_description.as_str())
     );
 }

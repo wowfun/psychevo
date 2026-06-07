@@ -324,7 +324,7 @@ pub(crate) fn stale_file_search_results_are_ignored() {
 pub(crate) fn bottom_panel_row_right_aligns_detail_with_wide_title() {
     let row = BottomSelectionRow {
         label: "当前模式询问".to_string(),
-        description: Some("deepseek/deepseek-v4-pro  messages=2".to_string()),
+        description: Some("/repo  deepseek/deepseek-v4-pro  messages=2".to_string()),
         detail: Some("08:50".to_string()),
         group: None,
         search_text: String::new(),

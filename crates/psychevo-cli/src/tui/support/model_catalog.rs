@@ -2,6 +2,8 @@
 pub(crate) use super::*;
 pub(crate) struct TuiSessionDisplaySummary {
     pub(crate) summary: SessionSummary,
+    pub(crate) project_label: String,
+    pub(crate) project_display_path: String,
     pub(crate) visible_message_count: usize,
 }
 

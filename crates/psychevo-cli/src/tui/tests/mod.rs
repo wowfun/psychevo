@@ -22,6 +22,7 @@ pub(crate) fn summary(id: &str) -> SessionSummary {
     SessionSummary {
         id: id.to_string(),
         source: "tui".to_string(),
+        parent_session_id: None,
         workdir: "/repo".to_string(),
         model: "model".to_string(),
         provider: "provider".to_string(),

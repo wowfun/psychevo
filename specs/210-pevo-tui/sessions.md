@@ -9,22 +9,27 @@ Define session lifecycle behavior owned by the interactive `pevo tui` surface.
 
 ## Session Behavior
 
-Without `--session` or `--new`, TUI resumes the latest `run` or `tui` session
-for the canonical working directory. If no matching session exists, the first
-submitted prompt creates a new session with `source = "tui"`.
+Without `--session` or `--new`, TUI resumes the latest human-visible session
+from the local state database, regardless of the directory where TUI was
+opened. Internal sessions such as `tui-side` are excluded. If no matching
+session exists, the first submitted prompt creates a new session with
+`source = "tui"` for the opened working directory.
 
 `--session` resumes the requested session. `--new` defers creation until the
 first prompt is submitted, then creates a `source = "tui"` session.
 
 When TUI starts with a current session, it loads that session's sanitized
-history into the transcript before accepting input. Switching sessions inside
-fullscreen TUI replaces the displayed transcript with the selected session's
-sanitized history. Folded reasoning remains hidden or folded according to TUI
-rendering rules and must not leak provider replay fields. TUI history reload
-may restore folded local reasoning into `Thinking: <reasoning>` transcript
-evidence, but only from persisted message material that is already marked as
-reasoning and never by replaying provider wire fields as visible assistant
-text.
+history into the transcript before accepting input. If that session belongs to
+a different stored workdir than the launch directory, TUI switches its active
+workdir, Gateway source, project context, file/completion scope, sidebar state,
+and subsequent turn options to the stored workdir. Switching sessions inside
+fullscreen TUI follows the same rule, then replaces the displayed transcript
+with the selected session's sanitized history. Folded reasoning remains hidden
+or folded according to TUI rendering rules and must not leak provider replay
+fields. TUI history reload may restore folded local reasoning into
+`Thinking: <reasoning>` transcript evidence, but only from persisted message
+material that is already marked as reasoning and never by replaying provider
+wire fields as visible assistant text.
 
 When history contains an assistant tool-call message without persisted tool
 results, TUI may keep those tool rows live only when the current TUI process
@@ -91,11 +96,15 @@ fullscreen and non-terminal scripted TUI. Empty titles and rename attempts
 without a current session fail with bounded user-visible errors.
 
 Fullscreen `/sessions`, `/resume`, and `/continue` expose active and archived
-session views in the shared bottom selection pane. Active sessions are the
-default view. Archived sessions are hidden from the default view, from default
-TUI startup resume, and from latest-session resolution until restored.
-Non-terminal scripted `/sessions`, `/resume`, and `/continue` continue to print
-only active sessions.
+global session views in the shared bottom selection pane. Active sessions are
+the default view. Archived sessions are hidden from the default view, from
+default TUI startup resume, and from latest-session resolution until restored.
+Rows show compact project/workdir context and are searchable by session id,
+title, project, workdir, provider, and model. Runtime `source` remains an
+internal classification, not a user-facing search, grouping, or visibility
+boundary. Non-terminal scripted `/sessions`, `/resume`, and `/continue`
+continue to print only active sessions, using the same global human-visible
+list.
 
 When the fullscreen session pane opens and the current visible session appears
 in the active view, the selected-row arrow defaults to that current session

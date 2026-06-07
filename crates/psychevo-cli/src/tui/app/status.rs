@@ -46,7 +46,7 @@ impl TuiApp {
             session: self.current_session.clone(),
             continue_latest: self.current_session.is_none() && !self.force_new_once,
             source: "tui".to_string(),
-            continue_sources: TUI_SESSION_SOURCES
+            continue_sources: TUI_CONTINUE_SESSION_SOURCES
                 .iter()
                 .map(|source| (*source).to_string())
                 .collect(),
@@ -219,9 +219,9 @@ impl TuiApp {
     }
 
     pub(crate) fn session_list_lines(&self) -> Result<Vec<String>> {
-        let sessions = self.tui_sessions_for_workdir(SessionListView::Active)?;
+        let sessions = self.tui_sessions(SessionListView::Active)?;
         if sessions.is_empty() {
-            return Ok(vec!["no sessions for this workdir".to_string()]);
+            return Ok(vec!["no sessions".to_string()]);
         }
         Ok(sessions
             .into_iter()
@@ -229,7 +229,7 @@ impl TuiApp {
                 let summary = &session.summary;
                 format_session_line(
                     &summary.id,
-                    &summary.source,
+                    &session.project_label,
                     &summary.provider,
                     &summary.model,
                     session.visible_message_count as i64,

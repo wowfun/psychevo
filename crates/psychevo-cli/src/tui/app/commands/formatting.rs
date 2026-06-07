@@ -94,7 +94,7 @@ impl TuiApp {
                     input: Vec::new(),
                     options,
                     runtime_source: Some("tui".to_string()),
-                    continue_sources: TUI_SESSION_SOURCES
+                    continue_sources: TUI_CONTINUE_SESSION_SOURCES
                         .iter()
                         .map(|source| (*source).to_string())
                         .collect(),

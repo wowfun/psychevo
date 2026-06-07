@@ -666,7 +666,7 @@ pub(crate) fn cli_tui_sessions_scripted_fallback_hides_archived_sessions() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8(output.stdout).expect("stdout");
-    assert!(stdout.contains("no sessions for this workdir"));
+    assert!(stdout.contains("no sessions"));
     assert!(!stdout.contains("mock/mock-model"));
     assert!(!stdout.contains("hidden chain"));
 }

@@ -262,10 +262,11 @@ pub(crate) fn stable_session_bottom_panel() -> BottomSelectionPanel {
         vec![
             BottomSelectionRow {
                 label: "Implement model picker".to_string(),
-                description: Some("mock/mock-model  messages=5".to_string()),
-                detail: Some("12:10".to_string()),
-                group: Some("2026-05-06".to_string()),
-                search_text: "session-a Implement model picker mock mock-model tui".to_string(),
+                description: Some("/repo  mock/mock-model  messages=5".to_string()),
+                detail: Some("2026-05-06 12:10".to_string()),
+                group: Some("repo".to_string()),
+                search_text: "session-a Implement model picker repo /repo mock mock-model"
+                    .to_string(),
                 is_current: true,
                 is_default: false,
                 style: BottomRowStyle::Normal,
@@ -274,10 +275,11 @@ pub(crate) fn stable_session_bottom_panel() -> BottomSelectionPanel {
             },
             BottomSelectionRow {
                 label: "Review session pane".to_string(),
-                description: Some("mock/other-model  messages=3".to_string()),
-                detail: Some("09:44".to_string()),
-                group: Some("2026-05-05".to_string()),
-                search_text: "session-b Review session pane mock other-model run".to_string(),
+                description: Some("/repo  mock/other-model  messages=3".to_string()),
+                detail: Some("2026-05-05 09:44".to_string()),
+                group: Some("repo".to_string()),
+                search_text: "session-b Review session pane repo /repo mock other-model"
+                    .to_string(),
                 is_current: false,
                 is_default: false,
                 style: BottomRowStyle::Normal,
@@ -293,10 +295,10 @@ pub(crate) fn stable_archived_session_bottom_panel() -> BottomSelectionPanel {
         SessionListView::Archived,
         vec![BottomSelectionRow {
             label: "Archived refactor branch".to_string(),
-            description: Some("mock/mock-model  messages=7".to_string()),
-            detail: Some("18:22".to_string()),
-            group: Some("2026-05-01".to_string()),
-            search_text: "session-archived Archived refactor branch mock mock-model tui"
+            description: Some("/repo  mock/mock-model  messages=7".to_string()),
+            detail: Some("2026-05-01 18:22".to_string()),
+            group: Some("repo".to_string()),
+            search_text: "session-archived Archived refactor branch repo /repo mock mock-model"
                 .to_string(),
             is_current: false,
             is_default: false,

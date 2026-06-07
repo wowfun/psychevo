@@ -122,6 +122,8 @@ impl TuiApp {
     #[cfg(test)]
     pub(crate) fn switch_session_no_print(&mut self, reference: &str) -> Result<String> {
         let id = self.resolve_session_ref(reference)?;
+        let summary = self.session_summary_required(&id)?;
+        self.adopt_session_workdir(&summary)?;
         self.state_runtime.store().resume_session(&id)?;
         self.current_session = Some(id.clone());
         self.reset_live_agent_reload_poll();
@@ -152,6 +154,8 @@ impl TuiApp {
             store.resume_session(&edge.child_session_id)?;
             edge.child_session_id
         };
+        let summary = self.session_summary_required(&child_session_id)?;
+        self.adopt_session_workdir(&summary)?;
         self.detach_running_for_session_switch(ui, Some(child_session_id.clone()));
         self.current_session = Some(child_session_id.clone());
         self.reset_live_agent_reload_poll();
@@ -290,6 +294,8 @@ impl TuiApp {
         ui: &mut FullscreenUi<'_>,
         session_id: &str,
     ) -> Result<()> {
+        let summary = self.session_summary_required(session_id)?;
+        self.adopt_session_workdir(&summary)?;
         self.detach_running_for_session_switch(ui, None);
         self.state_runtime.store().resume_session(session_id)?;
         self.current_session = Some(session_id.to_string());
@@ -581,42 +587,50 @@ impl TuiApp {
 
     #[cfg(test)]
     pub(crate) fn resolve_session_ref(&self, reference: &str) -> Result<String> {
-        let sessions = self.sessions_for_workdir()?;
+        let sessions = self.sessions()?;
         resolve_session_ref_from_summaries(&sessions, reference)
     }
 
     #[cfg(test)]
-    pub(crate) fn sessions_for_workdir(&self) -> Result<Vec<SessionSummary>> {
-        self.state_runtime
+    pub(crate) fn sessions(&self) -> Result<Vec<SessionSummary>> {
+        Ok(self
+            .state_runtime
             .store()
-            .list_sessions_for_workdir_with_sources(&self.workdir, TUI_SESSION_SOURCES)
-            .map_err(Into::into)
+            .list_sessions_with_sources(&[])?
+            .into_iter()
+            .filter(human_visible_tui_session_summary)
+            .collect())
     }
 
-    pub(crate) fn tui_sessions_for_workdir(
+    pub(crate) fn tui_sessions(
         &self,
         view: SessionListView,
     ) -> Result<Vec<TuiSessionDisplaySummary>> {
-        let store = self.state_runtime.store();
-        let sessions = match view {
-            SessionListView::Active => {
-                store.list_sessions_for_workdir_with_sources(&self.workdir, TUI_SESSION_SOURCES)?
-            }
-            SessionListView::Archived => store.list_archived_sessions_for_workdir_with_sources(
-                &self.workdir,
-                TUI_SESSION_SOURCES,
-            )?,
-        };
-        sessions
-            .into_iter()
-            .map(|summary| {
-                let messages = store.load_tui_message_summaries(&summary.id)?;
-                Ok(TuiSessionDisplaySummary {
-                    summary,
-                    visible_message_count: visible_tui_message_count(&messages)?,
-                })
-            })
-            .collect()
+        tui_sessions_for_store(self.state_runtime.store(), view)
+    }
+
+    pub(crate) fn session_summary_required(&self, session_id: &str) -> Result<SessionSummary> {
+        self.state_runtime
+            .store()
+            .session_summary(session_id)?
+            .ok_or_else(|| anyhow!("session not found: {session_id}"))
+    }
+
+    pub(crate) fn adopt_session_workdir(&mut self, summary: &SessionSummary) -> Result<()> {
+        let next_workdir = canonicalize_workdir(Path::new(&summary.workdir))?;
+        if next_workdir == self.workdir {
+            return Ok(());
+        }
+        self.workdir = next_workdir;
+        self.workdir_key = self.workdir.to_string_lossy().to_string();
+        self.slash_config = load_effective_tui_slash_config(
+            &self.env_map,
+            self.state_runtime.clone(),
+            self.workdir.clone(),
+            self.config_path.clone(),
+        )?;
+        self.refresh_selected_model();
+        Ok(())
     }
 
     pub(crate) fn load_current_session_history(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
@@ -673,6 +687,56 @@ impl TuiApp {
         ui.refresh_sidebar(self);
         Ok(())
     }
+}
+
+pub(crate) fn latest_human_visible_session_id(store: &SqliteStore) -> Result<Option<String>> {
+    Ok(tui_sessions_for_store(store, SessionListView::Active)?
+        .into_iter()
+        .next()
+        .map(|session| session.summary.id))
+}
+
+pub(crate) fn tui_sessions_for_store(
+    store: &SqliteStore,
+    view: SessionListView,
+) -> Result<Vec<TuiSessionDisplaySummary>> {
+    let sessions = match view {
+        SessionListView::Active => store.list_sessions_with_sources(&[])?,
+        SessionListView::Archived => store.list_archived_sessions_with_sources(&[])?,
+    };
+    let mut visible = Vec::new();
+    for summary in sessions {
+        if !human_visible_tui_session_summary(&summary) {
+            continue;
+        }
+        let messages = store.load_tui_message_summaries(&summary.id)?;
+        let visible_message_count = visible_tui_message_count(&messages)?;
+        visible.push(TuiSessionDisplaySummary {
+            project_label: session_project_label(&summary.workdir),
+            project_display_path: session_project_display_path(&summary.workdir),
+            summary,
+            visible_message_count,
+        });
+    }
+    Ok(visible)
+}
+
+pub(crate) fn human_visible_tui_session_summary(summary: &SessionSummary) -> bool {
+    summary.parent_session_id.is_none()
+        && !TUI_INTERNAL_SESSION_SOURCES.contains(&summary.source.as_str())
+}
+
+pub(crate) fn session_project_label(workdir: &str) -> String {
+    Path::new(workdir)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or("workdir")
+        .to_string()
+}
+
+pub(crate) fn session_project_display_path(workdir: &str) -> String {
+    Path::new(workdir).display().to_string()
 }
 
 pub(crate) fn session_context_limit_with_parent_fallback(

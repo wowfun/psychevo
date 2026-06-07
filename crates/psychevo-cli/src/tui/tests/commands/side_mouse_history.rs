@@ -39,11 +39,10 @@ pub(crate) async fn fullscreen_btw_opens_hidden_side_and_ctrl_c_deletes_it() {
     assert_eq!(app.current_session.as_deref(), Some(side.as_str()));
     assert!(ui.transcript.is_empty());
     assert!(
-        store
-            .list_sessions_for_workdir_with_sources(&app.workdir, TUI_SESSION_SOURCES)
+        app.tui_sessions(SessionListView::Active)
             .expect("sessions")
             .iter()
-            .all(|summary| summary.id != side)
+            .all(|session| session.summary.id != side)
     );
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::Refresh)
