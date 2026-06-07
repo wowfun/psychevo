@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "estimated": {
+      "type": "boolean"
+    },
+    "id": {
+      "type": "string"
+    },
+    "label": {
+      "type": "string"
+    },
+    "percent": {
+      "default": null,
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "status": {
+      "type": "string"
+    },
+    "tokens": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "estimated",
+    "id",
+    "label",
+    "status",
+    "tokens"
+  ],
+  "title": "ContextUsageCategoryView",
+  "type": "object"
+}

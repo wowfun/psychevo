@@ -133,7 +133,7 @@ impl SqliteStore {
         sources: &[&str],
     ) -> Result<Vec<SessionSummary>> {
         let workdir = workdir.to_string_lossy().to_string();
-        self.list_sessions_for_workdir_with_sources_and_archive(&workdir, sources, false)
+        self.list_sessions_with_sources_and_archive(Some(&workdir), sources, false)
     }
 
     pub fn list_archived_sessions_for_workdir_with_sources(
@@ -142,23 +142,34 @@ impl SqliteStore {
         sources: &[&str],
     ) -> Result<Vec<SessionSummary>> {
         let workdir = workdir.to_string_lossy().to_string();
-        self.list_sessions_for_workdir_with_sources_and_archive(&workdir, sources, true)
+        self.list_sessions_with_sources_and_archive(Some(&workdir), sources, true)
     }
 
-    pub(crate) fn list_sessions_for_workdir_with_sources_and_archive(
+    pub fn list_sessions_with_sources(&self, sources: &[&str]) -> Result<Vec<SessionSummary>> {
+        self.list_sessions_with_sources_and_archive(None, sources, false)
+    }
+
+    pub fn list_archived_sessions_with_sources(
         &self,
-        workdir: &str,
+        sources: &[&str],
+    ) -> Result<Vec<SessionSummary>> {
+        self.list_sessions_with_sources_and_archive(None, sources, true)
+    }
+
+    pub(crate) fn list_sessions_with_sources_and_archive(
+        &self,
+        workdir: Option<&str>,
         sources: &[&str],
         archived: bool,
     ) -> Result<Vec<SessionSummary>> {
         let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let mut stmt = conn.prepare(
             r#"
-            SELECT id, source, workdir, model, provider, started_at_ms,
+            SELECT id, source, parent_session_id, workdir, model, provider, started_at_ms,
                    updated_at_ms, ended_at_ms, end_reason, archived_at_ms,
                    message_count, tool_call_count, title
             FROM sessions
-            WHERE workdir = ?1
+            WHERE (?1 IS NULL OR workdir = ?1)
               AND ((?2 = 0 AND archived_at_ms IS NULL) OR (?2 = 1 AND archived_at_ms IS NOT NULL))
             ORDER BY updated_at_ms DESC, started_at_ms DESC
             "#,
@@ -180,7 +191,7 @@ impl SqliteStore {
         Ok(conn
             .query_row(
                 r#"
-                SELECT id, source, workdir, model, provider, started_at_ms,
+                SELECT id, source, parent_session_id, workdir, model, provider, started_at_ms,
                        updated_at_ms, ended_at_ms, end_reason, archived_at_ms,
                        message_count, tool_call_count, title
                 FROM sessions

@@ -1,0 +1,113 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "WorkspaceDiffFileStatusView": {
+      "enum": [
+        "modified",
+        "added",
+        "deleted",
+        "untracked",
+        "binary",
+        "unreadable"
+      ],
+      "type": "string"
+    },
+    "WorkspaceDiffFileView": {
+      "properties": {
+        "binary": {
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string"
+        },
+        "placeholder": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/WorkspaceDiffFileStatusView"
+        },
+        "unreadable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "binary",
+        "path",
+        "status",
+        "unreadable"
+      ],
+      "type": "object"
+    },
+    "WorkspaceDiffTruncationView": {
+      "properties": {
+        "maxBytes": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "maxLines": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "omittedBytes": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "omittedLines": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "maxBytes",
+        "maxLines",
+        "omittedBytes",
+        "omittedLines",
+        "truncated"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "files": {
+      "items": {
+        "$ref": "#/definitions/WorkspaceDiffFileView"
+      },
+      "type": "array"
+    },
+    "isGitRepo": {
+      "type": "boolean"
+    },
+    "selectedPath": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "truncation": {
+      "$ref": "#/definitions/WorkspaceDiffTruncationView"
+    },
+    "unifiedDiff": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "files",
+    "isGitRepo",
+    "truncation",
+    "unifiedDiff"
+  ],
+  "title": "WorkspaceDiffResult",
+  "type": "object"
+}

@@ -1,0 +1,97 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ContextUsageCategoryView": {
+      "properties": {
+        "estimated": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "percent": {
+          "default": null,
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "tokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "estimated",
+        "id",
+        "label",
+        "status",
+        "tokens"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "advice": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "available": {
+      "type": "boolean"
+    },
+    "categories": {
+      "items": {
+        "$ref": "#/definitions/ContextUsageCategoryView"
+      },
+      "type": "array"
+    },
+    "contextLimit": {
+      "default": null,
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "label": {
+      "type": "string"
+    },
+    "percent": {
+      "default": null,
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "status": {
+      "type": "string"
+    },
+    "usedTokens": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "available",
+    "categories",
+    "label",
+    "status",
+    "usedTokens"
+  ],
+  "title": "ContextReadResult",
+  "type": "object"
+}

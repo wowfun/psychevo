@@ -711,6 +711,7 @@ pub struct SessionRedoResult {
 pub struct SessionSummary {
     pub id: String,
     pub source: String,
+    pub parent_session_id: Option<String>,
     pub workdir: String,
     pub model: String,
     pub provider: String,

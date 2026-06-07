@@ -79,9 +79,13 @@ with a valid browser-session cookie redirects to the clean shell. Reopening it
 without a valid browser-session cookie returns a launch-expired diagnostic page
 with the recovery command.
 
-The managed cookie authorizes only workdirs that were granted by a launch/open
-flow in the current server process. Direct Bearer API clients may request any
-local workdir accessible to the Psychevo process.
+The managed cookie authorizes workdirs granted by a launch/open flow in the
+current server process and workdirs explicitly adopted from human-visible
+global session projects. A browser session may adopt another project by
+resuming a stored session or by starting a new draft from that project group in
+the Sessions browser, but it may not request arbitrary workdirs that have no
+visible stored session. Direct Bearer API clients may request any local workdir
+accessible to the Psychevo process.
 
 Direct browser visits to the managed base URL without a valid browser-session
 cookie are not authorized Web Shell launches. They should return a local
@@ -127,11 +131,32 @@ persisted messages into non-empty `TranscriptEntry[]` whenever those messages
 contain visible user or assistant content. A history selection must not return a
 normal empty transcript snapshot for such a session.
 
+`thread/start` is a new-source operation, not a session-creation operation. It
+clears the current source binding and returns an empty source snapshot with
+`thread = null`, without archiving the previously selected thread or inserting a
+placeholder session. That empty source snapshot is a detached draft: delayed
+events or read-only snapshot refreshes for previously running threads must not
+bind it back to an older thread. Only the draft's own first accepted prompt or
+shell result may attach the Web view to the newly resolved runtime thread.
+Web clients may show a local draft row for this detached draft in their History
+UI, but that row is not a persisted session and must not be exposed as a
+Gateway `SessionSummaryView`.
+When the detached draft is started from a project scope, the draft row appears
+inside that project's Sessions group rather than as a global item above all
+projects. If the target project has no persisted visible sessions yet, the
+client may create a temporary project group for the draft.
+`source/reset` is stronger: it ends and archives the previously bound thread,
+clears the source binding, and returns the same empty source snapshot without
+creating a replacement session.
+
 If the user submits a prompt from an empty source snapshot, the Web Gateway
-creates and binds a concrete thread before starting the turn. All live
-transcript events for that turn are emitted with the owning `threadId`, so a
-background running turn cannot be projected into whichever thread is currently
-visible.
+validates the input before resolving or creating a concrete thread. A valid
+first prompt starts against the source key; runtime creates the durable session
+when it persists the first user request, and Gateway binds the source to that
+session after the result resolves. Live events may initially arrive before a
+durable thread id is known, but completion and snapshot refreshes must carry the
+owning `threadId`, so a background running turn cannot be projected into
+whichever thread is currently visible.
 Workbench updates the active thread binding from `turnStarted` and live entry
 events, but ordinary transcript rendering during the active turn is driven by
 Gateway live transcript events. It must not poll `thread/read` on a timer during
@@ -152,6 +177,39 @@ current Web source without archiving the previously selected thread. Only an
 explicit `source/reset`, archive action, or delete action may remove a thread
 from the active history list.
 
+Workbench history is a global session browser. `thread/list` with no workdir
+filter returns all human-visible sessions from the local state database; the
+stored session workdir is used only for grouping and for the target scope on
+resume. Rows are grouped by project, with the current project first and all
+other projects ordered by latest session activity. Runtime `source` may appear
+in diagnostics but must not appear in history rows/search or decide whether
+GUI, TUI, ACP, Web, or Desktop sessions are visible by default.
+
+When Workbench resumes a session from another project, it switches the active
+scope to that session's stored workdir before accepting more input. The file
+tree, `@` completion, diff/status panes, agents, skills, and subsequent turns
+refresh against the resumed project. Cross-project resume must not splice the
+old session's transcript into the launch workdir. Archiving, restoring,
+renaming, and deleting sessions operate from the same global list and must
+respect running/current-session guards across every source.
+Starting a new session from another project group switches the active browser
+scope to that project's stored workdir and returns an empty source snapshot for
+that project, without first requiring the user to resume an older session.
+
+The left Sessions browser owns the session-history controls. It has one
+compact header with the history icon to the left of `Sessions`; it does not
+render a separate `History` title or an `active across projects` subtitle. The
+header includes one expand/collapse-all toggle for project groups; when any
+project is collapsed it expands all groups, otherwise it collapses all groups.
+Each project group can be collapsed independently, shows only the project label
+in its header, and has a right-aligned `+` action for starting a new session in
+that project. Group headers do not show session counts. Session rows put the
+display title and timestamp on the same line with the timestamp right-aligned;
+the row does not show project name or entry count under the title. The archive
+history toggle belongs in Settings rather than the Sessions header. The
+Sessions scroller reserves a stable scrollbar gutter so project header actions
+do not shift horizontally as overflow appears or disappears.
+
 Selecting or creating a Web thread is allowed while another thread is running.
 The original thread continues in the background, remains visible in history with
 running/queued state, and can be interrupted by selecting it or by thread-scoped
@@ -167,6 +225,12 @@ Long completion lists remain keyboard-operable: ArrowUp/ArrowDown and
 Ctrl+P/Ctrl+N update the active option and keep it visible inside the popover
 without moving focus out of the composer textarea.
 
+The Web Shell `Search` action opens a center-surface search view. The first
+slice searches the current workdir's known session ids, session titles, and
+visible message text from `thread/read` snapshots. Search results resume the
+matching session in the transcript surface; they do not create a right-side
+utility tab and do not search arbitrary host files.
+
 The Web Shell executes shared slash commands through `command/execute` when the
 command has a Gateway representation. Host-only results such as copy, export,
 share, and download are returned as structured client actions and performed by
@@ -181,12 +245,14 @@ local command error.
 
 The Web Shell supports TUI-compatible shell mode through `shell/start`.
 `shell/start` accepts `scope`, optional `threadId`, and a stripped local shell
-`command`; it returns whether the command was accepted plus the owning thread
-id when known. Execution uses the runtime user-shell executor, not the
-provider-callable `exec_command` tool surface. Live shell start/end events are
-projected through the ordinary Gateway event stream as shell evidence rows.
-After completion or error, Gateway sends a notification that lets Workbench
-refresh the owning snapshot and history.
+`command`; it returns whether the command was accepted plus the owning thread id
+when known. When a shell command is the first user request for an empty source
+snapshot, the accepted response may have `threadId = null`; the later
+`shell/result.thread.id` is authoritative. Execution uses the runtime user-shell
+executor, not the provider-callable `exec_command` tool surface. Live shell
+start/end events are projected through the ordinary Gateway event stream as
+shell evidence rows. After completion or error, Gateway sends a notification
+that lets Workbench refresh the owning snapshot and history.
 
 Shell mode is an explicit composer mode, not a literal prompt prefix. Entering
 `!` in an empty composer switches into shell mode and displays the shell marker;
@@ -210,24 +276,87 @@ the bounded runtime user-shell XML record.
 
 ## Workbench Layout
 
-The desktop layout is a dense three-column workbench:
+The shared Web and generic Desktop layout follows the v0 workbench direction:
+a dark, dense, operator-ledger app shell with no top tab bar. Desktop may later
+add native chrome and a native status bar, but the application content layout is
+the same Web/Desktop tree.
 
-- left: history list and session lifecycle actions
-- center: transcript and composer
-- right: status/queue, settings/auth/model, diff, and export/share panels
+The desktop layout is a three-surface workbench:
 
-Narrow layouts keep transcript and composer as the primary surface and collapse
-history and utility panels into bottom tabs or drawers. The UI should present
-as an operational workbench, not a landing page.
+- left: collapse control, `New Session`, `Search`, `Artifacts`, global
+  `Pinned`, project-grouped Sessions with expand/collapse and per-project new
+  session actions, and a bottom utility rail for Settings. Agents, Skills,
+  Tools, and MCP remain deferred utility surfaces and are hidden from the rail
+  until the product explicitly enables them.
+- center: transcript/workbench, bottom-fixed composer, and optional inline
+  preview split
+- right: `Status` and `Files` tabs, defaulting to `Status`
+
+The center composer and right inspector are session-scoped. They are hidden
+when no persisted session or local new-session draft is selected. Selecting a
+history session or creating/selecting a local draft reveals the composer and
+right inspector for that session scope.
+
+The right `Files` tab shows only the launched project's file tree. Selecting a
+supported text file previews it in the center inline split instead of inserting
+a reference or opening an external host file. Unsupported preview formats and
+Gateway binary/unreadable file responses do not open a preview pane. Folder rows
+are locally expandable and collapsible so users can keep large trees compact.
+The inline preview is part of the center surface, not a third right-tab mode,
+and can be closed without changing the selected right tab.
+
+The right `Status` tab is ordered as current work state: session identity and
+activity first, compact model/permission/mode summaries second, context usage
+as a graphical meter, then changed files as ledger rows. Changed-file rows are
+clickable. Selecting one opens a read-only unified diff preview in the center
+inline split, scoped to that file when Gateway can provide a file-specific
+diff. The same preview surface is used for `/diff`, artifact preview, and file
+preview so display artifacts do not enter ordinary transcript history.
+
+Settings includes a local appearance control with `dark` and `light` choices.
+The default is the dark ledger appearance. The setting is a Workbench host
+preference and does not require Gateway to persist provider/runtime
+configuration, but Gateway-rendered status/settings data must remain readable
+under both appearances.
+Settings also includes a local Debug switch. Enabling Debug adds a right-side
+`Debug` tab after `Files` and displays the current Workbench event stream and
+Gateway notifications there. Debug output is diagnostic chrome, hidden by
+default, and must not become transcript history or model-visible context.
+
+Narrow layouts keep transcript and composer as the primary surface. Left and
+right sidebars collapse to fixed-size icon buttons without allocating extra
+empty columns, and the composer/status line remains usable without horizontal
+overflow. The UI should present as an operational workbench, not a landing
+page.
 
 First-slice panels include transcript, composer, history, status/queue,
-settings/auth/model, diff placeholder, export/share, permission, and clarify.
-Memory and resource surfaces are status-only in the first Web slice.
+settings/auth/model controls, project files, changed-file diff preview,
+export/share, permission, and clarify. Memory and resource surfaces are
+status-only in the first Web slice.
 
 The composer matches TUI keyboard behavior: plain Enter submits, modifier Enter
 variants insert newline, IME composition is respected, and running-turn prompt
 submission steers by default. Queueing remains available as an explicit composer
 mode and via `/queue`.
+The composer panel uses a Copilot-style restrained input surface: the textarea
+and send control are inside the input frame, the attachment button and current
+Agent selector sit in the lower-left action slot, and model controls are moved
+out of the text frame into the status line. The status line mirrors the TUI
+footer shape with clickable permission mode, chat mode, model, variant, context
+usage ring, project path, and Git branch. Context usage is graphical by
+default; detailed text appears on hover or in the same graphical popover used
+by the right `Status` context panel. Tokenizer and context-scope details are
+not shown in the Workbench UI.
+Permission approval and clarify requests appear in the composer area, matching
+the TUI's bottom interaction pattern. They may sit above or temporarily replace
+the text input while awaiting a decision, but they must not be buried in the
+right Status inspector or Debug diagnostics.
+The attachment button opens the host file picker. Browser hosts attach images
+as Gateway image inputs, text-like files as visible context input, and
+non-text files as bounded visible metadata when their contents cannot be
+embedded safely. Attachment chips remain in the composer until the next prompt
+is accepted or the user removes them; attaching files must not require opening
+the right Files tab.
 The same shared composer provides Web and generic Desktop shell mode. The
 generic Desktop shell reuses this Workbench/Gateway behavior and identifies
 itself through the host/source scope; this topic does not introduce native

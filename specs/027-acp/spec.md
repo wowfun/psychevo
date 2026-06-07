@@ -52,20 +52,23 @@ owns the protocol mapping, not the product process that hosts it.
 
 ACP session ids identify active ACP session actors. Each actor maps to a
 Psychevo runtime session id once runtime creates or loads the backing session.
-New ACP sessions use gateway source kind `acp` and runtime source `acp` for persistence. A newly created ACP
-session may remain transport-local until the first model-backed prompt creates
-the durable runtime session; the ACP id must remain stable for the client and
-must be linked to the runtime id once that id exists.
+New ACP sessions use gateway source kind `acp` and runtime source `acp` for
+persistence. A newly created ACP session may remain transport-local until the
+first model-backed prompt creates the durable runtime session; the ACP id must
+remain stable for the client and must be linked to the runtime id once that id
+exists.
 
 ACP uses a `Persistent` Gateway source lifetime. Source-to-thread binding is
 therefore durable across reconnects, while active turns and queued turns remain
 process-local to the Gateway instance that owns the running ACP agent.
 
-`session/new` creates a runtime session boundary for the selected cwd,
-provider, model, mode, permissions, and ACP-supplied MCP sources. `session/load`
-opens an existing Psychevo session for replay and future prompts. `session/list`
-lists Psychevo sessions visible to the requested cwd. `session/close` closes
-the ACP actor and aborts any active invocation for that actor.
+`session/new` creates only an ACP session actor for the selected cwd, provider,
+model, mode, permissions, and ACP-supplied MCP sources. Its backing runtime
+session remains absent until the first model-backed prompt creates it.
+`session/load` opens an existing Psychevo session for replay and future prompts.
+`session/list` lists Psychevo sessions visible to the requested cwd.
+`session/close` closes the ACP actor and aborts any active invocation for that
+actor.
 
 Session history replay uses sanitized runtime messages and ACP session updates.
 Replay is presentation, not new evidence. `session/load` must replay history

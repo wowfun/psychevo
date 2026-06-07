@@ -353,7 +353,21 @@
       },
       "type": "array"
     },
+    "mode": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "model": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "permissionMode": {
       "default": null,
       "type": [
         "string",

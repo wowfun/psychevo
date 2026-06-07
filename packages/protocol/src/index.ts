@@ -11,6 +11,7 @@ export type {
 } from "./generated";
 import type {
   GatewayEvent,
+  ContextReadResult,
   CompletionListResult,
   InitializeResult,
   JsonRpcErrorResponse,
@@ -19,7 +20,10 @@ import type {
   SettingsReadResult,
   ThreadListResult,
   ThreadSnapshot,
-  TurnResultPayload
+  TurnResultPayload,
+  WorkspaceDiffResult,
+  WorkspaceFileReadResult,
+  WorkspaceFilesResult
 } from "./generated";
 
 const ajv = new Ajv({ allErrors: true, strict: false, validateFormats: false });
@@ -48,6 +52,14 @@ export const TurnResultNotificationSchema =
 export const InitializeResultSchema = schema<InitializeResult>("InitializeResult");
 export const SettingsReadResultSchema =
   schema<SettingsReadResult>("SettingsReadResult");
+export const WorkspaceFilesResultSchema =
+  schema<WorkspaceFilesResult>("WorkspaceFilesResult");
+export const WorkspaceFileReadResultSchema =
+  schema<WorkspaceFileReadResult>("WorkspaceFileReadResult");
+export const WorkspaceDiffResultSchema =
+  schema<WorkspaceDiffResult>("WorkspaceDiffResult");
+export const ContextReadResultSchema =
+  schema<ContextReadResult>("ContextReadResult");
 
 export const RpcResponseSchema: RuntimeSchema<JsonRpcSuccess | JsonRpcErrorResponse> = {
   parse(value) {

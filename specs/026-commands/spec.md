@@ -154,6 +154,9 @@ showing a structured diff result, is available during active turns, and must
 not write runtime messages, affect model context, alter exports, or change
 usage/accounting. Its concrete semantics are defined by
 [214 pevo Diff Command](../214-pevo-diff-command/spec.md).
+Web and Desktop surfaces satisfy this capability by opening a read-only inline
+diff preview in the center workbench split. Right-panel changed-file rows may
+reuse the same structured diff action without executing a slash command.
 
 Interactive terminal surfaces may project local slash command feedback as
 surface-local UI state. Such feedback is display-only: it must not become user

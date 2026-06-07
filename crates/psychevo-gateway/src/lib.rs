@@ -381,6 +381,46 @@ impl Gateway {
         Ok(())
     }
 
+    pub fn clear_source_binding(
+        &self,
+        source: &GatewaySource,
+    ) -> psychevo_runtime::Result<Option<String>> {
+        let source_key = source.source_key();
+        match source.lifetime {
+            GatewaySourceLifetime::Invocation => Ok(None),
+            GatewaySourceLifetime::Process => Ok(self
+                .process_bindings
+                .lock()
+                .expect("gateway process binding map poisoned")
+                .remove(&source_key.0)),
+            GatewaySourceLifetime::Persistent => {
+                let previous = self
+                    .state
+                    .store()
+                    .gateway_source_binding(&source_key.0)?
+                    .map(|binding| binding.thread_id);
+                self.state
+                    .store()
+                    .delete_gateway_source_binding(&source_key.0)?;
+                Ok(previous)
+            }
+        }
+    }
+
+    pub fn reset_source_to_empty(
+        &self,
+        source: &GatewaySource,
+    ) -> psychevo_runtime::Result<Option<String>> {
+        let previous = self.clear_source_binding(source)?;
+        if let Some(previous) = previous.as_deref() {
+            self.state
+                .store()
+                .mark_session_ended_with_reason(previous, "gateway_reset")?;
+            self.state.store().archive_session(previous)?;
+        }
+        Ok(previous)
+    }
+
     pub fn bind_source_thread(
         &self,
         source: &GatewaySource,
@@ -1361,7 +1401,9 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     use psychevo_ai::Outcome;
-    use psychevo_runtime::{Message, PermissionMode, RunMode, UserContentBlock};
+    use psychevo_runtime::{
+        Message, PermissionMode, RunMode, UserContentBlock, UserShellContextOptions,
+    };
     use tokio::sync::{Notify, mpsc};
 
     #[derive(Debug, Clone)]
@@ -1650,6 +1692,16 @@ mod tests {
         let harness = harness(backend.clone());
         let source = GatewaySource::new("acp", "client-session").persistent();
 
+        assert_eq!(
+            harness
+                .state
+                .store()
+                .list_sessions_for_workdir_with_sources(&harness.workdir, &["test"])
+                .expect("initial sessions")
+                .len(),
+            0
+        );
+
         let first = harness
             .gateway
             .send_turn(request(&harness, source.clone(), "first"))
@@ -1662,6 +1714,20 @@ mod tests {
             .expect("second turn");
 
         assert_eq!(first.result.session_id, second.result.session_id);
+        assert_eq!(backend.runs()[0].session, None);
+        assert_eq!(
+            backend.runs()[1].session.as_deref(),
+            Some(first.result.session_id.as_str())
+        );
+        assert_eq!(
+            harness
+                .state
+                .store()
+                .list_sessions_for_workdir_with_sources(&harness.workdir, &["test"])
+                .expect("sessions")
+                .len(),
+            1
+        );
         assert_eq!(
             harness
                 .state
@@ -1671,6 +1737,80 @@ mod tests {
                 .expect("binding")
                 .thread_id,
             first.result.session_id
+        );
+    }
+
+    #[tokio::test]
+    async fn first_shell_without_bound_source_creates_and_binds_runtime_session() {
+        let backend = Arc::new(FakeBackend::default());
+        let harness = harness(backend);
+        let source = GatewaySource::new("web", "workdir").persistent();
+        let root = harness.workdir.parent().expect("temp root");
+        let home = root.join("home");
+        std::fs::create_dir_all(&home).expect("home");
+        std::fs::write(
+            home.join("config.toml"),
+            r#"
+model = "lmstudio/test-model"
+
+[provider.lmstudio.models.test-model]
+"#,
+        )
+        .expect("config");
+
+        let result = harness
+            .gateway
+            .send_shell(SendShellRequest {
+                thread_id: None,
+                source: Some(source.clone()),
+                workdir: harness.workdir.clone(),
+                command: "printf shell-ok".to_string(),
+                context: UserShellContextOptions {
+                    state: harness.state.clone(),
+                    session: None,
+                    continue_latest: false,
+                    source: "web".to_string(),
+                    continue_sources: vec!["web".to_string()],
+                    config_path: None,
+                    model: None,
+                    reasoning_effort: None,
+                    mode: RunMode::Default,
+                    inherited_env: Some(BTreeMap::from([
+                        ("HOME".to_string(), root.to_string_lossy().to_string()),
+                        (
+                            "PSYCHEVO_HOME".to_string(),
+                            home.to_string_lossy().to_string(),
+                        ),
+                    ])),
+                },
+                stream: None,
+                event_sink: None,
+                lineage: None,
+            })
+            .await
+            .expect("shell");
+
+        let session_id = result.result.session_id.expect("shell session");
+        assert_eq!(result.thread.id, session_id);
+        assert_eq!(result.result.outcome, Outcome::Normal);
+        assert_eq!(
+            harness
+                .state
+                .store()
+                .gateway_source_binding(&source.source_key().0)
+                .expect("binding lookup")
+                .expect("binding")
+                .thread_id,
+            session_id
+        );
+        assert_eq!(
+            harness
+                .state
+                .store()
+                .list_sessions_for_workdir_with_sources(&harness.workdir, &["web"])
+                .expect("sessions")
+                .len(),
+            1
         );
     }
 

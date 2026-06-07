@@ -274,9 +274,35 @@ Transport requests that introduce or select a source carry a request-scoped
 raw id from source kind plus canonical workdir. `thread/start`,
 source-default `thread/resume`, `turn/start`, and completion requests require
 `params.scope`. Methods anchored by a thread id or active selector authorize
-through the stored thread/workdir binding. `thread/list` uses an explicit
-workdir filter instead of a full source scope and includes per-session activity
-so multi-client shells can show background running state.
+through the stored thread/workdir binding.
+
+Session history is global across interactive surfaces. `thread/list` accepts
+an optional workdir filter: a concrete workdir returns only that project's
+sessions, while a missing or `null` workdir returns the human-visible session
+set across all workdirs in the local state database. Runtime `source` is an
+internal persistence/runtime classification and is not part of the user-facing
+session summary. Human-facing lists include top-level sessions, exclude
+internal/noisy sessions such as `tui-side`, and keep empty top-level sessions
+manageable instead of using message count as a visibility gate. They also
+include per-session activity so multi-client shells can show background
+running state. A `SessionSummaryView` carries enough display projection for
+every surface to render the same row: stable id, workdir/project metadata,
+title, fallback display title, preview, visible-entry count, persisted counts,
+archive timestamp, and activity.
+
+Explicit `thread/resume` may target a session from a different workdir than
+the caller's current scope. In that case Gateway rebinds the caller's source to
+the target session and returns a snapshot whose scope/project is the session's
+stored workdir. Subsequent turns, completion, diff, files, agents, skills, and
+context operations run in that resumed workdir. Browser-session authorization
+must observe that scope adoption immediately for later RPCs on the same
+WebSocket connection; it must not keep using a stale browser-session workdir
+captured when the socket was opened. Clients must not append an old project's
+history while continuing to operate in the launch directory.
+Browser clients may also call `thread/start` for a workdir that appears as a
+human-visible project in the global session list; Gateway treats that explicit
+project-group action as scope adoption for the browser session. This does not
+authorize arbitrary workdirs that have no visible stored session.
 
 The transport protocol is generated from Rust-owned Gateway wire types. Clients
 should consume generated TypeScript types and JSON Schema rather than

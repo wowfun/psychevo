@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "binary": {
+      "type": "boolean"
+    },
+    "content": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "path": {
+      "type": "string"
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "unreadable": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "binary",
+    "path",
+    "truncated"
+  ],
+  "title": "WorkspaceFileReadResult",
+  "type": "object"
+}

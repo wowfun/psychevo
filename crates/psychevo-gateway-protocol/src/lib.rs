@@ -508,6 +508,7 @@ pub struct PendingClarifyView {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadSnapshot {
     pub source: GatewaySource,
+    pub scope: GatewayRequestScope,
     #[serde(default)]
     pub thread: Option<GatewayThread>,
     pub entries: Vec<TranscriptEntry>,
@@ -518,10 +519,18 @@ pub struct ThreadSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct SessionProjectView {
+    pub workdir: String,
+    pub label: String,
+    pub display_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionSummaryView {
     pub id: String,
-    pub source: String,
     pub workdir: String,
+    pub project: SessionProjectView,
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
@@ -537,10 +546,15 @@ pub struct SessionSummaryView {
     pub archived_at_ms: Option<i64>,
     pub message_count: usize,
     pub tool_call_count: usize,
+    pub visible_entry_count: usize,
     #[serde(default)]
     pub activity: GatewayActivityView,
     #[serde(default)]
     pub title: Option<String>,
+    #[serde(default)]
+    pub display_title: Option<String>,
+    #[serde(default)]
+    pub preview: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -751,6 +765,10 @@ pub struct TurnStartParams {
     pub model: Option<String>,
     #[serde(default)]
     pub reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
+    pub permission_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -880,10 +898,178 @@ pub struct SettingsReadParams {
 #[serde(rename_all = "camelCase")]
 pub struct SettingsReadResult {
     pub workdir: String,
+    #[serde(default)]
+    pub project: Option<WorkbenchProjectView>,
     #[ts(type = "Record<string, unknown>")]
     pub memory_resources: BTreeMap<String, Value>,
     #[ts(type = "Record<string, unknown>")]
     pub secrets: BTreeMap<String, Value>,
+    #[serde(default)]
+    pub controls: Option<WorkbenchControlsView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkbenchProjectView {
+    pub path: String,
+    pub display_path: String,
+    #[serde(default)]
+    pub branch: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkbenchControlsView {
+    pub permission_mode: String,
+    pub mode: String,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub variant: Option<String>,
+    #[serde(default)]
+    pub permission_mode_options: Vec<String>,
+    #[serde(default)]
+    pub mode_options: Vec<String>,
+    #[serde(default)]
+    pub model_options: Vec<String>,
+    #[serde(default)]
+    pub variant_options: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkspaceFileKind {
+    File,
+    Directory,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFileEntry {
+    pub path: String,
+    pub name: String,
+    pub kind: WorkspaceFileKind,
+    pub depth: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFilesParams {
+    pub scope: GatewayRequestScope,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFilesResult {
+    pub root: String,
+    pub entries: Vec<WorkspaceFileEntry>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFileReadParams {
+    pub scope: GatewayRequestScope,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFileReadResult {
+    pub path: String,
+    #[serde(default)]
+    pub content: Option<String>,
+    pub truncated: bool,
+    pub binary: bool,
+    #[serde(default)]
+    pub unreadable: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceDiffFileStatusView {
+    Modified,
+    Added,
+    Deleted,
+    Untracked,
+    Binary,
+    Unreadable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceDiffFileView {
+    pub path: String,
+    pub status: WorkspaceDiffFileStatusView,
+    pub binary: bool,
+    pub unreadable: bool,
+    #[serde(default)]
+    pub placeholder: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceDiffTruncationView {
+    pub truncated: bool,
+    pub max_bytes: usize,
+    pub max_lines: usize,
+    pub omitted_bytes: usize,
+    pub omitted_lines: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceDiffParams {
+    pub scope: GatewayRequestScope,
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceDiffResult {
+    pub is_git_repo: bool,
+    pub files: Vec<WorkspaceDiffFileView>,
+    pub unified_diff: String,
+    pub truncation: WorkspaceDiffTruncationView,
+    #[serde(default)]
+    pub selected_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextReadParams {
+    pub scope: GatewayRequestScope,
+    #[serde(default)]
+    pub thread_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextUsageCategoryView {
+    pub id: String,
+    pub label: String,
+    pub tokens: u64,
+    pub estimated: bool,
+    pub status: String,
+    #[serde(default)]
+    pub percent: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextReadResult {
+    pub available: bool,
+    pub label: String,
+    pub status: String,
+    pub used_tokens: u64,
+    #[serde(default)]
+    pub context_limit: Option<u64>,
+    #[serde(default)]
+    pub percent: Option<f64>,
+    pub categories: Vec<ContextUsageCategoryView>,
+    #[serde(default)]
+    pub advice: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -1024,6 +1210,14 @@ pub enum ClientRequest {
     ClarifyRespond(ClarifyRespondParams),
     #[serde(rename = "settings/read")]
     SettingsRead(SettingsReadParams),
+    #[serde(rename = "workspace/files")]
+    WorkspaceFiles(WorkspaceFilesParams),
+    #[serde(rename = "workspace/file/read")]
+    WorkspaceFileRead(WorkspaceFileReadParams),
+    #[serde(rename = "workspace/diff")]
+    WorkspaceDiff(WorkspaceDiffParams),
+    #[serde(rename = "context/read")]
+    ContextRead(ContextReadParams),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -1051,6 +1245,7 @@ struct ExportedType {
 pub fn generate_typescript_and_schema(repo_root: &Path, check: bool) -> Result<()> {
     let package_root = repo_root.join("packages/protocol");
     let generated_dir = package_root.join("src/generated");
+    let generated_schema_dir = generated_dir.join("schemas");
     let schema_dir = package_root.join("schema");
     let mut ts = String::from("// @generated by psychevo-xtask gateway-protocol generate\n\n");
     for exported in exported_types() {
@@ -1059,9 +1254,22 @@ pub fn generate_typescript_and_schema(repo_root: &Path, check: bool) -> Result<(
     }
     write_checked(&generated_dir.join("types.ts"), &ts, check)?;
 
-    let mut schema_ts =
-        String::from("// @generated by psychevo-xtask gateway-protocol generate\n\n");
-    schema_ts.push_str("export const gatewaySchemas = {\n");
+    let legacy_schema_file = generated_dir.join("schemas.ts");
+    if check {
+        if legacy_schema_file.exists() {
+            bail!(
+                "obsolete generated file is present: {}",
+                legacy_schema_file.display()
+            );
+        }
+    } else {
+        let _ = fs::remove_file(&legacy_schema_file);
+        if generated_schema_dir.exists() {
+            fs::remove_dir_all(&generated_schema_dir)?;
+        }
+    }
+
+    let mut schema_groups: BTreeMap<&'static str, Vec<(&'static str, String)>> = BTreeMap::new();
     for exported in exported_types() {
         let schema = (exported.schema)()?;
         let json = serde_json::to_string_pretty(&schema)?;
@@ -1070,19 +1278,149 @@ pub fn generate_typescript_and_schema(repo_root: &Path, check: bool) -> Result<(
             &(json.clone() + "\n"),
             check,
         )?;
-        schema_ts.push_str("  ");
-        schema_ts.push_str(exported.name);
-        schema_ts.push_str(": ");
-        schema_ts.push_str(&json);
-        schema_ts.push_str(",\n");
+        schema_groups
+            .entry(schema_group_module(exported.name))
+            .or_default()
+            .push((exported.name, json));
     }
-    schema_ts.push_str("} as const;\n\n");
-    schema_ts.push_str("export type GatewaySchemaName = keyof typeof gatewaySchemas;\n");
-    write_checked(&generated_dir.join("schemas.ts"), &schema_ts, check)?;
+
+    for (module, schemas) in &schema_groups {
+        let mut group_ts =
+            String::from("// @generated by psychevo-xtask gateway-protocol generate\n\n");
+        group_ts.push_str("export const ");
+        group_ts.push_str(schema_group_const(module));
+        group_ts.push_str(" = {\n");
+        for (name, json) in schemas {
+            group_ts.push_str("  ");
+            group_ts.push_str(name);
+            group_ts.push_str(": ");
+            group_ts.push_str(json);
+            group_ts.push_str(",\n");
+        }
+        group_ts.push_str("} as const;\n");
+        write_checked(
+            &generated_schema_dir.join(format!("{module}.ts")),
+            &group_ts,
+            check,
+        )?;
+    }
+
+    let mut schemas_index =
+        String::from("// @generated by psychevo-xtask gateway-protocol generate\n\n");
+    for module in schema_groups.keys() {
+        schemas_index.push_str("import { ");
+        schemas_index.push_str(schema_group_const(module));
+        schemas_index.push_str(" } from './");
+        schemas_index.push_str(module);
+        schemas_index.push_str("';\n");
+    }
+    schemas_index.push_str("\nexport const gatewaySchemas = {\n");
+    for exported in exported_types() {
+        let module = schema_group_module(exported.name);
+        schemas_index.push_str("  ");
+        schemas_index.push_str(exported.name);
+        schemas_index.push_str(": ");
+        schemas_index.push_str(schema_group_const(module));
+        schemas_index.push('.');
+        schemas_index.push_str(exported.name);
+        schemas_index.push_str(",\n");
+    }
+    schemas_index.push_str("} as const;\n\n");
+    schemas_index.push_str("export type GatewaySchemaName = keyof typeof gatewaySchemas;\n");
+    write_checked(
+        &generated_schema_dir.join("index.ts"),
+        &schemas_index,
+        check,
+    )?;
 
     let index = "// @generated by psychevo-xtask gateway-protocol generate\nexport * from './types';\nexport * from './schemas';\n";
     write_checked(&generated_dir.join("index.ts"), index, check)?;
     Ok(())
+}
+
+fn schema_group_module(name: &str) -> &'static str {
+    if name.starts_with("JsonRpc") || matches!(name, "ClientRequest" | "ServerNotification") {
+        return "rpc";
+    }
+    if name.starts_with("Source") || name.starts_with("GatewaySource") {
+        return "source";
+    }
+    if matches!(
+        name,
+        "GatewayRequestScope"
+            | "GatewayThreadSelector"
+            | "BackendKind"
+            | "GatewayBackendInfo"
+            | "GatewayThread"
+            | "GatewayTurn"
+            | "GatewayTurnStatus"
+            | "GatewayInputPart"
+            | "GatewayImageInput"
+            | "GatewaySelectedSkill"
+            | "GatewayEvent"
+    ) || name.starts_with("GatewayMention")
+    {
+        return "gateway";
+    }
+    if name.starts_with("Transcript") {
+        return "transcript";
+    }
+    if name.starts_with("Thread") || name.starts_with("Session") || name == "GatewayActivityView" {
+        return "thread";
+    }
+    if name.starts_with("Completion") {
+        return "completion";
+    }
+    if name.starts_with("Command") {
+        return "command";
+    }
+    if name.starts_with("Shell") {
+        return "shell";
+    }
+    if name.starts_with("Turn") {
+        return "turn";
+    }
+    if name.starts_with("Permission")
+        || name.starts_with("Clarify")
+        || name.starts_with("Pending")
+        || name == "InteractionRespondResult"
+    {
+        return "interaction";
+    }
+    if name.starts_with("Settings") || name.starts_with("Workbench") {
+        return "settings";
+    }
+    if name.starts_with("Workspace") {
+        return "workspace";
+    }
+    if name.starts_with("Context") {
+        return "context";
+    }
+    if name.starts_with("CreateLaunch") || name == "ManagedServerState" {
+        return "launch";
+    }
+    "system"
+}
+
+fn schema_group_const(module: &str) -> &'static str {
+    match module {
+        "command" => "commandSchemas",
+        "completion" => "completionSchemas",
+        "context" => "contextSchemas",
+        "gateway" => "gatewayCoreSchemas",
+        "interaction" => "interactionSchemas",
+        "launch" => "launchSchemas",
+        "rpc" => "rpcSchemas",
+        "settings" => "settingsSchemas",
+        "shell" => "shellSchemas",
+        "source" => "sourceSchemas",
+        "system" => "systemSchemas",
+        "thread" => "threadSchemas",
+        "transcript" => "transcriptSchemas",
+        "turn" => "turnSchemas",
+        "workspace" => "workspaceSchemas",
+        _ => unreachable!("unknown schema group module"),
+    }
 }
 
 fn write_checked(path: &Path, content: &str, check: bool) -> Result<()> {
@@ -1155,6 +1493,21 @@ fn camelize_ts_decl_numbers(mut decl: String) -> String {
         ("backend_ref", "backendRef"),
         ("relative_path", "relativePath"),
         ("target_kind", "targetKind"),
+        ("permission_mode", "permissionMode"),
+        ("permission_mode_options", "permissionModeOptions"),
+        ("display_path", "displayPath"),
+        ("model_options", "modelOptions"),
+        ("mode_options", "modeOptions"),
+        ("variant_options", "variantOptions"),
+        ("used_tokens", "usedTokens"),
+        ("context_limit", "contextLimit"),
+        ("is_git_repo", "isGitRepo"),
+        ("unified_diff", "unifiedDiff"),
+        ("selected_path", "selectedPath"),
+        ("max_bytes", "maxBytes"),
+        ("max_lines", "maxLines"),
+        ("omitted_bytes", "omittedBytes"),
+        ("omitted_lines", "omittedLines"),
     ] {
         decl = decl.replace(from, to);
     }
@@ -1209,6 +1562,7 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(PendingPermissionView),
         exported_type!(PendingClarifyView),
         exported_type!(ThreadSnapshot),
+        exported_type!(SessionProjectView),
         exported_type!(SessionSummaryView),
         exported_type!(InitializeParams),
         exported_type!(InitializeResult),
@@ -1248,6 +1602,22 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(SourceResetParams),
         exported_type!(SettingsReadParams),
         exported_type!(SettingsReadResult),
+        exported_type!(WorkbenchProjectView),
+        exported_type!(WorkbenchControlsView),
+        exported_type!(WorkspaceFileKind),
+        exported_type!(WorkspaceFileEntry),
+        exported_type!(WorkspaceFilesParams),
+        exported_type!(WorkspaceFilesResult),
+        exported_type!(WorkspaceFileReadParams),
+        exported_type!(WorkspaceFileReadResult),
+        exported_type!(WorkspaceDiffFileStatusView),
+        exported_type!(WorkspaceDiffFileView),
+        exported_type!(WorkspaceDiffTruncationView),
+        exported_type!(WorkspaceDiffParams),
+        exported_type!(WorkspaceDiffResult),
+        exported_type!(ContextReadParams),
+        exported_type!(ContextUsageCategoryView),
+        exported_type!(ContextReadResult),
         exported_type!(ReadyzResult),
         exported_type!(CreateLaunchParams),
         exported_type!(CreateLaunchResult),

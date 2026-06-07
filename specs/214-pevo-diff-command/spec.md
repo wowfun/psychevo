@@ -74,6 +74,21 @@ a synthetic tool-call update whose content uses ACP `ToolCallContent::Diff`.
 It must not fall back to a plain assistant text chunk. Summary, truncation, and
 binary placeholder metadata may be included in raw output.
 
+## Web And Desktop
+
+Web and Desktop shells expose the same structured diff model through Gateway.
+Executing `/diff` returns a structured display artifact that opens the center
+inline preview split. It must not append ordinary transcript rows, create
+runtime messages, affect model context, or change usage/accounting.
+
+The Workbench `Status` panel also lists changed files derived from the same
+workspace diff snapshot. Clicking a changed-file row opens a read-only unified
+diff preview in the center inline split. When a file path is selected, Gateway
+should return a file-scoped diff block and matching file metadata; if the path
+cannot be isolated from the unified diff, the client may show the full diff
+with the selected file highlighted. Empty, non-git, binary, unreadable, and
+truncated states use the same structured placeholders as `/diff`.
+
 ## Related Topics
 
 - [026 Commands](../026-commands/spec.md)

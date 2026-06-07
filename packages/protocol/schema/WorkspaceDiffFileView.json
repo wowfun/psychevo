@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "WorkspaceDiffFileStatusView": {
+      "enum": [
+        "modified",
+        "added",
+        "deleted",
+        "untracked",
+        "binary",
+        "unreadable"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "binary": {
+      "type": "boolean"
+    },
+    "path": {
+      "type": "string"
+    },
+    "placeholder": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "$ref": "#/definitions/WorkspaceDiffFileStatusView"
+    },
+    "unreadable": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "binary",
+    "path",
+    "status",
+    "unreadable"
+  ],
+  "title": "WorkspaceDiffFileView",
+  "type": "object"
+}

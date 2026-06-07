@@ -75,6 +75,16 @@ impl SqliteStore {
         .map_err(Into::into)
     }
 
+    pub fn delete_gateway_source_binding(&self, source_key: &str) -> Result<bool> {
+        let changed = self.write_retry(|conn| {
+            conn.execute(
+                "DELETE FROM gateway_source_bindings WHERE source_key = ?1",
+                params![source_key],
+            )
+        })?;
+        Ok(changed > 0)
+    }
+
     pub fn mark_session_ended_with_reason(&self, session_id: &str, reason: &str) -> Result<()> {
         let now = now_ms();
         let changed = self.write_retry(|conn| {

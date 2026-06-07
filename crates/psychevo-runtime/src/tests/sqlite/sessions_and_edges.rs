@@ -156,6 +156,22 @@ pub(crate) fn sqlite_gateway_source_binding_round_trips_and_rebinds() {
             .thread_id,
         second_session
     );
+    assert!(
+        store
+            .delete_gateway_source_binding("acp:client-session")
+            .expect("delete binding")
+    );
+    assert!(
+        store
+            .gateway_source_binding("acp:client-session")
+            .expect("load deleted binding")
+            .is_none()
+    );
+    assert!(
+        !store
+            .delete_gateway_source_binding("acp:client-session")
+            .expect("delete missing binding")
+    );
 
     store
         .mark_session_ended_with_reason(&first_session, "gateway_reset")

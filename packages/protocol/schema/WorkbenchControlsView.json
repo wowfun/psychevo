@@ -1,0 +1,59 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "mode": {
+      "type": "string"
+    },
+    "modeOptions": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "model": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "modelOptions": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "permissionMode": {
+      "type": "string"
+    },
+    "permissionModeOptions": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "variant": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "variantOptions": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "mode",
+    "permissionMode"
+  ],
+  "title": "WorkbenchControlsView",
+  "type": "object"
+}

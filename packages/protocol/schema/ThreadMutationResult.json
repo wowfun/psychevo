@@ -25,6 +25,25 @@
       ],
       "type": "object"
     },
+    "SessionProjectView": {
+      "properties": {
+        "displayPath": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "displayPath",
+        "label",
+        "workdir"
+      ],
+      "type": "object"
+    },
     "SessionSummaryView": {
       "properties": {
         "activity": {
@@ -44,6 +63,13 @@
           "format": "int64",
           "type": [
             "integer",
+            "null"
+          ]
+        },
+        "displayTitle": {
+          "default": null,
+          "type": [
+            "string",
             "null"
           ]
         },
@@ -77,15 +103,22 @@
             "null"
           ]
         },
-        "provider": {
+        "preview": {
           "default": null,
           "type": [
             "string",
             "null"
           ]
         },
-        "source": {
-          "type": "string"
+        "project": {
+          "$ref": "#/definitions/SessionProjectView"
+        },
+        "provider": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "startedAtMs": {
           "format": "int64",
@@ -111,6 +144,11 @@
             "null"
           ]
         },
+        "visibleEntryCount": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "workdir": {
           "type": "string"
         }
@@ -118,9 +156,10 @@
       "required": [
         "id",
         "messageCount",
-        "source",
+        "project",
         "startedAtMs",
         "toolCallCount",
+        "visibleEntryCount",
         "workdir"
       ],
       "type": "object"

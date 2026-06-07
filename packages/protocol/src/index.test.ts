@@ -11,6 +11,16 @@ describe("ThreadSnapshotSchema", () => {
         rawIdentity: null,
         visibleName: "psychevo"
       },
+      scope: {
+        workdir: "/tmp/project",
+        source: {
+          kind: "web",
+          rawId: "workdir:abc",
+          lifetime: "persistent",
+          rawIdentity: null,
+          visibleName: "psychevo"
+        }
+      },
       thread: {
         id: "s1",
         backend: { kind: "psychevo", nativeId: "s1" },

@@ -56,9 +56,11 @@ export type PendingPermissionView = { requestId: string, toolName: string, reaso
 
 export type PendingClarifyView = { requestId: string, raw: unknown, };
 
-export type ThreadSnapshot = { source: GatewaySource, thread: GatewayThread | null, entries: Array<TranscriptEntry>, activity: GatewayActivityView, pendingPermissions: Array<PendingPermissionView>, pendingClarifies: Array<PendingClarifyView>, };
+export type ThreadSnapshot = { source: GatewaySource, scope: GatewayRequestScope, thread: GatewayThread | null, entries: Array<TranscriptEntry>, activity: GatewayActivityView, pendingPermissions: Array<PendingPermissionView>, pendingClarifies: Array<PendingClarifyView>, };
 
-export type SessionSummaryView = { id: string, source: string, workdir: string, model: string | null, provider: string | null, startedAtMs: number, updatedAtMs: number | null, endedAtMs: number | null, endReason: string | null, archivedAtMs: number | null, messageCount: number, toolCallCount: number, activity: GatewayActivityView, title: string | null, };
+export type SessionProjectView = { workdir: string, label: string, displayPath: string, };
+
+export type SessionSummaryView = { id: string, workdir: string, project: SessionProjectView, model: string | null, provider: string | null, startedAtMs: number, updatedAtMs: number | null, endedAtMs: number | null, endReason: string | null, archivedAtMs: number | null, messageCount: number, toolCallCount: number, visibleEntryCount: number, activity: GatewayActivityView, title: string | null, displayTitle: string | null, preview: string | null, };
 
 export type InitializeParams = Record<string, never>;
 
@@ -104,7 +106,7 @@ export type ShellStartParams = { scope: GatewayRequestScope, threadId: string | 
 
 export type ShellStartResult = { accepted: boolean, threadId: string | null, message: string | null, };
 
-export type TurnStartParams = { scope: GatewayRequestScope, threadId: string | null, agentName: string | null, input: Array<GatewayInputPart>, mentions: Array<GatewayMention>, text: string | null, model: string | null, reasoningEffort: string | null, };
+export type TurnStartParams = { scope: GatewayRequestScope, threadId: string | null, agentName: string | null, input: Array<GatewayInputPart>, mentions: Array<GatewayMention>, text: string | null, model: string | null, reasoningEffort: string | null, mode: string | null, permissionMode: string | null, };
 
 export type TurnSteerParams = { threadId: string | null, expectedTurnId: string, text: string, };
 
@@ -134,7 +136,39 @@ export type SourceResetParams = { scope: GatewayRequestScope, };
 
 export type SettingsReadParams = { workdir: string | null, };
 
-export type SettingsReadResult = { workdir: string, memoryResources: Record<string, unknown>, secrets: Record<string, unknown>, };
+export type SettingsReadResult = { workdir: string, project: WorkbenchProjectView | null, memoryResources: Record<string, unknown>, secrets: Record<string, unknown>, controls: WorkbenchControlsView | null, };
+
+export type WorkbenchProjectView = { path: string, displayPath: string, branch: string | null, };
+
+export type WorkbenchControlsView = { permissionMode: string, mode: string, model: string | null, variant: string | null, permissionModeOptions: Array<string>, modeOptions: Array<string>, modelOptions: Array<string>, variantOptions: Array<string>, };
+
+export type WorkspaceFileKind = "file" | "directory";
+
+export type WorkspaceFileEntry = { path: string, name: string, kind: WorkspaceFileKind, depth: number, };
+
+export type WorkspaceFilesParams = { scope: GatewayRequestScope, };
+
+export type WorkspaceFilesResult = { root: string, entries: Array<WorkspaceFileEntry>, truncated: boolean, };
+
+export type WorkspaceFileReadParams = { scope: GatewayRequestScope, path: string, };
+
+export type WorkspaceFileReadResult = { path: string, content: string | null, truncated: boolean, binary: boolean, unreadable: string | null, };
+
+export type WorkspaceDiffFileStatusView = "modified" | "added" | "deleted" | "untracked" | "binary" | "unreadable";
+
+export type WorkspaceDiffFileView = { path: string, status: WorkspaceDiffFileStatusView, binary: boolean, unreadable: boolean, placeholder: string | null, };
+
+export type WorkspaceDiffTruncationView = { truncated: boolean, maxBytes: number, maxLines: number, omittedBytes: number, omittedLines: number, };
+
+export type WorkspaceDiffParams = { scope: GatewayRequestScope, path: string | null, };
+
+export type WorkspaceDiffResult = { isGitRepo: boolean, files: Array<WorkspaceDiffFileView>, unifiedDiff: string, truncation: WorkspaceDiffTruncationView, selectedPath: string | null, };
+
+export type ContextReadParams = { scope: GatewayRequestScope, threadId: string | null, };
+
+export type ContextUsageCategoryView = { id: string, label: string, tokens: number, estimated: boolean, status: string, percent: number | null, };
+
+export type ContextReadResult = { available: boolean, label: string, status: string, usedTokens: number, contextLimit: number | null, percent: number | null, categories: Array<ContextUsageCategoryView>, advice: Array<string>, };
 
 export type ReadyzResult = { ok: boolean, server: string, version: string, };
 
@@ -156,7 +190,7 @@ export type JsonRpcErrorResponse = { jsonrpc: string, id: JsonRpcId, error: Json
 
 export type JsonRpcError = { code: number, message: string, data: unknown | null, };
 
-export type ClientRequest = { "method": "initialize", "params": InitializeParams } | { "method": "thread/start", "params": ThreadStartParams } | { "method": "thread/resume", "params": ThreadResumeParams } | { "method": "thread/read", "params": ThreadReadParams } | { "method": "thread/list", "params": ThreadListParams } | { "method": "thread/rename", "params": ThreadRenameParams } | { "method": "thread/archive", "params": ThreadIdParams } | { "method": "thread/restore", "params": ThreadIdParams } | { "method": "thread/delete", "params": ThreadIdParams } | { "method": "turn/start", "params": TurnStartParams } | { "method": "turn/steer", "params": TurnSteerParams } | { "method": "turn/interrupt", "params": TurnInterruptParams } | { "method": "completion/list", "params": CompletionListParams } | { "method": "command/list", "params": CommandListParams } | { "method": "command/execute", "params": CommandExecuteParams } | { "method": "shell/start", "params": ShellStartParams } | { "method": "source/reset", "params": SourceResetParams } | { "method": "permission/respond", "params": PermissionRespondParams } | { "method": "clarify/respond", "params": ClarifyRespondParams } | { "method": "settings/read", "params": SettingsReadParams };
+export type ClientRequest = { "method": "initialize", "params": InitializeParams } | { "method": "thread/start", "params": ThreadStartParams } | { "method": "thread/resume", "params": ThreadResumeParams } | { "method": "thread/read", "params": ThreadReadParams } | { "method": "thread/list", "params": ThreadListParams } | { "method": "thread/rename", "params": ThreadRenameParams } | { "method": "thread/archive", "params": ThreadIdParams } | { "method": "thread/restore", "params": ThreadIdParams } | { "method": "thread/delete", "params": ThreadIdParams } | { "method": "turn/start", "params": TurnStartParams } | { "method": "turn/steer", "params": TurnSteerParams } | { "method": "turn/interrupt", "params": TurnInterruptParams } | { "method": "completion/list", "params": CompletionListParams } | { "method": "command/list", "params": CommandListParams } | { "method": "command/execute", "params": CommandExecuteParams } | { "method": "shell/start", "params": ShellStartParams } | { "method": "source/reset", "params": SourceResetParams } | { "method": "permission/respond", "params": PermissionRespondParams } | { "method": "clarify/respond", "params": ClarifyRespondParams } | { "method": "settings/read", "params": SettingsReadParams } | { "method": "workspace/files", "params": WorkspaceFilesParams } | { "method": "workspace/file/read", "params": WorkspaceFileReadParams } | { "method": "workspace/diff", "params": WorkspaceDiffParams } | { "method": "context/read", "params": ContextReadParams };
 
 export type ServerNotification = { "method": "gateway/event", "params": GatewayEvent } | { "method": "turn/result", "params": TurnResultPayload } | { "method": "turn/error", "params": TurnErrorPayload } | { "method": "shell/result", "params": ShellResultPayload } | { "method": "shell/error", "params": ShellErrorPayload };
 

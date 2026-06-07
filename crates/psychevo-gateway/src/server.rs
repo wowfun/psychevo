@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
+use std::io::Read;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -24,13 +25,15 @@ use psychevo_runtime::command_registry::{
 };
 use psychevo_runtime::{
     AgentBackendConfig, AgentDiscoveryOptions, AgentEntrypoint, ClarifyAnswer, ClarifyResponse,
-    ClarifyResult, Error, ListSkillsOptions, Message as RuntimeMessage, PermissionApprovalDecision,
-    PermissionApprovalOutcome, PermissionMode, RunMode, RunOptions, SessionArtifactKind,
-    SessionExportFormat, SessionExportIncludeSet, SessionExportOptions, SessionSummary,
-    SkillDiscoveryOptions, StateRuntime, UserContentBlock, UserShellContextOptions,
-    canonicalize_workdir, discover_agents, discover_skills, list_agents_value, list_skill_bundles,
-    list_skills_value_with_options, load_agent_backend_configs, render_session_export,
-    resolve_agent_definition, valid_agent_name, view_agent_value_with_catalog,
+    ClarifyResult, ContextOptions, Error, ListSkillsOptions, Message as RuntimeMessage,
+    PermissionApprovalDecision, PermissionApprovalOutcome, PermissionMode, RunMode, RunOptions,
+    SessionArtifactKind, SessionExportFormat, SessionExportIncludeSet, SessionExportOptions,
+    SessionSummary, SkillDiscoveryOptions, StateRuntime, UserContentBlock, UserShellContextOptions,
+    WorkspaceDiffFileStatus, canonicalize_workdir, collect_workspace_diff, configured_models,
+    context_snapshot, discover_agents, discover_skills, format_context_total_value,
+    list_agents_value, list_skill_bundles, list_skills_value_with_options,
+    load_agent_backend_configs, render_session_export, resolve_agent_definition,
+    selected_configured_model, valid_agent_name, view_agent_value_with_catalog,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -42,13 +45,15 @@ use crate::{
     BackendKind, Gateway, GatewayActivity, GatewayBackendInfo, GatewayEvent, GatewayEventSink,
     GatewayInputPart, GatewayShellResult, GatewaySource, GatewaySourceLifetime, GatewayThread,
     GatewayThreadSelector, GatewayTurnResult, PermissionDecision, SendShellRequest, SourceKey,
-    gateway_now_ms,
+    TranscriptEntry, TranscriptEntryRole, gateway_now_ms,
 };
 
-const HISTORY_SOURCES: &[&str] = &["run", "tui", "web", "desktop", "peer_agent"];
+const INTERNAL_SESSION_SOURCES: &[&str] = &["tui-side"];
 const MAX_COMPLETION_ITEMS: usize = 50;
 const MAX_FILE_COMPLETION_ITEMS: usize = 80;
 const MAX_FILE_COMPLETION_DEPTH: usize = 8;
+const MAX_WORKSPACE_FILE_ITEMS: usize = 1_500;
+const MAX_WORKSPACE_FILE_READ_BYTES: usize = 256 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct GatewayWebServerConfig {
@@ -271,7 +276,7 @@ struct LaunchEntry {
 #[derive(Debug, Clone)]
 enum AuthContext {
     Bearer,
-    Browser(BrowserSession),
+    Browser { session_id: String },
 }
 
 impl AuthContext {
@@ -316,8 +321,9 @@ impl WebState {
             .lock()
             .expect("web browser sessions poisoned")
             .get(cookie)
-            .cloned()
-            .map(AuthContext::Browser)
+            .map(|_| AuthContext::Browser {
+                session_id: cookie.to_string(),
+            })
     }
 
     fn selector(&self, source: &GatewaySource) -> GatewayThreadSelector {
@@ -723,46 +729,59 @@ async fn handle_rpc(
         }
         "thread/start" => {
             let params = request.required_params::<wire::ThreadStartParams>()?;
-            let scope = resolve_required_scope(&state, &auth, params.scope.clone())?;
-            start_empty_thread(&state, &scope)
+            let scope = resolve_start_scope(&state, &auth, params.scope.clone())?;
+            update_browser_session_scope(&state, &auth, &scope);
+            start_empty_source(&state, &scope)
         }
         "thread/resume" => {
             let params = request.params::<wire::ThreadResumeParams>()?;
-            let thread_id = match params.thread_id {
+            let (thread_id, scope) = match params.thread_id {
                 Some(thread_id) => {
                     authorize_thread(&state, &auth, &thread_id)?;
-                    if let Some(scope) = params.scope {
-                        let scope = resolve_required_scope(&state, &auth, scope)?;
-                        bind_source_to_thread(&state, &scope, &thread_id)?;
-                    }
-                    Some(thread_id)
+                    let scope = resolved_scope_for_thread(&state, &thread_id)?;
+                    bind_source_to_thread(&state, &scope, &thread_id)?;
+                    update_browser_session_scope(&state, &auth, &scope);
+                    (Some(thread_id), scope)
                 }
                 None => {
                     let scope = resolve_optional_scope(&state, &auth, params.scope)?;
-                    state.inner.gateway.resolve_source_thread(&scope.source)?
+                    let thread_id = state.inner.gateway.resolve_source_thread(&scope.source)?;
+                    (thread_id, scope)
                 }
             };
-            let scope = default_resolved_scope(&state, &auth)?;
             thread_snapshot(&state, &scope, thread_id.as_deref())
         }
         "thread/read" => {
             let params = request.required_params::<wire::ThreadReadParams>()?;
             authorize_thread(&state, &auth, &params.thread_id)?;
-            let scope = default_resolved_scope(&state, &auth)?;
+            let scope = resolved_scope_for_thread(&state, &params.thread_id)?;
             thread_snapshot(&state, &scope, Some(&params.thread_id))
         }
         "thread/list" => {
             let params = request.params::<wire::ThreadListParams>()?;
             let limit = params.limit.unwrap_or(50).clamp(1, 200);
-            let workdir = resolve_workdir_filter(&state, &auth, params.workdir)?;
+            let workdir = resolve_session_workdir_filter(&state, &auth, params.workdir)?;
             let store = state.inner.state.store();
             let sessions = if params.archived.unwrap_or(false) {
-                store.list_archived_sessions_for_workdir_with_sources(&workdir, HISTORY_SOURCES)?
+                match workdir.as_ref() {
+                    Some(workdir) => {
+                        store.list_archived_sessions_for_workdir_with_sources(workdir, &[])?
+                    }
+                    None => store.list_archived_sessions_with_sources(&[])?,
+                }
             } else {
-                store.list_sessions_for_workdir_with_sources(&workdir, HISTORY_SOURCES)?
+                match workdir.as_ref() {
+                    Some(workdir) => store.list_sessions_for_workdir_with_sources(workdir, &[])?,
+                    None => store.list_sessions_with_sources(&[])?,
+                }
             };
             Ok(json!({
-                "sessions": sessions.into_iter().take(limit).map(|session| session_summary_value(&state, session)).collect::<Vec<_>>(),
+                "sessions": sessions
+                    .into_iter()
+                    .filter(|session| human_visible_session(&state, session))
+                    .take(limit)
+                    .map(|session| session_summary_value(&state, session))
+                    .collect::<psychevo_runtime::Result<Vec<_>>>()?,
             }))
         }
         "thread/rename" => {
@@ -811,26 +830,37 @@ async fn handle_rpc(
         "turn/start" => {
             let params = request.required_params::<wire::TurnStartParams>()?;
             let scope = resolve_required_scope(&state, &auth, params.scope.clone())?;
+            let input = params.input_parts()?;
             let thread_id = match params.thread_id.clone() {
                 Some(thread_id) => {
                     authorize_thread(&state, &auth, &thread_id)?;
-                    thread_id
+                    Some(thread_id)
                 }
-                None => ensure_source_thread_for_turn(&state, &scope)?,
+                None => state.inner.gateway.resolve_source_thread(&scope.source)?,
             };
             if state
                 .inner
                 .gateway
                 .resolve_source_thread(&scope.source)?
                 .as_deref()
-                != Some(thread_id.as_str())
+                != thread_id.as_deref()
+                && let Some(thread_id) = thread_id.as_deref()
             {
-                bind_source_to_thread(&state, &scope, &thread_id)?;
+                bind_source_to_thread(&state, &scope, thread_id)?;
             }
-            let input = params.input_parts()?;
-            let mut options = state.run_options(scope.workdir.clone(), Some(thread_id.clone()));
+            let mut options = state.run_options(scope.workdir.clone(), thread_id.clone());
             options.model = params.model;
             options.reasoning_effort = params.reasoning_effort;
+            if let Some(mode) = params.mode.as_deref() {
+                options.mode = RunMode::parse(mode)
+                    .ok_or_else(|| Error::Message(format!("unknown mode: {mode}")))?;
+            }
+            if let Some(permission_mode) = params.permission_mode.as_deref() {
+                options.permission_mode =
+                    Some(PermissionMode::parse(permission_mode).ok_or_else(|| {
+                        Error::Message(format!("unknown permission mode: {permission_mode}"))
+                    })?);
+            }
             options.agent = params.agent_name.clone();
             apply_mentions_to_run_options(&mut options, &params.mentions);
             let source = scope.source.clone();
@@ -844,7 +874,7 @@ async fn handle_rpc(
             tokio::spawn(async move {
                 let result = gateway
                     .send_turn(crate::SendTurnRequest {
-                        thread_id: Some(thread_id),
+                        thread_id,
                         source: Some(source),
                         reset_source_binding: false,
                         input,
@@ -914,10 +944,33 @@ async fn handle_rpc(
             }
             completion_list_value(&state, &scope, params)
         }
+        "workspace/files" => {
+            let params = request.required_params::<wire::WorkspaceFilesParams>()?;
+            let scope = resolve_required_scope(&state, &auth, params.scope)?;
+            workspace_files_value(&scope)
+        }
+        "workspace/file/read" => {
+            let params = request.required_params::<wire::WorkspaceFileReadParams>()?;
+            let scope = resolve_required_scope(&state, &auth, params.scope)?;
+            workspace_file_read_value(&scope, &params.path)
+        }
+        "workspace/diff" => {
+            let params = request.required_params::<wire::WorkspaceDiffParams>()?;
+            let scope = resolve_required_scope(&state, &auth, params.scope)?;
+            workspace_diff_value(&scope, params.path.as_deref())
+        }
+        "context/read" => {
+            let params = request.required_params::<wire::ContextReadParams>()?;
+            let scope = resolve_required_scope(&state, &auth, params.scope)?;
+            if let Some(thread_id) = &params.thread_id {
+                authorize_thread(&state, &auth, thread_id)?;
+            }
+            context_read_value(&state, &scope, params.thread_id.as_deref())
+        }
         "source/reset" => {
             let params = request.required_params::<wire::SourceResetParams>()?;
             let scope = resolve_required_scope(&state, &auth, params.scope)?;
-            reset_source_to_empty_thread(&state, &scope)
+            reset_source_to_empty(&state, &scope)
         }
         "permission/respond" => {
             let params = request.required_params::<wire::PermissionRespondParams>()?;
@@ -1045,18 +1098,19 @@ async fn handle_rpc(
             let thread_id = match params.thread_id.clone() {
                 Some(thread_id) => {
                     authorize_thread(&state, &auth, &thread_id)?;
-                    thread_id
+                    Some(thread_id)
                 }
-                None => ensure_source_thread_for_shell(&state, &scope)?,
+                None => state.inner.gateway.resolve_source_thread(&scope.source)?,
             };
             if state
                 .inner
                 .gateway
                 .resolve_source_thread(&scope.source)?
                 .as_deref()
-                != Some(thread_id.as_str())
+                != thread_id.as_deref()
+                && let Some(thread_id) = thread_id.as_deref()
             {
-                bind_source_to_thread(&state, &scope, &thread_id)?;
+                bind_source_to_thread(&state, &scope, thread_id)?;
             }
             let event_state = state.clone();
             let event_tx = out_tx.clone();
@@ -1064,7 +1118,7 @@ async fn handle_rpc(
                 event_state.record_event(&event);
                 let _ = event_tx.send(rpc_notification("gateway/event", json!(event)));
             });
-            let context = user_shell_context_options(&state, &scope, Some(thread_id.clone()));
+            let context = user_shell_context_options(&state, &scope, thread_id.clone());
             let gateway = state.inner.gateway.clone();
             let source = scope.source.clone();
             let workdir = scope.workdir.clone();
@@ -1072,7 +1126,7 @@ async fn handle_rpc(
             tokio::spawn(async move {
                 let result = gateway
                     .send_shell(SendShellRequest {
-                        thread_id: Some(result_thread_id.clone()),
+                        thread_id: result_thread_id.clone(),
                         source: Some(source),
                         workdir,
                         command,
@@ -1095,17 +1149,21 @@ async fn handle_rpc(
             });
             Ok(serde_json::to_value(wire::ShellStartResult {
                 accepted: true,
-                thread_id: Some(thread_id),
+                thread_id,
                 message: None,
             })?)
         }
         "settings/read" => {
             let params = request.params::<wire::SettingsReadParams>()?;
             let workdir = resolve_workdir_filter(&state, &auth, params.workdir)?;
+            let controls = workbench_controls_value(&state, &workdir);
+            let project = workbench_project_value(&workdir);
             Ok(json!({
             "workdir": workdir,
+            "project": project,
             "memoryResources": {"mode": "status_only", "available": true},
-            "secrets": {"frontendPersistence": "disabled"}
+            "secrets": {"frontendPersistence": "disabled"},
+            "controls": controls
             }))
         }
         method => Err(Error::Message(format!("method not found: {method}"))),
@@ -1133,84 +1191,17 @@ impl ResolvedScope {
     }
 }
 
-fn start_empty_thread(state: &WebState, scope: &ResolvedScope) -> psychevo_runtime::Result<Value> {
-    let session_id = create_empty_thread_session(state, scope)?;
-    state.inner.gateway.bind_source_thread(
-        &scope.source,
-        &session_id,
-        &GatewayBackendInfo {
-            kind: BackendKind::Psychevo,
-            native_id: Some(session_id.clone()),
-        },
-        Some(json!({"reason": "thread_start"})),
-    )?;
-    thread_snapshot(state, scope, Some(&session_id))
+fn start_empty_source(state: &WebState, scope: &ResolvedScope) -> psychevo_runtime::Result<Value> {
+    state.inner.gateway.clear_source_binding(&scope.source)?;
+    thread_snapshot(state, scope, None)
 }
 
-fn ensure_source_thread_for_turn(
-    state: &WebState,
-    scope: &ResolvedScope,
-) -> psychevo_runtime::Result<String> {
-    ensure_source_thread(state, scope, "turn_start")
-}
-
-fn ensure_source_thread_for_shell(
-    state: &WebState,
-    scope: &ResolvedScope,
-) -> psychevo_runtime::Result<String> {
-    ensure_source_thread(state, scope, "shell_start")
-}
-
-fn ensure_source_thread(
-    state: &WebState,
-    scope: &ResolvedScope,
-    reason: &str,
-) -> psychevo_runtime::Result<String> {
-    if let Some(thread_id) = state.inner.gateway.resolve_source_thread(&scope.source)? {
-        return Ok(thread_id);
-    }
-    let session_id = create_empty_thread_session(state, scope)?;
-    state.inner.gateway.bind_source_thread(
-        &scope.source,
-        &session_id,
-        &GatewayBackendInfo {
-            kind: BackendKind::Psychevo,
-            native_id: Some(session_id.clone()),
-        },
-        Some(json!({"reason": reason})),
-    )?;
-    Ok(session_id)
-}
-
-fn create_empty_thread_session(
-    state: &WebState,
-    scope: &ResolvedScope,
-) -> psychevo_runtime::Result<String> {
-    state.inner.state.store().create_session_with_metadata(
-        &scope.workdir,
-        &scope.source.kind,
-        "pending",
-        "pending",
-        None,
-    )
-}
-
-fn reset_source_to_empty_thread(
+fn reset_source_to_empty(
     state: &WebState,
     scope: &ResolvedScope,
 ) -> psychevo_runtime::Result<Value> {
-    let session_id = state.inner.state.store().create_session_with_metadata(
-        &scope.workdir,
-        &scope.source.kind,
-        "pending",
-        "pending",
-        Some(json!({"source_reset": true})),
-    )?;
-    state
-        .inner
-        .gateway
-        .reset_source(&scope.source, &session_id)?;
-    thread_snapshot(state, scope, Some(&session_id))
+    state.inner.gateway.reset_source_to_empty(&scope.source)?;
+    thread_snapshot(state, scope, None)
 }
 
 fn bind_source_to_thread(
@@ -1242,10 +1233,7 @@ fn user_shell_context_options(
         session: thread_id,
         continue_latest: false,
         source: scope.source.kind.clone(),
-        continue_sources: HISTORY_SOURCES
-            .iter()
-            .map(|source| (*source).to_string())
-            .collect(),
+        continue_sources: Vec::new(),
         config_path: state.inner.config_path.clone(),
         model: None,
         reasoning_effort: None,
@@ -1293,10 +1281,13 @@ fn default_resolved_scope(
             workdir: state.inner.workdir.clone(),
             source: state.inner.source.clone(),
         }),
-        AuthContext::Browser(session) => Ok(ResolvedScope {
-            workdir: session.workdir.clone(),
-            source: session.source.clone(),
-        }),
+        AuthContext::Browser { .. } => {
+            let session = current_browser_session(state, auth)?;
+            Ok(ResolvedScope {
+                workdir: session.workdir.clone(),
+                source: session.source.clone(),
+            })
+        }
     }
 }
 
@@ -1312,12 +1303,29 @@ fn resolve_optional_scope(
 }
 
 fn resolve_required_scope(
-    _state: &WebState,
+    state: &WebState,
     auth: &AuthContext,
     scope: wire::GatewayRequestScope,
 ) -> psychevo_runtime::Result<ResolvedScope> {
     let workdir = canonicalize_workdir(Path::new(&scope.workdir))?;
-    authorize_workdir(auth, &workdir)?;
+    authorize_workdir(state, auth, &workdir)?;
+    Ok(ResolvedScope {
+        source: source_from_input(
+            Some(scope.source),
+            &workdir,
+            wire::GatewaySourceLifetime::Persistent,
+        ),
+        workdir,
+    })
+}
+
+fn resolve_start_scope(
+    state: &WebState,
+    auth: &AuthContext,
+    scope: wire::GatewayRequestScope,
+) -> psychevo_runtime::Result<ResolvedScope> {
+    let workdir = canonicalize_workdir(Path::new(&scope.workdir))?;
+    authorize_start_workdir(state, auth, &workdir)?;
     Ok(ResolvedScope {
         source: source_from_input(
             Some(scope.source),
@@ -1337,8 +1345,56 @@ fn resolve_workdir_filter(
         Some(workdir) => canonicalize_workdir(Path::new(&workdir))?,
         None => default_resolved_scope(state, auth)?.workdir,
     };
-    authorize_workdir(auth, &workdir)?;
+    authorize_workdir(state, auth, &workdir)?;
     Ok(workdir)
+}
+
+fn resolve_session_workdir_filter(
+    state: &WebState,
+    auth: &AuthContext,
+    workdir: Option<String>,
+) -> psychevo_runtime::Result<Option<PathBuf>> {
+    let Some(workdir) = workdir else {
+        return Ok(None);
+    };
+    let workdir = canonicalize_workdir(Path::new(&workdir))?;
+    authorize_workdir(state, auth, &workdir)?;
+    Ok(Some(workdir))
+}
+
+fn resolved_scope_for_thread(
+    state: &WebState,
+    thread_id: &str,
+) -> psychevo_runtime::Result<ResolvedScope> {
+    let summary = state
+        .inner
+        .state
+        .store()
+        .session_summary(thread_id)?
+        .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
+    let workdir = PathBuf::from(summary.workdir);
+    Ok(ResolvedScope {
+        source: workdir_source(&workdir),
+        workdir,
+    })
+}
+
+fn update_browser_session_scope(state: &WebState, auth: &AuthContext, scope: &ResolvedScope) {
+    let AuthContext::Browser { session_id, .. } = auth else {
+        return;
+    };
+    state
+        .inner
+        .browser_sessions
+        .lock()
+        .expect("web browser sessions poisoned")
+        .insert(
+            session_id.clone(),
+            BrowserSession {
+                workdir: scope.workdir.clone(),
+                source: scope.source.clone(),
+            },
+        );
 }
 
 fn discover_gateway_agents(
@@ -1695,6 +1751,405 @@ fn should_skip_completion_path(name: &str) -> bool {
     matches!(name, ".git" | ".local" | "target" | "node_modules")
 }
 
+fn workspace_files_value(scope: &ResolvedScope) -> psychevo_runtime::Result<Value> {
+    let mut entries = Vec::new();
+    let mut truncated = false;
+    collect_workspace_file_entries(
+        &scope.workdir,
+        &scope.workdir,
+        0,
+        &mut entries,
+        &mut truncated,
+    );
+    Ok(serde_json::to_value(wire::WorkspaceFilesResult {
+        root: scope.workdir.display().to_string(),
+        entries,
+        truncated,
+    })?)
+}
+
+fn collect_workspace_file_entries(
+    root: &Path,
+    dir: &Path,
+    depth: usize,
+    entries: &mut Vec<wire::WorkspaceFileEntry>,
+    truncated: &mut bool,
+) {
+    if depth > MAX_FILE_COMPLETION_DEPTH || entries.len() >= MAX_WORKSPACE_FILE_ITEMS {
+        *truncated = true;
+        return;
+    }
+    let Ok(read_dir) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut children = read_dir.flatten().collect::<Vec<_>>();
+    children.sort_by_key(|entry| {
+        let dir_rank = if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            0
+        } else {
+            1
+        };
+        (
+            dir_rank,
+            entry.file_name().to_string_lossy().to_ascii_lowercase(),
+        )
+    });
+    for entry in children {
+        if entries.len() >= MAX_WORKSPACE_FILE_ITEMS {
+            *truncated = true;
+            return;
+        }
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if should_skip_completion_path(&name) {
+            continue;
+        }
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        let Ok(relative) = path.strip_prefix(root) else {
+            continue;
+        };
+        let relative = relative.to_string_lossy().replace('\\', "/");
+        let is_dir = file_type.is_dir();
+        if !is_dir && !file_type.is_file() {
+            continue;
+        }
+        entries.push(wire::WorkspaceFileEntry {
+            path: relative,
+            name,
+            kind: if is_dir {
+                wire::WorkspaceFileKind::Directory
+            } else {
+                wire::WorkspaceFileKind::File
+            },
+            depth,
+        });
+        if is_dir {
+            collect_workspace_file_entries(root, &path, depth + 1, entries, truncated);
+        }
+    }
+}
+
+fn workspace_file_read_value(scope: &ResolvedScope, path: &str) -> psychevo_runtime::Result<Value> {
+    let resolved = resolve_workspace_relative_path(&scope.workdir, path)?;
+    let mut file = match std::fs::File::open(&resolved) {
+        Ok(file) => file,
+        Err(err) => {
+            return Ok(serde_json::to_value(wire::WorkspaceFileReadResult {
+                path: normalize_workspace_path(path),
+                content: None,
+                truncated: false,
+                binary: false,
+                unreadable: Some(err.to_string()),
+            })?);
+        }
+    };
+    let mut bytes = Vec::new();
+    file.by_ref()
+        .take((MAX_WORKSPACE_FILE_READ_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)?;
+    let truncated = bytes.len() > MAX_WORKSPACE_FILE_READ_BYTES;
+    if truncated {
+        bytes.truncate(MAX_WORKSPACE_FILE_READ_BYTES);
+    }
+    let binary = bytes.contains(&0) || (!truncated && std::str::from_utf8(&bytes).is_err());
+    let content = (!binary).then(|| String::from_utf8_lossy(&bytes).into_owned());
+    Ok(serde_json::to_value(wire::WorkspaceFileReadResult {
+        path: path_from_root(&scope.workdir, &resolved)
+            .unwrap_or_else(|| normalize_workspace_path(path)),
+        content,
+        truncated,
+        binary,
+        unreadable: None,
+    })?)
+}
+
+fn resolve_workspace_relative_path(root: &Path, path: &str) -> psychevo_runtime::Result<PathBuf> {
+    let raw = Path::new(path);
+    if raw.is_absolute() || path.contains('\0') {
+        return Err(Error::Message(
+            "workspace path must be relative".to_string(),
+        ));
+    }
+    let normalized = normalize_workspace_path(path);
+    if normalized.is_empty() || normalized.starts_with("../") || normalized == ".." {
+        return Err(Error::Message(
+            "workspace path must be relative".to_string(),
+        ));
+    }
+    let candidate = root.join(&normalized);
+    let canonical = candidate.canonicalize()?;
+    if !canonical.starts_with(root) {
+        return Err(Error::Message(
+            "workspace path is outside the project".to_string(),
+        ));
+    }
+    Ok(canonical)
+}
+
+fn normalize_workspace_path(path: &str) -> String {
+    path.trim()
+        .trim_start_matches('/')
+        .replace('\\', "/")
+        .split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn path_from_root(root: &Path, path: &Path) -> Option<String> {
+    path.strip_prefix(root)
+        .ok()
+        .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+}
+
+fn workspace_diff_value(
+    scope: &ResolvedScope,
+    path: Option<&str>,
+) -> psychevo_runtime::Result<Value> {
+    Ok(serde_json::to_value(workspace_diff_result(scope, path)?)?)
+}
+
+fn workspace_diff_result(
+    scope: &ResolvedScope,
+    path: Option<&str>,
+) -> psychevo_runtime::Result<wire::WorkspaceDiffResult> {
+    let diff = collect_workspace_diff(&scope.workdir)?;
+    let selected = path
+        .map(|path| {
+            let raw = Path::new(path);
+            if raw.is_absolute() || path.contains('\0') {
+                return Err(Error::Message(
+                    "workspace diff path must be relative".to_string(),
+                ));
+            }
+            Ok(normalize_workspace_path(path))
+        })
+        .transpose()?
+        .filter(|path| !path.is_empty());
+    let files = diff
+        .files
+        .iter()
+        .filter(|file| {
+            selected
+                .as_deref()
+                .is_none_or(|selected| file.path == selected)
+        })
+        .map(|file| wire::WorkspaceDiffFileView {
+            path: file.path.clone(),
+            status: workspace_diff_status(file.status),
+            binary: file.binary,
+            unreadable: file.unreadable,
+            placeholder: file.placeholder.clone(),
+        })
+        .collect::<Vec<_>>();
+    let unified_diff = if let Some(selected) = selected.as_deref() {
+        extract_unified_diff_for_path(&diff.unified_diff, selected).unwrap_or_else(|| {
+            diff.files
+                .iter()
+                .find(|file| file.path == selected)
+                .and_then(|file| file.placeholder.clone())
+                .unwrap_or_default()
+        })
+    } else {
+        diff.unified_diff
+    };
+    Ok(wire::WorkspaceDiffResult {
+        is_git_repo: diff.is_git_repo,
+        files,
+        unified_diff,
+        truncation: wire::WorkspaceDiffTruncationView {
+            truncated: diff.truncation.truncated,
+            max_bytes: diff.truncation.max_bytes,
+            max_lines: diff.truncation.max_lines,
+            omitted_bytes: diff.truncation.omitted_bytes,
+            omitted_lines: diff.truncation.omitted_lines,
+        },
+        selected_path: selected,
+    })
+}
+
+fn workspace_diff_status(status: WorkspaceDiffFileStatus) -> wire::WorkspaceDiffFileStatusView {
+    match status {
+        WorkspaceDiffFileStatus::Modified => wire::WorkspaceDiffFileStatusView::Modified,
+        WorkspaceDiffFileStatus::Added => wire::WorkspaceDiffFileStatusView::Added,
+        WorkspaceDiffFileStatus::Deleted => wire::WorkspaceDiffFileStatusView::Deleted,
+        WorkspaceDiffFileStatus::Untracked => wire::WorkspaceDiffFileStatusView::Untracked,
+        WorkspaceDiffFileStatus::Binary => wire::WorkspaceDiffFileStatusView::Binary,
+        WorkspaceDiffFileStatus::Unreadable => wire::WorkspaceDiffFileStatusView::Unreadable,
+    }
+}
+
+fn extract_unified_diff_for_path(diff: &str, path: &str) -> Option<String> {
+    let mut blocks = Vec::new();
+    let mut current = String::new();
+    for line in diff.split_inclusive('\n') {
+        if line.starts_with("diff --git ") && !current.is_empty() {
+            blocks.push(std::mem::take(&mut current));
+        }
+        current.push_str(line);
+    }
+    if !current.is_empty() {
+        blocks.push(current);
+    }
+    blocks.into_iter().find(|block| {
+        let header = block.lines().next().unwrap_or_default();
+        diff_header_matches_path(header, path)
+            || block.lines().take(6).any(|line| {
+                line.strip_prefix("+++ b/")
+                    .is_some_and(|candidate| candidate == path)
+                    || line
+                        .strip_prefix("--- a/")
+                        .is_some_and(|candidate| candidate == path)
+            })
+    })
+}
+
+fn diff_header_matches_path(header: &str, path: &str) -> bool {
+    header.contains(&format!(" a/{path} "))
+        || header.ends_with(&format!(" a/{path}"))
+        || header.contains(&format!(" b/{path} "))
+        || header.ends_with(&format!(" b/{path}"))
+}
+
+fn context_read_value(
+    state: &WebState,
+    scope: &ResolvedScope,
+    thread_id: Option<&str>,
+) -> psychevo_runtime::Result<Value> {
+    let thread_id = match thread_id {
+        Some(thread_id) => Some(thread_id.to_string()),
+        None => state.inner.gateway.resolve_source_thread(&scope.source)?,
+    };
+    let Some(thread_id) = thread_id else {
+        return Ok(serde_json::to_value(context_unavailable(
+            "No active session",
+        ))?);
+    };
+    let snapshot = match context_snapshot(ContextOptions {
+        state: state.inner.state.clone(),
+        workdir: scope.workdir.clone(),
+        session: thread_id,
+        config_path: state.inner.config_path.clone(),
+        inherited_env: Some(state.inner.inherited_env.clone()),
+    }) {
+        Ok(snapshot) => snapshot,
+        Err(err) => {
+            return Ok(serde_json::to_value(context_unavailable(&err.to_string()))?);
+        }
+    };
+    let categories = snapshot
+        .categories
+        .iter()
+        .filter(|(id, _)| id.as_str() != "free_space")
+        .map(|(id, category)| wire::ContextUsageCategoryView {
+            id: id.clone(),
+            label: category.label.clone(),
+            tokens: category.tokens,
+            estimated: category.estimated,
+            status: category.status.clone(),
+            percent: category.percent,
+        })
+        .collect::<Vec<_>>();
+    Ok(serde_json::to_value(wire::ContextReadResult {
+        available: true,
+        label: format_context_total_value(&snapshot),
+        status: snapshot.status,
+        used_tokens: snapshot.total.tokens,
+        context_limit: snapshot.context_limit,
+        percent: snapshot.total.percent,
+        categories,
+        advice: snapshot
+            .advice
+            .into_iter()
+            .map(|advice| advice.message)
+            .collect(),
+    })?)
+}
+
+fn context_unavailable(label: &str) -> wire::ContextReadResult {
+    wire::ContextReadResult {
+        available: false,
+        label: label.to_string(),
+        status: "unavailable".to_string(),
+        used_tokens: 0,
+        context_limit: None,
+        percent: None,
+        categories: Vec::new(),
+        advice: Vec::new(),
+    }
+}
+
+fn workbench_controls_value(state: &WebState, workdir: &Path) -> wire::WorkbenchControlsView {
+    let options = state.run_options(workdir.to_path_buf(), None);
+    let selected = selected_configured_model(&options).ok().flatten();
+    let configured = configured_models(&options).unwrap_or_default();
+    wire::WorkbenchControlsView {
+        permission_mode: PermissionMode::Default.as_str().to_string(),
+        mode: RunMode::Default.as_str().to_string(),
+        model: selected
+            .as_ref()
+            .map(|model| format!("{}/{}", model.provider, model.model)),
+        variant: selected
+            .as_ref()
+            .and_then(|model| model.reasoning_effort.clone())
+            .or_else(|| Some("none".to_string())),
+        permission_mode_options: ["default", "acceptEdits", "dontAsk", "bypassPermissions"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        mode_options: ["default", "plan"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        model_options: configured
+            .into_iter()
+            .map(|model| format!("{}/{}", model.provider, model.model))
+            .collect(),
+        variant_options: ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+    }
+}
+
+fn workbench_project_value(workdir: &Path) -> wire::WorkbenchProjectView {
+    wire::WorkbenchProjectView {
+        path: workdir.display().to_string(),
+        display_path: display_workdir(workdir),
+        branch: current_git_branch(workdir),
+    }
+}
+
+fn display_workdir(workdir: &Path) -> String {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    if let Some(home) = home
+        && let Ok(relative) = workdir.strip_prefix(&home)
+    {
+        let relative = relative.to_string_lossy();
+        return if relative.is_empty() {
+            "~".to_string()
+        } else {
+            format!("~/{}", relative.replace('\\', "/"))
+        };
+    }
+    workdir.to_string_lossy().replace('\\', "/")
+}
+
+fn current_git_branch(workdir: &Path) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(workdir)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!branch.is_empty()).then_some(branch)
+}
+
 fn command_execute_value(
     state: &WebState,
     scope: &ResolvedScope,
@@ -1723,7 +2178,7 @@ fn command_execute_value(
             active_turn,
         ) {
             Ok(effect) => {
-                command_result_from_effect(&raw, invocation.spec.action, effect, thread_id)
+                command_result_from_effect(scope, &raw, invocation.spec.action, effect, thread_id)?
             }
             Err(message) => wire::CommandExecuteResult {
                 accepted: false,
@@ -1738,7 +2193,13 @@ fn command_execute_value(
             args,
         } => {
             if let Some(effect) = dynamic_slash_command_effect(&command, &args, &dynamic) {
-                command_result_from_effect(&raw, SlashCommandAction::SkillInvoke, effect, thread_id)
+                command_result_from_effect(
+                    scope,
+                    &raw,
+                    SlashCommandAction::SkillInvoke,
+                    effect,
+                    thread_id,
+                )?
             } else {
                 wire::CommandExecuteResult {
                     accepted: false,
@@ -1759,70 +2220,84 @@ fn command_execute_value(
 }
 
 fn command_result_from_effect(
+    scope: &ResolvedScope,
     raw: &str,
     action: SlashCommandAction,
     effect: SlashCommandEffect,
     thread_id: Option<String>,
-) -> wire::CommandExecuteResult {
+) -> psychevo_runtime::Result<wire::CommandExecuteResult> {
     match effect {
         SlashCommandEffect::LocalText => match action {
-            SlashCommandAction::Help => {
-                command_action(raw, json!({"type": "showPanel", "panel": "commands"}))
-            }
-            SlashCommandAction::Status => {
-                command_action(raw, json!({"type": "showPanel", "panel": "status"}))
-            }
-            SlashCommandAction::Usage | SlashCommandAction::Context => command_unsupported(
+            SlashCommandAction::Help => Ok(command_action(
+                raw,
+                json!({"type": "showPanel", "panel": "commands"}),
+            )),
+            SlashCommandAction::Status => Ok(command_action(
+                raw,
+                json!({"type": "showPanel", "panel": "status"}),
+            )),
+            SlashCommandAction::Usage | SlashCommandAction::Context => Ok(command_unsupported(
                 raw,
                 format!(
                     "{} is not available in Web/Desktop yet.",
                     raw.split_whitespace().next().unwrap_or(raw)
                 ),
-            ),
-            _ => command_accepted_message(raw, None),
+            )),
+            _ => Ok(command_accepted_message(raw, None)),
         },
-        SlashCommandEffect::PassThroughPrompt(text) => {
-            command_action(raw, json!({"type": "passThroughPrompt", "text": text}))
-        }
-        SlashCommandEffect::SubmitPrompt(text) => {
-            command_action(raw, json!({"type": "submitPrompt", "text": text}))
-        }
-        SlashCommandEffect::Steer(text) => {
-            command_action(raw, json!({"type": "steerPrompt", "text": text}))
-        }
-        SlashCommandEffect::Queue(text) => {
-            command_action(raw, json!({"type": "queuePrompt", "text": text}))
-        }
-        SlashCommandEffect::PendingCancel => {
-            command_action(raw, json!({"type": "turnInterrupt", "threadId": thread_id}))
-        }
-        SlashCommandEffect::NewSession => command_action(raw, json!({"type": "threadStart"})),
-        SlashCommandEffect::SessionsList => {
-            command_action(raw, json!({"type": "showPanel", "panel": "history"}))
-        }
-        SlashCommandEffect::Agents => {
-            command_action(raw, json!({"type": "showPanel", "panel": "agents"}))
-        }
-        SlashCommandEffect::Export { .. } => command_action(
+        SlashCommandEffect::PassThroughPrompt(text) => Ok(command_action(
+            raw,
+            json!({"type": "passThroughPrompt", "text": text}),
+        )),
+        SlashCommandEffect::SubmitPrompt(text) => Ok(command_action(
+            raw,
+            json!({"type": "submitPrompt", "text": text}),
+        )),
+        SlashCommandEffect::Steer(text) => Ok(command_action(
+            raw,
+            json!({"type": "steerPrompt", "text": text}),
+        )),
+        SlashCommandEffect::Queue(text) => Ok(command_action(
+            raw,
+            json!({"type": "queuePrompt", "text": text}),
+        )),
+        SlashCommandEffect::PendingCancel => Ok(command_action(
+            raw,
+            json!({"type": "turnInterrupt", "threadId": thread_id}),
+        )),
+        SlashCommandEffect::NewSession => Ok(command_action(raw, json!({"type": "threadStart"}))),
+        SlashCommandEffect::SessionsList => Ok(command_action(
+            raw,
+            json!({"type": "showPanel", "panel": "history"}),
+        )),
+        SlashCommandEffect::Agents => Ok(command_action(
+            raw,
+            json!({"type": "showPanel", "panel": "agents"}),
+        )),
+        SlashCommandEffect::Export { .. } => Ok(command_action(
             raw,
             json!({"type": "downloadSession", "kind": "export", "threadId": thread_id}),
-        ),
-        SlashCommandEffect::Share { .. } => command_action(
+        )),
+        SlashCommandEffect::Share { .. } => Ok(command_action(
             raw,
             json!({"type": "downloadSession", "kind": "share", "threadId": thread_id}),
-        ),
-        SlashCommandEffect::Fork(prompt) => {
-            command_action(raw, json!({"type": "submitPrompt", "text": prompt}))
-        }
-        SlashCommandEffect::Compact { instructions } => command_action(
+        )),
+        SlashCommandEffect::Fork(prompt) => Ok(command_action(
+            raw,
+            json!({"type": "submitPrompt", "text": prompt}),
+        )),
+        SlashCommandEffect::Compact { instructions } => Ok(command_action(
             raw,
             json!({"type": "submitPrompt", "text": compact_prompt_text(instructions)}),
-        ),
-        SlashCommandEffect::Diff => command_unsupported(
-            raw,
-            "/diff is not available in Web/Desktop yet.".to_string(),
-        ),
-        SlashCommandEffect::Unsupported(message) => command_unsupported(raw, message),
+        )),
+        SlashCommandEffect::Diff => {
+            let diff = workspace_diff_result(scope, None)?;
+            Ok(command_action(
+                raw,
+                json!({"type": "workspaceDiff", "diff": diff}),
+            ))
+        }
+        SlashCommandEffect::Unsupported(message) => Ok(command_unsupported(raw, message)),
         SlashCommandEffect::ResumeSession { .. }
         | SlashCommandEffect::ShowModel
         | SlashCommandEffect::SetModel { .. }
@@ -1838,13 +2313,13 @@ fn command_result_from_effect(
         | SlashCommandEffect::Redo
         | SlashCommandEffect::Skills { .. }
         | SlashCommandEffect::Bundles { .. }
-        | SlashCommandEffect::Curator { .. } => command_unsupported(
+        | SlashCommandEffect::Curator { .. } => Ok(command_unsupported(
             raw,
             format!(
                 "{} is not available in Web/Desktop yet.",
                 raw.split_whitespace().next().unwrap_or(raw)
             ),
-        ),
+        )),
     }
 }
 
@@ -2203,14 +2678,74 @@ fn gateway_command_capabilities() -> Vec<CommandCapability> {
     ]
 }
 
-fn authorize_workdir(auth: &AuthContext, workdir: &Path) -> psychevo_runtime::Result<()> {
+fn current_browser_session(
+    state: &WebState,
+    auth: &AuthContext,
+) -> psychevo_runtime::Result<BrowserSession> {
+    let AuthContext::Browser { session_id } = auth else {
+        return Err(Error::Message(
+            "browser session is required for this operation".to_string(),
+        ));
+    };
+    state
+        .inner
+        .browser_sessions
+        .lock()
+        .expect("web browser sessions poisoned")
+        .get(session_id)
+        .cloned()
+        .ok_or_else(|| Error::Message("browser session is no longer active".to_string()))
+}
+
+fn authorize_workdir(
+    state: &WebState,
+    auth: &AuthContext,
+    workdir: &Path,
+) -> psychevo_runtime::Result<()> {
     match auth {
         AuthContext::Bearer => Ok(()),
-        AuthContext::Browser(session) if session.workdir == workdir => Ok(()),
-        AuthContext::Browser(_) => Err(Error::Message(
+        AuthContext::Browser { .. } if current_browser_session(state, auth)?.workdir == workdir => {
+            Ok(())
+        }
+        AuthContext::Browser { .. } => Err(Error::Message(
             "browser session is not authorized for this workdir".to_string(),
         )),
     }
+}
+
+fn authorize_start_workdir(
+    state: &WebState,
+    auth: &AuthContext,
+    workdir: &Path,
+) -> psychevo_runtime::Result<()> {
+    match auth {
+        AuthContext::Bearer => Ok(()),
+        AuthContext::Browser { .. } if current_browser_session(state, auth)?.workdir == workdir => {
+            Ok(())
+        }
+        AuthContext::Browser { .. } if browser_known_session_project(state, workdir)? => Ok(()),
+        AuthContext::Browser { .. } => Err(Error::Message(
+            "browser session is not authorized for this workdir".to_string(),
+        )),
+    }
+}
+
+fn browser_known_session_project(
+    state: &WebState,
+    workdir: &Path,
+) -> psychevo_runtime::Result<bool> {
+    let store = state.inner.state.store();
+    let active = store.list_sessions_for_workdir_with_sources(workdir, &[])?;
+    if active
+        .iter()
+        .any(|session| human_visible_session(state, session))
+    {
+        return Ok(true);
+    }
+    let archived = store.list_archived_sessions_for_workdir_with_sources(workdir, &[])?;
+    Ok(archived
+        .iter()
+        .any(|session| human_visible_session(state, session)))
 }
 
 fn authorize_thread(
@@ -2221,10 +2756,16 @@ fn authorize_thread(
     if matches!(auth, AuthContext::Bearer) {
         return Ok(());
     }
-    let Some(summary) = state.inner.state.store().session_summary(thread_id)? else {
+    if state
+        .inner
+        .state
+        .store()
+        .session_summary(thread_id)?
+        .is_none()
+    {
         return Err(Error::Message(format!("session not found: {thread_id}")));
-    };
-    authorize_workdir(auth, Path::new(&summary.workdir))
+    }
+    Ok(())
 }
 
 fn selector_from_thread_or_default(
@@ -2537,6 +3078,7 @@ fn thread_snapshot(
     let activity = state.activity(&scope.source, thread_id);
     Ok(json!({
         "source": scope.source,
+        "scope": scope.to_wire_scope(),
         "thread": thread,
         "entries": entries,
         "activity": activity,
@@ -2576,18 +3118,41 @@ fn session_summary_by_id(state: &WebState, session_id: &str) -> psychevo_runtime
         .store()
         .session_summary(session_id)?
         .map(|summary| session_summary_value(state, summary))
+        .transpose()?
         .ok_or_else(|| Error::Message(format!("session not found: {session_id}")))
 }
 
-fn session_summary_value(state: &WebState, summary: SessionSummary) -> Value {
+fn human_visible_session(_state: &WebState, summary: &SessionSummary) -> bool {
+    if summary.parent_session_id.is_some() {
+        return false;
+    }
+    if INTERNAL_SESSION_SOURCES.contains(&summary.source.as_str()) {
+        return false;
+    }
+    true
+}
+
+fn session_summary_value(
+    state: &WebState,
+    summary: SessionSummary,
+) -> psychevo_runtime::Result<Value> {
     let activity = state
         .inner
         .gateway
         .activity_for_selector(GatewayThreadSelector::thread_id(&summary.id));
-    json!({
+    let entries = state.inner.gateway.thread_transcript(&summary.id)?;
+    let preview = session_preview(&entries);
+    let display_title = summary
+        .title
+        .clone()
+        .filter(|title| !title.trim().is_empty())
+        .or_else(|| preview.clone())
+        .unwrap_or_else(|| short_thread_id(&summary.id));
+    let project = session_project_value(&summary.workdir);
+    Ok(json!({
         "id": summary.id,
-        "source": summary.source,
         "workdir": summary.workdir,
+        "project": project,
         "model": summary.model,
         "provider": summary.provider,
         "startedAtMs": summary.started_at_ms,
@@ -2597,9 +3162,62 @@ fn session_summary_value(state: &WebState, summary: SessionSummary) -> Value {
         "archivedAtMs": summary.archived_at_ms,
         "messageCount": summary.message_count,
         "toolCallCount": summary.tool_call_count,
+        "visibleEntryCount": entries.len(),
         "activity": activity,
         "title": summary.title,
+        "displayTitle": display_title,
+        "preview": preview,
+    }))
+}
+
+fn session_project_value(workdir: &str) -> Value {
+    let path = PathBuf::from(workdir);
+    json!({
+        "workdir": workdir,
+        "label": project_label(&path),
+        "displayPath": display_workdir(&path),
     })
+}
+
+fn project_label(workdir: &Path) -> String {
+    workdir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or("workdir")
+        .to_string()
+}
+
+fn session_preview(entries: &[TranscriptEntry]) -> Option<String> {
+    entries
+        .iter()
+        .find(|entry| entry.role == TranscriptEntryRole::User)
+        .and_then(entry_preview)
+        .or_else(|| entries.iter().find_map(entry_preview))
+}
+
+fn entry_preview(entry: &TranscriptEntry) -> Option<String> {
+    entry
+        .blocks
+        .iter()
+        .filter_map(|block| block.preview.as_deref().or(block.body.as_deref()))
+        .map(compact_display_text)
+        .find(|text| !text.is_empty())
+}
+
+fn compact_display_text(text: &str) -> String {
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    const MAX_CHARS: usize = 120;
+    if collapsed.chars().count() <= MAX_CHARS {
+        return collapsed;
+    }
+    let mut out = collapsed.chars().take(MAX_CHARS - 1).collect::<String>();
+    out.push('…');
+    out
+}
+
+fn short_thread_id(id: &str) -> String {
+    id.chars().take(8).collect()
 }
 
 fn gateway_turn_result_value(result: GatewayTurnResult) -> Value {
@@ -2726,6 +3344,7 @@ mod tests {
     use super::*;
     use axum::body::to_bytes;
     use std::collections::BTreeMap;
+    use std::ffi::OsStr;
 
     fn web_state() -> (tempfile::TempDir, WebState) {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -2764,17 +3383,23 @@ mod tests {
     }
 
     #[test]
-    fn start_empty_thread_binds_web_source() {
+    fn start_empty_source_returns_null_thread_and_creates_no_session() {
         let (_temp, state) = web_state();
         let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
 
-        let snapshot = start_empty_thread(&state, &scope).expect("snapshot");
-        let thread_id = snapshot
-            .get("thread")
-            .and_then(|thread| thread.get("id"))
-            .and_then(Value::as_str)
-            .expect("thread id");
+        let snapshot = start_empty_source(&state, &scope).expect("snapshot");
 
+        assert!(snapshot.get("thread").is_some_and(Value::is_null));
+        assert_eq!(
+            state
+                .inner
+                .state
+                .store()
+                .list_sessions_for_workdir_with_sources(&state.inner.workdir, &[])
+                .expect("sessions")
+                .len(),
+            0
+        );
         assert_eq!(
             state
                 .inner
@@ -2782,52 +3407,302 @@ mod tests {
                 .resolve_source_thread(&state.inner.source)
                 .expect("source lookup")
                 .as_deref(),
-            Some(thread_id)
+            None
         );
     }
 
     #[test]
-    fn start_empty_thread_keeps_previous_history_active() {
+    fn start_empty_source_clears_binding_without_archiving_previous_history() {
         let (_temp, state) = web_state();
         let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
+        let session_id = state
+            .inner
+            .state
+            .store()
+            .create_session_with_metadata(
+                &state.inner.workdir,
+                "web",
+                "fake-model",
+                "fake-provider",
+                None,
+            )
+            .expect("session");
+        bind_source_to_thread(&state, &scope, &session_id).expect("bind");
 
-        let first = start_empty_thread(&state, &scope).expect("first");
-        let first_id = first["thread"]["id"]
-            .as_str()
-            .expect("first id")
-            .to_string();
-        let second = start_empty_thread(&state, &scope).expect("second");
-        let second_id = second["thread"]["id"]
-            .as_str()
-            .expect("second id")
-            .to_string();
+        let snapshot = start_empty_source(&state, &scope).expect("snapshot");
 
+        assert!(snapshot.get("thread").is_some_and(Value::is_null));
+        assert!(
+            state
+                .inner
+                .gateway
+                .resolve_source_thread(&state.inner.source)
+                .expect("source lookup")
+                .is_none()
+        );
         let active_ids = state
             .inner
             .state
             .store()
-            .list_sessions_for_workdir_with_sources(&state.inner.workdir, HISTORY_SOURCES)
+            .list_sessions_for_workdir_with_sources(&state.inner.workdir, &[])
             .expect("active sessions")
             .into_iter()
             .map(|session| session.id)
             .collect::<Vec<_>>();
 
-        assert!(active_ids.contains(&first_id));
-        assert!(active_ids.contains(&second_id));
+        assert_eq!(active_ids, vec![session_id]);
+    }
+
+    #[tokio::test]
+    async fn thread_list_returns_global_top_level_sessions_without_source_partition() {
+        let (temp, state) = web_state();
+        let other_workdir = temp.path().join("other-work");
+        std::fs::create_dir_all(&other_workdir).expect("other workdir");
+        let other_workdir = canonicalize_workdir(&other_workdir).expect("other canonical");
+        let store = state.inner.state.store();
+        let top_level = store
+            .create_session_with_metadata(
+                &other_workdir,
+                "web",
+                "fake-model",
+                "fake-provider",
+                None,
+            )
+            .expect("top level");
+        let internal = store
+            .create_session_with_metadata(
+                &state.inner.workdir,
+                "tui-side",
+                "fake-model",
+                "fake-provider",
+                None,
+            )
+            .expect("internal");
+        let child = store
+            .create_child_session_with_metadata(
+                &top_level,
+                &other_workdir,
+                "web",
+                "fake-model",
+                "fake-provider",
+                None,
+            )
+            .expect("child");
+        let (out_tx, _out_rx) = mpsc::unbounded_channel();
+
+        let value = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            out_tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!(1)),
+                method: "thread/list".to_string(),
+                params: None,
+            },
+        )
+        .await
+        .expect("thread list");
+        let sessions = value["sessions"].as_array().expect("sessions");
+        let ids = sessions
+            .iter()
+            .filter_map(|session| session["id"].as_str())
+            .collect::<Vec<_>>();
+
+        assert!(ids.contains(&top_level.as_str()));
+        assert!(!ids.contains(&internal.as_str()));
+        assert!(!ids.contains(&child.as_str()));
+        let listed = sessions
+            .iter()
+            .find(|session| session["id"].as_str() == Some(top_level.as_str()))
+            .expect("top level listed");
+        assert_eq!(
+            listed["project"]["workdir"],
+            other_workdir.display().to_string()
+        );
+        assert_eq!(listed["project"]["label"], "other-work");
+        assert_eq!(listed["visibleEntryCount"], 0);
+        assert!(listed.get("source").is_none());
+    }
+
+    #[tokio::test]
+    async fn browser_cross_project_resume_authorizes_followup_rpcs_on_same_connection() {
+        let (temp, state) = web_state();
+        let other_workdir = temp.path().join("other-work");
+        std::fs::create_dir_all(&other_workdir).expect("other workdir");
+        let other_workdir = canonicalize_workdir(&other_workdir).expect("other canonical");
+        let session_id = state
+            .inner
+            .state
+            .store()
+            .create_session_with_metadata(
+                &other_workdir,
+                "web",
+                "fake-model",
+                "fake-provider",
+                None,
+            )
+            .expect("session");
+        let browser_session_id = "browser-session".to_string();
+        state
+            .inner
+            .browser_sessions
+            .lock()
+            .expect("sessions")
+            .insert(
+                browser_session_id.clone(),
+                BrowserSession {
+                    workdir: state.inner.workdir.clone(),
+                    source: state.inner.source.clone(),
+                },
+            );
+        let auth = AuthContext::Browser {
+            session_id: browser_session_id,
+        };
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        handle_rpc(
+            state.clone(),
+            auth.clone(),
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!(1)),
+                method: "thread/resume".to_string(),
+                params: Some(json!({ "threadId": session_id })),
+            },
+        )
+        .await
+        .expect("thread/resume");
+        let settings = handle_rpc(
+            state,
+            auth,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!(2)),
+                method: "settings/read".to_string(),
+                params: Some(json!({ "workdir": other_workdir })),
+            },
+        )
+        .await
+        .expect("settings/read after cross-project resume");
+
+        assert_eq!(
+            settings["project"]["path"],
+            other_workdir.display().to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn browser_project_group_start_adopts_known_session_project_scope() {
+        let (temp, state) = web_state();
+        let other_workdir = temp.path().join("other-work");
+        std::fs::create_dir_all(&other_workdir).expect("other workdir");
+        let other_workdir = canonicalize_workdir(&other_workdir).expect("other canonical");
+        state
+            .inner
+            .state
+            .store()
+            .create_session_with_metadata(
+                &other_workdir,
+                "web",
+                "fake-model",
+                "fake-provider",
+                None,
+            )
+            .expect("existing project session");
+        let browser_session_id = "browser-session".to_string();
+        state
+            .inner
+            .browser_sessions
+            .lock()
+            .expect("sessions")
+            .insert(
+                browser_session_id.clone(),
+                BrowserSession {
+                    workdir: state.inner.workdir.clone(),
+                    source: state.inner.source.clone(),
+                },
+            );
+        let auth = AuthContext::Browser {
+            session_id: browser_session_id,
+        };
+        let scope = ResolvedScope {
+            workdir: other_workdir.clone(),
+            source: workdir_source(&other_workdir),
+        }
+        .to_wire_scope();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let snapshot = handle_rpc(
+            state.clone(),
+            auth.clone(),
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!(1)),
+                method: "thread/start".to_string(),
+                params: Some(json!({ "scope": scope })),
+            },
+        )
+        .await
+        .expect("thread/start in known project");
+        assert!(snapshot.get("thread").is_some_and(Value::is_null));
+        assert_eq!(
+            snapshot["scope"]["workdir"],
+            other_workdir.display().to_string()
+        );
+
+        let settings = handle_rpc(
+            state,
+            auth,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!(2)),
+                method: "settings/read".to_string(),
+                params: Some(json!({ "workdir": other_workdir })),
+            },
+        )
+        .await
+        .expect("settings/read after project start");
+
+        assert_eq!(
+            settings["project"]["path"],
+            other_workdir.display().to_string()
+        );
     }
 
     #[test]
-    fn reset_source_to_empty_thread_archives_previous_binding() {
+    fn reset_source_to_empty_archives_previous_binding_without_replacement() {
         let (_temp, state) = web_state();
         let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
+        let first_id = state
+            .inner
+            .state
+            .store()
+            .create_session_with_metadata(
+                &state.inner.workdir,
+                "web",
+                "fake-model",
+                "fake-provider",
+                None,
+            )
+            .expect("session");
+        bind_source_to_thread(&state, &scope, &first_id).expect("bind");
 
-        let first = start_empty_thread(&state, &scope).expect("first");
-        let first_id = first["thread"]["id"]
-            .as_str()
-            .expect("first id")
-            .to_string();
-        reset_source_to_empty_thread(&state, &scope).expect("reset");
+        let snapshot = reset_source_to_empty(&state, &scope).expect("reset");
 
+        assert!(snapshot.get("thread").is_some_and(Value::is_null));
+        assert!(
+            state
+                .inner
+                .gateway
+                .resolve_source_thread(&state.inner.source)
+                .expect("source lookup")
+                .is_none()
+        );
         assert!(
             state
                 .inner
@@ -2838,6 +3713,16 @@ mod tests {
                 .expect("first exists")
                 .archived_at_ms
                 .is_some()
+        );
+        assert_eq!(
+            state
+                .inner
+                .state
+                .store()
+                .list_sessions_for_workdir_with_sources(&state.inner.workdir, &[])
+                .expect("active sessions")
+                .len(),
+            0
         );
     }
 
@@ -3081,6 +3966,177 @@ command = "cursor-agent"
     }
 
     #[tokio::test]
+    async fn settings_read_returns_workbench_project_and_controls() {
+        let (_temp, state) = web_state();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let result = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "settings/read".to_string(),
+                params: None,
+            },
+        )
+        .await
+        .expect("settings/read");
+
+        let workdir = state.inner.workdir.display().to_string();
+        assert_eq!(result["project"]["path"].as_str(), Some(workdir.as_str()));
+        assert!(
+            result["project"]["displayPath"]
+                .as_str()
+                .is_some_and(|path| path.ends_with("/work") || path == "work"),
+            "{result:#}"
+        );
+        assert_eq!(result["controls"]["permissionMode"], "default");
+        assert_eq!(result["controls"]["mode"], "default");
+        assert!(
+            result["controls"]["variantOptions"]
+                .as_array()
+                .expect("variant options")
+                .iter()
+                .any(|value| value.as_str() == Some("medium"))
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_file_rpcs_are_scoped_to_current_project_tree() {
+        let (_temp, state) = web_state();
+        let src = state.inner.workdir.join("src");
+        std::fs::create_dir_all(&src).expect("src");
+        std::fs::write(src.join("main.rs"), "fn main() {}\n").expect("main");
+        for skipped in [".git", ".local", "target", "node_modules"] {
+            let dir = state.inner.workdir.join(skipped);
+            std::fs::create_dir_all(&dir).expect("skipped dir");
+            std::fs::write(dir.join("hidden.txt"), skipped).expect("hidden");
+        }
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let result = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "workspace/files".to_string(),
+                params: Some(json!({ "scope": scope.clone() })),
+            },
+        )
+        .await
+        .expect("workspace/files");
+
+        let paths = result["entries"]
+            .as_array()
+            .expect("entries")
+            .iter()
+            .filter_map(|entry| entry["path"].as_str())
+            .collect::<Vec<_>>();
+        assert!(paths.contains(&"src"));
+        assert!(paths.contains(&"src/main.rs"));
+        assert!(
+            paths.iter().all(|path| !path.starts_with(".git")
+                && !path.starts_with(".local")
+                && !path.starts_with("target")
+                && !path.starts_with("node_modules")),
+            "{paths:?}"
+        );
+
+        let read = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("2")),
+                method: "workspace/file/read".to_string(),
+                params: Some(json!({
+                    "scope": scope.clone(),
+                    "path": "src/main.rs"
+                })),
+            },
+        )
+        .await
+        .expect("workspace/file/read");
+        assert_eq!(read["path"].as_str(), Some("src/main.rs"));
+        assert_eq!(read["content"].as_str(), Some("fn main() {}\n"));
+
+        let err = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("3")),
+                method: "workspace/file/read".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "path": "/etc/passwd"
+                })),
+            },
+        )
+        .await
+        .expect_err("absolute path should be rejected");
+        assert_eq!(err.to_string(), "workspace path must be relative");
+    }
+
+    #[tokio::test]
+    async fn workspace_diff_rpc_returns_selected_file_diff_preview() {
+        let (_temp, state) = web_state();
+        git(&state.inner.workdir, ["init"]);
+        git(
+            &state.inner.workdir,
+            ["config", "user.email", "test@example.com"],
+        );
+        git(&state.inner.workdir, ["config", "user.name", "Test User"]);
+        let src = state.inner.workdir.join("src");
+        std::fs::create_dir_all(&src).expect("src");
+        std::fs::write(src.join("main.rs"), "fn main() {}\n").expect("main");
+        git(&state.inner.workdir, ["add", "."]);
+        git(&state.inner.workdir, ["commit", "-m", "initial"]);
+        std::fs::write(src.join("main.rs"), "fn main() {}\nfn changed() {}\n").expect("main");
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let result = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "workspace/diff".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "path": "src/main.rs"
+                })),
+            },
+        )
+        .await
+        .expect("workspace/diff");
+
+        assert_eq!(result["selectedPath"].as_str(), Some("src/main.rs"));
+        assert_eq!(result["files"].as_array().expect("files").len(), 1);
+        assert_eq!(result["files"][0]["path"].as_str(), Some("src/main.rs"));
+        assert_eq!(result["files"][0]["status"].as_str(), Some("modified"));
+        assert!(
+            result["unifiedDiff"].as_str().is_some_and(|diff| diff
+                .contains("diff --git a/src/main.rs b/src/main.rs")
+                && diff.contains("+fn changed() {}")),
+            "{result:#}"
+        );
+    }
+
+    #[tokio::test]
     async fn completion_list_ranks_dollar_prefix_matches_first() {
         let (_temp, state) = web_state();
         write_project_skill(&state, "x-daily", "Fetch X daily posts.");
@@ -3280,6 +4336,83 @@ command = "cursor-agent"
     }
 
     #[tokio::test]
+    async fn turn_start_empty_input_rejects_before_creating_session() {
+        let (_temp, state) = web_state();
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let err = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "turn/start".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "input": [],
+                    "threadId": null
+                })),
+            },
+        )
+        .await
+        .expect_err("empty turn should reject");
+
+        assert_eq!(err.to_string(), "turn/start requires input");
+        assert_eq!(
+            state
+                .inner
+                .state
+                .store()
+                .list_sessions_for_workdir_with_sources(&state.inner.workdir, &[])
+                .expect("sessions")
+                .len(),
+            0
+        );
+        assert!(
+            state
+                .inner
+                .gateway
+                .resolve_source_thread(&state.inner.source)
+                .expect("source lookup")
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn shell_start_first_request_can_be_accepted_without_thread_id() {
+        let (_temp, state) = web_state();
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let result = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "shell/start".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "command": "printf shell-ok",
+                    "threadId": null
+                })),
+            },
+        )
+        .await
+        .expect("shell/start");
+
+        assert_eq!(result["accepted"], true);
+        assert!(result.get("threadId").is_some_and(Value::is_null));
+    }
+
+    #[tokio::test]
     async fn agent_write_rpc_creates_project_backend_ref_shadow() {
         let (_temp, state) = web_state();
         let (tx, _rx) = mpsc::unbounded_channel();
@@ -3439,5 +4572,22 @@ command = "cursor-agent"
             format!("---\nname: {name}\ndescription: {description:?}\n---\n\nUse this skill.\n"),
         )
         .expect("skill");
+    }
+
+    fn git<I, S>(workdir: &Path, args: I)
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(workdir)
+            .output()
+            .expect("git");
+        assert!(
+            output.status.success(),
+            "git failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }

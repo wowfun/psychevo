@@ -9,6 +9,8 @@ import {
   type CommandListResult,
   type CompletionListParams,
   type CompletionListResult,
+  type ContextReadParams,
+  type ContextReadResult,
   type GatewayRequestScope,
   type InitializeParams,
   type InitializeResult,
@@ -33,7 +35,13 @@ import {
   type TurnControlResult,
   type TurnStartParams,
   type TurnStartResult,
-  type TurnSteerParams
+  type TurnSteerParams,
+  type WorkspaceDiffParams,
+  type WorkspaceDiffResult,
+  type WorkspaceFileReadParams,
+  type WorkspaceFileReadResult,
+  type WorkspaceFilesParams,
+  type WorkspaceFilesResult
 } from "@psychevo/protocol";
 import type { GatewayEndpoint } from "@psychevo/host";
 
@@ -53,6 +61,7 @@ export interface GatewayRequestParams {
   "command/execute": CommandExecuteParams;
   "command/list": CommandListParams;
   "completion/list": CompletionListParams;
+  "context/read": ContextReadParams;
   "initialize": InitializeParams;
   "permission/respond": PermissionRespondParams;
   "settings/read": SettingsReadParams;
@@ -69,6 +78,9 @@ export interface GatewayRequestParams {
   "turn/interrupt": { sourceKey?: string | null; threadId?: string | null };
   "turn/start": TurnStartParams;
   "turn/steer": TurnSteerParams;
+  "workspace/diff": WorkspaceDiffParams;
+  "workspace/file/read": WorkspaceFileReadParams;
+  "workspace/files": WorkspaceFilesParams;
 }
 
 export interface GatewayRequestResults {
@@ -78,6 +90,7 @@ export interface GatewayRequestResults {
   "command/execute": CommandExecuteResult;
   "command/list": CommandListResult;
   "completion/list": CompletionListResult;
+  "context/read": ContextReadResult;
   "initialize": InitializeResult;
   "permission/respond": InteractionRespondResult;
   "settings/read": SettingsReadResult;
@@ -94,6 +107,9 @@ export interface GatewayRequestResults {
   "turn/interrupt": TurnControlResult;
   "turn/start": TurnStartResult;
   "turn/steer": TurnControlResult;
+  "workspace/diff": WorkspaceDiffResult;
+  "workspace/file/read": WorkspaceFileReadResult;
+  "workspace/files": WorkspaceFilesResult;
 }
 
 export type GatewayMethod = keyof GatewayRequestParams;
@@ -223,10 +239,27 @@ function withThreadSnapshotDefaults(value: unknown): unknown {
   }
   return {
     ...record,
+    scope: record.scope ?? defaultScopeFromSource(record.source),
     thread: Object.prototype.hasOwnProperty.call(record, "thread") ? record.thread : null,
     activity: withActivityDefaults(record.activity),
     pendingPermissions: Array.isArray(record.pendingPermissions) ? record.pendingPermissions : [],
     pendingClarifies: Array.isArray(record.pendingClarifies) ? record.pendingClarifies : []
+  };
+}
+
+function defaultScopeFromSource(value: unknown): GatewayRequestScope {
+  const source = asRecord(value);
+  return {
+    workdir: "",
+    source: {
+      kind: typeof source?.kind === "string" ? source.kind : "web",
+      rawId: typeof source?.rawId === "string" ? source.rawId : null,
+      lifetime: source?.lifetime === "invocation" || source?.lifetime === "process" || source?.lifetime === "persistent"
+        ? source.lifetime
+        : "persistent",
+      rawIdentity: source?.rawIdentity ?? null,
+      visibleName: typeof source?.visibleName === "string" ? source.visibleName : null
+    }
   };
 }
 
