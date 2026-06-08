@@ -1,5 +1,6 @@
 use std::env;
 use std::fs::{self, OpenOptions};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::time::{Duration, Instant, UNIX_EPOCH};
@@ -24,6 +25,8 @@ use crate::env::{
 };
 
 const GATEWAY_DIR: &str = "gateway";
+const MANAGED_GATEWAY_DEFAULT_PORT: u16 = 58_080;
+const MANAGED_GATEWAY_FALLBACK_PORTS: u16 = 19;
 
 #[derive(Debug, Clone)]
 struct ManagedPaths {
@@ -70,6 +73,51 @@ struct ProcessExecutable {
     deleted: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ManagedBindPolicy {
+    bind_addr: SocketAddr,
+    fallback_ports: u16,
+}
+
+impl ManagedBindPolicy {
+    fn new(explicit: Option<SocketAddr>) -> Self {
+        match explicit {
+            Some(bind_addr) => Self {
+                bind_addr,
+                fallback_ports: 0,
+            },
+            None => Self {
+                bind_addr: default_managed_bind_addr(),
+                fallback_ports: MANAGED_GATEWAY_FALLBACK_PORTS,
+            },
+        }
+    }
+
+    fn bind_addr(self) -> SocketAddr {
+        self.bind_addr
+    }
+
+    fn fallback_ports(self) -> u16 {
+        self.fallback_ports
+    }
+
+    fn allows_bound_addr(self, addr: SocketAddr) -> bool {
+        if self.fallback_ports == 0 {
+            return addr == self.bind_addr;
+        }
+        addr.ip() == self.bind_addr.ip()
+            && addr.port() >= self.bind_addr.port()
+            && addr.port() <= self.bind_addr.port().saturating_add(self.fallback_ports)
+    }
+}
+
+fn default_managed_bind_addr() -> SocketAddr {
+    SocketAddr::new(
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        MANAGED_GATEWAY_DEFAULT_PORT,
+    )
+}
+
 pub(crate) async fn run_gateway_command(args: GatewayArgs) -> Result<ExitCode> {
     match args.command {
         Some(GatewayCommand::Open(args)) => open(args).await,
@@ -80,7 +128,7 @@ pub(crate) async fn run_gateway_command(args: GatewayArgs) -> Result<ExitCode> {
         None => {
             open(GatewayOpenArgs {
                 dir: None,
-                bind: "127.0.0.1:0".parse().expect("default bind address"),
+                bind: None,
                 no_browser: false,
                 print_url: false,
             })
@@ -99,7 +147,8 @@ pub(crate) async fn open(args: GatewayOpenArgs) -> Result<ExitCode> {
     if !static_dir.found() {
         return print_json_code(workbench_dist_missing(&static_dir));
     }
-    let state = ensure_started(&ctx, args.bind, &static_dir.path).await?;
+    let bind_policy = ManagedBindPolicy::new(args.bind);
+    let state = ensure_started(&ctx, bind_policy, &static_dir.path).await?;
     let workdir = match &args.dir {
         Some(dir) => canonicalize_workdir(&resolve_explicit_path(dir, &ctx.env_map, &ctx.cwd)?)?,
         None => canonicalize_workdir(&ctx.cwd)?,
@@ -129,7 +178,8 @@ async fn start(args: GatewayStartArgs) -> Result<ExitCode> {
     if !static_dir.found() {
         return print_json_code(workbench_dist_missing(&static_dir));
     }
-    let state = ensure_started(&ctx, args.bind, &static_dir.path).await?;
+    let bind_policy = ManagedBindPolicy::new(args.bind);
+    let state = ensure_started(&ctx, bind_policy, &static_dir.path).await?;
     print_json(json!({
         "ok": true,
         "running": true,
@@ -160,7 +210,8 @@ async fn restart(args: GatewayStartArgs) -> Result<ExitCode> {
     if !static_dir.found() {
         return print_json_code(workbench_dist_missing(&static_dir));
     }
-    let state = ensure_started(&ctx, args.bind, &static_dir.path).await?;
+    let bind_policy = ManagedBindPolicy::new(args.bind);
+    let state = ensure_started(&ctx, bind_policy, &static_dir.path).await?;
     print_json(json!({
         "ok": true,
         "running": true,
@@ -201,7 +252,7 @@ impl GatewayContext {
 
 async fn ensure_started(
     ctx: &GatewayContext,
-    bind: std::net::SocketAddr,
+    bind_policy: ManagedBindPolicy,
     static_dir: &Path,
 ) -> Result<ManagedServerState> {
     let target = managed_reuse_target(static_dir)?;
@@ -212,6 +263,7 @@ async fn ensure_started(
             pid_alive(state.pid),
             Some(&target.executable),
             Some(target.static_dir.as_str()),
+            Some(&bind_policy),
             process.as_ref(),
         );
         if stale_reason.is_none() {
@@ -223,11 +275,15 @@ async fn ensure_started(
     }
     cleanup_state(&ctx.paths)?;
     rotate_token(&ctx.paths)?;
-    spawn_serve(ctx, bind, static_dir)?;
+    spawn_serve(ctx, bind_policy, static_dir)?;
     wait_for_state(&ctx.paths).await
 }
 
-fn spawn_serve(ctx: &GatewayContext, bind: std::net::SocketAddr, static_dir: &Path) -> Result<()> {
+fn spawn_serve(
+    ctx: &GatewayContext,
+    bind_policy: ManagedBindPolicy,
+    static_dir: &Path,
+) -> Result<()> {
     let exe = env::current_exe().context("resolve pevo executable")?;
     let log = OpenOptions::new()
         .create(true)
@@ -238,13 +294,19 @@ fn spawn_serve(ctx: &GatewayContext, bind: std::net::SocketAddr, static_dir: &Pa
     command
         .arg("serve")
         .arg("--bind")
-        .arg(bind.to_string())
+        .arg(bind_policy.bind_addr().to_string())
         .arg("--token-file")
         .arg(&ctx.paths.token)
         .arg("--internal-static-dir")
         .arg(static_dir)
         .arg("--internal-managed-state")
-        .arg(&ctx.paths.server_json)
+        .arg(&ctx.paths.server_json);
+    if bind_policy.fallback_ports() > 0 {
+        command
+            .arg("--internal-bind-fallbacks")
+            .arg(bind_policy.fallback_ports().to_string());
+    }
+    command
         .stdin(Stdio::null())
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(log_err));
@@ -363,6 +425,7 @@ fn managed_status_value(
         running,
         expected_executable,
         None,
+        None,
         process_executable,
     );
     json!({
@@ -416,6 +479,7 @@ fn managed_stale_reason(
     pid_running: bool,
     expected_executable: Option<&ExecutableFingerprint>,
     expected_static_dir: Option<&str>,
+    expected_bind_policy: Option<&ManagedBindPolicy>,
     process_executable: Option<&ProcessExecutable>,
 ) -> Option<&'static str> {
     if !pid_running {
@@ -452,7 +516,23 @@ fn managed_stale_reason(
             return Some("static_dir_mismatch");
         }
     }
+    if let Some(policy) = expected_bind_policy {
+        let Some(bound_addr) = state_bound_addr(state) else {
+            return Some("bind_addr_mismatch");
+        };
+        if !policy.allows_bound_addr(bound_addr) {
+            return Some("bind_addr_mismatch");
+        }
+    }
     None
+}
+
+fn state_bound_addr(state: &ManagedServerState) -> Option<SocketAddr> {
+    state
+        .base_url
+        .strip_prefix("http://")?
+        .parse::<SocketAddr>()
+        .ok()
 }
 
 fn state_executable_fingerprint(state: &ManagedServerState) -> Option<ExecutableFingerprint> {
@@ -637,7 +717,7 @@ mod tests {
         let expected = test_fingerprint("/new/pevo", 20, 200, Some(2));
 
         assert_eq!(
-            managed_stale_reason(&state, true, Some(&expected), Some("/static"), None),
+            managed_stale_reason(&state, true, Some(&expected), Some("/static"), None, None),
             Some("executable_fingerprint_mismatch")
         );
     }
@@ -659,7 +739,7 @@ mod tests {
         let expected = test_fingerprint("/current/pevo", 20, 200, Some(2));
 
         assert_eq!(
-            managed_stale_reason(&state, true, Some(&expected), Some("/static"), None),
+            managed_stale_reason(&state, true, Some(&expected), Some("/static"), None, None),
             Some("missing_executable_fingerprint")
         );
     }
@@ -670,8 +750,80 @@ mod tests {
         let state = test_state(executable.clone(), "/old-static");
 
         assert_eq!(
-            managed_stale_reason(&state, true, Some(&executable), Some("/new-static"), None),
+            managed_stale_reason(
+                &state,
+                true,
+                Some(&executable),
+                Some("/new-static"),
+                None,
+                None
+            ),
             Some("static_dir_mismatch")
+        );
+    }
+
+    #[test]
+    fn default_managed_bind_policy_uses_fixed_port_with_range() {
+        let policy = ManagedBindPolicy::new(None);
+
+        assert_eq!(
+            policy.bind_addr(),
+            "127.0.0.1:58080".parse::<SocketAddr>().expect("addr")
+        );
+        assert_eq!(policy.fallback_ports(), 19);
+        assert!(policy.allows_bound_addr("127.0.0.1:58080".parse().expect("addr")));
+        assert!(policy.allows_bound_addr("127.0.0.1:58099".parse().expect("addr")));
+        assert!(!policy.allows_bound_addr("127.0.0.1:58100".parse().expect("addr")));
+    }
+
+    #[test]
+    fn explicit_managed_bind_policy_is_strict() {
+        let policy = ManagedBindPolicy::new(Some("127.0.0.1:60000".parse().expect("addr")));
+
+        assert_eq!(policy.fallback_ports(), 0);
+        assert!(policy.allows_bound_addr("127.0.0.1:60000".parse().expect("addr")));
+        assert!(!policy.allows_bound_addr("127.0.0.1:60001".parse().expect("addr")));
+    }
+
+    #[test]
+    fn managed_state_outside_default_bind_range_is_stale() {
+        let executable = test_fingerprint("/current/pevo", 20, 200, Some(2));
+        let mut state = test_state(executable.clone(), "/static");
+        state.base_url = "http://127.0.0.1:1".to_string();
+        state.readyz_url = "http://127.0.0.1:1/readyz".to_string();
+        let policy = ManagedBindPolicy::new(None);
+
+        assert_eq!(
+            managed_stale_reason(
+                &state,
+                true,
+                Some(&executable),
+                Some("/static"),
+                Some(&policy),
+                None
+            ),
+            Some("bind_addr_mismatch")
+        );
+    }
+
+    #[test]
+    fn managed_state_inside_default_bind_range_is_reusable() {
+        let executable = test_fingerprint("/current/pevo", 20, 200, Some(2));
+        let mut state = test_state(executable.clone(), "/static");
+        state.base_url = "http://127.0.0.1:58099".to_string();
+        state.readyz_url = "http://127.0.0.1:58099/readyz".to_string();
+        let policy = ManagedBindPolicy::new(None);
+
+        assert_eq!(
+            managed_stale_reason(
+                &state,
+                true,
+                Some(&executable),
+                Some("/static"),
+                Some(&policy),
+                None
+            ),
+            None
         );
     }
 
@@ -703,6 +855,7 @@ mod tests {
                 true,
                 Some(&executable),
                 Some("/static"),
+                None,
                 Some(&process)
             ),
             Some("process_executable_deleted")

@@ -31,7 +31,9 @@ metadata; it does not include tokens.
 Direct `pevo serve` requires an explicit token from `PSYCHEVO_SERVE_TOKEN` or
 `--token-file`. There is no `--token` flag, and query string tokens are not
 accepted. Managed `pevo gateway` may start `pevo serve` with internal flags and
-a generated token file.
+a generated token file. Managed-only internal flags may request fallback across
+a finite loopback port range; the public `pevo serve` command keeps its
+single-address bind behavior.
 
 ## HTTP And WebSocket
 

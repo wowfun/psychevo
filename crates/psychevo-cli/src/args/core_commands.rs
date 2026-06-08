@@ -148,6 +148,13 @@ pub(crate) struct ServeArgs {
         help = "Write managed server metadata to this file after binding"
     )]
     pub(crate) managed_state: Option<PathBuf>,
+    #[arg(
+        long = "internal-bind-fallbacks",
+        hide = true,
+        default_value_t = 0,
+        help = "Try this many sequential ports after --bind when the address is already in use"
+    )]
+    pub(crate) bind_fallbacks: u16,
 }
 
 #[derive(Debug, Parser)]
@@ -181,10 +188,9 @@ pub(crate) struct GatewayOpenArgs {
     #[arg(
         long,
         value_name = "ADDR",
-        default_value = "127.0.0.1:0",
-        help = "Loopback address for a newly started managed Gateway server"
+        help = "Loopback address for a newly started managed Gateway server; omitted uses 127.0.0.1:58080 with managed fallback through 58099"
     )]
-    pub(crate) bind: std::net::SocketAddr,
+    pub(crate) bind: Option<std::net::SocketAddr>,
     #[arg(long, help = "Do not open a browser")]
     pub(crate) no_browser: bool,
     #[arg(long, help = "Include the short-lived launch URL in stdout JSON")]
@@ -196,10 +202,9 @@ pub(crate) struct GatewayStartArgs {
     #[arg(
         long,
         value_name = "ADDR",
-        default_value = "127.0.0.1:0",
-        help = "Loopback address for the managed Gateway server"
+        help = "Loopback address for the managed Gateway server; omitted uses 127.0.0.1:58080 with managed fallback through 58099"
     )]
-    pub(crate) bind: std::net::SocketAddr,
+    pub(crate) bind: Option<std::net::SocketAddr>,
 }
 
 #[derive(Debug, Parser)]

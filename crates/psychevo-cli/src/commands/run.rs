@@ -93,6 +93,7 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
         .send_turn(SendTurnRequest {
             thread_id: args.session.clone(),
             source: Some(source),
+            bind_source: None,
             reset_source_binding: false,
             input: Vec::new(),
             options: RunOptions {

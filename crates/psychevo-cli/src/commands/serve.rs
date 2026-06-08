@@ -47,6 +47,7 @@ pub(crate) async fn run_serve_command(args: ServeArgs) -> Result<ExitCode> {
     let mut config =
         GatewayWebServerConfig::headless(gateway, home, workdir, config_path, env_map, token);
     config.bind_addr = args.bind;
+    config.bind_port_fallbacks = args.bind_fallbacks;
     config.static_dir = static_dir;
     config.managed_state_path = managed_state;
 

@@ -6,7 +6,7 @@ mod acp_peer;
 mod projection;
 mod transcript;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -45,7 +45,9 @@ pub struct Gateway {
     state: StateRuntime,
     backend: Arc<dyn GatewayBackend>,
     active: Arc<Mutex<HashMap<String, ActiveThreadState>>>,
+    active_aliases: Arc<Mutex<HashMap<String, String>>>,
     process_bindings: Arc<Mutex<HashMap<String, String>>>,
+    source_generations: Arc<Mutex<HashMap<String, u64>>>,
     pending_permissions: PendingPermissionMap,
 }
 
@@ -69,7 +71,9 @@ impl Gateway {
             state,
             backend,
             active: Arc::new(Mutex::new(HashMap::new())),
+            active_aliases: Arc::new(Mutex::new(HashMap::new())),
             process_bindings: Arc::new(Mutex::new(HashMap::new())),
+            source_generations: Arc::new(Mutex::new(HashMap::new())),
             pending_permissions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -98,8 +102,17 @@ impl Gateway {
     pub fn activity_for_selector(&self, selector: GatewayThreadSelector) -> GatewayActivity {
         let selector_keys = self.selector_keys(&selector);
         let active = self.active.lock().expect("gateway active map poisoned");
+        let aliases = self
+            .active_aliases
+            .lock()
+            .expect("gateway active alias map poisoned");
         let mut activity = GatewayActivity::default();
+        let mut seen = HashSet::new();
         for key in selector_keys {
+            let key = aliases.get(&key).cloned().unwrap_or(key);
+            if !seen.insert(key.clone()) {
+                continue;
+            }
             if let Some(state) = active.get(&key) {
                 activity.running |= state.running;
                 if activity.active_turn_id.is_none() {
@@ -307,7 +320,16 @@ impl Gateway {
         let mut dropped = Vec::new();
         {
             let mut active = self.active.lock().expect("gateway active map poisoned");
+            let aliases = self
+                .active_aliases
+                .lock()
+                .expect("gateway active alias map poisoned");
+            let mut seen = HashSet::new();
             for key in selector_keys {
+                let key = aliases.get(&key).cloned().unwrap_or(key);
+                if !seen.insert(key.clone()) {
+                    continue;
+                }
                 if let Some(state) = active.get_mut(&key) {
                     dropped.extend(state.queued.drain(..));
                 }
@@ -349,7 +371,7 @@ impl Gateway {
                     .process_bindings
                     .lock()
                     .expect("gateway process binding map poisoned")
-                    .insert(source_key.0, new_thread_id.to_string());
+                    .insert(source_key.0.clone(), new_thread_id.to_string());
                 if let Some(previous) = previous {
                     self.state
                         .store()
@@ -378,6 +400,7 @@ impl Gateway {
                     })?;
             }
         }
+        self.bump_source_generation_key(&source_key);
         Ok(())
     }
 
@@ -386,13 +409,13 @@ impl Gateway {
         source: &GatewaySource,
     ) -> psychevo_runtime::Result<Option<String>> {
         let source_key = source.source_key();
-        match source.lifetime {
-            GatewaySourceLifetime::Invocation => Ok(None),
-            GatewaySourceLifetime::Process => Ok(self
+        let previous = match source.lifetime {
+            GatewaySourceLifetime::Invocation => return Ok(None),
+            GatewaySourceLifetime::Process => self
                 .process_bindings
                 .lock()
                 .expect("gateway process binding map poisoned")
-                .remove(&source_key.0)),
+                .remove(&source_key.0),
             GatewaySourceLifetime::Persistent => {
                 let previous = self
                     .state
@@ -402,9 +425,11 @@ impl Gateway {
                 self.state
                     .store()
                     .delete_gateway_source_binding(&source_key.0)?;
-                Ok(previous)
+                previous
             }
-        }
+        };
+        self.bump_source_generation_key(&source_key);
+        Ok(previous)
     }
 
     pub fn reset_source_to_empty(
@@ -440,7 +465,7 @@ impl Gateway {
                 self.process_bindings
                     .lock()
                     .expect("gateway process binding map poisoned")
-                    .insert(source_key.0, thread_id.to_string());
+                    .insert(source_key.0.clone(), thread_id.to_string());
             }
             GatewaySourceLifetime::Persistent => {
                 self.state
@@ -457,6 +482,7 @@ impl Gateway {
                     })?;
             }
         }
+        self.bump_source_generation_key(&source_key);
         Ok(())
     }
 
@@ -466,8 +492,29 @@ impl Gateway {
         request: SendTurnRequest,
         turn_id: String,
     ) -> psychevo_runtime::Result<GatewayTurnResult> {
-        let event_sink = request.event_sink.clone();
-        let event_sink_for_completion = request.event_sink.clone();
+        let event_sink = request.event_sink.clone().map(|event_sink| {
+            let gateway = self.clone();
+            let queue_key = queue_key.to_string();
+            Arc::new(move |event: GatewayEvent| {
+                if let GatewayEvent::TurnStarted {
+                    thread_id: Some(thread_id),
+                    ..
+                } = &event
+                {
+                    gateway.register_active_thread_alias(&queue_key, thread_id);
+                }
+                event_sink(event);
+            }) as GatewayEventSink
+        });
+        let event_sink_for_completion = event_sink.clone();
+        let queue_source = request.source.clone();
+        let bind_source = request.bind_source.clone().or_else(|| queue_source.clone());
+        let bind_source_generation = bind_source
+            .as_ref()
+            .map(|source| self.source_generation(source));
+        let queue_source_generation = queue_source
+            .as_ref()
+            .map(|source| self.source_generation(source));
         let mut options = request.options;
         options.state = self.state.clone();
         apply_input_parts(&mut options, &request.input)?;
@@ -527,7 +574,6 @@ impl Gateway {
             turn_id.clone(),
             active_thread_id.clone(),
         );
-        let result_source = request.source.clone();
         let result_lineage = request.lineage.clone();
         let source_name = request
             .runtime_source
@@ -576,8 +622,27 @@ impl Gateway {
             ..backend_info
         };
 
-        if let Some(source) = &result_source {
-            self.bind_source_to_result(source, &result, &backend_info, result_lineage)?;
+        if let Some(source) = &bind_source {
+            self.bind_source_to_result(
+                source,
+                &result,
+                &backend_info,
+                result_lineage,
+                bind_source_generation,
+            )?;
+        }
+        if let Some(source) = &queue_source
+            && bind_source
+                .as_ref()
+                .is_none_or(|bind_source| bind_source.source_key() != source.source_key())
+        {
+            self.bind_source_to_result(
+                source,
+                &result,
+                &backend_info,
+                None,
+                queue_source_generation,
+            )?;
         }
         let summaries = self
             .state
@@ -601,7 +666,7 @@ impl Gateway {
             thread: GatewayThread {
                 id: result.session_id.clone(),
                 backend: backend_info,
-                source_key: result_source.as_ref().map(GatewaySource::source_key),
+                source_key: bind_source.as_ref().map(GatewaySource::source_key),
             },
             turn: GatewayTurn {
                 id: turn_id,
@@ -648,6 +713,14 @@ impl Gateway {
         control: RunControl,
         inject_into: Option<RunControlHandle>,
     ) -> psychevo_runtime::Result<GatewayShellResult> {
+        let queue_source = request.source.clone();
+        let bind_source = request.bind_source.clone().or_else(|| queue_source.clone());
+        let bind_source_generation = bind_source
+            .as_ref()
+            .map(|source| self.source_generation(source));
+        let queue_source_generation = queue_source
+            .as_ref()
+            .map(|source| self.source_generation(source));
         let mut context = request.context;
         context.state = self.state.clone();
         let active_thread_id = request
@@ -703,8 +776,20 @@ impl Gateway {
             kind: BackendKind::Psychevo,
             native_id: Some(session_id.clone()),
         };
-        if let Some(source) = &request.source {
+        if let Some(source) = &bind_source
+            && bind_source_generation
+                .is_none_or(|generation| self.source_generation(source) == generation)
+        {
             self.bind_source_thread(source, &session_id, &backend, request.lineage)?;
+        }
+        if let Some(source) = &queue_source
+            && bind_source
+                .as_ref()
+                .is_none_or(|bind_source| bind_source.source_key() != source.source_key())
+            && queue_source_generation
+                .is_none_or(|generation| self.source_generation(source) == generation)
+        {
+            self.bind_source_thread(source, &session_id, &backend, None)?;
         }
         let summaries = self.state.store().load_tui_message_summaries(&session_id)?;
         let committed_entries = transcript::project_committed_turn_entries(
@@ -724,7 +809,7 @@ impl Gateway {
             thread: GatewayThread {
                 id: session_id,
                 backend,
-                source_key: request.source.as_ref().map(GatewaySource::source_key),
+                source_key: bind_source.as_ref().map(GatewaySource::source_key),
             },
             result,
             committed_entries,
@@ -734,6 +819,10 @@ impl Gateway {
     fn finish_activity_and_spawn_next(&self, queue_key: String) {
         let next = {
             let mut active = self.active.lock().expect("gateway active map poisoned");
+            self.active_aliases
+                .lock()
+                .expect("gateway active alias map poisoned")
+                .retain(|_, primary| primary != &queue_key);
             let Some(state) = active.get_mut(&queue_key) else {
                 return;
             };
@@ -831,21 +920,46 @@ impl Gateway {
         }
     }
 
+    fn source_generation(&self, source: &GatewaySource) -> u64 {
+        let key = source.source_key();
+        self.source_generations
+            .lock()
+            .expect("gateway source generation map poisoned")
+            .get(&key.0)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    fn bump_source_generation_key(&self, source_key: &SourceKey) {
+        let mut generations = self
+            .source_generations
+            .lock()
+            .expect("gateway source generation map poisoned");
+        let generation = generations.entry(source_key.0.clone()).or_default();
+        *generation = generation.saturating_add(1);
+    }
+
     fn bind_source_to_result(
         &self,
         source: &GatewaySource,
         result: &RunResult,
         backend: &GatewayBackendInfo,
         lineage: Option<Value>,
+        expected_generation: Option<u64>,
     ) -> psychevo_runtime::Result<()> {
         let source_key = source.source_key();
+        if let Some(expected_generation) = expected_generation
+            && self.source_generation(source) != expected_generation
+        {
+            return Ok(());
+        }
         match source.lifetime {
             GatewaySourceLifetime::Invocation => {}
             GatewaySourceLifetime::Process => {
                 self.process_bindings
                     .lock()
                     .expect("gateway process binding map poisoned")
-                    .insert(source_key.0, result.session_id.clone());
+                    .insert(source_key.0.clone(), result.session_id.clone());
             }
             GatewaySourceLifetime::Persistent => {
                 self.state
@@ -861,6 +975,9 @@ impl Gateway {
                         lineage,
                     })?;
             }
+        }
+        if source.lifetime != GatewaySourceLifetime::Invocation {
+            self.bump_source_generation_key(&source_key);
         }
         Ok(())
     }
@@ -879,6 +996,17 @@ impl Gateway {
         state.active_kind = Some(kind);
     }
 
+    fn register_active_thread_alias(&self, key: &str, thread_id: &str) {
+        let alias = thread_key(thread_id);
+        if alias == key {
+            return;
+        }
+        self.active_aliases
+            .lock()
+            .expect("gateway active alias map poisoned")
+            .insert(alias, key.to_string());
+    }
+
     fn control_for_selector(
         &self,
         selector: &GatewayThreadSelector,
@@ -886,7 +1014,16 @@ impl Gateway {
     ) -> Option<RunControlHandle> {
         let selector_keys = self.selector_keys(selector);
         let active = self.active.lock().expect("gateway active map poisoned");
+        let aliases = self
+            .active_aliases
+            .lock()
+            .expect("gateway active alias map poisoned");
+        let mut seen = HashSet::new();
         for key in selector_keys {
+            let key = aliases.get(&key).cloned().unwrap_or(key);
+            if !seen.insert(key.clone()) {
+                continue;
+            }
             if let Some(state) = active.get(&key) {
                 if expected_turn_id
                     .is_some_and(|expected| state.active_turn_id.as_deref() != Some(expected))
@@ -1143,6 +1280,7 @@ pub struct QueuedGatewayInput {
 pub struct SendTurnRequest {
     pub thread_id: Option<String>,
     pub source: Option<GatewaySource>,
+    pub bind_source: Option<GatewaySource>,
     pub reset_source_binding: bool,
     pub input: Vec<GatewayInputPart>,
     pub options: RunOptions,
@@ -1161,6 +1299,7 @@ impl fmt::Debug for SendTurnRequest {
             .debug_struct("SendTurnRequest")
             .field("thread_id", &self.thread_id)
             .field("source", &self.source)
+            .field("bind_source", &self.bind_source)
             .field("reset_source_binding", &self.reset_source_binding)
             .field("input", &self.input)
             .field("options", &self.options)
@@ -1178,6 +1317,7 @@ impl fmt::Debug for SendTurnRequest {
 pub struct SendShellRequest {
     pub thread_id: Option<String>,
     pub source: Option<GatewaySource>,
+    pub bind_source: Option<GatewaySource>,
     pub workdir: PathBuf,
     pub command: String,
     pub context: UserShellContextOptions,
@@ -1192,6 +1332,7 @@ impl fmt::Debug for SendShellRequest {
             .debug_struct("SendShellRequest")
             .field("thread_id", &self.thread_id)
             .field("source", &self.source)
+            .field("bind_source", &self.bind_source)
             .field("workdir", &self.workdir)
             .field("command", &self.command)
             .field("context", &self.context)
@@ -1606,6 +1747,7 @@ mod tests {
         SendTurnRequest {
             thread_id: None,
             source: Some(source),
+            bind_source: None,
             reset_source_binding: false,
             input: Vec::new(),
             options: run_options(harness, prompt),
@@ -1763,6 +1905,7 @@ model = "lmstudio/test-model"
             .send_shell(SendShellRequest {
                 thread_id: None,
                 source: Some(source.clone()),
+                bind_source: None,
                 workdir: harness.workdir.clone(),
                 command: "printf shell-ok".to_string(),
                 context: UserShellContextOptions {
@@ -1851,6 +1994,67 @@ model = "lmstudio/test-model"
                 .map(|run| run.prompt)
                 .collect::<Vec<_>>(),
             vec!["first".to_string(), "second".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn draft_source_lane_runs_while_previous_unbound_source_turn_finishes_later() {
+        let backend = Arc::new(FakeBackend::default());
+        let wait = backend.wait_on_first_run();
+        let harness = harness(backend.clone());
+        let canonical = GatewaySource::new("web", "workdir").persistent();
+        let draft = GatewaySource::new("web", "workdir:draft:test").persistent();
+
+        let first_gateway = harness.gateway.clone();
+        let first_request = request(&harness, canonical.clone(), "first");
+        let first = tokio::spawn(async move { first_gateway.send_turn(first_request).await });
+        wait.started.notified().await;
+
+        harness
+            .gateway
+            .clear_source_binding(&canonical)
+            .expect("thread/start clears canonical binding");
+
+        let mut second_request = request(&harness, draft, "second");
+        second_request.bind_source = Some(canonical.clone());
+        let second = harness
+            .gateway
+            .send_turn(second_request)
+            .await
+            .expect("second draft turn");
+
+        assert_eq!(
+            backend
+                .runs()
+                .into_iter()
+                .map(|run| run.prompt)
+                .collect::<Vec<_>>(),
+            vec!["first".to_string(), "second".to_string()]
+        );
+        assert_eq!(
+            harness
+                .state
+                .store()
+                .gateway_source_binding(&canonical.source_key().0)
+                .expect("binding lookup")
+                .expect("canonical binding after draft")
+                .thread_id,
+            second.result.session_id
+        );
+
+        wait.release.notify_one();
+        let first = first.await.expect("first task").expect("first turn");
+
+        assert_ne!(first.result.session_id, second.result.session_id);
+        assert_eq!(
+            harness
+                .state
+                .store()
+                .gateway_source_binding(&canonical.source_key().0)
+                .expect("binding lookup")
+                .expect("canonical binding after stale completion")
+                .thread_id,
+            second.result.session_id
         );
     }
 

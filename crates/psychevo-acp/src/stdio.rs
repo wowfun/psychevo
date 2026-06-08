@@ -516,6 +516,7 @@ impl PsychevoAcpAgent {
             .send_turn(SendTurnRequest {
                 thread_id: session.runtime_session_id.clone(),
                 source: Some(source),
+                bind_source: None,
                 reset_source_binding: false,
                 input: Vec::new(),
                 options,

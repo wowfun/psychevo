@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
-use std::io::Read;
+use std::io::{Error as IoError, ErrorKind, Read};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -64,6 +64,7 @@ pub struct GatewayWebServerConfig {
     pub inherited_env: BTreeMap<String, String>,
     pub static_dir: Option<PathBuf>,
     pub bind_addr: SocketAddr,
+    pub bind_port_fallbacks: u16,
     pub token: String,
     pub managed_state_path: Option<PathBuf>,
 }
@@ -85,6 +86,7 @@ impl GatewayWebServerConfig {
             inherited_env,
             static_dir: Some(static_dir),
             bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            bind_port_fallbacks: 0,
             token: Uuid::now_v7().to_string(),
             managed_state_path: None,
         }
@@ -106,6 +108,7 @@ impl GatewayWebServerConfig {
             inherited_env,
             static_dir: None,
             bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            bind_port_fallbacks: 0,
             token,
             managed_state_path: None,
         }
@@ -141,7 +144,7 @@ impl BoundGatewayWebServer {
 pub async fn bind_gateway_web_server(
     config: GatewayWebServerConfig,
 ) -> psychevo_runtime::Result<BoundGatewayWebServer> {
-    let listener = TcpListener::bind(config.bind_addr).await?;
+    let listener = bind_tcp_listener(config.bind_addr, config.bind_port_fallbacks).await?;
     let local_addr = listener.local_addr()?;
     let token = config.token.clone();
     if let Some(path) = &config.managed_state_path {
@@ -166,6 +169,37 @@ pub async fn bind_gateway_web_server(
         local_addr,
         token,
     })
+}
+
+async fn bind_tcp_listener(
+    bind_addr: SocketAddr,
+    bind_port_fallbacks: u16,
+) -> std::io::Result<TcpListener> {
+    let max_offset = if bind_addr.port() == 0 {
+        0
+    } else {
+        bind_port_fallbacks
+    };
+    let mut last_addr_in_use = None;
+    for offset in 0..=max_offset {
+        let Some(port) = bind_addr.port().checked_add(offset) else {
+            break;
+        };
+        let candidate = SocketAddr::new(bind_addr.ip(), port);
+        match TcpListener::bind(candidate).await {
+            Ok(listener) => return Ok(listener),
+            Err(error) if error.kind() == ErrorKind::AddrInUse && offset < max_offset => {
+                last_addr_in_use = Some(error);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(last_addr_in_use.unwrap_or_else(|| {
+        IoError::new(
+            ErrorKind::InvalidInput,
+            "managed gateway bind fallback range overflowed",
+        )
+    }))
 }
 
 fn write_managed_state(
@@ -730,8 +764,10 @@ async fn handle_rpc(
         "thread/start" => {
             let params = request.required_params::<wire::ThreadStartParams>()?;
             let scope = resolve_start_scope(&state, &auth, params.scope.clone())?;
-            update_browser_session_scope(&state, &auth, &scope);
-            start_empty_source(&state, &scope)
+            state.inner.gateway.clear_source_binding(&scope.source)?;
+            let snapshot_scope = detached_draft_scope(&scope, &auth);
+            update_browser_session_scope(&state, &auth, &snapshot_scope);
+            thread_snapshot(&state, &snapshot_scope, None)
         }
         "thread/resume" => {
             let params = request.params::<wire::ThreadResumeParams>()?;
@@ -871,11 +907,13 @@ async fn handle_rpc(
                 let _ = event_tx.send(rpc_notification("gateway/event", json!(event)));
             });
             let gateway = state.inner.gateway.clone();
+            let bind_source = workdir_source(&scope.workdir);
             tokio::spawn(async move {
                 let result = gateway
                     .send_turn(crate::SendTurnRequest {
                         thread_id,
                         source: Some(source),
+                        bind_source: Some(bind_source),
                         reset_source_binding: false,
                         input,
                         options,
@@ -1121,6 +1159,7 @@ async fn handle_rpc(
             let context = user_shell_context_options(&state, &scope, thread_id.clone());
             let gateway = state.inner.gateway.clone();
             let source = scope.source.clone();
+            let bind_source = workdir_source(&scope.workdir);
             let workdir = scope.workdir.clone();
             let result_thread_id = thread_id.clone();
             tokio::spawn(async move {
@@ -1128,6 +1167,7 @@ async fn handle_rpc(
                     .send_shell(SendShellRequest {
                         thread_id: result_thread_id.clone(),
                         source: Some(source),
+                        bind_source: Some(bind_source),
                         workdir,
                         command,
                         context,
@@ -1191,6 +1231,30 @@ impl ResolvedScope {
     }
 }
 
+fn detached_draft_scope(scope: &ResolvedScope, auth: &AuthContext) -> ResolvedScope {
+    if !matches!(auth, AuthContext::Browser { .. }) {
+        return scope.clone();
+    }
+    let mut source = scope.source.clone();
+    source.raw_id = format!("{}:draft:{}", source.raw_id, Uuid::now_v7());
+    source.visible_name = source
+        .visible_name
+        .clone()
+        .or_else(|| Some("Web draft".to_string()));
+    source.raw_identity = Some(json!({
+        "kind": source.kind.clone(),
+        "rawId": source.raw_id.clone(),
+        "canonicalRawId": scope.source.raw_id.clone(),
+        "workdir": scope.workdir.display().to_string(),
+        "draft": true,
+    }));
+    ResolvedScope {
+        workdir: scope.workdir.clone(),
+        source,
+    }
+}
+
+#[cfg(test)]
 fn start_empty_source(state: &WebState, scope: &ResolvedScope) -> psychevo_runtime::Result<Value> {
     state.inner.gateway.clear_source_binding(&scope.source)?;
     thread_snapshot(state, scope, None)
@@ -3380,6 +3444,49 @@ mod tests {
             .await
             .expect("body");
         String::from_utf8(bytes.to_vec()).expect("utf8")
+    }
+
+    async fn occupied_port_with_free_successor() -> TcpListener {
+        for _ in 0..100 {
+            let occupied = TcpListener::bind("127.0.0.1:0").await.expect("occupy port");
+            let port = occupied.local_addr().expect("occupied addr").port();
+            let Some(next_port) = port.checked_add(1) else {
+                continue;
+            };
+            if let Ok(probe) = TcpListener::bind(("127.0.0.1", next_port)).await {
+                drop(probe);
+                return occupied;
+            }
+        }
+        panic!("could not find adjacent free loopback ports");
+    }
+
+    #[tokio::test]
+    async fn bind_gateway_web_server_falls_back_from_used_port() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let workdir = temp.path().join("work");
+        let static_dir = temp.path().join("static");
+        std::fs::create_dir_all(&workdir).expect("workdir");
+        std::fs::create_dir_all(&static_dir).expect("static dir");
+        let state = StateRuntime::open(temp.path().join("state.db")).expect("state");
+        let gateway = Gateway::new(state);
+        let occupied = occupied_port_with_free_successor().await;
+        let occupied_addr = occupied.local_addr().expect("occupied addr");
+        let mut config = GatewayWebServerConfig::new(
+            gateway,
+            temp.path().join("home"),
+            workdir,
+            None,
+            BTreeMap::new(),
+            static_dir,
+        );
+        config.bind_addr = occupied_addr;
+        config.bind_port_fallbacks = 1;
+
+        let bound = bind_gateway_web_server(config).await.expect("bind");
+
+        assert_eq!(bound.local_addr().ip(), occupied_addr.ip());
+        assert_eq!(bound.local_addr().port(), occupied_addr.port() + 1);
     }
 
     #[test]

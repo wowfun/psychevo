@@ -51,6 +51,11 @@ Managed `open`, `start`, and `restart` spawn the `serve` child as an
 independent long-lived process. The child must keep running after the opener
 command exits, so a ready `server.json` cannot immediately become stale because
 the caller's shell, terminal, or test harness closed its process group.
+When no `--bind` is provided, managed commands prefer `127.0.0.1:58080` and may
+fall back through `127.0.0.1:58099` when a lower port is already in use. The
+actual bound address is persisted in `server.json` and reported through
+`baseUrl`/`readyzUrl`. An explicit `--bind` disables fallback and must either
+reuse a matching managed server or start exactly on the requested address.
 
 Managed server reuse must prove that the running process is the same local
 build and asset set that the caller would start now. `open` and `start` may
@@ -58,6 +63,9 @@ reuse an existing server only when the pid is alive, `server.json` includes an
 executable fingerprint, that fingerprint matches the current `pevo` executable,
 the running process executable is not a deleted Unix inode, and the recorded
 static asset directory matches the directory resolved for the current command.
+Default-bind callers may reuse only a server bound inside the managed fallback
+range. Explicit-bind callers may reuse only a server whose recorded address
+matches the requested address.
 Old-style `server.json` files without those fields are stale. A stale managed
 server is stopped, its token/state are rotated, and a new `serve` child is
 started. `gateway status` reports stale managed state with `stale: true` and a
@@ -138,6 +146,16 @@ placeholder session. That empty source snapshot is a detached draft: delayed
 events or read-only snapshot refreshes for previously running threads must not
 bind it back to an older thread. Only the draft's own first accepted prompt or
 shell result may attach the Web view to the newly resolved runtime thread.
+When another turn for the same browser/project source is already running,
+`thread/start` creates an internal draft source lane for the returned snapshot.
+The draft lane lets the first prompt or shell command start immediately instead
+of queueing behind the previous turn. The lane may appear as
+`ThreadSnapshot.scope.source.rawId`, but it is internal routing state: it must
+not appear in session history rows, grouping, search, display titles, or
+runtime `source` classifications. When the draft resolves to a durable thread,
+Gateway may bind the canonical project source to that new thread only if no
+newer source generation has superseded it; stale completions from previously
+running turns must not overwrite the binding.
 Web clients may show a local draft row for this detached draft in their History
 UI, but that row is not a persisted session and must not be exposed as a
 Gateway `SessionSummaryView`.

@@ -137,6 +137,10 @@ turn provider metadata into transcript content.
 equivalent to `pevo gateway open`, defaults to the current working directory,
 keeps stdout as exactly one JSON object, and accepts the same first-slice open
 flags: `--dir`, `--bind`, `--no-browser`, and `--print-url`.
+When `--bind` is omitted, the managed Web UI prefers `127.0.0.1:58080` and may
+fall back through `127.0.0.1:58099` if earlier ports are already in use. The
+JSON response always reports the actual bound URL in `baseUrl`. An explicit
+`--bind` is strict and does not use managed port fallback.
 
 `pevo serve` starts the strict headless local Gateway API server. It binds
 loopback by default, requires an explicit token from `PSYCHEVO_SERVE_TOKEN` or
