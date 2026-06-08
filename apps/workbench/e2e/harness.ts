@@ -38,7 +38,7 @@ export async function startPevoWeb({
     ? process.env.PSYCHEVO_CONFIG ?? path.join(homedir(), ".psychevo/config.toml")
     : path.join(root, "config.toml");
   if (!live) {
-    writeFileSync(configPath, "[model]\nid = \"test/noop\"\n");
+    writeFileSync(configPath, "model = \"lmstudio/noop\"\n");
   }
   if (live && !existsSync(configPath)) {
     throw new Error(`live config not found: ${configPath}`);
@@ -86,6 +86,17 @@ name: reviewer
 description: Review a change for correctness.
 ---
 Review the current change and call out concrete risks.
+`
+  );
+
+  const agentDir = path.join(workdir, ".psychevo", "agents");
+  mkdirSync(agentDir, { recursive: true });
+  writeFileSync(
+    path.join(agentDir, "translate.md"),
+    `---
+description: Translate user messages.
+---
+Translate the user's message.
 `
   );
 }

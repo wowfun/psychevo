@@ -222,12 +222,13 @@ function TranscriptBlockView({
     );
   }
   const display = evidenceDisplay(block, text);
+  const evidenceLineClass = `pevo-evidenceLine ${display.singleTitle ? "is-singleTitle" : ""}`.trim();
   return (
     <article className={`pevo-evidence is-${block.status}`} {...transcriptBlockDataAttributes(entry, block)}>
-      <button className="pevo-evidenceLine" onClick={() => setOpen((value) => !value)} type="button">
+      <button className={evidenceLineClass} onClick={() => setOpen((value) => !value)} type="button">
         {open ? <ChevronDown size={15} aria-hidden /> : <ChevronRight size={15} aria-hidden />}
-        <code>{block.title ?? block.kind}</code>
-        <span>{display.summary}</span>
+        <code>{display.title}</code>
+        {display.summary && <span>{display.summary}</span>}
         {status && <em>{status}</em>}
       </button>
       {open && display.detail && <pre>{display.detail}</pre>}
@@ -347,25 +348,68 @@ function MarkdownText({ streaming, text }: { streaming?: boolean; text: string }
   );
 }
 
-function evidenceDisplay(block: TranscriptBlock, fallbackText: string): { detail: string | null; summary: string } {
+function evidenceDisplay(block: TranscriptBlock, fallbackText: string): { detail: string | null; title: string; summary: string | null; singleTitle: boolean } {
   const metadata = asRecord(block.metadata);
+  const title = block.title ?? block.kind;
   if (metadata.projection === "tool") {
     const args = metadata.args ?? metadata.arguments;
     const result = block.result?.content ?? metadata.result;
-    const summary = toolArgsSummary(block.title ?? block.kind, args, block.preview ?? fallbackText);
     const detail = [
       args === undefined ? null : `args\n${prettyJson(args)}`,
       result === undefined ? null : `result\n${prettyJson(result)}`,
       block.result?.isError ? "status\nerror" : null,
       metadata.outcome && metadata.outcome !== "normal" ? `outcome\n${String(metadata.outcome)}` : null
     ].filter((value): value is string => value !== null).join("\n\n");
-    return { summary, detail: detail || null };
+    const invocation = execCommandInvocation(
+      stringValue(metadata.tool_name) ?? title,
+      title,
+      args,
+      block.preview ?? ""
+    );
+    if (invocation) {
+      return { title: invocation, summary: null, detail: detail || null, singleTitle: true };
+    }
+    return {
+      title,
+      summary: toolArgsSummary(title, args, block.preview ?? fallbackText),
+      detail: detail || null,
+      singleTitle: false
+    };
   }
   const summary = block.preview ?? compactText(fallbackText, 180);
   const detail = [block.detail, block.body, block.result?.content, block.preview]
     .filter((value): value is string => Boolean(value?.trim()))
     .filter((value) => value.trim() !== summary.trim())[0] ?? null;
-  return { summary, detail };
+  const invocation = block.kind === "shell" ? execCommandInvocation(title, title, undefined, block.preview ?? "") : null;
+  if (invocation) {
+    return { title: invocation, summary: null, detail, singleTitle: true };
+  }
+  return { title, summary, detail, singleTitle: false };
+}
+
+function execCommandInvocation(toolName: string, title: string, args: unknown, fallbackCommand: string): string | null {
+  const trimmedTitle = title.trim();
+  const trimmedTool = toolName.trim();
+  const isExecCommand = trimmedTool === "exec_command" ||
+    trimmedTitle === "exec_command" ||
+    trimmedTitle.startsWith("exec_command ");
+  if (!isExecCommand) {
+    return null;
+  }
+  const record = asRecord(args);
+  const command = stringValue(record.cmd) ??
+    stringValue(record.command) ??
+    execCommandTitleSubject(trimmedTitle) ??
+    (fallbackCommand.trim() || null);
+  if (!command) {
+    return "exec_command";
+  }
+  return compactText(`exec_command ${firstEffectiveCommand(command)}`, 180);
+}
+
+function execCommandTitleSubject(title: string): string | null {
+  const subject = title.trim().replace(/^exec_command\s+/, "").trim();
+  return subject && subject !== title.trim() ? subject : null;
 }
 
 function toolArgsSummary(toolName: string, args: unknown, fallback: string): string {

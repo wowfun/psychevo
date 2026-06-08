@@ -320,4 +320,116 @@ describe("Composer completion mentions", () => {
     await waitFor(() => expect(completionProvider).toHaveBeenCalled());
     expect(await screen.findByRole("option", { name: /@src\// })).toBeTruthy();
   });
+
+  it("opens the plus menu and triggers the attachment row", () => {
+    const onAttach = vi.fn();
+
+    render(
+      <Composer
+        running={false}
+        onAttach={onAttach}
+        onInterrupt={vi.fn()}
+        onSteer={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add attachments and options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Add images and files" }));
+
+    expect(onAttach).toHaveBeenCalledTimes(1);
+  });
+
+  it("moves plan mode into the plus menu and exposes a close affordance on the Plan chip", () => {
+    const onModeChange = vi.fn();
+    const agentControl = <select aria-label="Agent"><option>Default Agent</option></select>;
+
+    const { rerender } = render(
+      <Composer
+        leftControls={agentControl}
+        mode="default"
+        running={false}
+        onInterrupt={vi.fn()}
+        onModeChange={onModeChange}
+        onSteer={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add attachments and options" }));
+    const planSwitch = screen.getByRole("switch", { name: "Plan mode" });
+    expect(planSwitch.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(planSwitch);
+    expect(onModeChange).toHaveBeenCalledWith("plan");
+
+    rerender(
+      <Composer
+        leftControls={agentControl}
+        mode="plan"
+        running={false}
+        onInterrupt={vi.fn()}
+        onModeChange={onModeChange}
+        onSteer={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Plan")).toBeTruthy();
+    const footerLeftControls = document.querySelector(".pevo-composerLeftControls");
+    expect(footerLeftControls?.contains(screen.getByRole("combobox", { name: "Agent" }))).toBe(true);
+    expect(footerLeftControls?.contains(screen.getByText("Plan"))).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Disable Plan mode" }));
+    expect(onModeChange).toHaveBeenCalledWith("default");
+  });
+
+  it("swaps the send button for the interrupt button while running", () => {
+    const { rerender } = render(
+      <Composer
+        running={false}
+        onInterrupt={vi.fn()}
+        onSteer={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    const sendButton = screen.getByRole("button", { name: "Send message" });
+    expect(sendButton.closest(".pevo-composerRightControls")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Interrupt active turn" })).toBeNull();
+
+    rerender(
+      <Composer
+        running
+        onInterrupt={vi.fn()}
+        onSteer={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    const interruptButton = screen.getByRole("button", { name: "Interrupt active turn" });
+    expect(interruptButton.closest(".pevo-composerRightControls")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
+  });
+
+  it("grows the textarea with multiline input and clamps at the maximum height", () => {
+    render(
+      <Composer
+        running={false}
+        onInterrupt={vi.fn()}
+        onSteer={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
+    Object.defineProperty(textarea, "scrollHeight", { configurable: true, value: 96 });
+    fireEvent.change(textarea, { target: { value: "one\ntwo\nthree" } });
+    expect(textarea.style.height).toBe("96px");
+    expect(textarea.style.overflowY).toBe("hidden");
+
+    textarea.style.maxHeight = "180px";
+    Object.defineProperty(textarea, "scrollHeight", { configurable: true, value: 240 });
+    fireEvent.change(textarea, { target: { value: "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight" } });
+    expect(textarea.style.height).toBe("180px");
+    expect(textarea.style.overflowY).toBe("auto");
+  });
 });

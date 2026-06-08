@@ -92,6 +92,11 @@ cached arguments from the earlier tool call event before emitting the live
 `exec_command` entry or any later `write_stdin`-merged update. Display titles
 for yielded exec rows are based on that original command invocation, not on the
 polling session id or the bare tool name.
+Display surfaces render shell-command rows with the invocation-style title
+`exec_command <cmd>`. Workbench may use a single clipped title column for that
+combined invocation to avoid duplicating the command across tool-name and
+summary columns. The original invocation must remain available in row metadata
+or expanded detail.
 
 Ordinary tool rows require an explicit typed tool call, execution observation,
 or message-derived tool-result relationship. Reasoning or assistant text that

@@ -1,5 +1,6 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 727
 expression: combined
 ---
 fixture=consecutive_tool_rows_flat

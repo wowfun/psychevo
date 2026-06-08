@@ -464,8 +464,9 @@ describe("component fallback rendering", () => {
       <TranscriptPanel entries={[transcriptEntry({ blocks: [tool] })]} />
     );
 
-    expect(html).toContain("exec_command");
-    expect(html).toContain("python fetch.py");
+    expect(html).toContain("pevo-evidenceLine is-singleTitle");
+    expect(html).toContain("exec_command python fetch.py");
+    expect(html).not.toContain("<code>exec_command</code><span>python fetch.py</span>");
   });
 
   it("does not render hidden write_stdin poll blocks", () => {
@@ -504,8 +505,8 @@ describe("component fallback rendering", () => {
       <TranscriptPanel entries={[transcriptEntry({ blocks: [exec, poll] })]} />
     );
 
-    expect(html).toContain("exec_command");
-    expect(html).toContain("python fetch.py");
+    expect(html).toContain("exec_command python fetch.py");
+    expect(html).not.toContain("<code>exec_command</code><span>python fetch.py</span>");
     expect(html).not.toContain("write_stdin");
     expect(html).not.toContain("yield_time_ms");
     expect(html).not.toContain("second");

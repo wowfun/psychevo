@@ -6,17 +6,20 @@ test.describe("pevo Web Workbench", () => {
     const server = await startPevoWeb({ live: false });
     try {
       await page.goto(server.url);
-      await expect(page.getByRole("heading", { name: "pevo" })).toBeVisible();
-      await expect(page.locator(".statePill")).toHaveText("connected");
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      if (!isMobile) {
+        await expect(page.getByRole("heading", { name: "Psychevo" })).toBeVisible();
+      }
 
       await openPanel(page, isMobile, "History");
-      await page.getByRole("button", { name: "New thread" }).click();
+      await page.getByRole("button", { name: "New Session" }).click();
       await expect(page.locator(".pevo-sessionRow")).toHaveCount(1);
+      await expect(page.locator(".pevo-sessionRow.is-draft")).toHaveCount(1);
 
       await openPanel(page, isMobile, "Transcript");
       await expect(page.getByText("No messages yet")).toBeVisible();
 
-      const composer = page.getByPlaceholder("Ask pevo...");
+      const composer = page.getByPlaceholder("Ask Psychevo...");
       await composer.fill("/");
       await expect(page.getByRole("option", { name: /\/new/ })).toBeVisible();
       await page.keyboard.press("Escape");
@@ -34,11 +37,13 @@ test.describe("pevo Web Workbench", () => {
       await page.keyboard.press("Escape");
       await page.keyboard.press("Enter");
       await openPanel(page, isMobile, "History");
-      await expect(page.locator(".pevo-sessionRow")).toHaveCount(2);
+      await expect(page.locator(".pevo-sessionRow")).toHaveCount(1);
+      await expect(page.locator(".pevo-sessionRow.is-draft")).toHaveCount(1);
 
       await openPanel(page, isMobile, "Status");
-      await expect(page.getByText("idle")).toBeVisible();
-      await expect(page.getByText("status_only")).toBeVisible();
+      const statusRegion = page.getByRole("region", { name: "Status" });
+      await expect(statusRegion.getByText("idle")).toBeVisible();
+      await expect(statusRegion.getByText("No active session")).toBeVisible();
     } finally {
       await server.stop();
     }
@@ -48,17 +53,15 @@ test.describe("pevo Web Workbench", () => {
     const server = await startPevoWeb({ live: false });
     try {
       await page.goto(server.url);
-      await expect(page.locator(".statePill")).toHaveText("connected");
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
       await openPanel(page, isMobile, "Transcript");
 
       await page.locator(".pevo-threadItems").evaluate((container) => {
         container.innerHTML = `
           <article class="pevo-evidence is-running" data-testid="long-tool-row">
-            <button class="pevo-evidenceLine" type="button">
+            <button class="pevo-evidenceLine is-singleTitle" type="button">
               <svg width="15" height="15" aria-hidden="true"></svg>
-              <svg width="16" height="16" aria-hidden="true"></svg>
-              <code>exec_command</code>
-              <span>python /home/kevin/Projects/feedgarden/.agents/skills/x-daily/scripts/fetch.py --project /home/kevin/Projects/feedgarden</span>
+              <code>exec_command python /home/kevin/Projects/feedgarden/.agents/skills/x-daily/scripts/fetch.py --project /home/kevin/Projects/feedgarden</code>
               <em>running</em>
             </button>
           </article>
@@ -67,15 +70,17 @@ test.describe("pevo Web Workbench", () => {
 
       const row = page.getByTestId("long-tool-row");
       const status = row.locator(".pevo-evidenceLine em");
-      const summary = row.locator(".pevo-evidenceLine span");
+      const title = row.locator(".pevo-evidenceLine code");
       const rowBox = await row.boundingBox();
       const statusBox = await status.boundingBox();
-      const summaryClipped = await summary.evaluate((element) => element.scrollWidth > element.clientWidth);
+      const titleClipped = await title.evaluate((element) => element.scrollWidth > element.clientWidth);
 
       expect(rowBox).not.toBeNull();
       expect(statusBox).not.toBeNull();
+      await expect(title).toContainText("exec_command python");
+      await expect(row.locator(".pevo-evidenceLine span")).toHaveCount(0);
       expect(statusBox!.x + statusBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width);
-      expect(summaryClipped).toBe(true);
+      expect(titleClipped).toBe(true);
     } finally {
       await server.stop();
     }
@@ -87,12 +92,12 @@ test.describe("pevo Web Workbench", () => {
     const server = await startPevoWeb({ live: true });
     try {
       await page.goto(server.url);
-      await expect(page.locator(".statePill")).toHaveText("connected");
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
 
-      await page.getByPlaceholder("Ask pevo...").fill(
+      await page.getByPlaceholder("Ask Psychevo...").fill(
         "Reply with exactly this text and nothing else: psychevo web live ok"
       );
-      await page.getByRole("button", { name: "Send" }).click();
+      await page.getByRole("button", { name: "Send message" }).click();
 
       await expect(
         page.locator(".pevo-message.is-assistant").getByText(/psychevo web live ok/i)
@@ -104,6 +109,15 @@ test.describe("pevo Web Workbench", () => {
 });
 
 async function openPanel(page: Page, isMobile: boolean, name: "History" | "Status" | "Transcript") {
+  if (name === "Status") {
+    if (isMobile) {
+      await page.getByRole("button", { name: "Transcript" }).click();
+    }
+    const expandInspector = page.getByRole("button", { name: "Show right inspector" });
+    if (await expandInspector.isVisible().catch(() => false)) {
+      await expandInspector.click();
+    }
+  }
   if (isMobile) {
     await page.getByRole("button", { name }).click();
   }

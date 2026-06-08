@@ -483,21 +483,13 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 8px;
   min-width: 0;
   color: var(--pevo-muted);
   font-size: 0.78rem;
 }
 
-.agentRunSelector span {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  white-space: nowrap;
-}
-
 .agentRunSelector select {
-  width: min(180px, 45vw);
+  width: 148px;
   min-height: 30px;
   padding: 0 28px 0 9px;
   color: var(--pevo-ink);
@@ -1003,8 +995,20 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   white-space: nowrap;
 }
 
+.composerSubmitControls {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+  color: var(--pevo-muted);
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
 .statusSelect select,
-.composerStatusLine button {
+.composerStatusLine button,
+.composerSubmitControls button {
   min-height: 24px;
   max-width: 180px;
   padding: 0;
@@ -1018,9 +1022,8 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   min-width: 0;
 }
 
-.statusSelect[data-status="permission-mode"] select,
-.statusSelect[data-status="mode"] select {
-  max-width: 88px;
+.statusSelect[data-status="permission-mode"] select {
+  max-width: 168px;
 }
 
 .statusSelect[data-status="model"] select {
@@ -1029,6 +1032,14 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 
 .statusSelect[data-status="variant"] select {
   max-width: 78px;
+}
+
+.composerSubmitControls .statusSelect[data-status="model"] select {
+  width: 84px;
+}
+
+.composerSubmitControls .statusSelect[data-status="variant"] select {
+  width: 62px;
 }
 
 .composerStatusContext {
@@ -1459,6 +1470,22 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 }
 
 @media (max-width: 620px) {
+  .agentRunSelector select {
+    width: min(132px, 34vw);
+  }
+
+  .composerSubmitControls {
+    gap: 4px;
+  }
+
+  .composerSubmitControls .statusSelect[data-status="model"] select {
+    width: 58px;
+  }
+
+  .composerSubmitControls .statusSelect[data-status="variant"] select {
+    width: 52px;
+  }
+
   .composerStatusLine {
     gap: 6px;
     overflow: hidden;
@@ -1468,17 +1495,16 @@ html[data-pevo-appearance="light"] .brandGlyph img {
     display: none;
   }
 
-  .statusSelect[data-status="permission-mode"] select,
-  .statusSelect[data-status="mode"] select {
-    max-width: 68px;
+  .statusSelect[data-status="permission-mode"] select {
+    max-width: 160px;
   }
 
   .statusSelect[data-status="model"] select {
-    max-width: 124px;
+    max-width: 56px;
   }
 
   .statusSelect[data-status="variant"] select {
-    max-width: 58px;
+    max-width: 50px;
   }
 
   .pathStatusButton {
@@ -1488,18 +1514,33 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 }
 
 @media (max-width: 420px) {
+  .agentRunSelector select {
+    width: min(120px, 31vw);
+  }
+
+  .composerSubmitControls {
+    font-size: 0.72rem;
+  }
+
+  .composerSubmitControls .statusSelect[data-status="model"] select {
+    width: 54px;
+  }
+
+  .composerSubmitControls .statusSelect[data-status="variant"] select {
+    width: 50px;
+  }
+
   .composerStatusLine {
     gap: 5px;
     font-size: 0.72rem;
   }
 
-  .statusSelect[data-status="permission-mode"] select,
-  .statusSelect[data-status="mode"] select {
-    max-width: 55px;
+  .statusSelect[data-status="permission-mode"] select {
+    max-width: 160px;
   }
 
   .statusSelect[data-status="model"] select {
-    max-width: 104px;
+    max-width: 54px;
   }
 
   .statusSelect[data-status="variant"] select {
@@ -1517,6 +1558,6 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   }
 
   .pathStatusButton {
-    max-width: 50px;
+    max-width: 54px;
   }
 }

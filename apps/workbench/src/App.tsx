@@ -96,6 +96,7 @@ type WorkbenchAgent = {
   description: string;
   source: string;
   generated: boolean;
+  path?: string | null;
   entrypoints: string[];
   backend?: { ref?: string } | null;
 };
@@ -229,17 +230,20 @@ export function App() {
       .filter((session): session is SessionSummary => Boolean(session)),
     [pinnedSessionIds, sessions]
   );
-  const peerAgents = useMemo(
-    () => agents.filter((agent) => agent.entrypoints.includes("peer") && agent.backend?.ref),
+  const runnableAgents = useMemo(
+    () => agents.filter((agent) => agent.name),
     [agents]
   );
   const controls = settings?.controls ?? null;
 
   useEffect(() => {
-    if (selectedAgentName && !peerAgents.some((agent) => agent.name === selectedAgentName)) {
+    if (
+      selectedAgentName &&
+      !runnableAgents.some((agent) => agentOptionValue(agent) === selectedAgentName || agent.name === selectedAgentName)
+    ) {
       setSelectedAgentName("");
     }
-  }, [peerAgents, selectedAgentName]);
+  }, [runnableAgents, selectedAgentName]);
 
   useEffect(() => {
     if (!debugEnabled && rightTab === "debug") {
@@ -394,9 +398,6 @@ export function App() {
         scopeRef.current = initialize.scope;
         await refreshSnapshot(nextClient, undefined, initialize.scope, false, null, true);
         await refreshHistory(nextClient, archived);
-        const nextSettings = SettingsReadResultSchema.parse(await nextClient.request("settings/read", { workdir: initialize.scope.workdir }));
-        setSettings(nextSettings);
-        applyInitialControls(nextSettings);
         await refreshAgentSurface(nextClient, initialize.scope);
         await refreshWorkspaceSurface(nextClient, initialize.scope, null);
       } catch (err) {
@@ -504,13 +505,17 @@ export function App() {
     const previous = scopeRef.current;
     scopeRef.current = scope;
     setActiveScope(scope);
+    const threadId = nextSnapshot.thread?.id ?? null;
     if (previous?.workdir === scope.workdir) {
+      const nextSettings = SettingsReadResultSchema.parse(await nextClient.request("settings/read", { threadId, workdir: scope.workdir }));
+      setSettings(nextSettings);
+      applyInitialControls(nextSettings);
       return;
     }
     const [settingsValue] = await Promise.all([
-      nextClient.request("settings/read", { workdir: scope.workdir }),
+      nextClient.request("settings/read", { threadId, workdir: scope.workdir }),
       refreshAgentSurface(nextClient, scope),
-      refreshWorkspaceSurface(nextClient, scope, nextSnapshot.thread?.id ?? null)
+      refreshWorkspaceSurface(nextClient, scope, threadId)
     ]);
     const nextSettings = SettingsReadResultSchema.parse(settingsValue);
     setSettings(nextSettings);
@@ -578,6 +583,7 @@ export function App() {
     }
     setPermissionMode(nextControls.permissionMode || "default");
     setWorkMode(nextControls.mode || "default");
+    setSelectedAgentName(nextControls.agent ?? "");
     setSelectedModel(nextControls.model ?? null);
     setSelectedVariant(nextControls.variant ?? "none");
   }
@@ -775,6 +781,21 @@ export function App() {
     await refreshHistory();
   }
 
+  async function changeAgentSelection(value: string) {
+    setSelectedAgentName(value);
+    if (!client || !currentThreadId) {
+      return;
+    }
+    const scope = activeScope ?? init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
+    const nextSettings = SettingsReadResultSchema.parse(await client.request("settings/update", {
+      agent: value || null,
+      threadId: currentThreadId,
+      scope
+    }));
+    setSettings(nextSettings);
+    setSelectedAgentName(nextSettings.controls?.agent ?? value);
+  }
+
   async function startShell(command: string) {
     const scope = activeScope ?? init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
     const pendingShell = snapshot.thread?.id
@@ -924,83 +945,89 @@ export function App() {
                 {leftCollapsed ? <img alt="" aria-hidden className="sidebarToggleLogo" src={logoUrl} /> : <PanelLeft size={16} />}
               </button>
             </div>
-            <div className="leftActions" aria-label="Session actions">
-              <button onClick={() => void runAction(async () => startNewThread())} type="button">
-                <MessageSquare size={16} /> <span>New Session</span>
-              </button>
-              <button className={mainView === "search" ? "is-selected" : ""} onClick={() => setMainView("search")} type="button">
-                <Search size={16} /> <span>Search</span>
-              </button>
-              <button className={mainView === "artifacts" ? "is-selected" : ""} onClick={() => setMainView("artifacts")} type="button">
-                <Archive size={16} /> <span>Artifacts</span>
-              </button>
-            </div>
-            <PinnedPanel
-              currentThreadId={currentThreadId}
-              disabled={disabled}
-              sessions={pinnedSessions}
-              onResume={(threadId) => void runAction(async () => {
-                const epoch = beginExplicitViewSwitch();
-                await refreshSnapshot(client, threadId, undefined, false, epoch);
-                setMainView("transcript");
-                setMobilePanel("transcript");
-              })}
-              onUnpin={togglePinnedSession}
-            />
-            <HistoryPanel
-              archived={archived}
-              currentThreadId={currentThreadId}
-              disabled={disabled}
-              draftSession={visibleDraftSession}
-              pinnedSessionIds={pinnedSessionIds}
-              sessions={sessions}
-              onArchive={(threadId) => void runAction(async () => {
-                setDraftSession(null);
-                await client?.request("thread/archive", { threadId });
-                await refreshHistory();
-              })}
-              onDelete={(threadId) => void runAction(async () => {
-                setDraftSession(null);
-                await client?.request("thread/delete", { threadId });
-                await refreshHistory();
-              })}
-              onExport={(threadId) => {
-                if (endpoint) {
-                  void host?.open.openDownload(downloadUrl(endpoint, threadId, "export"));
-                }
-              }}
-              onNew={() => void runAction(async () => {
-                await startNewThread();
-              })}
-              onNewInWorkdir={(workdir) => void runAction(async () => {
-                await startNewThread(workdir);
-              })}
-              onTogglePinned={togglePinnedSession}
-              onRename={(threadId, title) => void runAction(async () => {
-                await client?.request("thread/rename", { threadId, title });
-                await refreshHistory();
-              })}
-              onRestore={(threadId) => void runAction(async () => {
-                setDraftSession(null);
-                await client?.request("thread/restore", { threadId });
-                await refreshHistory();
-              })}
-              onResumeDraft={() => {
-                setMainView("transcript");
-                setMobilePanel("transcript");
-              }}
-              onResume={(threadId) => void runAction(async () => {
-                const epoch = beginExplicitViewSwitch();
-                await refreshSnapshot(client, threadId, undefined, false, epoch);
-                setMainView("transcript");
-                setMobilePanel("transcript");
-              })}
-              onShare={(threadId) => {
-                if (endpoint) {
-                  void host?.open.openDownload(downloadUrl(endpoint, threadId, "share"));
-                }
-              }}
-            />
+            {!leftCollapsed && (
+              <div className="leftActions" aria-label="Session actions">
+                <button onClick={() => void runAction(async () => startNewThread())} type="button">
+                  <MessageSquare size={16} /> <span>New Session</span>
+                </button>
+                <button className={mainView === "search" ? "is-selected" : ""} onClick={() => setMainView("search")} type="button">
+                  <Search size={16} /> <span>Search</span>
+                </button>
+                <button className={mainView === "artifacts" ? "is-selected" : ""} onClick={() => setMainView("artifacts")} type="button">
+                  <Archive size={16} /> <span>Artifacts</span>
+                </button>
+              </div>
+            )}
+            {!leftCollapsed && (
+              <>
+                <PinnedPanel
+                  currentThreadId={currentThreadId}
+                  disabled={disabled}
+                  sessions={pinnedSessions}
+                  onResume={(threadId) => void runAction(async () => {
+                    const epoch = beginExplicitViewSwitch();
+                    await refreshSnapshot(client, threadId, undefined, false, epoch);
+                    setMainView("transcript");
+                    setMobilePanel("transcript");
+                  })}
+                  onUnpin={togglePinnedSession}
+                />
+                <HistoryPanel
+                  archived={archived}
+                  currentThreadId={currentThreadId}
+                  disabled={disabled}
+                  draftSession={visibleDraftSession}
+                  pinnedSessionIds={pinnedSessionIds}
+                  sessions={sessions}
+                  onArchive={(threadId) => void runAction(async () => {
+                    setDraftSession(null);
+                    await client?.request("thread/archive", { threadId });
+                    await refreshHistory();
+                  })}
+                  onDelete={(threadId) => void runAction(async () => {
+                    setDraftSession(null);
+                    await client?.request("thread/delete", { threadId });
+                    await refreshHistory();
+                  })}
+                  onExport={(threadId) => {
+                    if (endpoint) {
+                      void host?.open.openDownload(downloadUrl(endpoint, threadId, "export"));
+                    }
+                  }}
+                  onNew={() => void runAction(async () => {
+                    await startNewThread();
+                  })}
+                  onNewInWorkdir={(workdir) => void runAction(async () => {
+                    await startNewThread(workdir);
+                  })}
+                  onTogglePinned={togglePinnedSession}
+                  onRename={(threadId, title) => void runAction(async () => {
+                    await client?.request("thread/rename", { threadId, title });
+                    await refreshHistory();
+                  })}
+                  onRestore={(threadId) => void runAction(async () => {
+                    setDraftSession(null);
+                    await client?.request("thread/restore", { threadId });
+                    await refreshHistory();
+                  })}
+                  onResumeDraft={() => {
+                    setMainView("transcript");
+                    setMobilePanel("transcript");
+                  }}
+                  onResume={(threadId) => void runAction(async () => {
+                    const epoch = beginExplicitViewSwitch();
+                    await refreshSnapshot(client, threadId, undefined, false, epoch);
+                    setMainView("transcript");
+                    setMobilePanel("transcript");
+                  })}
+                  onShare={(threadId) => {
+                    if (endpoint) {
+                      void host?.open.openDownload(downloadUrl(endpoint, threadId, "share"));
+                    }
+                  }}
+                />
+              </>
+            )}
             <LeftUtilityRail value={mainView} onChange={setMainView} />
           </div>
         </aside>
@@ -1062,10 +1089,22 @@ export function App() {
               disabled={disabled}
               leftControls={(
                 <AgentRunSelector
-                  agents={peerAgents}
+                  agents={runnableAgents}
                   disabled={disabled}
                   value={selectedAgentName}
-                  onChange={setSelectedAgentName}
+                  onChange={(value) => void runAction(async () => changeAgentSelection(value))}
+                />
+              )}
+              mode={workMode}
+              rightControls={(
+                <ComposerSubmitControls
+                  context={contextUsage}
+                  controls={controls}
+                  model={selectedModel}
+                  variant={selectedVariant}
+                  onContextClick={() => setRightTab("status")}
+                  onModelChange={setSelectedModel}
+                  onVariantChange={setSelectedVariant}
                 />
               )}
               requestPanel={(pendingClarifies.length > 0 || pendingPermissions.length > 0) ? (
@@ -1089,6 +1128,7 @@ export function App() {
                 await client?.request("turn/interrupt", { threadId: snapshot.thread?.id ?? null });
                 await refreshSnapshot();
               })}
+              onModeChange={setWorkMode}
               onRemoveAttachment={(id) => setAttachments((current) => current.filter((attachment) => attachment.id !== id))}
               onShell={(command) => void runAction(async () => startShell(command))}
               onSteer={(text) => void runAction(async () => {
@@ -1107,26 +1147,18 @@ export function App() {
             />
             <ComposerStatusLine
               branch={settings?.project?.branch ?? null}
-              context={contextUsage}
               controls={controls}
-              mode={workMode}
-              model={selectedModel}
               path={settings?.project?.displayPath ?? settings?.workdir ?? ""}
               permissionMode={permissionMode}
-              variant={selectedVariant}
               onBranchClick={() => {
                 setRightTab("status");
                 setMobilePanel("status");
               }}
-              onContextClick={() => setRightTab("status")}
-              onModeChange={setWorkMode}
-              onModelChange={setSelectedModel}
               onPathClick={() => {
                 setRightTab("files");
                 setMobilePanel("status");
               }}
               onPermissionModeChange={setPermissionMode}
-              onVariantChange={setSelectedVariant}
             />
           </div>}
         </section>
@@ -1759,37 +1791,21 @@ function ClarifyComposerRequest({
   );
 }
 
-function ComposerStatusLine({
-  branch,
+function ComposerSubmitControls({
   context,
   controls,
-  mode,
   model,
-  path,
-  permissionMode,
   variant,
-  onBranchClick,
   onContextClick,
-  onModeChange,
   onModelChange,
-  onPathClick,
-  onPermissionModeChange,
   onVariantChange
 }: {
-  branch: string | null;
   context: ContextReadResult | null;
   controls: SettingsReadResult["controls"];
-  mode: string;
   model: string | null;
-  path: string;
-  permissionMode: string;
   variant: string;
-  onBranchClick(): void;
   onContextClick(): void;
-  onModeChange(value: string): void;
   onModelChange(value: string | null): void;
-  onPathClick(): void;
-  onPermissionModeChange(value: string): void;
   onVariantChange(value: string): void;
 }) {
   const contextPercent = typeof context?.percent === "number" ? Math.max(0, Math.min(100, context.percent)) : 0;
@@ -1820,19 +1836,18 @@ function ComposerStatusLine({
   }, [contextOpen]);
 
   return (
-    <div className="composerStatusLine" aria-label="Composer status">
-      <StatusSelect label="Permission mode" value={permissionMode} values={controls?.permissionModeOptions ?? ["default"]} onChange={onPermissionModeChange} />
-      <StatusSelect label="Mode" value={mode} values={controls?.modeOptions ?? ["default", "plan"]} onChange={onModeChange} />
+    <div className="composerSubmitControls" aria-label="Composer submit controls">
       <StatusSelect
         label="Model"
         value={model ?? ""}
         values={["", ...(controls?.modelOptions ?? [])]}
-        renderValue={(value) => value || "model"}
+        renderValue={compactModelLabel}
         onChange={(value) => onModelChange(value || null)}
       />
       <StatusSelect label="Variant" value={variant} values={controls?.variantOptions ?? ["none"]} onChange={onVariantChange} />
       <div className="composerStatusContext" ref={contextPopoverRef}>
         <button
+          aria-label="Context usage"
           aria-expanded={contextOpen}
           className="contextStatusButton"
           onClick={() => {
@@ -1870,6 +1885,30 @@ function ComposerStatusLine({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function ComposerStatusLine({
+  branch,
+  controls,
+  path,
+  permissionMode,
+  onBranchClick,
+  onPathClick,
+  onPermissionModeChange
+}: {
+  branch: string | null;
+  controls: SettingsReadResult["controls"];
+  path: string;
+  permissionMode: string;
+  onBranchClick(): void;
+  onPathClick(): void;
+  onPermissionModeChange(value: string): void;
+}) {
+  return (
+    <div className="composerStatusLine" aria-label="Composer status">
+      <StatusSelect label="Permission mode" value={permissionMode} values={controls?.permissionModeOptions ?? ["default"]} onChange={onPermissionModeChange} />
       <button className="pathStatusButton" onClick={onPathClick} title={path} type="button">{path || "project"}</button>
       <button className="branchStatusButton" onClick={onBranchClick} type="button">
         <GitBranch size={13} />
@@ -1896,11 +1935,28 @@ function StatusSelect({
     <label className="statusSelect" data-status={label.toLowerCase().replace(/\s+/g, "-")} title={label}>
       <select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)}>
         {values.map((option) => (
-          <option key={option || "default"} value={option}>{renderValue?.(option) ?? option}</option>
+          <option key={option || "default"} value={option}>{renderValue?.(option) ?? defaultStatusSelectValue(label, option)}</option>
         ))}
       </select>
     </label>
   );
+}
+
+function defaultStatusSelectValue(label: string, value: string): string {
+  if (label === "Permission mode" && value === "default") {
+    return "Default Permission";
+  }
+  return value || label.toLowerCase();
+}
+
+function compactModelLabel(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "model";
+  }
+  const slash = trimmed.lastIndexOf("/");
+  const label = slash >= 0 ? trimmed.slice(slash + 1).trim() : trimmed;
+  return label || trimmed;
 }
 
 function AgentRunSelector({
@@ -1915,23 +1971,26 @@ function AgentRunSelector({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="agentRunSelector">
-      <span>Agent</span>
+    <label className="agentRunSelector" title="Agent">
       <select
-        aria-label="Run agent"
-        disabled={disabled || agents.length === 0}
+        aria-label="Agent"
+        disabled={disabled}
         value={value}
         onChange={(event) => onChange(event.target.value)}
       >
-        <option value="">Default</option>
+        <option value="">Default Agent</option>
         {agents.map((agent) => (
-          <option key={`${agent.source}:${agent.name}`} value={agent.name}>
+          <option key={`${agent.source}:${agent.path ?? agent.name}`} value={agentOptionValue(agent)}>
             {agent.name}
           </option>
         ))}
       </select>
     </label>
   );
+}
+
+function agentOptionValue(agent: WorkbenchAgent): string {
+  return agent.source === "explicit" ? agent.path?.trim() || agent.name : agent.name;
 }
 
 function AgentSurfacePanel({
@@ -2324,6 +2383,7 @@ function parseAgentList(value: unknown): WorkbenchAgent[] {
           description: stringField(item.description),
           source: stringField(item.source),
           generated: item.generated === true,
+          path: optionalStringField(item.path),
           entrypoints: stringArray(item.entrypoints),
           backend: asOptionalRecord(item.backend) as { ref?: string } | null
         };

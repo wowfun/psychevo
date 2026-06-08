@@ -1,5 +1,5 @@
-import { Paperclip, Send, Square, Terminal, X } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { ArrowUp, Plus, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import type { CompletionItem, CompletionListResult, GatewayMention, PendingClarify } from "@psychevo/protocol";
 import { IconButton } from "./primitives";
 
@@ -8,11 +8,14 @@ export interface ComposerProps {
   completionProvider?: (text: string, cursor: number) => Promise<CompletionListResult>;
   disabled?: boolean;
   leftControls?: ReactNode;
+  mode?: string;
   requestPanel?: ReactNode;
+  rightControls?: ReactNode;
   running: boolean;
   onCommand?(command: string): void;
   onAttach?(): void;
   onInterrupt(): void;
+  onModeChange?(mode: string): void;
   onRemoveAttachment?(id: string): void;
   onShell?(command: string): void;
   onSteer(text: string): void;
@@ -31,11 +34,14 @@ export function Composer({
   completionProvider,
   disabled,
   leftControls,
+  mode = "default",
   requestPanel,
+  rightControls,
   running,
   onAttach,
   onCommand,
   onInterrupt,
+  onModeChange,
   onRemoveAttachment,
   onShell,
   onSteer,
@@ -44,6 +50,7 @@ export function Composer({
   const [draft, setDraft] = useState("");
   const [turnMode, setTurnMode] = useState<"turn" | "steer">("steer");
   const [inputMode, setInputMode] = useState<"prompt" | "shell">("prompt");
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [completion, setCompletion] = useState<CompletionListResult | null>(null);
   const [activeCompletion, setActiveCompletion] = useState(0);
   const mentionsRef = useRef<GatewayMention[]>([]);
@@ -51,11 +58,17 @@ export function Composer({
   const completionOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const completionTimer = useRef<number | null>(null);
   const completionSequence = useRef(0);
+  const attachMenuRef = useRef<HTMLDivElement | null>(null);
   const trimmed = draft.trim();
   const completionItems = completion?.items ?? [];
   const shellMode = inputMode === "shell";
+  const planMode = mode === "plan";
   const attachmentItems = attachments ?? [];
   const hasPromptPayload = Boolean(trimmed) || attachmentItems.length > 0;
+
+  useLayoutEffect(() => {
+    resizeTextarea(textareaRef.current);
+  }, [draft, shellMode]);
 
   useEffect(() => () => {
     if (completionTimer.current !== null) {
@@ -69,6 +82,29 @@ export function Composer({
     }
     completionOptionRefs.current[activeCompletion]?.scrollIntoView?.({ block: "nearest" });
   }, [activeCompletion, completionItems.length]);
+
+  useEffect(() => {
+    if (!attachMenuOpen) {
+      return;
+    }
+    function onPointerDown(event: MouseEvent) {
+      if (attachMenuRef.current?.contains(event.target as Node)) {
+        return;
+      }
+      setAttachMenuOpen(false);
+    }
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        setAttachMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [attachMenuOpen]);
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -216,8 +252,28 @@ export function Composer({
     }
   }
 
+  const actionButton = running ? (
+    <button
+      aria-label="Interrupt active turn"
+      className="pevo-primaryButton pevo-sendButton is-interrupt"
+      onClick={onInterrupt}
+      type="button"
+    >
+      <span className="pevo-stopGlyph" aria-hidden />
+    </button>
+  ) : (
+    <button
+      aria-label={shellMode ? "Run shell command" : "Send message"}
+      className="pevo-primaryButton pevo-sendButton"
+      disabled={disabled || (shellMode ? (!trimmed || !onShell) : !hasPromptPayload)}
+      type="submit"
+    >
+      <ArrowUp size={17} aria-hidden />
+    </button>
+  );
+
   return (
-    <form className={`pevo-composer ${shellMode ? "is-shellMode" : ""} ${running ? "is-running" : ""}`} onSubmit={submit}>
+    <form className={`pevo-composer ${shellMode ? "is-shellMode" : ""} ${running ? "is-running" : ""} ${planMode ? "is-planMode" : ""}`} onSubmit={submit}>
       {requestPanel && <div className="pevo-composerRequestPanel">{requestPanel}</div>}
       {running && (
         <div className="pevo-segmented" role="tablist" aria-label="Turn mode">
@@ -252,21 +308,6 @@ export function Composer({
           rows={1}
           disabled={disabled}
         />
-        <div className="pevo-composerActions">
-          {running && (
-            <IconButton title="Interrupt active turn" onClick={onInterrupt} type="button">
-              <Square size={17} />
-            </IconButton>
-          )}
-          <button
-            aria-label={shellMode ? "Run shell command" : running && turnMode === "steer" ? "Steer active turn" : "Send message"}
-            className="pevo-primaryButton pevo-sendButton"
-            disabled={disabled || (shellMode ? (!trimmed || !onShell) : !hasPromptPayload)}
-            type="submit"
-          >
-            {shellMode ? <Terminal size={17} aria-hidden /> : <Send size={17} aria-hidden />}
-          </button>
-        </div>
       </div>
       {shellMode && !trimmed && (
         <div className="pevo-shellHelp">shell mode: type !&lt;command&gt; to run a local shell command</div>
@@ -314,14 +355,87 @@ export function Composer({
       )}
       <div className="pevo-composerFooter">
         <div className="pevo-composerLeftControls">
-          <IconButton title="Add attachment" onClick={onAttach} disabled={disabled || !onAttach} type="button">
-            <Paperclip size={17} />
-          </IconButton>
+          <div className="pevo-addMenu" ref={attachMenuRef}>
+            <IconButton
+              title="Add attachments and options"
+              onClick={() => setAttachMenuOpen((open) => !open)}
+              disabled={disabled}
+              type="button"
+              aria-expanded={attachMenuOpen}
+            >
+              <Plus size={18} />
+            </IconButton>
+            {attachMenuOpen && (
+              <div className="pevo-addPopover" role="menu">
+                <button
+                  className="pevo-addFileRow"
+                  disabled={!onAttach}
+                  onClick={() => {
+                    setAttachMenuOpen(false);
+                    onAttach?.();
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  Add images and files
+                </button>
+                <button
+                  aria-checked={planMode}
+                  className={`pevo-modeSwitchRow ${planMode ? "is-on" : ""}`}
+                  onClick={() => {
+                    onModeChange?.(planMode ? "default" : "plan");
+                  }}
+                  role="switch"
+                  type="button"
+                >
+                  <span>Plan mode</span>
+                  <span aria-hidden className="pevo-modeSwitchTrack">
+                    <span />
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
           {leftControls}
+          {planMode && (
+            <div className="pevo-planChip" tabIndex={0}>
+              <span>Plan</span>
+              <button
+                aria-label="Disable Plan mode"
+                onClick={() => onModeChange?.("default")}
+                type="button"
+              >
+                <X size={12} aria-hidden />
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="pevo-composerRightControls">
+          {rightControls && <div className="pevo-composerInlineStatus">{rightControls}</div>}
+          <div className="pevo-composerActions">
+            {actionButton}
+          </div>
         </div>
       </div>
     </form>
   );
+}
+
+function resizeTextarea(textarea: HTMLTextAreaElement | null) {
+  if (!textarea) {
+    return;
+  }
+  textarea.style.height = "auto";
+  const styles = window.getComputedStyle(textarea);
+  const maxHeight = parseFloat(styles.maxHeight);
+  const minHeight = parseFloat(styles.minHeight);
+  const measuredHeight = textarea.scrollHeight || minHeight || 0;
+  const clampedHeight = Number.isFinite(maxHeight)
+    ? Math.min(measuredHeight, maxHeight)
+    : measuredHeight;
+  const nextHeight = Math.max(clampedHeight, Number.isFinite(minHeight) ? minHeight : 0);
+  textarea.style.height = `${nextHeight}px`;
+  textarea.style.overflowY = Number.isFinite(maxHeight) && measuredHeight > maxHeight ? "auto" : "hidden";
 }
 
 function completionItemsForResult(result: CompletionListResult): CompletionItem[] {

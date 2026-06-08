@@ -186,10 +186,24 @@ Attachment chips are controlled component state with remove actions, and the
 submit button is enabled when either prompt text or pending attachments are
 present. Attachments are submitted through typed Gateway input parts rather
 than through ordinary transcript history or browser-only file path access.
-Composer send and interrupt controls are anchored inside the input frame's
-right edge and must stay within the textarea border box in compact one-line
-states. The composer does not expose the browser's native textarea resize grip,
-which competes with those controls and can make the action appear to overflow.
+Attachment entry is exposed as a compact `+` menu in the composer action row.
+The menu contains an `Add images and files` file/image picker action and the
+runtime mode switch. Plan mode is toggled from this menu rather than from the
+footer: default mode renders the switch off, plan mode renders it on and shows a
+quiet `Plan` chip immediately to the right of the Agent selector. Hovering or
+focusing that chip reveals a close control that returns the session to default
+mode. Composer send and interrupt controls live in the same footer row as the
+`+`, Agent, and `Plan` controls, aligned to the row's right edge with a stable
+height so the composer does not gain an extra row when Plan is active. Model,
+Variant, and context-usage controls sit immediately to the left of that
+send/interrupt slot; provider-qualified model values display using the segment
+after the final `/` while retaining the full value for submission. Permission,
+path, and branch remain in the quieter status line. The default send control is
+a compact circular arrow-up button; during an
+active turn, the same slot becomes an interrupt control with a Codex-like filled
+square stop glyph inside the same circular button. The prompt textarea grows with
+message line count until its bounded maximum height, then scrolls internally.
+The composer does not expose the browser's native textarea resize grip.
 
 Completion popovers are shared controlled components. `/` lists Gateway slash
 commands, `$` lists skills, local agents, and ACP capability mentions, and `@`
@@ -300,6 +314,12 @@ to render as its own compact terminal interaction. Long command, path, or query
 headers must elide inside the row so the optional status marker and row border
 remain visible at desktop and narrow widths. Full commands, SQL, arguments,
 results, and JSON belong in expandable detail, not in the collapsed header.
+Shell-command rows render the invocation-style subject `exec_command <cmd>` in
+both TUI and Workbench. Workbench must not split an `exec_command` row into a
+truncated tool-name column such as `exec_command p...` plus a second command
+summary column; the collapsed row uses one clipped invocation title with the
+status marker kept visible. Full commands, arguments, results, and internal
+tool metadata remain available through expandable detail.
 
 Transcript components must render message-derived entries in canonical order
 even when an app store or reconnect path provides a temporarily shuffled array.
@@ -365,15 +385,15 @@ outer panel borders, or filled containers just to separate adjacent controls.
 Desktop uses a persistent left history/project pane, center
 transcript/composer, optional inline center preview split, and a right
 Status/Files inspector that is collapsed by default on Web startup. The composer
-status line carries clickable permission mode, chat mode, model, variant,
-context usage, project path, and branch controls outside the input frame. The
-context item is a compact graphical meter with hover/click details, not a token
-table. Right Status changed-file rows open a read-only diff preview in the
-center split. Diff and code preview panes must remain readable in both dark and
-light appearances; dark code surfaces use dedicated code text tokens rather than
-inheriting ordinary page ink. Permission approval and clarify requests render in
-the composer area, where TUI-style bottom interaction lives, and must not be
-displaced into Status, Files, Debug, or passive metrics.
+footer carries Agent, Plan, model, variant, context usage, and submit/interrupt
+controls; the quieter status line below carries permission mode, project path,
+and branch. The context item is a compact graphical meter with hover/click
+details, not a token table. Right Status changed-file rows open a read-only diff
+preview in the center split. Diff and code preview panes must remain readable in
+both dark and light appearances; dark code surfaces use dedicated code text
+tokens rather than inheriting ordinary page ink. Permission approval and clarify
+requests render in the composer area, where TUI-style bottom interaction lives,
+and must not be displaced into Status, Files, Debug, or passive metrics.
 Project-group ordering in the Sessions pane is based on actual session or
 local draft recency, with label as a deterministic tie-breaker. Selecting or
 resuming a session in a lower project marks that row active but must not lift
@@ -399,8 +419,10 @@ subtitle under the product brand. The left sidebar collapse control sits in the
 same brand row as the logo/name and is icon-only; it must align to the right
 edge of the session column. When the left sidebar is collapsed, the same
 control becomes the expand affordance and uses a scaled Psychevo logo mark
-instead of the generic panel icon. The transcript surface starts directly with
-conversation content rather than a redundant `Transcript` title row, and the
+instead of the generic panel icon. Collapsed sidebar-only chrome must not keep
+the hidden Actions, Pinned, or Sessions components mounted above the bottom
+Settings utility entry. The transcript surface starts directly with conversation
+content rather than a redundant `Transcript` title row, and the
 right inspector starts directly with Status/Files/Debug tabs instead of a
 separate connection endpoint header. The right inspector expand/collapse
 control is fixed to the top-right edge of the transcript column, above the
