@@ -27,9 +27,21 @@ test.describe("Workbench composer visual contract", () => {
       const modelSelect = page.getByRole("combobox", { name: "Model" });
       await expect(modelSelect).toBeVisible();
       expect(await selectedOptionText(modelSelect)).toBe("noop");
+      await expectSelectTextFits(modelSelect);
       await expect(page.getByRole("combobox", { name: "Variant" })).toBeVisible();
       await expect(page.getByRole("button", { name: "Context usage" })).toBeVisible();
       await assertComposerGeometry(page, { plan: false });
+
+      await page.getByRole("button", { name: "Context usage" }).click();
+      const contextPopover = page.getByRole("dialog", { name: "Context usage" });
+      await expect(contextPopover).toBeVisible();
+      const contextSummary = page.locator(".composerContextSummary strong");
+      await contextSummary.evaluate((element) => {
+        element.textContent = "16.7k/1.0M (1.6%)";
+      });
+      await expectElementInsideViewport(page, contextPopover);
+      await expectTextNotClipped(contextSummary);
+      await page.keyboard.press("Escape");
 
       await page.getByRole("button", { name: "Add attachments and options" }).click();
       await expect(page.getByRole("menuitem", { name: "Add images and files" })).toBeVisible();
@@ -66,6 +78,58 @@ test.describe("Workbench composer visual contract", () => {
       await server.stop();
     }
   });
+
+  test("fits compact model labels and hides Transcript scrollbars until active", async ({ page, isMobile }) => {
+    const server = await startPevoWeb({ live: false, model: "lmstudio/mimo-v2.5" });
+    try {
+      await page.goto(server.url);
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+
+      await openPanel(page, isMobile, "History");
+      await page.getByRole("button", { name: "New Session" }).click();
+      await openPanel(page, isMobile, "Transcript");
+
+      const modelSelect = page.getByRole("combobox", { name: "Model" });
+      await expect(modelSelect).toBeVisible();
+      expect(await selectedOptionText(modelSelect)).toBe("mimo-v2.5");
+      await expectSelectTextFits(modelSelect);
+      await expect(modelSelect).toHaveAttribute("title", "lmstudio/mimo-v2.5");
+
+      const threadItems = page.locator(".pevo-threadItems");
+      await threadItems.evaluate((container) => {
+        container.innerHTML = Array.from({ length: 36 }, (_, index) => (
+          `<article class="pevo-messageFrame"><div class="pevo-message">Transcript row ${index + 1}</div></article>`
+        )).join("");
+      });
+      if (!isMobile) {
+        await page.mouse.move(1, 1);
+      }
+      const restingColor = await scrollbarColor(threadItems);
+      expectTransparentScrollbar(restingColor);
+      const restingBox = await threadItems.boundingBox();
+      expect(restingBox).not.toBeNull();
+
+      await threadItems.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+        element.dispatchEvent(new Event("scroll", { bubbles: true }));
+      });
+      await expect.poll(() => threadItems.evaluate((element) => element.classList.contains("is-scrolling"))).toBe(true);
+      const scrollingColor = await scrollbarColor(threadItems);
+      expect(scrollingColor).not.toBe(restingColor);
+      const scrollingBox = await threadItems.boundingBox();
+      expect(scrollingBox).not.toBeNull();
+      expect(Math.abs(scrollingBox!.width - restingBox!.width)).toBeLessThanOrEqual(1);
+
+      if (!isMobile) {
+        await expect.poll(() => threadItems.evaluate((element) => element.classList.contains("is-scrolling"))).toBe(false);
+        await threadItems.hover();
+        const hoverColor = await scrollbarColor(threadItems);
+        expect(hoverColor).not.toBe(restingColor);
+      }
+    } finally {
+      await server.stop();
+    }
+  });
 });
 
 async function selectedOptionText(select: Locator): Promise<string> {
@@ -82,7 +146,40 @@ async function optionTexts(select: Locator): Promise<string[]> {
   });
 }
 
+async function expectSelectTextFits(select: Locator) {
+  const fits = await select.evaluate((element) => element.scrollWidth <= element.clientWidth + 1);
+  expect(fits).toBe(true);
+}
+
+async function expectTextNotClipped(locator: Locator) {
+  const result = await locator.evaluate((element) => ({
+    clippedX: element.scrollWidth > element.clientWidth + 1,
+    clippedY: element.scrollHeight > element.clientHeight + 1,
+    overflow: getComputedStyle(element).overflow
+  }));
+  expect(result.overflow).not.toBe("hidden");
+  expect(result.clippedX).toBe(false);
+  expect(result.clippedY).toBe(false);
+}
+
+async function expectElementInsideViewport(page: Page, locator: Locator) {
+  const [box, viewport] = await Promise.all([locator.boundingBox(), page.viewportSize()]);
+  expect(box).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width);
+}
+
+async function scrollbarColor(locator: Locator): Promise<string> {
+  return locator.evaluate((element) => getComputedStyle(element).scrollbarColor);
+}
+
+function expectTransparentScrollbar(value: string) {
+  expect(value.toLowerCase()).toMatch(/transparent|rgba\(0, 0, 0, 0\)|color\(srgb 0 0 0 \/ 0\)/);
+}
+
 async function assertComposerGeometry(page: Page, options: { plan: boolean }) {
+  const add = page.getByRole("button", { name: "Add attachments and options" });
   const input = page.locator(".pevo-composerInput");
   const footer = page.locator(".pevo-composerFooter");
   const action = page.locator(".pevo-sendButton");
@@ -91,7 +188,8 @@ async function assertComposerGeometry(page: Page, options: { plan: boolean }) {
   const variant = page.getByRole("combobox", { name: "Variant" });
   const context = page.getByRole("button", { name: "Context usage" });
   const chip = page.locator(".pevo-planChip");
-  const [inputBox, footerBox, actionBox, agentBox, modelBox, variantBox, contextBox, chipBox] = await Promise.all([
+  const [addBox, inputBox, footerBox, actionBox, agentBox, modelBox, variantBox, contextBox, chipBox] = await Promise.all([
+    add.boundingBox(),
     input.boundingBox(),
     footer.boundingBox(),
     action.boundingBox(),
@@ -102,6 +200,7 @@ async function assertComposerGeometry(page: Page, options: { plan: boolean }) {
     options.plan ? chip.boundingBox() : Promise.resolve(null)
   ]);
 
+  expect(addBox).not.toBeNull();
   expect(inputBox).not.toBeNull();
   expect(footerBox).not.toBeNull();
   expect(actionBox).not.toBeNull();
@@ -124,10 +223,12 @@ async function assertComposerGeometry(page: Page, options: { plan: boolean }) {
   if (options.plan) {
     expect(chipBox).not.toBeNull();
     expect(chipBox!.x).toBeGreaterThan(agentBox!.x);
+    expect(modelBox!.x).toBeGreaterThan(chipBox!.x);
     expect(Math.abs(actionCenterY - (chipBox!.y + chipBox!.height / 2))).toBeLessThanOrEqual(5);
   }
 
   expect(inputBox!.y + inputBox!.height).toBeLessThanOrEqual(footerBox!.y + 2);
+  expect(addBox!.x).toBeLessThan(agentBox!.x);
   expect(modelBox!.x).toBeGreaterThan(agentBox!.x);
   expect(modelBox!.x).toBeLessThan(actionBox!.x);
   expect(variantBox!.x).toBeGreaterThan(modelBox!.x);

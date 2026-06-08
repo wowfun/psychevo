@@ -18,9 +18,11 @@ export interface PevoWebServer {
 
 export async function startPevoWeb({
   live,
+  model,
   workdir
 }: {
   live: boolean;
+  model?: string;
   workdir?: string;
 }): Promise<PevoWebServer> {
   if (!existsSync(staticDir)) {
@@ -38,7 +40,7 @@ export async function startPevoWeb({
     ? process.env.PSYCHEVO_CONFIG ?? path.join(homedir(), ".psychevo/config.toml")
     : path.join(root, "config.toml");
   if (!live) {
-    writeFileSync(configPath, "model = \"lmstudio/noop\"\n");
+    writeFileSync(configPath, `model = "${model ?? "lmstudio/noop"}"\n`);
   }
   if (live && !existsSync(configPath)) {
     throw new Error(`live config not found: ${configPath}`);

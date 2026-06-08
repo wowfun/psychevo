@@ -231,12 +231,26 @@ describe("Workbench composer agent wiring", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Collapse left sidebar" }));
 
-    expect(screen.queryByRole("button", { name: "New Session" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Search" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Artifacts" })).toBeNull();
+    expect(screen.getByRole("button", { name: "New Session" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Search" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Artifacts" })).toBeTruthy();
     expect(screen.queryByText("Pinned")).toBeNull();
     expect(screen.queryByText("Sessions")).toBeNull();
     expect(screen.getByRole("button", { name: "Settings" })).toBeTruthy();
+  });
+
+  it("shows an explicit Settings return action", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    expect(await screen.findByRole("region", { name: "Settings" })).toBeTruthy();
+
+    const backButton = screen.getByRole("button", { name: "Back to transcript" });
+    expect(backButton.textContent).toBe("");
+    expect(backButton.getAttribute("title")).toBe("Back to transcript");
+
+    fireEvent.click(backButton);
+    expect(await screen.findByRole("region", { name: "Transcript" })).toBeTruthy();
   });
 
   it("renders provider-qualified model names as short labels", async () => {
@@ -244,6 +258,7 @@ describe("Workbench composer agent wiring", () => {
 
     const modelSelect = await screen.findByRole("combobox", { name: "Model" }) as HTMLSelectElement;
     expect(modelSelect.selectedOptions[0]?.textContent).toBe("xiaomi-token-high");
+    expect(modelSelect.title).toBe("xiaomi/xiaomi-token-high");
     expect(screen.getByRole("option", { name: "gpt-4o" })).toBeTruthy();
     expect(screen.queryByRole("option", { name: "xiaomi/xiaomi-token-high" })).toBeNull();
   });

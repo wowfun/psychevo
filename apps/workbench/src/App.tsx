@@ -945,19 +945,17 @@ export function App() {
                 {leftCollapsed ? <img alt="" aria-hidden className="sidebarToggleLogo" src={logoUrl} /> : <PanelLeft size={16} />}
               </button>
             </div>
-            {!leftCollapsed && (
-              <div className="leftActions" aria-label="Session actions">
-                <button onClick={() => void runAction(async () => startNewThread())} type="button">
-                  <MessageSquare size={16} /> <span>New Session</span>
-                </button>
-                <button className={mainView === "search" ? "is-selected" : ""} onClick={() => setMainView("search")} type="button">
-                  <Search size={16} /> <span>Search</span>
-                </button>
-                <button className={mainView === "artifacts" ? "is-selected" : ""} onClick={() => setMainView("artifacts")} type="button">
-                  <Archive size={16} /> <span>Artifacts</span>
-                </button>
-              </div>
-            )}
+            <div className="leftActions" aria-label="Session actions">
+              <button aria-label="New Session" onClick={() => void runAction(async () => startNewThread())} type="button">
+                <MessageSquare size={16} /> <span>New Session</span>
+              </button>
+              <button aria-label="Search" className={mainView === "search" ? "is-selected" : ""} onClick={() => setMainView("search")} type="button">
+                <Search size={16} /> <span>Search</span>
+              </button>
+              <button aria-label="Artifacts" className={mainView === "artifacts" ? "is-selected" : ""} onClick={() => setMainView("artifacts")} type="button">
+                <Archive size={16} /> <span>Artifacts</span>
+              </button>
+            </div>
             {!leftCollapsed && (
               <>
                 <PinnedPanel
@@ -1242,7 +1240,7 @@ function PinnedPanel({
   return (
     <section className="leftPinnedPanel" aria-label="Pinned sessions">
       <header>
-        <Pin size={14} />
+        <Pin size={16} />
         <span>Pinned</span>
       </header>
       {sessions.length === 0 ? (
@@ -1318,6 +1316,7 @@ function MainSurface({
         onAppearanceChange={onAppearanceChange}
         onArchivedChange={onArchivedChange}
         onDebugChange={onDebugChange}
+        onOpenTranscript={() => onMainViewChange("transcript")}
       />
     );
   }
@@ -1353,7 +1352,8 @@ function SettingsPage({
   settings,
   onAppearanceChange,
   onArchivedChange,
-  onDebugChange
+  onDebugChange,
+  onOpenTranscript
 }: {
   appearance: Appearance;
   archived: boolean;
@@ -1362,15 +1362,28 @@ function SettingsPage({
   onAppearanceChange(value: Appearance): void;
   onArchivedChange(value: boolean): void;
   onDebugChange(value: boolean): void;
+  onOpenTranscript(): void;
 }) {
   return (
     <section className="centerPage settingsPage" aria-label="Settings">
       <header>
-        <Settings size={18} />
-        <div>
-          <h2>Settings</h2>
-          <p>{settings?.project?.displayPath ?? settings?.workdir ?? "local workbench"}</p>
+        <div className="centerPageTitle">
+          <Settings size={18} />
+          <div>
+            <h2>Settings</h2>
+            <p>{settings?.project?.displayPath ?? settings?.workdir ?? "local workbench"}</p>
+          </div>
         </div>
+        <button
+          aria-label="Back to transcript"
+          className="centerPageBack"
+          data-tooltip="Back to transcript"
+          onClick={onOpenTranscript}
+          title="Back to transcript"
+          type="button"
+        >
+          <X size={15} />
+        </button>
       </header>
       <div className="settingsRows">
         <div className="settingsRow">
@@ -1933,7 +1946,7 @@ function StatusSelect({
 }) {
   return (
     <label className="statusSelect" data-status={label.toLowerCase().replace(/\s+/g, "-")} title={label}>
-      <select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)}>
+      <select aria-label={label} title={value || label} value={value} onChange={(event) => onChange(event.target.value)}>
         {values.map((option) => (
           <option key={option || "default"} value={option}>{renderValue?.(option) ?? defaultStatusSelectValue(label, option)}</option>
         ))}

@@ -2,6 +2,9 @@
 
 ## 2026-06-09
 
+- Polished Workbench composer model/context fitting, Transcript scrollbar
+  visibility, collapsed left-rail icons, sidebar section alignment, and the
+  icon-only Settings return path.
 - Fixed Workbench/TUI `exec_command` rows to use one clipped invocation title
   and aligned Workbench new-session checks with local draft replacement.
 

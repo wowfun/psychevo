@@ -170,6 +170,10 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 }
 
 .leftChrome {
+  --left-nav-icon-column: 20px;
+  --left-nav-gap: 7px;
+  --left-nav-x: 6px;
+  --left-nav-font-size: 0.86rem;
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   min-width: 0;
@@ -219,18 +223,25 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 .leftActions button,
 .leftUtilityRail button {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: var(--left-nav-icon-column, 20px) minmax(0, 1fr);
   align-items: center;
-  gap: 7px;
+  gap: var(--left-nav-gap, 7px);
   min-width: 0;
   min-height: 30px;
-  padding: 0 6px;
+  padding: 0 var(--left-nav-x, 6px);
   color: var(--pevo-muted);
+  font-size: var(--left-nav-font-size, 0.86rem);
+  font-weight: 500;
   text-align: left;
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--pevo-radius-sm);
   cursor: pointer;
+}
+
+.leftActions button > svg,
+.leftUtilityRail button > svg {
+  justify-self: center;
 }
 
 .leftActions button.is-selected {
@@ -278,12 +289,18 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 
 .leftPinnedPanel header {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: var(--left-nav-icon-column, 20px) minmax(0, 1fr);
   align-items: center;
-  gap: 6px;
-  color: var(--pevo-ink);
-  font-size: 0.82rem;
-  font-weight: 650;
+  gap: var(--left-nav-gap, 7px);
+  min-height: 30px;
+  padding: 0 var(--left-nav-x, 6px);
+  color: var(--pevo-muted);
+  font-size: var(--left-nav-font-size, 0.86rem);
+  font-weight: 500;
+}
+
+.leftPinnedPanel header > svg {
+  justify-self: center;
 }
 
 .leftPinnedPanel p {
@@ -411,9 +428,28 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 }
 
 .historyColumn .pevo-sessionsHeader {
-  min-height: 34px;
-  padding: 2px 0;
+  min-height: 30px;
+  padding: 0 var(--left-nav-x);
   border-bottom-color: transparent;
+}
+
+.historyColumn .pevo-sessionsHeader .pevo-titleLine {
+  display: grid;
+  grid-template-columns: var(--left-nav-icon-column) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--left-nav-gap);
+  min-width: 0;
+  color: var(--pevo-muted);
+}
+
+.historyColumn .pevo-sessionsHeader .pevo-titleLine > svg {
+  justify-self: center;
+}
+
+.historyColumn .pevo-sessionsHeader h2 {
+  color: var(--pevo-muted);
+  font-size: var(--left-nav-font-size);
+  font-weight: 500;
 }
 
 .historyColumn .pevo-sessionList {
@@ -624,6 +660,74 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   border-bottom: 0;
 }
 
+.centerPageTitle {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 10px;
+}
+
+.centerPageTitle > div {
+  min-width: 0;
+}
+
+.centerPageBack {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  min-height: 30px;
+  padding: 0;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  font: inherit;
+}
+
+.centerPageBack::after {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 5;
+  width: max-content;
+  max-width: min(220px, calc(100vw - 24px));
+  padding: 5px 7px;
+  color: var(--pevo-panel);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  content: attr(data-tooltip);
+  background: var(--pevo-ink);
+  border: 1px solid color-mix(in oklch, var(--pevo-ink), transparent 28%);
+  border-radius: var(--pevo-radius-sm);
+  box-shadow: var(--pevo-shadow-popover);
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.centerPageBack:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--pevo-accent), white 24%);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) {
+  .centerPageBack:hover {
+    color: var(--pevo-ink);
+    background: var(--pevo-panel-muted);
+  }
+
+  .centerPageBack:hover::after {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .centerPage h2,
 .previewPane h2,
 .filesPanel h2,
@@ -653,6 +757,10 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 
 .settingsPage {
   width: min(900px, 100%);
+}
+
+.settingsPage > header {
+  justify-content: space-between;
 }
 
 .settingsRow {
@@ -1035,7 +1143,8 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 }
 
 .composerSubmitControls .statusSelect[data-status="model"] select {
-  width: 84px;
+  width: clamp(96px, 14ch, 136px);
+  min-width: 96px;
 }
 
 .composerSubmitControls .statusSelect[data-status="variant"] select {
@@ -1066,10 +1175,10 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 .composerContextPopover {
   position: absolute;
   bottom: calc(100% + 8px);
-  left: 50%;
+  right: 0;
   z-index: 40;
   display: grid;
-  width: min(320px, calc(100vw - 24px));
+  width: min(360px, calc(100vw - 24px));
   gap: 10px;
   padding: 12px;
   color: var(--pevo-ink);
@@ -1077,7 +1186,6 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   border: 1px solid var(--pevo-border-strong);
   border-radius: var(--pevo-radius);
   box-shadow: var(--pevo-shadow-panel);
-  transform: translateX(-50%);
   white-space: normal;
 }
 
@@ -1086,6 +1194,10 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   grid-template-columns: 48px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
+}
+
+.composerContextSummary > div {
+  min-width: 0;
 }
 
 .composerContextSummary > span {
@@ -1102,7 +1214,6 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   font-weight: 700;
 }
 
-.composerContextSummary strong,
 .composerContextSummary small,
 .composerContextBar span {
   min-width: 0;
@@ -1113,6 +1224,10 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 
 .composerContextSummary strong {
   display: block;
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
   font-size: 0.85rem;
 }
 
@@ -1479,7 +1594,8 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   }
 
   .composerSubmitControls .statusSelect[data-status="model"] select {
-    width: 58px;
+    width: clamp(88px, 24vw, 112px);
+    min-width: 88px;
   }
 
   .composerSubmitControls .statusSelect[data-status="variant"] select {
@@ -1523,7 +1639,8 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   }
 
   .composerSubmitControls .statusSelect[data-status="model"] select {
-    width: 54px;
+    width: clamp(84px, 25vw, 104px);
+    min-width: 84px;
   }
 
   .composerSubmitControls .statusSelect[data-status="variant"] select {
@@ -1555,6 +1672,11 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   .contextStatusButton span {
     width: 14px;
     height: 14px;
+  }
+
+  .composerContextPopover {
+    right: -42px;
+    width: min(280px, calc(100vw - 18px));
   }
 
   .pathStatusButton {

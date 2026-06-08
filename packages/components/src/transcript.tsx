@@ -15,9 +15,12 @@ type CopyTextHandler = ((text: string) => void | Promise<void>) | undefined;
 
 export function TranscriptPanel({ activity, entries, onCopyText }: TranscriptPanelProps) {
   const [followingBottom, setFollowingBottom] = useState(true);
+  const [scrolling, setScrolling] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const scrollIdleTimer = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
   const orderedEntries = useMemo(() => orderTranscriptEntries(entries), [entries]);
   const visibleEntries = useMemo(() => orderedEntries.filter((entry) => visibleBlocks(entry).length > 0), [orderedEntries]);
+  const threadItemsClass = `pevo-threadItems ${scrolling ? "is-scrolling" : ""}`.trim();
 
   useEffect(() => {
     if (!followingBottom) {
@@ -30,15 +33,29 @@ export function TranscriptPanel({ activity, entries, onCopyText }: TranscriptPan
     scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" });
   }, [followingBottom, visibleEntries, activity?.running]);
 
+  useEffect(() => () => {
+    if (scrollIdleTimer.current !== null) {
+      globalThis.clearTimeout(scrollIdleTimer.current);
+    }
+  }, []);
+
   return (
     <section className="pevo-panel pevo-transcript" aria-label="Transcript">
       <div
-        className="pevo-threadItems"
+        className={threadItemsClass}
         ref={scrollRef}
         onScroll={(event) => {
           const target = event.currentTarget;
           const atBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 48;
           setFollowingBottom(atBottom);
+          setScrolling(true);
+          if (scrollIdleTimer.current !== null) {
+            globalThis.clearTimeout(scrollIdleTimer.current);
+          }
+          scrollIdleTimer.current = globalThis.setTimeout(() => {
+            setScrolling(false);
+            scrollIdleTimer.current = null;
+          }, 900);
         }}
       >
         {visibleEntries.length === 0 ? (

@@ -197,7 +197,10 @@ mode. Composer send and interrupt controls live in the same footer row as the
 height so the composer does not gain an extra row when Plan is active. Model,
 Variant, and context-usage controls sit immediately to the left of that
 send/interrupt slot; provider-qualified model values display using the segment
-after the final `/` while retaining the full value for submission. Permission,
+after the final `/` while retaining the full value for submission. The compact
+model label and context-usage popover must not clip their selected value,
+summary, or visible usage details at desktop or narrow Workbench widths.
+Permission,
 path, and branch remain in the quieter status line. The default send control is
 a compact circular arrow-up button; during an
 active turn, the same slot becomes an interrupt control with a Codex-like filled
@@ -373,7 +376,9 @@ a consistent radius scale and press feedback without resizing their layout
 footprint. The left navigation/sidebar reads as one continuous navigation
 surface: Actions, Pinned, Sessions, and Settings use spacing, typography, and
 soft selection indicators rather than prominent boxed outlines, heavy divider
-lines, left rails, underline rails, or resting card-like row fills. Active
+lines, left rails, underline rails, or resting card-like row fills. Section
+headers in that sidebar align their icons and labels to the same grid as the
+action rows above them, with matching text scale and weight. Active
 navigation rows, session rows, tabs, and segmented controls use a shallow tonal
 shadow with a quiet surface step instead of inset rail effects. Logo containers
 are transparent when the mark itself is visible against the dark chrome.
@@ -400,9 +405,9 @@ resuming a session in a lower project marks that row active but must not lift
 the project group to the top of the Sessions pane. Collapsed project groups
 remain a compact top-stacked list with stable row spacing; empty available space
 belongs below the list and must not be distributed between collapsed projects.
-The Sessions scroller reserves a stable gutter so project add controls do not
-shift, but its scrollbar thumb stays hidden until the Sessions list itself is
-hovered or keyboard-focused.
+The Sessions and Transcript scrollers reserve a stable gutter so surrounding
+layout does not shift, but their scrollbar thumbs stay hidden until the
+scrolling surface itself is hovered, keyboard-focused, or actively scrolling.
 Persisted session rows keep the row body focused on the session title. Time
 metadata appears as compact relative days such as `0d` or `3d`, and the time
 metadata plus More affordance appear on row hover or keyboard-visible focus
@@ -415,14 +420,20 @@ permanent action strip under the session name. Local draft rows do not expose
 session management actions until they become persisted sessions.
 Workbench chrome uses `Psychevo` as the visible product name. Project identity
 belongs in the project/session grouping and settings detail surfaces, not as a
-subtitle under the product brand. The left sidebar collapse control sits in the
+subtitle under the product brand. The Settings center page exposes an explicit
+icon-only return/close control that switches back to the Transcript, carries a
+hover tooltip, and does not require users to infer the left utility icon as a
+close action. The left sidebar collapse
+control sits in the
 same brand row as the logo/name and is icon-only; it must align to the right
 edge of the session column. When the left sidebar is collapsed, the same
 control becomes the expand affordance and uses a scaled Psychevo logo mark
-instead of the generic panel icon. Collapsed sidebar-only chrome must not keep
-the hidden Actions, Pinned, or Sessions components mounted above the bottom
-Settings utility entry. The transcript surface starts directly with conversation
-content rather than a redundant `Transcript` title row, and the
+instead of the generic panel icon. Collapsed sidebar chrome keeps the primary
+action icons, such as New Session, Search, and Artifacts, visible directly below
+the logo toggle while hiding their text labels, and keeps the Settings utility
+icon in the bottom utility rail at its normal vertical position. It must not
+keep Pinned or Sessions list components mounted. The transcript surface starts
+directly with conversation content rather than a redundant `Transcript` title row, and the
 right inspector starts directly with Status/Files/Debug tabs instead of a
 separate connection endpoint header. The right inspector expand/collapse
 control is fixed to the top-right edge of the transcript column, above the
