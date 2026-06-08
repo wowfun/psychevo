@@ -18,9 +18,10 @@ pub(crate) use crate::agents::{
     AgentDefinition, AgentDiscoveryOptions, AgentToolContext, agent_catalog_for_prompt,
     agent_catalog_for_selected_policy, agent_mailbox_event_message,
     agent_policy_allows_agent_spawn, agent_project_instructions_enabled, apply_agent_hooks,
-    apply_agent_tool_policy, discover_agents, effective_tool_names,
+    apply_agent_tool_policy, discover_agents, effective_tool_names, main_agent_metadata,
     narrow_permission_mode_for_agent, resolve_agent_definition, resolve_agents_home,
-    run_agent_hook_event, skill_catalog_visible_for_tools, spawn_child_agent_background,
+    run_agent_hook_event, session_agent_input_from_metadata, skill_catalog_visible_for_tools,
+    spawn_child_agent_background,
 };
 pub(crate) use crate::compaction::{
     CompactSessionOptions, CompactionReason, compact_session, is_context_overflow_error,

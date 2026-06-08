@@ -54,6 +54,10 @@ pub(crate) use super::*;
 mod catalog_surface;
 #[allow(unused_imports)]
 pub use catalog_surface::*;
+#[path = "agents/main_agent.rs"]
+mod main_agent;
+#[allow(unused_imports)]
+pub use main_agent::*;
 #[path = "agents/lifecycle.rs"]
 mod lifecycle;
 #[allow(unused_imports)]

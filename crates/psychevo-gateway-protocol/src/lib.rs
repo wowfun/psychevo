@@ -892,6 +892,17 @@ pub struct SourceResetParams {
 pub struct SettingsReadParams {
     #[serde(default)]
     pub workdir: Option<String>,
+    #[serde(default)]
+    pub thread_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsUpdateParams {
+    pub scope: GatewayRequestScope,
+    pub thread_id: String,
+    #[serde(default)]
+    pub agent: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -922,6 +933,8 @@ pub struct WorkbenchProjectView {
 pub struct WorkbenchControlsView {
     pub permission_mode: String,
     pub mode: String,
+    #[serde(default)]
+    pub agent: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
@@ -1208,6 +1221,8 @@ pub enum ClientRequest {
     PermissionRespond(PermissionRespondParams),
     #[serde(rename = "clarify/respond")]
     ClarifyRespond(ClarifyRespondParams),
+    #[serde(rename = "settings/update")]
+    SettingsUpdate(SettingsUpdateParams),
     #[serde(rename = "settings/read")]
     SettingsRead(SettingsReadParams),
     #[serde(rename = "workspace/files")]
@@ -1601,6 +1616,7 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(InteractionRespondResult),
         exported_type!(SourceResetParams),
         exported_type!(SettingsReadParams),
+        exported_type!(SettingsUpdateParams),
         exported_type!(SettingsReadResult),
         exported_type!(WorkbenchProjectView),
         exported_type!(WorkbenchControlsView),

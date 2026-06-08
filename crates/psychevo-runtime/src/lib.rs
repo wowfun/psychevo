@@ -40,10 +40,14 @@ pub use agents::{
     AgentBackendConfig, AgentBackendKind, AgentBackendRef, AgentCatalog, AgentControl,
     AgentDefinition, AgentDiagnostic, AgentDiscoveryOptions, AgentEntrypoint, AgentInvocationRole,
     AgentPermissionMode, AgentRun, AgentRunRecord, AgentRunStatus, AgentSource, AgentToolPolicy,
-    MAX_AGENT_SPAWN_DEPTH_CAP, agent_spawn_paused, agent_status_value, close_agent_id,
-    discover_agents, list_agents_value, resolve_agent_definition, resume_agent_id,
-    send_agent_message, set_agent_spawn_paused, stop_agent_id_with_grace, valid_agent_name,
-    view_agent_value, view_agent_value_with_catalog, wait_agent_id, wait_agent_mailbox,
+    LoadedMainAgent, MAX_AGENT_SPAWN_DEPTH_CAP, SESSION_MAIN_AGENT_METADATA_KEY,
+    agent_spawn_paused, agent_status_value, close_agent_id, discover_agents, list_agents_value,
+    main_agent_default_metadata, main_agent_from_session_metadata, main_agent_metadata,
+    resolve_agent_definition, resume_agent_id, send_agent_message,
+    session_agent_input_from_metadata, session_base_agent_name_from_metadata,
+    session_main_agent_explicit_default, set_agent_spawn_paused, stop_agent_id_with_grace,
+    valid_agent_name, view_agent_value, view_agent_value_with_catalog, wait_agent_id,
+    wait_agent_mailbox,
 };
 pub use compaction::{
     AutoCompactionCheckOptions, CompactSessionOptions, CompactionReason, CompactionResult,

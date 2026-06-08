@@ -29,15 +29,33 @@ pub(crate) async fn run_live_internal(
             crate::types::ApprovalsReviewer::Smart => crate::types::ApprovalMode::Smart,
         }
     });
+    let store = options.state.store().clone();
+    let resumed_session_id = if let Some(session_id) = &options.session {
+        Some(session_id.clone())
+    } else if options.continue_latest {
+        store.latest_session_for_workdir_with_sources(&workdir, continue_sources)?
+    } else {
+        None
+    };
+    let session_metadata_for_agent = resumed_session_id
+        .as_deref()
+        .map(|session_id| store.session_metadata(session_id))
+        .transpose()?
+        .flatten();
     let agents_home = resolve_agents_home(&loaded.env, &workdir)?;
+    let agent_input = main_agent_input_from_sources(
+        options.no_agents,
+        options.agent.as_deref(),
+        session_metadata_for_agent.as_ref(),
+    );
     let agent_catalog = discover_agents(&AgentDiscoveryOptions {
         home: agents_home,
         workdir: workdir.clone(),
         env: loaded.env.clone(),
-        explicit_inputs: options.agent.iter().cloned().collect(),
+        explicit_inputs: agent_input.iter().cloned().collect(),
         no_agents: options.no_agents,
     })?;
-    let selected_agent = match &options.agent {
+    let selected_agent = match &agent_input {
         Some(input) => Some(resolve_agent_definition(
             &agent_catalog,
             input,
@@ -87,6 +105,13 @@ pub(crate) async fn run_live_internal(
         &loaded.env,
     );
     let selected_agent_summary = selected_agent_for_result(selected_agent.as_ref());
+    let selected_main_agent_metadata =
+        selected_agent
+            .as_ref()
+            .zip(agent_input.as_deref())
+            .map(|(agent, input)| {
+                main_agent_metadata(input, &agent.name, agent.source, agent.file_path.as_ref())
+            });
     let required_agent_catalog = if options.no_agents {
         Vec::new()
     } else {
@@ -95,14 +120,35 @@ pub(crate) async fn run_live_internal(
     let required_agent_mentions = required_agent_mentions(&options.prompt, &required_agent_catalog);
     let skill_context_fragments = skill_context_fragments(&selected_skills, &skill_catalog)?;
     let selected_skill_context_message_count = skill_context_fragments.len();
-    let store = options.state.store().clone();
+    let session_metadata = || {
+        let mut metadata = json!({
+            "provider_label": resolved.display_label.clone(),
+            "base_url": resolved.base_url.clone(),
+            "api_key_env": resolved.api_key_env.clone(),
+            "reasoning_effort": resolved.reasoning_effort.clone(),
+            "context_limit": resolved.context_limit,
+            "model_metadata": resolved.metadata.public_json(),
+            "mode": options.mode.as_str(),
+            "permission_mode": permission_mode.as_str(),
+            "approval_mode": approval_mode.as_str(),
+            "project_context": {
+                "instructions": project_context_mode.as_str(),
+            },
+            "workdir": workdir.display().to_string(),
+            "selected_agent": selected_agent_summary.clone(),
+        });
+        if let Some(main_agent) = selected_main_agent_metadata.clone()
+            && let Some(object) = metadata.as_object_mut()
+        {
+            object.insert("main_agent".to_string(), main_agent);
+        }
+        metadata
+    };
     let (session_id, created_session) = if let Some(session_id) = options.session.clone() {
         store.resume_session(&session_id)?;
         (session_id, false)
     } else if options.continue_latest {
-        if let Some(session_id) =
-            store.latest_session_for_workdir_with_sources(&workdir, continue_sources)?
-        {
+        if let Some(session_id) = resumed_session_id {
             store.resume_session(&session_id)?;
             (session_id, false)
         } else {
@@ -112,22 +158,7 @@ pub(crate) async fn run_live_internal(
                     source,
                     &resolved.model,
                     &resolved.provider,
-                    Some(json!({
-                        "provider_label": resolved.display_label.clone(),
-                        "base_url": resolved.base_url.clone(),
-                        "api_key_env": resolved.api_key_env.clone(),
-                        "reasoning_effort": resolved.reasoning_effort.clone(),
-                        "context_limit": resolved.context_limit,
-                        "model_metadata": resolved.metadata.public_json(),
-                        "mode": options.mode.as_str(),
-                        "permission_mode": permission_mode.as_str(),
-                        "approval_mode": approval_mode.as_str(),
-                        "project_context": {
-                            "instructions": project_context_mode.as_str(),
-                        },
-                        "workdir": workdir.display().to_string(),
-                        "selected_agent": selected_agent_summary.clone(),
-                    })),
+                    Some(session_metadata()),
                 )?,
                 true,
             )
@@ -139,22 +170,7 @@ pub(crate) async fn run_live_internal(
                 source,
                 &resolved.model,
                 &resolved.provider,
-                Some(json!({
-                    "provider_label": resolved.display_label.clone(),
-                    "base_url": resolved.base_url.clone(),
-                    "api_key_env": resolved.api_key_env.clone(),
-                    "reasoning_effort": resolved.reasoning_effort.clone(),
-                    "context_limit": resolved.context_limit,
-                    "model_metadata": resolved.metadata.public_json(),
-                    "mode": options.mode.as_str(),
-                    "permission_mode": permission_mode.as_str(),
-                    "approval_mode": approval_mode.as_str(),
-                    "project_context": {
-                        "instructions": project_context_mode.as_str(),
-                    },
-                    "workdir": workdir.display().to_string(),
-                    "selected_agent": selected_agent_summary.clone(),
-                })),
+                Some(session_metadata()),
             )?,
             true,
         )
@@ -720,39 +736,24 @@ pub(crate) fn session_model_metadata(metadata: &serde_json::Value) -> ModelMetad
         .unwrap_or_default()
 }
 
-pub(crate) fn session_agent_input_from_metadata(metadata: &serde_json::Value) -> Option<String> {
-    if let Some(main_agent) = metadata.get("main_agent") {
-        if main_agent
-            .get("mode")
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(|mode| mode == "default")
-            || main_agent.is_null()
-        {
-            return None;
-        }
-        if let Some(input) = main_agent
-            .get("input")
-            .and_then(serde_json::Value::as_str)
-            .or_else(|| main_agent.get("name").and_then(serde_json::Value::as_str))
-            .or_else(|| main_agent.get("path").and_then(serde_json::Value::as_str))
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            return Some(input.to_string());
-        }
+pub(crate) fn main_agent_input_from_sources(
+    no_agents: bool,
+    explicit_agent: Option<&str>,
+    session_metadata: Option<&serde_json::Value>,
+) -> Option<String> {
+    if no_agents {
+        return None;
     }
-    metadata
-        .get("selected_agent")
-        .and_then(|value| {
-            value
-                .get("input")
-                .or_else(|| value.get("name"))
-                .or_else(|| value.get("path"))
-        })
-        .and_then(serde_json::Value::as_str)
+    if let Some(input) = explicit_agent
         .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
+        .filter(|input| !input.is_empty())
+    {
+        return Some(input.to_string());
+    }
+    if let Some(input) = session_metadata.and_then(session_agent_input_from_metadata) {
+        return Some(input);
+    }
+    None
 }
 
 pub(crate) fn prompt_prefix_invalidation_reason(
@@ -998,6 +999,58 @@ pub(crate) fn record_missed_required_agents(
             }
         })),
     )
+}
+
+#[cfg(test)]
+mod main_agent_input_tests {
+    use super::*;
+
+    #[test]
+    fn explicit_agent_wins_over_session_agent() {
+        let metadata = json!({
+            "main_agent": {
+                "name": "session-agent"
+            }
+        });
+
+        assert_eq!(
+            main_agent_input_from_sources(false, Some("cli-agent"), Some(&metadata)).as_deref(),
+            Some("cli-agent")
+        );
+    }
+
+    #[test]
+    fn session_agent_is_used_without_explicit_agent() {
+        let metadata = json!({
+            "main_agent": {
+                "input": "session-agent"
+            }
+        });
+
+        assert_eq!(
+            main_agent_input_from_sources(false, None, Some(&metadata)).as_deref(),
+            Some("session-agent")
+        );
+    }
+
+    #[test]
+    fn session_explicit_default_uses_no_agent() {
+        let metadata = json!({
+            "main_agent": {
+                "mode": "default"
+            }
+        });
+
+        assert_eq!(
+            main_agent_input_from_sources(false, None, Some(&metadata)),
+            None
+        );
+    }
+
+    #[test]
+    fn missing_session_agent_uses_no_agent() {
+        assert_eq!(main_agent_input_from_sources(false, None, None), None);
+    }
 }
 
 #[cfg(test)]

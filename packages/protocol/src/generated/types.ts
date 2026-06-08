@@ -134,13 +134,15 @@ export type InteractionRespondResult = { accepted: boolean, };
 
 export type SourceResetParams = { scope: GatewayRequestScope, };
 
-export type SettingsReadParams = { workdir: string | null, };
+export type SettingsReadParams = { workdir: string | null, threadId: string | null, };
+
+export type SettingsUpdateParams = { scope: GatewayRequestScope, threadId: string, agent: string | null, };
 
 export type SettingsReadResult = { workdir: string, project: WorkbenchProjectView | null, memoryResources: Record<string, unknown>, secrets: Record<string, unknown>, controls: WorkbenchControlsView | null, };
 
 export type WorkbenchProjectView = { path: string, displayPath: string, branch: string | null, };
 
-export type WorkbenchControlsView = { permissionMode: string, mode: string, model: string | null, variant: string | null, permissionModeOptions: Array<string>, modeOptions: Array<string>, modelOptions: Array<string>, variantOptions: Array<string>, };
+export type WorkbenchControlsView = { permissionMode: string, mode: string, agent: string | null, model: string | null, variant: string | null, permissionModeOptions: Array<string>, modeOptions: Array<string>, modelOptions: Array<string>, variantOptions: Array<string>, };
 
 export type WorkspaceFileKind = "file" | "directory";
 
@@ -190,7 +192,7 @@ export type JsonRpcErrorResponse = { jsonrpc: string, id: JsonRpcId, error: Json
 
 export type JsonRpcError = { code: number, message: string, data: unknown | null, };
 
-export type ClientRequest = { "method": "initialize", "params": InitializeParams } | { "method": "thread/start", "params": ThreadStartParams } | { "method": "thread/resume", "params": ThreadResumeParams } | { "method": "thread/read", "params": ThreadReadParams } | { "method": "thread/list", "params": ThreadListParams } | { "method": "thread/rename", "params": ThreadRenameParams } | { "method": "thread/archive", "params": ThreadIdParams } | { "method": "thread/restore", "params": ThreadIdParams } | { "method": "thread/delete", "params": ThreadIdParams } | { "method": "turn/start", "params": TurnStartParams } | { "method": "turn/steer", "params": TurnSteerParams } | { "method": "turn/interrupt", "params": TurnInterruptParams } | { "method": "completion/list", "params": CompletionListParams } | { "method": "command/list", "params": CommandListParams } | { "method": "command/execute", "params": CommandExecuteParams } | { "method": "shell/start", "params": ShellStartParams } | { "method": "source/reset", "params": SourceResetParams } | { "method": "permission/respond", "params": PermissionRespondParams } | { "method": "clarify/respond", "params": ClarifyRespondParams } | { "method": "settings/read", "params": SettingsReadParams } | { "method": "workspace/files", "params": WorkspaceFilesParams } | { "method": "workspace/file/read", "params": WorkspaceFileReadParams } | { "method": "workspace/diff", "params": WorkspaceDiffParams } | { "method": "context/read", "params": ContextReadParams };
+export type ClientRequest = { "method": "initialize", "params": InitializeParams } | { "method": "thread/start", "params": ThreadStartParams } | { "method": "thread/resume", "params": ThreadResumeParams } | { "method": "thread/read", "params": ThreadReadParams } | { "method": "thread/list", "params": ThreadListParams } | { "method": "thread/rename", "params": ThreadRenameParams } | { "method": "thread/archive", "params": ThreadIdParams } | { "method": "thread/restore", "params": ThreadIdParams } | { "method": "thread/delete", "params": ThreadIdParams } | { "method": "turn/start", "params": TurnStartParams } | { "method": "turn/steer", "params": TurnSteerParams } | { "method": "turn/interrupt", "params": TurnInterruptParams } | { "method": "completion/list", "params": CompletionListParams } | { "method": "command/list", "params": CommandListParams } | { "method": "command/execute", "params": CommandExecuteParams } | { "method": "shell/start", "params": ShellStartParams } | { "method": "source/reset", "params": SourceResetParams } | { "method": "permission/respond", "params": PermissionRespondParams } | { "method": "clarify/respond", "params": ClarifyRespondParams } | { "method": "settings/update", "params": SettingsUpdateParams } | { "method": "settings/read", "params": SettingsReadParams } | { "method": "workspace/files", "params": WorkspaceFilesParams } | { "method": "workspace/file/read", "params": WorkspaceFileReadParams } | { "method": "workspace/diff", "params": WorkspaceDiffParams } | { "method": "context/read", "params": ContextReadParams };
 
 export type ServerNotification = { "method": "gateway/event", "params": GatewayEvent } | { "method": "turn/result", "params": TurnResultPayload } | { "method": "turn/error", "params": TurnErrorPayload } | { "method": "shell/result", "params": ShellResultPayload } | { "method": "shell/error", "params": ShellErrorPayload };
 

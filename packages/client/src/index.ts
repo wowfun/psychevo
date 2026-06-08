@@ -19,6 +19,7 @@ import {
   type RpcNotification,
   type SettingsReadParams,
   type SettingsReadResult,
+  type SettingsUpdateParams,
   type ShellStartParams,
   type ShellStartResult,
   type SourceResetParams,
@@ -65,6 +66,7 @@ export interface GatewayRequestParams {
   "initialize": InitializeParams;
   "permission/respond": PermissionRespondParams;
   "settings/read": SettingsReadParams;
+  "settings/update": SettingsUpdateParams;
   "shell/start": ShellStartParams;
   "source/reset": SourceResetParams;
   "thread/archive": ThreadIdParams;
@@ -94,6 +96,7 @@ export interface GatewayRequestResults {
   "initialize": InitializeResult;
   "permission/respond": InteractionRespondResult;
   "settings/read": SettingsReadResult;
+  "settings/update": SettingsReadResult;
   "shell/start": ShellStartResult;
   "source/reset": ThreadSnapshot;
   "thread/archive": ThreadMutationResult;

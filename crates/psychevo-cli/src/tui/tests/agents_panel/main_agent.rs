@@ -240,6 +240,7 @@ pub(crate) fn available_agent_use_as_main_is_session_scoped_and_clearable() {
     assert!(!status.contains("translate"), "{status}");
     assert_eq!(app.session_identity_label().as_deref(), Some("translate"));
     assert!(ui.bottom_panel.is_none());
+    assert!(!app.workdir.join(".psychevo/config.toml").exists());
 
     let panel = app.agent_panel();
     let translate = panel
@@ -279,6 +280,7 @@ pub(crate) fn available_agent_use_as_main_is_session_scoped_and_clearable() {
         .expect("metadata value");
     assert_eq!(metadata["main_agent"]["mode"], "default");
     assert!(!app.status_text().contains("agent: translate"));
+    assert!(!app.workdir.join(".psychevo/config.toml").exists());
 }
 
 #[test]

@@ -90,10 +90,8 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
     let project_context_mode =
         load_project_context_instruction_mode(&project_context_options, &workdir)?;
     let agents_home = resolve_agents_home(&env, &workdir)?;
-    let agent_input = options
-        .agent
-        .clone()
-        .or_else(|| session_agent_input_from_metadata(&metadata));
+    let agent_input =
+        main_agent_input_from_sources(options.no_agents, options.agent.as_deref(), Some(&metadata));
     let agent_catalog = discover_agents(&AgentDiscoveryOptions {
         home: agents_home,
         workdir: workdir.clone(),

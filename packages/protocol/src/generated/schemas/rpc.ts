@@ -686,6 +686,13 @@ export const rpcSchemas = {
     },
     "SettingsReadParams": {
       "properties": {
+        "threadId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "workdir": {
           "default": null,
           "type": [
@@ -694,6 +701,28 @@ export const rpcSchemas = {
           ]
         }
       },
+      "type": "object"
+    },
+    "SettingsUpdateParams": {
+      "properties": {
+        "agent": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "scope",
+        "threadId"
+      ],
       "type": "object"
     },
     "ShellStartParams": {
@@ -1323,6 +1352,24 @@ export const rpcSchemas = {
         },
         "params": {
           "$ref": "#/definitions/ClarifyRespondParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "settings/update"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/SettingsUpdateParams"
         }
       },
       "required": [

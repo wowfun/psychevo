@@ -85,6 +85,7 @@ export const gatewaySchemas = {
   InteractionRespondResult: interactionSchemas.InteractionRespondResult,
   SourceResetParams: sourceSchemas.SourceResetParams,
   SettingsReadParams: settingsSchemas.SettingsReadParams,
+  SettingsUpdateParams: settingsSchemas.SettingsUpdateParams,
   SettingsReadResult: settingsSchemas.SettingsReadResult,
   WorkbenchProjectView: settingsSchemas.WorkbenchProjectView,
   WorkbenchControlsView: settingsSchemas.WorkbenchControlsView,

@@ -1,14 +1,6 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
-pub(crate) const SESSION_MAIN_AGENT_METADATA_KEY: &str = "main_agent";
 pub(crate) const LIVE_AGENT_RELOAD_POLL_INTERVAL: Duration = Duration::from_millis(250);
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum LoadedMainAgent {
-    Missing,
-    Default,
-    Agent(String),
-}
 
 impl TuiApp {
     pub(crate) fn refresh_selected_model(&mut self) {
@@ -788,76 +780,6 @@ pub(crate) fn history_active_tool_call_ids_for_reload(
         }
     }
     Ok(active)
-}
-
-pub(crate) fn main_agent_default_metadata() -> Value {
-    serde_json::json!({"mode": "default"})
-}
-
-pub(crate) fn main_agent_metadata(
-    input: &str,
-    name: &str,
-    source: AgentSource,
-    path: Option<&PathBuf>,
-) -> Value {
-    serde_json::json!({
-        "mode": "agent",
-        "input": input,
-        "name": name,
-        "source": source.as_str(),
-        "path": path,
-    })
-}
-
-pub(crate) fn main_agent_from_session_metadata(metadata: Option<&Value>) -> LoadedMainAgent {
-    let Some(metadata) = metadata else {
-        return LoadedMainAgent::Missing;
-    };
-    if let Some(main_agent) = metadata.get(SESSION_MAIN_AGENT_METADATA_KEY) {
-        if main_agent
-            .get("mode")
-            .and_then(Value::as_str)
-            .is_some_and(|mode| mode == "default")
-            || main_agent.is_null()
-        {
-            return LoadedMainAgent::Default;
-        }
-        if let Some(input) = main_agent
-            .get("input")
-            .and_then(Value::as_str)
-            .or_else(|| main_agent.get("name").and_then(Value::as_str))
-            .or_else(|| main_agent.get("path").and_then(Value::as_str))
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            return LoadedMainAgent::Agent(input.to_string());
-        }
-    }
-    if let Some(name) = metadata
-        .get("selected_agent")
-        .and_then(|value| {
-            value
-                .get("input")
-                .or_else(|| value.get("name"))
-                .or_else(|| value.get("path"))
-        })
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        return LoadedMainAgent::Agent(name.to_string());
-    }
-    LoadedMainAgent::Missing
-}
-
-pub(crate) fn session_base_agent_name_from_metadata(metadata: Option<&Value>) -> Option<String> {
-    metadata?
-        .get("agent")
-        .and_then(|value| value.get("name"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
 }
 
 #[cfg(test)]

@@ -25,14 +25,16 @@ use psychevo_runtime::command_registry::{
 };
 use psychevo_runtime::{
     AgentBackendConfig, AgentDiscoveryOptions, AgentEntrypoint, ClarifyAnswer, ClarifyResponse,
-    ClarifyResult, ContextOptions, Error, ListSkillsOptions, Message as RuntimeMessage,
-    PermissionApprovalDecision, PermissionApprovalOutcome, PermissionMode, RunMode, RunOptions,
-    SessionArtifactKind, SessionExportFormat, SessionExportIncludeSet, SessionExportOptions,
-    SessionSummary, SkillDiscoveryOptions, StateRuntime, UserContentBlock, UserShellContextOptions,
+    ClarifyResult, ContextOptions, Error, ListSkillsOptions, LoadedMainAgent,
+    Message as RuntimeMessage, PermissionApprovalDecision, PermissionApprovalOutcome,
+    PermissionMode, RunMode, RunOptions, SESSION_MAIN_AGENT_METADATA_KEY, SessionArtifactKind,
+    SessionExportFormat, SessionExportIncludeSet, SessionExportOptions, SessionSummary,
+    SkillDiscoveryOptions, StateRuntime, UserContentBlock, UserShellContextOptions,
     WorkspaceDiffFileStatus, canonicalize_workdir, collect_workspace_diff, configured_models,
     context_snapshot, discover_agents, discover_skills, format_context_total_value,
     list_agents_value, list_skill_bundles, list_skills_value_with_options,
-    load_agent_backend_configs, render_session_export, resolve_agent_definition,
+    load_agent_backend_configs, main_agent_default_metadata, main_agent_from_session_metadata,
+    main_agent_metadata, render_session_export, resolve_agent_definition,
     selected_configured_model, valid_agent_name, view_agent_value_with_catalog,
 };
 use serde::{Deserialize, Serialize};
@@ -1195,16 +1197,31 @@ async fn handle_rpc(
         }
         "settings/read" => {
             let params = request.params::<wire::SettingsReadParams>()?;
-            let workdir = resolve_workdir_filter(&state, &auth, params.workdir)?;
-            let controls = workbench_controls_value(&state, &workdir);
-            let project = workbench_project_value(&workdir);
-            Ok(json!({
-            "workdir": workdir,
-            "project": project,
-            "memoryResources": {"mode": "status_only", "available": true},
-            "secrets": {"frontendPersistence": "disabled"},
-            "controls": controls
-            }))
+            let (workdir, thread_id) = if let Some(thread_id) = params.thread_id {
+                authorize_thread(&state, &auth, &thread_id)?;
+                let summary = state
+                    .inner
+                    .state
+                    .store()
+                    .session_summary(&thread_id)?
+                    .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
+                (PathBuf::from(summary.workdir), Some(thread_id))
+            } else {
+                (resolve_workdir_filter(&state, &auth, params.workdir)?, None)
+            };
+            settings_read_value(&state, &workdir, thread_id.as_deref())
+        }
+        "settings/update" => {
+            let params = request.required_params::<wire::SettingsUpdateParams>()?;
+            let scope = resolve_required_scope(&state, &auth, params.scope)?;
+            authorize_thread(&state, &auth, &params.thread_id)?;
+            update_session_agent_setting(
+                &state,
+                &scope,
+                &params.thread_id,
+                params.agent.as_deref(),
+            )?;
+            settings_read_value(&state, &scope.workdir, Some(&params.thread_id))
         }
         method => Err(Error::Message(format!("method not found: {method}"))),
     }
@@ -2145,13 +2162,35 @@ fn context_unavailable(label: &str) -> wire::ContextReadResult {
     }
 }
 
-fn workbench_controls_value(state: &WebState, workdir: &Path) -> wire::WorkbenchControlsView {
+fn settings_read_value(
+    state: &WebState,
+    workdir: &Path,
+    thread_id: Option<&str>,
+) -> psychevo_runtime::Result<Value> {
+    let controls = workbench_controls_value(state, workdir, thread_id)?;
+    let project = workbench_project_value(workdir);
+    Ok(json!({
+        "workdir": workdir,
+        "project": project,
+        "memoryResources": {"mode": "status_only", "available": true},
+        "secrets": {"frontendPersistence": "disabled"},
+        "controls": controls
+    }))
+}
+
+fn workbench_controls_value(
+    state: &WebState,
+    workdir: &Path,
+    thread_id: Option<&str>,
+) -> psychevo_runtime::Result<wire::WorkbenchControlsView> {
     let options = state.run_options(workdir.to_path_buf(), None);
+    let agent = session_control_agent(state, thread_id)?;
     let selected = selected_configured_model(&options).ok().flatten();
     let configured = configured_models(&options).unwrap_or_default();
-    wire::WorkbenchControlsView {
+    Ok(wire::WorkbenchControlsView {
         permission_mode: PermissionMode::Default.as_str().to_string(),
         mode: RunMode::Default.as_str().to_string(),
+        agent,
         model: selected
             .as_ref()
             .map(|model| format!("{}/{}", model.provider, model.model)),
@@ -2175,7 +2214,79 @@ fn workbench_controls_value(state: &WebState, workdir: &Path) -> wire::Workbench
             .into_iter()
             .map(str::to_string)
             .collect(),
+    })
+}
+
+fn session_control_agent(
+    state: &WebState,
+    thread_id: Option<&str>,
+) -> psychevo_runtime::Result<Option<String>> {
+    let Some(thread_id) = thread_id else {
+        return Ok(None);
+    };
+    let metadata = state.inner.state.store().session_metadata(thread_id)?;
+    Ok(match main_agent_from_session_metadata(metadata.as_ref()) {
+        LoadedMainAgent::Agent(agent) => Some(agent),
+        LoadedMainAgent::Default | LoadedMainAgent::Missing => None,
+    })
+}
+
+fn update_session_agent_setting(
+    state: &WebState,
+    scope: &ResolvedScope,
+    thread_id: &str,
+    input: Option<&str>,
+) -> psychevo_runtime::Result<()> {
+    let summary = state
+        .inner
+        .state
+        .store()
+        .session_summary(thread_id)?
+        .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
+    if Path::new(&summary.workdir) != scope.workdir.as_path() {
+        return Err(Error::Message(format!(
+            "session {thread_id} does not belong to {}",
+            scope.workdir.display()
+        )));
     }
+    let Some(input) = input else {
+        state.inner.state.store().set_session_metadata_field(
+            thread_id,
+            SESSION_MAIN_AGENT_METADATA_KEY,
+            Some(main_agent_default_metadata()),
+        )?;
+        return Ok(());
+    };
+    let input = input.trim();
+    if input.is_empty() {
+        return Err(Error::Message(
+            "settings/update agent must be null or a concrete agent".to_string(),
+        ));
+    }
+    let catalog = discover_gateway_agents(state, scope)?;
+    if catalog.shadowed_agents.iter().any(|agent| {
+        agent
+            .file_path
+            .as_ref()
+            .is_some_and(|path| path.to_string_lossy() == input)
+    }) {
+        return Err(Error::Message(format!(
+            "shadowed agent definitions cannot be used as main: {input}"
+        )));
+    }
+    let agent =
+        resolve_agent_definition(&catalog, input, &scope.workdir, &state.inner.inherited_env)?;
+    state.inner.state.store().set_session_metadata_field(
+        thread_id,
+        SESSION_MAIN_AGENT_METADATA_KEY,
+        Some(main_agent_metadata(
+            input,
+            &agent.name,
+            agent.source,
+            agent.file_path.as_ref(),
+        )),
+    )?;
+    Ok(())
 }
 
 fn workbench_project_value(workdir: &Path) -> wire::WorkbenchProjectView {
@@ -3427,6 +3538,17 @@ mod tests {
         (temp, WebState::new(config))
     }
 
+    fn write_agent_definition(dir: &Path, name: &str, description: &str) -> PathBuf {
+        std::fs::create_dir_all(dir).expect("agent dir");
+        let path = dir.join(format!("{name}.md"));
+        std::fs::write(
+            &path,
+            format!("---\ndescription: {description:?}\n---\n\nUse this agent.\n"),
+        )
+        .expect("agent definition");
+        path
+    }
+
     fn web_state_with_static() -> (tempfile::TempDir, WebState) {
         let (temp, state) = web_state();
         let static_dir = temp.path().join("static");
@@ -4101,12 +4223,226 @@ command = "cursor-agent"
         );
         assert_eq!(result["controls"]["permissionMode"], "default");
         assert_eq!(result["controls"]["mode"], "default");
+        assert_eq!(result["controls"]["agent"], Value::Null);
         assert!(
             result["controls"]["variantOptions"]
                 .as_array()
                 .expect("variant options")
                 .iter()
                 .any(|value| value.as_str() == Some("medium"))
+        );
+    }
+
+    #[tokio::test]
+    async fn settings_read_exposes_session_agent() {
+        let (_temp, state) = web_state();
+        let session = state
+            .inner
+            .state
+            .store()
+            .create_session_with_metadata(
+                &state.inner.workdir,
+                "web",
+                "model",
+                "provider",
+                Some(json!({
+                    "main_agent": main_agent_metadata(
+                        "translate",
+                        "translate",
+                        psychevo_runtime::AgentSource::Project,
+                        None,
+                    )
+                })),
+            )
+            .expect("session");
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let result = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "settings/read".to_string(),
+                params: Some(json!({ "threadId": session })),
+            },
+        )
+        .await
+        .expect("settings/read");
+
+        assert_eq!(result["controls"]["agent"].as_str(), Some("translate"));
+    }
+
+    #[tokio::test]
+    async fn settings_update_persists_session_agent_and_default() {
+        let (_temp, state) = web_state();
+        write_agent_definition(
+            &state.inner.workdir.join(".psychevo/agents"),
+            "translate",
+            "Translate user messages",
+        );
+        let session = state
+            .inner
+            .state
+            .store()
+            .create_session_with_metadata(&state.inner.workdir, "web", "model", "provider", None)
+            .expect("session");
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let result = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "settings/update".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "threadId": session,
+                    "agent": "translate"
+                })),
+            },
+        )
+        .await
+        .expect("settings/update");
+
+        assert_eq!(result["controls"]["agent"].as_str(), Some("translate"));
+        let metadata = state
+            .inner
+            .state
+            .store()
+            .session_metadata(&session)
+            .expect("metadata")
+            .expect("metadata value");
+        assert_eq!(metadata["main_agent"]["mode"], "agent");
+        assert_eq!(metadata["main_agent"]["name"], "translate");
+        assert!(!state.inner.workdir.join(".psychevo/config.toml").exists());
+
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let result = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("2")),
+                method: "settings/update".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "threadId": session,
+                    "agent": null
+                })),
+            },
+        )
+        .await
+        .expect("settings/update");
+
+        assert_eq!(result["controls"]["agent"], Value::Null);
+        let metadata = state
+            .inner
+            .state
+            .store()
+            .session_metadata(&session)
+            .expect("metadata")
+            .expect("metadata value");
+        assert_eq!(metadata["main_agent"]["mode"], "default");
+    }
+
+    #[tokio::test]
+    async fn settings_update_rejects_unknown_or_shadowed_session_agent() {
+        let (_temp, state) = web_state();
+        let project_agents = state.inner.workdir.join(".psychevo/agents");
+        let home_agents = state.inner.home.join("agents");
+        write_agent_definition(&project_agents, "review", "Project review");
+        let shadowed = write_agent_definition(&home_agents, "review", "Global review");
+        let session = state
+            .inner
+            .state
+            .store()
+            .create_session_with_metadata(&state.inner.workdir, "web", "model", "provider", None)
+            .expect("session");
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let active = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "settings/update".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "threadId": session,
+                    "agent": "review"
+                })),
+            },
+        )
+        .await
+        .expect("active review is valid");
+        assert_eq!(active["controls"]["agent"].as_str(), Some("review"));
+
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let err = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("2")),
+                method: "settings/update".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "threadId": session,
+                    "agent": shadowed.display().to_string()
+                })),
+            },
+        )
+        .await
+        .expect_err("shadowed path");
+        assert!(
+            err.to_string().contains("shadowed agent definitions"),
+            "{err:#}"
+        );
+
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let err = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("3")),
+                method: "settings/update".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "threadId": session,
+                    "agent": "missing"
+                })),
+            },
+        )
+        .await
+        .expect_err("unknown agent");
+        assert!(
+            err.to_string().contains("unknown agent: missing"),
+            "{err:#}"
         );
     }
 

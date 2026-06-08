@@ -3,6 +3,13 @@
   "definitions": {
     "WorkbenchControlsView": {
       "properties": {
+        "agent": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "mode": {
           "type": "string"
         },

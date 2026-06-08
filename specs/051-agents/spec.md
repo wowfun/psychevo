@@ -128,6 +128,11 @@ agent, while an explicit default setting clears the selected agent for that
 session. Runtime projections for each invocation should still record the
 resolved selected agent, when any, so replay can identify which main-session
 agent produced a turn.
+Interactive clients persist concrete main-agent selections and explicit
+`Default Agent` selections in the current session metadata only. They must not
+write project-local Agent defaults from selector changes. A draft or new session
+without session metadata starts from the process or CLI selected agent, then no
+Agent.
 Refreshing the selected-agent prompt prefix for an existing session must not
 require provider credentials or a provider-ready home config; it may read only
 the lightweight project context policy needed for prompt assembly.

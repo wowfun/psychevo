@@ -4,6 +4,13 @@ export const settingsSchemas = {
   SettingsReadParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
+    "threadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "workdir": {
       "default": null,
       "type": [
@@ -15,11 +22,106 @@ export const settingsSchemas = {
   "title": "SettingsReadParams",
   "type": "object"
 },
+  SettingsUpdateParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "agent": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "scope": {
+      "$ref": "#/definitions/GatewayRequestScope"
+    },
+    "threadId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "scope",
+    "threadId"
+  ],
+  "title": "SettingsUpdateParams",
+  "type": "object"
+},
   SettingsReadResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "WorkbenchControlsView": {
       "properties": {
+        "agent": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "mode": {
           "type": "string"
         },
@@ -168,6 +270,13 @@ export const settingsSchemas = {
   WorkbenchControlsView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
+    "agent": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "mode": {
       "type": "string"
     },

@@ -124,6 +124,17 @@ panel lists local, generated peer, Markdown-shadowed peer, invalid, and
 shadowed definitions from the shared catalog. It can open peer threads, run
 subagents, edit Markdown agent definitions, display backend diagnostics, and
 execute `/agent:command` namespaced peer slash commands.
+The composer exposes active, runnable agent definitions from the same catalog
+as a main-agent selector. The empty selector value is displayed as
+`Default Agent` and submits future turns with no `agentName`; concrete
+selections submit that agent name and are persisted to the current session's
+main-agent metadata. Shadowed and invalid definitions remain visible only in the
+Agents panel diagnostics, not in the composer selector. `settings/read` returns
+the current session's selected main Agent in `controls.agent` when a `threadId`
+is supplied, or `null` for a draft/default session. `settings/update` accepts
+`agent: string | null` with a `threadId`, validates concrete Agents against the
+active catalog, and writes either concrete main-agent metadata or an explicit
+session default marker. It does not write project-local Agent defaults.
 
 Startup and reconnect call source-default `thread/resume` with `params.scope`.
 Gateway returns the current thread snapshot when a binding exists, or an empty
@@ -159,6 +170,10 @@ running turns must not overwrite the binding.
 Web clients may show a local draft row for this detached draft in their History
 UI, but that row is not a persisted session and must not be exposed as a
 Gateway `SessionSummaryView`.
+Starting another new session while an unpersisted local draft is selected
+replaces the client-local draft row instead of accumulating multiple draft rows;
+only an accepted prompt or shell command can turn a draft into a durable
+session.
 When the detached draft is started from a project scope, the draft row appears
 inside that project's Sessions group rather than as a global item above all
 projects. If the target project has no persisted visible sessions yet, the
