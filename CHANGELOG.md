@@ -1,7 +1,15 @@
 # Changelog
 
+## 2026-06-09
+
+- Fixed Workbench/TUI `exec_command` rows to use one clipped invocation title
+  and aligned Workbench new-session checks with local draft replacement.
+
 ## 2026-06-08
 
+- Reworked the Workbench composer around the `+` menu, Plan chip,
+  session-scoped Agent selection, compact model/context controls, circular
+  send/interrupt slot, growing input, and collapsed-sidebar cleanup.
 - Made managed `pevo web`/`pevo gateway` startup prefer
   `127.0.0.1:58080`, with automatic fallback through `58099` when default
   ports are already in use while keeping explicit `--bind` strict.
