@@ -29,6 +29,35 @@ pub(crate) fn shell_lc_word_only_commands(command: &[String]) -> Option<Vec<Vec<
     shell_word_only_commands(script)
 }
 
+pub(crate) fn shell_command_invocations(src: &str) -> Option<Vec<Vec<String>>> {
+    let tree = parse_shell(src)?;
+    if tree.root_node().has_error() {
+        return None;
+    }
+
+    let root = tree.root_node();
+    let mut cursor = root.walk();
+    let mut stack = vec![root];
+    let mut command_nodes = Vec::new();
+    while let Some(node) = stack.pop() {
+        if node.kind() == "command" {
+            command_nodes.push(node);
+        }
+        for child in node.children(&mut cursor) {
+            stack.push(child);
+        }
+    }
+
+    command_nodes.sort_by_key(Node::start_byte);
+    let mut commands = Vec::new();
+    for node in command_nodes {
+        if let Some(command) = parse_command_invocation(node, src) {
+            commands.push(command);
+        }
+    }
+    Some(commands)
+}
+
 pub(crate) fn shell_basename(raw: &str) -> Option<String> {
     std::path::Path::new(raw)
         .file_name()
@@ -134,6 +163,39 @@ fn parse_plain_command(cmd: Node<'_>, src: &str) -> Option<Vec<String>> {
     (!words.is_empty()).then_some(words)
 }
 
+fn parse_command_invocation(cmd: Node<'_>, src: &str) -> Option<Vec<String>> {
+    if cmd.kind() != "command" {
+        return None;
+    }
+    let mut words = Vec::new();
+    let mut cursor = cmd.walk();
+    for child in cmd.named_children(&mut cursor) {
+        match child.kind() {
+            "command_name" => {
+                let word = child.named_child(0)?;
+                words.push(parse_literal_shell_text(word, src)?);
+            }
+            "word" | "number" | "string" | "raw_string" | "concatenation" => {
+                if let Some(word) = parse_literal_shell_text(child, src) {
+                    words.push(word);
+                }
+            }
+            _ => {}
+        }
+    }
+    (!words.is_empty()).then_some(words)
+}
+
+fn parse_literal_shell_text(node: Node<'_>, src: &str) -> Option<String> {
+    match node.kind() {
+        "word" | "number" => node.utf8_text(src.as_bytes()).ok().map(str::to_string),
+        "string" => parse_double_quoted_string(node, src),
+        "raw_string" => parse_raw_string(node, src),
+        "concatenation" => parse_concatenation(node, src),
+        _ => None,
+    }
+}
+
 fn parse_concatenation(node: Node<'_>, src: &str) -> Option<String> {
     let mut out = String::new();
     let mut cursor = node.walk();
@@ -196,5 +258,24 @@ mod tests {
     fn rejects_redirects_and_expansions() {
         assert!(shell_word_only_commands("ls > out.txt").is_none());
         assert!(shell_word_only_commands(r#"echo "$HOME""#).is_none());
+    }
+
+    #[test]
+    fn command_invocations_keep_quoted_sql_as_argument() {
+        let commands = shell_command_invocations(
+            r#"sqlite3 db "UPDATE stories SET content = 'system halted';"; sudo reboot"#,
+        )
+        .unwrap();
+        assert_eq!(
+            commands,
+            vec![
+                vec![
+                    "sqlite3".to_string(),
+                    "db".to_string(),
+                    "UPDATE stories SET content = 'system halted';".to_string(),
+                ],
+                vec!["sudo".to_string(), "reboot".to_string()],
+            ]
+        );
     }
 }

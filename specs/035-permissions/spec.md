@@ -167,6 +167,10 @@ Hard/protected denies cannot be bypassed by `dontAsk`, `bypassPermissions`,
 `allow always`, session grants, or configured allow rules. They cover sensitive
 write targets such as SSH, cloud credentials, shell rc files, `.env`, system
 account/service files, and the project permissions configuration surface.
+System shutdown/reboot hard denies match executable command positions, including
+common wrappers such as `sudo`, `env`, `exec`, `nohup`, and `setsid`; ordinary
+arguments or quoted literals that merely contain words such as `shutdown`,
+`reboot`, `poweroff`, or `halt` must not trigger the hard deny.
 
 Protected reads are intentionally narrow. Internal Psychevo cache/index paths
 that could inject stale or untrusted runtime material may be denied.
@@ -277,6 +281,8 @@ recent smart denial with `/approve once|session|always`.
 - Bash dangerous-command detection covers representative recursive delete,
   shell-pipe installer, destructive git, process kill, service, permission,
   and SQL destructive commands.
+- System shutdown/reboot hard denies trigger for command-position invocations
+  while avoiding quoted SQL/text false positives.
 - Known-safe command classification covers representative read-only commands
   and safe shell compositions.
 - Inline interpreter classification allows only literal already-authorized file

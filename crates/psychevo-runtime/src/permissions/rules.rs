@@ -14,14 +14,115 @@ pub(crate) fn hardline_bash_reason(command: &str) -> Option<String> {
     if command.contains("mkfs")
         || command.contains("dd if=") && command.contains(" of=/dev/")
         || command.contains(":(){")
-        || command.contains("shutdown")
-        || command.contains("reboot")
-        || command.contains("poweroff")
-        || command.contains("halt")
+        || contains_system_destructive_command(command)
     {
         return Some("hard-denied system destructive command".to_string());
     }
     None
+}
+
+pub(crate) fn contains_system_destructive_command(command: &str) -> bool {
+    shell_command_invocations(command).is_some_and(|commands| {
+        commands
+            .iter()
+            .any(|command| is_system_destructive_invocation(command))
+    })
+}
+
+pub(crate) fn is_system_destructive_invocation(command: &[String]) -> bool {
+    let Some((name, args)) = effective_system_command(command) else {
+        return false;
+    };
+    match name.as_str() {
+        "shutdown" | "reboot" | "poweroff" | "halt" => true,
+        "systemctl" => systemctl_destructive_action(args).is_some(),
+        _ => false,
+    }
+}
+
+fn effective_system_command(command: &[String]) -> Option<(String, &[String])> {
+    let mut index = 0usize;
+    while index < command.len() {
+        let name = shell_basename(command.get(index)?)?;
+        match name.as_str() {
+            "sudo" => {
+                index += 1;
+                while let Some(arg) = command.get(index) {
+                    if arg == "--" {
+                        index += 1;
+                        break;
+                    }
+                    if !arg.starts_with('-') || arg == "-" {
+                        break;
+                    }
+                    let takes_value = matches!(
+                        arg.as_str(),
+                        "-A" | "-C"
+                            | "-D"
+                            | "-g"
+                            | "-h"
+                            | "-p"
+                            | "-R"
+                            | "-r"
+                            | "-T"
+                            | "-t"
+                            | "-U"
+                            | "-u"
+                    );
+                    index += 1;
+                    if takes_value && command.get(index).is_some() {
+                        index += 1;
+                    }
+                }
+            }
+            "env" => {
+                index += 1;
+                while let Some(arg) = command.get(index) {
+                    if arg == "--" {
+                        index += 1;
+                        break;
+                    }
+                    if arg == "-u" || arg == "--unset" || arg == "-S" || arg == "--split-string" {
+                        index += 2;
+                        continue;
+                    }
+                    if arg.starts_with('-') || is_env_assignment(arg) {
+                        index += 1;
+                        continue;
+                    }
+                    break;
+                }
+            }
+            "exec" | "nohup" | "setsid" => {
+                index += 1;
+            }
+            _ => {
+                return Some((name, &command[index + 1..]));
+            }
+        }
+    }
+    None
+}
+
+fn is_env_assignment(arg: &str) -> bool {
+    let Some((name, _value)) = arg.split_once('=') else {
+        return false;
+    };
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+        && name
+            .chars()
+            .next()
+            .is_some_and(|ch| ch == '_' || ch.is_ascii_alphabetic())
+}
+
+fn systemctl_destructive_action(args: &[String]) -> Option<&str> {
+    args.iter()
+        .find(|arg| !arg.starts_with('-') || arg.as_str() == "-")
+        .map(String::as_str)
+        .filter(|action| matches!(*action, "poweroff" | "reboot" | "halt" | "kexec"))
 }
 
 pub(crate) fn dangerous_bash_reason(command: &str) -> Option<String> {
@@ -652,6 +753,46 @@ pub(crate) mod tests {
         );
         let decision = runtime.evaluate("exec_command", &json!({"cmd": "rm -rf /"}));
         assert!(matches!(decision, PermissionDecision::Deny { .. }));
+    }
+
+    #[test]
+    fn system_shutdown_hardline_matches_command_positions_only() {
+        let runtime = runtime(
+            PermissionConfig::default(),
+            PermissionMode::BypassPermissions,
+        );
+        for command in [
+            "shutdown -h now",
+            "sudo reboot",
+            "env X=1 poweroff",
+            "exec halt",
+            "nohup shutdown now",
+            "setsid reboot",
+            "systemctl reboot",
+        ] {
+            let decision = runtime.evaluate("exec_command", &json!({"cmd": command}));
+            assert!(
+                matches!(decision, PermissionDecision::Deny { .. }),
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn system_shutdown_words_in_arguments_do_not_hardline_deny() {
+        let runtime = runtime(
+            PermissionConfig::default(),
+            PermissionMode::BypassPermissions,
+        );
+        for command in [
+            r#"sqlite3 /repo/feeds/.cache/hn.db "UPDATE stories SET content = 'system halted after a kernel panic' WHERE id = 1;""#,
+            "echo reboot",
+            "grep shutdown log.txt",
+            "printf 'poweroff is a command name, not this command'",
+        ] {
+            let decision = runtime.evaluate("exec_command", &json!({"cmd": command}));
+            assert_eq!(decision, PermissionDecision::Allow, "{command}");
+        }
     }
 
     #[test]
