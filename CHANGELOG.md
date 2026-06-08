@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-06-08
+
+- Made managed `pevo web`/`pevo gateway` startup prefer
+  `127.0.0.1:58080`, with automatic fallback through `58099` when default
+  ports are already in use while keeping explicit `--bind` strict.
+- Isolated TUI and Workbench new-session drafts from older still-running turns
+  by routing first prompts through draft source lanes while preserving
+  background completion for the previous session.
+- Fixed exec hardline shutdown/reboot detection so quoted SQL or prose such as
+  `system halted` no longer trips the system-destructive command deny.
+
 ## 2026-06-07
 
 - Reworked Workbench around global project-grouped sessions, guarded session
