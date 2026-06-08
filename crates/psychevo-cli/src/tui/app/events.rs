@@ -107,7 +107,7 @@ impl TuiApp {
                         ui.session_live_event_backlog.remove(&result.session_id);
                         if self.current_session.as_deref() == Some(result.session_id.as_str()) {
                             self.refresh_current_session_title()?;
-                            self.force_new_once = false;
+                            self.clear_new_session_draft();
                         }
                         if result.outcome != Outcome::Normal && !interrupted {
                             self.had_error = true;
@@ -138,7 +138,7 @@ impl TuiApp {
                             ui.session_live_event_backlog.remove(&session_id);
                             if self.current_session.as_deref() == Some(session_id.as_str()) {
                                 self.refresh_current_session_title()?;
-                                self.force_new_once = false;
+                                self.clear_new_session_draft();
                             }
                         }
                         if (result.outcome != Outcome::Normal || result.tool_failures > 0)
@@ -230,7 +230,7 @@ impl TuiApp {
     pub(crate) fn apply_pending_auxiliary_agent_live_events(
         &mut self,
         ui: &mut FullscreenUi<'_>,
-        owner_session: Option<&str>,
+        agent: &mut AuxiliaryAgentTask,
         mut pending: VecDeque<TuiLiveEvent>,
     ) -> bool {
         let mut had_pending = false;
@@ -238,10 +238,36 @@ impl TuiApp {
             had_pending = true;
             match event {
                 TuiLiveEvent::Runtime(event) => {
+                    let event_session = stream_event_session_id(&event).map(str::to_string);
+                    if agent.session_id.is_none() {
+                        if let Some(session_id) = event_session.clone() {
+                            agent.session_id = Some(session_id);
+                            flush_pending_unowned_agent_events(ui, agent);
+                        } else {
+                            push_pending_unowned_agent_event(agent, event);
+                            continue;
+                        }
+                    }
+                    let owner_session = event_session.as_deref().or(agent.session_id.as_deref());
+                    if !agent.visible_live
+                        || owner_session
+                            .is_none_or(|session| self.current_session.as_deref() != Some(session))
+                    {
+                        if let Some(session_id) = event_session.as_deref().or(owner_session) {
+                            buffer_session_live_event(ui, session_id, event);
+                        }
+                        continue;
+                    }
                     self.apply_auxiliary_agent_stream_event(ui, owner_session, event);
                 }
                 TuiLiveEvent::Gateway(event) => {
-                    self.apply_gateway_event(ui, owner_session, *event);
+                    if agent.session_id.is_none()
+                        && let Some(session_id) = gateway_event_session_id(&event)
+                    {
+                        agent.session_id = Some(session_id.to_string());
+                        flush_pending_unowned_agent_events(ui, agent);
+                    }
+                    self.apply_gateway_event(ui, agent.session_id.as_deref(), *event);
                 }
             }
         }
@@ -325,6 +351,9 @@ impl TuiApp {
                 self.apply_scoped_fullscreen_stream_event(ui, &session_id, *event);
             }
             other => {
+                if owner_session.is_none() && stream_event_session_id(&other).is_none() {
+                    return;
+                }
                 self.apply_owned_fullscreen_stream_event(ui, owner_session, other);
             }
         }
@@ -336,6 +365,9 @@ impl TuiApp {
         owner_session: Option<&str>,
         event: RunStreamEvent,
     ) -> bool {
+        if owner_session.is_none() && stream_event_session_id(&event).is_none() {
+            return false;
+        }
         self.apply_owned_fullscreen_stream_event(ui, owner_session, event)
     }
 
@@ -471,10 +503,11 @@ impl TuiApp {
     ) -> bool {
         let event_session = gateway_event_session_id(&event).or(owner_session);
         if let Some(session_id) = event_session
-            && self
-                .current_session
-                .as_deref()
-                .is_some_and(|current| current != session_id)
+            && (owner_session.is_some() && self.current_session.as_deref() != Some(session_id)
+                || self
+                    .current_session
+                    .as_deref()
+                    .is_some_and(|current| current != session_id))
         {
             if matches!(event, GatewayEvent::ClarifyRequested { .. }) {
                 ui.push_status(format!(
@@ -670,7 +703,7 @@ impl TuiApp {
                 "error: failed to persist main agent selection: {err:#}"
             ));
         }
-        self.force_new_once = false;
+        self.clear_new_session_draft();
     }
 
     pub(crate) fn apply_gateway_transcript_entry(
@@ -1326,7 +1359,7 @@ impl TuiApp {
                 "error: failed to persist main agent selection: {err:#}"
             ));
         }
-        self.force_new_once = false;
+        self.clear_new_session_draft();
         true
     }
 
@@ -1350,6 +1383,7 @@ impl TuiApp {
                         session_id: owner_session,
                         child_session_id: None,
                         visible_live: false,
+                        pending_unowned_live_events: Vec::new(),
                         control,
                         events,
                         task,
@@ -1532,11 +1566,8 @@ impl TuiApp {
             while let Ok(event) = agent.events.try_recv() {
                 events.push_back(event);
             }
-            let had_pending = self.apply_pending_auxiliary_agent_live_events(
-                ui,
-                agent.session_id.as_deref(),
-                events,
-            );
+            let had_pending =
+                self.apply_pending_auxiliary_agent_live_events(ui, &mut agent, events);
             changed |= had_pending;
             if had_pending {
                 ui.follow_transcript_if_needed();
@@ -1548,17 +1579,23 @@ impl TuiApp {
                 while let Ok(event) = agent.events.try_recv() {
                     events.push_back(event);
                 }
-                let had_pending = self.apply_pending_auxiliary_agent_live_events(
-                    ui,
-                    agent.session_id.as_deref(),
-                    events,
-                );
+                let had_pending =
+                    self.apply_pending_auxiliary_agent_live_events(ui, &mut agent, events);
                 if had_pending {
                     ui.follow_transcript_if_needed();
                 }
+                let mut agent_session_id = agent.session_id.take();
+                let pending_unowned_live_events =
+                    std::mem::take(&mut agent.pending_unowned_live_events);
                 if let Ok(Ok(result)) = agent.task.await {
                     self.last_context_snapshot = result.context_snapshot.clone();
                     ui.last_context_snapshot = result.context_snapshot;
+                    let session_id = agent_session_id
+                        .get_or_insert_with(|| result.session_id.clone())
+                        .clone();
+                    for event in pending_unowned_live_events {
+                        buffer_session_live_event(ui, &session_id, event);
+                    }
                     ui.session_live_event_backlog.remove(&result.session_id);
                 }
                 self.refresh_current_session_title()?;
@@ -1623,7 +1660,7 @@ impl TuiApp {
                             ui.session_live_event_backlog.remove(&session_id);
                             if self.current_session.as_deref() == Some(session_id.as_str()) {
                                 self.refresh_current_session_title()?;
-                                self.force_new_once = false;
+                                self.clear_new_session_draft();
                             }
                         }
                         if (result.outcome != Outcome::Normal || result.tool_failures > 0)

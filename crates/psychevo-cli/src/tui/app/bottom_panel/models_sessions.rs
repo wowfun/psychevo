@@ -30,7 +30,7 @@ impl TuiApp {
         self.current_session = Some(result.parent_session_id);
         self.reset_live_agent_reload_poll();
         self.refresh_current_session_title()?;
-        self.force_new_once = false;
+        self.clear_new_session_draft();
         ui.bottom_panel = None;
         ui.clear_transcript();
         self.load_current_session_history(ui)?;
@@ -605,10 +605,7 @@ impl TuiApp {
     }
 
     pub(crate) fn clear_current_session_after_management(&mut self, ui: &mut FullscreenUi<'_>) {
-        self.current_session = None;
-        self.reset_live_agent_reload_poll();
-        self.current_session_title = None;
-        self.force_new_once = true;
+        self.begin_new_session_draft();
         ui.clear_transcript();
         ui.replace_session_history_prompts(Vec::new());
         ui.refresh_sidebar(self);

@@ -1,5 +1,7 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
+static NEXT_TUI_DRAFT_SOURCE: AtomicU64 = AtomicU64::new(1);
+
 pub(crate) struct TuiApp {
     pub(crate) env_map: BTreeMap<String, String>,
     pub(crate) home: PathBuf,
@@ -14,6 +16,7 @@ pub(crate) struct TuiApp {
     pub(crate) current_session: Option<String>,
     pub(crate) current_session_title: Option<String>,
     pub(crate) force_new_once: bool,
+    pub(crate) draft_source_raw_id: Option<String>,
     pub(crate) current_model: Option<String>,
     pub(crate) current_variant: Option<String>,
     pub(crate) selected_model: Option<ConfiguredModel>,
@@ -72,13 +75,41 @@ pub(crate) struct DiffTask {
 }
 
 impl TuiApp {
+    pub(crate) fn begin_new_session_draft(&mut self) {
+        self.current_session = None;
+        self.reset_live_agent_reload_poll();
+        self.current_session_title = None;
+        self.force_new_once = true;
+        self.draft_source_raw_id = Some(new_tui_draft_source_raw_id(&self.workdir_key));
+    }
+
+    pub(crate) fn clear_new_session_draft(&mut self) {
+        self.force_new_once = false;
+        self.draft_source_raw_id = None;
+    }
+
+    pub(crate) fn canonical_gateway_source(&self) -> GatewaySource {
+        self.gateway_source_for_raw_id(self.workdir_key.clone(), "TUI")
+    }
+
     pub(crate) fn gateway_source(&self) -> GatewaySource {
-        GatewaySource::new("tui", self.workdir_key.clone())
+        if self.force_new_once
+            && self.current_session.is_none()
+            && let Some(raw_id) = self.draft_source_raw_id.clone()
+        {
+            return self.gateway_source_for_raw_id(raw_id, "TUI draft");
+        }
+        self.canonical_gateway_source()
+    }
+
+    fn gateway_source_for_raw_id(&self, raw_id: String, visible_name: &str) -> GatewaySource {
+        GatewaySource::new("tui", raw_id)
             .process()
-            .with_visible_name("TUI")
+            .with_visible_name(visible_name)
             .with_raw_identity(serde_json::json!({
                 "kind": "tui",
                 "cwd": self.workdir.display().to_string(),
+                "canonicalRawId": self.workdir_key.clone(),
             }))
     }
 
@@ -245,6 +276,11 @@ impl TuiApp {
         };
         ui.sync_skill_popup(self.skill_search_matches(&token.query));
     }
+}
+
+fn new_tui_draft_source_raw_id(workdir_key: &str) -> String {
+    let sequence = NEXT_TUI_DRAFT_SOURCE.fetch_add(1, Ordering::Relaxed);
+    format!("{workdir_key}:draft:{sequence}")
 }
 
 pub(crate) fn skill_match_rank(name: &str, description: &str, query: &str) -> Option<(u8, usize)> {

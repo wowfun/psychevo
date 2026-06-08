@@ -114,6 +114,93 @@ pub(crate) async fn running_session_switch_buffers_stream_until_return() {
 }
 
 #[tokio::test]
+pub(crate) async fn fullscreen_new_with_unresolved_running_session_hides_unowned_late_output() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    app.current_session = None;
+    app.force_new_once = true;
+
+    let mut ui = FullscreenUi::new(&app);
+    let (tx, rx) = mpsc::unbounded_channel();
+    let task = tokio::spawn(async {
+        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::RunResult>>().await
+    });
+    let (control, _) = run_control();
+    ui.running = Some(RunningTurn {
+        session_id: None,
+        control,
+        selector: None,
+        turn_id: None,
+        events: RunningTurnEvents::Runtime(rx),
+        task: RunningTask::Agent(task),
+    });
+    ui.start_assistant();
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::New)
+        .await
+        .expect("new");
+    assert_eq!(app.current_session, None);
+    assert!(ui.running.is_none());
+    assert_eq!(ui.auxiliary_agent_tasks.len(), 1);
+
+    tx.send(RunStreamEvent::ReasoningDelta {
+        text: "unresolved old session thinking".to_string(),
+    })
+    .expect("send unresolved output");
+    app.drain_fullscreen_events(&mut ui)
+        .await
+        .expect("drain unresolved output");
+
+    assert_eq!(app.current_session, None);
+    assert_eq!(
+        ui.auxiliary_agent_tasks[0]
+            .pending_unowned_live_events
+            .len(),
+        1
+    );
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| !row.text.contains("unresolved old session thinking"))
+    );
+
+    tx.send(RunStreamEvent::Event(serde_json::json!({
+        "type": "run_start",
+        "session_id": "old-session",
+        "provider": "mock",
+        "model": "mock-model",
+        "mode": "default"
+    })))
+    .expect("send old session start");
+    app.drain_fullscreen_events(&mut ui)
+        .await
+        .expect("drain old session start");
+
+    assert_eq!(app.current_session, None);
+    assert!(
+        ui.auxiliary_agent_tasks[0]
+            .pending_unowned_live_events
+            .is_empty()
+    );
+    let backlog = ui
+        .session_live_event_backlog
+        .get("old-session")
+        .expect("old session backlog");
+    assert!(backlog
+        .iter()
+        .any(|event| matches!(event, RunStreamEvent::ReasoningDelta { text } if text == "unresolved old session thinking")));
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| !row.text.contains("unresolved old session thinking"))
+    );
+
+    for agent in &ui.auxiliary_agent_tasks {
+        agent.task.abort();
+    }
+}
+
+#[tokio::test]
 pub(crate) async fn background_session_completion_does_not_steal_current_session() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);

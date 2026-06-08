@@ -41,7 +41,7 @@ impl TuiApp {
             self.current_session = Some(session_id);
             self.reset_live_agent_reload_poll();
             self.refresh_current_session_title()?;
-            self.force_new_once = false;
+            self.clear_new_session_draft();
         }
         if result.outcome != Outcome::Normal || result.tool_failures > 0 {
             self.had_error = true;
@@ -81,6 +81,7 @@ impl TuiApp {
         options.prompt_display = prompt_display_metadata(display_prompt, &images, &self.workdir);
         let gateway = self.gateway.clone();
         let source = self.gateway_source();
+        let bind_source = self.canonical_gateway_source();
         let selector = GatewayThreadSelector::source(source.source_key());
         let reset_source_binding = self.force_new_once && self.current_session.is_none();
         let thread_id = options.session.clone();
@@ -90,6 +91,7 @@ impl TuiApp {
                 .send_turn(SendTurnRequest {
                     thread_id,
                     source: Some(source),
+                    bind_source: Some(bind_source),
                     reset_source_binding,
                     input: Vec::new(),
                     options,

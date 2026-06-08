@@ -42,10 +42,7 @@ impl TuiApp {
             SlashCommand::Quit => return Ok(true),
             SlashCommand::Status => self.show_status(),
             SlashCommand::New => {
-                self.current_session = None;
-                self.reset_live_agent_reload_poll();
-                self.current_session_title = None;
-                self.force_new_once = true;
+                self.begin_new_session_draft();
                 Ok(())
             }
             SlashCommand::Sessions => self.show_session_list(),
@@ -881,12 +878,14 @@ impl TuiApp {
         });
         let options = self.run_options(prompt);
         let source = self.gateway_source();
+        let bind_source = self.canonical_gateway_source();
         let reset_source_binding = self.force_new_once && self.current_session.is_none();
         let result = self
             .gateway
             .send_turn(SendTurnRequest {
                 thread_id: options.session.clone(),
                 source: Some(source),
+                bind_source: Some(bind_source),
                 reset_source_binding,
                 input: Vec::new(),
                 options,
@@ -912,7 +911,7 @@ impl TuiApp {
         self.current_session = Some(result.session_id);
         self.reset_live_agent_reload_poll();
         self.refresh_current_session_title()?;
-        self.force_new_once = false;
+        self.clear_new_session_draft();
         let success = result.outcome == Outcome::Normal && result.tool_failures == 0;
         if !success {
             self.had_error = true;

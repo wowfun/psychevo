@@ -61,6 +61,7 @@ pub(crate) struct AuxiliaryAgentTask {
     pub(crate) session_id: Option<String>,
     pub(crate) child_session_id: Option<String>,
     pub(crate) visible_live: bool,
+    pub(crate) pending_unowned_live_events: Vec<RunStreamEvent>,
     pub(crate) control: RunControlHandle,
     pub(crate) events: RunningTurnEvents,
     pub(crate) task: JoinHandle<psychevo_runtime::Result<psychevo_runtime::RunResult>>,

@@ -73,7 +73,7 @@ impl TuiApp {
         self.current_session = Some(side_session.clone());
         self.reset_live_agent_reload_poll();
         self.current_session_title = Some(format!("Side {}", short_session(&side_session)));
-        self.force_new_once = false;
+        self.clear_new_session_draft();
         ui.bottom_panel = None;
         ui.clear_transcript();
         self.load_current_session_history(ui)?;

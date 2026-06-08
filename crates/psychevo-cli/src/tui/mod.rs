@@ -168,6 +168,7 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
         current_session,
         current_session_title: None,
         force_new_once: args.new_session,
+        draft_source_raw_id: None,
         current_model,
         current_variant,
         selected_model: None,
@@ -197,6 +198,9 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
         compaction_task: None,
         diff_task: None,
     };
+    if args.new_session {
+        app.begin_new_session_draft();
+    }
     app.start_missing_model_metadata_cache_warmup();
     app.refresh_selected_model();
     app.refresh_current_session_title()?;

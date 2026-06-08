@@ -41,6 +41,30 @@ pub(crate) fn buffer_session_live_event(
     }
 }
 
+pub(crate) fn push_pending_unowned_agent_event(
+    agent: &mut AuxiliaryAgentTask,
+    event: RunStreamEvent,
+) {
+    agent.pending_unowned_live_events.push(event);
+    const MAX_PENDING_UNOWNED_AGENT_EVENTS: usize = 500;
+    if agent.pending_unowned_live_events.len() > MAX_PENDING_UNOWNED_AGENT_EVENTS {
+        let drain = agent.pending_unowned_live_events.len() - MAX_PENDING_UNOWNED_AGENT_EVENTS;
+        agent.pending_unowned_live_events.drain(0..drain);
+    }
+}
+
+pub(crate) fn flush_pending_unowned_agent_events(
+    ui: &mut FullscreenUi<'_>,
+    agent: &mut AuxiliaryAgentTask,
+) {
+    let Some(session_id) = agent.session_id.clone() else {
+        return;
+    };
+    for event in agent.pending_unowned_live_events.drain(..) {
+        buffer_session_live_event(ui, &session_id, event);
+    }
+}
+
 pub(crate) fn session_live_event_ends_backlog(event: &RunStreamEvent) -> bool {
     match event {
         RunStreamEvent::Event(value) => matches!(

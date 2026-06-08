@@ -66,10 +66,7 @@ impl TuiApp {
             }
             SlashCommand::New => {
                 self.detach_running_for_session_switch(ui, None);
-                self.current_session = None;
-                self.reset_live_agent_reload_poll();
-                self.current_session_title = None;
-                self.force_new_once = true;
+                self.begin_new_session_draft();
                 self.current_agent = self.startup_agent.clone();
                 self.current_agent_explicit_default = false;
                 ui.clear_transcript();

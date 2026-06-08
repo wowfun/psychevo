@@ -127,7 +127,7 @@ impl TuiApp {
         self.state_runtime.store().resume_session(&id)?;
         self.current_session = Some(id.clone());
         self.reset_live_agent_reload_poll();
-        self.force_new_once = false;
+        self.clear_new_session_draft();
         self.refresh_current_session_title()?;
         self.refresh_current_session_agent()?;
         Ok(id)
@@ -159,7 +159,7 @@ impl TuiApp {
         self.detach_running_for_session_switch(ui, Some(child_session_id.clone()));
         self.current_session = Some(child_session_id.clone());
         self.reset_live_agent_reload_poll();
-        self.force_new_once = false;
+        self.clear_new_session_draft();
         self.refresh_current_session_title()?;
         self.refresh_current_session_agent()?;
         ui.bottom_panel = None;
@@ -300,7 +300,7 @@ impl TuiApp {
         self.state_runtime.store().resume_session(session_id)?;
         self.current_session = Some(session_id.to_string());
         self.reset_live_agent_reload_poll();
-        self.force_new_once = false;
+        self.clear_new_session_draft();
         self.refresh_current_session_title()?;
         self.refresh_current_session_agent()?;
         ui.bottom_panel = None;
@@ -356,6 +356,7 @@ impl TuiApp {
                     session_id: owner_session,
                     child_session_id,
                     visible_live: true,
+                    pending_unowned_live_events: Vec::new(),
                     control: running.control,
                     events: running.events,
                     task,

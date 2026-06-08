@@ -50,6 +50,15 @@ session reloads its persisted history and replays only that session's buffered
 live events. `/new` leaves no visible session selected, so later output from a
 previous running session must not appear in the new-session transcript.
 
+When `/new` is entered while the current turn is still running, TUI starts a
+new draft lane for the next prompt instead of queueing it behind or steering
+the previous turn. The previous turn continues in the background, and its later
+session id discovery, completion, permission, clarify, and live transcript
+events must not steal the empty draft, change `current_session`, or bind the
+new draft back to the previous session. The draft lane is internal routing
+state only; it must not appear in session rows, search text, grouping, titles,
+or persisted transcript content.
+
 Opening, resuming, selecting, or viewing a session is read-only for session
 recency. These operations must not update the session's latest-activity time,
 ended state, archive state, messages, usage rows, or evidence. Persisting new
