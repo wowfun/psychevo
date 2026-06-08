@@ -114,11 +114,15 @@ async function openPanel(page: Page, isMobile: boolean, name: "History" | "Statu
       await page.getByRole("button", { name: "Transcript" }).click();
     }
     const expandInspector = page.getByRole("button", { name: "Show right inspector" });
-    if (await expandInspector.isVisible().catch(() => false)) {
+    if (await expandInspector.count()) {
+      await expect(expandInspector).toBeVisible();
       await expandInspector.click();
     }
   }
   if (isMobile) {
     await page.getByRole("button", { name }).click();
+  }
+  if (name === "Status") {
+    await expect(page.getByRole("region", { name: "Status" })).toBeVisible();
   }
 }
