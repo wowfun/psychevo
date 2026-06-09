@@ -435,17 +435,20 @@
 }
 
 .pevo-threadItems {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  display: grid;
+  grid-auto-rows: max-content;
+  grid-template-columns: minmax(0, min(840px, 100%));
+  align-content: start;
+  justify-content: center;
+  gap: 11px;
   overflow: auto;
-  padding: 8px 14px 28px;
+  padding: 12px 18px 28px;
   background: transparent;
 }
 
 .pevo-message {
   display: block;
-  max-width: 100%;
+  max-width: min(760px, 100%);
   padding: 0;
   border-radius: 0;
   line-height: 1.55;
@@ -464,11 +467,13 @@
 }
 
 .pevo-messageFrame.is-user {
-  align-self: flex-end;
+  justify-self: end;
+  max-width: min(620px, 100%);
 }
 
 .pevo-messageFrame.is-assistant {
-  align-self: flex-start;
+  justify-self: start;
+  width: min(760px, 100%);
 }
 
 .pevo-srOnly {
@@ -553,13 +558,19 @@
 }
 
 .pevo-message.is-user {
+  width: fit-content;
+  max-width: 100%;
   padding: 10px 12px;
-  background: var(--pevo-panel);
+  color: var(--pevo-ink);
+  background: var(--pevo-user-bubble);
+  border: 1px solid var(--pevo-user-bubble-border);
   border-radius: var(--pevo-radius);
   box-shadow: none;
 }
 
 .pevo-message.is-assistant {
+  width: 100%;
+  margin-right: auto;
   background: transparent;
   box-shadow: none;
 }
@@ -638,8 +649,8 @@
 .pevo-reasoning,
 .pevo-evidence {
   display: grid;
-  align-self: flex-start;
   width: min(760px, 100%);
+  justify-self: start;
   gap: 7px;
   padding: 4px 0;
   background: transparent;
@@ -649,7 +660,7 @@
 }
 
 .pevo-reasoning {
-  color: var(--pevo-muted);
+  color: var(--pevo-muted-strong);
 }
 
 .pevo-evidence p {
@@ -666,7 +677,7 @@
   box-sizing: border-box;
   gap: 8px;
   padding: 0;
-  color: var(--pevo-muted);
+  color: var(--pevo-muted-strong);
   background: transparent;
   border: 0;
   font-size: 0.86rem;
@@ -706,7 +717,7 @@
 .pevo-reasoningHeader em,
 .pevo-evidenceLine em {
   padding: 0;
-  color: var(--pevo-muted);
+  color: var(--pevo-muted-strong);
   background: transparent;
   border-radius: 0;
   font-style: normal;

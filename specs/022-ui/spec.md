@@ -237,9 +237,11 @@ CommonMark block structure, GFM tables/task lists, links, inline code, fenced
 code blocks, and streaming caret placement at the end of the final rendered
 block. The transcript panel header, user text, assistant text, reasoning rows,
 and tool/evidence rows do not render decorative role, cognition, or kind icons.
-Assistant text renders on the ordinary page background. User text aligns right
-and is the only ordinary text message with a filled bubble; fenced code blocks
-and code previews keep a dedicated filled code surface. Inline code remains a
+Assistant text renders on the ordinary page background. Transcript rows share a
+centered reading column so user and assistant turns remain visually related on
+wide Workbench surfaces. User text aligns right within that reading column and
+is the only ordinary text message with a filled bubble; fenced code blocks and
+code previews keep a dedicated filled code surface. Inline code remains a
 typographic monospace distinction and does not render as a filled chip.
 Ordinary chat text, reasoning rows, tool/evidence summaries, and assistant
 messages do not use accent fill or permanent card fill. Each text block exposes
@@ -455,6 +457,12 @@ light/dark appearance toggle. The choice may be persisted by the host storage
 adapter and applied before ordinary panel rendering when available. Theme
 switching must preserve the same layout, density, button background rules, and
 status/diff preview behavior.
+In dark appearance, primary shell labels such as `New Session`, `Search`,
+`Artifacts`, `Pinned`, `Sessions`, `Settings`, and transcript state labels such
+as `Thinking` must use readable foreground tokens rather than the faintest
+muted text color. Filled user bubbles and selected navigation rows must remain
+visibly separated from the page background without becoming saturated accent
+surfaces.
 
 Settings also provides a local Debug switch. When enabled, the right inspector
 adds a `Debug` tab after `Files`; when disabled, the tab is absent. The Debug

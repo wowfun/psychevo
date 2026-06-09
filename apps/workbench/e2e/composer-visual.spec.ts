@@ -130,6 +130,77 @@ test.describe("Workbench composer visual contract", () => {
       await server.stop();
     }
   });
+
+  test("keeps transcript rows in a readable shared column", async ({ page, isMobile }, testInfo) => {
+    const server = await startPevoWeb({ live: false });
+    mkdirSync(screenshotDir, { recursive: true });
+    try {
+      await page.goto(server.url);
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+
+      await openPanel(page, isMobile, "History");
+      const newSessionButton = page.getByRole("button", { name: "New Session" });
+      const settingsButton = page.getByRole("button", { name: "Settings" });
+      await expectCssPropertyMatchesRootVar(newSessionButton, "color", "--pevo-nav-text");
+      await expectCssPropertyMatchesRootVar(settingsButton, "color", "--pevo-nav-text");
+      await newSessionButton.click();
+      await openPanel(page, isMobile, "Transcript");
+
+      const threadItems = page.locator(".pevo-threadItems");
+      await threadItems.evaluate((container) => {
+        container.innerHTML = `
+          <div class="pevo-messageFrame is-user" data-testid="user-frame">
+            <article class="pevo-message is-user"><p>Improve the GUI contrast.</p></article>
+          </div>
+          <div class="pevo-messageFrame is-assistant" data-testid="assistant-frame">
+            <article class="pevo-message is-assistant"><p>The sidebar and transcript can be tightened without changing data flow.</p></article>
+          </div>
+          <article class="pevo-reasoning is-running" data-testid="thinking-row">
+            <button class="pevo-reasoningHeader" type="button">
+              <svg width="15" height="15" aria-hidden="true"></svg>
+              <span>Thinking</span>
+              <em>running</em>
+            </button>
+          </article>
+        `;
+      });
+
+      const userFrame = page.getByTestId("user-frame");
+      const assistantFrame = page.getByTestId("assistant-frame");
+      const thinkingRow = page.getByTestId("thinking-row");
+      const userBubble = userFrame.locator(".pevo-message.is-user");
+      const thinkingHeader = thinkingRow.locator(".pevo-reasoningHeader");
+      const [threadBox, userBox, assistantBox, thinkingBox] = await Promise.all([
+        threadItems.boundingBox(),
+        userFrame.boundingBox(),
+        assistantFrame.boundingBox(),
+        thinkingRow.boundingBox()
+      ]);
+
+      expect(threadBox).not.toBeNull();
+      expect(userBox).not.toBeNull();
+      expect(assistantBox).not.toBeNull();
+      expect(thinkingBox).not.toBeNull();
+      expect(assistantBox!.width).toBeLessThanOrEqual(762);
+      expect(userBox!.x).toBeGreaterThan(assistantBox!.x);
+      expect(userBox!.x + userBox!.width).toBeLessThanOrEqual(assistantBox!.x + 842);
+      expect(Math.abs(thinkingBox!.x - assistantBox!.x)).toBeLessThanOrEqual(1);
+
+      if (!isMobile) {
+        expect(assistantBox!.x - threadBox!.x).toBeGreaterThan(16);
+        expect(threadBox!.x + threadBox!.width - (userBox!.x + userBox!.width)).toBeGreaterThan(16);
+      }
+
+      await expectCssPropertyMatchesRootVar(userBubble, "background-color", "--pevo-user-bubble");
+      await expectCssPropertyMatchesRootVar(userBubble, "border-top-color", "--pevo-user-bubble-border");
+      await expectCssPropertyMatchesRootVar(thinkingHeader, "color", "--pevo-muted-strong");
+      await page.screenshot({
+        path: path.join(screenshotDir, `transcript-column-${testInfo.project.name}.png`)
+      });
+    } finally {
+      await server.stop();
+    }
+  });
 });
 
 async function selectedOptionText(select: Locator): Promise<string> {
@@ -176,6 +247,22 @@ async function scrollbarColor(locator: Locator): Promise<string> {
 
 function expectTransparentScrollbar(value: string) {
   expect(value.toLowerCase()).toMatch(/transparent|rgba\(0, 0, 0, 0\)|color\(srgb 0 0 0 \/ 0\)/);
+}
+
+async function expectCssPropertyMatchesRootVar(locator: Locator, property: string, variableName: string) {
+  const values = await locator.evaluate((element, [cssProperty, cssVariable]) => {
+    const style = getComputedStyle(element);
+    const probe = document.createElement("span");
+    probe.style.setProperty(cssProperty, `var(${cssVariable})`);
+    document.documentElement.appendChild(probe);
+    const expected = getComputedStyle(probe).getPropertyValue(cssProperty);
+    probe.remove();
+    return {
+      actual: style.getPropertyValue(cssProperty).trim().replace(/\s+/g, " "),
+      expected: expected.trim().replace(/\s+/g, " ")
+    };
+  }, [property, variableName]);
+  expect(values.actual).toBe(values.expected);
 }
 
 async function assertComposerGeometry(page: Page, options: { plan: boolean }) {

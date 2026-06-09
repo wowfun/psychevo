@@ -2,6 +2,9 @@
 
 ## 2026-06-09
 
+- Improved Workbench dark-mode readability and transcript density with stronger
+  sidebar/status text, a distinct user-message bubble, and a centered shared
+  transcript reading column.
 - Polished Workbench composer model/context fitting, Transcript scrollbar
   visibility, collapsed left-rail icons, sidebar section alignment, and the
   icon-only Settings return path.

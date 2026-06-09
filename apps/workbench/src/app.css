@@ -169,6 +169,13 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   display: grid;
 }
 
+.historyColumn {
+  padding: 5px 6px;
+  background: var(--pevo-sidebar-bg);
+  border: 1px solid var(--pevo-sidebar-border);
+  border-radius: var(--pevo-radius);
+}
+
 .leftChrome {
   --left-nav-icon-column: 20px;
   --left-nav-gap: 7px;
@@ -191,6 +198,10 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   padding: 0;
 }
 
+.brandMark h1 {
+  color: var(--pevo-nav-text);
+}
+
 .sidebarToggle,
 .rightInspectorToggle {
   display: grid;
@@ -202,6 +213,14 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   border: 1px solid var(--pevo-border);
   border-radius: var(--pevo-radius-sm);
   cursor: pointer;
+}
+
+@media (hover: hover) {
+  .sidebarToggle:hover {
+    color: var(--pevo-nav-text);
+    background: color-mix(in oklch, var(--pevo-sidebar-active), transparent 42%);
+    border-color: color-mix(in oklch, var(--pevo-nav-muted), transparent 62%);
+  }
 }
 
 .sidebarToggleLogo {
@@ -229,9 +248,9 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   min-width: 0;
   min-height: 30px;
   padding: 0 var(--left-nav-x, 6px);
-  color: var(--pevo-muted);
+  color: var(--pevo-nav-text);
   font-size: var(--left-nav-font-size, 0.86rem);
-  font-weight: 500;
+  font-weight: 600;
   text-align: left;
   background: transparent;
   border: 1px solid transparent;
@@ -246,7 +265,7 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 
 .leftActions button.is-selected {
   color: var(--pevo-ink);
-  background: color-mix(in oklch, var(--pevo-panel), transparent 34%);
+  background: var(--pevo-sidebar-active);
   border-color: transparent;
   box-shadow: var(--pevo-shadow-active);
 }
@@ -255,14 +274,14 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   .leftActions button:hover,
   .leftUtilityRail button:hover {
     color: var(--pevo-ink);
-    background: color-mix(in oklch, var(--pevo-panel-muted), transparent 82%);
+    background: color-mix(in oklch, var(--pevo-sidebar-active), transparent 46%);
     border-color: transparent;
   }
 }
 
 .leftUtilityRail button.is-selected {
   color: var(--pevo-ink);
-  background: color-mix(in oklch, var(--pevo-panel), transparent 34%);
+  background: var(--pevo-sidebar-active);
   border-color: transparent;
   box-shadow: var(--pevo-shadow-active);
 }
@@ -294,9 +313,9 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   gap: var(--left-nav-gap, 7px);
   min-height: 30px;
   padding: 0 var(--left-nav-x, 6px);
-  color: var(--pevo-muted);
+  color: var(--pevo-nav-text);
   font-size: var(--left-nav-font-size, 0.86rem);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .leftPinnedPanel header > svg {
@@ -305,7 +324,7 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 
 .leftPinnedPanel p {
   margin: 0;
-  color: var(--pevo-muted);
+  color: var(--pevo-nav-muted);
   font-size: 0.74rem;
 }
 
@@ -329,7 +348,7 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   align-items: start;
   background: transparent;
   border: 0;
-  color: var(--pevo-ink);
+  color: var(--pevo-nav-text);
   display: grid;
   gap: 2px;
   padding: 4px 2px;
@@ -344,7 +363,7 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 }
 
 .pinnedSessionRow > button:first-child small {
-  color: var(--pevo-muted);
+  color: var(--pevo-nav-muted);
   font-size: 0.72rem;
 }
 
@@ -352,7 +371,7 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   align-items: center;
   background: transparent;
   border: 0;
-  color: var(--pevo-muted);
+  color: var(--pevo-nav-muted);
   display: inline-flex;
   height: 24px;
   justify-content: center;
@@ -360,7 +379,7 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 }
 
 .pinnedSessionRow.is-active > button:first-child {
-  color: var(--pevo-accent);
+  color: var(--pevo-ink);
 }
 
 .historyColumn.is-collapsed .leftChrome {
@@ -389,7 +408,7 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 
 .historyColumn.is-collapsed .leftActions,
 .historyColumn.is-collapsed .leftUtilityRail {
-  padding: 6px;
+  padding: 0;
 }
 
 .historyColumn.is-collapsed .leftActions button,
@@ -439,7 +458,7 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   align-items: center;
   gap: var(--left-nav-gap);
   min-width: 0;
-  color: var(--pevo-muted);
+  color: var(--pevo-nav-text);
 }
 
 .historyColumn .pevo-sessionsHeader .pevo-titleLine > svg {
@@ -447,9 +466,9 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 }
 
 .historyColumn .pevo-sessionsHeader h2 {
-  color: var(--pevo-muted);
+  color: var(--pevo-nav-text);
   font-size: var(--left-nav-font-size);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .historyColumn .pevo-sessionList {
@@ -462,8 +481,24 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 }
 
 .historyColumn .pevo-sessionRow.is-active {
-  background: color-mix(in oklch, var(--pevo-panel), transparent 34%);
+  background: var(--pevo-sidebar-active);
   border-color: transparent;
+}
+
+.historyColumn .pevo-sessionGroupHeader,
+.historyColumn .pevo-sessionGroupToggle {
+  color: var(--pevo-nav-muted);
+}
+
+.historyColumn .pevo-sessionGroupToggle span,
+.historyColumn .pevo-sessionTitle {
+  color: var(--pevo-nav-text);
+}
+
+.historyColumn .pevo-sessionTime,
+.historyColumn .pevo-muted,
+.historyColumn .pevo-sessionMenu summary {
+  color: var(--pevo-nav-muted);
 }
 
 .statusColumn {

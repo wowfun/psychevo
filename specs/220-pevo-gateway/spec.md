@@ -399,7 +399,10 @@ The transcript renders user and assistant Markdown, streams assistant and
 reasoning updates without waiting for turn completion, keeps observed block
 order, and follows the bottom while the user has not intentionally scrolled
 away. Tool calls render as collapsible evidence rows with parameters and
-results shown once.
+results shown once. The center transcript uses a shared reading column: user
+messages align right inside that column with a filled neutral bubble, while
+assistant text, reasoning rows, and tool rows keep a common left edge and do not
+become filled message cards.
 Only real reasoning projections are labeled `Thinking` in the UI; `Reasoning`
 and `Preamble` remain internal protocol/projection terms and must not appear as
 ordinary transcript headers. Empty reasoning completions and no-text assistant
