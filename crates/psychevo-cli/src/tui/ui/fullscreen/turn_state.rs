@@ -198,6 +198,14 @@ impl<'a> FullscreenUi<'a> {
         self.live_tool_args.clear();
         self.streaming_tool_message_open = false;
         self.deferred_stream_events.clear();
+        self.turn_started = None;
+        self.turn_provider.clear();
+        self.turn_model.clear();
+        self.turn_context_limit = None;
+        self.turn_usage = None;
+        self.turn_metadata = None;
+        self.turn_accounting = None;
+        self.turn_failures = 0;
         self.turn_outcome = None;
         self.turn_terminal_message = None;
         self.turn_interrupted = false;

@@ -1765,7 +1765,9 @@ impl TuiApp {
             }
             return;
         }
-        let composer_height = composer_height(&ui.textarea);
+        let editable_width =
+            composer_input_width(main.width, ui.shell_mode, ui.textarea.is_empty());
+        let composer_height = composer_height(&ui.textarea, editable_width);
         let pending_preview_height = pending_input_preview_height(ui, main.width);
         let file_popup_height = ui.file_popup_height();
         let agent_popup_height = ui.agent_popup_height();

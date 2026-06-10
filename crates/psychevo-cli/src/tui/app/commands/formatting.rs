@@ -388,6 +388,7 @@ pub(crate) fn slash_command_echo(command: &SlashCommand) -> String {
         SlashCommand::VariantSet(variant) => format!("/variant {variant}"),
         SlashCommand::ModeSet(mode) => format!("/mode {mode}"),
         SlashCommand::Permissions => "/permissions".to_string(),
+        SlashCommand::Sandbox => "/sandbox".to_string(),
         SlashCommand::ThinkingToggle => "/show-thinking".to_string(),
         SlashCommand::ThinkingSet(enabled) => {
             format!("/show-thinking {}", if *enabled { "on" } else { "off" })

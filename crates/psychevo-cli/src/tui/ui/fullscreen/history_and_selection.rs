@@ -409,9 +409,13 @@ impl<'a> FullscreenUi<'a> {
         let Some(area) = self.last_composer_input_area else {
             return false;
         };
-        let Some((text_row, text_col)) =
-            composer_cursor_from_point(&self.textarea, area, column, row)
-        else {
+        let Some((text_row, text_col)) = composer_cursor_from_point(
+            &self.textarea,
+            area,
+            self.composer_cursor_top_row,
+            column,
+            row,
+        ) else {
             return false;
         };
         self.textarea.move_cursor(CursorMove::Jump(

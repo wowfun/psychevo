@@ -181,6 +181,9 @@ impl TuiApp {
             SlashCommand::Permissions => {
                 ui.push_command_result(command_echo, None, self.permissions_status_text()?, false);
             }
+            SlashCommand::Sandbox => {
+                ui.push_command_result(command_echo, None, self.sandbox_status_text()?, false);
+            }
             SlashCommand::ThinkingToggle => {
                 let enabled = !self.thinking_visible;
                 self.set_thinking_no_print(enabled)?;

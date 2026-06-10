@@ -255,6 +255,7 @@ pub(crate) fn side_command_allowed(command: &SlashCommand) -> bool {
             | SlashCommand::VariantSet(_)
             | SlashCommand::ModeSet(_)
             | SlashCommand::Permissions
+            | SlashCommand::Sandbox
             | SlashCommand::Tools
             | SlashCommand::ThinkingToggle
             | SlashCommand::ThinkingSet(_)

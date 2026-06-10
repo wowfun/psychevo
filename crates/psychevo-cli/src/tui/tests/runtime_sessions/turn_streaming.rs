@@ -1502,6 +1502,82 @@ pub(crate) fn committed_turn_entries_remove_live_meta_without_removing_committed
 }
 
 #[test]
+pub(crate) fn committed_footer_consumes_turn_failures_before_completion_fallback() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    app.current_session = Some("session-1".to_string());
+    let mut ui = FullscreenUi::new(&app);
+
+    for index in 1..=2 {
+        app.apply_gateway_transcript_entry(
+            &mut ui,
+            Some("session-1"),
+            failed_live_tool_entry(
+                &format!("live:turn-1:tool:call_write_{index}"),
+                "turn-1",
+                &format!("call_write_{index}"),
+            ),
+        );
+    }
+    assert_eq!(ui.turn_failures, 2);
+
+    let mut committed_assistant = durable_assistant_entry(
+        1,
+        vec![durable_block(
+            "message:1:block:0",
+            TranscriptBlockKind::Text,
+            TranscriptBlockStatus::Completed,
+            None,
+            Some("committed answer"),
+            Some(serde_json::json!({
+                "provider": "xiaomi-token-plan",
+                "model": "mimo-v2.5-pro",
+                "finish_reason": "stop",
+                "outcome": "normal",
+                "metadata": {
+                    "elapsed_ms": 26_000,
+                    "reasoning_effort": "high"
+                }
+            })),
+        )],
+    );
+    committed_assistant.turn_id = Some("turn-1".to_string());
+
+    app.apply_committed_turn_entries(
+        &mut ui,
+        Some("session-1"),
+        "turn-1",
+        vec![committed_assistant],
+    );
+    ui.update_turn_meta(false, true, true, true);
+
+    let meta_rows = ui
+        .transcript
+        .iter()
+        .filter(|row| row.kind == TranscriptKind::Meta)
+        .collect::<Vec<_>>();
+    assert_eq!(meta_rows.len(), 1, "{:?}", ui.transcript);
+    let meta = meta_rows[0];
+    assert!(
+        meta.text.contains("xiaomi-token-plan/mimo-v2.5-pro high"),
+        "{}",
+        meta.text
+    );
+    assert!(meta.text.contains("26s"), "{}", meta.text);
+    assert!(meta.text.contains("2 failures"), "{}", meta.text);
+    assert_eq!(meta.transcript_source.as_deref(), Some("runtime.message"));
+    assert_eq!(meta.transcript_entry_id.as_deref(), Some("message:1"));
+    assert!(
+        ui.transcript.iter().all(|row| {
+            !(row.kind == TranscriptKind::Meta
+                && row.transcript_source.as_deref() == Some("runtime.stream"))
+        }),
+        "{:?}",
+        ui.transcript
+    );
+}
+
+#[test]
 pub(crate) fn committed_turn_entries_skip_already_loaded_message_sequences() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
@@ -1657,6 +1733,52 @@ fn gateway_tool_entry(
             order: 0,
             source: source.to_string(),
             title: Some(tool_name.to_string()),
+            preview: None,
+            detail: None,
+            body: None,
+            artifact_ids: Vec::new(),
+            metadata: Some(serde_json::Value::Object(metadata)),
+            result: None,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        }],
+        metadata: None,
+        usage: None,
+        accounting: None,
+        created_at_ms: 1,
+        updated_at_ms: 1,
+    }
+}
+
+fn failed_live_tool_entry(id: &str, turn_id: &str, tool_call_id: &str) -> TranscriptEntry {
+    let mut metadata = serde_json::Map::new();
+    metadata.insert("projection".to_string(), serde_json::json!("tool"));
+    metadata.insert("tool_name".to_string(), serde_json::json!("write"));
+    metadata.insert("tool_call_id".to_string(), serde_json::json!(tool_call_id));
+    metadata.insert(
+        "args".to_string(),
+        serde_json::json!({"path": format!("/tmp/{tool_call_id}.txt")}),
+    );
+    metadata.insert(
+        "result".to_string(),
+        serde_json::json!({"error": "denied by sandbox policy"}),
+    );
+    metadata.insert("outcome".to_string(), serde_json::json!("failed"));
+    TranscriptEntry {
+        id: id.to_string(),
+        thread_id: "session-1".to_string(),
+        turn_id: Some(turn_id.to_string()),
+        message_seq: None,
+        role: TranscriptEntryRole::Assistant,
+        status: TranscriptBlockStatus::Failed,
+        source: "runtime.stream".to_string(),
+        blocks: vec![TranscriptBlock {
+            id: format!("{id}:block"),
+            kind: TranscriptBlockKind::Tool,
+            status: TranscriptBlockStatus::Failed,
+            order: 0,
+            source: "runtime.stream".to_string(),
+            title: Some("write".to_string()),
             preview: None,
             detail: None,
             body: None,

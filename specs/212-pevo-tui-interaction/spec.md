@@ -76,6 +76,10 @@ Approval panel defaults:
   clicked option through the same decision path as keyboard confirmation
 - offer once, session, always, and deny choices when the backend request
   supports them; hidden or unsupported choices must not be rendered
+- treat approval panels as decision collection only: backend permission and
+  sandbox layers remain responsible for translating an allow decision into any
+  bounded runtime grant, and sandbox-widening file approvals must not render a
+  permanent option
 - compute panel height from the terminal-wrapped detail text, not just the
   logical source lines, so long tool/action/grant details do not hide approval
   options

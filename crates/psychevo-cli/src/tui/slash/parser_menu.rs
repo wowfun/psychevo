@@ -393,6 +393,10 @@ pub(crate) fn parse_registered_slash_command(
             parse_no_arguments_for_usage(command, rest)?;
             Ok(SlashCommand::Permissions)
         }
+        SlashCommandAction::Sandbox => {
+            parse_no_arguments(spec, command, rest)?;
+            Ok(SlashCommand::Sandbox)
+        }
         SlashCommandAction::Thinking => parse_thinking_command(spec, rest),
         SlashCommandAction::Raw => parse_raw_command(spec, rest),
         SlashCommandAction::Copy => {

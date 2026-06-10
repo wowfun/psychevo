@@ -71,6 +71,10 @@ Completed message-derived assistant entries may render a quiet committed footer
 under the owning answer row, but that footer must carry the same entry identity
 and source lineage as the committed assistant block so it is not removed or
 reused by the next turn's live-overlay reconciliation.
+After a committed footer is appended, the transient live turn metadata state is
+consumed; later foreground task or turn completion cleanup must not use stale
+failure, usage, timing, provider, or accounting state to synthesize a second
+`Meta` row for the same answer.
 History reload must preserve assistant message content order when rebuilding
 transcripts from message-derived entries: reasoning, assistant pre-tool text,
 tool rows, later reasoning, and final answers appear in their original
@@ -94,6 +98,11 @@ derived from Gateway transcript entries or the shared history projection.
 History reload and session switching use the same shared transcript projection
 as Gateway/thread snapshots. The TUI must not maintain a second durable display
 model or prefer any runtime sidecar for ordinary transcript rows.
+
+The fullscreen composer height is derived from the rendered editable input
+rows. Empty input uses one visible row. Non-empty input grows from explicit
+logical lines and terminal soft-wrapped rows, and remains capped at six visible
+rows before the textarea scrolls internally.
 
 ## Scope
 

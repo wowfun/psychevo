@@ -124,6 +124,10 @@ impl TuiApp {
                 println!("{}", self.permissions_status_text()?);
                 Ok(())
             }
+            SlashCommand::Sandbox => {
+                println!("{}", self.sandbox_status_text()?);
+                Ok(())
+            }
             SlashCommand::ThinkingToggle => self.toggle_thinking(),
             SlashCommand::ThinkingSet(enabled) => self.set_thinking(enabled),
             SlashCommand::RawToggle => self.toggle_raw(),
@@ -646,6 +650,14 @@ impl TuiApp {
             }
         }
         Ok(lines.join("\n"))
+    }
+
+    pub(crate) fn sandbox_status_text(&self) -> Result<String> {
+        let options = self.run_options(String::new());
+        Ok(psychevo_runtime::sandbox_status_text(
+            &options,
+            self.current_mode,
+        )?)
     }
 
     pub(crate) fn agents_status_text(&self) -> String {

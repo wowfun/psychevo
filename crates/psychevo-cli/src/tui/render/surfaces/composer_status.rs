@@ -12,13 +12,7 @@ pub(crate) fn render_composer(frame: &mut Frame<'_>, area: Rect, ui: &mut Fullsc
     }
 
     let textarea_empty = ui.textarea.is_empty();
-    let marker_width = if ui.shell_mode {
-        area.width.min(2)
-    } else if textarea_empty {
-        area.width.min(1)
-    } else {
-        area.width.min(2)
-    };
+    let marker_width = composer_marker_width(area.width, ui.shell_mode, textarea_empty);
     let marker_spans = if ui.shell_mode {
         if marker_width <= 1 {
             vec![Span::styled(
@@ -92,7 +86,7 @@ pub(crate) fn render_composer(frame: &mut Frame<'_>, area: Rect, ui: &mut Fullsc
 
 pub(crate) const PENDING_INPUT_PREVIEW_MAX_HEIGHT: u16 = 8;
 
-pub(crate) fn pending_input_preview_height(ui: &FullscreenUi<'_>, _width: u16) -> u16 {
+pub(crate) fn pending_input_preview_height(ui: &FullscreenUi<'_>, width: u16) -> u16 {
     if !ui.has_pending_input_preview() {
         return 0;
     }
@@ -105,22 +99,23 @@ pub(crate) fn pending_input_preview_height(ui: &FullscreenUi<'_>, _width: u16) -
             .as_ref()
             .is_some_and(|edit| edit.target == entry.target)
         {
-            height = height.saturating_add(pending_input_edit_height(ui));
+            height = height.saturating_add(pending_input_edit_height(ui, width));
             edit_rendered = true;
         } else {
             height = height.saturating_add(2);
         }
     }
     if ui.pending_input_edit.is_some() && !edit_rendered {
-        height = height.saturating_add(pending_input_edit_height(ui));
+        height = height.saturating_add(pending_input_edit_height(ui, width));
     }
     height.min(PENDING_INPUT_PREVIEW_MAX_HEIGHT)
 }
 
-pub(crate) fn pending_input_edit_height(ui: &FullscreenUi<'_>) -> u16 {
+pub(crate) fn pending_input_edit_height(ui: &FullscreenUi<'_>, width: u16) -> u16 {
+    let input_width = width.saturating_sub(2);
     ui.pending_input_edit
         .as_ref()
-        .map(|edit| composer_height(&edit.textarea).saturating_add(2))
+        .map(|edit| composer_height(&edit.textarea, input_width).saturating_add(2))
         .unwrap_or(0)
 }
 
@@ -287,11 +282,13 @@ pub(crate) fn render_pending_input_editor(
     if input_y >= bottom {
         return input_y;
     }
-    let edit_height = composer_height(&edit.textarea).min(bottom.saturating_sub(input_y));
+    let input_width = area.width.saturating_sub(2);
+    let edit_height =
+        composer_height(&edit.textarea, input_width).min(bottom.saturating_sub(input_y));
     let input_area = Rect {
         x: area.x.saturating_add(2),
         y: input_y,
-        width: area.width.saturating_sub(2),
+        width: input_width,
         height: edit_height,
     };
     ui.last_pending_input_edit_area = Some(input_area);

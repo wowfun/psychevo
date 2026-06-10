@@ -60,6 +60,58 @@ pub(crate) fn composer_terminal_cursor_anchors_cjk_wide_text() {
 }
 
 #[test]
+pub(crate) fn long_single_line_composer_grows_to_wrapped_rows() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.textarea = textarea_with_text("abcdefghijklmnopqrstuvwxyz");
+
+    let (_buffer, cursor) = draw_fullscreen_with_cursor_for_test(&app, &mut ui, 12, 10);
+    let input = ui.last_composer_input_area.expect("composer input area");
+
+    assert_eq!(input.height, 3);
+    assert_eq!(cursor, (input.x + 6, input.y + 2));
+}
+
+#[test]
+pub(crate) fn empty_composer_retains_one_input_row() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    let _ = draw_fullscreen_for_test(&app, &mut ui, 48, 10);
+    let input = ui.last_composer_input_area.expect("composer input area");
+
+    assert_eq!(input.height, 1);
+}
+
+#[test]
+pub(crate) fn multiline_composer_uses_logical_rows_when_wide() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.textarea = textarea_with_text("one\ntwo\nthree");
+
+    let _ = draw_fullscreen_for_test(&app, &mut ui, 48, 12);
+    let input = ui.last_composer_input_area.expect("composer input area");
+
+    assert_eq!(input.height, 3);
+}
+
+#[test]
+pub(crate) fn long_composer_height_is_capped_at_six_rows() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.textarea = textarea_with_text(&"abcdefghijklmnopqrstuvwxyz".repeat(4));
+
+    let _ = draw_fullscreen_for_test(&app, &mut ui, 12, 14);
+    let input = ui.last_composer_input_area.expect("composer input area");
+
+    assert_eq!(input.height, 6);
+}
+
+#[test]
 pub(crate) fn composer_terminal_cursor_stays_anchored_with_popup_above() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);

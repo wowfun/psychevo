@@ -24,9 +24,32 @@ pub(crate) fn apply_composer_textarea_style(textarea: &mut TextArea<'_>) {
     textarea.set_selection_style(text_selection_style());
 }
 
+pub(crate) fn composer_marker_width(
+    area_width: u16,
+    shell_mode: bool,
+    textarea_empty: bool,
+) -> u16 {
+    if shell_mode {
+        area_width.min(2)
+    } else if textarea_empty {
+        area_width.min(1)
+    } else {
+        area_width.min(2)
+    }
+}
+
+pub(crate) fn composer_input_width(area_width: u16, shell_mode: bool, textarea_empty: bool) -> u16 {
+    area_width.saturating_sub(composer_marker_width(
+        area_width,
+        shell_mode,
+        textarea_empty,
+    ))
+}
+
 pub(crate) fn composer_cursor_from_point(
     textarea: &TextArea<'_>,
     area: Rect,
+    top_row: u16,
     column: u16,
     row: u16,
 ) -> Option<(usize, usize)> {
@@ -40,12 +63,14 @@ pub(crate) fn composer_cursor_from_point(
     let row_offset = row
         .saturating_sub(area.y)
         .min(area.height.saturating_sub(1)) as usize;
-    let text_row = row_offset.min(lines.len().saturating_sub(1));
     let display_col = column.saturating_sub(area.x).min(area.width) as usize;
-    Some((
-        text_row,
-        composer_char_col_at_display_col(&lines[text_row], display_col),
-    ))
+    let target_screen_row = usize::from(top_row).saturating_add(row_offset);
+    composer_text_position_at_screen_row(
+        textarea,
+        usize::from(area.width.max(1)),
+        target_screen_row,
+        display_col,
+    )
 }
 
 pub(crate) fn composer_terminal_cursor_position(
@@ -83,10 +108,14 @@ pub(crate) fn next_composer_cursor_top_row(prev_top: u16, cursor_row: u16, heigh
     }
 }
 
-pub(crate) fn composer_char_col_at_display_col(line: &str, display_col: usize) -> usize {
+pub(crate) fn composer_char_col_at_display_col(
+    line: &str,
+    display_col: usize,
+    tab_len: u8,
+) -> usize {
     let mut width = 0usize;
     for (index, ch) in line.chars().enumerate() {
-        width = width.saturating_add(UnicodeWidthChar::width(ch).unwrap_or(0));
+        width = width.saturating_add(composer_char_display_width(ch, width, tab_len));
         if width > display_col {
             return index;
         }
@@ -458,7 +487,209 @@ pub(crate) fn is_newline_key(key: KeyEvent) -> bool {
             .intersects(KeyModifiers::SHIFT | KeyModifiers::CONTROL | KeyModifiers::ALT)
 }
 
-pub(crate) fn composer_height(textarea: &TextArea<'_>) -> u16 {
-    let lines = textarea.lines().len() as u16;
-    lines.clamp(1, 6)
+pub(crate) fn composer_height(textarea: &TextArea<'_>, input_width: u16) -> u16 {
+    let rows = composer_screen_row_count(textarea, input_width);
+    rows.min(usize::from(COMPOSER_MAX_VISIBLE_ROWS)) as u16
+}
+
+pub(crate) const COMPOSER_MAX_VISIBLE_ROWS: u16 = 6;
+
+fn composer_screen_row_count(textarea: &TextArea<'_>, input_width: u16) -> usize {
+    let width = usize::from(input_width.max(1));
+    textarea
+        .lines()
+        .iter()
+        .map(|line| composer_wrapped_line_segments(line, width, textarea.tab_length()).len())
+        .sum::<usize>()
+        .max(1)
+}
+
+fn composer_text_position_at_screen_row(
+    textarea: &TextArea<'_>,
+    width: usize,
+    target_screen_row: usize,
+    display_col: usize,
+) -> Option<(usize, usize)> {
+    let tab_len = textarea.tab_length();
+    let mut screen_row = 0usize;
+    for (text_row, line) in textarea.lines().iter().enumerate() {
+        let segments = composer_wrapped_line_segments(line, width, tab_len);
+        for segment in segments {
+            if screen_row == target_screen_row {
+                let fragment = &line[segment.start_byte..segment.end_byte];
+                let relative_col = composer_char_col_at_display_col(fragment, display_col, tab_len);
+                return Some((
+                    text_row,
+                    segment
+                        .start_col
+                        .saturating_add(relative_col)
+                        .min(segment.end_col),
+                ));
+            }
+            screen_row = screen_row.saturating_add(1);
+        }
+    }
+    textarea
+        .lines()
+        .iter()
+        .enumerate()
+        .next_back()
+        .map(|(row, line)| (row, line.chars().count()))
+}
+
+#[derive(Clone, Copy)]
+struct ComposerWrappedSegment {
+    start_byte: usize,
+    end_byte: usize,
+    start_col: usize,
+    end_col: usize,
+}
+
+fn composer_wrapped_line_segments(
+    line: &str,
+    width: usize,
+    tab_len: u8,
+) -> Vec<ComposerWrappedSegment> {
+    let ranges = composer_wrapped_line_ranges(line, width, tab_len);
+    let mut start_col = 0usize;
+    ranges
+        .into_iter()
+        .map(|(start_byte, end_byte)| {
+            let char_count = line[start_byte..end_byte].chars().count();
+            let segment = ComposerWrappedSegment {
+                start_byte,
+                end_byte,
+                start_col,
+                end_col: start_col.saturating_add(char_count),
+            };
+            start_col = segment.end_col;
+            segment
+        })
+        .collect()
+}
+
+fn composer_wrapped_line_ranges(line: &str, width: usize, tab_len: u8) -> Vec<(usize, usize)> {
+    let width = width.max(1);
+    if line.is_empty() {
+        return vec![(0, 0)];
+    }
+
+    let chunks = composer_word_like_chunks(line);
+    let mut ranges = Vec::new();
+    let mut index = 0usize;
+    let mut segment_start = chunks[0].0;
+    let mut segment_end = segment_start;
+    let mut segment_width = 0usize;
+
+    while index < chunks.len() {
+        let (chunk_start, chunk_end) = chunks[index];
+        if segment_end == segment_start {
+            segment_start = chunk_start;
+        }
+        let chunk_width =
+            composer_display_width_from(&line[chunk_start..chunk_end], segment_width, tab_len);
+        if segment_width.saturating_add(chunk_width) <= width {
+            segment_end = chunk_end;
+            segment_width = segment_width.saturating_add(chunk_width);
+            index = index.saturating_add(1);
+            continue;
+        }
+        if segment_end > segment_start {
+            ranges.push((segment_start, segment_end));
+            segment_start = segment_end;
+            segment_width = 0;
+            continue;
+        }
+        composer_split_range_by_width(line, chunk_start, chunk_end, width, tab_len, &mut ranges);
+        index = index.saturating_add(1);
+        segment_start = chunk_end;
+        segment_end = chunk_end;
+        segment_width = 0;
+    }
+    if segment_end > segment_start {
+        ranges.push((segment_start, segment_end));
+    }
+    if ranges.is_empty() {
+        ranges.push((0, 0));
+    }
+    ranges
+}
+
+fn composer_word_like_chunks(line: &str) -> Vec<(usize, usize)> {
+    let mut chunks = Vec::new();
+    let mut start = None::<usize>;
+    let mut whitespace = None::<bool>;
+    for (index, ch) in line.char_indices() {
+        let is_whitespace = ch.is_whitespace();
+        match (start, whitespace) {
+            (None, _) => {
+                start = Some(index);
+                whitespace = Some(is_whitespace);
+            }
+            (Some(chunk_start), Some(current)) if current != is_whitespace => {
+                chunks.push((chunk_start, index));
+                start = Some(index);
+                whitespace = Some(is_whitespace);
+            }
+            _ => {}
+        }
+    }
+    if let Some(chunk_start) = start {
+        chunks.push((chunk_start, line.len()));
+    }
+    chunks
+}
+
+fn composer_split_range_by_width(
+    line: &str,
+    start: usize,
+    end: usize,
+    width: usize,
+    tab_len: u8,
+    ranges: &mut Vec<(usize, usize)>,
+) {
+    let mut segment_start = start;
+    while segment_start < end {
+        let mut segment_end = segment_start;
+        let mut segment_width = 0usize;
+        for (offset, ch) in line[segment_start..end].char_indices() {
+            let char_start = segment_start.saturating_add(offset);
+            let char_end = char_start.saturating_add(ch.len_utf8());
+            let char_width = composer_char_display_width(ch, segment_width, tab_len);
+            if segment_end != segment_start && segment_width.saturating_add(char_width) > width {
+                break;
+            }
+            segment_end = char_end;
+            segment_width = segment_width.saturating_add(char_width);
+            if segment_width > width {
+                break;
+            }
+        }
+        if segment_end == segment_start {
+            if let Some(ch) = line[segment_start..end].chars().next() {
+                segment_end = segment_start.saturating_add(ch.len_utf8());
+            } else {
+                break;
+            }
+        }
+        ranges.push((segment_start, segment_end));
+        segment_start = segment_end;
+    }
+}
+
+fn composer_display_width_from(text: &str, start_width: usize, tab_len: u8) -> usize {
+    let mut width = start_width;
+    for ch in text.chars() {
+        width = width.saturating_add(composer_char_display_width(ch, width, tab_len));
+    }
+    width.saturating_sub(start_width)
+}
+
+fn composer_char_display_width(ch: char, current_width: usize, tab_len: u8) -> usize {
+    if ch == '\t' {
+        let tab = usize::from(tab_len.max(1));
+        tab.saturating_sub(current_width % tab).max(1)
+    } else {
+        UnicodeWidthChar::width(ch).unwrap_or(0)
+    }
 }

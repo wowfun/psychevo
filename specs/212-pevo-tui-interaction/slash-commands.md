@@ -29,6 +29,7 @@ The first TUI supports:
 - `/variant <none|minimal|low|medium|high|xhigh|max>`
 - `/mode <plan|default|acceptEdits|dontAsk|bypassPermissions>`
 - `/permissions`
+- `/sandbox`
 - `/show-thinking`
 - `/show-thinking on`
 - `/show-thinking off`
@@ -308,12 +309,12 @@ temporary session transcript is deleted.
 
 Side conversations allow only a limited slash-command set:
 `/help`, `/status`, `/context`, `/model`, `/variant`, `/mode`, `/permissions`,
-`/show-thinking`, `/show-raw`, `/copy`, `/export`, `/share`, `/quit`, `/exit`,
-and `/q`. Nested `/btw` or `/side`, `/refresh`, session navigation, `/new`,
-`/clear`, `/undo`, `/redo`, `/agents`, `/fork`, `/compact`, `/skills`, and skill
-invocation are rejected with bounded feedback. `/quit`, `/exit`, and `/q` keep
-their normal meaning of exiting the program; returning to the parent is only
-`Ctrl+C`.
+`/sandbox`, `/show-thinking`, `/show-raw`, `/copy`, `/export`, `/share`,
+`/quit`, `/exit`, and `/q`. Nested `/btw` or `/side`, `/refresh`, session
+navigation, `/new`, `/clear`, `/undo`, `/redo`, `/agents`, `/fork`, `/compact`,
+`/skills`, and skill invocation are rejected with bounded feedback. `/quit`,
+`/exit`, and `/q` keep their normal meaning of exiting the program; returning
+to the parent is only `Ctrl+C`.
 
 Fullscreen `/sessions`, `/resume`, `/continue`, `/model`, and `/tools` use bottom panes
 with title text, selected-row highlighting, footer hints, `Enter` selection,
@@ -328,6 +329,11 @@ forms accepted by shared non-picker surfaces are
 picker affordances for the same policy edits. Permission policy semantics are
 defined by [035 Permissions](../035-permissions/spec.md); this topic owns only
 the interactive projection.
+
+`/sandbox` shows the effective sandbox mode, backend, confinement status, and
+configured roots. Sandbox enforcement semantics are defined by
+[036 Sandbox](../036-sandbox/spec.md); this topic owns only the interactive
+projection.
 
 Fullscreen `/tools` opens a searchable bottom pane of built-in and configured
 toolsets. Rows show enabled, disabled, or available status for the current
