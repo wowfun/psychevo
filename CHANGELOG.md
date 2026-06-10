@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-06-10
+
+- Added opt-in sandbox enforcement for file writes and shell children, including
+  bounded approval grants, `/sandbox` status, config parsing, and broad
+  validation cleanup.
+- Tightened TUI composer and transcript rendering around wrapped input,
+  command metadata, live footer state, and stable exec/status presentation.
+- Added runtime-declared GUI slash command presentation metadata, with
+  Web/Desktop catalog filtering, typed unsupported-command guidance, Workbench
+  command grouping, composer-local feedback, structured destination routing,
+  and original slash display text for submit-style commands.
+
 ## 2026-06-09
 
 - Improved Workbench dark-mode readability and transcript density with stronger
