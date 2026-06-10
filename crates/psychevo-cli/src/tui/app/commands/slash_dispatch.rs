@@ -92,12 +92,10 @@ impl TuiApp {
                     "reloaded context: {} v{}; side cleanup deleted {}",
                     result.prefix_hash,
                     result.version,
-                    self.state_runtime
-                        .store()
-                        .delete_sessions_for_workdir_with_source(
-                            &self.workdir,
-                            TUI_SIDE_SESSION_SOURCE,
-                        )?
+                    self.state_runtime.delete_sessions_for_workdir_with_source(
+                        &self.workdir,
+                        TUI_SIDE_SESSION_SOURCE,
+                    )?
                 );
                 Ok(())
             }

@@ -80,7 +80,7 @@ test.describe("Workbench composer visual contract", () => {
   });
 
   test("fits compact model labels and hides Transcript scrollbars until active", async ({ page, isMobile }) => {
-    const server = await startPevoWeb({ live: false, model: "lmstudio/mimo-v2.5" });
+    const server = await startPevoWeb({ live: false, model: "lmstudio/mimo-v2.5-pro" });
     try {
       await page.goto(server.url);
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
@@ -91,16 +91,17 @@ test.describe("Workbench composer visual contract", () => {
 
       const modelSelect = page.getByRole("combobox", { name: "Model" });
       await expect(modelSelect).toBeVisible();
-      expect(await selectedOptionText(modelSelect)).toBe("mimo-v2.5");
+      expect(await selectedOptionText(modelSelect)).toBe("mimo-v2.5-pro");
       await expectSelectTextFits(modelSelect);
-      await expect(modelSelect).toHaveAttribute("title", "lmstudio/mimo-v2.5");
+      await expect(modelSelect).toHaveAttribute("title", "lmstudio/mimo-v2.5-pro");
 
       const threadItems = page.locator(".pevo-threadItems");
       await threadItems.evaluate((container) => {
         container.innerHTML = Array.from({ length: 36 }, (_, index) => (
           `<article class="pevo-messageFrame"><div class="pevo-message">Transcript row ${index + 1}</div></article>`
-        )).join("");
+        )).join("") + `<div data-testid="reading-column-probe" style="height: 1px;"></div>`;
       });
+      await assertComposerDockTracksTranscriptColumn(page, isMobile);
       if (!isMobile) {
         await page.mouse.move(1, 1);
       }
@@ -218,8 +219,31 @@ async function optionTexts(select: Locator): Promise<string[]> {
 }
 
 async function expectSelectTextFits(select: Locator) {
-  const fits = await select.evaluate((element) => element.scrollWidth <= element.clientWidth + 1);
-  expect(fits).toBe(true);
+  const result = await select.evaluate((element) => {
+    const control = element as HTMLSelectElement;
+    const style = getComputedStyle(control);
+    const selectedText = control.selectedOptions[0]?.textContent?.trim() ?? "";
+    const probe = document.createElement("span");
+    probe.style.font = style.font;
+    probe.style.letterSpacing = style.letterSpacing;
+    probe.style.position = "absolute";
+    probe.style.visibility = "hidden";
+    probe.style.whiteSpace = "nowrap";
+    probe.textContent = selectedText;
+    document.body.appendChild(probe);
+    const textWidth = probe.getBoundingClientRect().width;
+    probe.remove();
+    const paddingLeft = Number.parseFloat(style.paddingLeft) || 0;
+    const paddingRight = Number.parseFloat(style.paddingRight) || 0;
+    return {
+      contentWidth: control.clientWidth - paddingLeft - paddingRight,
+      paddingRight,
+      selectedText,
+      textWidth
+    };
+  });
+  expect(result.paddingRight).toBeGreaterThanOrEqual(22);
+  expect(result.textWidth).toBeLessThanOrEqual(result.contentWidth + 1);
 }
 
 async function expectTextNotClipped(locator: Locator) {
@@ -263,6 +287,22 @@ async function expectCssPropertyMatchesRootVar(locator: Locator, property: strin
     };
   }, [property, variableName]);
   expect(values.actual).toBe(values.expected);
+}
+
+async function assertComposerDockTracksTranscriptColumn(page: Page, isMobile: boolean) {
+  if (isMobile) {
+    return;
+  }
+  const composerDock = page.locator(".composerDock");
+  const readingProbe = page.getByTestId("reading-column-probe");
+  const [dockBox, probeBox] = await Promise.all([
+    composerDock.boundingBox(),
+    readingProbe.boundingBox()
+  ]);
+  expect(dockBox).not.toBeNull();
+  expect(probeBox).not.toBeNull();
+  expect(Math.abs(dockBox!.x - probeBox!.x)).toBeLessThanOrEqual(12);
+  expect(Math.abs(dockBox!.width - probeBox!.width)).toBeLessThanOrEqual(16);
 }
 
 async function assertComposerGeometry(page: Page, options: { plan: boolean }) {

@@ -113,7 +113,7 @@ impl TuiApp {
         ui.set_ephemeral_status(BTW_RETURNED_MESSAGE);
         ui.refresh_sidebar(self);
 
-        match self.state_runtime.store().delete_session(&side_session) {
+        match self.state_runtime.delete_session(&side_session) {
             Ok(()) => {}
             Err(err) => {
                 ui.set_ephemeral_error(format!("failed to delete /btw side session: {err}"))
@@ -186,7 +186,6 @@ impl TuiApp {
         let workdir = self.workdir.clone();
         let task = tokio::spawn(async move {
             state
-                .store()
                 .delete_sessions_for_workdir_with_source(&workdir, TUI_SIDE_SESSION_SOURCE)
                 .map_err(|err| err.to_string())
         });

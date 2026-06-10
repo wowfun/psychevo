@@ -508,6 +508,7 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 }
 
 .conversationColumn {
+  --workbench-reading-column: 840px;
   display: grid;
   grid-template-rows: 34px minmax(0, 1fr) auto;
   gap: 4px;
@@ -530,6 +531,7 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 }
 
 .centerWorkspace {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   min-width: 0;
@@ -547,11 +549,63 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 
 .composerDock {
   display: grid;
+  justify-self: center;
+  width: min(var(--workbench-reading-column), calc(100% - 16px));
+  max-width: 100%;
   gap: 6px;
 }
 
 .composerCommandFeedback {
   margin: 0 2px;
+}
+
+.commandOverlay {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 8px;
+  z-index: 8;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(560px, calc(100% - 16px));
+  min-width: 0;
+  overflow: hidden;
+  background: color-mix(in oklch, var(--pevo-panel), transparent 4%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 20%);
+  border-radius: var(--pevo-radius);
+  box-shadow: var(--pevo-shadow-popover);
+}
+
+.commandOverlay > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 8px 10px;
+  border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 35%);
+}
+
+.commandOverlayBody {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+}
+
+.commandOverlay .agentSurfacePanel {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+@media (max-width: 720px) {
+  .commandOverlay {
+    inset: 4px;
+    width: auto;
+  }
 }
 
 .agentRunSelector {
@@ -697,6 +751,24 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   min-height: 38px;
   padding: 6px 4px;
   border-bottom: 0;
+}
+
+.debugPanel > header button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  margin-left: auto;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.debugPanel > header button:hover {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 72%);
 }
 
 .centerPageTitle {
@@ -998,6 +1070,32 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   padding: 8px;
 }
 
+.debugSection {
+  display: grid;
+  min-height: 0;
+  border-top: 1px solid color-mix(in oklch, var(--pevo-border), transparent 35%);
+}
+
+.debugSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 8px 0;
+  color: var(--pevo-ink);
+  font-size: 0.78rem;
+}
+
+.debugSectionHeader span,
+.debugNotice {
+  color: var(--pevo-muted);
+  font-size: 0.74rem;
+}
+
+.debugNotice {
+  margin: 6px 8px 0;
+}
+
 .fileTree button {
   display: grid;
   grid-template-columns: 14px 14px minmax(0, 1fr);
@@ -1182,8 +1280,9 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 }
 
 .composerSubmitControls .statusSelect[data-status="model"] select {
-  width: clamp(96px, 14ch, 136px);
-  min-width: 96px;
+  width: clamp(132px, 18ch, 168px);
+  min-width: 132px;
+  padding: 0 26px 0 0;
 }
 
 .composerSubmitControls .statusSelect[data-status="variant"] select {
@@ -1681,8 +1780,8 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   }
 
   .composerSubmitControls .statusSelect[data-status="model"] select {
-    width: clamp(88px, 24vw, 112px);
-    min-width: 88px;
+    width: clamp(120px, 32vw, 148px);
+    min-width: 120px;
   }
 
   .composerSubmitControls .statusSelect[data-status="variant"] select {
@@ -1726,8 +1825,8 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   }
 
   .composerSubmitControls .statusSelect[data-status="model"] select {
-    width: clamp(84px, 25vw, 104px);
-    min-width: 84px;
+    width: clamp(118px, 34vw, 136px);
+    min-width: 118px;
   }
 
   .composerSubmitControls .statusSelect[data-status="variant"] select {

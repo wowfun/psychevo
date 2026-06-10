@@ -126,6 +126,14 @@ Web and Desktop shells present the shared catalog as a command utility panel.
 Executing `/help` or `/commands` opens that panel, `/agents` opens the agents
 panel, `/status` opens status, and `/sessions` or `/history` opens history.
 These panel switches are host display effects, not ordinary transcript facts.
+When the target panel can be collapsed or hidden in the current layout, the host
+must reveal the target region instead of only changing a selected tab or mobile
+panel marker. Display-only command feedback for these effects must have a
+visible local landing area, such as the composer trigger feedback or the
+commands panel, without adding transcript rows. Web/Desktop composer-triggered
+help and browse commands may use closeable overlays over the current transcript
+when replacing the transcript would make returning to the active session
+unclear.
 The Web/Desktop catalog is capability-filtered by the runtime registry and may
 include dynamic backend-provided commands when runtime exposes them. Client-side
 presentation may hide only commands that the Gateway/runtime marks unavailable
@@ -163,6 +171,9 @@ Web/Desktop `command/execute` maps these shared effects to typed host actions
 where a first-slice host action exists. Effects without a Web/Desktop action
 return bounded unsupported guidance instead of falling through to arbitrary
 frontend behavior.
+Queue-style host actions may include separate display text so the model input
+can use expanded prompt text while the transcript-visible user input remains the
+original slash line.
 Unknown slash-looking input on prompt-bearing surfaces remains a pass-through
 prompt and reports `known=false` on typed Gateway execution results. A known
 command hidden only because the current GUI surface cannot represent it reports
@@ -192,6 +203,8 @@ ordinary main transcript history. Commands whose output kind is a bottom pane
 use that pane instead of adding transcript rows. Any future persistent command
 result history requires an explicit domain sidecar spec rather than a generic
 transcript sidecar.
+GUI display-only feedback is scoped to the active session/workdir and must be
+cleared when that scope changes or when new user input is submitted.
 This boundary follows the transcript state and projection ownership defined by
 [030 Transcript State](../030-state-and-data-model/transcript-state.md) and
 [213 pevo Display Model](../213-pevo-display-model/spec.md).

@@ -186,6 +186,9 @@ Attachment chips are controlled component state with remove actions, and the
 submit button is enabled when either prompt text or pending attachments are
 present. Attachments are submitted through typed Gateway input parts rather
 than through ordinary transcript history or browser-only file path access.
+Workbench shells center the visible composer input band on the same reading
+column as ordinary transcript rows on wide surfaces so prompt entry remains
+visually connected to the transcript.
 Attachment entry is exposed as a compact `+` menu in the composer action row.
 The menu contains an `Add images and files` file/image picker action and the
 runtime mode switch. Plan mode is toggled from this menu rather than from the
@@ -198,8 +201,10 @@ height so the composer does not gain an extra row when Plan is active. Model,
 Variant, and context-usage controls sit immediately to the left of that
 send/interrupt slot; provider-qualified model values display using the segment
 after the final `/` while retaining the full value for submission. The compact
-model label and context-usage popover must not clip their selected value,
-summary, or visible usage details at desktop or narrow Workbench widths.
+model label must reserve space for the native selector affordance so selected
+characters are not covered, and the model label and context-usage popover must
+not clip their selected value, summary, or visible usage details at desktop or
+narrow Workbench widths.
 Permission,
 path, and branch remain in the quieter status line. The default send control is
 a compact circular arrow-up button; during an
@@ -230,8 +235,13 @@ details focus the status area. Export and share invoke host download/share
 actions. Active-turn control commands update turn state and show display-only
 feedback near the trigger. Dynamic skill and bundle slash commands submit a
 model turn while the transcript-visible user input remains the original slash
-line. Other command feedback is display-only and must not become ordinary
-transcript history.
+line. Panel-targeted slash actions reveal collapsed regions, such as the right
+Status inspector or left History sidebar, so the command has an immediate
+visible result. Composer-triggered `/help`, `/commands`, and `/agents` open
+closeable overlays over the current transcript instead of replacing the active
+session surface. Other command feedback is display-only, session-scoped
+transient UI and must not become ordinary transcript history; it is cleared on
+session or workdir switches and when the user submits new input.
 
 Ordinary transcript components consume typed transcript entries/blocks and typed
 Gateway events. They must not display raw runtime event names such as

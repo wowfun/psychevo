@@ -570,7 +570,7 @@ impl TuiApp {
             .join("snapshots")
             .join("sessions")
             .join(&session_id);
-        self.state_runtime.store().delete_session(&session_id)?;
+        self.state_runtime.delete_session(&session_id)?;
         let cleanup_notice = if snapshot_dir.exists() {
             fs::remove_dir_all(&snapshot_dir).err().map(|err| {
                 format!(

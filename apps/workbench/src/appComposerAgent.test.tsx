@@ -45,10 +45,12 @@ const gatewayMock = vi.hoisted(() => {
       };
     }),
     commandList: [] as Array<Record<string, unknown>>,
+    endpoint: { wsUrl: "ws://127.0.0.1/test", baseUrl: "http://127.0.0.1/test" } as { wsUrl: string; baseUrl: string } | null,
     openDownloadLog: [] as string[],
     optimisticLog: [] as string[],
     requestLog: [] as Array<{ method: string; params: unknown }>,
     scope,
+    sessionSummaries: [] as Array<Record<string, unknown>>,
     settingsResult(agent: string | null) {
       return {
         workdir: scope.workdir,
@@ -99,10 +101,21 @@ vi.mock("@psychevo/client", () => {
         };
       }
       if (method === "thread/resume" || method === "thread/read") {
-        return gatewayMock.snapshot;
+        const record = params as { threadId?: string | null } | undefined;
+        const threadId = record?.threadId ?? gatewayMock.snapshot.thread?.id ?? null;
+        return {
+          ...gatewayMock.snapshot,
+          thread: threadId
+            ? {
+                id: threadId,
+                backend: { kind: "psychevo" as const, nativeId: threadId },
+                sourceKey: `source-${threadId}`
+              }
+            : null
+        };
       }
       if (method === "thread/list") {
-        return { sessions: [] };
+        return { sessions: gatewayMock.sessionSummaries };
       }
       if (method === "settings/read") {
         return gatewayMock.settingsResult(null);
@@ -185,7 +198,7 @@ vi.mock("@psychevo/client", () => {
 
 vi.mock("@psychevo/host", () => ({
   createBrowserHost: () => ({
-    endpoint: { wsUrl: "ws://127.0.0.1/test", baseUrl: "http://127.0.0.1/test" },
+    endpoint: gatewayMock.endpoint,
     storage: {
       getJson: (_key: string, fallback: unknown) => fallback,
       setJson: vi.fn()
@@ -211,9 +224,16 @@ afterEach(() => {
     action: { type: "passThroughPrompt", text: command }
   });
   gatewayMock.commandList = [];
+  gatewayMock.endpoint = { wsUrl: "ws://127.0.0.1/test", baseUrl: "http://127.0.0.1/test" };
   gatewayMock.openDownloadLog.length = 0;
   gatewayMock.optimisticLog.length = 0;
   gatewayMock.requestLog.length = 0;
+  gatewayMock.sessionSummaries = [];
+  gatewayMock.snapshot.thread = {
+    id: "thread-1",
+    backend: { kind: "psychevo" as const, nativeId: "thread-1" },
+    sourceKey: "source-key"
+  };
 });
 
 function commandItem(
@@ -234,6 +254,32 @@ function commandItem(
     destination,
     feedbackAnchor: "commandsPanel",
     alternateAction: null
+  };
+}
+
+function sessionSummary(id: string, title: string): Record<string, unknown> {
+  return {
+    id,
+    workdir: gatewayMock.scope.workdir,
+    project: {
+      workdir: gatewayMock.scope.workdir,
+      label: "project",
+      displayPath: "/tmp/project"
+    },
+    model: null,
+    provider: null,
+    startedAtMs: 1,
+    updatedAtMs: 2,
+    endedAtMs: null,
+    endReason: null,
+    archivedAtMs: null,
+    messageCount: 1,
+    toolCallCount: 0,
+    visibleEntryCount: 1,
+    activity: { running: false, activeTurnId: null, queuedTurns: 0 },
+    title,
+    displayTitle: title,
+    preview: "session preview"
   };
 }
 
@@ -348,12 +394,77 @@ describe("Workbench composer agent wiring", () => {
     fireEvent.change(textarea, { target: { value: "/help" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
+    expect(await screen.findByRole("region", { name: "Commands overlay" })).toBeTruthy();
     expect(await screen.findByRole("region", { name: "Commands" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Transcript" })).toBeTruthy();
+    expect(screen.getByPlaceholderText("Ask Psychevo...")).toBeTruthy();
     for (const heading of ["Navigate", "Inspect", "Control", "Submit", "Export", "Extensions"]) {
       expect(screen.getByText(heading)).toBeTruthy();
     }
     expect(screen.getByRole("button", { name: /\/diff/ })).toBeTruthy();
     expect(screen.getByText("Preview")).toBeTruthy();
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close Commands" }));
+    expect(screen.queryByRole("region", { name: "Commands overlay" })).toBeNull();
+    expect(screen.getByPlaceholderText("Ask Psychevo...")).toBeTruthy();
+  });
+
+  it("opens commands and agents slash results as transcript overlays", async () => {
+    gatewayMock.commandExecute = (command: string) => ({
+      accepted: true,
+      command,
+      known: true,
+      presentationKind: "navigate",
+      feedbackAnchor: "commandsPanel",
+      action: { type: "showPanel", panel: command === "/agents" ? "agents" : "commands" }
+    });
+
+    render(<App />);
+
+    const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "/commands" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByRole("region", { name: "Commands overlay" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Transcript" })).toBeTruthy();
+    expect(screen.getByPlaceholderText("Ask Psychevo...")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close Commands" }));
+
+    fireEvent.change(textarea, { target: { value: "/agents" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByRole("region", { name: "Agents overlay" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Transcript" })).toBeTruthy();
+    expect(screen.getByPlaceholderText("Ask Psychevo...")).toBeTruthy();
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
+  });
+
+  it("routes commands clicked inside the overlay without submitting transcript turns", async () => {
+    gatewayMock.commandList = [
+      commandItem("status", "inspect", "status")
+    ];
+    gatewayMock.commandExecute = (command: string) => ({
+      accepted: true,
+      command,
+      known: true,
+      presentationKind: command === "/status" ? "inspect" : "navigate",
+      feedbackAnchor: command === "/status" ? "status" : "commandsPanel",
+      action: { type: "showPanel", panel: command === "/status" ? "status" : "commands" }
+    });
+
+    render(<App />);
+
+    const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "/help" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByRole("region", { name: "Commands overlay" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /\/status/ }));
+
+    expect(await screen.findByRole("region", { name: "Status" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Commands overlay" })).toBeNull();
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
   });
 
   it("shows composer feedback for known unsupported slash commands without submitting a turn", async () => {
@@ -377,6 +488,131 @@ describe("Workbench composer agent wiring", () => {
     expect(await screen.findByText("/model is managed by the Workbench model controls.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Open model controls" })).toBeTruthy();
     expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
+  });
+
+  it("reveals Status and shows local feedback for composer-entered status commands", async () => {
+    gatewayMock.commandExecute = (command: string) => ({
+      accepted: true,
+      command,
+      known: true,
+      presentationKind: "inspect",
+      feedbackAnchor: "status",
+      action: { type: "showPanel", panel: "status" }
+    });
+
+    render(<App />);
+
+    expect(screen.queryByRole("region", { name: "Status" })).toBeNull();
+
+    const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "/status" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByRole("region", { name: "Status" })).toBeTruthy();
+    expect(await screen.findByText("Opened Status.")).toBeTruthy();
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
+  });
+
+  it("shows sandbox status feedback near the composer while revealing Status", async () => {
+    gatewayMock.commandExecute = (command: string) => ({
+      accepted: true,
+      command,
+      known: true,
+      message: "sandbox: workspace-write",
+      presentationKind: "inspect",
+      feedbackAnchor: "status",
+      action: null
+    });
+
+    render(<App />);
+
+    const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "/sandbox" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByRole("region", { name: "Status" })).toBeTruthy();
+    expect(await screen.findByText("sandbox: workspace-write")).toBeTruthy();
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
+  });
+
+  it("reveals collapsed History for composer-entered sessions commands", async () => {
+    gatewayMock.commandExecute = (command: string) => ({
+      accepted: true,
+      command,
+      known: true,
+      presentationKind: "navigate",
+      feedbackAnchor: "commandsPanel",
+      action: { type: "showPanel", panel: "history" }
+    });
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Collapse left sidebar" }));
+    expect(screen.queryByText("Sessions")).toBeNull();
+
+    const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "/sessions" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByText("Sessions")).toBeTruthy();
+    expect(await screen.findByText("Opened History.")).toBeTruthy();
+  });
+
+  it("keeps idle steer errors local to the composer", async () => {
+    gatewayMock.commandExecute = (command: string) => ({
+      accepted: true,
+      command,
+      known: true,
+      presentationKind: "control",
+      feedbackAnchor: "composer",
+      action: { type: "steerPrompt", text: "hello" }
+    });
+
+    render(<App />);
+
+    const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "/steer hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByText("/steer is only available while a turn is running.")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Transcript" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Commands overlay" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Commands" })).toBeNull();
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
+  });
+
+  it("clears transient slash feedback after switching sessions", async () => {
+    gatewayMock.sessionSummaries = [
+      sessionSummary("thread-1", "First session"),
+      sessionSummary("thread-2", "Second session")
+    ];
+    gatewayMock.commandExecute = (command: string) => ({
+      accepted: true,
+      command,
+      known: true,
+      presentationKind: "inspect",
+      feedbackAnchor: "status",
+      action: { type: "showPanel", panel: "status" }
+    });
+
+    render(<App />);
+
+    const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "/usage" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByText("Opened Status.")).toBeTruthy();
+    fireEvent.click(await screen.findByText("Second session"));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/resume",
+        params: expect.objectContaining({ threadId: "thread-2" })
+      });
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Opened Status.")).toBeNull();
+    });
   });
 
   it("submits unknown slash input as prompt text", async () => {
@@ -421,6 +657,54 @@ describe("Workbench composer agent wiring", () => {
       });
     });
     expect(gatewayMock.optimisticLog).toContain("/x-daily latest");
+  });
+
+  it("submits queued slash payloads while displaying the original slash line", async () => {
+    gatewayMock.commandExecute = (command: string) => ({
+      accepted: true,
+      command,
+      known: true,
+      presentationKind: "control",
+      feedbackAnchor: "composer",
+      action: { type: "queuePrompt", text: "hello", displayText: command }
+    });
+
+    render(<App />);
+
+    const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "/queue hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "turn/start",
+        params: expect.objectContaining({
+          input: [{ type: "text", text: "hello" }]
+        })
+      });
+    });
+    expect(gatewayMock.optimisticLog).toContain("/queue hello");
+  });
+
+  it("shows a bounded export error instead of opening downloads without a host endpoint", async () => {
+    gatewayMock.endpoint = null;
+    gatewayMock.commandExecute = (command: string) => ({
+      accepted: true,
+      command,
+      known: true,
+      presentationKind: "export",
+      feedbackAnchor: "trigger",
+      action: { type: "downloadSession", kind: "export", threadId: "thread-1" }
+    });
+
+    render(<App />);
+
+    const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "/export" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByText("Export is not available for this session.")).toBeTruthy();
+    expect(gatewayMock.openDownloadLog).toEqual([]);
   });
 
   it("routes diff previews and artifact downloads from structured slash actions", async () => {

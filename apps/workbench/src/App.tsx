@@ -17,6 +17,7 @@ import {
   PanelRight,
   Pin,
   PlugZap,
+  RefreshCw,
   Search,
   Settings,
   Shield,
@@ -54,6 +55,7 @@ import {
   InitializeResultSchema,
   SettingsReadResultSchema,
   ThreadListResultSchema,
+  ThreadTraceResultSchema,
   WorkspaceDiffResultSchema,
   WorkspaceFileReadResultSchema,
   WorkspaceFilesResultSchema,
@@ -68,6 +70,7 @@ import {
   type SessionSummary,
   type SettingsReadResult,
   type ThreadSnapshot,
+  type ThreadTraceResult,
   type WorkspaceDiffResult,
   type WorkspaceFileEntry,
   type WorkspaceFileReadResult,
@@ -128,7 +131,8 @@ type WorkbenchCommand = {
 type RightTab = "status" | "files" | "debug";
 type MainView = "transcript" | "search" | "artifacts" | "agents" | "skills" | "tools" | "mcp" | "settings";
 type Appearance = "dark" | "light";
-type CommandTrigger = "composer" | "commandsPanel";
+type CommandOverlay = "agents" | "commands";
+type CommandTrigger = "composer" | "commandsPanel" | "commandOverlay";
 
 type CommandAlternateAction = {
   type: string;
@@ -154,6 +158,13 @@ type DebugEvent = {
   at: number;
   method: string;
   payload: unknown;
+};
+
+type TraceState = {
+  error: string | null;
+  loading: boolean;
+  result: ThreadTraceResult | null;
+  threadId: string | null;
 };
 
 type PendingAttachment = {
@@ -203,6 +214,7 @@ export function App() {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(true);
   const [commandFeedback, setCommandFeedback] = useState<CommandFeedback>(null);
+  const [activeCommandOverlay, setActiveCommandOverlay] = useState<CommandOverlay | null>(null);
   const [selectedAgentName, setSelectedAgentName] = useState<string>("");
   const [permissionMode, setPermissionMode] = useState("default");
   const [workMode, setWorkMode] = useState("default");
@@ -214,6 +226,12 @@ export function App() {
   const [preview, setPreview] = useState<PreviewState>(null);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
+  const [traceState, setTraceState] = useState<TraceState>({
+    error: null,
+    loading: false,
+    result: null,
+    threadId: null
+  });
   const initialPrefs = useMemo(readWorkbenchPrefs, []);
   const [appearance, setAppearance] = useState<Appearance>(initialPrefs.appearance);
   const [debugEnabled, setDebugEnabled] = useState(initialPrefs.debug);
@@ -223,6 +241,7 @@ export function App() {
   const [mobilePanel, setMobilePanel] = useState<"history" | "transcript" | "status">("transcript");
   const viewEpochRef = useRef(0);
   const scopeRef = useRef<GatewayRequestScope | null>(null);
+  const commandContextKeyRef = useRef<string | null>(null);
   const detachedShellTokenRef = useRef(0);
   const pendingDetachedShellRef = useRef<PendingDetachedShell | null>(null);
   const skipNextPinnedPersistRef = useRef(false);
@@ -237,6 +256,7 @@ export function App() {
   const visibleDraftSession = visibleHistoryDraftSession(draftSession, archived);
   const hasSelectedSession = Boolean(currentThreadId || visibleDraftSession);
   const showSessionChrome = mainView === "transcript" && hasSelectedSession;
+  const commandContextKey = `${activeScope?.workdir ?? ""}:${currentThreadId ?? visibleDraftSession?.id ?? "none"}`;
   const pinnedSessions = useMemo(
     () => pinnedSessionIds
       .map((id) => sessions.find((session) => session.id === id))
@@ -263,6 +283,16 @@ export function App() {
       setRightTab("status");
     }
   }, [debugEnabled, rightTab]);
+
+  useEffect(() => {
+    if (!debugEnabled || rightTab !== "debug" || !client || !currentThreadId) {
+      if (!currentThreadId) {
+        setTraceState({ error: null, loading: false, result: null, threadId: null });
+      }
+      return;
+    }
+    void refreshTrace(client, currentThreadId);
+  }, [client, currentThreadId, debugEnabled, rightTab]);
 
   useEffect(() => {
     document.documentElement.dataset.pevoAppearance = appearance;
@@ -297,6 +327,17 @@ export function App() {
       setDraftSession(null);
     }
   }, [currentThreadId, draftSession]);
+
+  useEffect(() => {
+    if (commandContextKeyRef.current === null) {
+      commandContextKeyRef.current = commandContextKey;
+      return;
+    }
+    if (commandContextKeyRef.current !== commandContextKey) {
+      commandContextKeyRef.current = commandContextKey;
+      clearCommandTransientUi();
+    }
+  }, [commandContextKey]);
 
   useEffect(() => {
     if (!showSessionChrome && mobilePanel === "status") {
@@ -449,6 +490,7 @@ export function App() {
   function beginExplicitViewSwitch(): number {
     viewEpochRef.current += 1;
     pendingDetachedShellRef.current = null;
+    clearCommandTransientUi();
     setDraftSession(null);
     return viewEpochRef.current;
   }
@@ -589,6 +631,39 @@ export function App() {
     ].slice(0, 120));
   }
 
+  async function refreshTrace(
+    nextClient: GatewayClient | null = client,
+    threadId: string | null = currentThreadId ?? null
+  ) {
+    if (!nextClient || !threadId) {
+      setTraceState({ error: null, loading: false, result: null, threadId: null });
+      return;
+    }
+    setTraceState((current) => ({
+      error: null,
+      loading: true,
+      result: current.threadId === threadId ? current.result : null,
+      threadId
+    }));
+    try {
+      const result = ThreadTraceResultSchema.parse(
+        await nextClient.request("thread/trace", { threadId, afterSeq: null, limit: 200 })
+      );
+      setTraceState((current) => (
+        current.threadId === threadId
+          ? { error: null, loading: false, result, threadId }
+          : current
+      ));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setTraceState((current) => (
+        current.threadId === threadId
+          ? { error: message, loading: false, result: current.result, threadId }
+          : current
+      ));
+    }
+  }
+
   function applyInitialControls(nextSettings: SettingsReadResult) {
     const nextControls = nextSettings.controls;
     if (!nextControls) {
@@ -610,16 +685,101 @@ export function App() {
     }
   }
 
+  function clearCommandTransientUi() {
+    setCommandFeedback(null);
+    setActiveCommandOverlay(null);
+  }
+
+  function switchMainView(value: MainView) {
+    if (value === "transcript") {
+      clearCommandTransientUi();
+    } else {
+      setActiveCommandOverlay(null);
+    }
+    setMainView(value);
+  }
+
+  function openCommandOverlay(kind: CommandOverlay) {
+    setActiveCommandOverlay(kind);
+    setMainView("transcript");
+    setMobilePanel("transcript");
+  }
+
+  function revealHistoryPanel() {
+    setLeftCollapsed(false);
+    setActiveCommandOverlay(null);
+    setMobilePanel("history");
+  }
+
+  function revealStatusPanel(tab: RightTab = "status") {
+    setActiveCommandOverlay(null);
+    setRightCollapsed(false);
+    setRightTab(tab);
+    setMobilePanel("status");
+  }
+
+  function revealCommandsPanel(trigger: CommandTrigger = "commandsPanel") {
+    if (trigger === "composer" || trigger === "commandOverlay") {
+      openCommandOverlay("commands");
+      return;
+    }
+    setActiveCommandOverlay(null);
+    setMainView("tools");
+    setMobilePanel("transcript");
+  }
+
+  function revealAgentsPanel(trigger: CommandTrigger = "commandsPanel") {
+    if (trigger === "composer" || trigger === "commandOverlay") {
+      openCommandOverlay("agents");
+      return;
+    }
+    setActiveCommandOverlay(null);
+    setMainView("agents");
+    setMobilePanel("transcript");
+  }
+
+  function revealTranscriptPanel() {
+    clearCommandTransientUi();
+    setMainView("transcript");
+    setMobilePanel("transcript");
+  }
+
+  function revealHostPanel(panel: string, trigger: CommandTrigger = "commandsPanel") {
+    switch (panel) {
+      case "history":
+      case "sessions":
+        revealHistoryPanel();
+        return;
+      case "agents":
+        revealAgentsPanel(trigger);
+        return;
+      case "commands":
+      case "help":
+        revealCommandsPanel(trigger);
+        return;
+      case "preview":
+        revealTranscriptPanel();
+        return;
+      case "files":
+        revealStatusPanel("files");
+        return;
+      case "debug":
+        revealStatusPanel("debug");
+        return;
+      case "status":
+      default:
+        revealStatusPanel("status");
+    }
+  }
+
   function routeCommandFeedback(feedback: CommandFeedback, trigger: CommandTrigger) {
     const anchor = feedback?.feedbackAnchor;
     if (trigger === "commandsPanel" || anchor === "commandsPanel") {
-      setMainView("tools");
-      setMobilePanel("transcript");
+      revealCommandsPanel(trigger);
       return;
     }
     if (anchor === "status") {
-      setRightTab("status");
-      setMobilePanel("status");
+      revealStatusPanel("status");
     }
   }
 
@@ -631,23 +791,11 @@ export function App() {
       switch (action.target) {
         case "history":
         case "sessions":
-          setMobilePanel("history");
-          return;
         case "agents":
-          setMainView("agents");
-          setMobilePanel("transcript");
-          return;
         case "commands":
-          setMainView("tools");
-          setMobilePanel("transcript");
-          return;
         case "status":
-          setRightTab("status");
-          setMobilePanel("status");
-          return;
         case "preview":
-          setMainView("transcript");
-          setMobilePanel("transcript");
+          revealHostPanel(action.target);
           return;
         default:
           return;
@@ -658,8 +806,7 @@ export function App() {
         await handleAttachment();
         return;
       }
-      setRightTab("status");
-      setMobilePanel("status");
+      revealStatusPanel("status");
     }
   }
 
@@ -674,9 +821,15 @@ export function App() {
       return;
     }
     const record = asRecord(result);
-    const feedback = commandFeedbackFromResult(command, record, trigger);
-    if (asRecord(record.action).type === "passThroughPrompt") {
-      await runHostAction(record.action);
+    const action = asRecord(record.action);
+    const downloadThreadId = action.type === "downloadSession"
+      ? optionalStringField(action.threadId) ?? snapshot.thread?.id ?? null
+      : null;
+    const feedback = commandFeedbackFromResult(command, record, trigger, {
+      downloadAvailable: action.type !== "downloadSession" || Boolean(endpoint && downloadThreadId)
+    });
+    if (action.type === "passThroughPrompt") {
+      await runHostAction(record.action, trigger);
       return;
     }
     if (record.accepted !== true && record.known === false) {
@@ -697,7 +850,7 @@ export function App() {
     if (feedback) {
       routeCommandFeedback(feedback, trigger);
     }
-    await runHostAction(record.action);
+    await runHostAction(record.action, trigger);
   }
 
   async function startNewThread(workdir?: string) {
@@ -719,7 +872,7 @@ export function App() {
     setMobilePanel("transcript");
   }
 
-  async function runHostAction(action: unknown) {
+  async function runHostAction(action: unknown, trigger: CommandTrigger = "commandsPanel") {
     const record = asRecord(action);
     switch (record.type) {
       case "threadStart": {
@@ -746,8 +899,9 @@ export function App() {
         break;
       case "queuePrompt": {
         const text = stringField(record.text).trim();
+        const displayText = optionalStringField(record.displayText);
         if (text) {
-          await submitTurn(text, []);
+          await submitTurn(text, [], displayText);
         }
         break;
       }
@@ -774,47 +928,32 @@ export function App() {
           setCommandFeedback({
             accepted: false,
             command: "/steer",
-            message: "/steer is only available while a turn is running."
+            message: "/steer is only available while a turn is running.",
+            feedbackAnchor: "composer"
           });
-          setMainView("tools");
           setMobilePanel("transcript");
         }
         break;
       }
       case "downloadSession":
-        if (endpoint && snapshot.thread?.id) {
-          const kind = stringField(record.kind) === "share" ? "share" : "export";
-          void host?.open.openDownload(downloadUrl(endpoint, snapshot.thread.id, kind));
+        {
+          const threadId = optionalStringField(record.threadId) ?? snapshot.thread?.id ?? null;
+          if (endpoint && threadId) {
+            const kind = stringField(record.kind) === "share" ? "share" : "export";
+            void host?.open.openDownload(downloadUrl(endpoint, threadId, kind));
+          }
         }
         break;
       case "workspaceDiff": {
         const diff = WorkspaceDiffResultSchema.parse(record.diff);
+        setActiveCommandOverlay(null);
         setPreview(diffPreviewState(diff));
         setMainView("transcript");
         setMobilePanel("transcript");
         break;
       }
       case "showPanel":
-        switch (stringField(record.panel)) {
-          case "history":
-          case "sessions":
-            setMobilePanel("history");
-            break;
-          case "agents":
-            setMainView("agents");
-            setMobilePanel("transcript");
-            break;
-          case "commands":
-          case "help":
-            setMainView("tools");
-            setMobilePanel("transcript");
-            break;
-          case "status":
-          default:
-            setRightTab("status");
-            setMobilePanel("status");
-            break;
-        }
+        revealHostPanel(stringField(record.panel), trigger);
         break;
       default:
         if (record.type) {
@@ -833,6 +972,7 @@ export function App() {
       || text.trim()
       || attachments.map((attachment) => `[Attachment: ${attachment.name}]`).join(" ");
     pendingDetachedShellRef.current = null;
+    clearCommandTransientUi();
     setSnapshot((current) => appendOptimisticPrompt(current, optimisticText));
     await client?.request("turn/start", {
       agentName: selectedAgentName || null,
@@ -867,6 +1007,7 @@ export function App() {
 
   async function startShell(command: string) {
     const scope = activeScope ?? init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
+    clearCommandTransientUi();
     const pendingShell = snapshot.thread?.id
       ? null
       : {
@@ -1018,10 +1159,10 @@ export function App() {
               <button aria-label="New Session" onClick={() => void runAction(async () => startNewThread())} type="button">
                 <MessageSquare size={16} /> <span>New Session</span>
               </button>
-              <button aria-label="Search" className={mainView === "search" ? "is-selected" : ""} onClick={() => setMainView("search")} type="button">
+              <button aria-label="Search" className={mainView === "search" ? "is-selected" : ""} onClick={() => switchMainView("search")} type="button">
                 <Search size={16} /> <span>Search</span>
               </button>
-              <button aria-label="Artifacts" className={mainView === "artifacts" ? "is-selected" : ""} onClick={() => setMainView("artifacts")} type="button">
+              <button aria-label="Artifacts" className={mainView === "artifacts" ? "is-selected" : ""} onClick={() => switchMainView("artifacts")} type="button">
                 <Archive size={16} /> <span>Artifacts</span>
               </button>
             </div>
@@ -1078,7 +1219,7 @@ export function App() {
                     await refreshHistory();
                   })}
                   onResumeDraft={() => {
-                    setMainView("transcript");
+                    switchMainView("transcript");
                     setMobilePanel("transcript");
                   }}
                   onResume={(threadId) => void runAction(async () => {
@@ -1095,7 +1236,7 @@ export function App() {
                 />
               </>
             )}
-            <LeftUtilityRail value={mainView} onChange={setMainView} />
+            <LeftUtilityRail value={mainView} onChange={switchMainView} />
           </div>
         </aside>
 
@@ -1130,7 +1271,7 @@ export function App() {
               onCommand={(slash) => void runAction(async () => executeCommand(slash, "commandsPanel"))}
               onCommandAlternateAction={(action) => void runAction(async () => runCommandAlternateAction(action))}
               onDebugChange={setDebugEnabled}
-              onMainViewChange={setMainView}
+              onMainViewChange={switchMainView}
               onOpenSession={(threadId) => void runAction(async () => {
                 const epoch = beginExplicitViewSwitch();
                 await refreshSnapshot(client, threadId, undefined, false, epoch);
@@ -1141,9 +1282,21 @@ export function App() {
               transcript={<TranscriptPanel activity={activity} entries={transcriptEntries} onCopyText={copyTranscriptText} />}
             />
             {showSessionChrome && preview && <PreviewPane preview={preview} onClose={() => setPreview(null)} />}
+            {showSessionChrome && activeCommandOverlay && (
+              <CommandOverlay
+                agents={agents}
+                backends={backends}
+                commands={commands}
+                feedback={commandFeedback}
+                kind={activeCommandOverlay}
+                onAlternateAction={(action) => void runAction(async () => runCommandAlternateAction(action))}
+                onClose={clearCommandTransientUi}
+                onExecute={(slash) => void runAction(async () => executeCommand(slash, "commandOverlay"))}
+              />
+            )}
           </div>
           {showSessionChrome && <div className="composerDock">
-            {commandFeedback?.feedbackAnchor === "composer" && (
+            {(commandFeedback?.feedbackAnchor === "composer" || commandFeedback?.feedbackAnchor === "status") && (
               <CommandFeedbackView
                 className="composerCommandFeedback"
                 feedback={commandFeedback}
@@ -1210,6 +1363,7 @@ export function App() {
                 if (!activity.activeTurnId) {
                   return;
                 }
+                clearCommandTransientUi();
                 setSnapshot((current) => appendOptimisticPrompt(current, text));
                 await client?.request("turn/steer", {
                   expectedTurnId: activity.activeTurnId,
@@ -1265,7 +1419,13 @@ export function App() {
                 onOpen={(path) => void runAction(async () => openFilePreview(path))}
               />
             )}
-            {rightTab === "debug" && debugEnabled && <DebugPanel events={debugEvents} />}
+            {rightTab === "debug" && debugEnabled && (
+              <DebugPanel
+                events={debugEvents}
+                trace={traceState}
+                onRefreshTrace={() => void refreshTrace()}
+              />
+            )}
           </aside>
         )}
       </div>
@@ -1803,16 +1963,56 @@ const UNSUPPORTED_PREVIEW_EXTENSIONS = new Set([
   "zst"
 ]);
 
-function DebugPanel({ events }: { events: DebugEvent[] }) {
+function DebugPanel({
+  events,
+  onRefreshTrace,
+  trace
+}: {
+  events: DebugEvent[];
+  onRefreshTrace(): void;
+  trace: TraceState;
+}) {
+  const traceEvents = trace.result?.events ?? [];
+  const traceWarnings = trace.result?.warnings ?? [];
   return (
     <section className="debugPanel" aria-label="Debug event stream">
       <header>
         <Bug size={17} />
         <div>
           <h2>Debug</h2>
-          <p>{events.length} recent notifications</p>
+          <p>{traceEvents.length} trace events · {events.length} recent notifications</p>
         </div>
+        <button aria-label="Refresh Trace" onClick={onRefreshTrace} type="button">
+          <RefreshCw size={15} />
+        </button>
       </header>
+      <div className="debugSection">
+        <div className="debugSectionHeader">
+          <strong>Trace</strong>
+          <span>{trace.loading ? "loading" : trace.result?.available ? "persisted" : "unavailable"}</span>
+        </div>
+        {trace.error && <p className="debugNotice">{trace.error}</p>}
+        {traceWarnings.map((warning) => (
+          <p className="debugNotice" key={warning}>{warning}</p>
+        ))}
+        <div className="debugList">
+          {traceEvents.map((event, index) => (
+            <details key={`${trace.threadId ?? "trace"}:${traceEventSeq(event) ?? index}`}>
+              <summary>
+                <code>{traceEventLabel(event)}</code>
+                <span>{traceEventTime(event)}</span>
+              </summary>
+              <pre>{prettyJson(event)}</pre>
+            </details>
+          ))}
+          {traceEvents.length === 0 && <p>No persisted trace events.</p>}
+        </div>
+      </div>
+      <div className="debugSection">
+        <div className="debugSectionHeader">
+          <strong>Notifications</strong>
+          <span>{events.length} recent</span>
+        </div>
       <div className="debugList">
         {events.map((event) => (
           <details key={event.id}>
@@ -1824,6 +2024,7 @@ function DebugPanel({ events }: { events: DebugEvent[] }) {
           </details>
         ))}
         {events.length === 0 && <p>No events yet.</p>}
+      </div>
       </div>
     </section>
   );
@@ -2147,6 +2348,63 @@ function AgentSurfacePanel({
             {command.slash}
           </span>
         ))}
+      </div>
+    </section>
+  );
+}
+
+function CommandOverlay({
+  agents,
+  backends,
+  commands,
+  feedback,
+  kind,
+  onAlternateAction,
+  onClose,
+  onExecute
+}: {
+  agents: WorkbenchAgent[];
+  backends: WorkbenchBackend[];
+  commands: WorkbenchCommand[];
+  feedback: CommandFeedback;
+  kind: CommandOverlay;
+  onAlternateAction(action: CommandAlternateAction): void;
+  onClose(): void;
+  onExecute: (slash: string) => void;
+}) {
+  const title = kind === "agents" ? "Agents" : "Commands";
+  return (
+    <section className="commandOverlay" aria-label={`${title} overlay`}>
+      <header>
+        <div className="centerPageTitle">
+          {kind === "agents" ? <Bot size={18} /> : <TerminalSquare size={18} />}
+          <div>
+            <h2>{title}</h2>
+            <p>{kind === "agents" ? "Available agent surfaces" : "Slash command catalog"}</p>
+          </div>
+        </div>
+        <button
+          aria-label={`Close ${title}`}
+          className="centerPageBack"
+          data-tooltip="Back to transcript"
+          onClick={onClose}
+          title="Back to transcript"
+          type="button"
+        >
+          <X size={15} />
+        </button>
+      </header>
+      <div className="commandOverlayBody">
+        {kind === "agents" ? (
+          <AgentsPanel agents={agents} backends={backends} />
+        ) : (
+          <CommandsPanel
+            commands={commands}
+            feedback={feedback}
+            onAlternateAction={onAlternateAction}
+            onExecute={onExecute}
+          />
+        )}
       </div>
     </section>
   );
@@ -2565,15 +2823,17 @@ function parseCommandAlternateAction(value: unknown): CommandAlternateAction | n
 function commandFeedbackFromResult(
   command: string,
   record: Record<string, unknown>,
-  trigger: CommandTrigger
+  trigger: CommandTrigger,
+  options: { downloadAvailable?: boolean } = {}
 ): CommandFeedback {
   const action = asRecord(record.action);
-  const message = optionalStringField(record.message) ?? commandActionFeedbackMessage(action);
+  const message = optionalStringField(record.message) ?? commandActionFeedbackMessage(action, options);
   if (!message) {
     return null;
   }
+  const downloadFailed = action.type === "downloadSession" && options.downloadAvailable === false;
   return {
-    accepted: record.accepted === true,
+    accepted: record.accepted === true && !downloadFailed,
     command: optionalStringField(record.command) ?? command,
     message,
     feedbackAnchor: resolveCommandFeedbackAnchor(optionalStringField(record.feedbackAnchor), trigger),
@@ -2582,6 +2842,12 @@ function commandFeedbackFromResult(
 }
 
 function resolveCommandFeedbackAnchor(anchor: string | null, trigger: CommandTrigger): string {
+  if (
+    (trigger === "commandsPanel" || trigger === "commandOverlay")
+    && (!anchor || anchor === "trigger" || anchor === "commandsPanel")
+  ) {
+    return "commandsPanel";
+  }
   if (!anchor || anchor === "trigger") {
     return trigger;
   }
@@ -2591,11 +2857,44 @@ function resolveCommandFeedbackAnchor(anchor: string | null, trigger: CommandTri
   return anchor;
 }
 
-function commandActionFeedbackMessage(action: Record<string, unknown>): string | null {
+function commandActionFeedbackMessage(
+  action: Record<string, unknown>,
+  options: { downloadAvailable?: boolean } = {}
+): string | null {
   if (action.type === "downloadSession") {
+    if (options.downloadAvailable === false) {
+      return stringField(action.kind) === "share"
+        ? "Share is not available for this session."
+        : "Export is not available for this session.";
+    }
     return stringField(action.kind) === "share" ? "Share artifact opened." : "Export download opened.";
   }
+  if (action.type === "showPanel") {
+    return `Opened ${hostPanelLabel(stringField(action.panel))}.`;
+  }
   return null;
+}
+
+function hostPanelLabel(panel: string): string {
+  switch (panel) {
+    case "history":
+    case "sessions":
+      return "History";
+    case "agents":
+      return "Agents";
+    case "commands":
+    case "help":
+      return "Commands";
+    case "preview":
+      return "Preview";
+    case "files":
+      return "Files";
+    case "debug":
+      return "Debug";
+    case "status":
+    default:
+      return "Status";
+  }
 }
 
 const COMMAND_PRESENTATION_ORDER = ["navigate", "inspect", "control", "submit", "export", "extension"];
@@ -2669,6 +2968,26 @@ function stringField(value: unknown): string {
 
 function optionalStringField(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function traceEventSeq(value: unknown): number | null {
+  const seq = asRecord(value).seq;
+  return typeof seq === "number" && Number.isFinite(seq) ? seq : null;
+}
+
+function traceEventLabel(value: unknown): string {
+  const record = asRecord(value);
+  const seq = traceEventSeq(value);
+  const kind = optionalStringField(record.kind) ?? optionalStringField(record.type) ?? "event";
+  return seq === null ? kind : `#${seq} ${kind}`;
+}
+
+function traceEventTime(value: unknown): string {
+  const timestamp = asRecord(value).timestamp_ms;
+  if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) {
+    return "";
+  }
+  return new Date(timestamp).toLocaleTimeString();
 }
 
 function stringArray(value: unknown): string[] {
