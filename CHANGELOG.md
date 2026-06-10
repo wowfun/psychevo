@@ -11,6 +11,14 @@
   Web/Desktop catalog filtering, typed unsupported-command guidance, Workbench
   command grouping, composer-local feedback, structured destination routing,
   and original slash display text for submit-style commands.
+- Completed several Web/Desktop UX and command-flow fixes around safer slash action
+  visibility, in-transcript `/help`/`/commands`/`/agents`, and composer alignment
+  with the centered reading column plus compact model controls.
+- Expanded `peval-py` reporting with Waterfall/flat traces, richer timing
+  diagnostics, compact `sessions/<session_id>/events.jsonl` payloads, v18
+  timing fields, and shared report-rendering and export flows.
+- Split `peval-py` tests into behavior-focused suites with shared fixtures and
+  support helpers.
 
 ## 2026-06-09
 
