@@ -28,6 +28,10 @@ impl WorkdirTool {
         &self.workdir
     }
 
+    pub(crate) fn sandbox_policy(&self) -> &SandboxPolicy {
+        &self.context.sandbox_policy
+    }
+
     pub(crate) fn resolve_existing(&self, raw: &str) -> Result<PathBuf> {
         let target = self.resolve_raw(raw);
         Ok(target.canonicalize()?)
@@ -69,6 +73,27 @@ impl WorkdirTool {
                 "path escapes workdir: {}",
                 path.display()
             )))
+        }
+    }
+
+    pub(crate) fn ensure_sandbox_write_allowed(
+        &self,
+        path: &Path,
+        tool_call_id: Option<&str>,
+    ) -> Result<()> {
+        match self.sandbox_policy().ensure_write_allowed(path) {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                if let Some(tool_call_id) = tool_call_id
+                    && self
+                        .context
+                        .sandbox_grants
+                        .allows_once(tool_call_id, path)?
+                {
+                    return Ok(());
+                }
+                Err(err)
+            }
         }
     }
 

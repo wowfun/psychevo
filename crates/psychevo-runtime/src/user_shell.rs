@@ -19,6 +19,7 @@ use crate::types::{
 pub(crate) struct PreparedUserShellContext {
     pub(crate) store: SqliteStore,
     pub(crate) session_id: String,
+    pub(crate) sandbox_policy: crate::sandbox::SandboxPolicy,
 }
 
 pub async fn run_user_shell_command_streaming_controlled(
@@ -39,6 +40,10 @@ pub async fn run_user_shell_command_streaming_controlled(
     let stream_session_id = prepared_context
         .as_ref()
         .map(|context| context.session_id.clone());
+    let sandbox_policy = prepared_context
+        .as_ref()
+        .map(|context| context.sandbox_policy.clone())
+        .unwrap_or_else(crate::sandbox::SandboxPolicy::disabled);
 
     let tool_call_id = "user_shell".to_string();
     stream(RunStreamEvent::Event(json!({
@@ -55,6 +60,7 @@ pub async fn run_user_shell_command_streaming_controlled(
     let (result, is_error) = match run_exec_command_for_user_shell(
         workdir.clone(),
         command.clone(),
+        sandbox_policy,
         control.receivers.abort_signal(),
     )
     .await
@@ -162,6 +168,12 @@ pub(crate) fn prepare_user_shell_context(
     };
     let loaded = load_run_config(&options, workdir)?;
     let resolved = resolve_run_provider(&options, &loaded)?;
+    let sandbox_policy = crate::sandbox::SandboxPolicy::from_config(
+        &loaded.config.sandbox,
+        workdir,
+        context.mode,
+        &loaded.env,
+    )?;
     let store = context.state.store().clone();
     let continue_sources = context
         .continue_sources
@@ -221,7 +233,11 @@ pub(crate) fn prepare_user_shell_context(
         let title = deterministic_shell_session_title(command);
         store.set_session_title(&session_id, &title)?;
     }
-    Ok(PreparedUserShellContext { store, session_id })
+    Ok(PreparedUserShellContext {
+        store,
+        session_id,
+        sandbox_policy,
+    })
 }
 
 pub(crate) fn user_shell_metadata(

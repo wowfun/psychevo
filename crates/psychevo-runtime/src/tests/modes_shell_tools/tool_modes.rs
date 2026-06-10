@@ -58,6 +58,8 @@ pub(crate) async fn exec_command_prepends_managed_tool_path() {
             stream_events: None,
             env: BTreeMap::new(),
             path_prefixes: vec![tools_dir],
+            sandbox_policy: crate::sandbox::SandboxPolicy::disabled(),
+            sandbox_grants: crate::sandbox::SandboxWriteGrants::default(),
         },
     );
     let exec = tools
@@ -760,6 +762,7 @@ pub(crate) async fn exec_command_abort_kills_background_child_process_group() {
     let task = tokio::spawn(crate::tools::run_exec_command_for_user_shell(
         workdir,
         command,
+        crate::sandbox::SandboxPolicy::disabled(),
         receivers.abort_signal(),
     ));
 

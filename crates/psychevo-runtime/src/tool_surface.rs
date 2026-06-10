@@ -8,6 +8,7 @@ use psychevo_ai::ToolDeclaration;
 use crate::agents::{AgentToolContext, agent_tools};
 use crate::config::{CustomToolsetConfig, LspConfig, ToolSelectionConfig};
 use crate::mcp::mcp_tool_name_parts;
+use crate::sandbox::{SandboxPolicy, SandboxWriteGrants};
 use crate::skills::SkillDiscoveryOptions;
 use crate::tools::{
     ToolRuntimeContext, clarify_tool, coding_core_tools_for_mode_with_selection,
@@ -48,6 +49,8 @@ pub(crate) struct ToolSurfaceAssembly {
     pub(crate) stream_events: Option<RunStreamSink>,
     pub(crate) env: BTreeMap<String, String>,
     pub(crate) path_prefixes: Vec<PathBuf>,
+    pub(crate) sandbox_policy: SandboxPolicy,
+    pub(crate) sandbox_grants: SandboxWriteGrants,
     pub(crate) tool_selection: ToolSelectionConfig,
     pub(crate) custom_toolsets: std::collections::BTreeMap<String, CustomToolsetConfig>,
     pub(crate) clarify: ClarifyToolSurface,
@@ -81,6 +84,8 @@ pub(crate) fn assemble_tool_surface_with_warnings(
             stream_events: input.stream_events.clone(),
             env: input.env.clone(),
             path_prefixes: input.path_prefixes.clone(),
+            sandbox_policy: input.sandbox_policy.clone(),
+            sandbox_grants: input.sandbox_grants.clone(),
         },
         &input.tool_selection,
         &input.custom_toolsets,

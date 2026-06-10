@@ -58,7 +58,7 @@ impl ToolBinding for EditTool {
 
     fn execute(
         &self,
-        _tool_call_id: String,
+        tool_call_id: String,
         args: Value,
         abort: AbortSignal,
     ) -> BoxFuture<'static, ToolOutput> {
@@ -67,29 +67,43 @@ impl ToolBinding for EditTool {
             if abort.aborted() {
                 return ToolOutput::error("aborted");
             }
-            result_output(edit_tool_impl(tool, args))
+            result_output(edit_tool_impl_for_call(tool, Some(&tool_call_id), args))
         })
     }
 }
 
+#[cfg(test)]
 pub(crate) fn edit_tool_impl(tool: WorkdirTool, args: Value) -> Result<Value> {
+    edit_tool_impl_for_call(tool, None, args)
+}
+
+pub(crate) fn edit_tool_impl_for_call(
+    tool: WorkdirTool,
+    tool_call_id: Option<&str>,
+    args: Value,
+) -> Result<Value> {
     let mode = args
         .get("mode")
         .and_then(Value::as_str)
         .unwrap_or("replace");
     match mode {
-        "replace" => edit_replace(tool, args),
-        "patch" => edit_patch(tool, args),
+        "replace" => edit_replace(tool, tool_call_id, args),
+        "patch" => edit_patch(tool, tool_call_id, args),
         _ => Err(Error::Message(format!("unsupported edit mode: {mode}"))),
     }
 }
 
-pub(crate) fn edit_replace(tool: WorkdirTool, args: Value) -> Result<Value> {
+pub(crate) fn edit_replace(
+    tool: WorkdirTool,
+    tool_call_id: Option<&str>,
+    args: Value,
+) -> Result<Value> {
     let path = required_string(&args, "path")?;
     let old_string = required_string(&args, "old_string")?;
     let new_string = required_string(&args, "new_string")?;
     let replace_all = optional_bool(&args, "replace_all")?.unwrap_or(false);
     let target = tool.resolve_existing(path)?;
+    tool.ensure_sandbox_write_allowed(&target, tool_call_id)?;
     let _locks = acquire_path_locks(std::slice::from_ref(&target));
     let warning = stale_file_warning(tool.task_id(), &target);
     let text = read_text_file(&target)?;
@@ -120,7 +134,11 @@ pub(crate) fn edit_replace(tool: WorkdirTool, args: Value) -> Result<Value> {
     }))
 }
 
-pub(crate) fn edit_patch(tool: WorkdirTool, args: Value) -> Result<Value> {
+pub(crate) fn edit_patch(
+    tool: WorkdirTool,
+    tool_call_id: Option<&str>,
+    args: Value,
+) -> Result<Value> {
     let patch = required_string(&args, "patch")?;
     let operations = match parse_v4a_patch(patch) {
         Ok(operations) => operations,
@@ -131,24 +149,30 @@ pub(crate) fn edit_patch(tool: WorkdirTool, args: Value) -> Result<Value> {
         match op.kind {
             V4aOperationKind::Add => {
                 let (target, _) = tool.resolve_write_target(&op.file_path)?;
+                tool.ensure_sandbox_write_allowed(&target, tool_call_id)?;
                 lock_paths.push(target);
             }
             V4aOperationKind::Update | V4aOperationKind::Delete => {
-                lock_paths.push(tool.resolve_existing(&op.file_path)?);
+                let target = tool.resolve_existing(&op.file_path)?;
+                tool.ensure_sandbox_write_allowed(&target, tool_call_id)?;
+                lock_paths.push(target);
             }
             V4aOperationKind::Move => {
-                lock_paths.push(tool.resolve_existing(&op.file_path)?);
+                let source = tool.resolve_existing(&op.file_path)?;
+                tool.ensure_sandbox_write_allowed(&source, tool_call_id)?;
+                lock_paths.push(source);
                 let new_path = op
                     .new_path
                     .as_deref()
                     .ok_or_else(|| Error::Message("move destination required".to_string()))?;
                 let (target, _) = tool.resolve_write_target(new_path)?;
+                tool.ensure_sandbox_write_allowed(&target, tool_call_id)?;
                 lock_paths.push(target);
             }
         }
     }
     let _locks = acquire_path_locks(&lock_paths);
-    let plan = match validate_v4a_operations(&tool, &operations) {
+    let plan = match validate_v4a_operations(&tool, tool_call_id, &operations) {
         Ok(plan) => plan,
         Err(err) => {
             return Ok(json!({
@@ -187,6 +211,7 @@ pub(crate) enum V4aApply {
 
 pub(crate) fn validate_v4a_operations(
     tool: &WorkdirTool,
+    tool_call_id: Option<&str>,
     operations: &[V4aOperation],
 ) -> Result<Vec<V4aApply>> {
     let mut plan = Vec::new();
@@ -194,6 +219,7 @@ pub(crate) fn validate_v4a_operations(
         match op.kind {
             V4aOperationKind::Add => {
                 let (target, _) = tool.resolve_write_target(&op.file_path)?;
+                tool.ensure_sandbox_write_allowed(&target, tool_call_id)?;
                 if target.exists() {
                     return Err(Error::Message(format!(
                         "{}: add target already exists",
@@ -208,6 +234,7 @@ pub(crate) fn validate_v4a_operations(
             }
             V4aOperationKind::Update => {
                 let target = tool.resolve_existing(&op.file_path)?;
+                tool.ensure_sandbox_write_allowed(&target, tool_call_id)?;
                 let text = read_text_file(&target)?;
                 let updated =
                     apply_v4a_update_hunks(&text.normalized, &op.hunks).map_err(Error::Message)?;
@@ -223,6 +250,7 @@ pub(crate) fn validate_v4a_operations(
             }
             V4aOperationKind::Delete => {
                 let target = tool.resolve_existing(&op.file_path)?;
+                tool.ensure_sandbox_write_allowed(&target, tool_call_id)?;
                 let text = read_text_file(&target)?;
                 plan.push(V4aApply::Delete {
                     rel: tool.relative(&target),
@@ -232,11 +260,13 @@ pub(crate) fn validate_v4a_operations(
             }
             V4aOperationKind::Move => {
                 let source = tool.resolve_existing(&op.file_path)?;
+                tool.ensure_sandbox_write_allowed(&source, tool_call_id)?;
                 let dest = op
                     .new_path
                     .as_deref()
                     .ok_or_else(|| Error::Message("move destination required".to_string()))?;
                 let (dest, _) = tool.resolve_write_target(dest)?;
+                tool.ensure_sandbox_write_allowed(&dest, tool_call_id)?;
                 if dest.exists() {
                     return Err(Error::Message(format!(
                         "{}: move destination already exists",
@@ -368,6 +398,32 @@ pub(crate) mod edit_tool_tests {
                 stream_events: None,
                 env: BTreeMap::new(),
                 path_prefixes: Vec::new(),
+                sandbox_policy: SandboxPolicy::disabled(),
+                sandbox_grants: crate::sandbox::SandboxWriteGrants::default(),
+            },
+        )
+    }
+
+    fn workdir_tool_read_only_sandbox(path: &Path) -> WorkdirTool {
+        let env = BTreeMap::new();
+        let policy = crate::sandbox::SandboxPolicy::from_config(
+            &crate::sandbox::SandboxConfig {
+                enabled: true,
+                mode: crate::sandbox::SandboxMode::ReadOnly,
+                writable_roots: Vec::new(),
+                include_tmp: false,
+                include_common_caches: false,
+            },
+            path,
+            RunMode::Default,
+            &env,
+        )
+        .expect("sandbox policy");
+        WorkdirTool::with_context(
+            path.canonicalize().expect("canonical workdir"),
+            ToolRuntimeContext {
+                sandbox_policy: policy,
+                ..ToolRuntimeContext::default()
             },
         )
     }
@@ -478,6 +534,28 @@ pub(crate) mod edit_tool_tests {
         let content = fs::read_to_string(temp.path().join("win.txt")).expect("file");
         assert!(content.starts_with('\u{feff}'));
         assert!(content.contains("uno\r\ntwo\r\n"));
+    }
+
+    #[test]
+    fn edit_replace_rejects_read_only_sandbox_write() {
+        let temp = tempfile::tempdir().expect("temp");
+        fs::write(temp.path().join("main.rs"), "fn main() {}\n").expect("seed");
+        let err = edit_tool_impl(
+            workdir_tool_read_only_sandbox(temp.path()),
+            json!({
+                "mode": "replace",
+                "path": "main.rs",
+                "old_string": "main",
+                "new_string": "run"
+            }),
+        )
+        .expect_err("sandbox denial");
+
+        assert!(err.to_string().contains("read-only"));
+        assert_eq!(
+            fs::read_to_string(temp.path().join("main.rs")).expect("file"),
+            "fn main() {}\n"
+        );
     }
 
     #[test]

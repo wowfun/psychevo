@@ -11,6 +11,7 @@ futures.workspace = true
 html2text.workspace = true
 http.workspace = true
 libc.workspace = true
+landlock.workspace = true
 portable-pty.workspace = true
 psychevo-agent-core = { path = "../psychevo-agent-core" }
 psychevo-ai = { path = "../psychevo-ai" }

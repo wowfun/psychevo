@@ -19,6 +19,7 @@ pub(crate) mod prompt_assembly;
 pub(crate) mod prompt_image;
 pub(crate) mod prompt_templates;
 pub(crate) mod run;
+pub(crate) mod sandbox;
 pub(crate) mod session_export;
 pub(crate) mod session_lookup;
 pub(crate) mod skills;
@@ -89,6 +90,7 @@ pub use run::{
     reload_session_context, run_live, run_live_streaming, run_live_streaming_controlled,
     spawn_agent_background,
 };
+pub use sandbox::{sandbox_status_text, sandbox_status_value};
 pub use session_export::{
     SessionArtifactKind, SessionExportArtifact, SessionExportFormat, SessionExportInclude,
     SessionExportIncludeSet, SessionExportOptions, SessionExportWriteResult,

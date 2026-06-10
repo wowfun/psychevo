@@ -478,6 +478,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     child_agent_tool_context.parent_context_snapshot = previous_messages.clone();
     child_agent_tool_context.required_agent_names = Vec::new();
     child_agent_tool_context.spawn_depth_remaining = Some(child.spawn_depth_remaining);
+    let sandbox_grants = crate::sandbox::SandboxWriteGrants::default();
     let tool_surface = assemble_tool_surface_with_warnings(ToolSurfaceAssembly {
         workdir: child.context.workdir.clone(),
         task_id: child_session.clone(),
@@ -487,6 +488,8 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         stream_events: child.context.stream_events.clone(),
         env: child.context.env.clone(),
         path_prefixes: child.context.path_prefixes.clone(),
+        sandbox_policy: child.context.sandbox_policy.clone(),
+        sandbox_grants: sandbox_grants.clone(),
         tool_selection: child.context.tool_selection.clone(),
         custom_toolsets: child.context.custom_toolsets.clone(),
         clarify: ClarifyToolSurface::Disabled,
@@ -508,6 +511,8 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         child.context.approval_handler.clone(),
         None,
     );
+    let permission_runtime =
+        permission_runtime.with_sandbox(child.context.sandbox_policy.clone(), sandbox_grants);
     tools = permission_runtime.wrap_tools(tools);
     let effective_tool_names = effective_tool_names(&tools);
     let tool_declarations_hash = tool_declarations_hash(&tools);

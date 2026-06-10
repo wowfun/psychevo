@@ -40,6 +40,9 @@ pub(crate) fn parse_run_config(value: Value) -> Result<RunConfig> {
         config.project_context = parse_project_context_config(project_context)?;
     }
     config.permissions = parse_permission_config(object)?;
+    if let Some(sandbox) = object.get("sandbox") {
+        config.sandbox = parse_sandbox_config(sandbox)?;
+    }
     if let Some(tools) = object.get("tools") {
         config.tools = parse_tool_selection_config(tools)?;
     }
@@ -48,6 +51,27 @@ pub(crate) fn parse_run_config(value: Value) -> Result<RunConfig> {
     }
     if let Some(agents) = object.get("agents") {
         config.agent_backends = parse_agent_backend_configs(agents)?;
+    }
+    Ok(config)
+}
+
+pub(crate) fn parse_sandbox_config(value: &Value) -> Result<SandboxConfig> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| Error::Config("sandbox must be an object".to_string()))?;
+    let mut config = SandboxConfig::default();
+    if let Some(enabled) = optional_bool_field(object, "enabled")? {
+        config.enabled = enabled;
+    }
+    if let Some(mode) = optional_string_field(object, "mode")? {
+        config.mode = SandboxMode::parse(&mode)?;
+    }
+    config.writable_roots = string_array_field(object, "writable_roots", "sandbox.writable_roots")?;
+    if let Some(include_tmp) = optional_bool_field(object, "include_tmp")? {
+        config.include_tmp = include_tmp;
+    }
+    if let Some(include_common_caches) = optional_bool_field(object, "include_common_caches")? {
+        config.include_common_caches = include_common_caches;
     }
     Ok(config)
 }

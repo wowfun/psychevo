@@ -40,7 +40,7 @@ impl ToolBinding for WriteTool {
 
     fn execute(
         &self,
-        _tool_call_id: String,
+        tool_call_id: String,
         args: Value,
         abort: AbortSignal,
     ) -> BoxFuture<'static, ToolOutput> {
@@ -49,15 +49,25 @@ impl ToolBinding for WriteTool {
             if abort.aborted() {
                 return ToolOutput::error("aborted");
             }
-            result_output(write_tool_impl(tool, args))
+            result_output(write_tool_impl_for_call(tool, Some(&tool_call_id), args))
         })
     }
 }
 
+#[cfg(test)]
 pub(crate) fn write_tool_impl(tool: WorkdirTool, args: Value) -> Result<Value> {
+    write_tool_impl_for_call(tool, None, args)
+}
+
+pub(crate) fn write_tool_impl_for_call(
+    tool: WorkdirTool,
+    tool_call_id: Option<&str>,
+    args: Value,
+) -> Result<Value> {
     let path = required_string(&args, "path")?;
     let content = required_string(&args, "content")?;
     let (target, dirs_created) = tool.resolve_write_target(path)?;
+    tool.ensure_sandbox_write_allowed(&target, tool_call_id)?;
     let _locks = acquire_path_locks(std::slice::from_ref(&target));
     let warning = stale_file_warning(tool.task_id(), &target);
     let pre_content = if target.exists() {
@@ -96,6 +106,8 @@ pub(crate) mod write_tool_tests {
                 stream_events: None,
                 env: BTreeMap::new(),
                 path_prefixes: Vec::new(),
+                sandbox_policy: SandboxPolicy::disabled(),
+                sandbox_grants: crate::sandbox::SandboxWriteGrants::default(),
             },
         )
     }
@@ -114,6 +126,32 @@ pub(crate) mod write_tool_tests {
                 stream_events: None,
                 env: BTreeMap::new(),
                 path_prefixes: Vec::new(),
+                sandbox_policy: SandboxPolicy::disabled(),
+                sandbox_grants: crate::sandbox::SandboxWriteGrants::default(),
+            },
+        )
+    }
+
+    fn workdir_tool_with_sandbox(path: &Path) -> WorkdirTool {
+        let env = BTreeMap::new();
+        let policy = crate::sandbox::SandboxPolicy::from_config(
+            &crate::sandbox::SandboxConfig {
+                enabled: true,
+                mode: crate::sandbox::SandboxMode::WorkspaceWrite,
+                writable_roots: Vec::new(),
+                include_tmp: false,
+                include_common_caches: false,
+            },
+            path,
+            RunMode::Default,
+            &env,
+        )
+        .expect("sandbox policy");
+        WorkdirTool::with_context(
+            path.canonicalize().expect("canonical workdir"),
+            ToolRuntimeContext {
+                sandbox_policy: policy,
+                ..ToolRuntimeContext::default()
             },
         )
     }
@@ -196,5 +234,22 @@ pub(crate) mod write_tool_tests {
         let value = write_tool_impl(reader, json!({"path": "shared.txt", "content": "three\n"}))
             .expect("reader write");
         assert!(value["warning"].as_str().unwrap().contains("sibling agent"));
+    }
+
+    #[test]
+    fn write_tool_rejects_sandbox_write_outside_workspace() {
+        let temp = tempfile::tempdir().expect("temp");
+        let outside = tempfile::tempdir().expect("outside");
+        let err = write_tool_impl(
+            workdir_tool_with_sandbox(temp.path()),
+            json!({
+                "path": outside.path().join("blocked.txt").display().to_string(),
+                "content": "nope\n",
+            }),
+        )
+        .expect_err("sandbox denial");
+
+        assert!(err.to_string().contains("denied by sandbox policy"));
+        assert!(!outside.path().join("blocked.txt").exists());
     }
 }

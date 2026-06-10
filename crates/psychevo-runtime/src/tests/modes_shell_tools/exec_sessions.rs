@@ -23,6 +23,8 @@ pub(crate) async fn exec_command_yielded_session_emits_background_lifecycle_even
             stream_events: Some(stream),
             env: BTreeMap::new(),
             path_prefixes: Vec::new(),
+            sandbox_policy: crate::sandbox::SandboxPolicy::disabled(),
+            sandbox_grants: crate::sandbox::SandboxWriteGrants::default(),
         },
     );
     let exec = tools
@@ -97,6 +99,8 @@ pub(crate) async fn interrupt_exec_sessions_for_task_emits_interrupted_finish() 
             stream_events: Some(stream),
             env: BTreeMap::new(),
             path_prefixes: Vec::new(),
+            sandbox_policy: crate::sandbox::SandboxPolicy::disabled(),
+            sandbox_grants: crate::sandbox::SandboxWriteGrants::default(),
         },
     );
     let exec = tools

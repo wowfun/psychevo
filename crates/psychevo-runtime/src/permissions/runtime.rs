@@ -11,6 +11,8 @@ pub(crate) struct PermissionRuntimeInner {
     pub(crate) project_config_dir: PathBuf,
     pub(crate) mode: PermissionMode,
     pub(crate) config: PermissionConfig,
+    pub(crate) sandbox_policy: crate::sandbox::SandboxPolicy,
+    pub(crate) sandbox_grants: crate::sandbox::SandboxWriteGrants,
     pub(crate) session_grants: Mutex<HashSet<String>>,
     pub(crate) pending_approvals: Mutex<VecDeque<String>>,
     pub(crate) approval_events: Mutex<Vec<ApprovalLifecycleEvent>>,
@@ -78,6 +80,23 @@ pub(crate) enum PersistentPermissionGrant {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SandboxWriteGrantRequest {
+    paths: Vec<PathBuf>,
+    reason: String,
+}
+
+struct ApprovalDecisionRequest<'a> {
+    tool_call_id: &'a str,
+    tool_name: &'a str,
+    args: &'a Value,
+    reason: &'a str,
+    matched_rule: Option<&'a str>,
+    suggested_rule: Option<String>,
+    allow_always: bool,
+    abort: Option<AbortSignal>,
+}
+
 pub(crate) struct PendingApprovalGuard {
     runtime: PermissionRuntime,
     tool_call_id: String,
@@ -120,6 +139,8 @@ impl PermissionRuntime {
                 project_config_dir,
                 mode,
                 config,
+                sandbox_policy: crate::sandbox::SandboxPolicy::disabled(),
+                sandbox_grants: crate::sandbox::SandboxWriteGrants::default(),
                 session_grants: Mutex::new(HashSet::new()),
                 pending_approvals: Mutex::new(VecDeque::new()),
                 approval_events: Mutex::new(Vec::new()),
@@ -127,6 +148,18 @@ impl PermissionRuntime {
                 smart_approval_handler,
             }),
         }
+    }
+
+    pub(crate) fn with_sandbox(
+        mut self,
+        sandbox_policy: crate::sandbox::SandboxPolicy,
+        sandbox_grants: crate::sandbox::SandboxWriteGrants,
+    ) -> Self {
+        let inner = Arc::get_mut(&mut self.inner)
+            .expect("sandbox must be attached before PermissionRuntime is cloned");
+        inner.sandbox_policy = sandbox_policy;
+        inner.sandbox_grants = sandbox_grants;
+        self
     }
 
     pub(crate) fn wrap_tools(&self, tools: Vec<Arc<dyn ToolBinding>>) -> Vec<Arc<dyn ToolBinding>> {
@@ -193,8 +226,40 @@ impl PermissionRuntime {
         if abort.as_ref().is_some_and(AbortSignal::aborted) {
             return Err(ToolOutput::error("aborted"));
         }
+        let action = PermissionAction::from_tool_call(&self.inner.workdir, tool_name, args);
         match self.evaluate(tool_name, args) {
-            PermissionDecision::Allow => Ok(()),
+            PermissionDecision::Allow => {
+                let sandbox_grant = match action.as_ref() {
+                    Some(action) => self.sandbox_write_grant_request(action)?,
+                    None => None,
+                };
+                if let Some(grant) = sandbox_grant {
+                    let session_key = action
+                        .as_ref()
+                        .map(PermissionAction::session_key)
+                        .unwrap_or_else(|| {
+                            format!("{tool_name}:{}", action_summary(tool_name, args))
+                        });
+                    if self
+                        .inner
+                        .sandbox_grants
+                        .grant_call_from_session(tool_call_id, &session_key)
+                    {
+                        return Ok(());
+                    }
+                    return self
+                        .authorize_sandbox_write_grant(
+                            tool_call_id,
+                            tool_name,
+                            args,
+                            session_key,
+                            grant,
+                            abort,
+                        )
+                        .await;
+                }
+                Ok(())
+            }
             PermissionDecision::Deny {
                 reason,
                 matched_rule,
@@ -207,104 +272,92 @@ impl PermissionRuntime {
                 session_key,
                 persistent_grants,
             } => {
+                let sandbox_grant = match action.as_ref() {
+                    Some(action) => self.sandbox_write_grant_request(action)?,
+                    None => None,
+                };
                 if self.inner.mode.bypasses_prompt_asks() {
+                    if let Some(grant) = sandbox_grant {
+                        return Err(ToolOutput::error(format!(
+                            "denied by sandbox policy: {}; bypassPermissions does not bypass sandbox enforcement",
+                            grant.reason
+                        )));
+                    }
                     return Ok(());
                 }
-                if self.inner.mode == PermissionMode::DontAsk {
-                    return Err(permission_error(
-                        "denied",
-                        &format!("permission prompt suppressed by dontAsk: {reason}"),
-                        matched_rule.as_deref(),
-                    ));
-                }
-                if matches!(self.inner.config.approval_policy, ApprovalPolicy::Never) {
-                    return Err(permission_error(
-                        "denied",
-                        &format!("approval_policy=never suppressed prompt: {reason}"),
-                        matched_rule.as_deref(),
-                    ));
-                }
-                let reviewer = self.inner.config.approvals_reviewer;
-                let handler = match reviewer {
-                    ApprovalsReviewer::User => self.inner.approval_handler.as_ref(),
-                    ApprovalsReviewer::Smart => self.inner.smart_approval_handler.as_ref(),
+                let approval_reason = if let Some(grant) = &sandbox_grant {
+                    format!("{reason}; sandbox approval required: {}", grant.reason)
+                } else {
+                    reason.clone()
                 };
-                let Some(handler) = handler else {
-                    return Err(permission_error(
-                        "denied",
-                        &format!("permission reviewer unavailable; failing closed: {reason}"),
-                        matched_rule.as_deref(),
-                    ));
-                };
-                let timeout_secs = handler.timeout_secs();
-                let request = PermissionApprovalRequest {
-                    tool_call_id: tool_call_id.to_string(),
-                    tool_name: tool_name.to_string(),
-                    summary: action_summary(tool_name, args),
-                    reason: if self.inner.config.approvals_reviewer == ApprovalsReviewer::Smart {
-                        match &self.inner.config.auto_review.model {
-                            Some(model) => format!("{reason} (smart reviewer configured: {model})"),
-                            None => format!("{reason} (smart reviewer configured)"),
-                        }
-                    } else {
-                        reason.clone()
-                    },
-                    matched_rule: matched_rule.clone(),
-                    suggested_rule: suggested_rule.clone(),
-                    allow_always,
-                    timeout_secs,
-                };
-                let mut pending_approval = self.start_pending_approval(&request);
-                let decision = match abort {
-                    Some(mut abort) if timeout_secs == 0 => {
-                        tokio::select! {
-                            biased;
-                            _ = abort.wait_for_abort() => return Err(ToolOutput::error("aborted")),
-                            decision = handler.request_permission(request) => decision,
-                        }
-                    }
-                    Some(mut abort) => {
-                        tokio::select! {
-                            biased;
-                            _ = abort.wait_for_abort() => return Err(ToolOutput::error("aborted")),
-                            decision = time::timeout(
-                                Duration::from_secs(timeout_secs),
-                                handler.request_permission(request),
-                            ) => {
-                                decision.unwrap_or_else(|_| crate::types::PermissionApprovalDecision::deny())
-                            }
-                        }
-                    }
-                    None if timeout_secs == 0 => handler.request_permission(request).await,
-                    None => time::timeout(
-                        Duration::from_secs(timeout_secs),
-                        handler.request_permission(request),
-                    )
-                    .await
-                    .unwrap_or_else(|_| crate::types::PermissionApprovalDecision::deny()),
-                };
-                pending_approval.finish(decision.outcome);
-                if reviewer == ApprovalsReviewer::Smart {
+                let decision = self
+                    .request_approval_decision(ApprovalDecisionRequest {
+                        tool_call_id,
+                        tool_name,
+                        args,
+                        reason: &approval_reason,
+                        matched_rule: matched_rule.as_deref(),
+                        suggested_rule: suggested_rule.clone(),
+                        allow_always: allow_always && sandbox_grant.is_none(),
+                        abort,
+                    })
+                    .await?;
+                if self.inner.config.approvals_reviewer == ApprovalsReviewer::Smart {
                     return match decision.outcome {
                         PermissionApprovalOutcome::AllowOnce
                         | PermissionApprovalOutcome::AllowSession
-                        | PermissionApprovalOutcome::AllowAlways => Ok(()),
+                        | PermissionApprovalOutcome::AllowAlways => {
+                            if let Some(grant) = &sandbox_grant {
+                                self.inner
+                                    .sandbox_grants
+                                    .grant_once(tool_call_id, &grant.paths)
+                                    .map_err(|err| ToolOutput::error(err.to_string()))?;
+                            }
+                            Ok(())
+                        }
                         PermissionApprovalOutcome::Deny => Err(permission_error(
                             "denied",
-                            &format!("smart reviewer denied permission: {reason}"),
+                            &format!("smart reviewer denied permission: {approval_reason}"),
                             matched_rule.as_deref(),
                         )),
                     };
                 }
                 match decision.outcome {
-                    PermissionApprovalOutcome::AllowOnce => Ok(()),
+                    PermissionApprovalOutcome::AllowOnce => {
+                        if let Some(grant) = &sandbox_grant {
+                            self.inner
+                                .sandbox_grants
+                                .grant_once(tool_call_id, &grant.paths)
+                                .map_err(|err| ToolOutput::error(err.to_string()))?;
+                        }
+                        Ok(())
+                    }
                     PermissionApprovalOutcome::AllowSession => {
-                        self.remember_session_grant(session_key);
+                        self.remember_session_grant(session_key.clone());
+                        if let Some(grant) = &sandbox_grant {
+                            self.inner
+                                .sandbox_grants
+                                .grant_once(tool_call_id, &grant.paths)
+                                .map_err(|err| ToolOutput::error(err.to_string()))?;
+                            self.inner
+                                .sandbox_grants
+                                .grant_session(&session_key, &grant.paths)
+                                .map_err(|err| ToolOutput::error(err.to_string()))?;
+                        }
                         Ok(())
                     }
                     PermissionApprovalOutcome::AllowAlways => {
-                        self.remember_session_grant(session_key);
-                        if allow_always {
+                        self.remember_session_grant(session_key.clone());
+                        if let Some(grant) = &sandbox_grant {
+                            self.inner
+                                .sandbox_grants
+                                .grant_once(tool_call_id, &grant.paths)
+                                .map_err(|err| ToolOutput::error(err.to_string()))?;
+                            self.inner
+                                .sandbox_grants
+                                .grant_session(&session_key, &grant.paths)
+                                .map_err(|err| ToolOutput::error(err.to_string()))?;
+                        } else if allow_always {
                             self.persist_permission_grants(&persistent_grants);
                         }
                         Ok(())
@@ -312,12 +365,234 @@ impl PermissionRuntime {
                     PermissionApprovalOutcome::Deny => Err(permission_error(
                         "denied",
                         &format!(
-                            "user denied permission; do not retry the same operation: {reason}"
+                            "user denied permission; do not retry the same operation: {approval_reason}"
                         ),
                         matched_rule.as_deref(),
                     )),
                 }
             }
+        }
+    }
+
+    async fn authorize_sandbox_write_grant(
+        &self,
+        tool_call_id: &str,
+        tool_name: &str,
+        args: &Value,
+        session_key: String,
+        grant: SandboxWriteGrantRequest,
+        abort: Option<AbortSignal>,
+    ) -> std::result::Result<(), ToolOutput> {
+        if self.inner.mode.bypasses_prompt_asks() {
+            return Err(ToolOutput::error(format!(
+                "denied by sandbox policy: {}; bypassPermissions does not bypass sandbox enforcement",
+                grant.reason
+            )));
+        }
+        if let Some(action) = PermissionAction::from_tool_call(&self.inner.workdir, tool_name, args)
+            && matches!(self.inner.config.approval_policy, ApprovalPolicy::Granular)
+            && !self.granular_allows_prompt(&action)
+        {
+            return Err(permission_error(
+                "denied",
+                &format!(
+                    "granular approval disabled for filesystem: {}",
+                    grant.reason
+                ),
+                None,
+            ));
+        }
+        let reason = format!("sandbox approval required: {}", grant.reason);
+        let decision = self
+            .request_approval_decision(ApprovalDecisionRequest {
+                tool_call_id,
+                tool_name,
+                args,
+                reason: &reason,
+                matched_rule: None,
+                suggested_rule: None,
+                allow_always: false,
+                abort,
+            })
+            .await?;
+        if self.inner.config.approvals_reviewer == ApprovalsReviewer::Smart {
+            return match decision.outcome {
+                PermissionApprovalOutcome::AllowOnce
+                | PermissionApprovalOutcome::AllowSession
+                | PermissionApprovalOutcome::AllowAlways => {
+                    self.inner
+                        .sandbox_grants
+                        .grant_once(tool_call_id, &grant.paths)
+                        .map_err(|err| ToolOutput::error(err.to_string()))?;
+                    Ok(())
+                }
+                PermissionApprovalOutcome::Deny => Err(permission_error(
+                    "denied",
+                    &format!("smart reviewer denied permission: {reason}"),
+                    None,
+                )),
+            };
+        }
+        match decision.outcome {
+            PermissionApprovalOutcome::AllowOnce => {
+                self.inner
+                    .sandbox_grants
+                    .grant_once(tool_call_id, &grant.paths)
+                    .map_err(|err| ToolOutput::error(err.to_string()))?;
+                Ok(())
+            }
+            PermissionApprovalOutcome::AllowSession | PermissionApprovalOutcome::AllowAlways => {
+                self.inner
+                    .sandbox_grants
+                    .grant_once(tool_call_id, &grant.paths)
+                    .map_err(|err| ToolOutput::error(err.to_string()))?;
+                self.inner
+                    .sandbox_grants
+                    .grant_session(&session_key, &grant.paths)
+                    .map_err(|err| ToolOutput::error(err.to_string()))?;
+                Ok(())
+            }
+            PermissionApprovalOutcome::Deny => Err(permission_error(
+                "denied",
+                &format!("user denied permission; do not retry the same operation: {reason}"),
+                None,
+            )),
+        }
+    }
+
+    async fn request_approval_decision(
+        &self,
+        request: ApprovalDecisionRequest<'_>,
+    ) -> std::result::Result<crate::types::PermissionApprovalDecision, ToolOutput> {
+        let ApprovalDecisionRequest {
+            tool_call_id,
+            tool_name,
+            args,
+            reason,
+            matched_rule,
+            suggested_rule,
+            allow_always,
+            abort,
+        } = request;
+        if self.inner.mode == PermissionMode::DontAsk {
+            return Err(permission_error(
+                "denied",
+                &format!("permission prompt suppressed by dontAsk: {reason}"),
+                matched_rule,
+            ));
+        }
+        if matches!(self.inner.config.approval_policy, ApprovalPolicy::Never) {
+            return Err(permission_error(
+                "denied",
+                &format!("approval_policy=never suppressed prompt: {reason}"),
+                matched_rule,
+            ));
+        }
+        let reviewer = self.inner.config.approvals_reviewer;
+        let handler = match reviewer {
+            ApprovalsReviewer::User => self.inner.approval_handler.as_ref(),
+            ApprovalsReviewer::Smart => self.inner.smart_approval_handler.as_ref(),
+        };
+        let Some(handler) = handler else {
+            return Err(permission_error(
+                "denied",
+                &format!("permission reviewer unavailable; failing closed: {reason}"),
+                matched_rule,
+            ));
+        };
+        let timeout_secs = handler.timeout_secs();
+        let request = PermissionApprovalRequest {
+            tool_call_id: tool_call_id.to_string(),
+            tool_name: tool_name.to_string(),
+            summary: action_summary(tool_name, args),
+            reason: if self.inner.config.approvals_reviewer == ApprovalsReviewer::Smart {
+                match &self.inner.config.auto_review.model {
+                    Some(model) => format!("{reason} (smart reviewer configured: {model})"),
+                    None => format!("{reason} (smart reviewer configured)"),
+                }
+            } else {
+                reason.to_string()
+            },
+            matched_rule: matched_rule.map(str::to_string),
+            suggested_rule,
+            allow_always,
+            timeout_secs,
+        };
+        let mut pending_approval = self.start_pending_approval(&request);
+        let decision = match abort {
+            Some(mut abort) if timeout_secs == 0 => {
+                tokio::select! {
+                    biased;
+                    _ = abort.wait_for_abort() => return Err(ToolOutput::error("aborted")),
+                    decision = handler.request_permission(request) => decision,
+                }
+            }
+            Some(mut abort) => {
+                tokio::select! {
+                    biased;
+                    _ = abort.wait_for_abort() => return Err(ToolOutput::error("aborted")),
+                    decision = time::timeout(
+                        Duration::from_secs(timeout_secs),
+                        handler.request_permission(request),
+                    ) => {
+                        decision.unwrap_or_else(|_| crate::types::PermissionApprovalDecision::deny())
+                    }
+                }
+            }
+            None if timeout_secs == 0 => handler.request_permission(request).await,
+            None => time::timeout(
+                Duration::from_secs(timeout_secs),
+                handler.request_permission(request),
+            )
+            .await
+            .unwrap_or_else(|_| crate::types::PermissionApprovalDecision::deny()),
+        };
+        pending_approval.finish(decision.outcome);
+        Ok(decision)
+    }
+
+    fn sandbox_write_grant_request(
+        &self,
+        action: &PermissionAction,
+    ) -> std::result::Result<Option<SandboxWriteGrantRequest>, ToolOutput> {
+        let PermissionAction::File {
+            paths,
+            mutating: true,
+            ..
+        } = action
+        else {
+            return Ok(None);
+        };
+
+        let mut grant_paths = Vec::new();
+        let mut reasons = Vec::new();
+        for target in paths {
+            match self
+                .inner
+                .sandbox_policy
+                .write_decision(&target.absolute)
+                .map_err(|err| ToolOutput::error(err.to_string()))?
+            {
+                crate::sandbox::SandboxWriteDecision::Allowed => {}
+                crate::sandbox::SandboxWriteDecision::Grantable { path, reason } => {
+                    grant_paths.push(path);
+                    reasons.push(reason);
+                }
+                crate::sandbox::SandboxWriteDecision::Denied { reason } => {
+                    return Err(ToolOutput::error(format!(
+                        "denied by sandbox policy: {reason}"
+                    )));
+                }
+            }
+        }
+
+        if grant_paths.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(SandboxWriteGrantRequest {
+                paths: grant_paths,
+                reason: reasons.join("; "),
+            }))
         }
     }
 
@@ -1734,4 +2009,400 @@ pub(crate) fn protected_read_reason(target: &FileTarget) -> Option<String> {
         return Some("internal Psychevo cache files cannot be read directly".to_string());
     }
     None
+}
+
+#[cfg(test)]
+mod sandbox_approval_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    #[derive(Debug)]
+    struct RecordingApprovalHandler {
+        decisions: Mutex<VecDeque<crate::types::PermissionApprovalDecision>>,
+        requests: Mutex<Vec<PermissionApprovalRequest>>,
+    }
+
+    impl RecordingApprovalHandler {
+        fn new(decisions: Vec<crate::types::PermissionApprovalDecision>) -> Arc<Self> {
+            Arc::new(Self {
+                decisions: Mutex::new(decisions.into()),
+                requests: Mutex::new(Vec::new()),
+            })
+        }
+
+        fn requests(&self) -> Vec<PermissionApprovalRequest> {
+            self.requests.lock().expect("requests").clone()
+        }
+    }
+
+    impl crate::types::ApprovalHandler for RecordingApprovalHandler {
+        fn timeout_secs(&self) -> u64 {
+            0
+        }
+
+        fn request_permission(
+            &self,
+            request: PermissionApprovalRequest,
+        ) -> BoxFuture<'static, crate::types::PermissionApprovalDecision> {
+            self.requests.lock().expect("requests").push(request);
+            let decision = self
+                .decisions
+                .lock()
+                .expect("decisions")
+                .pop_front()
+                .unwrap_or_else(crate::types::PermissionApprovalDecision::deny);
+            Box::pin(async move { decision })
+        }
+    }
+
+    fn abort_signal() -> AbortSignal {
+        let (_tx, rx) = tokio::sync::watch::channel(false);
+        AbortSignal::new(rx)
+    }
+
+    fn sandbox_policy(
+        workdir: &Path,
+        mode: crate::sandbox::SandboxMode,
+    ) -> crate::sandbox::SandboxPolicy {
+        crate::sandbox::SandboxPolicy::from_config(
+            &crate::sandbox::SandboxConfig {
+                enabled: true,
+                mode,
+                writable_roots: Vec::new(),
+                include_tmp: false,
+                include_common_caches: false,
+            },
+            workdir,
+            crate::types::RunMode::Default,
+            &BTreeMap::new(),
+        )
+        .expect("sandbox policy")
+    }
+
+    fn tool_context(
+        policy: crate::sandbox::SandboxPolicy,
+        grants: crate::sandbox::SandboxWriteGrants,
+    ) -> crate::tools::ToolRuntimeContext {
+        crate::tools::ToolRuntimeContext {
+            task_id: "sandbox-approval-test".to_string(),
+            lsp: crate::config::LspConfig {
+                enabled: false,
+                ..Default::default()
+            },
+            lsp_manager: crate::tools::write_support::default_lsp_manager(),
+            allow_login_shell: false,
+            stream_events: None,
+            env: BTreeMap::new(),
+            path_prefixes: Vec::new(),
+            sandbox_policy: policy,
+            sandbox_grants: grants,
+        }
+    }
+
+    fn permission_runtime(
+        workdir: &Path,
+        policy: crate::sandbox::SandboxPolicy,
+        grants: crate::sandbox::SandboxWriteGrants,
+        handler: Arc<RecordingApprovalHandler>,
+    ) -> PermissionRuntime {
+        permission_runtime_with_config(
+            workdir,
+            PermissionConfig::default(),
+            policy,
+            grants,
+            handler,
+        )
+    }
+
+    fn permission_runtime_with_config(
+        workdir: &Path,
+        config: PermissionConfig,
+        policy: crate::sandbox::SandboxPolicy,
+        grants: crate::sandbox::SandboxWriteGrants,
+        handler: Arc<RecordingApprovalHandler>,
+    ) -> PermissionRuntime {
+        PermissionRuntime::new(
+            workdir.to_path_buf(),
+            workdir.join(".psychevo"),
+            config,
+            PermissionMode::Default,
+            ApprovalMode::Manual,
+            Some(handler),
+            None,
+        )
+        .with_sandbox(policy, grants)
+    }
+
+    fn wrapped_write(
+        workdir: &Path,
+        policy: crate::sandbox::SandboxPolicy,
+        grants: crate::sandbox::SandboxWriteGrants,
+        runtime: &PermissionRuntime,
+    ) -> Arc<dyn ToolBinding> {
+        runtime
+            .wrap_tools(vec![Arc::new(crate::tools::WriteTool::new(
+                workdir.to_path_buf(),
+                tool_context(policy, grants),
+            )) as Arc<dyn ToolBinding>])
+            .into_iter()
+            .next()
+            .expect("write tool")
+    }
+
+    fn wrapped_edit(
+        workdir: &Path,
+        policy: crate::sandbox::SandboxPolicy,
+        grants: crate::sandbox::SandboxWriteGrants,
+        runtime: &PermissionRuntime,
+    ) -> Arc<dyn ToolBinding> {
+        runtime
+            .wrap_tools(vec![Arc::new(crate::tools::EditTool::new(
+                workdir.to_path_buf(),
+                tool_context(policy, grants),
+            )) as Arc<dyn ToolBinding>])
+            .into_iter()
+            .next()
+            .expect("edit tool")
+    }
+
+    #[tokio::test]
+    async fn allow_once_grants_current_write_call_only() {
+        let work = tempfile::tempdir().expect("work");
+        let outside = tempfile::tempdir().expect("outside");
+        let target = outside.path().join("writer.txt");
+        let policy = sandbox_policy(work.path(), crate::sandbox::SandboxMode::WorkspaceWrite);
+        let grants = crate::sandbox::SandboxWriteGrants::default();
+        let handler = RecordingApprovalHandler::new(vec![
+            crate::types::PermissionApprovalDecision::allow_once(),
+        ]);
+        let runtime =
+            permission_runtime(work.path(), policy.clone(), grants.clone(), handler.clone());
+        let write = wrapped_write(work.path(), policy, grants, &runtime);
+
+        let first = write
+            .execute(
+                "call-write-once".to_string(),
+                json!({"path": target.display().to_string(), "content": "one\n"}),
+                abort_signal(),
+            )
+            .await;
+        assert!(!first.is_error, "{:?}", first.json);
+        assert_eq!(std::fs::read_to_string(&target).expect("target"), "one\n");
+
+        let requests = handler.requests();
+        assert_eq!(requests.len(), 1);
+        assert!(!requests[0].allow_always);
+        assert!(requests[0].reason.contains("sandbox approval required"));
+
+        let second = write
+            .execute(
+                "call-write-second".to_string(),
+                json!({"path": target.display().to_string(), "content": "two\n"}),
+                abort_signal(),
+            )
+            .await;
+        assert!(second.is_error, "{:?}", second.json);
+        assert_eq!(std::fs::read_to_string(&target).expect("target"), "one\n");
+    }
+
+    #[tokio::test]
+    async fn allow_session_reuses_same_file_key_but_not_sibling() {
+        let work = tempfile::tempdir().expect("work");
+        let outside = tempfile::tempdir().expect("outside");
+        let target = outside.path().join("session.txt");
+        let sibling = outside.path().join("sibling.txt");
+        let policy = sandbox_policy(work.path(), crate::sandbox::SandboxMode::WorkspaceWrite);
+        let grants = crate::sandbox::SandboxWriteGrants::default();
+        let handler = RecordingApprovalHandler::new(vec![
+            crate::types::PermissionApprovalDecision::allow_session(),
+        ]);
+        let runtime =
+            permission_runtime(work.path(), policy.clone(), grants.clone(), handler.clone());
+        let write = wrapped_write(work.path(), policy, grants, &runtime);
+
+        let first = write
+            .execute(
+                "call-session-1".to_string(),
+                json!({"path": target.display().to_string(), "content": "one\n"}),
+                abort_signal(),
+            )
+            .await;
+        assert!(!first.is_error, "{:?}", first.json);
+        let second = write
+            .execute(
+                "call-session-2".to_string(),
+                json!({"path": target.display().to_string(), "content": "two\n"}),
+                abort_signal(),
+            )
+            .await;
+        assert!(!second.is_error, "{:?}", second.json);
+        assert_eq!(std::fs::read_to_string(&target).expect("target"), "two\n");
+        assert_eq!(handler.requests().len(), 1);
+
+        let sibling_result = write
+            .execute(
+                "call-session-sibling".to_string(),
+                json!({"path": sibling.display().to_string(), "content": "bad\n"}),
+                abort_signal(),
+            )
+            .await;
+        assert!(sibling_result.is_error, "{:?}", sibling_result.json);
+        assert!(!sibling.exists());
+        assert_eq!(handler.requests().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn read_only_sandbox_denies_without_prompt() {
+        let work = tempfile::tempdir().expect("work");
+        let target = work.path().join("blocked.txt");
+        let policy = sandbox_policy(work.path(), crate::sandbox::SandboxMode::ReadOnly);
+        let grants = crate::sandbox::SandboxWriteGrants::default();
+        let handler = RecordingApprovalHandler::new(vec![
+            crate::types::PermissionApprovalDecision::allow_once(),
+        ]);
+        let runtime =
+            permission_runtime(work.path(), policy.clone(), grants.clone(), handler.clone());
+        let write = wrapped_write(work.path(), policy, grants, &runtime);
+
+        let output = write
+            .execute(
+                "call-read-only".to_string(),
+                json!({"path": target.display().to_string(), "content": "no\n"}),
+                abort_signal(),
+            )
+            .await;
+
+        assert!(output.is_error, "{:?}", output.json);
+        assert!(
+            output.json["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("read-only")
+        );
+        assert!(!target.exists());
+        assert!(handler.requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn allow_once_grants_current_edit_call() {
+        let work = tempfile::tempdir().expect("work");
+        let outside = tempfile::tempdir().expect("outside");
+        let target = outside.path().join("edit.txt");
+        std::fs::write(&target, "alpha\n").expect("seed");
+        let policy = sandbox_policy(work.path(), crate::sandbox::SandboxMode::WorkspaceWrite);
+        let grants = crate::sandbox::SandboxWriteGrants::default();
+        let handler = RecordingApprovalHandler::new(vec![
+            crate::types::PermissionApprovalDecision::allow_once(),
+        ]);
+        let runtime =
+            permission_runtime(work.path(), policy.clone(), grants.clone(), handler.clone());
+        let edit = wrapped_edit(work.path(), policy, grants, &runtime);
+
+        let output = edit
+            .execute(
+                "call-edit-once".to_string(),
+                json!({
+                    "mode": "replace",
+                    "path": target.display().to_string(),
+                    "old_string": "alpha",
+                    "new_string": "beta"
+                }),
+                abort_signal(),
+            )
+            .await;
+
+        assert!(!output.is_error, "{:?}", output.json);
+        assert_eq!(std::fs::read_to_string(&target).expect("target"), "beta\n");
+        let requests = handler.requests();
+        assert_eq!(requests.len(), 1);
+        assert!(!requests[0].allow_always);
+    }
+
+    #[tokio::test]
+    async fn sandbox_prompts_even_when_permission_profile_allows_path() {
+        let work = tempfile::tempdir().expect("work");
+        let outside = tempfile::tempdir().expect("outside");
+        let target = outside.path().join("profile-allowed.txt");
+        let policy = sandbox_policy(work.path(), crate::sandbox::SandboxMode::WorkspaceWrite);
+        let grants = crate::sandbox::SandboxWriteGrants::default();
+        let handler = RecordingApprovalHandler::new(vec![
+            crate::types::PermissionApprovalDecision::allow_once(),
+        ]);
+        let config = PermissionConfig {
+            default_permissions: ":danger-full-access".to_string(),
+            ..PermissionConfig::default()
+        };
+        let runtime = permission_runtime_with_config(
+            work.path(),
+            config,
+            policy.clone(),
+            grants.clone(),
+            handler.clone(),
+        );
+        let write = wrapped_write(work.path(), policy, grants, &runtime);
+
+        let output = write
+            .execute(
+                "call-profile-allowed".to_string(),
+                json!({"path": target.display().to_string(), "content": "ok\n"}),
+                abort_signal(),
+            )
+            .await;
+
+        assert!(!output.is_error, "{:?}", output.json);
+        assert_eq!(std::fs::read_to_string(&target).expect("target"), "ok\n");
+        let requests = handler.requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            requests[0].reason,
+            format!(
+                "sandbox approval required: write to {} is outside configured writable roots",
+                target.display()
+            )
+        );
+        assert!(!requests[0].allow_always);
+    }
+
+    #[tokio::test]
+    async fn approval_policy_never_blocks_sandbox_widening_prompt() {
+        let work = tempfile::tempdir().expect("work");
+        let outside = tempfile::tempdir().expect("outside");
+        let target = outside.path().join("blocked-by-never.txt");
+        let policy = sandbox_policy(work.path(), crate::sandbox::SandboxMode::WorkspaceWrite);
+        let grants = crate::sandbox::SandboxWriteGrants::default();
+        let handler = RecordingApprovalHandler::new(vec![
+            crate::types::PermissionApprovalDecision::allow_once(),
+        ]);
+        let config = PermissionConfig {
+            default_permissions: ":danger-full-access".to_string(),
+            approval_policy: ApprovalPolicy::Never,
+            ..PermissionConfig::default()
+        };
+        let runtime = permission_runtime_with_config(
+            work.path(),
+            config,
+            policy.clone(),
+            grants.clone(),
+            handler.clone(),
+        );
+        let write = wrapped_write(work.path(), policy, grants, &runtime);
+
+        let output = write
+            .execute(
+                "call-never".to_string(),
+                json!({"path": target.display().to_string(), "content": "no\n"}),
+                abort_signal(),
+            )
+            .await;
+
+        assert!(output.is_error, "{:?}", output.json);
+        assert!(
+            output.json["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("approval_policy=never")
+        );
+        assert!(!target.exists());
+        assert!(handler.requests().is_empty());
+    }
 }

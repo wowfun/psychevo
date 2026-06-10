@@ -12,6 +12,7 @@ pub(crate) use crate::agents::{
 };
 pub(crate) use crate::error::{Error, Result};
 pub(crate) use crate::paths::canonical_workdir;
+pub(crate) use crate::sandbox::{SandboxConfig, SandboxMode};
 pub(crate) use crate::types::{
     ApprovalPolicy, ApprovalsReviewer, AutoReviewConfig, ConfigScope, ConfiguredModel,
     CustomProviderInput, CustomProviderResult, ExecPolicyConfig, ExecPolicyDecision,
@@ -28,6 +29,7 @@ pub(crate) struct RunConfig {
     pub(crate) provider: BTreeMap<String, ConfigProviderEntry>,
     pub(crate) compression: CompressionConfig,
     pub(crate) permissions: PermissionConfig,
+    pub(crate) sandbox: SandboxConfig,
     pub(crate) lsp: LspConfig,
     pub(crate) project_context: ProjectContextConfig,
     pub(crate) tools: ToolSelectionConfig,

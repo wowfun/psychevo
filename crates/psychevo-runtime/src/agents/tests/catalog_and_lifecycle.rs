@@ -72,6 +72,7 @@ Coordinate.
             model_metadata: ModelMetadata::default(),
             env: BTreeMap::new(),
             path_prefixes: Vec::new(),
+            sandbox_policy: crate::sandbox::SandboxPolicy::disabled(),
             tool_selection: Default::default(),
             custom_toolsets: BTreeMap::new(),
             allowed_agent_names: coordinator.tool_policy.allowed_agents.clone(),

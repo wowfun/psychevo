@@ -358,6 +358,7 @@ pub(crate) struct AgentToolContext {
     pub(crate) model_metadata: ModelMetadata,
     pub(crate) env: BTreeMap<String, String>,
     pub(crate) path_prefixes: Vec<PathBuf>,
+    pub(crate) sandbox_policy: crate::sandbox::SandboxPolicy,
     pub(crate) tool_selection: ToolSelectionConfig,
     pub(crate) custom_toolsets: BTreeMap<String, CustomToolsetConfig>,
     pub(crate) allowed_agent_names: Option<BTreeSet<String>>,

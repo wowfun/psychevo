@@ -277,6 +277,13 @@ pub(crate) async fn run_live_internal(
             serde_json::Value::String(effort.clone()),
         );
     }
+    let sandbox_policy = crate::sandbox::SandboxPolicy::from_config(
+        &loaded.config.sandbox,
+        &workdir,
+        options.mode,
+        &loaded.env,
+    )?;
+    let sandbox_grants = crate::sandbox::SandboxWriteGrants::default();
     let agent_tools = if !options.no_agents {
         Some(AgentToolContext {
             provider: Arc::clone(&provider),
@@ -306,6 +313,7 @@ pub(crate) async fn run_live_internal(
             model_metadata: resolved.metadata.clone(),
             env: loaded.env.clone(),
             path_prefixes: managed_tools.path_prefixes.clone(),
+            sandbox_policy: sandbox_policy.clone(),
             tool_selection: loaded.config.tools.clone(),
             custom_toolsets: loaded.config.toolsets.clone(),
             allowed_agent_names: selected_agent
@@ -335,6 +343,8 @@ pub(crate) async fn run_live_internal(
             generation_metadata.clone(),
         ),
     );
+    let permission_runtime =
+        permission_runtime.with_sandbox(sandbox_policy.clone(), sandbox_grants.clone());
     let (mcp_tools, mcp_warnings) =
         crate::mcp::mcp_tool_bindings(&options.mcp_servers, &workdir, Some(&permission_runtime))
             .await;
@@ -348,6 +358,8 @@ pub(crate) async fn run_live_internal(
         stream_events: stream_events.clone(),
         env: loaded.env.clone(),
         path_prefixes: managed_tools.path_prefixes.clone(),
+        sandbox_policy,
+        sandbox_grants,
         tool_selection: loaded.config.tools.clone(),
         custom_toolsets: loaded.config.toolsets.clone(),
         clarify: if options.clarify_enabled {

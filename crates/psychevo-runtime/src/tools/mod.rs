@@ -18,6 +18,7 @@ pub(crate) use tokio::time;
 pub(crate) use crate::config::{CustomToolsetConfig, LspConfig, ToolSelectionConfig};
 pub(crate) use crate::error::{Error, Result};
 pub(crate) use crate::prompt_templates;
+pub(crate) use crate::sandbox::{SandboxPolicy, SandboxWriteGrants};
 pub(crate) use crate::skills::{
     InstallOptions, ListSkillsOptions, SkillDiscoveryOptions, SkillTarget, create_skill,
     discover_skills, install_skill, list_skills_value_with_options, patch_skill, remove_skill,
@@ -54,6 +55,8 @@ pub(crate) struct ToolRuntimeContext {
     pub(crate) stream_events: Option<RunStreamSink>,
     pub(crate) env: BTreeMap<String, String>,
     pub(crate) path_prefixes: Vec<PathBuf>,
+    pub(crate) sandbox_policy: SandboxPolicy,
+    pub(crate) sandbox_grants: SandboxWriteGrants,
 }
 
 impl Default for ToolRuntimeContext {
@@ -66,6 +69,8 @@ impl Default for ToolRuntimeContext {
             stream_events: None,
             env: BTreeMap::new(),
             path_prefixes: Vec::new(),
+            sandbox_policy: SandboxPolicy::disabled(),
+            sandbox_grants: SandboxWriteGrants::default(),
         }
     }
 }

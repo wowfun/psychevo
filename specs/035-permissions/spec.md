@@ -27,7 +27,7 @@ dangerous-action policy.
 Out of scope:
 
 - operating-system sandbox isolation, security guarantees, containerization,
-  or process isolation
+  or process isolation, which are owned by [036 Sandbox](../036-sandbox/spec.md)
 - concrete terminal rendering details beyond the approval-flow contract
 - concrete tool result JSON fields beyond requiring permission outcomes to be
   observable through the owning tool contract
@@ -39,6 +39,8 @@ Out of scope:
 
 Psychevo permissions are a runtime policy gate before local resource operations
 and tool execution. They are not an operating-system sandbox in this slice.
+[036 Sandbox](../036-sandbox/spec.md) defines the separate enforcement layer
+that may further constrain already-authorized writes or shell children.
 Tool availability, runtime mode, permission mode, approval mode, and persistent
 policy are separate concerns.
 
@@ -245,6 +247,14 @@ The original tool call is suspended while approval is pending. Allow decisions
 resume the original call; deny decisions return an explicit permission-denied
 error instructing the model not to retry the same operation.
 
+For direct file-mutation tools, a permission approval may also be the user
+decision that [036 Sandbox](../036-sandbox/spec.md) consumes to create a
+bounded in-memory sandbox write grant. This bridge is runtime-local: it does
+not persist sandbox writer roots and does not let permission grants bypass
+hard sandbox policy. When a file approval would require sandbox widening,
+permanent approval must not be offered unless a separate sandbox configuration
+change is being made explicitly.
+
 The runtime keeps an in-process FIFO of pending approval requests. Approval
 request and response hooks may observe a request before it is shown and after
 it resolves; hooks must not be required for the approval result and must not
@@ -318,3 +328,5 @@ recent smart denial with `/approve once|session|always`.
   mode and permissions projection.
 - [027 ACP](../027-acp/spec.md) owns ACP permission-request projection for
   runtime asks.
+- [036 Sandbox](../036-sandbox/spec.md) defines filesystem write containment
+  and native OS shell sandbox enforcement beneath permission policy.

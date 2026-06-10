@@ -185,6 +185,8 @@ pub(crate) async fn exec_command_tool_impl(
             stream_events: None,
             env: BTreeMap::new(),
             path_prefixes: Vec::new(),
+            sandbox_policy: SandboxPolicy::disabled(),
+            sandbox_grants: crate::sandbox::SandboxWriteGrants::default(),
         },
         "exec_command".to_string(),
         args,
@@ -210,6 +212,11 @@ pub(crate) async fn exec_command_tool_impl_with_context(
         .map(ToOwned::to_owned)
         .unwrap_or_else(default_shell);
     let tty = optional_bool(&args, "tty")?.unwrap_or(false);
+    if tty && context.sandbox_policy.enabled {
+        return Err(crate::sandbox::sandbox_denied(
+            "tty=true is not supported when sandbox is enabled",
+        ));
+    }
     let login = optional_bool(&args, "login")?.unwrap_or(false);
     if login && !context.allow_login_shell {
         return Err(Error::Message(
@@ -231,6 +238,7 @@ pub(crate) async fn exec_command_tool_impl_with_context(
         login,
         tty,
         path_prefixes: context.path_prefixes.clone(),
+        sandbox_policy: context.sandbox_policy.clone(),
     };
     let session = spawn_exec_session(
         invocation,
@@ -297,6 +305,7 @@ pub(crate) async fn write_stdin_tool_impl_with_call(
 pub(crate) async fn run_exec_command_for_user_shell(
     workdir: PathBuf,
     command: String,
+    sandbox_policy: SandboxPolicy,
     abort: AbortSignal,
 ) -> Result<(Value, bool)> {
     let invocation = ExecInvocation {
@@ -306,6 +315,7 @@ pub(crate) async fn run_exec_command_for_user_shell(
         login: false,
         tty: false,
         path_prefixes: Vec::new(),
+        sandbox_policy,
     };
     let session = spawn_exec_session(
         invocation,
@@ -362,6 +372,7 @@ pub(crate) struct ExecInvocation {
     pub(crate) login: bool,
     pub(crate) tty: bool,
     pub(crate) path_prefixes: Vec<PathBuf>,
+    pub(crate) sandbox_policy: SandboxPolicy,
 }
 
 #[derive(Default)]
@@ -601,6 +612,11 @@ pub(crate) fn spawn_exec_session(
     invocation: ExecInvocation,
     context: ExecSessionContext,
 ) -> Result<Arc<ExecSession>> {
+    if invocation.tty && invocation.sandbox_policy.enabled {
+        return Err(crate::sandbox::sandbox_denied(
+            "tty=true is not supported when sandbox is enabled",
+        ));
+    }
     let id = reserve_exec_session_id()?;
     let session = if invocation.tty {
         match spawn_pty_session(id, context.clone(), &invocation) {
@@ -627,9 +643,9 @@ pub(crate) fn spawn_pipe_session(
     stdin_allowed: bool,
     initial_output: &[u8],
 ) -> Result<Arc<ExecSession>> {
-    let mut command = std::process::Command::new(&invocation.shell);
+    invocation.sandbox_policy.ensure_shell_supported()?;
+    let mut command = pipe_command(invocation)?;
     command
-        .args(shell_args(invocation.login, &invocation.cmd))
         .current_dir(&invocation.workdir)
         .stdin(if stdin_allowed {
             Stdio::piped()
@@ -641,8 +657,20 @@ pub(crate) fn spawn_pipe_session(
     if let Some(path) = subprocess_path(&invocation.path_prefixes)? {
         command.env("PATH", path);
     }
+    for (key, value) in invocation.sandbox_policy.env_markers() {
+        command.env(key, value);
+    }
     configure_process_group(&mut command);
-    let mut child = command.spawn()?;
+    configure_sandbox_pre_exec(&mut command, &invocation.sandbox_policy);
+    let mut child = if invocation.sandbox_policy.enabled {
+        command.spawn().map_err(|err| {
+            Error::Message(format!(
+                "denied by sandbox policy: failed to spawn sandboxed command: {err}"
+            ))
+        })?
+    } else {
+        command.spawn()?
+    };
     let stdin = if stdin_allowed {
         child
             .stdin
@@ -677,6 +705,45 @@ pub(crate) fn spawn_pipe_session(
     spawn_pipe_waiter_thread(Arc::clone(&session), child);
     Ok(session)
 }
+
+fn pipe_command(invocation: &ExecInvocation) -> Result<std::process::Command> {
+    #[cfg(target_os = "macos")]
+    if invocation.sandbox_policy.enabled
+        && matches!(
+            invocation.sandbox_policy.backend,
+            crate::sandbox::SandboxBackend::Seatbelt
+        )
+    {
+        let mut command = std::process::Command::new("/usr/bin/sandbox-exec");
+        command
+            .arg("-p")
+            .arg(crate::sandbox::seatbelt_profile(&invocation.sandbox_policy))
+            .arg("--")
+            .arg(&invocation.shell)
+            .args(shell_args(invocation.login, &invocation.cmd));
+        return Ok(command);
+    }
+
+    let mut command = std::process::Command::new(&invocation.shell);
+    command.args(shell_args(invocation.login, &invocation.cmd));
+    Ok(command)
+}
+
+#[cfg(target_os = "linux")]
+fn configure_sandbox_pre_exec(command: &mut std::process::Command, policy: &SandboxPolicy) {
+    use std::os::unix::process::CommandExt;
+
+    if !policy.enabled {
+        return;
+    }
+    let policy = policy.clone();
+    unsafe {
+        command.pre_exec(move || crate::sandbox::apply_landlock(&policy));
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn configure_sandbox_pre_exec(_command: &mut std::process::Command, _policy: &SandboxPolicy) {}
 
 pub(crate) fn spawn_pty_session(
     id: u64,
@@ -845,4 +912,91 @@ pub(crate) fn session_completed(session: &ExecSession) -> bool {
         .state
         .lock()
         .is_ok_and(|state| state.exited && state.readers_active == 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn exec_command_rejects_tty_when_sandbox_enabled() {
+        let temp = tempfile::tempdir().expect("temp");
+        let env = BTreeMap::new();
+        let policy = crate::sandbox::SandboxPolicy::from_config(
+            &crate::sandbox::SandboxConfig {
+                enabled: true,
+                mode: crate::sandbox::SandboxMode::WorkspaceWrite,
+                writable_roots: Vec::new(),
+                include_tmp: false,
+                include_common_caches: false,
+            },
+            temp.path(),
+            RunMode::Default,
+            &env,
+        )
+        .expect("sandbox policy");
+        let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+
+        let err = exec_command_tool_impl_with_context(
+            temp.path().canonicalize().expect("workdir"),
+            ToolRuntimeContext {
+                sandbox_policy: policy,
+                ..ToolRuntimeContext::default()
+            },
+            "exec_command".to_string(),
+            json!({"cmd": "printf hi", "tty": true}),
+            receivers.abort_signal(),
+        )
+        .await
+        .expect_err("sandbox tty denial");
+
+        assert!(err.to_string().contains("tty=true is not supported"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn exec_command_sandbox_blocks_writes_outside_workspace() {
+        let work = tempfile::tempdir().expect("work");
+        let outside = tempfile::tempdir().expect("outside");
+        let outside_file = outside.path().join("blocked.txt");
+        let env = BTreeMap::new();
+        let policy = crate::sandbox::SandboxPolicy::from_config(
+            &crate::sandbox::SandboxConfig {
+                enabled: true,
+                mode: crate::sandbox::SandboxMode::WorkspaceWrite,
+                writable_roots: Vec::new(),
+                include_tmp: false,
+                include_common_caches: false,
+            },
+            work.path(),
+            RunMode::Default,
+            &env,
+        )
+        .expect("sandbox policy");
+        let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+
+        let result = exec_command_tool_impl_with_context(
+            work.path().canonicalize().expect("workdir"),
+            ToolRuntimeContext {
+                sandbox_policy: policy,
+                ..ToolRuntimeContext::default()
+            },
+            "exec_command".to_string(),
+            json!({
+                "cmd": format!("printf no > {}", outside_file.display()),
+                "yield_time_ms": 30000
+            }),
+            receivers.abort_signal(),
+        )
+        .await;
+
+        match result {
+            Ok(value) => assert_ne!(value["exit_code"].as_i64(), Some(0), "{value}"),
+            Err(err) => assert!(
+                err.to_string().contains("denied by sandbox policy"),
+                "{err}"
+            ),
+        }
+        assert!(!outside_file.exists());
+    }
 }

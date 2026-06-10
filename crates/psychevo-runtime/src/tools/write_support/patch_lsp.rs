@@ -1494,6 +1494,8 @@ pub(crate) mod lsp_tests {
                 stream_events,
                 env,
                 path_prefixes: Vec::new(),
+                sandbox_policy: SandboxPolicy::disabled(),
+                sandbox_grants: crate::sandbox::SandboxWriteGrants::default(),
             },
         )
     }
