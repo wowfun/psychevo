@@ -219,6 +219,19 @@ completion state through touch lists or sheets. Completion ordering is
 query-aware: exact and prefix matches against the visible command/skill/agent/file
 label rank before substring or description-only matches, so pressing Enter
 accepts the item the typed token visibly points at.
+Slash completion rows may include a short destination label such as Panel,
+Preview, Prompt, Download, or Extension. Those labels are derived from Gateway
+command presentation metadata, not from frontend command-name allowlists.
+
+Workbench applies slash command results to the region that owns the result.
+Commands, sessions/history, agents, and status commands switch the relevant
+Workbench panel. Diff opens the preview surface. Context, usage, and status
+details focus the status area. Export and share invoke host download/share
+actions. Active-turn control commands update turn state and show display-only
+feedback near the trigger. Dynamic skill and bundle slash commands submit a
+model turn while the transcript-visible user input remains the original slash
+line. Other command feedback is display-only and must not become ordinary
+transcript history.
 
 Ordinary transcript components consume typed transcript entries/blocks and typed
 Gateway events. They must not display raw runtime event names such as

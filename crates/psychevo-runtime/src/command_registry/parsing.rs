@@ -253,6 +253,8 @@ pub fn available_slash_commands_for_surface(
                 .map(|alias| (*alias).to_string())
                 .collect(),
             argument_kind: spec.argument_kind,
+            action: spec.action,
+            presentation: spec.presentation(),
         })
         .collect::<Vec<_>>();
     let core_count = commands.len();
@@ -275,6 +277,8 @@ pub fn available_slash_commands_for_surface(
                     summary: command.summary.clone(),
                     aliases: Vec::new(),
                     argument_kind: CommandArgumentKind::DynamicSuffixOptionalText,
+                    action: SlashCommandAction::SkillInvoke,
+                    presentation: command_presentation(SlashCommandAction::SkillInvoke),
                 }),
         );
     }
@@ -364,6 +368,10 @@ pub fn slash_invocation_effect(
             validate_mode,
         )?)),
         SlashCommandAction::Permissions => parse_permissions_effect(&invocation.args),
+        SlashCommandAction::Sandbox => {
+            no_args(spec, &invocation.args)?;
+            Ok(SlashCommandEffect::SandboxShow)
+        }
         SlashCommandAction::Tools => parse_tools_effect(&invocation.args),
         SlashCommandAction::Rename => Ok(SlashCommandEffect::Rename(required_text(
             spec,
@@ -755,6 +763,63 @@ pub(crate) mod tests {
         assert!(names.contains(&"diff"));
         assert!(!names.contains(&"resume"));
         assert!(!names.contains(&"compact"));
+    }
+
+    #[test]
+    fn available_commands_include_presentation_metadata() {
+        let dynamic = [DynamicSlashCommand {
+            name: "x-daily".to_string(),
+            summary: "Fetch X daily posts.".to_string(),
+            prompt: "$x-daily ".to_string(),
+        }];
+        let available = available_slash_commands_for_surface(
+            &[
+                CommandCapability::SessionSwitch,
+                CommandCapability::ArtifactWrite,
+                CommandCapability::WorkspaceDiff,
+            ],
+            false,
+            &dynamic,
+            100,
+        );
+
+        let diff = available
+            .commands
+            .iter()
+            .find(|command| command.name == "diff")
+            .expect("diff command");
+        assert_eq!(diff.action, SlashCommandAction::Diff);
+        assert_eq!(diff.presentation.kind, CommandPresentationKind::Inspect);
+        assert_eq!(diff.presentation.destination, CommandDestination::Preview);
+
+        let sessions = available
+            .commands
+            .iter()
+            .find(|command| command.name == "sessions")
+            .expect("sessions command");
+        assert_eq!(
+            sessions.presentation.kind,
+            CommandPresentationKind::Navigate
+        );
+        assert_eq!(
+            sessions.presentation.destination,
+            CommandDestination::History
+        );
+
+        let dynamic = available
+            .commands
+            .iter()
+            .find(|command| command.name == "x-daily")
+            .expect("dynamic command");
+        assert_eq!(dynamic.action, SlashCommandAction::SkillInvoke);
+        assert_eq!(
+            dynamic.presentation.kind,
+            CommandPresentationKind::Extension
+        );
+        assert_eq!(
+            dynamic.presentation.destination,
+            CommandDestination::Composer
+        );
     }
 
     #[test]

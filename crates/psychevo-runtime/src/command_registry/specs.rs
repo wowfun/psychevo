@@ -78,6 +78,7 @@ pub enum SlashCommandAction {
     VariantSet,
     ModeSet,
     Permissions,
+    Sandbox,
     Thinking,
     Raw,
     Copy,
@@ -103,6 +104,105 @@ pub enum SlashCommandSurface {
     WebDesktop,
     Acp,
     Messaging,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandPresentationKind {
+    Navigate,
+    Inspect,
+    Control,
+    Submit,
+    Export,
+    Extension,
+}
+
+impl CommandPresentationKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Navigate => "navigate",
+            Self::Inspect => "inspect",
+            Self::Control => "control",
+            Self::Submit => "submit",
+            Self::Export => "export",
+            Self::Extension => "extension",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandDestination {
+    Commands,
+    History,
+    Agents,
+    Status,
+    Preview,
+    Composer,
+    Download,
+    None,
+}
+
+impl CommandDestination {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Commands => "commands",
+            Self::History => "history",
+            Self::Agents => "agents",
+            Self::Status => "status",
+            Self::Preview => "preview",
+            Self::Composer => "composer",
+            Self::Download => "download",
+            Self::None => "none",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandFeedbackAnchor {
+    Trigger,
+    CommandsPanel,
+    Composer,
+    Status,
+}
+
+impl CommandFeedbackAnchor {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Trigger => "trigger",
+            Self::CommandsPanel => "commandsPanel",
+            Self::Composer => "composer",
+            Self::Status => "status",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandAlternateActionType {
+    OpenPanel,
+    OpenComposerControl,
+}
+
+impl CommandAlternateActionType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OpenPanel => "openPanel",
+            Self::OpenComposerControl => "openComposerControl",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommandAlternateAction {
+    pub action_type: CommandAlternateActionType,
+    pub target: &'static str,
+    pub label: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommandPresentation {
+    pub kind: CommandPresentationKind,
+    pub destination: CommandDestination,
+    pub feedback_anchor: CommandFeedbackAnchor,
+    pub alternate_action: Option<CommandAlternateAction>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -138,6 +238,7 @@ impl SlashCommandSpec {
             }
             SlashCommandAction::Tools => &[],
             SlashCommandAction::Permissions => &[],
+            SlashCommandAction::Sandbox => &[],
             SlashCommandAction::Export | SlashCommandAction::Share => {
                 &[CommandCapability::ArtifactWrite]
             }
@@ -189,6 +290,10 @@ impl SlashCommandSpec {
         }
     }
 
+    pub fn presentation(self) -> CommandPresentation {
+        command_presentation(self.action)
+    }
+
     pub fn available_during_active_turn(self) -> bool {
         matches!(
             self.action,
@@ -198,11 +303,136 @@ impl SlashCommandSpec {
                 | SlashCommandAction::Context
                 | SlashCommandAction::Diff
                 | SlashCommandAction::Tools
+                | SlashCommandAction::Sandbox
                 | SlashCommandAction::Agents
                 | SlashCommandAction::Steer
                 | SlashCommandAction::Queue
                 | SlashCommandAction::Pending
         )
+    }
+}
+
+pub fn command_presentation(action: SlashCommandAction) -> CommandPresentation {
+    use CommandDestination as Destination;
+    use CommandFeedbackAnchor as Anchor;
+    use CommandPresentationKind as Kind;
+    match action {
+        SlashCommandAction::Help => {
+            presentation(Kind::Navigate, Destination::Commands, Anchor::CommandsPanel)
+        }
+        SlashCommandAction::Status
+        | SlashCommandAction::Usage
+        | SlashCommandAction::Context
+        | SlashCommandAction::Sandbox => {
+            presentation(Kind::Inspect, Destination::Status, Anchor::Status)
+        }
+        SlashCommandAction::New => {
+            presentation(Kind::Navigate, Destination::Composer, Anchor::Composer)
+        }
+        SlashCommandAction::Sessions | SlashCommandAction::Resume => {
+            presentation(Kind::Navigate, Destination::History, Anchor::CommandsPanel)
+        }
+        SlashCommandAction::Diff => {
+            presentation(Kind::Inspect, Destination::Preview, Anchor::Trigger)
+        }
+        SlashCommandAction::Steer | SlashCommandAction::Queue | SlashCommandAction::Pending => {
+            presentation(Kind::Control, Destination::Composer, Anchor::Composer)
+        }
+        SlashCommandAction::Agents => {
+            presentation(Kind::Navigate, Destination::Agents, Anchor::CommandsPanel)
+        }
+        SlashCommandAction::Fork | SlashCommandAction::Compact => {
+            presentation(Kind::Submit, Destination::Composer, Anchor::Composer)
+        }
+        SlashCommandAction::Export | SlashCommandAction::Share => {
+            presentation(Kind::Export, Destination::Download, Anchor::Trigger)
+        }
+        SlashCommandAction::SkillInvoke => {
+            presentation(Kind::Extension, Destination::Composer, Anchor::Composer)
+        }
+        SlashCommandAction::ModelShow
+        | SlashCommandAction::VariantSet
+        | SlashCommandAction::ModeSet => presentation_with_alternate(
+            Kind::Control,
+            Destination::Composer,
+            Anchor::Composer,
+            CommandAlternateAction {
+                action_type: CommandAlternateActionType::OpenComposerControl,
+                target: "model",
+                label: "Open model controls",
+            },
+        ),
+        SlashCommandAction::Image => presentation_with_alternate(
+            Kind::Submit,
+            Destination::Composer,
+            Anchor::Composer,
+            CommandAlternateAction {
+                action_type: CommandAlternateActionType::OpenComposerControl,
+                target: "attachments",
+                label: "Add attachment",
+            },
+        ),
+        SlashCommandAction::Permissions => presentation_with_alternate(
+            Kind::Control,
+            Destination::Status,
+            Anchor::Status,
+            CommandAlternateAction {
+                action_type: CommandAlternateActionType::OpenPanel,
+                target: "status",
+                label: "Open status",
+            },
+        ),
+        SlashCommandAction::Tools
+        | SlashCommandAction::Skills
+        | SlashCommandAction::Bundles
+        | SlashCommandAction::Curator => presentation_with_alternate(
+            Kind::Control,
+            Destination::Commands,
+            Anchor::CommandsPanel,
+            CommandAlternateAction {
+                action_type: CommandAlternateActionType::OpenPanel,
+                target: "commands",
+                label: "Open commands",
+            },
+        ),
+        SlashCommandAction::Quit
+        | SlashCommandAction::Btw
+        | SlashCommandAction::Thinking
+        | SlashCommandAction::Raw
+        | SlashCommandAction::Copy
+        | SlashCommandAction::Refresh
+        | SlashCommandAction::Rename
+        | SlashCommandAction::Undo
+        | SlashCommandAction::Redo => {
+            presentation(Kind::Control, Destination::None, Anchor::Composer)
+        }
+    }
+}
+
+fn presentation(
+    kind: CommandPresentationKind,
+    destination: CommandDestination,
+    feedback_anchor: CommandFeedbackAnchor,
+) -> CommandPresentation {
+    CommandPresentation {
+        kind,
+        destination,
+        feedback_anchor,
+        alternate_action: None,
+    }
+}
+
+fn presentation_with_alternate(
+    kind: CommandPresentationKind,
+    destination: CommandDestination,
+    feedback_anchor: CommandFeedbackAnchor,
+    alternate_action: CommandAlternateAction,
+) -> CommandPresentation {
+    CommandPresentation {
+        kind,
+        destination,
+        feedback_anchor,
+        alternate_action: Some(alternate_action),
     }
 }
 
@@ -504,6 +734,22 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         output_kind: CommandOutputKind::TranscriptStatusBlock,
         status: CommandStatus::Active,
         action: SlashCommandAction::Permissions,
+        common: false,
+    },
+    SlashCommandSpec {
+        canonical: "/sandbox",
+        aliases: &[],
+        usage: "/sandbox",
+        summary: "show sandbox status",
+        help_detail: Some(
+            "Shows the effective sandbox mode, platform backend, and confined roots.",
+        ),
+        surface: TUI_SLASH,
+        group: COMMANDS,
+        argument_kind: CommandArgumentKind::None,
+        output_kind: CommandOutputKind::TranscriptStatusBlock,
+        status: CommandStatus::Active,
+        action: SlashCommandAction::Sandbox,
         common: false,
     },
     SlashCommandSpec {
@@ -812,6 +1058,7 @@ pub enum SlashCommandEffect {
     SetVariant(String),
     SetMode(String),
     PermissionsShow,
+    SandboxShow,
     PermissionAdd {
         kind: String,
         rule: String,
@@ -859,6 +1106,8 @@ pub struct AvailableSlashCommand {
     pub summary: String,
     pub aliases: Vec<String>,
     pub argument_kind: CommandArgumentKind,
+    pub action: SlashCommandAction,
+    pub presentation: CommandPresentation,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -550,6 +550,10 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   gap: 6px;
 }
 
+.composerCommandFeedback {
+  margin: 0 2px;
+}
+
 .agentRunSelector {
   display: inline-flex;
   align-items: center;
@@ -1450,7 +1454,9 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 
 .commandFeedback {
   display: grid;
-  gap: 2px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
   padding: 8px 9px;
   color: var(--pevo-muted);
   background: var(--pevo-panel-muted);
@@ -1459,10 +1465,24 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   font-size: 0.8rem;
 }
 
+.commandFeedback div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
 .commandFeedback strong {
   color: var(--pevo-ink);
   font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
   font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commandFeedback span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .commandFeedback.is-error {
@@ -1471,9 +1491,41 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   border-color: color-mix(in oklch, var(--pevo-danger), white 72%);
 }
 
+.commandFeedbackAction {
+  min-height: 28px;
+  padding: 0 9px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
 .commandSurfaceList {
   display: grid;
   gap: 6px;
+}
+
+.commandSurfaceGroup {
+  display: grid;
+  gap: 6px;
+}
+
+.commandSurfaceGroup h3 {
+  margin: 7px 0 0;
+  color: var(--pevo-muted);
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.commandSurfaceGroup:first-child h3 {
+  margin-top: 0;
 }
 
 .commandSurfaceList p {

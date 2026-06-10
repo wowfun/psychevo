@@ -119,16 +119,29 @@ type WorkbenchCommand = {
   aliases: string[];
   argumentKind: string;
   source: string;
+  presentationKind: string;
+  destination: string | null;
+  feedbackAnchor: string | null;
+  alternateAction: CommandAlternateAction | null;
 };
 
 type RightTab = "status" | "files" | "debug";
 type MainView = "transcript" | "search" | "artifacts" | "agents" | "skills" | "tools" | "mcp" | "settings";
 type Appearance = "dark" | "light";
+type CommandTrigger = "composer" | "commandsPanel";
+
+type CommandAlternateAction = {
+  type: string;
+  target: string;
+  label: string;
+};
 
 type CommandFeedback = {
   accepted: boolean;
   command: string;
   message: string;
+  feedbackAnchor?: string | null;
+  alternateAction?: CommandAlternateAction | null;
 } | null;
 
 type PreviewState =
@@ -597,7 +610,60 @@ export function App() {
     }
   }
 
-  async function executeCommand(command: string) {
+  function routeCommandFeedback(feedback: CommandFeedback, trigger: CommandTrigger) {
+    const anchor = feedback?.feedbackAnchor;
+    if (trigger === "commandsPanel" || anchor === "commandsPanel") {
+      setMainView("tools");
+      setMobilePanel("transcript");
+      return;
+    }
+    if (anchor === "status") {
+      setRightTab("status");
+      setMobilePanel("status");
+    }
+  }
+
+  async function runCommandAlternateAction(action: CommandAlternateAction | null | undefined) {
+    if (!action) {
+      return;
+    }
+    if (action.type === "openPanel") {
+      switch (action.target) {
+        case "history":
+        case "sessions":
+          setMobilePanel("history");
+          return;
+        case "agents":
+          setMainView("agents");
+          setMobilePanel("transcript");
+          return;
+        case "commands":
+          setMainView("tools");
+          setMobilePanel("transcript");
+          return;
+        case "status":
+          setRightTab("status");
+          setMobilePanel("status");
+          return;
+        case "preview":
+          setMainView("transcript");
+          setMobilePanel("transcript");
+          return;
+        default:
+          return;
+      }
+    }
+    if (action.type === "openComposerControl") {
+      if (action.target === "attachments") {
+        await handleAttachment();
+        return;
+      }
+      setRightTab("status");
+      setMobilePanel("status");
+    }
+  }
+
+  async function executeCommand(command: string, trigger: CommandTrigger = "composer") {
     const scope = activeScope ?? init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
     const result = await client?.request("command/execute", {
       command,
@@ -608,29 +674,29 @@ export function App() {
       return;
     }
     const record = asRecord(result);
+    const feedback = commandFeedbackFromResult(command, record, trigger);
     if (asRecord(record.action).type === "passThroughPrompt") {
       await runHostAction(record.action);
       return;
     }
-    if (record.accepted !== true && !isKnownCommand(command, commands)) {
+    if (record.accepted !== true && record.known === false) {
       await submitTurn(command, []);
       return;
     }
     if (record.accepted !== true) {
-      setCommandFeedback({
+      setCommandFeedback(feedback ?? {
         accepted: false,
         command,
-        message: optionalStringField(record.message) ?? `Unsupported command: ${command}`
+        message: `Unsupported command: ${command}`,
+        feedbackAnchor: trigger
       });
-      setMainView("tools");
-      setMobilePanel("transcript");
+      routeCommandFeedback(feedback, trigger);
       return;
     }
-    setCommandFeedback(optionalStringField(record.message) ? {
-      accepted: true,
-      command,
-      message: optionalStringField(record.message) ?? ""
-    } : null);
+    setCommandFeedback(feedback);
+    if (feedback) {
+      routeCommandFeedback(feedback, trigger);
+    }
     await runHostAction(record.action);
   }
 
@@ -688,8 +754,9 @@ export function App() {
       case "passThroughPrompt":
       case "submitPrompt": {
         const text = stringField(record.text).trim();
+        const displayText = optionalStringField(record.displayText);
         if (text) {
-          await submitTurn(text, []);
+          await submitTurn(text, [], displayText);
         }
         break;
       }
@@ -756,13 +823,15 @@ export function App() {
     }
   }
 
-  async function submitTurn(text: string, mentions: GatewayMention[]) {
+  async function submitTurn(text: string, mentions: GatewayMention[], displayText?: string | null) {
     const scope = activeScope ?? init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
     const nextInput: GatewayInputPart[] = [
       ...(text.trim() ? [{ type: "text" as const, text }] : []),
       ...attachments.map((attachment) => attachment.input)
     ];
-    const optimisticText = text.trim() || attachments.map((attachment) => `[Attachment: ${attachment.name}]`).join(" ");
+    const optimisticText = displayText?.trim()
+      || text.trim()
+      || attachments.map((attachment) => `[Attachment: ${attachment.name}]`).join(" ");
     pendingDetachedShellRef.current = null;
     setSnapshot((current) => appendOptimisticPrompt(current, optimisticText));
     await client?.request("turn/start", {
@@ -1058,7 +1127,8 @@ export function App() {
               loadThreadSearchText={loadThreadSearchText}
               onAppearanceChange={setAppearance}
               onArchivedChange={setArchived}
-              onCommand={(slash) => void runAction(async () => executeCommand(slash))}
+              onCommand={(slash) => void runAction(async () => executeCommand(slash, "commandsPanel"))}
+              onCommandAlternateAction={(action) => void runAction(async () => runCommandAlternateAction(action))}
               onDebugChange={setDebugEnabled}
               onMainViewChange={setMainView}
               onOpenSession={(threadId) => void runAction(async () => {
@@ -1073,6 +1143,13 @@ export function App() {
             {showSessionChrome && preview && <PreviewPane preview={preview} onClose={() => setPreview(null)} />}
           </div>
           {showSessionChrome && <div className="composerDock">
+            {commandFeedback?.feedbackAnchor === "composer" && (
+              <CommandFeedbackView
+                className="composerCommandFeedback"
+                feedback={commandFeedback}
+                onAlternateAction={(action) => void runAction(async () => runCommandAlternateAction(action))}
+              />
+            )}
             <Composer
               attachments={attachments}
               completionProvider={async (text, cursor) => {
@@ -1121,7 +1198,7 @@ export function App() {
               ) : null}
               running={running}
               onAttach={() => void runAction(async () => handleAttachment())}
-              onCommand={(command) => void runAction(async () => executeCommand(command))}
+              onCommand={(command) => void runAction(async () => executeCommand(command, "composer"))}
               onInterrupt={() => void runAction(async () => {
                 await client?.request("turn/interrupt", { threadId: snapshot.thread?.id ?? null });
                 await refreshSnapshot();
@@ -1277,6 +1354,7 @@ function MainSurface({
   onAppearanceChange,
   onArchivedChange,
   onCommand,
+  onCommandAlternateAction,
   onDebugChange,
   onMainViewChange,
   onOpenSession,
@@ -1296,6 +1374,7 @@ function MainSurface({
   onAppearanceChange(value: Appearance): void;
   onArchivedChange(value: boolean): void;
   onCommand(slash: string): void;
+  onCommandAlternateAction(action: CommandAlternateAction): void;
   onDebugChange(value: boolean): void;
   onMainViewChange(value: MainView): void;
   onOpenSession(threadId: string): void;
@@ -1324,7 +1403,14 @@ function MainSurface({
     return <AgentsPanel agents={agents} backends={backends} />;
   }
   if (mainView === "tools") {
-    return <CommandsPanel commands={commands} feedback={feedback} onExecute={onCommand} />;
+    return (
+      <CommandsPanel
+        commands={commands}
+        feedback={feedback}
+        onAlternateAction={onCommandAlternateAction}
+        onExecute={onCommand}
+      />
+    );
   }
   if (mainView === "search") {
     return (
@@ -2115,12 +2201,15 @@ function AgentsPanel({
 function CommandsPanel({
   commands,
   feedback,
+  onAlternateAction,
   onExecute
 }: {
   commands: WorkbenchCommand[];
   feedback: CommandFeedback;
+  onAlternateAction(action: CommandAlternateAction): void;
   onExecute: (slash: string) => void;
 }) {
+  const groups = commandPresentationGroups(commands);
   return (
     <section className="agentSurfacePanel commandSurfacePanel" aria-label="Commands">
       <header>
@@ -2128,28 +2217,65 @@ function CommandsPanel({
         <b>{commands.length}</b>
       </header>
       {feedback && (
-        <div className={`commandFeedback ${feedback.accepted ? "is-ok" : "is-error"}`}>
-          <strong>{feedback.command}</strong>
-          <span>{feedback.message}</span>
-        </div>
+        <CommandFeedbackView feedback={feedback} onAlternateAction={onAlternateAction} />
       )}
       <div className="commandSurfaceList">
-        {commands.map((command) => (
-          <button
-            className="commandSurfaceRow"
-            key={`${command.source}:${command.name}`}
-            onClick={() => onExecute(command.slash)}
-            title={command.usage || command.summary}
-            type="button"
-          >
-            <code>{command.slash}</code>
-            <span>{command.summary}</span>
-            {command.aliases.length > 0 && <small>{command.aliases.map((alias) => `/${alias}`).join(" ")}</small>}
-          </button>
+        {groups.map((group) => (
+          <div className="commandSurfaceGroup" key={group.kind}>
+            <h3>{commandPresentationLabel(group.kind)}</h3>
+            {group.commands.map((command) => {
+              const details = [
+                commandDestinationLabel(command.destination),
+                command.aliases.length > 0 ? command.aliases.map((alias) => `/${alias}`).join(" ") : null
+              ].filter(Boolean).join(" · ");
+              return (
+                <button
+                  className="commandSurfaceRow"
+                  key={`${command.source}:${command.name}`}
+                  onClick={() => onExecute(command.slash)}
+                  title={command.usage || command.summary}
+                  type="button"
+                >
+                  <code>{command.slash}</code>
+                  <span>{command.summary}</span>
+                  {details && <small>{details}</small>}
+                </button>
+              );
+            })}
+          </div>
         ))}
         {commands.length === 0 && <p>No commands available.</p>}
       </div>
     </section>
+  );
+}
+
+function CommandFeedbackView({
+  className = "",
+  feedback,
+  onAlternateAction
+}: {
+  className?: string;
+  feedback: NonNullable<CommandFeedback>;
+  onAlternateAction(action: CommandAlternateAction): void;
+}) {
+  const alternateAction = feedback.alternateAction;
+  return (
+    <div className={`commandFeedback ${feedback.accepted ? "is-ok" : "is-error"} ${className}`.trim()}>
+      <div>
+        <strong>{feedback.command}</strong>
+        <span>{feedback.message}</span>
+      </div>
+      {alternateAction && (
+        <button
+          className="commandFeedbackAction"
+          onClick={() => onAlternateAction(alternateAction)}
+          type="button"
+        >
+          {alternateAction.label}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -2367,25 +2493,6 @@ function shortSessionId(id: string): string {
   return id.length > 12 ? `${id.slice(0, 8)}...${id.slice(-4)}` : id;
 }
 
-function isKnownCommand(command: string, commands: WorkbenchCommand[]): boolean {
-  const name = command
-    .trim()
-    .replace(/^\/+/, "")
-    .split(/\s+/, 1)[0]
-    ?.toLowerCase();
-  if (!name) {
-    return true;
-  }
-  if (name === "commands") {
-    return true;
-  }
-  return commands.some((candidate) => (
-    candidate.name.toLowerCase() === name ||
-    candidate.slash.replace(/^\/+/, "").toLowerCase() === name ||
-    candidate.aliases.some((alias) => alias.toLowerCase() === name)
-  ));
-}
-
 function parseAgentList(value: unknown): WorkbenchAgent[] {
   const agents = asRecord(value).agents;
   return Array.isArray(agents)
@@ -2434,10 +2541,115 @@ function parseCommandList(value: unknown): WorkbenchCommand[] {
           summary: stringField(item.summary),
           aliases: stringArray(item.aliases),
           argumentKind: stringField(item.argumentKind),
-          source: stringField(item.source)
+          source: stringField(item.source),
+          presentationKind: optionalStringField(item.presentationKind) ?? "control",
+          destination: optionalStringField(item.destination),
+          feedbackAnchor: optionalStringField(item.feedbackAnchor),
+          alternateAction: parseCommandAlternateAction(item.alternateAction)
         };
       }).filter((command) => command.name)
     : [];
+}
+
+function parseCommandAlternateAction(value: unknown): CommandAlternateAction | null {
+  const action = asOptionalRecord(value);
+  if (!action) {
+    return null;
+  }
+  const type = stringField(action.type);
+  const target = stringField(action.target);
+  const label = stringField(action.label);
+  return type && target && label ? { type, target, label } : null;
+}
+
+function commandFeedbackFromResult(
+  command: string,
+  record: Record<string, unknown>,
+  trigger: CommandTrigger
+): CommandFeedback {
+  const action = asRecord(record.action);
+  const message = optionalStringField(record.message) ?? commandActionFeedbackMessage(action);
+  if (!message) {
+    return null;
+  }
+  return {
+    accepted: record.accepted === true,
+    command: optionalStringField(record.command) ?? command,
+    message,
+    feedbackAnchor: resolveCommandFeedbackAnchor(optionalStringField(record.feedbackAnchor), trigger),
+    alternateAction: parseCommandAlternateAction(record.alternateAction)
+  };
+}
+
+function resolveCommandFeedbackAnchor(anchor: string | null, trigger: CommandTrigger): string {
+  if (!anchor || anchor === "trigger") {
+    return trigger;
+  }
+  if (trigger === "composer" && anchor === "commandsPanel") {
+    return "composer";
+  }
+  return anchor;
+}
+
+function commandActionFeedbackMessage(action: Record<string, unknown>): string | null {
+  if (action.type === "downloadSession") {
+    return stringField(action.kind) === "share" ? "Share artifact opened." : "Export download opened.";
+  }
+  return null;
+}
+
+const COMMAND_PRESENTATION_ORDER = ["navigate", "inspect", "control", "submit", "export", "extension"];
+
+function commandPresentationGroups(commands: WorkbenchCommand[]): Array<{ kind: string; commands: WorkbenchCommand[] }> {
+  const order = new Map(COMMAND_PRESENTATION_ORDER.map((kind, index) => [kind, index]));
+  const grouped = new Map<string, WorkbenchCommand[]>();
+  for (const command of commands) {
+    const kind = command.presentationKind || "control";
+    grouped.set(kind, [...(grouped.get(kind) ?? []), command]);
+  }
+  return [...grouped.entries()]
+    .sort(([left], [right]) => (order.get(left) ?? 99) - (order.get(right) ?? 99) || left.localeCompare(right))
+    .map(([kind, commands]) => ({ kind, commands }));
+}
+
+function commandPresentationLabel(kind: string): string {
+  switch (kind) {
+    case "navigate":
+      return "Navigate";
+    case "inspect":
+      return "Inspect";
+    case "control":
+      return "Control";
+    case "submit":
+      return "Submit";
+    case "export":
+      return "Export";
+    case "extension":
+      return "Extensions";
+    default:
+      return kind ? `${kind.slice(0, 1).toUpperCase()}${kind.slice(1)}` : "Commands";
+  }
+}
+
+function commandDestinationLabel(destination: string | null): string | null {
+  switch (destination) {
+    case "commands":
+      return "Commands";
+    case "history":
+      return "History";
+    case "agents":
+      return "Agents";
+    case "status":
+      return "Status";
+    case "preview":
+      return "Preview";
+    case "composer":
+      return "Composer";
+    case "download":
+      return "Download";
+    default:
+      return null;
+  }
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

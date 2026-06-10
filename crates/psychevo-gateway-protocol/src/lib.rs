@@ -697,6 +697,15 @@ pub struct CommandListParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct CommandAlternateAction {
+    #[serde(rename = "type")]
+    pub action_type: String,
+    pub target: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct CommandListItem {
     pub name: String,
     pub slash: String,
@@ -706,6 +715,14 @@ pub struct CommandListItem {
     pub aliases: Vec<String>,
     pub argument_kind: String,
     pub source: String,
+    #[serde(default)]
+    pub presentation_kind: Option<String>,
+    #[serde(default)]
+    pub destination: Option<String>,
+    #[serde(default)]
+    pub feedback_anchor: Option<String>,
+    #[serde(default)]
+    pub alternate_action: Option<CommandAlternateAction>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -721,6 +738,14 @@ pub struct CommandListResult {
 pub struct CommandExecuteResult {
     pub accepted: bool,
     pub command: String,
+    #[serde(default)]
+    pub known: Option<bool>,
+    #[serde(default)]
+    pub presentation_kind: Option<String>,
+    #[serde(default)]
+    pub feedback_anchor: Option<String>,
+    #[serde(default)]
+    pub alternate_action: Option<CommandAlternateAction>,
     #[serde(default)]
     pub message: Option<String>,
     #[serde(default)]
@@ -1595,6 +1620,7 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(CompletionItem),
         exported_type!(CompletionListResult),
         exported_type!(CommandListParams),
+        exported_type!(CommandAlternateAction),
         exported_type!(CommandListItem),
         exported_type!(CommandListResult),
         exported_type!(CommandExecuteParams),

@@ -94,13 +94,15 @@ export type CompletionListResult = { items: Array<CompletionItem>, replacement: 
 
 export type CommandListParams = { scope: GatewayRequestScope | null, threadId: string | null, };
 
-export type CommandListItem = { name: string, slash: string, usage: string, summary: string, aliases: Array<string>, argumentKind: string, source: string, };
+export type CommandAlternateAction = { type: string, target: string, label: string, };
+
+export type CommandListItem = { name: string, slash: string, usage: string, summary: string, aliases: Array<string>, argumentKind: string, source: string, presentationKind: string | null, destination: string | null, feedbackAnchor: string | null, alternateAction: CommandAlternateAction | null, };
 
 export type CommandListResult = { commands: Array<CommandListItem>, hiddenDynamic: number, };
 
 export type CommandExecuteParams = { scope: GatewayRequestScope, threadId: string | null, command: string, };
 
-export type CommandExecuteResult = { accepted: boolean, command: string, message: string | null, action: unknown | null, };
+export type CommandExecuteResult = { accepted: boolean, command: string, known: boolean | null, presentationKind: string | null, feedbackAnchor: string | null, alternateAction: CommandAlternateAction | null, message: string | null, action: unknown | null, };
 
 export type ShellStartParams = { scope: GatewayRequestScope, threadId: string | null, command: string, };
 

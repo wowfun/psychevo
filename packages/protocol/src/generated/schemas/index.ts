@@ -64,6 +64,7 @@ export const gatewaySchemas = {
   CompletionItem: completionSchemas.CompletionItem,
   CompletionListResult: completionSchemas.CompletionListResult,
   CommandListParams: commandSchemas.CommandListParams,
+  CommandAlternateAction: commandSchemas.CommandAlternateAction,
   CommandListItem: commandSchemas.CommandListItem,
   CommandListResult: commandSchemas.CommandListResult,
   CommandExecuteParams: commandSchemas.CommandExecuteParams,

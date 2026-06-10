@@ -90,8 +90,50 @@ export const commandSchemas = {
   "title": "CommandListParams",
   "type": "object"
 },
+  CommandAlternateAction: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "label": {
+      "type": "string"
+    },
+    "target": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "label",
+    "target",
+    "type"
+  ],
+  "title": "CommandAlternateAction",
+  "type": "object"
+},
   CommandListItem: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "CommandAlternateAction": {
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "target",
+        "type"
+      ],
+      "type": "object"
+    }
+  },
   "properties": {
     "aliases": {
       "default": [],
@@ -100,11 +142,43 @@ export const commandSchemas = {
       },
       "type": "array"
     },
+    "alternateAction": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/CommandAlternateAction"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "argumentKind": {
       "type": "string"
     },
+    "destination": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "feedbackAnchor": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "name": {
       "type": "string"
+    },
+    "presentationKind": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "slash": {
       "type": "string"
@@ -133,6 +207,25 @@ export const commandSchemas = {
   CommandListResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "CommandAlternateAction": {
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "target",
+        "type"
+      ],
+      "type": "object"
+    },
     "CommandListItem": {
       "properties": {
         "aliases": {
@@ -142,11 +235,43 @@ export const commandSchemas = {
           },
           "type": "array"
         },
+        "alternateAction": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CommandAlternateAction"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "argumentKind": {
           "type": "string"
         },
+        "destination": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "feedbackAnchor": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "name": {
           "type": "string"
+        },
+        "presentationKind": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "slash": {
           "type": "string"
@@ -282,6 +407,27 @@ export const commandSchemas = {
 },
   CommandExecuteResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "CommandAlternateAction": {
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "target",
+        "type"
+      ],
+      "type": "object"
+    }
+  },
   "properties": {
     "accepted": {
       "type": "boolean"
@@ -289,10 +435,42 @@ export const commandSchemas = {
     "action": {
       "default": null
     },
+    "alternateAction": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/CommandAlternateAction"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "command": {
       "type": "string"
     },
+    "feedbackAnchor": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "known": {
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "message": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "presentationKind": {
       "default": null,
       "type": [
         "string",

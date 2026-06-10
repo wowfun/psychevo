@@ -1,5 +1,26 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "CommandAlternateAction": {
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "target",
+        "type"
+      ],
+      "type": "object"
+    }
+  },
   "properties": {
     "aliases": {
       "default": [],
@@ -8,11 +29,43 @@
       },
       "type": "array"
     },
+    "alternateAction": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/CommandAlternateAction"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "argumentKind": {
       "type": "string"
     },
+    "destination": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "feedbackAnchor": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "name": {
       "type": "string"
+    },
+    "presentationKind": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "slash": {
       "type": "string"

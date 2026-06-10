@@ -18,10 +18,11 @@ use axum::routing::{get, post};
 use futures::{SinkExt, StreamExt};
 use psychevo_gateway_protocol as wire;
 use psychevo_runtime::command_registry::{
-    AvailableSlashCommand, CommandArgumentKind, CommandCapability, DynamicSlashCommand,
-    SlashCommandAction, SlashCommandEffect, SlashCommandParse, SlashCommandSurface,
-    available_slash_commands_for_surface, dynamic_slash_command_effect, parse_slash_command_line,
-    skill_prompt_marker, slash_invocation_effect,
+    AvailableSlashCommand, CommandArgumentKind, CommandCapability, CommandPresentation,
+    DynamicSlashCommand, SlashCommandAction, SlashCommandEffect, SlashCommandParse,
+    SlashCommandSurface, available_slash_commands_for_surface, command_presentation,
+    dynamic_slash_command_effect, parse_slash_command_line, skill_prompt_marker,
+    slash_invocation_effect,
 };
 use psychevo_runtime::{
     AgentBackendConfig, AgentDiscoveryOptions, AgentEntrypoint, ClarifyAnswer, ClarifyResponse,
@@ -1620,6 +1621,7 @@ fn slash_completion_items(
     Ok(available
         .commands
         .into_iter()
+        .filter(web_desktop_command_visible)
         .filter(|command| command_matches(command, query))
         .map(|command| wire::CompletionItem {
             id: format!("command:{}", command.name),
@@ -1627,7 +1629,7 @@ fn slash_completion_items(
             label: format!("/{}", command.name),
             insert_text: format!("/{}", command.name),
             kind: "command".to_string(),
-            detail: Some(command.summary.to_string()),
+            detail: Some(command_completion_detail(&command)),
             target: None,
             sort_text: Some(format!("command:{}", command.name)),
         })
@@ -2333,12 +2335,11 @@ fn command_execute_value(
     let raw = params.command.trim().to_string();
     let thread_id = params.thread_id.clone();
     if raw.is_empty() {
-        return Ok(serde_json::to_value(wire::CommandExecuteResult {
-            accepted: false,
-            command: raw,
-            message: Some("empty command".to_string()),
-            action: None,
-        })?);
+        return Ok(serde_json::to_value(command_rejected_unknown(
+            &raw,
+            Some("empty command".to_string()),
+            None,
+        ))?);
     }
     let active_turn = thread_id
         .as_deref()
@@ -2346,22 +2347,28 @@ fn command_execute_value(
         .unwrap_or_else(|| state.activity(&scope.source, None).running);
     let dynamic = dynamic_slash_commands(state, scope)?;
     let result = match parse_slash_command_line(&raw) {
-        SlashCommandParse::Known(invocation) => match slash_invocation_effect(
-            &invocation,
-            &gateway_command_capabilities(),
-            SlashCommandSurface::WebDesktop,
-            active_turn,
-        ) {
-            Ok(effect) => {
-                command_result_from_effect(scope, &raw, invocation.spec.action, effect, thread_id)?
+        SlashCommandParse::Known(invocation) => {
+            let action = invocation.spec.action;
+            if !web_desktop_action_visible(action) {
+                command_unsupported(
+                    &raw,
+                    action,
+                    web_desktop_unavailable_message(invocation.spec.canonical, action),
+                )
+            } else {
+                match slash_invocation_effect(
+                    &invocation,
+                    &gateway_command_capabilities(),
+                    SlashCommandSurface::WebDesktop,
+                    active_turn,
+                ) {
+                    Ok(effect) => {
+                        command_result_from_effect(state, scope, &raw, action, effect, thread_id)?
+                    }
+                    Err(message) => command_unsupported(&raw, action, message),
+                }
             }
-            Err(message) => wire::CommandExecuteResult {
-                accepted: false,
-                command: raw,
-                message: Some(message),
-                action: None,
-            },
-        },
+        }
         SlashCommandParse::Unknown {
             original,
             command,
@@ -2369,6 +2376,7 @@ fn command_execute_value(
         } => {
             if let Some(effect) = dynamic_slash_command_effect(&command, &args, &dynamic) {
                 command_result_from_effect(
+                    state,
                     scope,
                     &raw,
                     SlashCommandAction::SkillInvoke,
@@ -2376,25 +2384,24 @@ fn command_execute_value(
                     thread_id,
                 )?
             } else {
-                wire::CommandExecuteResult {
-                    accepted: false,
-                    command,
-                    message: None,
-                    action: Some(json!({"type": "passThroughPrompt", "text": original})),
-                }
+                command_rejected_unknown(
+                    &command,
+                    None,
+                    Some(json!({"type": "passThroughPrompt", "text": original})),
+                )
             }
         }
-        SlashCommandParse::NotSlash => wire::CommandExecuteResult {
-            accepted: false,
-            command: raw.clone(),
-            message: None,
-            action: Some(json!({"type": "passThroughPrompt", "text": raw})),
-        },
+        SlashCommandParse::NotSlash => command_rejected_unknown(
+            &raw,
+            None,
+            Some(json!({"type": "passThroughPrompt", "text": raw})),
+        ),
     };
     Ok(serde_json::to_value(result)?)
 }
 
 fn command_result_from_effect(
+    state: &WebState,
     scope: &ResolvedScope,
     raw: &str,
     action: SlashCommandAction,
@@ -2405,76 +2412,96 @@ fn command_result_from_effect(
         SlashCommandEffect::LocalText => match action {
             SlashCommandAction::Help => Ok(command_action(
                 raw,
+                action,
                 json!({"type": "showPanel", "panel": "commands"}),
             )),
-            SlashCommandAction::Status => Ok(command_action(
+            SlashCommandAction::Status
+            | SlashCommandAction::Usage
+            | SlashCommandAction::Context => Ok(command_action(
                 raw,
+                action,
                 json!({"type": "showPanel", "panel": "status"}),
             )),
-            SlashCommandAction::Usage | SlashCommandAction::Context => Ok(command_unsupported(
-                raw,
-                format!(
-                    "{} is not available in Web/Desktop yet.",
-                    raw.split_whitespace().next().unwrap_or(raw)
-                ),
-            )),
-            _ => Ok(command_accepted_message(raw, None)),
+            _ => Ok(command_accepted_message(raw, action, None)),
         },
         SlashCommandEffect::PassThroughPrompt(text) => Ok(command_action(
             raw,
+            action,
             json!({"type": "passThroughPrompt", "text": text}),
         )),
         SlashCommandEffect::SubmitPrompt(text) => Ok(command_action(
             raw,
-            json!({"type": "submitPrompt", "text": text}),
+            action,
+            json!({"type": "submitPrompt", "text": text, "displayText": raw}),
         )),
         SlashCommandEffect::Steer(text) => Ok(command_action(
             raw,
+            action,
             json!({"type": "steerPrompt", "text": text}),
         )),
         SlashCommandEffect::Queue(text) => Ok(command_action(
             raw,
+            action,
             json!({"type": "queuePrompt", "text": text}),
         )),
         SlashCommandEffect::PendingCancel => Ok(command_action(
             raw,
+            action,
             json!({"type": "turnInterrupt", "threadId": thread_id}),
         )),
-        SlashCommandEffect::NewSession => Ok(command_action(raw, json!({"type": "threadStart"}))),
+        SlashCommandEffect::NewSession => {
+            Ok(command_action(raw, action, json!({"type": "threadStart"})))
+        }
         SlashCommandEffect::SessionsList => Ok(command_action(
             raw,
+            action,
+            json!({"type": "showPanel", "panel": "history"}),
+        )),
+        SlashCommandEffect::ResumeSession { .. } => Ok(command_action(
+            raw,
+            action,
             json!({"type": "showPanel", "panel": "history"}),
         )),
         SlashCommandEffect::Agents => Ok(command_action(
             raw,
+            action,
             json!({"type": "showPanel", "panel": "agents"}),
         )),
         SlashCommandEffect::Export { .. } => Ok(command_action(
             raw,
+            action,
             json!({"type": "downloadSession", "kind": "export", "threadId": thread_id}),
         )),
         SlashCommandEffect::Share { .. } => Ok(command_action(
             raw,
+            action,
             json!({"type": "downloadSession", "kind": "share", "threadId": thread_id}),
         )),
         SlashCommandEffect::Fork(prompt) => Ok(command_action(
             raw,
-            json!({"type": "submitPrompt", "text": prompt}),
+            action,
+            json!({"type": "submitPrompt", "text": prompt, "displayText": raw}),
         )),
         SlashCommandEffect::Compact { instructions } => Ok(command_action(
             raw,
-            json!({"type": "submitPrompt", "text": compact_prompt_text(instructions)}),
+            action,
+            json!({"type": "submitPrompt", "text": compact_prompt_text(instructions), "displayText": raw}),
         )),
         SlashCommandEffect::Diff => {
             let diff = workspace_diff_result(scope, None)?;
             Ok(command_action(
                 raw,
+                action,
                 json!({"type": "workspaceDiff", "diff": diff}),
             ))
         }
-        SlashCommandEffect::Unsupported(message) => Ok(command_unsupported(raw, message)),
-        SlashCommandEffect::ResumeSession { .. }
-        | SlashCommandEffect::ShowModel
+        SlashCommandEffect::SandboxShow => {
+            let options = state.run_options(scope.workdir.clone(), thread_id.clone());
+            let status = psychevo_runtime::sandbox_status_text(&options, RunMode::Default)?;
+            Ok(command_accepted_message(raw, action, Some(status)))
+        }
+        SlashCommandEffect::Unsupported(message) => Ok(command_unsupported(raw, action, message)),
+        SlashCommandEffect::ShowModel
         | SlashCommandEffect::SetModel { .. }
         | SlashCommandEffect::SetVariant(_)
         | SlashCommandEffect::SetMode(_)
@@ -2490,38 +2517,97 @@ fn command_result_from_effect(
         | SlashCommandEffect::Bundles { .. }
         | SlashCommandEffect::Curator { .. } => Ok(command_unsupported(
             raw,
-            format!(
-                "{} is not available in Web/Desktop yet.",
-                raw.split_whitespace().next().unwrap_or(raw)
-            ),
+            action,
+            web_desktop_unavailable_message(raw.split_whitespace().next().unwrap_or(raw), action),
         )),
     }
 }
 
-fn command_action(raw: &str, action: Value) -> wire::CommandExecuteResult {
-    wire::CommandExecuteResult {
-        accepted: true,
-        command: raw.to_string(),
-        message: None,
-        action: Some(action),
-    }
+fn command_action(
+    raw: &str,
+    slash_action: SlashCommandAction,
+    action: Value,
+) -> wire::CommandExecuteResult {
+    command_known_result(raw, slash_action, true, None, Some(action))
 }
 
-fn command_accepted_message(raw: &str, message: Option<String>) -> wire::CommandExecuteResult {
+fn command_accepted_message(
+    raw: &str,
+    slash_action: SlashCommandAction,
+    message: Option<String>,
+) -> wire::CommandExecuteResult {
+    command_known_result(raw, slash_action, true, message, None)
+}
+
+fn command_unsupported(
+    raw: &str,
+    slash_action: SlashCommandAction,
+    message: String,
+) -> wire::CommandExecuteResult {
+    command_known_result(raw, slash_action, false, Some(message), None)
+}
+
+fn command_known_result(
+    raw: &str,
+    slash_action: SlashCommandAction,
+    accepted: bool,
+    message: Option<String>,
+    action: Option<Value>,
+) -> wire::CommandExecuteResult {
+    let presentation = command_presentation(slash_action);
     wire::CommandExecuteResult {
-        accepted: true,
+        accepted,
         command: raw.to_string(),
+        known: Some(true),
+        presentation_kind: Some(presentation.kind.as_str().to_string()),
+        feedback_anchor: Some(presentation.feedback_anchor.as_str().to_string()),
+        alternate_action: command_alternate_action(presentation),
         message,
-        action: None,
+        action,
     }
 }
 
-fn command_unsupported(raw: &str, message: String) -> wire::CommandExecuteResult {
+fn command_rejected_unknown(
+    raw: &str,
+    message: Option<String>,
+    action: Option<Value>,
+) -> wire::CommandExecuteResult {
     wire::CommandExecuteResult {
         accepted: false,
         command: raw.to_string(),
-        message: Some(message),
-        action: None,
+        known: Some(false),
+        presentation_kind: None,
+        feedback_anchor: None,
+        alternate_action: None,
+        message,
+        action,
+    }
+}
+
+fn web_desktop_unavailable_message(command: &str, action: SlashCommandAction) -> String {
+    let command = command.split_whitespace().next().unwrap_or(command);
+    match action {
+        SlashCommandAction::ModelShow
+        | SlashCommandAction::VariantSet
+        | SlashCommandAction::ModeSet => {
+            format!("{command} is managed by the Workbench model controls.")
+        }
+        SlashCommandAction::Image => {
+            format!("{command} is managed by the Workbench attachment control.")
+        }
+        SlashCommandAction::Permissions => {
+            format!("{command} is managed by Workbench status controls.")
+        }
+        SlashCommandAction::Sessions | SlashCommandAction::Resume => {
+            format!("{command} is managed by Workbench history.")
+        }
+        SlashCommandAction::Tools
+        | SlashCommandAction::Skills
+        | SlashCommandAction::Bundles
+        | SlashCommandAction::Curator => {
+            format!("{command} is managed by Workbench panels.")
+        }
+        _ => format!("{command} is not available in Web/Desktop."),
     }
 }
 
@@ -2799,6 +2885,7 @@ fn command_list_value(
         commands: available
             .commands
             .iter()
+            .filter(|command| web_desktop_command_visible(command))
             .map(|command| command_value(command, &dynamic_names))
             .collect(),
         hidden_dynamic: available.hidden_dynamic,
@@ -2809,6 +2896,7 @@ fn command_value(
     command: &AvailableSlashCommand,
     dynamic_names: &std::collections::BTreeSet<String>,
 ) -> wire::CommandListItem {
+    let presentation = command.presentation;
     wire::CommandListItem {
         name: command.name.clone(),
         slash: format!("/{}", command.name),
@@ -2825,7 +2913,85 @@ fn command_value(
         } else {
             "core".to_string()
         },
+        presentation_kind: Some(presentation.kind.as_str().to_string()),
+        destination: Some(presentation.destination.as_str().to_string()),
+        feedback_anchor: Some(presentation.feedback_anchor.as_str().to_string()),
+        alternate_action: command_alternate_action(presentation),
     }
+}
+
+fn web_desktop_command_visible(command: &AvailableSlashCommand) -> bool {
+    matches!(
+        command.action,
+        SlashCommandAction::Help
+            | SlashCommandAction::Status
+            | SlashCommandAction::New
+            | SlashCommandAction::Sessions
+            | SlashCommandAction::Resume
+            | SlashCommandAction::Usage
+            | SlashCommandAction::Context
+            | SlashCommandAction::Diff
+            | SlashCommandAction::Steer
+            | SlashCommandAction::Queue
+            | SlashCommandAction::Pending
+            | SlashCommandAction::Sandbox
+            | SlashCommandAction::Agents
+            | SlashCommandAction::Fork
+            | SlashCommandAction::Compact
+            | SlashCommandAction::Export
+            | SlashCommandAction::Share
+            | SlashCommandAction::SkillInvoke
+    )
+}
+
+fn web_desktop_action_visible(action: SlashCommandAction) -> bool {
+    matches!(
+        action,
+        SlashCommandAction::Help
+            | SlashCommandAction::Status
+            | SlashCommandAction::New
+            | SlashCommandAction::Sessions
+            | SlashCommandAction::Resume
+            | SlashCommandAction::Usage
+            | SlashCommandAction::Context
+            | SlashCommandAction::Diff
+            | SlashCommandAction::Steer
+            | SlashCommandAction::Queue
+            | SlashCommandAction::Pending
+            | SlashCommandAction::Sandbox
+            | SlashCommandAction::Agents
+            | SlashCommandAction::Fork
+            | SlashCommandAction::Compact
+            | SlashCommandAction::Export
+            | SlashCommandAction::Share
+            | SlashCommandAction::SkillInvoke
+    )
+}
+
+fn command_completion_detail(command: &AvailableSlashCommand) -> String {
+    let destination = match command.presentation.destination.as_str() {
+        "commands" => "Panel",
+        "history" => "History",
+        "agents" => "Agents",
+        "status" => "Status",
+        "preview" => "Preview",
+        "composer" => "Prompt",
+        "download" => "Download",
+        _ => "Command",
+    };
+    format!("{destination} - {}", command.summary)
+}
+
+fn command_alternate_action(
+    presentation: CommandPresentation,
+) -> Option<wire::CommandAlternateAction> {
+    presentation
+        .alternate_action
+        .map(|action| wire::CommandAlternateAction {
+            action_type: action.action_type.as_str().to_string(),
+            target: action.target.to_string(),
+            label: action.label.to_string(),
+        })
 }
 
 fn command_argument_kind(kind: CommandArgumentKind) -> &'static str {
@@ -4650,9 +4816,85 @@ command = "cursor-agent"
             .expect("command/execute");
 
             assert_eq!(result["accepted"], true, "{command}: {result:?}");
+            assert_eq!(result["known"], true, "{command}: {result:?}");
             assert_eq!(result["action"]["type"], "showPanel");
             assert_eq!(result["action"]["panel"], panel);
+            assert!(result["presentationKind"].as_str().is_some());
+            assert!(result["feedbackAnchor"].as_str().is_some());
         }
+    }
+
+    #[tokio::test]
+    async fn command_list_and_completion_use_web_desktop_presentation_catalog() {
+        let (_temp, state) = web_state();
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let list = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "command/list".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "threadId": null
+                })),
+            },
+        )
+        .await
+        .expect("command/list");
+        let commands = list["commands"].as_array().expect("commands");
+        let names = commands
+            .iter()
+            .filter_map(|command| command["name"].as_str())
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"diff"), "{names:?}");
+        assert!(names.contains(&"sessions"), "{names:?}");
+        assert!(!names.contains(&"model"), "{names:?}");
+        assert!(!names.contains(&"tools"), "{names:?}");
+
+        let diff = commands
+            .iter()
+            .find(|command| command["name"] == "diff")
+            .expect("diff command");
+        assert_eq!(diff["presentationKind"], "inspect");
+        assert_eq!(diff["destination"], "preview");
+        assert_eq!(diff["feedbackAnchor"], "trigger");
+
+        let completion = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("2")),
+                method: "completion/list".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "text": "/",
+                    "cursor": 1,
+                    "threadId": null
+                })),
+            },
+        )
+        .await
+        .expect("completion/list");
+        let items = completion["items"].as_array().expect("items");
+        assert!(items.iter().any(|item| item["label"] == "/diff"));
+        assert!(!items.iter().any(|item| item["label"] == "/model"));
+        let diff_completion = items
+            .iter()
+            .find(|item| item["label"] == "/diff")
+            .expect("diff completion");
+        assert_eq!(
+            diff_completion["detail"].as_str(),
+            Some("Preview - show workspace diff")
+        );
     }
 
     #[tokio::test]
@@ -4688,6 +4930,37 @@ command = "cursor-agent"
             .expect("dynamic command");
         assert_eq!(dynamic["source"], "dynamic");
         assert_eq!(dynamic["slash"], "/x-daily");
+        assert_eq!(dynamic["presentationKind"], "extension");
+        assert_eq!(dynamic["destination"], "composer");
+
+        let completion = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("2")),
+                method: "completion/list".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "text": "/x",
+                    "cursor": 2,
+                    "threadId": null
+                })),
+            },
+        )
+        .await
+        .expect("completion/list");
+        let dynamic_completion = completion["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .find(|item| item["label"] == "/x-daily")
+            .expect("dynamic completion");
+        assert_eq!(
+            dynamic_completion["detail"].as_str(),
+            Some("Prompt - Fetch X daily posts.")
+        );
 
         let result = handle_rpc(
             state,
@@ -4695,7 +4968,7 @@ command = "cursor-agent"
             tx,
             RpcRequest {
                 jsonrpc: wire::JSONRPC_VERSION.to_string(),
-                id: Some(json!("2")),
+                id: Some(json!("3")),
                 method: "command/execute".to_string(),
                 params: Some(json!({
                     "scope": scope,
@@ -4707,8 +4980,53 @@ command = "cursor-agent"
         .await
         .expect("command/execute");
         assert_eq!(result["accepted"], true);
+        assert_eq!(result["known"], true);
+        assert_eq!(result["presentationKind"], "extension");
+        assert_eq!(result["feedbackAnchor"], "composer");
         assert_eq!(result["action"]["type"], "submitPrompt");
         assert_eq!(result["action"]["text"], "$x-daily latest");
+        assert_eq!(result["action"]["displayText"], "/x-daily latest");
+    }
+
+    #[tokio::test]
+    async fn command_execute_known_unsupported_returns_guidance_without_passthrough() {
+        let (_temp, state) = web_state();
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let result = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "command/execute".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "command": "/model",
+                    "threadId": null
+                })),
+            },
+        )
+        .await
+        .expect("command/execute");
+
+        assert_eq!(result["accepted"], false);
+        assert_eq!(result["known"], true);
+        assert!(result["action"].is_null(), "{result:#}");
+        assert_eq!(result["presentationKind"], "control");
+        assert_eq!(result["feedbackAnchor"], "composer");
+        assert_eq!(result["alternateAction"]["type"], "openComposerControl");
+        assert_eq!(result["alternateAction"]["target"], "model");
+        assert!(
+            result["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("Workbench model controls")),
+            "{result:#}"
+        );
     }
 
     #[tokio::test]
@@ -4739,9 +5057,11 @@ command = "cursor-agent"
             .expect("command/execute");
 
             assert_eq!(result["accepted"], false);
+            assert_eq!(result["known"], false);
             assert_eq!(result["action"]["type"], "passThroughPrompt");
             assert_eq!(result["action"]["text"], command);
             assert!(result["message"].is_null());
+            assert!(result["presentationKind"].is_null());
         }
     }
 

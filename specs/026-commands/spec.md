@@ -118,9 +118,10 @@ with the original submitted text.
 Gateway exposes the same command catalog to reconnectable clients through
 typed `command/list` and `command/execute` methods. `command/list` returns
 `CommandListResult { commands: CommandListItem[] }`, where each item carries
-the command name, slash label, usage, summary, aliases, argument kind, and
-source. TUI, Web, Desktop, ACP, and messaging surfaces must project the shared
-catalog rather than inventing separate slash semantics.
+the command name, slash label, usage, summary, aliases, argument kind, source,
+and optional presentation metadata for GUI-like surfaces. TUI, Web, Desktop,
+ACP, and messaging surfaces must project the shared catalog rather than
+inventing separate slash semantics.
 Web and Desktop shells present the shared catalog as a command utility panel.
 Executing `/help` or `/commands` opens that panel, `/agents` opens the agents
 panel, `/status` opens status, and `/sessions` or `/history` opens history.
@@ -130,6 +131,27 @@ include dynamic backend-provided commands when runtime exposes them. Client-side
 presentation may hide only commands that the Gateway/runtime marks unavailable
 for that host capability set; it must not drop unknown extension commands from
 completion or execution merely because the frontend does not know their names.
+
+GUI presentation metadata is derived from runtime command metadata rather than
+from frontend command-name allowlists. `presentationKind` uses:
+
+- `navigate` for commands that switch an existing surface, such as commands,
+  sessions, agents, or status.
+- `inspect` for observational structured views such as diff, context, usage,
+  and status details.
+- `control` for active-turn or local state controls.
+- `submit` for commands that submit or transform prompt text.
+- `export` for host download/share/artifact actions.
+- `extension` for dynamic skill, bundle, or backend-provided slash commands.
+
+`destination` names the preferred GUI landing area: `commands`, `history`,
+`agents`, `status`, `preview`, `composer`, `download`, or `none`.
+`feedbackAnchor` says where display-only feedback belongs: `trigger`,
+`commandsPanel`, `composer`, or `status`. `alternateAction`, when present,
+identifies a GUI-native replacement such as opening the model picker, attachment
+control, or history panel. These fields are presentation hints, not permission
+grants, and must not let clients execute commands hidden by the runtime surface
+profile.
 
 Shared execution returns an effect rather than directly manipulating a UI. The
 effect vocabulary includes local text, pass-through prompt, prompt submission,
@@ -141,6 +163,11 @@ Web/Desktop `command/execute` maps these shared effects to typed host actions
 where a first-slice host action exists. Effects without a Web/Desktop action
 return bounded unsupported guidance instead of falling through to arbitrary
 frontend behavior.
+Unknown slash-looking input on prompt-bearing surfaces remains a pass-through
+prompt and reports `known=false` on typed Gateway execution results. A known
+command hidden only because the current GUI surface cannot represent it reports
+`known=true`, `accepted=false`, bounded guidance, and optional alternate action;
+it must not be silently sent to the model.
 
 Peer-agent ACP commands are dynamic catalog entries sourced from ACP
 `available_commands_update`. They are exposed as namespaced commands of the
@@ -223,6 +250,13 @@ or client-native image attachment are not advertised to ACP unless the surface
 declares that capability. Dynamic skill and bundle commands may be appended
 after core commands with a surface-defined cap; hidden dynamic commands remain
 valid when typed if they resolve at execution time.
+
+Web/Desktop discovery groups visible commands by `presentationKind` rather than
+by a frontend-owned command-name list. Dynamic extension commands remain visible
+when returned by the runtime catalog even if the frontend has no built-in
+knowledge of their names. Completion rows may show the command summary and a
+compact destination label, but they must use the Gateway/runtime metadata rather
+than hard-coded surface curation.
 
 ## Errors
 

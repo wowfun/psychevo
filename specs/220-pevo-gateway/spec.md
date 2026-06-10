@@ -275,6 +275,21 @@ Web must not carry a separate hard-coded slash inventory beyond applying typed
 host actions returned by Gateway. Unknown slash-looking input, including
 absolute-path-looking input, is returned as prompt passthrough instead of a
 local command error.
+The Web/Desktop surface profile is derived by Gateway from the request source
+and is not declared by the browser client. `command/list` includes runtime
+presentation metadata (`presentationKind`, `destination`, `feedbackAnchor`, and
+optional `alternateAction`) for visible commands. Commands hidden because
+Workbench cannot represent them are omitted from discovery and slash completion;
+if typed explicitly, `command/execute` returns `known=true`, `accepted=false`,
+bounded guidance, and optional alternate action. Unknown slash-looking input
+returns `known=false` with a `passThroughPrompt` host action.
+
+Workbench applies command results by destination rather than by transcript
+insertion. Navigation commands switch panels, structured inspection commands
+open their domain view such as preview or status, active-turn controls update
+local activity state, submit-style slash commands start a normal model turn, and
+export commands invoke the host download/share path. Display-only feedback from
+commands must not be persisted as transcript entries.
 
 The Web Shell supports TUI-compatible shell mode through `shell/start`.
 `shell/start` accepts `scope`, optional `threadId`, and a stripped local shell

@@ -1,5 +1,26 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "CommandAlternateAction": {
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "target",
+        "type"
+      ],
+      "type": "object"
+    }
+  },
   "properties": {
     "accepted": {
       "type": "boolean"
@@ -7,10 +28,42 @@
     "action": {
       "default": null
     },
+    "alternateAction": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/CommandAlternateAction"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "command": {
       "type": "string"
     },
+    "feedbackAnchor": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "known": {
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "message": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "presentationKind": {
       "default": null,
       "type": [
         "string",
