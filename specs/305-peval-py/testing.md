@@ -26,6 +26,13 @@ Out of scope:
 Tests use only temporary directories, local fixtures, Python standard-library
 SQLite, and checked-in JSONL fixture files.
 
+The unittest suite is split by behavior surface instead of keeping all coverage
+in one large module. Shared fixture paths, fake adapter entry points, custom
+test adapters, JSON script extraction, and SQLite fixture builders live in a
+non-discovered support module under `tools/peval-py/tests`; discovered
+`test_*.py` modules group config/adapter coverage, source conversion coverage,
+report/HTML coverage, and CLI/input-table smoke coverage.
+
 Coverage must verify:
 
 - Psychevo SQLite `messages` extraction orders rows by `session_seq`.
@@ -41,8 +48,9 @@ Coverage must verify:
   issuing Agent step, mark tool meta as failed, count tool errors, and do not
   prevent later successful tool calls from being represented.
 - unmatched tool results remain visible and produce a warning.
-- tool execution duration prefers `metadata.elapsed_ms` and falls back to
-  timestamp differences when metadata is absent.
+- assistant and tool execution duration prefer `metadata.elapsed_ms` and fall
+  back to timestamp differences only when the fallback span is no more than
+  600,000 ms.
 - common JSONL conversion works through the OpenCode and Hermes adapters.
 - built-in adapter registry discovery includes Psychevo, OpenCode, and Hermes.
 - installed Python entry points in the `peval_py.adapters` group can register a
@@ -75,7 +83,13 @@ Coverage must verify:
 - ATIF step ids are sequential and tool observations link to source tool calls.
 - final metrics aggregate available usage, accounting, turn, tool-call, and
   tool-error facts.
-- report JSON contains the v17 subset top-level fields.
+- report JSON contains the v18 subset top-level fields.
+- report JSON records active `duration_ms` plus `wall_duration_ms` for each
+  Trial and comparison leaderboard row.
+- retained sessions with multi-hour idle gaps keep the full `wall_duration_ms`
+  but exclude that idle gap from active `duration_ms`.
+- active duration fallback counts short missing-metadata timestamp spans and
+  excludes spans longer than 600,000 ms.
 - repeated `-p` inputs in `view trajectory` create one trajectory per input
   and include a session-oriented comparison summary.
 - `-d` with repeated `-s` reads each SQLite session independently through the
@@ -108,13 +122,30 @@ Coverage must verify:
 - `-n/--note 0=TEXT` creates report-level notes, `-n/--note N=TEXT` attaches
   to the one-based session index, repeated notes preserve CLI order, and
   out-of-range indexes fail clearly.
-- comparison heatmap and table rows do not contain benchmark, task, task-set,
-  task-family, or matrix task-axis fields.
+- comparison JSON contains one canonical `leaderboard.entries` row list, omits
+  legacy duplicate `session_heatmap.rows` and `session_table.rows`, and does not
+  emit benchmark, task, task-set, task-family, matrix task-axis, row `selected`,
+  or derived `successful_tool_calls` fields.
 - HTML escapes text, safely embeds JSON, exposes one step visibility toggle,
   and renders peval-style tool names, tool execution timing, and observations
   inside the corresponding Agent step.
 - HTML renderer source CSS and JavaScript live in package asset files and are
   still inlined into the emitted offline HTML report.
+- static HTML reports use the default report presentation mode and do not
+  render serve-only import controls, Leaderboard row-selection checkboxes, or
+  Leaderboard export controls.
+- serve UI HTML mode reuses the static report body while rendering a collapsed
+  import panel above the report title, a Leaderboard row-selection checkbox
+  column, a header select-visible checkbox, and a split Leaderboard export
+  control for rows, JSON report, and HTML report.
+- serve UI row-selection state is independent from selected-Trial state:
+  checkbox clicks stop row selection, row clicks still update the selected
+  Trial, and Trajectory Overview rows keep following filtered and sorted
+  Leaderboard rows rather than checkbox state.
+- serve UI export helpers use visible checked rows when any currently visible
+  rows are checked, otherwise the current visible filtered and sorted rows.
+  Checked rows hidden by filters remain selected in UI state but are excluded
+  from the current export scope until visible again.
 - HTML does not render the old Summary, Session Heatmap, or Session Table
   labels in multi-session reports.
 - HTML renders Report Notes, Leaderboard, Trajectory Overview, selected Trial
@@ -126,8 +157,8 @@ Coverage must verify:
 - Multi-session HTML does not render the old Visible Heatmap panel, metric
   controls, visible-grid, or session-axis layout.
 - Leaderboard renders Agent from the trajectory agent name with adapter fallback,
-  and duration, tokens, Tool Calls, and Turns cells show per-column metric
-  intensity classes while Cost remains unshaded.
+  and active duration, tokens, Tool Calls, and Turns cells show per-column
+  metric intensity classes while Cost remains unshaded.
 - Leaderboard exposes multi-value filters for Session, Agent, Model, and Result;
   filter options come from the complete row set, values within a column are
   OR-ed, filtered columns are AND-ed, metric shading uses filtered visible rows,
@@ -142,19 +173,56 @@ Coverage must verify:
   the final Steps section's expanded step markup, supports close and Escape,
   closes when the user clicks blank page space outside the drawer, swaps content
   when another node is clicked, and closes when filtering hides the selected
-  node. The drawer is wide enough for readable inspection on desktop and its
-  expanded step blocks fill the drawer's available height without leaving a
-  large empty bottom region. When the desktop drawer is open, the main workspace
-  reserves the drawer width so report content is not hidden behind it. The
-  drawer remains scrollable when browser zoom or short viewports make its
-  content taller than the available screen height.
+  node. The drawer is wide enough for readable inspection on desktop; expanded
+  step blocks use their natural content height, short message/tool/observation
+  blocks do not stretch into large empty panels, and long payloads scroll inside
+  their own blocks. When the desktop drawer is open, the main workspace reserves
+  the drawer width so report content is not hidden behind it. The drawer remains
+  scrollable when browser zoom or short viewports make its content taller than
+  the available screen height.
 - HTML renders the peval-style Run, Result, Evidence, and Usage Breakdown
   sections for single-session reports.
 - HTML report typography keeps the body text baseline at 15px and compact
   labels, chips, table headers, and code blocks at 12px or larger.
 - HTML timed chips in the rendered Steps rail can show proportional fill for
   step duration, elapsed time, and tool execution time, while missing or zero
-  timing values keep the plain chip style.
+  timing values keep the plain chip style. Elapsed fill uses `wall_duration_ms`
+  before falling back to first-to-last timestamps or active `duration_ms`.
+- HTML data tables use content-adaptive column widths with a safe maximum column
+  width; long content must not force unbounded columns, and narrow compact-value
+  columns must not reserve fixed oversized space. Shared table renderer tests
+  verify that Leaderboard and Timeline Detail Table use the same table model for
+  rendering, sorting, filtering, metric shading, empty states, headers, cells,
+  and row state while keeping isolated table state by table id.
+- HTML Timeline Waterfall and Timeline Detail Table diagnostics render from
+  existing selected-Trial step/tool timing metadata, derive a flat performance
+  trace with latency-bearing stages and near-zero user/system markers, load the
+  fixed ECharts 6.0.0 CDN build for the Waterfall, show a readable Waterfall
+  fallback if ECharts is unavailable, omit retained-session idle gaps from the
+  Timeline, preserve true model and tool wall start/end values in the detail
+  table, render model generation as `Model: <model_name>` or `Model`, render
+  estimated model timing with visible `≈` prefixes when explicit model duration
+  is unavailable, avoid duplicating tool spans as model duration,
+  render heuristic category colors on Detail Table Stage values instead of a
+  separate visible Category column, visible Waterfall duration labels, and active-share values, size the
+  Waterfall left gutter from y-axis
+  labels instead of a large fixed margin, use stable interval-aware x-axis ticks
+  that avoid repeated rounded labels on short traces, keep message previews out
+  of Waterfall labels/tooltips and Detail Table Stage cells, and do not mutate
+  the embedded JSON v18 report data. Timeline bar and Detail Table row clicks
+  open the existing Step details drawer for the corresponding source step
+  without changing the selected Trial. The selected Detail Table row uses a
+  single first-cell indicator rather than repeated vertical bars in every cell.
+  Timeline Detail Table tests cover sortable `#`, `Stage`, `Start`, `End`,
+  `Duration`, and `Active Share` columns, sortable table headers cycling
+  through ascending, descending, and no-sort states, Stage-only filtering,
+  `Duration` and `Active Share` metric shading, `Active Share` in-cell
+  proportional fill, no Distribution column, and no Category header or filter.
+  Timeline Waterfall tests verify that table
+  sorting/filtering state does not drive the Waterfall trace order or chart
+  data.
+  Timeline color tests reserve red for `Error` and keep non-error `External`
+  stages on a neutral color.
 - HTML shows visibly marked estimated token chips for steps that lack real
   token metrics, preserves exact token chips when real step metrics exist, can
   use an optional `tiktoken` module, falls back to a deterministic byte-length

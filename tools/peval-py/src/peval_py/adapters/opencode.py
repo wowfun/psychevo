@@ -194,6 +194,19 @@ def tool_records_from_part(
     if not isinstance(state, dict) or "output" not in state:
         return tool_call, None
     status = str(state.get("status") or "completed").lower()
+    started_at_ms = int(part_row["time_created"])
+    finished_at_ms = int(part_row["time_updated"] or part_row["time_created"])
+    metadata = metadata_for(session, part_row["message_id"], part_row["id"])
+    metadata.update(
+        {
+            "started_at_ms": started_at_ms,
+            "started_at_ms_source": "opencode_part_timestamps",
+            "finished_at_ms": finished_at_ms,
+            "finished_at_ms_source": "opencode_part_timestamps",
+            "elapsed_ms": max(0, finished_at_ms - started_at_ms),
+            "elapsed_ms_source": "opencode_part_timestamps",
+        }
+    )
     return tool_call, MessageRecord(
         message={
             "role": "tool_result",
@@ -201,9 +214,9 @@ def tool_records_from_part(
             "tool_name": tool_name,
             "content": state.get("output"),
             "is_error": status not in {"completed", "success"},
-            "timestamp_ms": int(part_row["time_updated"] or part_row["time_created"]),
+            "timestamp_ms": finished_at_ms,
         },
-        metadata=metadata_for(session, part_row["message_id"], part_row["id"]),
+        metadata=metadata,
         source_session_id=str(session["id"]),
     )
 

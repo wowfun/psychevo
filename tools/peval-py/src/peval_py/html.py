@@ -13,11 +13,21 @@ from peval_py.i18n import messages_for, normalize_locale
 ASSET_PACKAGE = "peval_py.assets"
 
 
-def render_html(report: dict[str, Any], locale: str = "en") -> str:
+def render_html(
+    report: dict[str, Any],
+    locale: str = "en",
+    mode: str = "report",
+) -> str:
+    normalized_mode = normalize_render_mode(mode)
     normalized_locale = normalize_locale(locale)
     messages = messages_for(normalized_locale)
     payload = HTML_TEMPLATE.replace("__LANG__", escape(normalized_locale))
     payload = payload.replace("__TITLE__", escape(messages["title"]))
+    payload = payload.replace("__BODY_CLASS__", escape(f"{normalized_mode}-mode"))
+    payload = payload.replace(
+        "__SERVE_IMPORT__",
+        render_serve_import(report, messages) if normalized_mode == "serve" else "",
+    )
     payload = payload.replace("__CSS__", load_asset_text("report.css"))
     payload = payload.replace("__JS__", load_asset_text("report.js"))
     payload = payload.replace(
@@ -34,7 +44,74 @@ def render_html(report: dict[str, Any], locale: str = "en") -> str:
         "__I18N__",
         safe_json_for_script(json.dumps(messages, ensure_ascii=False)),
     )
+    payload = payload.replace(
+        "__RENDER_OPTIONS__",
+        safe_json_for_script(
+            json.dumps(
+                {
+                    "mode": normalized_mode,
+                    "sources": serve_sources(report) if normalized_mode == "serve" else [],
+                },
+                ensure_ascii=False,
+            )
+        ),
+    )
     return payload
+
+
+def render_serve_html(report: dict[str, Any], locale: str = "en") -> str:
+    return render_html(report, locale=locale, mode="serve")
+
+
+def normalize_render_mode(mode: object) -> str:
+    text = str(mode or "report").strip().lower()
+    if text in {"report", "serve"}:
+        return text
+    raise ValueError(f"unsupported HTML render mode: {mode}; supported modes: report, serve")
+
+
+def render_serve_import(report: dict[str, Any], messages: dict[str, str]) -> str:
+    sources = serve_sources(report)
+    count = len(sources)
+    source_word = messages["serve_source_count"]
+    if count != 1:
+        source_word = messages["serve_sources_count"]
+    source_list = "".join(
+        f'<li><span>{escape(source["label"])}</span><strong>{escape(source["kind"])}</strong></li>'
+        for source in sources
+    )
+    if not source_list:
+        source_list = f'<li><span>{escape(messages["serve_no_sources"])}</span><strong>-</strong></li>'
+    return f"""
+  <section class="serve-import-panel" data-serve-only>
+    <details class="serve-import">
+      <summary>
+        <span class="serve-add">{escape(messages["serve_add_source"])}</span>
+        <span class="serve-summary">{count} {escape(source_word)}</span>
+      </summary>
+      <div class="serve-import-body">
+        <div class="serve-drop">{escape(messages["serve_drop_copy"])}</div>
+        <ul class="serve-source-list">{source_list}</ul>
+      </div>
+    </details>
+  </section>"""
+
+
+def serve_sources(report: dict[str, Any]) -> list[dict[str, str]]:
+    sources: list[dict[str, str]] = []
+    for index, meta in enumerate(list_value(report.get("trajectory_meta"))):
+        if not isinstance(meta, dict):
+            continue
+        data_ref = as_dict(meta.get("data_ref"))
+        label = (
+            data_ref.get("relative_path")
+            or data_ref.get("path")
+            or meta.get("trial_key")
+            or f"source-{index + 1}"
+        )
+        kind = meta.get("adapter") or "source"
+        sources.append({"label": str(label), "kind": str(kind)})
+    return sources
 
 
 def load_asset_text(name: str) -> str:
@@ -174,8 +251,9 @@ HTML_TEMPLATE = """<!doctype html>
 __CSS__
 </style>
 </head>
-<body>
+<body class="__BODY_CLASS__">
 <div class="workspace">
+  __SERVE_IMPORT__
   <section class="topline">
     <h1>__TITLE__</h1>
   </section>
@@ -187,6 +265,8 @@ __CSS__
 <script type="application/json" id="peval-py-data">__DATA__</script>
 <script type="application/json" id="peval-py-token-estimates">__TOKEN_ESTIMATES__</script>
 <script type="application/json" id="peval-py-i18n">__I18N__</script>
+<script type="application/json" id="peval-py-render-options">__RENDER_OPTIONS__</script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@6.0.0/dist/echarts.min.js"></script>
 <script>
 __JS__
 </script>

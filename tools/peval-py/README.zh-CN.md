@@ -75,6 +75,10 @@ Nuitka 也是一种选择，适合想做 compiled-Python 构建并且本机有 C
 相对 `path` 和 `db` 会按清单文件所在目录解析。`.xlsx` 只在本机已安装
 `openpyxl` 时可用；如果希望保持标准库路径，请另存为 CSV。
 
+在对比报告中，Leaderboard 的 Duration 列和 JSON `duration_ms` 字段表示 active
+agent/tool work time。已保留 session 中较长的空闲间隔会单独保存在
+`wall_duration_ms` 字段中。
+
 CSV 示例：
 
 ```csv

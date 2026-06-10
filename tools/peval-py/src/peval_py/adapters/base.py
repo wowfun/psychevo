@@ -7,6 +7,21 @@ from peval_py.config import ToolConfig
 from peval_py.sources import MessageRecord
 
 
+ACTIVE_DURATION_FALLBACK_CAP_MS = 600_000
+
+
+def timestamp_fallback_duration_ms(
+    start_ms: int | None,
+    end_ms: int | None,
+) -> int | None:
+    if start_ms is None or end_ms is None:
+        return None
+    duration = end_ms - start_ms
+    if 0 <= duration <= ACTIVE_DURATION_FALLBACK_CAP_MS:
+        return duration
+    return None
+
+
 @dataclass
 class ToolMeta:
     tool_call_id: str
@@ -39,6 +54,7 @@ class StepMeta:
     timestamp_ms: int | None = None
     elapsed_ms: int | None = None
     duration_ms: int | None = None
+    duration_source: str | None = None
     data_preview: str | None = None
     truncated: bool = False
 

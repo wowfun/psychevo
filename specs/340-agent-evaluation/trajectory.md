@@ -36,9 +36,10 @@ itself starts after that execution.
 
 `execution_duration_ms` is the execution duration of one tool call. It belongs
 to the tool-call metadata, not to the transcript step as a whole. When a
-producer exposes runtime tool duration, reports should prefer that value. When
-runtime duration is unavailable, reports may use the interval from tool
-execution start to matching observation completion.
+producer exposes runtime tool duration, reports should prefer that value. A
+Psychevo session observability trace is a runtime timing source. When runtime
+duration is unavailable, reports may use retained message metadata or the
+interval from tool execution start to matching observation completion.
 
 `duration_ms` is the observed wall-clock span of the visible transcript step.
 It starts at the step timestamp and should end at the latest known completion

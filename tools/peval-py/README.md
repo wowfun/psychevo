@@ -80,6 +80,10 @@ rows are appended in file order. Relative `path` and `db` values resolve from
 the manifest directory. `.xlsx` works only when `openpyxl` is installed; save
 as CSV when you want the standard-library-only path.
 
+In comparison reports, the Leaderboard Duration column and JSON `duration_ms`
+fields show active agent/tool work time. Long retained-session idle gaps are
+kept separately as `wall_duration_ms`.
+
 CSV example:
 
 ```csv

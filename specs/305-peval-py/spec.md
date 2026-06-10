@@ -15,6 +15,7 @@ same command tree.
 - offline trajectory export of one session from JSONL or SQLite `messages` rows
 - ATIF v1.7 trajectory projection
 - single-session and session-comparison JSON/HTML report generation
+- a reusable HTML report renderer mode for a future local `serve` web UI
 - config-selected English and Simplified Chinese HTML report UI localization
 - translated canonical docs under `docs/i18n/<locale>/...`
 - localized tool README files beside their original README files
@@ -27,6 +28,8 @@ Out of scope:
   mutation
 - live providers, network services, ACP server startup, or official benchmark
   harnesses
+- the complete HTTP lifecycle, upload storage, authentication, or token model
+  for a future `peval-py serve` command
 - benchmark/task comparison matrices; `peval-py` comparison is session-first
   and does not introduce benchmark or task axes
 - generic runtime debug tables as canonical sources for v1 conversion
@@ -151,6 +154,12 @@ object as the canonical data source, does not require a selected adapter, and
 uses `atif` as the report metadata adapter id to mark passthrough input.
 It rebuilds only minimal report sidecar step metadata; peval-only timing
 metadata that is not present in ATIF is not reconstructed.
+Psychevo observability trace JSONL is also accepted by the Psychevo adapter. It
+is a redacted typed runtime trace, not an exported session transcript. Version 1
+trace JSONL may be converted directly when it contains retained message
+payloads. Version 2 compact trace JSONL does not contain transcript messages;
+direct conversion must return a warning and avoid fabricating transcript
+content.
 
 SQLite `--db` input is interpreted by the effective adapter for that DB input.
 Adapters may implement native database conversion for their own
@@ -168,6 +177,13 @@ session selection behavior. Psychevo defaults to the most recently updated
 session from the `sessions` table, OpenCode defaults to the most recently
 updated session, and Hermes defaults to the session with the most recent active
 message, ending, or start time when `--session-id` is omitted.
+When a Psychevo DB session has a sibling observability trace sidecar, the
+Psychevo adapter prefers version 1 or version 2 trace timing for generation and
+tool execution wall start/end timing, then falls back to message metadata, then
+timestamp intervals. Generation spans come from `generation_start` /
+`generation_end`; tool execution spans come from `tool_execution_start` /
+`tool_execution_end`. Trace absence or parse failure must produce a warning at
+most and must not block message-based conversion.
 
 ## Adapters
 
@@ -177,7 +193,8 @@ Built-in adapters are always available:
 - `psychevo` supports current Psychevo retained messages with
   `role=user|assistant|tool_result`, user text blocks, assistant text,
   reasoning, tool-call blocks, and current Psychevo SQLite persistence with
-  `sessions` and `messages` tables.
+  `sessions` and `messages` tables. It may enrich retained messages with
+  sibling `sessions/<session_id>/events.jsonl` observability traces.
 - `opencode` supports the common single-session message JSONL shape and current
   OpenCode SQLite persistence with `session`, `message`, and `part` tables.
 - `hermes` supports the common single-session message JSONL shape and current
@@ -211,10 +228,34 @@ stay standard and must not include peval-only fields.
 `export trajectory` writes a single ATIF trajectory object. `view trajectory`
 writes either JSON or HTML:
 
-- JSON is a self-contained peval view v17 subset with `schema_version`,
+- JSON is a self-contained peval view v18 subset with `schema_version`,
   `includes`, `scope`, `path_selections`, `trajectory`, and
   `trajectory_meta`. Multi-session view reports also include `comparison`;
   reports with notes also include `annotations`.
+- JSON v18 removes legacy generated-report data that is no longer consumed by
+  the peval-py HTML renderer. Multi-session `comparison` contains only
+  `selected_trial_key`, `summary`, and `leaderboard.entries`; it must not emit
+  duplicate `session_heatmap.rows` or `session_table.rows` copies. Leaderboard
+  rows do not carry derived `selected` or `successful_tool_calls` fields; the
+  selected Trial is represented only by `comparison.selected_trial_key`, and
+  tool diagnostics use `total_tool_calls` plus `total_tool_errors`.
+- `trajectory_meta` stays session-oriented. It keeps adapter, timing, status,
+  failure, score, warning, input source, event count, prompt availability, and
+  per-step timing/tool/observation metadata. It must not emit peval matrix/task
+  placeholder fields such as `matrix_cell_key`, `benchmark`, `cell_root_relative`,
+  `case_id`, `task_set_id`, `task_id`, `task_family`, `score_passed`, or
+  `score_details`. Trial-level `duration_ms` is active model/tool work time,
+  not the first-to-last session wall span. When runtime trace timing separates
+  model generation from tool execution, active duration is model generation
+  duration plus tool execution duration rather than a duplicated outer step
+  span. For adapters such as OpenCode or Hermes, tool execution timing may come
+  from adapter message/part timestamps or message metadata. When no explicit
+  model generation duration is available, peval-py must not present inferred
+  model timing as exact; HTML Timeline may estimate the model span from
+  adjacent message/tool timestamps and must visibly prefix displayed start, end,
+  and duration values with `≈`. The original wall span is retained as
+  `wall_duration_ms = finished_at_ms - started_at_ms`. Leaderboard rows use the
+  same active `duration_ms` value and also carry `wall_duration_ms`.
 - HTML is emitted as a single offline file with inline CSS and JavaScript,
   while the source CSS and JavaScript live in package asset files instead of a
   large Python string. It renders the selected Trial trajectory, step rows,
@@ -224,6 +265,78 @@ writes either JSON or HTML:
   sections instead of appearing as a separate top banner. Report typography
   uses a 15px body text baseline, with compact labels, chips, table headers,
   and code blocks no smaller than 12px.
+- HTML data tables use content-adaptive column widths with a safe maximum
+  column width instead of fixed column tracks. Wide tables may still scroll
+  horizontally inside their table shell, but narrow content such as compact
+  labels should not reserve oversized empty columns, and long cell content must
+  not expand a column without bound. The browser renderer uses one shared data
+  table layer for Leaderboard and Timeline Detail Table rendering, sorting,
+  filtering, numeric metric shading, empty states, table headers, cells, and
+  row state. Each table has isolated table state keyed by table id so sort and
+  filter changes in one table do not affect the other table or the report JSON
+  payload.
+- HTML renders Timeline Waterfall and Timeline Detail Table diagnostics inside
+  the selected Trial trajectory, after Notes/Evidence and before the final
+  Steps list. These diagnostics are derived in the browser from the existing
+  `trajectory_meta.steps` timing/tool metadata and matching ATIF steps; they
+  must not introduce new JSON v18 fields or mutate the embedded report payload.
+  Timeline diagnostics are a performance trace rather than a second Steps view:
+  the browser derives flat `stages` for latency-bearing work and `markers` for
+  near-zero contextual events. Waterfall and Detail Table use the same flat
+  `stages` list in the same order and do not express nested step/tool hierarchy.
+  Near-zero user/system steps (`duration_ms` missing or no more than 50 ms)
+  render only as chart markers; longer user/system processing can render as
+  `Input processing` or `System context processing` stages. Model generation
+  steps render as `Model: <model_name>` when a model name is known, otherwise
+  `Model`; if model timing is inferred from adjacent timestamps rather than
+  explicit metadata, Timeline table and tooltip values are prefixed with
+  `≈`. Tools render as `Tool: <name>`, and failed tool stages are
+  categorized as `Error`. Retained-session idle gaps are
+  intentionally omitted from Timeline diagnostics; they remain represented by
+  Trial `wall_duration_ms` outside the Timeline.
+- Timeline Waterfall uses the fixed ECharts 6.0.0 CDN build from
+  `https://cdn.jsdelivr.net/npm/echarts@6.0.0/dist/echarts.min.js`. It renders a
+  cumulative active-latency Gantt with a shared x-axis, category-colored
+  rectangular bars, per-stage duration labels on or beside bars, user/system
+  markers, and tooltips containing true wall start/end, active offsets,
+  duration, percent of active Timeline duration, category, and source refs. If
+  ECharts is unavailable, the Waterfall shows a readable fallback message while
+  the Detail Table still renders. The chart left gutter is sized from the
+  rendered y-axis labels instead of using a large fixed margin, so short labels
+  do not leave excessive empty space. The active-latency x-axis uses stable
+  nice tick intervals and interval-aware labels, so short traces do not collapse
+  multiple ticks into the same rounded value.
+- Timeline Detail Table preserves true wall start, end, duration, and
+  active-share values. It uses heuristic categories
+  (`I/O`, `Agent`, `Network`, `External`, `Tool`, and `Error`) derived from step
+  source, tool names/titles, and status. The table does not render a separate
+  visible Category column; instead, the Stage value is tinted by its category so
+  type can be scanned without widening the table. Waterfall labels, tooltips,
+  and Detail Table stage cells use compact structural labels and must not
+  display step message or reasoning previews, which remain available in the
+  Steps content for diagnostics. Red Timeline color is reserved for `Error`;
+  non-error `External` work uses a neutral category color. Clicking a Timeline
+  Waterfall bar or Timeline Detail Table row opens the existing right-side Step
+  details drawer for the corresponding source step. This interaction does not
+  change Timeline row order, selected Trial semantics, or JSON payload shape.
+  The selected Detail Table row uses one subtle row background and one left
+  edge indicator on the first cell; it must not draw repeated vertical
+  selection bars across every table column. Sortable data-table headers cycle
+  through ascending, descending, and no-sort states; the no-sort state restores
+  the filtered rows to their source order. Timeline Detail Table supports
+  sorting by `#`, `Stage`, `Start`, `End`, `Duration`, and `Active Share`,
+  filters only by `Stage` text, applies metric shading only to `Duration` and
+  `Active Share`, and renders `Active Share` with an in-cell proportional fill
+  based on the same active-share percentage. It does not render a separate
+  Distribution column. Timeline Detail Table sorting and filtering do not
+  affect Timeline Waterfall row order, bars, markers, or active-latency axis.
+- The HTML renderer has two presentation modes over the same report body:
+  static report mode and serve UI mode. Static report mode is the default used
+  by `view trajectory --format html` and must not show import controls,
+  leaderboard row checkboxes, or report-export controls. Serve UI mode reuses
+  the same Leaderboard, Trajectory Overview, selected Trial trajectory, Step
+  details drawer, state transitions, and visual tokens, then adds only
+  serve-specific controls around that body.
 
 Single-session HTML renders the current Run, Result, Evidence, and Steps
 sections. Multi-session HTML renders Report Notes, Leaderboard, Trajectory
@@ -232,23 +345,50 @@ primary section title without a duplicate eyebrow label. `Leaderboard` is a
 preserved report UI term and remains English in localized reports.
 `peval-py` treats each input session as one Trial. Multi-session HTML no longer
 renders a separate Visible Heatmap panel. The Leaderboard shows session, agent,
-model, result, duration, turns, tools, tokens, cost, and notes. The Agent column
-uses the trajectory agent name and falls back to the adapter id when the
-trajectory does not provide an agent name. The Session, Agent, Model, and
-Result columns provide multi-value filters whose values are collected from the
-complete Leaderboard row set. Empty selections are equivalent to no filter,
+model, result, active duration, turns, tools, tokens, cost, and notes. The
+Agent column uses the trajectory agent name and falls back to the adapter id
+when the trajectory does not provide an agent name. The Session, Agent, Model,
+and Result columns provide multi-value filters whose values are collected from
+the complete Leaderboard row set. Empty selections are equivalent to no filter,
 values within one column are OR-ed, and multiple filtered columns are AND-ed.
 Filtering happens before sorting and before metric shading. If filters hide the
 currently selected Trial and visible rows remain, HTML selects the first visible
 Trial; if filters hide all rows, the selected Trial detail remains visible but
-no Leaderboard row is selected. Leaderboard duration, tokens, Tool Calls, and
-Turns cells show per-column metric intensity directly as cell background
+no Leaderboard row is selected. Leaderboard active duration, tokens, Tool Calls,
+and Turns cells show per-column metric intensity directly as cell background
 shading; each metric column computes its own scale from the currently visible
 filtered rows, missing values remain unshaded, and Cost is not shaded. The
 filter control appears inline on the right side of the filtered column label,
 similar to a spreadsheet table header, instead of occupying a second header
 line. The rendered comparison sections must not show benchmark, task, task-set,
 task-family, or matrix task-axis fields.
+
+Serve UI mode keeps the report body as the primary mental model rather than
+turning the page into a separate dashboard. It may show a collapsed import
+panel above the report title; the default collapsed state exposes only an Add
+source affordance and a compact source/status summary. Expanding the import
+panel shows the drop/import affordance and loaded source list without adding a
+left sidebar or reducing the report body width. Serve-only controls use the
+same color, radius, typography, and panel tokens as static reports but sit at a
+lower visual priority than report content.
+
+In serve UI mode, the Leaderboard may add a row-selection checkbox column at
+the start of the existing full column set. Header and row checkboxes control
+export selection only; they must not change the selected Trial, open the Step
+details drawer, or change the filtered/sorted row set. Clicking a Leaderboard
+row remains the canonical selected-Trial interaction. The Trajectory Overview
+continues to follow the currently filtered and sorted Leaderboard rows and
+does not follow checkbox state.
+
+Serve UI mode renders a split export control in the Leaderboard panel header:
+the primary action exports table rows, and the adjacent menu offers JSON report
+and HTML report exports. All serve exports use the same row scope rule:
+visible checked rows when at least one currently visible row is checked,
+otherwise the current filtered and sorted visible row set. Checked rows hidden
+by filters remain checked in UI state but are excluded from the current export
+scope until they become visible again. JSON and HTML exports create report
+subsets for that same export scope; table export defaults to CSV and must not
+introduce an Excel dependency.
 
 The Trajectory Overview section below the Leaderboard renders one row per
 session in the same order as the currently filtered and sorted Leaderboard
@@ -266,13 +406,13 @@ inspection width than the initial compact rail so longer reasoning, tool, and
 observation content can be read without excessive wrapping. The widened drawer
 must not obscure the middle report content: when it opens on desktop, the page
 layout reserves the drawer's right-side width and constrains the main workspace
-to the remaining viewport. Its expanded step layout stretches to the available
-drawer height: the step summary stays at the top, visible content blocks share
-the remaining height where possible, and long block payloads scroll inside their
-own blocks instead of leaving unused drawer space below. When browser zoom or a
-short viewport leaves less vertical room than the drawer content needs, the
-drawer itself remains scrollable so lower blocks and controls stay reachable
-instead of being clipped. The drawer supports a close button, Escape, and
+to the remaining viewport. Its expanded step layout is content-sized: the step
+summary stays at the top, short visible content blocks do not stretch merely to
+fill the drawer, and long block payloads scroll inside their own blocks. When
+browser zoom or a short viewport leaves less vertical room than the drawer
+content needs, the drawer itself remains scrollable so lower blocks and controls
+stay reachable instead of being clipped. The drawer supports a close button,
+Escape, and
 clicking blank page space outside the drawer. Clicking another node replaces
 the drawer content; filtering that hides the drawer's selected node closes the
 drawer. On narrow screens, the drawer appears as a bottom sheet. Node titles
@@ -294,9 +434,9 @@ Steps timing chips may show a UI-only proportional fill in HTML. The fill is
 computed in the browser from the selected Trial metadata and is not written
 back to ATIF or report JSON. Step duration chips scale against the slowest step
 in the selected Trial, tool execution chips scale against the slowest tool
-execution in the selected Trial, and elapsed chips scale against the selected
-Trial wall duration when available, falling back to the largest elapsed step
-value.
+execution in the selected Trial, and elapsed chips scale against
+`wall_duration_ms` when available, then the selected Trial first-to-last
+timestamp span, and finally the active `duration_ms`.
 
 HTML localization covers the report title, report-level chrome, comparison
 section titles, metric labels, comparison table headers, comparison filters,
@@ -333,10 +473,15 @@ tool call, the observation is attached to that assistant Agent step instead of
 being emitted as a separate observation-only step. Unmatched tool results remain
 standalone Agent observation steps and add a conversion warning.
 
-Tool timing comes from message metadata when available. For Psychevo messages,
-`metadata_json.elapsed_ms` on tool-result rows is the preferred tool execution
-duration. If absent, converters may fall back to the elapsed wall time between
-the assistant tool-call timestamp and the tool-result timestamp.
+Timing comes from message metadata when available. For Psychevo messages,
+`metadata_json.elapsed_ms` on assistant rows is the preferred assistant step
+duration, and `metadata_json.elapsed_ms` on tool-result rows is the preferred
+tool execution duration. If explicit metadata is absent, converters and report
+projection may fall back to timestamp spans only when the span is non-negative
+and no more than 600,000 ms. Longer timestamp-derived spans are treated as
+human idle or unknown retained-session delay and are excluded from active
+duration. Explicit source durations are trusted even when they exceed that
+fallback cap.
 
 Single-session report defaults use deterministic peval-compatible placeholders
 for eval-only fields: benchmark, case, task-set, task, and task family are

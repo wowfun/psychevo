@@ -1,0 +1,1126 @@
+from __future__ import annotations
+
+from peval_py_test_support import *
+
+
+def compact_css_text(value: str) -> str:
+    return re.sub(r"\s+", "", value).replace(";}", "}")
+
+
+class PevalPyReportHtmlTests(unittest.TestCase):
+    def test_report_json_subset_and_html_safe_embedding(self) -> None:
+        records = read_jsonl(str(FIXTURES / "psychevo_session.jsonl"))
+        config = ToolConfig(adapter="psychevo", trajectory_id="trial:html")
+        result = convert_records(records, config)
+        report = build_report(result, config, "psychevo_session.jsonl")
+        self.assertEqual(report["schema_version"], 18)
+        self.assertEqual(report["includes"], ["core"])
+        self.assertIn("trajectory", report)
+        self.assertIn("trajectory_meta", report)
+        self.assertEqual(report["trajectory_meta"][0]["adapter"], "psychevo")
+        self.assertEqual(report["trajectory_meta"][0]["status"], "passed")
+
+        html = render_html(report)
+        self.assertIn("data-step-action=\"toggle\"", html)
+        self.assertIn("<h1>Agent Trajectory Report</h1>", html)
+        self.assertNotIn("<p class=\"eyebrow\">agent trajectory</p>", html)
+        self.assertNotIn("id=\"report-copy\"", html)
+        self.assertNotIn("id=\"score-strip\"", html)
+        self.assertNotIn("class=\"metric-card\"", html)
+        self.assertIn('"run": "Run"', html)
+        self.assertIn('t("run", "Run")', html)
+        self.assertIn('t("result", "Result")', html)
+        self.assertIn('t("evidence", "Evidence")', html)
+        self.assertIn('"usage_breakdown": "Usage Breakdown"', html)
+        self.assertIn("wall duration", html)
+        self.assertIn("tool success / total", html)
+        self.assertIn(
+            compact_css_text(
+                "body{margin:0;background:var(--canvas);color:var(--ink);"
+                "font:15px/1.48 var(--sans)}",
+            ),
+            compact_css_text(html),
+        )
+        font_sizes = [
+            int(value)
+            for value in re.findall(r"font(?:-size)?:[^;}]*?(\d+)px", html)
+        ]
+        self.assertGreaterEqual(min(font_sizes), 12)
+        self.assertIn("\\u003cscript", html)
+        self.assertNotIn("<script>alert(1)</script>", html)
+
+
+    def test_multi_session_jsonl_report_comparison_and_notes(self) -> None:
+        config = ToolConfig(adapter="opencode")
+        first = convert_records(read_jsonl(str(FIXTURES / "common_session.jsonl")), config)
+        second = convert_records(read_jsonl(str(FIXTURES / "psychevo_session.jsonl")), config)
+
+        report = build_multi_report(
+            [
+                ReportSession(
+                    conversion=first,
+                    input_label="common_session.jsonl",
+                    input_path=str(FIXTURES / "common_session.jsonl"),
+                    session_hint="common_session",
+                ),
+                ReportSession(
+                    conversion=second,
+                    input_label="psychevo_session.jsonl",
+                    input_path=str(FIXTURES / "psychevo_session.jsonl"),
+                    session_hint="psychevo_session",
+                ),
+            ],
+            config,
+            [
+                NoteInput(index=0, markdown="Report <script>note</script>"),
+                NoteInput(index=2, markdown="Second session note"),
+            ],
+        )
+
+        self.assertEqual(report["includes"], ["core", "comparison", "annotations"])
+        self.assertEqual(len(report["trajectory"]), 2)
+        self.assertEqual(report["trajectory"][0]["session_id"], "common_session")
+        self.assertEqual(report["trajectory"][1]["session_id"], "sess-psychevo")
+        self.assertEqual(report["comparison"]["summary"]["session_count"], 2)
+        self.assertEqual(
+            report["comparison"]["selected_trial_key"],
+            report["trajectory_meta"][0]["trial_key"],
+        )
+        self.assertNotIn("default_metric", report["comparison"])
+        self.assertNotIn("session_heatmap", report["comparison"])
+        self.assertNotIn("session_table", report["comparison"])
+        entries = report["comparison"]["leaderboard"]["entries"]
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(report["trajectory_meta"][0]["duration_ms"], 100)
+        self.assertEqual(report["trajectory_meta"][0]["wall_duration_ms"], 600)
+        self.assertEqual(entries[0]["duration_ms"], 100)
+        self.assertEqual(entries[0]["wall_duration_ms"], 600)
+        self.assertEqual(report["trajectory_meta"][1]["duration_ms"], 321)
+        self.assertEqual(report["trajectory_meta"][1]["wall_duration_ms"], 2_000)
+        self.assertEqual(entries[1]["duration_ms"], 321)
+        self.assertEqual(entries[1]["wall_duration_ms"], 2_000)
+        forbidden = {
+            "benchmark",
+            "task",
+            "task_id",
+            "task_set_id",
+            "task_family",
+            "selected",
+            "successful_tool_calls",
+        }
+        for row in entries:
+            self.assertTrue(forbidden.isdisjoint(row))
+        meta_forbidden = {
+            "matrix_cell_key",
+            "benchmark",
+            "cell_root_relative",
+            "case_id",
+            "task_set_id",
+            "task_id",
+            "task_family",
+            "score_passed",
+            "score_details",
+        }
+        for meta in report["trajectory_meta"]:
+            self.assertTrue(meta_forbidden.isdisjoint(meta))
+        self.assertEqual(report["annotations"]["report_notes"][0]["markdown"], "Report <script>note</script>")
+        self.assertEqual(
+            report["annotations"]["notes"][0]["trial_key"],
+            report["trajectory_meta"][1]["trial_key"],
+        )
+
+        before_html_render = json.loads(json.dumps(report))
+        html = render_html(report)
+        compact_html = compact_css_text(html)
+        self.assertEqual(report, before_html_render)
+        self.assertNotIn("<h3>Summary</h3>", html)
+        self.assertNotIn("Session Heatmap", html)
+        self.assertNotIn("Session Table", html)
+        self.assertIn("report-note-list", html)
+        self.assertIn("report-note", html)
+        self.assertNotIn("Visible Heatmap", html)
+        self.assertNotIn("visible_heatmap", html)
+        self.assertNotIn("visible_heatmap_eyebrow", html)
+        self.assertNotIn("session-axis", html)
+        self.assertNotIn("visible-grid", html)
+        self.assertIn("grid-template-columns:minmax(150px,220px) minmax(0,1fr)", html)
+        self.assertNotIn("repeat(${Math.max(rows.length, 1)}, minmax(150px, 1fr))", html)
+        self.assertNotIn("metric-button", html)
+        self.assertIn('label: t("agent", "Agent")', html)
+        self.assertIn("agentNameFor(row)", html)
+        self.assertIn("metricCellShade(row, column, rows)", html)
+        self.assertIn("metric-shade-4", html)
+        self.assertIn('key: "session_id", label: t("session", "Session"), width: "180px", filterable: true', html)
+        self.assertIn('key: "agent", label: t("agent", "Agent"), width: "120px", filterable: true', html)
+        self.assertIn('key: "model", label: t("model", "Model"), width: "150px", filterable: true', html)
+        self.assertIn('key: "status", label: t("result", "Result"), width: "104px", filterable: true', html)
+        self.assertIn("function renderDataTable", html)
+        self.assertIn("function applyDataTableControls", html)
+        self.assertIn("function bindDataTableControls", html)
+        self.assertIn("function toggleDataTableSort", html)
+        self.assertIn("controls.sort = null", html)
+        self.assertIn("state.tables[tableId]", html)
+        self.assertIn("controls.filters ||= {}", html)
+        self.assertIn('bindDataTableControls(target, "leaderboard"', html)
+        self.assertIn('bindDataTableControls(target, "timeline"', html)
+        self.assertNotIn("state.filters", html)
+        self.assertIn("columns.every(column =>", html)
+        self.assertIn("selected.includes(filterValue(row, column))", html)
+        self.assertIn('return applyDataTableControls("leaderboard", reportRows(), leaderboardColumns(), reportRows())', html)
+        self.assertIn("filter-control", html)
+        self.assertIn("filter-option", html)
+        self.assertIn("table-head-inline", html)
+        self.assertIn("filter-icon", html)
+        self.assertIn("data-filter-key", html)
+        self.assertIn("data-filter-clear", html)
+        self.assertIn('label: t("duration", "Active Duration")', html)
+        self.assertIn("trial?.wall_duration_ms", html)
+        self.assertIn("metric: true, value: row => row.duration_ms", html)
+        self.assertIn("metric: true, value: row => row.tokens", html)
+        self.assertIn("metric: true, value: row => row.total_tool_calls", html)
+        self.assertIn("metric: true, value: row => row.turns", html)
+        self.assertIn('key: "cost_usd"', html)
+        self.assertNotIn("metric: true, value: row => row.cost_usd", html)
+        self.assertIn('tableId: "leaderboard"', html)
+        self.assertIn('tableId: "timeline"', html)
+        self.assertIn("Leaderboard", html)
+        self.assertNotIn("leaderboard_eyebrow", html)
+        self.assertIn("data-table-sort", html)
+        self.assertIn("selected-row", html)
+        self.assertIn("data-trial-key", html)
+        self.assertIn("Trajectory Overview", html)
+        self.assertIn("trajectory-overview-title", html)
+        self.assertIn("trajectory-node", html)
+        self.assertIn("trajectory-node-letter", html)
+        self.assertIn('if (role === "system") return "S"', html)
+        self.assertIn('if (role === "user") return "U"', html)
+        self.assertIn('if (role === "agent") return "A"', html)
+        self.assertIn('return "?"', html)
+        self.assertNotIn("trajectory-node.role-system", html)
+        self.assertNotIn("trajectory-node.role-user", html)
+        self.assertNotIn("trajectory-node.role-agent", html)
+        self.assertIn("--step-count", html)
+        self.assertIn("renderLeaderboard(rows);", html)
+        self.assertIn("renderTrajectoryOverview(rows);", html)
+        self.assertIn("function renderTrajectoryOverview(rows = leaderboardRows())", html)
+        self.assertIn('id="step-drawer"', html)
+        self.assertIn("function renderStepDrawer()", html)
+        self.assertIn("data-step-id", html)
+        self.assertIn("data-step-drawer-close", html)
+        self.assertIn('event.key !== "Escape"', html)
+        self.assertIn('document.addEventListener("click"', html)
+        self.assertIn('target?.closest?.("#step-drawer")', html)
+        self.assertIn('target?.closest?.("[data-step-id]")', html)
+        self.assertIn('target?.closest?.("[data-timeline-step-id]")', html)
+        self.assertIn('target?.closest?.("[data-timeline-chart]")', html)
+        self.assertIn("function setStepDrawerOpen(open)", html)
+        self.assertIn('document.body.classList.toggle("step-drawer-open", Boolean(open))', html)
+        self.assertIn("renderStep(step, trial, timingStats, { open: true })", html)
+        self.assertIn("step-drawer", html)
+        self.assertIn("--step-drawer-width:min(760px,44vw)", html)
+        self.assertIn("--step-drawer-gap:24px", html)
+        self.assertIn(
+            compact_css_text(
+                ".step-drawer-open .workspace{max-width:calc(100vw - var(--step-drawer-width) - var(--step-drawer-gap));margin-left:0;margin-right:calc(var(--step-drawer-width) + var(--step-drawer-gap))}"
+            ),
+            compact_html,
+        )
+        self.assertIn("width:var(--step-drawer-width)", html)
+        self.assertIn("height:100vh", html)
+        self.assertIn("overflow:auto", html)
+        self.assertIn("grid-template-rows:auto minmax(0,1fr)", html)
+        self.assertIn(
+            compact_css_text(
+                ".step-drawer-body{min-height:0;padding:16px;display:grid;gap:12px;align-content:start}"
+            ),
+            compact_html,
+        )
+        self.assertIn(
+            compact_css_text(
+                ".step-drawer .step-body{min-height:0;display:grid;gap:10px;overflow:visible}"
+            ),
+            compact_html,
+        )
+        self.assertIn(
+            compact_css_text(
+                ".step-drawer .block{min-height:0;overflow:visible}"
+            ),
+            compact_html,
+        )
+        self.assertIn(
+            compact_css_text(
+                ".step-drawer .block pre{min-height:0;max-height:min(52vh,420px);overflow:auto}"
+            ),
+            compact_html,
+        )
+        self.assertNotIn(
+            compact_css_text(
+                ".step-drawer .step-body{min-height:0;display:grid;grid-auto-rows:minmax(120px,1fr);overflow:visible}"
+            ),
+            compact_html,
+        )
+        self.assertNotIn(
+            compact_css_text(
+                ".step-drawer .block pre{flex:1 1 auto;min-height:0;max-height:none;overflow:auto}"
+            ),
+            compact_html,
+        )
+        self.assertIn("selected trial trajectory", html)
+        self.assertIn("note-list", html)
+        self.assertIn("note-snippet", html)
+        self.assertIn("Second session note", html)
+        self.assertIn("Report \\u003cscript", html)
+        self.assertNotIn("<script>note</script>", html)
+
+
+    def test_serve_html_mode_reuses_report_body_with_export_selection_controls(self) -> None:
+        config = ToolConfig(adapter="opencode")
+        first = convert_records(read_jsonl(str(FIXTURES / "common_session.jsonl")), config)
+        second = convert_records(read_jsonl(str(FIXTURES / "psychevo_session.jsonl")), config)
+        report = build_multi_report(
+            [
+                ReportSession(
+                    conversion=first,
+                    input_label="common_session.jsonl",
+                    input_path=str(FIXTURES / "common_session.jsonl"),
+                    session_hint="common_session",
+                ),
+                ReportSession(
+                    conversion=second,
+                    input_label="psychevo_session.jsonl",
+                    input_path=str(FIXTURES / "psychevo_session.jsonl"),
+                    session_hint="psychevo_session",
+                ),
+            ],
+            config,
+            [],
+        )
+
+        static_html = render_html(report)
+        serve_html = render_serve_html(report)
+
+        self.assertIn('<body class="report-mode">', static_html)
+        self.assertNotIn('class="serve-import-panel"', static_html)
+        self.assertIn("Timeline Waterfall", static_html)
+        self.assertIn("Timeline Detail Table", static_html)
+        self.assertEqual(
+            script_json(static_html, "peval-py-render-options"),
+            {"mode": "report", "sources": []},
+        )
+
+        serve_options = script_json(serve_html, "peval-py-render-options")
+        self.assertEqual(serve_options["mode"], "serve")
+        self.assertEqual(len(serve_options["sources"]), 2)
+        self.assertIn('<body class="serve-mode">', serve_html)
+        self.assertIn('class="serve-import-panel"', serve_html)
+        self.assertIn("Add source", serve_html)
+        self.assertIn("2 sources", serve_html)
+        self.assertIn("common_session.jsonl", serve_html)
+        self.assertIn("Timeline Waterfall", serve_html)
+        self.assertIn("Timeline Detail Table", serve_html)
+
+        self.assertIn("function renderLeaderboard(rows = leaderboardRows())", serve_html)
+        self.assertIn("function renderTrajectoryOverview(rows = leaderboardRows())", serve_html)
+        self.assertIn("function renderTrace()", serve_html)
+        self.assertIn("function renderStepDrawer()", serve_html)
+        self.assertIn("function displayLeaderboardColumns()", serve_html)
+        self.assertIn("serveMode() ? [selectionColumn(), ...leaderboardColumns()] : leaderboardColumns()", serve_html)
+        self.assertIn("data-select-visible", serve_html)
+        self.assertIn("data-row-select", serve_html)
+        self.assertIn("leaderboard-export", serve_html)
+        self.assertIn('data-export-kind="csv"', serve_html)
+        self.assertIn('data-export-kind="json"', serve_html)
+        self.assertIn('data-export-kind="html"', serve_html)
+        self.assertIn("function exportScopeRows()", serve_html)
+        self.assertIn(
+            "const selected = rows.filter(row => state.rowSelection.has(row.trial_key));",
+            serve_html,
+        )
+        self.assertIn("return selected.length ? selected : rows;", serve_html)
+        self.assertIn("state.rowSelection.delete(key)", serve_html)
+        self.assertIn("renderComparisonPanels({ trace: false })", serve_html)
+        self.assertIn("event.stopPropagation();", serve_html)
+        self.assertIn("function reportSubset(rows)", serve_html)
+        self.assertIn('downloadText("peval-report-v18.json"', serve_html)
+        self.assertIn('downloadText("peval-report.html"', serve_html)
+        self.assertIn('downloadText("peval-leaderboard-visible.csv"', serve_html)
+
+
+    def test_html_render_mode_rejects_unknown_mode(self) -> None:
+        report = {
+            "schema_version": 18,
+            "includes": ["core"],
+            "trajectory": [{"trajectory_id": "trial:mode", "steps": []}],
+            "trajectory_meta": [{"trial_key": "trial:mode", "status": "passed", "steps": []}],
+        }
+
+        with self.assertRaisesRegex(ValueError, "unsupported HTML render mode"):
+            render_html(report, mode="dashboard")
+
+
+    def test_html_report_locale_localizes_report_chrome_except_steps(self) -> None:
+        config = ToolConfig(adapter="opencode")
+        first = convert_records(read_jsonl(str(FIXTURES / "common_session.jsonl")), config)
+        second = convert_records(read_jsonl(str(FIXTURES / "psychevo_session.jsonl")), config)
+        report = build_multi_report(
+            [
+                ReportSession(
+                    conversion=first,
+                    input_label="common_session.jsonl",
+                    input_path=str(FIXTURES / "common_session.jsonl"),
+                    session_hint="common_session",
+                ),
+                ReportSession(
+                    conversion=second,
+                    input_label="psychevo_session.jsonl",
+                    input_path=str(FIXTURES / "psychevo_session.jsonl"),
+                    session_hint="psychevo_session",
+                ),
+            ],
+            config,
+            [],
+        )
+
+        english_html = render_html(report)
+        zh_html = render_html(report, locale="zh-CN")
+
+        self.assertIn('<html lang="en">', english_html)
+        self.assertIn("<h1>Agent Trajectory Report</h1>", english_html)
+        self.assertIn("Leaderboard", english_html)
+        self.assertIn("Trajectory Overview", english_html)
+        self.assertIn('"agent": "Agent"', english_html)
+        self.assertIn('"filter": "Filter"', english_html)
+        self.assertIn('"clear": "Clear"', english_html)
+        self.assertIn('"selected_count": "selected"', english_html)
+        self.assertIn('"step_details": "Step details"', english_html)
+        self.assertIn('"open_step_details": "Open step details"', english_html)
+        self.assertIn('"close": "Close"', english_html)
+        self.assertNotIn("Agent 轨迹报告", english_html)
+        self.assertNotIn("可见热力图", english_html)
+        self.assertNotIn("visible_heatmap", english_html)
+
+        self.assertIn('<html lang="zh-CN">', zh_html)
+        self.assertIn("<h1>Agent 轨迹报告</h1>", zh_html)
+        self.assertIn('"leaderboard": "Leaderboard"', zh_html)
+        self.assertIn('"agent": "Agent"', zh_html)
+        self.assertIn('"trajectory_overview": "轨迹概览"', zh_html)
+        self.assertIn('"filter": "筛选"', zh_html)
+        self.assertIn('"clear": "清除"', zh_html)
+        self.assertIn('"selected_count": "已选"', zh_html)
+        self.assertIn('"step_details": "Step 详情"', zh_html)
+        self.assertIn('"open_step_details": "打开 Step 详情"', zh_html)
+        self.assertIn('"close": "关闭"', zh_html)
+        self.assertNotIn('"visible_heatmap"', zh_html)
+        self.assertNotIn("visible_heatmap_eyebrow", zh_html)
+        self.assertNotIn("leaderboard_eyebrow", zh_html)
+        self.assertIn('"duration": "活跃耗时"', zh_html)
+        self.assertIn('"status.passed": "通过"', zh_html)
+        self.assertIn('"session": "Session"', zh_html)
+        self.assertIn('"result": "Result"', zh_html)
+        self.assertIn('"notes": "Notes"', zh_html)
+        self.assertNotIn('"agent": "代理"', zh_html)
+        self.assertIn('"selected_trial_trajectory": "selected trial trajectory"', zh_html)
+        self.assertIn('"run": "Run"', zh_html)
+        self.assertIn('"variant": "variant"', zh_html)
+        self.assertIn('"evaluator": "evaluator"', zh_html)
+        self.assertIn('"reasoning": "reasoning"', zh_html)
+        self.assertIn('"reasoning_exposed": "reasoning exposed"', zh_html)
+        self.assertIn('"steps_events": "steps/events"', zh_html)
+        self.assertIn('"turns": "Turns"', zh_html)
+        self.assertIn('"tool_calls": "Tool Calls"', zh_html)
+        self.assertIn('"tool_success_total": "tool success / total"', zh_html)
+        self.assertIn('"evidence": "Evidence"', zh_html)
+        self.assertIn('"cache_read": "cache read"', zh_html)
+        self.assertIn('"cache_write": "cache write"', zh_html)
+        self.assertIn('"usage_breakdown": "用量明细"', zh_html)
+        self.assertNotIn('"session": "会话"', zh_html)
+        self.assertNotIn('"result": "结果"', zh_html)
+        self.assertNotIn('"notes": "备注"', zh_html)
+        self.assertNotIn('"trajectory_overview": "Trajectory Overview"', zh_html)
+        self.assertNotIn('"selected_trial_trajectory": "选中的 Trial 轨迹"', zh_html)
+        self.assertNotIn('"run": "运行"', zh_html)
+        self.assertNotIn('"variant": "变体"', zh_html)
+        self.assertNotIn('"evaluator": "评估器"', zh_html)
+        self.assertNotIn('"reasoning": "推理"', zh_html)
+        self.assertNotIn('"reasoning_exposed": "包含推理"', zh_html)
+        self.assertNotIn('"steps_events": "步骤/事件"', zh_html)
+        self.assertNotIn('"turns": "轮次"', zh_html)
+        self.assertNotIn('"tool_calls": "工具调用"', zh_html)
+        self.assertNotIn('"tool_success_total": "工具成功 / 总数"', zh_html)
+        self.assertNotIn('"evidence": "证据"', zh_html)
+        self.assertNotIn('"cache_read": "缓存读取"', zh_html)
+        self.assertNotIn('"cache_write": "缓存写入"', zh_html)
+        self.assertNotIn('"leaderboard": "排行榜"', zh_html)
+        self.assertNotIn(">排行榜<", zh_html)
+        self.assertIn("<h3>Steps (${count})</h3>", zh_html)
+        self.assertIn("<h4>Tool Calls</h4>", zh_html)
+
+
+    def test_html_renders_tool_names_timing_and_nested_observations(self) -> None:
+        records = [
+            MessageRecord(
+                message={
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_call",
+                            "id": "call-exec",
+                            "name": "exec_command",
+                            "arguments": {"cmd": "true"},
+                        }
+                    ],
+                    "timestamp_ms": 1000,
+                },
+                usage={"prompt_tokens": 21460},
+            ),
+            MessageRecord(
+                message={
+                    "role": "tool_result",
+                    "tool_call_id": "call-exec",
+                    "tool_name": "exec_command",
+                    "content": {"exit_code": 0},
+                    "timestamp_ms": 1110,
+                },
+                metadata={"elapsed_ms": 101},
+            ),
+        ]
+        config = ToolConfig(adapter="psychevo", trajectory_id="trial:tool-html")
+        result = convert_records(records, config)
+        report = build_report(result, config, "inline")
+        html = render_html(report)
+
+        self.assertEqual(len(report["trajectory"][0]["steps"]), 1)
+        self.assertIn("exec_command", html)
+        self.assertIn("tool exec", html)
+        self.assertIn("rail-summary", html)
+        self.assertIn("rail-tool-row", html)
+        self.assertIn("function stepTimingStats", html)
+        self.assertIn("maxStepDurationMs", html)
+        self.assertIn("maxToolExecutionMs", html)
+        self.assertIn("elapsedMaxMs", html)
+        self.assertIn("timeGradientStyle", html)
+        self.assertIn("time-gradient", html)
+        self.assertIn("--time-pct", html)
+        self.assertIn("slowest step", html)
+        self.assertIn("slowest tool", html)
+        self.assertIn('timeTitle("elapsed", meta?.elapsed_ms, elapsedRatio, "trajectory")', html)
+        self.assertIn("function fmtRailTokens", html)
+        self.assertIn("fmtRailTokens(tokenInfo.tokens)", html)
+        self.assertIn("fmtNum(tokenInfo.tokens)", html)
+        self.assertIn("Tool Calls", html)
+        self.assertIn("Observations", html)
+        self.assertEqual(
+            report["trajectory_meta"][0]["steps"][0]["tool_calls"][0][
+                "execution_duration_ms"
+            ],
+            101,
+        )
+
+
+    def test_html_renders_wall_time_timeline_diagnostics_without_new_json_fields(self) -> None:
+        report = {
+            "schema_version": 18,
+            "includes": ["core"],
+            "trajectory": [
+                {
+                    "trajectory_id": "trial:timeline",
+                    "session_id": "timeline",
+                    "agent": {"name": "custom", "model_name": "test-model"},
+                    "steps": [
+                        {"step_id": 1, "source": "user", "message": "start"},
+                        {
+                            "step_id": 2,
+                            "source": "system",
+                            "message": "system context",
+                        },
+                        {
+                            "step_id": 3,
+                            "source": "agent",
+                            "message": "run slow tool",
+                            "tool_calls": [
+                                {
+                                    "tool_call_id": "call-slow",
+                                    "function_name": "exec_command",
+                                    "arguments": {"cmd": "sleep 1"},
+                                }
+                            ],
+                            "observation": {
+                                "results": [
+                                    {
+                                        "source_call_id": "call-slow",
+                                        "content": "done",
+                                    }
+                                ]
+                            },
+                        },
+                        {
+                            "step_id": 4,
+                            "source": "user",
+                            "message": "after long retained-session idle",
+                        },
+                        {
+                            "step_id": 5,
+                            "source": "user",
+                            "message": "long input processing",
+                        },
+                        {"step_id": 6, "source": "agent", "message": "final"},
+                    ],
+                    "final_metrics": {},
+                }
+            ],
+            "trajectory_meta": [
+                {
+                    "trial_key": "trial:timeline",
+                    "status": "passed",
+                    "started_at_ms": 1_000,
+                    "finished_at_ms": 702_300,
+                    "wall_duration_ms": 701_300,
+                    "duration_ms": 450,
+                    "steps": [
+                        {
+                            "step_id": 1,
+                            "timestamp_ms": 1_000,
+                            "elapsed_ms": 0,
+                            "duration_ms": None,
+                            "tool_calls": [],
+                            "observations": [],
+                        },
+                        {
+                            "step_id": 2,
+                            "timestamp_ms": 1_040,
+                            "elapsed_ms": 40,
+                            "duration_ms": 80,
+                            "tool_calls": [],
+                            "observations": [],
+                        },
+                        {
+                            "step_id": 3,
+                            "timestamp_ms": 1_100,
+                            "elapsed_ms": 100,
+                            "duration_ms": 250,
+                            "tool_calls": [
+                                {
+                                    "tool_call_id": "call-slow",
+                                    "title": "exec_command",
+                                    "timestamp_ms": 1_125,
+                                    "execution_duration_ms": 200,
+                                    "status": "error",
+                                }
+                            ],
+                            "observations": [
+                                {
+                                    "source_call_id": "call-slow",
+                                    "timestamp_ms": 1_325,
+                                    "status": "error",
+                                }
+                            ],
+                        },
+                        {
+                            "step_id": 4,
+                            "timestamp_ms": 702_000,
+                            "elapsed_ms": 701_000,
+                            "duration_ms": None,
+                            "tool_calls": [],
+                            "observations": [],
+                        },
+                        {
+                            "step_id": 5,
+                            "timestamp_ms": 702_050,
+                            "elapsed_ms": 701_050,
+                            "duration_ms": 120,
+                            "tool_calls": [],
+                            "observations": [],
+                        },
+                        {
+                            "step_id": 6,
+                            "timestamp_ms": 702_200,
+                            "elapsed_ms": 701_200,
+                            "duration_ms": 0,
+                            "tool_calls": [],
+                            "observations": [],
+                        },
+                    ],
+                    "warnings": [],
+                }
+            ],
+        }
+        before = json.loads(json.dumps(report))
+        html = render_html(report)
+        payload = script_json(html, "peval-py-data")
+        js = load_asset_text("report.js")
+        stage_source = js[
+            js.index("function timelineTrace") : js.index("function timelinePushStage")
+        ]
+        detail_columns_source = js[
+            js.index("function timelineDetailColumns") : js.index(
+                "function renderTimelineDetailTable"
+            )
+        ]
+        detail_pct_source = js[
+            js.index("function timelineActivePctValue") : js.index(
+                "function timelineDetailColumns"
+            )
+        ]
+        detail_table_source = js[
+            js.index("function renderTimelineDetailTable") : js.index(
+                "function renderTimelineStageLabel"
+            )
+        ]
+        chart_option_source = js[
+            js.index("function timelineChartOption") : js.index(
+                "function timelineYAxisLabelWidth"
+            )
+        ]
+
+        self.assertEqual(report, before)
+        self.assertEqual(payload, before)
+        self.assertEqual(payload["schema_version"], 18)
+        self.assertNotIn("timeline", payload)
+        self.assertIn("Timeline Waterfall", html)
+        self.assertIn("Timeline Detail Table", html)
+        self.assertIn("Flat active-latency trace", html)
+        self.assertIn("Flat latency stages with true wall timing", html)
+        self.assertIn(
+            "https://cdn.jsdelivr.net/npm/echarts@6.0.0/dist/echarts.min.js",
+            html,
+        )
+        self.assertIn("function renderTimelineDiagnostics", html)
+        self.assertIn("function timelineTrace", html)
+        self.assertIn("function initTimelineWaterfallChart", html)
+        self.assertIn("window.echarts.init", html)
+        self.assertIn('type: "custom"', html)
+        self.assertIn("timeline_stage_model", html)
+        self.assertIn("`Model: ${model}`", html)
+        self.assertIn("const modelStage = timelineModelStageLabel(trajectory)", js)
+        self.assertNotIn("Model Call", html)
+        self.assertNotIn("Agent turn", html)
+        self.assertIn("return `≈${value}`", js)
+        self.assertNotIn("${value} (estimated)", js)
+        self.assertIn("timeline_stage_input_processing", html)
+        self.assertIn("timeline_stage_system_processing", html)
+        self.assertIn("timeline_marker_user_input", html)
+        self.assertIn("timeline_marker_system_context", html)
+        self.assertIn("timeline_active_offset", html)
+        self.assertIn("active_total_ms", html)
+        self.assertIn("function timelineAssignActiveOffsets", html)
+        self.assertIn("function timelineYAxisLabelWidth", html)
+        self.assertIn("function timelineXAxisScale", html)
+        self.assertIn("function timelineNiceIntervalMs", html)
+        self.assertIn("function openTimelineStep", html)
+        self.assertIn("function bindTimelineControls", html)
+        self.assertIn("grid: { left: labelWidth + 18", html)
+        self.assertIn("width: labelWidth", html)
+        self.assertIn("interval: xAxisScale.interval", html)
+        self.assertIn("minInterval: xAxisScale.interval", html)
+        self.assertIn("formatter: value => fmtTimelineAxis(value, xAxisScale.interval)", html)
+        self.assertIn('return interval && interval < 1000 ? "0ms" : "0s"', html)
+        self.assertIn("TIMELINE_INPUT_STAGE_THRESHOLD_MS = 50", html)
+        self.assertNotIn("message", stage_source)
+        self.assertNotIn("reasoning_content", stage_source)
+        self.assertNotIn("valuePreview", stage_source)
+        self.assertNotIn("firstToolName", stage_source)
+        self.assertIn("function timelineActivePctValue", html)
+        self.assertIn("function renderTimelineActiveShare", html)
+        self.assertIn("--active-share-pct", html)
+        self.assertIn("timeline-active-share", html)
+        self.assertIn("function timelineDetailColumns(model)", html)
+        self.assertIn("model.active_total_ms", detail_pct_source)
+        self.assertNotIn("model.wall_total_ms", detail_pct_source)
+        self.assertNotIn("model.wall_total_ms", detail_columns_source)
+        self.assertIn('key: "stage", label: t("timeline_col_stage", "Stage"), sortable: true, filterable: true', detail_columns_source)
+        self.assertIn('key: "duration_ms", label: t("timeline_col_duration", "Duration"), type: "number", numeric: true, sortable: true, metric: true', detail_columns_source)
+        self.assertIn('key: "active_pct", label: t("timeline_col_total_pct", "Active Share"), type: "number", numeric: true, sortable: true, metric: true', detail_columns_source)
+        self.assertIn("html: row => renderTimelineActiveShare(row, model)", detail_columns_source)
+        self.assertIn('className: "active-share-cell"', detail_columns_source)
+        self.assertNotIn('key: "distribution"', detail_columns_source)
+        self.assertNotIn("timeline_col_distribution", detail_columns_source)
+        self.assertNotIn('t("timeline_col_category", "Category")', detail_columns_source)
+        self.assertIn('applyDataTableControls("timeline", rows, columns, rows)', detail_table_source)
+        self.assertIn("renderTimelineStageLabel(row)", detail_columns_source)
+        self.assertIn("data-timeline-step-id", detail_table_source)
+        self.assertIn("timeline-detail-row", detail_table_source)
+        self.assertIn("timeline-detail-selected", detail_table_source)
+        self.assertIn("tabindex=\"0\"", detail_table_source)
+        self.assertNotIn('t("timeline_col_category", "Category")', detail_table_source)
+        self.assertNotIn('applyDataTableControls("timeline"', chart_option_source)
+        self.assertNotIn('tableControls("timeline"', chart_option_source)
+        self.assertIn("timeline-waterfall-chart", html)
+        self.assertIn("timeline-fallback", html)
+        self.assertIn("ECharts did not load", html)
+        self.assertIn("const label = api.value(5)", html)
+        self.assertIn("type: \"text\"", html)
+        self.assertIn("fill: labelInside ? \"#fffdf8\" : color", html)
+        self.assertIn("const color = api.value(4)", html)
+        self.assertIn('cursor: "pointer"', html)
+        self.assertIn('node.addEventListener("click", event => event.stopPropagation())', html)
+        self.assertIn('state.timelineChart.on("click"', html)
+        self.assertIn("openTimelineStep(params?.data?.trace_item)", html)
+        self.assertIn("state.selectedStep = { trialKey: state.selectedTrial, stepId: String(item.step_id) }", html)
+        self.assertIn("renderComparisonPanels();", html)
+        self.assertIn("row.addEventListener(\"click\", open)", html)
+        self.assertIn('event.key !== "Enter" && event.key !== " "', html)
+        self.assertIn("fmtTimelineDuration(stage.duration_ms)", html)
+        self.assertIn('"timeline_category_agent": "Agent"', html)
+        self.assertNotIn("Agent/LLM", html)
+        self.assertIn("timeline-stage-label", html)
+        self.assertIn("timeline-category-error", html)
+        self.assertIn("Active Share", html)
+        self.assertNotIn("% Active", html)
+        self.assertNotIn("timeline-distribution", html)
+        self.assertIn("timeline-table", html)
+        self.assertNotIn("timeline_stage_idle_gap", html)
+        self.assertNotIn("timeline_category_idle", html)
+        self.assertNotIn("timeline-category-idle", html)
+        self.assertNotIn("function timelineAxisBreaks", html)
+        self.assertNotIn("function trueToDisplayMs", html)
+        self.assertNotIn("function displayToTrueMs", html)
+        self.assertNotIn("function timelineBreakMarkArea", html)
+        self.assertNotIn("TIMELINE_IDLE_GAP_BREAK_THRESHOLD_MS", html)
+        self.assertNotIn("TIMELINE_IDLE_GAP_COMPRESSED_MS", html)
+        self.assertNotIn("markArea:", html)
+        self.assertNotIn("function renderTimelineWaterfallSvg", html)
+        self.assertNotIn("timeline-waterfall-svg", html)
+        self.assertNotIn("timeline-svg-grid", html)
+        self.assertNotIn("Idle gap", html)
+        self.assertNotIn("chart.js", html.lower())
+
+
+    def test_html_inlines_css_and_js_package_assets(self) -> None:
+        report = {
+            "schema_version": 18,
+            "includes": ["core"],
+            "trajectory": [
+                {
+                    "trajectory_id": "trial:assets",
+                    "session_id": "assets",
+                    "agent": {"name": "custom"},
+                    "steps": [],
+                    "final_metrics": {},
+                }
+            ],
+            "trajectory_meta": [
+                {
+                    "trial_key": "trial:assets",
+                    "status": "passed",
+                    "steps": [],
+                    "warnings": [],
+                }
+            ],
+        }
+        css = load_asset_text("report.css")
+        js = load_asset_text("report.js")
+        html = render_html(report)
+        compact_css = compact_css_text(css)
+
+        self.assertIn(".time-gradient", css)
+        self.assertIn(".timeline-waterfall-shell", css)
+        self.assertIn(".timeline-waterfall-chart", css)
+        self.assertIn(".timeline-fallback", css)
+        self.assertIn("table-layout:auto", css)
+        self.assertIn("min-width:max-content", css)
+        self.assertIn(
+            compact_css_text(".data-table th,.data-table td{max-width:260px}"),
+            compact_css,
+        )
+        self.assertIn(
+            compact_css_text(
+                "td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;max-width:132px}"
+            ),
+            compact_css,
+        )
+        self.assertIn(".timeline-table td.metric-cell", css)
+        self.assertIn(".timeline-table td.metric-cell.metric-shade-4", css)
+        self.assertIn(
+            compact_css_text(".timeline-detail-row{cursor:pointer}"),
+            compact_css,
+        )
+        self.assertIn(
+            compact_css_text(
+                ".timeline-detail-selected td{background:color-mix(in oklch,var(--focus),#fff 92%)}"
+            ),
+            compact_css,
+        )
+        self.assertIn(
+            compact_css_text(
+                ".timeline-detail-selected td:first-child{box-shadow:inset 3px 0 0 var(--focus)}"
+            ),
+            compact_css,
+        )
+        self.assertNotIn(
+            compact_css_text(
+                ".timeline-detail-selected td{background:color-mix(in oklch,var(--focus),#fff 92%);box-shadow"
+            ),
+            compact_css,
+        )
+        self.assertIn(".timeline-stage-label", css)
+        self.assertIn(".timeline-active-share", css)
+        self.assertIn("--active-share-pct", css)
+        self.assertIn("active-share-cell", css)
+        self.assertIn(
+            compact_css_text(
+                ".timeline-category-external{background:#e2e8f0;color:#475569}"
+            ),
+            compact_css,
+        )
+        self.assertIn(
+            compact_css_text(
+                ".timeline-category-error{background:#fee2e2;color:#dc2626}"
+            ),
+            compact_css,
+        )
+        self.assertNotIn(".timeline-distribution", css)
+        self.assertNotIn("table-layout:fixed", css)
+        self.assertNotIn(".timeline-col-stage", css)
+        self.assertNotIn(".timeline-category-chip", css)
+        self.assertNotIn(".timeline-category-external,.timeline-category-error", css)
+        self.assertNotIn(".timeline-category-idle", css)
+        self.assertNotIn(".timeline-waterfall-svg", css)
+        self.assertIn("function renderTrace()", js)
+        self.assertIn("function renderDataTable", js)
+        self.assertIn("function applyDataTableControls", js)
+        self.assertIn("function bindDataTableControls", js)
+        self.assertIn("function timelineDetailColumns", js)
+        self.assertIn('bindDataTableControls(target, "leaderboard"', js)
+        self.assertIn('bindDataTableControls(target, "timeline"', js)
+        self.assertIn("function renderTimelineDiagnostics", js)
+        self.assertIn("function timelineTrace", js)
+        self.assertIn("function timelineAssignActiveOffsets", js)
+        self.assertIn("function timelineYAxisLabelWidth", js)
+        self.assertIn("function timelineXAxisScale", js)
+        self.assertIn("function timelineNiceIntervalMs", js)
+        self.assertIn("function openTimelineStep", js)
+        self.assertIn("function bindTimelineControls", js)
+        self.assertIn("function initTimelineWaterfallChart", js)
+        self.assertIn('node.addEventListener("click", event => event.stopPropagation())', js)
+        self.assertIn('state.timelineChart.on("click"', js)
+        self.assertIn("window.echarts.init", js)
+        self.assertIn('type: "custom"', js)
+        self.assertIn("active_total_ms", js)
+        self.assertIn("const label = api.value(5)", js)
+        self.assertIn("const color = api.value(4)", js)
+        self.assertIn('color: "#64748b"', js)
+        self.assertIn("grid: { left: labelWidth + 18", js)
+        self.assertIn("const xAxisScale = timelineXAxisScale", js)
+        self.assertIn("max: xAxisScale.max", js)
+        self.assertIn("interval: xAxisScale.interval", js)
+        self.assertIn("minInterval: xAxisScale.interval", js)
+        self.assertIn("hideOverlap: true", js)
+        self.assertIn("formatter: value => fmtTimelineAxis(value, xAxisScale.interval)", js)
+        self.assertNotIn("formatter: value => fmtTimelineAxis(value),", js)
+        self.assertNotIn("function timelineBreakMarkArea", js)
+        self.assertNotIn("function timelineAxisBreaks", js)
+        self.assertNotIn("TIMELINE_IDLE_GAP_BREAK_THRESHOLD_MS", js)
+        self.assertNotIn("function renderTimelineWaterfallSvg", js)
+        self.assertNotIn("<colgroup><col class=\"timeline-col-row\"", js)
+        self.assertNotIn("column.width", js)
+        self.assertIn("<style>\n:root", html)
+        self.assertIn(
+            "https://cdn.jsdelivr.net/npm/echarts@6.0.0/dist/echarts.min.js",
+            html,
+        )
+        self.assertIn("function renderTrace()", html)
+        self.assertNotIn("__CSS__", html)
+        self.assertNotIn("__JS__", html)
+
+
+    def test_html_timing_gradients_ignore_missing_values_without_mutating_report(self) -> None:
+        report = {
+            "schema_version": 18,
+            "includes": ["core"],
+            "trajectory": [
+                {
+                    "trajectory_id": "trial:missing-time",
+                    "session_id": "missing-time",
+                    "agent": {"name": "custom"},
+                    "steps": [
+                        {
+                            "step_id": 1,
+                            "source": "agent",
+                            "message": "no timing",
+                            "tool_calls": [
+                                {
+                                    "tool_call_id": "call-1",
+                                    "function_name": "exec_command",
+                                    "arguments": {"cmd": "true"},
+                                }
+                            ],
+                        }
+                    ],
+                    "final_metrics": {},
+                }
+            ],
+            "trajectory_meta": [
+                {
+                    "trial_key": "trial:missing-time",
+                    "status": "passed",
+                    "steps": [
+                        {
+                            "step_id": 1,
+                            "duration_ms": 0,
+                            "elapsed_ms": None,
+                            "tool_calls": [
+                                {
+                                    "tool_call_id": "call-1",
+                                    "title": "exec_command",
+                                    "execution_duration_ms": None,
+                                }
+                            ],
+                        }
+                    ],
+                    "warnings": [],
+                }
+            ],
+        }
+        before = json.loads(json.dumps(report))
+        html = render_html(report)
+        payload = script_json(html, "peval-py-data")
+
+        self.assertEqual(report, before)
+        self.assertEqual(payload, before)
+        self.assertIn("function positiveMetric", html)
+        self.assertIn("if (!positiveMetric(value) || !positiveMetric(max)) return null", html)
+
+
+    def test_html_estimates_missing_step_token_chips_without_mutating_report(self) -> None:
+        report = {
+            "schema_version": 18,
+            "includes": ["core"],
+            "trajectory": [
+                {
+                    "trajectory_id": "trial:estimate",
+                    "session_id": "estimate-session",
+                    "agent": {"name": "custom", "model_name": "unknown-model"},
+                    "steps": [
+                        {
+                            "step_id": 1,
+                            "source": "agent",
+                            "message": "abcdefgh",
+                            "tool_calls": [
+                                {
+                                    "tool_call_id": "call-1",
+                                    "function_name": "read",
+                                    "arguments": {"path": "README.md"},
+                                }
+                            ],
+                        }
+                    ],
+                    "final_metrics": {"usage": {"total_tokens": 100}},
+                }
+            ],
+            "trajectory_meta": [
+                {
+                    "trial_key": "trial:estimate",
+                    "status": "passed",
+                    "steps": [{"step_id": 1, "duration_ms": None}],
+                    "warnings": [],
+                }
+            ],
+        }
+        before = json.loads(json.dumps(report))
+        with patch("peval_py.html.import_module", side_effect=ImportError("missing")):
+            html = render_html(report)
+
+        self.assertEqual(report, before)
+        estimates = script_json(html, "peval-py-token-estimates")
+        self.assertIn("trial:estimate", estimates)
+        estimate = estimates["trial:estimate"]["1"]
+        self.assertEqual(estimate["method"], "byte_length_div_4")
+        self.assertEqual(estimate["source"], "visible_step_text")
+        self.assertTrue(estimate["estimated"])
+        self.assertGreater(estimate["tokens"], 0)
+        self.assertIn("renderStepRail(step, sm, meta?.trial_key, timingStats)", html)
+        self.assertIn("stepTokenInfo(step, trialKey)", html)
+        self.assertIn("stepTokenEstimate(trialKey, step.step_id)", html)
+        self.assertIn("estimated tokens", html)
+        self.assertIn("from visible step text", html)
+        self.assertIn("≈", html)
+        self.assertNotIn("estimated", script_json(html, "peval-py-data")["trajectory"][0]["steps"][0])
+
+
+    def test_html_preserves_exact_step_tokens_without_estimate(self) -> None:
+        report = {
+            "schema_version": 18,
+            "includes": ["core"],
+            "trajectory": [
+                {
+                    "trajectory_id": "trial:exact",
+                    "session_id": "exact-session",
+                    "agent": {"name": "custom", "model_name": "unknown-model"},
+                    "steps": [
+                        {
+                            "step_id": 1,
+                            "source": "agent",
+                            "message": "abcdefgh",
+                            "metrics": {"prompt_tokens": 3, "completion_tokens": 4},
+                        }
+                    ],
+                    "final_metrics": {"total_prompt_tokens": 3, "total_completion_tokens": 4},
+                }
+            ],
+            "trajectory_meta": [
+                {
+                    "trial_key": "trial:exact",
+                    "status": "passed",
+                    "steps": [{"step_id": 1, "duration_ms": None}],
+                    "warnings": [],
+                }
+            ],
+        }
+        with patch("peval_py.html.import_module", side_effect=ImportError("missing")):
+            html = render_html(report)
+
+        self.assertEqual(script_json(html, "peval-py-token-estimates"), {})
+        payload = script_json(html, "peval-py-data")
+        self.assertEqual(payload["trajectory"][0]["steps"][0]["metrics"]["prompt_tokens"], 3)
+
+
+    def test_html_estimated_tokens_can_use_optional_tiktoken(self) -> None:
+        class FakeEncoding:
+            name = "fake-model-encoding"
+
+            def encode(self, text: str):
+                return list(range(7))
+
+        class FakeTiktoken:
+            def encoding_for_model(self, model: str):
+                self.model = model
+                return FakeEncoding()
+
+            def get_encoding(self, name: str):
+                raise AssertionError("model encoding should be used")
+
+        report = {
+            "schema_version": 18,
+            "includes": ["core"],
+            "trajectory": [
+                {
+                    "trajectory_id": "trial:tiktoken",
+                    "session_id": "tiktoken-session",
+                    "agent": {"name": "custom", "model_name": "fake-model"},
+                    "steps": [
+                        {
+                            "step_id": 1,
+                            "source": "agent",
+                            "message": "model counted text",
+                        }
+                    ],
+                    "final_metrics": {},
+                }
+            ],
+            "trajectory_meta": [
+                {
+                    "trial_key": "trial:tiktoken",
+                    "status": "passed",
+                    "steps": [{"step_id": 1, "duration_ms": None}],
+                    "warnings": [],
+                }
+            ],
+        }
+        fake = FakeTiktoken()
+        with patch("peval_py.html.import_module", return_value=fake):
+            html = render_html(report)
+
+        self.assertEqual(fake.model, "fake-model")
+        estimate = script_json(html, "peval-py-token-estimates")["trial:tiktoken"]["1"]
+        self.assertEqual(estimate["tokens"], 7)
+        self.assertEqual(estimate["method"], "tiktoken:fake-model-encoding")

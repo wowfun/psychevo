@@ -1,8 +1,18 @@
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
 const lower = value => String(value || "").toLowerCase();
-const I18N = JSON.parse($("peval-py-i18n").textContent || "{}");
-const TOKEN_ESTIMATES = JSON.parse($("peval-py-token-estimates").textContent || "{}");
+function scriptJson(id, fallback) {
+  const node = $(id);
+  if (!node) return fallback;
+  try {
+    return JSON.parse(node.textContent || JSON.stringify(fallback));
+  } catch {
+    return fallback;
+  }
+}
+const I18N = scriptJson("peval-py-i18n", {});
+const TOKEN_ESTIMATES = scriptJson("peval-py-token-estimates", {});
+const RENDER_OPTIONS = scriptJson("peval-py-render-options", { mode: "report" });
 function t(key, fallback) { return Object.prototype.hasOwnProperty.call(I18N, key) ? I18N[key] : (fallback ?? key); }
 function statusLabel(value) {
   const raw = String(value || "-");
@@ -19,9 +29,10 @@ function fmtCost(value) { return hasMetricValue(value) ? `$${Number(value).toFix
 function fmtScore(value) { return hasMetricValue(value) ? Number(value).toLocaleString() : "-"; }
 function hasMetricValue(value) { return value !== null && value !== undefined && value !== "" && !Number.isNaN(Number(value)); }
 function data() { return JSON.parse($("peval-py-data").textContent || "{}"); }
-const state = { view: null, selectedTrial: null, selectedStep: null, filters: {}, tables: { leaderboard: { sort: null, direction: "asc" } }, boundGlobalControls: false };
+function serveMode() { return RENDER_OPTIONS?.mode === "serve"; }
+const state = { view: null, selectedTrial: null, selectedStep: null, rowSelection: new Set(), tables: {}, timelineChart: null, boundGlobalControls: false };
 function reportRows() {
-  return state.view?.comparison?.leaderboard?.entries || state.view?.comparison?.session_table?.rows || [];
+  return state.view?.comparison?.leaderboard?.entries || [];
 }
 function selectedKey() {
   return state.selectedTrial || state.view?.comparison?.selected_trial_key || state.view?.trajectory_meta?.[0]?.trial_key || null;
@@ -92,19 +103,31 @@ function renderComparisonPanels(options = {}) {
   if (options.trace !== false) renderTrace();
   renderStepDrawer();
 }
+function selectionColumn() {
+  return {
+    key: "__select",
+    width: "46px",
+    select: true,
+    label: t("select_rows", "Select rows"),
+    html: row => renderRowSelection(row)
+  };
+}
 function leaderboardColumns() {
   return [
     { key: "session_id", label: t("session", "Session"), width: "180px", filterable: true, value: row => row.session_id || row.trial_key },
     { key: "agent", label: t("agent", "Agent"), width: "120px", filterable: true, value: row => agentNameFor(row) },
     { key: "model", label: t("model", "Model"), width: "150px", filterable: true, value: row => row.model || "-" },
     { key: "status", label: t("result", "Result"), width: "104px", filterable: true, value: row => row.status || "-", filterLabel: value => statusLabel(value), html: row => `<span class="stamp ${lower(row.status || "passed")}">${esc(statusLabel(row.status))}</span>` },
-    { key: "duration_ms", label: t("duration", "Duration"), width: "104px", type: "number", numeric: true, sortable: true, metric: true, value: row => row.duration_ms, format: fmtMs },
+    { key: "duration_ms", label: t("duration", "Active Duration"), width: "124px", type: "number", numeric: true, sortable: true, metric: true, value: row => row.duration_ms, format: fmtMs },
     { key: "turns", label: t("turns", "Turns"), width: "82px", type: "number", numeric: true, sortable: true, metric: true, value: row => row.turns, format: fmtNum },
     { key: "total_tool_calls", label: t("tool_calls", "Tool Calls"), width: "106px", type: "number", numeric: true, sortable: true, metric: true, value: row => row.total_tool_calls, format: value => hasMetricValue(value) ? fmtNum(value) : "-" },
     { key: "tokens", label: t("tokens", "Tokens"), width: "100px", type: "number", numeric: true, sortable: true, metric: true, value: row => row.tokens, format: fmtNum },
     { key: "cost_usd", label: t("cost", "Cost"), width: "92px", type: "number", numeric: true, sortable: true, value: row => row.cost_usd, format: fmtCost },
     { key: "notes", label: t("notes", "Notes"), width: "220px", value: row => noteSnippetFor(row.trial_key), html: row => renderNotesCell(row.trial_key), cellTitle: row => notesPlainText(notesFor(row.trial_key)) }
   ];
+}
+function displayLeaderboardColumns() {
+  return serveMode() ? [selectionColumn(), ...leaderboardColumns()] : leaderboardColumns();
 }
 function agentNameFor(row) {
   const name = trajectoryFor(row?.trial_key)?.agent?.name;
@@ -113,57 +136,99 @@ function agentNameFor(row) {
 function renderLeaderboard(rows = leaderboardRows()) {
   const target = $("leaderboard");
   if (!target) return;
-  const columns = leaderboardColumns();
+  const columns = displayLeaderboardColumns();
   target.innerHTML = `
-    <div class="panel-head"><div><h2 id="leaderboard-title">${esc(t("leaderboard", "Leaderboard"))}</h2><p class="copy">${esc(t("leaderboard_copy", "Each row is one visible session-as-Trial. Numeric cells shade by column value; rows update the selected Trial."))}</p></div></div>
-    ${renderInteractiveTable(columns, rows)}
+    <div class="panel-head"><div><h2 id="leaderboard-title">${esc(t("leaderboard", "Leaderboard"))}</h2><p class="copy">${esc(t("leaderboard_copy", "Each row is one visible session-as-Trial. Numeric cells shade by column value; rows update the selected Trial."))}</p></div>${renderLeaderboardExportControls()}</div>
+    ${renderDataTable({
+      tableId: "leaderboard",
+      columns,
+      rows,
+      filterOptionsRows: reportRows(),
+      rowClass: row => `clickable-row ${row.trial_key === selectedKey() ? "selected-row" : ""}`,
+      rowAttrs: row => `data-trial-key="${esc(row.trial_key)}"`,
+      rowTitle: row => row.trial_key,
+    })}
   `;
   bindLeaderboardControls();
 }
+function renderLeaderboardExportControls() {
+  if (!serveMode()) return "";
+  return `<div class="leaderboard-export" data-serve-only>
+    <button class="step-toggle-button export-main" type="button" data-export-kind="csv">${esc(t("export_rows", "Export rows"))}</button>
+    <details class="export-menu">
+      <summary class="export-menu-button" aria-label="${esc(t("export_options", "Export options"))}">${esc(t("more", "More"))}</summary>
+      <div class="export-menu-panel">
+        <button type="button" data-export-kind="json">${esc(t("export_json_report", "JSON report"))}</button>
+        <button type="button" data-export-kind="html">${esc(t("export_html_report", "HTML report"))}</button>
+      </div>
+    </details>
+  </div>`;
+}
 function leaderboardRows() {
-  return applyTableControls(applyLeaderboardFilters(reportRows()));
+  return applyDataTableControls("leaderboard", reportRows(), leaderboardColumns(), reportRows());
 }
-function tableControls() {
-  state.tables.leaderboard ||= { sort: null, direction: "asc" };
-  return state.tables.leaderboard;
+function tableControls(tableId) {
+  const controls = state.tables[tableId] || {};
+  if (!Object.prototype.hasOwnProperty.call(controls, "sort")) controls.sort = null;
+  controls.direction ||= "asc";
+  controls.filters ||= {};
+  state.tables[tableId] = controls;
+  return controls;
 }
-function filterableColumns() {
-  return leaderboardColumns().filter(column => column.filterable);
+function filterableColumns(columns) {
+  return columns.filter(column => column.filterable);
 }
-function activeFilterValues(key) {
-  const values = state.filters?.[key];
+function activeFilterValues(tableId, key) {
+  const values = tableControls(tableId).filters?.[key];
   return Array.isArray(values) ? values : [];
 }
 function filterValue(row, column) {
-  const raw = column.filterValue ? column.filterValue(row) : column.value(row);
+  const source = column.filterValue || column.value || (item => item?.[column.key]);
+  const raw = source(row);
   const text = raw === null || raw === undefined || raw === "" ? "-" : String(raw);
   return text;
 }
 function filterLabel(column, value) {
   return column.filterLabel ? column.filterLabel(value) : value;
 }
-function applyLeaderboardFilters(rows) {
-  const columns = filterableColumns();
+function applyDataTableFilters(tableId, rows, columns) {
+  const activeColumns = filterableColumns(columns);
   return rows.filter(row => columns.every(column => {
-    const selected = activeFilterValues(column.key);
+    if (!activeColumns.includes(column)) return true;
+    const selected = activeFilterValues(tableId, column.key);
     if (!selected.length) return true;
     return selected.includes(filterValue(row, column));
   }));
 }
-function filterOptions(column) {
-  const values = reportRows().map(row => filterValue(row, column));
+function filterOptions(column, rows) {
+  const values = rows.map(row => filterValue(row, column));
   return Array.from(new Set(values)).sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }));
 }
-function setFilterValue(key, value, checked) {
-  const selected = new Set(activeFilterValues(key));
+function setFilterValue(tableId, key, value, checked) {
+  const controls = tableControls(tableId);
+  const selected = new Set(activeFilterValues(tableId, key));
   if (checked) selected.add(value);
   else selected.delete(value);
   const values = Array.from(selected);
-  if (values.length) state.filters[key] = values;
-  else delete state.filters[key];
+  if (values.length) controls.filters[key] = values;
+  else delete controls.filters[key];
 }
-function clearFilter(key) {
-  delete state.filters[key];
+function clearFilter(tableId, key) {
+  delete tableControls(tableId).filters[key];
+}
+function toggleDataTableSort(tableId, key) {
+  const controls = tableControls(tableId);
+  if (controls.sort !== key) {
+    controls.sort = key;
+    controls.direction = "asc";
+    return;
+  }
+  if (controls.direction === "asc") {
+    controls.direction = "desc";
+    return;
+  }
+  controls.sort = null;
+  controls.direction = "asc";
 }
 function syncSelectionWithVisibleRows(rows) {
   const key = selectedKey();
@@ -192,11 +257,11 @@ function compareTableValues(left, right, type, direction) {
   const delta = type === "number" ? Number(left) - Number(right) : String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: "base" });
   return direction === "desc" ? -delta : delta;
 }
-function applyTableControls(rows) {
-  const controls = tableControls();
-  const columns = leaderboardColumns();
+function applyDataTableControls(tableId, rows, columns, filterOptionsRows = rows) {
+  const controls = tableControls(tableId);
+  const filtered = applyDataTableFilters(tableId, rows, columns, filterOptionsRows);
   const sortColumn = columns.find(column => column.key === controls.sort && column.sortable);
-  const out = [...rows];
+  const out = [...filtered];
   if (sortColumn) out.sort((left, right) => compareTableValues(sortColumn.value(left), sortColumn.value(right), sortColumn.type, controls.direction));
   return out;
 }
@@ -204,26 +269,31 @@ function tableText(row, column) {
   const raw = column.value(row);
   return column.format ? column.format(raw, row) : (raw ?? "-");
 }
-function renderInteractiveTable(columns, rows) {
-  const controls = tableControls();
-  const colgroup = columns.map(column => `<col ${column.width ? `style="width:${esc(column.width)}"` : ""}>`).join("");
-  const headers = columns.map(column => renderTableHeader(column, controls)).join("");
-  const body = rows.length ? rows.map(row => renderTableRow(row, columns, rows)).join("") : `<tr><td class="table-empty" colspan="${columns.length}">${esc(t("no_matching_rows", "No matching rows"))}</td></tr>`;
-  return `<div class="table-shell"><div class="table-wrap"><table class="data-table"><colgroup>${colgroup}</colgroup><thead><tr>${headers}</tr></thead><tbody>${body}</tbody></table></div></div>`;
+function renderDataTable({ tableId, columns, rows, tableClass = "", shellClass = "", rowClass = "", rowAttrs = "", rowTitle = null, emptyText = null, filterOptionsRows = rows }) {
+  const controls = tableControls(tableId);
+  const headers = columns.map(column => renderTableHeader(tableId, column, controls, rows, filterOptionsRows)).join("");
+  const rowOptions = { rowClass, rowAttrs, rowTitle };
+  const body = rows.length
+    ? rows.map(row => renderTableRow(row, columns, rows, rowOptions)).join("")
+    : `<tr><td class="table-empty" colspan="${columns.length}">${esc(emptyText || t("no_matching_rows", "No matching rows"))}</td></tr>`;
+  const classes = ["data-table", tableClass].filter(Boolean).join(" ");
+  const shellClasses = ["table-shell", shellClass].filter(Boolean).join(" ");
+  return `<div class="${esc(shellClasses)}"><div class="table-wrap"><table class="${esc(classes)}" data-table-id="${esc(tableId)}"><thead><tr>${headers}</tr></thead><tbody>${body}</tbody></table></div></div>`;
 }
-function renderTableHeader(column, controls) {
+function renderTableHeader(tableId, column, controls, rows = [], filterOptionsRows = rows) {
+  if (column.select) return renderSelectionHeader(rows);
   const active = controls.sort === column.key;
   const mark = active ? (controls.direction === "desc" ? "&#9660;" : "&#9650;") : "&#8597;";
   const label = column.sortable
     ? `<button class="sort-button ${active ? "active" : ""}" type="button" data-table-sort="${esc(column.key)}" aria-label="${esc(t("sort", "Sort"))} ${esc(column.label)}"><span class="sort-label">${esc(column.label)}</span><span class="sort-mark">${mark}</span></button>`
     : `<span class="static-head">${esc(column.label)}</span>`;
-  const filter = column.filterable ? renderFilterControl(column) : "";
+  const filter = column.filterable ? renderFilterControl(tableId, column, filterOptionsRows) : "";
   const contentClass = column.filterable ? "table-head-cell table-head-inline" : "table-head-cell";
   return `<th class="${column.numeric ? "num" : ""}" title="${esc(column.label)}"><div class="${contentClass}">${label}${filter}</div></th>`;
 }
-function renderFilterControl(column) {
-  const selected = new Set(activeFilterValues(column.key));
-  const options = filterOptions(column);
+function renderFilterControl(tableId, column, rows) {
+  const selected = new Set(activeFilterValues(tableId, column.key));
+  const options = filterOptions(column, rows);
   const count = selected.size;
   const countText = count ? `<span class="filter-count">${esc(`${count} ${t("selected_count", "selected")}`)}</span>` : "";
   const optionHtml = options.length
@@ -231,11 +301,30 @@ function renderFilterControl(column) {
     : `<p class="filter-empty">${esc(t("no_matching_rows", "No matching rows"))}</p>`;
   return `<details class="filter-control ${count ? "active" : ""}" data-filter-menu="${esc(column.key)}"><summary class="filter-button" aria-label="${esc(t("filter", "Filter"))} ${esc(column.label)}"><span class="filter-icon">&#9662;</span>${countText}</summary><div class="filter-menu"><div class="filter-menu-head"><strong>${esc(column.label)}</strong><button class="filter-clear" type="button" data-filter-clear="${esc(column.key)}" ${count ? "" : "disabled"}>${esc(t("clear", "Clear"))}</button></div><div class="filter-options">${optionHtml}</div></div></details>`;
 }
-function renderTableRow(row, columns, rows) {
-  const selected = row.trial_key === selectedKey();
-  return `<tr class="clickable-row ${selected ? "selected-row" : ""}" data-trial-key="${esc(row.trial_key)}" title="${esc(row.trial_key)}">${columns.map(column => renderDataCell(row, column, rows)).join("")}</tr>`;
+function renderSelectionHeader(rows) {
+  const visible = rows.filter(row => row?.trial_key);
+  const selected = visible.filter(row => state.rowSelection.has(row.trial_key));
+  const checked = visible.length > 0 && selected.length === visible.length;
+  const partial = selected.length > 0 && selected.length < visible.length;
+  return `<th class="select-col" title="${esc(t("select_visible_rows", "Select visible rows"))}"><label class="select-box"><input type="checkbox" data-select-visible ${checked ? "checked" : ""} ${partial ? "data-partial=\"true\"" : ""} aria-label="${esc(t("select_visible_rows", "Select visible rows"))}"><span></span></label></th>`;
+}
+function renderRowSelection(row) {
+  const key = row.trial_key || "";
+  const checked = state.rowSelection.has(key);
+  return `<label class="select-box"><input type="checkbox" data-row-select="${esc(key)}" ${checked ? "checked" : ""} aria-label="${esc(t("select_row_for_export", "Select row for export"))}: ${esc(key)}"><span></span></label>`;
+}
+function tableOptionValue(option, row, fallback = "") {
+  return typeof option === "function" ? option(row) : (option || fallback);
+}
+function renderTableRow(row, columns, rows, options = {}) {
+  const className = tableOptionValue(options.rowClass, row);
+  const attrs = tableOptionValue(options.rowAttrs, row);
+  const title = tableOptionValue(options.rowTitle, row);
+  const titleAttr = title && !String(attrs).includes("title=") ? ` title="${esc(title)}"` : "";
+  return `<tr class="${esc(className)}"${attrs ? ` ${attrs}` : ""}${titleAttr}>${columns.map(column => renderDataCell(row, column, rows)).join("")}</tr>`;
 }
 function renderDataCell(row, column, rows) {
+  if (column.select) return `<td class="select-col">${column.html(row)}</td>`;
   const classes = [column.numeric ? "num" : "", column.metric ? metricCellShade(row, column, rows) : "", column.className || ""].filter(Boolean).join(" ");
   const html = column.html ? column.html(row) : esc(tableText(row, column));
   const title = column.cellTitle ? column.cellTitle(row) : "";
@@ -252,37 +341,79 @@ function metricCellShade(row, column, rows) {
   const bucket = Math.max(0, Math.min(4, Math.round(((Number(value) - min) / (max - min)) * 4)));
   return `metric-cell metric-shade-${bucket}`;
 }
+function bindDataTableControls(root, tableId, onChange) {
+  if (!root) return;
+  const rerender = typeof onChange === "function" ? onChange : (() => {});
+  root.querySelectorAll("[data-table-sort]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.stopPropagation();
+      toggleDataTableSort(tableId, button.dataset.tableSort);
+      rerender();
+    });
+  });
+  root.querySelectorAll("[data-filter-key]").forEach(input => {
+    input.addEventListener("change", event => {
+      event.stopPropagation();
+      setFilterValue(tableId, input.dataset.filterKey, input.value, input.checked);
+      rerender();
+    });
+  });
+  root.querySelectorAll("[data-filter-clear]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.stopPropagation();
+      clearFilter(tableId, button.dataset.filterClear);
+      rerender();
+    });
+  });
+}
 function bindLeaderboardControls() {
   const target = $("leaderboard");
   if (!target) return;
-  target.querySelectorAll("[data-table-sort]").forEach(button => {
-    button.addEventListener("click", event => {
-      event.stopPropagation();
-      const controls = tableControls();
-      if (controls.sort === button.dataset.tableSort) {
-        controls.direction = controls.direction === "asc" ? "desc" : "asc";
-      } else {
-        controls.sort = button.dataset.tableSort;
-        controls.direction = "asc";
-      }
-      renderComparisonPanels();
-    });
+  bindDataTableControls(target, "leaderboard", () => renderComparisonPanels());
+  bindServeSelectionControls(target);
+  bindServeExportControls(target);
+  bindTrialSelection(target);
+}
+function bindServeSelectionControls(target) {
+  if (!serveMode()) return;
+  target.querySelectorAll(".select-box").forEach(control => {
+    control.addEventListener("click", event => event.stopPropagation());
   });
-  target.querySelectorAll("[data-filter-key]").forEach(input => {
+  target.querySelectorAll("[data-row-select]").forEach(input => {
+    input.addEventListener("click", event => event.stopPropagation());
     input.addEventListener("change", event => {
       event.stopPropagation();
-      setFilterValue(input.dataset.filterKey, input.value, input.checked);
-      renderComparisonPanels();
+      const key = input.dataset.rowSelect;
+      if (!key) return;
+      if (input.checked) state.rowSelection.add(key);
+      else state.rowSelection.delete(key);
+      renderComparisonPanels({ trace: false });
     });
   });
-  target.querySelectorAll("[data-filter-clear]").forEach(button => {
+  target.querySelectorAll("[data-select-visible]").forEach(input => {
+    input.indeterminate = input.hasAttribute("data-partial");
+    input.addEventListener("click", event => event.stopPropagation());
+    input.addEventListener("change", event => {
+      event.stopPropagation();
+      const rows = leaderboardRows();
+      const visibleKeys = rows.map(row => row.trial_key).filter(Boolean);
+      const allSelected = visibleKeys.length > 0 && visibleKeys.every(key => state.rowSelection.has(key));
+      visibleKeys.forEach(key => {
+        if (allSelected) state.rowSelection.delete(key);
+        else state.rowSelection.add(key);
+      });
+      renderComparisonPanels({ trace: false });
+    });
+  });
+}
+function bindServeExportControls(target) {
+  if (!serveMode()) return;
+  target.querySelectorAll("[data-export-kind]").forEach(button => {
     button.addEventListener("click", event => {
       event.stopPropagation();
-      clearFilter(button.dataset.filterClear);
-      renderComparisonPanels();
+      exportCurrentScope(button.dataset.exportKind || "csv");
     });
   });
-  bindTrialSelection(target);
 }
 function bindTrialSelection(root) {
   root.querySelectorAll("[data-trial-key]").forEach(node => {
@@ -293,6 +424,102 @@ function bindTrialSelection(root) {
       renderComparisonPanels();
     });
   });
+}
+function exportScopeRows() {
+  const rows = leaderboardRows();
+  const selected = rows.filter(row => state.rowSelection.has(row.trial_key));
+  return selected.length ? selected : rows;
+}
+function exportCurrentScope(kind) {
+  const rows = exportScopeRows();
+  if (kind === "json") {
+    downloadText("peval-report-v18.json", "application/json", JSON.stringify(reportSubset(rows), null, 2));
+    return;
+  }
+  if (kind === "html") {
+    downloadText("peval-report.html", "text/html", htmlReportForSubset(reportSubset(rows)));
+    return;
+  }
+  downloadText("peval-leaderboard-visible.csv", "text/csv", csvForRows(rows));
+}
+function csvForRows(rows) {
+  const columns = leaderboardColumns();
+  const header = columns.map(column => csvValue(column.label));
+  const body = rows.map(row => columns.map(column => csvValue(tableText(row, column))).join(","));
+  return [header.join(","), ...body].join("\n");
+}
+function csvValue(value) {
+  const text = String(value ?? "");
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+function reportSubset(rows) {
+  const original = state.view || {};
+  const metas = original.trajectory_meta || [];
+  const trajectories = original.trajectory || [];
+  const entries = rows.map(row => ({ ...row }));
+  const selectedKeys = new Set(entries.map(row => row.trial_key));
+  const orderedMeta = [];
+  const orderedTrajectories = [];
+  entries.forEach(row => {
+    const index = metas.findIndex(meta => meta.trial_key === row.trial_key);
+    if (index >= 0) {
+      orderedMeta.push({ ...metas[index] });
+      orderedTrajectories.push(trajectories[index]);
+    }
+  });
+  const selectedTrialKey = selectedKeys.has(selectedKey()) ? selectedKey() : (entries[0]?.trial_key || original.comparison?.selected_trial_key || null);
+  const subset = {
+    ...original,
+    trajectory: orderedTrajectories,
+    trajectory_meta: orderedMeta
+  };
+  if (original.comparison) {
+    subset.comparison = {
+      ...original.comparison,
+      selected_trial_key: selectedTrialKey,
+      summary: { ...(original.comparison.summary || {}), session_count: entries.length },
+      leaderboard: { entries }
+    };
+  }
+  if (original.annotations) {
+    subset.annotations = {
+      ...original.annotations,
+      notes: (original.annotations.notes || []).filter(note => selectedKeys.has(note.trial_key))
+    };
+  }
+  return subset;
+}
+function htmlReportForSubset(report) {
+  const clone = document.documentElement.cloneNode(true);
+  clone.querySelectorAll("[data-serve-only]").forEach(node => node.remove());
+  ["report-notes", "comparison", "trace"].forEach(id => {
+    const node = clone.querySelector(`#${id}`);
+    if (node) node.innerHTML = "";
+  });
+  const dataNode = clone.querySelector("#peval-py-data");
+  if (dataNode) dataNode.textContent = safeJsonForScript(JSON.stringify(report));
+  const optionsNode = clone.querySelector("#peval-py-render-options");
+  if (optionsNode) optionsNode.textContent = safeJsonForScript(JSON.stringify({ mode: "report" }));
+  const body = clone.querySelector("body");
+  if (body) {
+    body.classList.remove("serve-mode");
+    body.classList.add("report-mode");
+  }
+  return `<!doctype html>\n${clone.outerHTML}`;
+}
+function safeJsonForScript(value) {
+  return String(value).replace(/&/g, "\\u0026").replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
+}
+function downloadText(filename, mime, text) {
+  const blob = new Blob([text], { type: `${mime};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 function renderTrajectoryOverview(rows = leaderboardRows()) {
   const target = $("trajectory-overview");
@@ -369,6 +596,7 @@ function renderTrace() {
   const status = lower(trial.status || "passed");
   const agentName = trajectory?.agent?.name || "-";
   const model = trajectory?.agent?.model_name || "-";
+  disposeTimelineChart();
   $("trace").innerHTML = `
     <div class="trace-head"><div><p class="eyebrow">${esc(t("selected_trial_trajectory", "selected trial trajectory"))}</p><h2 id="trace-title" class="trace-title"><span>${esc(t("selected_session_label", "session"))}</span><code>${esc(trial.trial_key || "-")}</code></h2></div><span class="status ${status}">${esc(statusLabel(status))}</span></div>
     <h3>${esc(t("run", "Run"))}</h3>
@@ -395,9 +623,12 @@ function renderTrace() {
     ])}
     ${renderSelectedNotes(trial.trial_key)}
     ${renderSelectedEvidence(trajectory, trial)}
+    ${renderTimelineDiagnostics(trajectory, trial)}
     ${renderStepsHeader(trajectory)}
     <div class="step-list" id="step-list">${(trajectory?.steps || []).map(step => renderStep(step, trial, timingStats)).join("")}</div>
   `;
+  initTimelineDiagnostics(trajectory, trial);
+  bindTimelineControls();
   bindStepToggle();
 }
 function renderStepDrawer() {
@@ -455,9 +686,12 @@ function bindGlobalControls() {
   document.addEventListener("click", event => {
     if (!state.selectedStep) return;
     const target = event.target;
-    if (target?.closest?.("#step-drawer") || target?.closest?.("[data-step-id]")) return;
+    if (target?.closest?.("#step-drawer") || target?.closest?.("[data-step-id]") || target?.closest?.("[data-timeline-step-id]") || target?.closest?.("[data-timeline-chart]")) return;
     state.selectedStep = null;
     renderComparisonPanels();
+  });
+  window.addEventListener("resize", () => {
+    if (state.timelineChart) state.timelineChart.resize();
   });
   state.boundGlobalControls = true;
 }
@@ -465,6 +699,7 @@ function infoGrid(items) {
   return `<div class="info-grid">${items.map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join("")}</div>`;
 }
 function trialWallDurationMs(trial) {
+  if (hasMetricValue(trial?.wall_duration_ms)) return Number(trial.wall_duration_ms);
   if (hasMetricValue(trial?.started_at_ms) && hasMetricValue(trial?.finished_at_ms)) return Math.max(0, Number(trial.finished_at_ms) - Number(trial.started_at_ms));
   return trial?.duration_ms;
 }
@@ -539,6 +774,615 @@ function renderSelectedWarnings(meta) {
 function renderSelectedSource(meta) {
   const path = meta.data_ref?.relative_path;
   return path ? `<article class="selected-evidence-card"><h4>${esc(t("input_source", "Input Source"))}</h4><code>${esc(path)}</code></article>` : "";
+}
+const TIMELINE_INPUT_STAGE_THRESHOLD_MS = 50;
+const TIMELINE_ESTIMATED_MODEL_CALL_CAP_MS = 600000;
+function renderTimelineDiagnostics(trajectory, meta) {
+  const trace = timelineTrace(trajectory, meta);
+  const waterfall = trace.stages.length
+    ? renderTimelineWaterfall(trace)
+    : `<p class="timeline-empty">${esc(t("timeline_empty", "No timed step or tool durations available."))}</p>`;
+  const table = trace.stages.length
+    ? renderTimelineDetailTable(trace.stages, trace.model)
+    : `<p class="timeline-empty">${esc(t("timeline_empty", "No timed step or tool durations available."))}</p>`;
+  return `<section class="selected-extra timeline-diagnostics">
+    <div class="timeline-head"><div><h3>${esc(t("timeline_waterfall", "Timeline Waterfall"))}</h3><p class="copy">${esc(t("timeline_waterfall_copy", "Flat active-latency trace for meaningful delay."))}</p></div><span class="timeline-total">${esc(fmtTimelineDuration(trace.model.active_total_ms))}</span></div>
+    ${waterfall}
+    <div class="timeline-head timeline-table-head"><div><h3>${esc(t("timeline_detail_table", "Timeline Detail Table"))}</h3><p class="copy">${esc(t("timeline_table_copy", "Flat latency stages with true wall timing."))}</p></div></div>
+    ${table}
+  </section>`;
+}
+function renderTimelineWaterfall(trace) {
+  const height = Math.max(300, trace.stages.length * 34 + 96);
+  return `<div class="timeline-waterfall-shell"><div class="timeline-waterfall-chart" data-timeline-chart style="height:${esc(height)}px"></div><p class="timeline-fallback" data-timeline-fallback>${esc(t("timeline_echarts_unavailable", "ECharts did not load. Timeline Waterfall is unavailable, but the detail table is still shown."))}</p></div>`;
+}
+function initTimelineDiagnostics(trajectory, meta) {
+  const trace = timelineTrace(trajectory, meta);
+  initTimelineWaterfallChart(trace);
+}
+function disposeTimelineChart() {
+  if (!state.timelineChart) return;
+  state.timelineChart.dispose();
+  state.timelineChart = null;
+}
+function initTimelineWaterfallChart(trace) {
+  const node = document.querySelector("[data-timeline-chart]");
+  const fallback = document.querySelector("[data-timeline-fallback]");
+  if (!node || !trace.stages.length) return;
+  if (!window.echarts) {
+    node.hidden = true;
+    return;
+  }
+  node.hidden = false;
+  if (fallback) fallback.hidden = true;
+  node.addEventListener("click", event => event.stopPropagation());
+  state.timelineChart = window.echarts.init(node, null, { renderer: "canvas" });
+  state.timelineChart.setOption(timelineChartOption(trace), true);
+  state.timelineChart.on("click", params => openTimelineStep(params?.data?.trace_item));
+}
+function timelineTrace(trajectory, meta) {
+  const steps = trajectory?.steps || [];
+  const stepMetas = meta?.steps || [];
+  const origin = timelineOriginMs(meta, stepMetas);
+  const modelStage = timelineModelStageLabel(trajectory);
+  const stages = [];
+  const markers = [];
+  let fallbackCursor = origin;
+  let previousTimestamp = origin;
+  steps.forEach((step, index) => {
+    const stepId = step?.step_id ?? index + 1;
+    const sm = stepMeta(meta, stepId);
+    const stepDuration = timelineDurationMs(sm?.duration_ms);
+    const stepStart = timelineStepStartMs(meta, sm, fallbackCursor);
+    const stepEnd = timelineEndMs(stepStart, stepDuration);
+    const source = lower(step?.source);
+    if (source === "user" || source === "system") {
+      if (positiveMetric(stepDuration) && Number(stepDuration) > TIMELINE_INPUT_STAGE_THRESHOLD_MS) {
+        timelinePushStage(stages, {
+          kind: "input",
+          stage: source === "system" ? t("timeline_stage_system_processing", "System context processing") : t("timeline_stage_input_processing", "Input processing"),
+          status: step?.source || "input",
+          category: "io",
+          wallStart: stepStart,
+          wallEnd: stepEnd,
+          duration: stepDuration,
+          origin,
+          trialKey: meta?.trial_key,
+          stepId,
+          ref: timelineStepRef(stepId),
+        });
+      } else {
+        timelinePushMarker(markers, {
+          name: source === "system" ? t("timeline_marker_system_context", "System context") : t("timeline_marker_user_input", "User input"),
+          category: "io",
+          wallStart: stepStart,
+          origin,
+          trialKey: meta?.trial_key,
+          stepId,
+          ref: timelineStepRef(stepId),
+        });
+      }
+    } else if (source === "agent" || source === "assistant") {
+      const hasExactModelDuration = positiveMetric(stepDuration);
+      const modelEstimate = hasExactModelDuration ? {} : timelineEstimatedModelCall(sm, step, stepStart, previousTimestamp);
+      const modelDuration = hasExactModelDuration ? stepDuration : modelEstimate.duration_ms;
+      timelinePushStage(stages, {
+        kind: "agent",
+        stage: modelStage,
+        status: step?.source || "agent",
+        category: "agent",
+        wallStart: hasExactModelDuration ? stepStart : modelEstimate.wall_start_ms,
+        wallEnd: hasExactModelDuration ? stepEnd : modelEstimate.wall_end_ms,
+        duration: modelDuration,
+        estimated: !hasExactModelDuration && modelEstimate.estimated,
+        origin,
+        trialKey: meta?.trial_key,
+        stepId,
+        ref: timelineStepRef(stepId),
+      });
+    } else if (positiveMetric(stepDuration)) {
+      timelinePushStage(stages, {
+        kind: "step",
+        stage: t("timeline_stage_input_processing", "Input processing"),
+        status: step?.source || "step",
+        category: "tool",
+        wallStart: stepStart,
+        wallEnd: stepEnd,
+        duration: stepDuration,
+        origin,
+        trialKey: meta?.trial_key,
+        stepId,
+        ref: timelineStepRef(stepId),
+      });
+    }
+    (step?.tool_calls || []).forEach((tool, toolIndex) => {
+      const toolMeta = toolMetaFor(sm, tool.tool_call_id);
+      const toolDuration = timelineDurationMs(toolMeta?.execution_duration_ms);
+      const toolStart = hasMetricValue(toolMeta?.timestamp_ms) ? Number(toolMeta.timestamp_ms) : stepStart;
+      const toolEnd = timelineEndMs(toolStart, toolDuration);
+      const category = timelineToolCategory(tool, toolMeta);
+      timelinePushStage(stages, {
+        kind: "tool",
+        stage: `Tool: ${timelineToolLabel(tool, toolMeta)}`,
+        status: toolMeta?.status || toolMeta?.title || "tool",
+        category,
+        wallStart: toolStart,
+        wallEnd: toolEnd,
+        duration: toolDuration,
+        origin,
+        trialKey: meta?.trial_key,
+        stepId,
+        toolCallId: tool.tool_call_id,
+        ref: timelineToolRef(stepId, tool, toolIndex),
+      });
+    });
+    fallbackCursor = Math.max(fallbackCursor, stepEnd ?? stepStart ?? fallbackCursor);
+    if (hasMetricValue(stepStart)) previousTimestamp = Number(stepStart);
+  });
+  const orderedStages = stages.sort(timelineStageSort).map((stage, index) => ({
+    ...stage,
+    number: String(index + 1),
+    category_meta: timelineCategoryMeta(stage.category),
+  }));
+  const model = timelineModel(orderedStages, markers);
+  const displayStages = timelineAssignActiveOffsets(orderedStages, model);
+  const displayMarkers = markers.map((marker, index) => ({
+    ...marker,
+    number: String(index + 1),
+    category_meta: timelineCategoryMeta(marker.category),
+    active_total_ms: model.active_total_ms,
+    display_offset_ms: timelineMarkerActiveOffset(marker, displayStages),
+  }));
+  return { stages: displayStages, markers: displayMarkers, model };
+}
+function timelineAssignActiveOffsets(stages, model) {
+  let cursor = 0;
+  return stages.map(stage => {
+    const duration = Math.max(0, Number(stage.duration_ms || 0));
+    const out = {
+      ...stage,
+      active_total_ms: model.active_total_ms,
+      display_start_ms: cursor,
+      display_end_ms: cursor + duration,
+    };
+    cursor += duration;
+    return out;
+  });
+}
+function timelineMarkerActiveOffset(marker, stages) {
+  const markerStart = Number(marker.start_offset_ms || 0);
+  let cursor = 0;
+  stages.forEach(stage => {
+    if (Number(stage.start_offset_ms || 0) < markerStart) {
+      cursor = Math.max(cursor, Number(stage.display_end_ms || 0));
+    }
+  });
+  return cursor;
+}
+function timelinePushStage(stages, args) {
+  const stage = timelineStage(args);
+  if (!positiveMetric(stage.duration_ms) || !hasMetricValue(stage.start_offset_ms)) return;
+  stages.push(stage);
+}
+function timelinePushMarker(markers, args) {
+  const marker = timelineMarker(args);
+  if (!marker || !hasMetricValue(marker.start_offset_ms)) return;
+  markers.push(marker);
+}
+function timelineStage({ kind, stage, status, category, wallStart, wallEnd, duration, estimated, origin, trialKey, stepId, toolCallId, ref }) {
+  const startOffset = hasMetricValue(wallStart) && hasMetricValue(origin) ? Math.max(0, Number(wallStart) - Number(origin)) : null;
+  const endOffset = hasMetricValue(wallEnd) && hasMetricValue(origin) ? Math.max(startOffset || 0, Number(wallEnd) - Number(origin)) : startOffset;
+  return {
+    kind,
+    stage,
+    status,
+    category,
+    trial_key: trialKey,
+    step_id: stepId,
+    tool_call_id: toolCallId,
+    wall_start_ms: wallStart,
+    wall_end_ms: wallEnd,
+    start_offset_ms: startOffset,
+    end_offset_ms: endOffset,
+    duration_ms: duration,
+    estimated: Boolean(estimated),
+    ref,
+  };
+}
+function timelineModelStageLabel(trajectory) {
+  const model = trajectory?.agent?.model_name;
+  return model ? `Model: ${model}` : t("timeline_stage_model", "Model");
+}
+function timelineEstimatedModelCall(stepMeta, step, stepStart, previousTimestamp) {
+  if (!hasMetricValue(stepStart)) return {};
+  const start = Number(stepStart);
+  const toolStarts = (step?.tool_calls || [])
+    .map(tool => toolMetaFor(stepMeta, tool.tool_call_id)?.timestamp_ms)
+    .filter(hasMetricValue)
+    .map(Number)
+    .filter(value => value > start);
+  if (toolStarts.length) {
+    const end = Math.min(...toolStarts);
+    const duration = timelineEstimatedDurationMs(start, end);
+    if (positiveMetric(duration)) {
+      return {
+        wall_start_ms: start,
+        wall_end_ms: end,
+        duration_ms: duration,
+        estimated: true,
+      };
+    }
+  }
+  const previous = hasMetricValue(previousTimestamp) ? Number(previousTimestamp) : null;
+  if (previous !== null && previous < start) {
+    const duration = timelineEstimatedDurationMs(previous, start);
+    if (positiveMetric(duration)) {
+      return {
+        wall_start_ms: previous,
+        wall_end_ms: start,
+        duration_ms: duration,
+        estimated: true,
+      };
+    }
+  }
+  return {};
+}
+function timelineEstimatedDurationMs(start, end) {
+  if (!hasMetricValue(start) || !hasMetricValue(end)) return null;
+  const duration = Number(end) - Number(start);
+  return duration > 0 && duration <= TIMELINE_ESTIMATED_MODEL_CALL_CAP_MS ? duration : null;
+}
+function timelineMarker({ name, category, wallStart, origin, trialKey, stepId, ref }) {
+  if (!hasMetricValue(wallStart)) return null;
+  const startOffset = hasMetricValue(origin) ? Math.max(0, Number(wallStart) - Number(origin)) : null;
+  return {
+    kind: "marker",
+    name,
+    category,
+    trial_key: trialKey,
+    step_id: stepId,
+    wall_start_ms: wallStart,
+    start_offset_ms: startOffset,
+    ref,
+  };
+}
+function timelineOriginMs(meta, stepMetas) {
+  if (hasMetricValue(meta?.started_at_ms)) return Number(meta.started_at_ms);
+  const timestamps = (stepMetas || []).map(step => step?.timestamp_ms).filter(hasMetricValue).map(Number);
+  return timestamps.length ? Math.min(...timestamps) : 0;
+}
+function timelineStepStartMs(meta, sm, fallback) {
+  if (hasMetricValue(sm?.timestamp_ms)) return Number(sm.timestamp_ms);
+  if (hasMetricValue(meta?.started_at_ms) && hasMetricValue(sm?.elapsed_ms)) return Number(meta.started_at_ms) + Number(sm.elapsed_ms);
+  return hasMetricValue(fallback) ? Number(fallback) : null;
+}
+function timelineEndMs(start, duration) {
+  if (!hasMetricValue(start)) return null;
+  return Number(start) + (hasMetricValue(duration) ? Number(duration) : 0);
+}
+function timelineToolLabel(tool, toolMeta) {
+  return String(tool?.function_name || toolMeta?.title || tool?.tool_call_id || "tool");
+}
+function timelineStepRef(stepId) {
+  return `step ${stepId}`;
+}
+function timelineToolRef(stepId, tool, toolIndex) {
+  return `step ${stepId} / ${tool?.tool_call_id || `tool ${toolIndex + 1}`}`;
+}
+function timelineDurationMs(value) {
+  return hasMetricValue(value) ? Math.max(0, Number(value)) : null;
+}
+function timelineToolCategory(tool, toolMeta) {
+  if (toolFailed(toolMeta)) return "error";
+  const text = lower(`${tool?.function_name || ""} ${toolMeta?.title || ""}`);
+  if (/(search|http|web|fetch|browser|mcp|curl|wget|request)/.test(text)) return "network";
+  if (/(shell|terminal|exec|python|query|task|bash|sh|cmd|command|subprocess)/.test(text)) return "external";
+  if (/(file|read|write|glob|grep|list|open|cat|sed|rg|ls|path|fs)/.test(text)) return "io";
+  return "tool";
+}
+function timelineCategoryMeta(key) {
+  const items = {
+    io: { key: "io", label: t("timeline_category_io", "I/O"), color: "#3b82f6" },
+    agent: { key: "agent", label: t("timeline_category_agent", "Agent"), color: "#7c3aed" },
+    network: { key: "network", label: t("timeline_category_network", "Network"), color: "#f59e0b" },
+    external: { key: "external", label: t("timeline_category_external", "External"), color: "#64748b" },
+    tool: { key: "tool", label: t("timeline_category_tool", "Tool"), color: "#0891b2" },
+    error: { key: "error", label: t("timeline_category_error", "Error"), color: "#dc2626" },
+  };
+  return items[key] || items.tool;
+}
+function timelineStageSort(left, right) {
+  return Number(left.start_offset_ms || 0) - Number(right.start_offset_ms || 0)
+    || Number(right.duration_ms || 0) - Number(left.duration_ms || 0)
+    || String(left.stage || "").localeCompare(String(right.stage || ""));
+}
+function timelineModel(stages) {
+  const activeTotal = stages.reduce((sum, stage) => sum + Math.max(0, Number(stage.duration_ms || 0)), 0);
+  return {
+    active_total_ms: activeTotal,
+    display_total_ms: Math.max(1, activeTotal),
+  };
+}
+function timelineChartOption(trace) {
+  const labels = trace.stages.map(stage => `#${stage.number} ${stage.stage}`);
+  const labelWidth = timelineYAxisLabelWidth(labels);
+  const xAxisScale = timelineXAxisScale(trace.model.display_total_ms);
+  return {
+    animation: false,
+    grid: { left: labelWidth + 18, right: 28, top: 38, bottom: 48 },
+    tooltip: {
+      trigger: "item",
+      confine: true,
+      borderWidth: 1,
+      borderColor: "#d5cdbb",
+      backgroundColor: "#fffdf8",
+      textStyle: { color: "#27231b", fontFamily: "system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif", fontSize: 12 },
+      formatter: timelineTooltipFormatter,
+    },
+    xAxis: {
+      type: "value",
+      min: 0,
+      max: xAxisScale.max,
+      interval: xAxisScale.interval,
+      minInterval: xAxisScale.interval,
+      axisLine: { lineStyle: { color: "#d9e2ef" } },
+      axisTick: { show: true, lineStyle: { color: "#d9e2ef" } },
+      axisLabel: {
+        color: "#6b7280",
+        fontSize: 12,
+        hideOverlap: true,
+        formatter: value => fmtTimelineAxis(value, xAxisScale.interval),
+      },
+      splitLine: { show: true, lineStyle: { color: "#edf2f7" } },
+    },
+    yAxis: {
+      type: "category",
+      inverse: true,
+      data: labels,
+      axisTick: { show: false },
+      axisLine: { lineStyle: { color: "#d9e2ef" } },
+      axisLabel: {
+        color: "#526581",
+        fontSize: 12,
+        fontFamily: "system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif",
+        width: labelWidth,
+        overflow: "truncate",
+      },
+      splitLine: { show: true, lineStyle: { color: "#f6f1e8" } },
+    },
+    series: [
+      {
+        name: t("timeline_waterfall", "Timeline Waterfall"),
+        type: "custom",
+        renderItem: timelineBarRenderItem,
+        cursor: "pointer",
+        encode: { x: [0, 1], y: 2 },
+        data: trace.stages.map((stage, index) => ({
+          value: [stage.display_start_ms, stage.display_end_ms, index, stage.duration_ms, stage.category_meta.color, fmtTimelineDuration(stage.duration_ms)],
+          itemStyle: { color: stage.category_meta.color },
+          trace_item: stage,
+        })),
+      },
+      {
+        name: t("timeline_markers", "Markers"),
+        type: "custom",
+        renderItem: timelineMarkerRenderItem,
+        data: trace.markers.map(marker => ({
+          value: [marker.display_offset_ms, 0],
+          trace_item: marker,
+        })),
+      },
+    ],
+  };
+}
+function timelineYAxisLabelWidth(labels) {
+  const longest = labels.reduce((max, label) => Math.max(max, String(label || "").length), 0);
+  return Math.max(100, Math.min(158, longest * 7 + 16));
+}
+function timelineXAxisScale(totalMs) {
+  const total = Math.max(1, Number(totalMs || 0));
+  const interval = timelineNiceIntervalMs(total / 5);
+  return {
+    interval,
+    max: Math.max(interval, Math.ceil(total / interval) * interval),
+  };
+}
+function timelineNiceIntervalMs(targetMs) {
+  const target = Math.max(1, Number(targetMs || 0));
+  const magnitude = Math.pow(10, Math.floor(Math.log10(target)));
+  for (const factor of [1, 2, 2.5, 5, 10]) {
+    const interval = factor * magnitude;
+    if (interval >= target) return Math.max(1, interval);
+  }
+  return Math.max(1, 10 * magnitude);
+}
+function timelineBarRenderItem(params, api) {
+  const start = api.coord([api.value(0), api.value(2)]);
+  const end = api.coord([api.value(1), api.value(2)]);
+  const bandHeight = api.size([0, 1])[1];
+  const barHeight = Math.max(7, Math.min(22, bandHeight * 0.62));
+  const color = api.value(4) || "#0891b2";
+  const shape = window.echarts.graphic.clipRectByRect({
+    x: start[0],
+    y: start[1] - barHeight / 2,
+    width: Math.max(2, end[0] - start[0]),
+    height: barHeight,
+  }, {
+    x: params.coordSys.x,
+    y: params.coordSys.y,
+    width: params.coordSys.width,
+    height: params.coordSys.height,
+  });
+  if (!shape) return null;
+  const label = api.value(5) || fmtTimelineDuration(api.value(3));
+  const labelInside = shape.width >= 58;
+  const chartRight = params.coordSys.x + params.coordSys.width;
+  const labelOutsideRight = !labelInside && shape.x + shape.width + 58 >= chartRight;
+  const labelX = labelInside
+    ? shape.x + Math.min(8, Math.max(3, shape.width / 4))
+    : (labelOutsideRight ? chartRight - 4 : shape.x + shape.width + 6);
+  const textAlign = labelInside || !labelOutsideRight ? "left" : "right";
+  return {
+    type: "group",
+    children: [
+      {
+        type: "rect",
+        shape,
+        style: api.style({ fill: color }),
+      },
+      {
+        type: "text",
+        style: {
+          x: labelX,
+          y: shape.y + shape.height / 2,
+          text: label,
+          fill: labelInside ? "#fffdf8" : color,
+          font: "700 12px ui-monospace,SFMono-Regular,Menlo,Consolas,\"Liberation Mono\",monospace",
+          textAlign,
+          textVerticalAlign: "middle",
+        },
+        silent: true,
+      },
+    ],
+  };
+}
+function timelineMarkerRenderItem(params, api) {
+  const x = api.coord([api.value(0), 0])[0];
+  const top = params.coordSys.y;
+  const bottom = top + params.coordSys.height;
+  return {
+    type: "group",
+    children: [
+      { type: "line", shape: { x1: x, y1: top, x2: x, y2: bottom }, style: { stroke: "#315f8f", lineDash: [4, 4], opacity: 0.36, lineWidth: 1 } },
+      { type: "circle", shape: { cx: x, cy: top + 10, r: 4 }, style: { fill: "#fffdf8", stroke: "#315f8f", lineWidth: 2 } },
+    ],
+  };
+}
+function timelineTooltipFormatter(params) {
+  const param = Array.isArray(params) ? params[0] : params;
+  return timelineTooltipHtml(param?.data?.trace_item);
+}
+function timelineTooltipHtml(item) {
+  if (!item) return "";
+  const isMarker = item.kind === "marker";
+  const title = isMarker ? item.name : `#${item.number} ${item.stage}`;
+  const pct = !isMarker && positiveMetric(item.duration_ms) && positiveMetric(item.active_total_ms)
+    ? `${(Number(item.duration_ms) / Number(item.active_total_ms) * 100).toFixed(1)}%`
+    : "-";
+  const rows = [
+    [t("timeline_col_category", "Category"), item.category_meta?.label || "-"],
+    [t("timeline_col_start", "Start"), fmtTimelineMaybeEstimated(fmtClockMs(item.wall_start_ms), item)],
+    [t("timeline_active_offset", "Active offset"), fmtTimelineDuration(item.display_offset_ms ?? item.display_start_ms)],
+    [t("timeline_ref", "Ref"), item.ref || "-"],
+  ];
+  if (!isMarker) {
+    rows.splice(2, 0, [t("timeline_col_end", "End"), fmtTimelineMaybeEstimated(fmtClockMs(item.wall_end_ms), item)]);
+    rows.splice(4, 0, [t("timeline_col_duration", "Duration"), fmtTimelineMaybeEstimated(fmtTimelineDuration(item.duration_ms), item)]);
+    rows.splice(5, 0, [t("timeline_col_total_pct", "Active Share"), pct]);
+  }
+  return `<div class="timeline-tooltip"><strong>${esc(title)}</strong>${rows.map(([key, value]) => `<br><span>${esc(key)}:</span> ${esc(value)}`).join("")}</div>`;
+}
+function openTimelineStep(item) {
+  if (!item || item.kind === "marker" || !item.step_id) return;
+  state.selectedTrial = item.trial_key || selectedKey();
+  state.selectedStep = { trialKey: state.selectedTrial, stepId: String(item.step_id) };
+  renderComparisonPanels();
+}
+function bindTimelineControls() {
+  const target = document.querySelector(".timeline-diagnostics");
+  if (!target) return;
+  bindDataTableControls(target, "timeline", () => renderTrace());
+  target.querySelectorAll("[data-timeline-step-id]").forEach(row => {
+    const open = event => {
+      event.stopPropagation();
+      openTimelineStep({
+        kind: "stage",
+        trial_key: row.dataset.trialKey || selectedKey(),
+        step_id: row.dataset.timelineStepId,
+      });
+    };
+    row.addEventListener("click", open);
+    row.addEventListener("keydown", event => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      open(event);
+    });
+  });
+}
+function timelineActivePctValue(row, model) {
+  return positiveMetric(row.duration_ms) && positiveMetric(model.active_total_ms)
+    ? Number(row.duration_ms) / Number(model.active_total_ms) * 100
+    : null;
+}
+function renderTimelineActiveShare(row, model) {
+  const value = timelineActivePctValue(row, model);
+  if (!hasMetricValue(value)) return "-";
+  const pct = Math.max(0, Math.min(100, Number(value)));
+  const label = `${Number(value).toFixed(1)}%`;
+  return `<span class="timeline-active-share" style="--active-share-pct:${esc(`${pct}%`)}" title="${esc(label)}"><span>${esc(label)}</span></span>`;
+}
+function timelineDetailColumns(model) {
+  return [
+    { key: "number", label: t("timeline_col_row", "#"), type: "number", numeric: true, sortable: true, value: row => Number(row.number), format: value => fmtNum(value) },
+    { key: "stage", label: t("timeline_col_stage", "Stage"), sortable: true, filterable: true, value: row => row.stage || "-", html: row => renderTimelineStageLabel(row), cellTitle: row => row.stage || "-", className: "timeline-label-cell" },
+    { key: "wall_start_ms", label: t("timeline_col_start", "Start"), type: "number", numeric: true, sortable: true, value: row => row.wall_start_ms, format: (value, row) => fmtTimelineMaybeEstimated(fmtClockMs(value), row) },
+    { key: "wall_end_ms", label: t("timeline_col_end", "End"), type: "number", numeric: true, sortable: true, value: row => row.wall_end_ms, format: (value, row) => fmtTimelineMaybeEstimated(fmtClockMs(value), row) },
+    { key: "duration_ms", label: t("timeline_col_duration", "Duration"), type: "number", numeric: true, sortable: true, metric: true, value: row => row.duration_ms, format: (value, row) => fmtTimelineMaybeEstimated(fmtTimelineDuration(value), row), className: "strong-num" },
+    { key: "active_pct", label: t("timeline_col_total_pct", "Active Share"), type: "number", numeric: true, sortable: true, metric: true, value: row => timelineActivePctValue(row, model), format: value => hasMetricValue(value) ? `${Number(value).toFixed(1)}%` : "-", html: row => renderTimelineActiveShare(row, model), className: "active-share-cell" },
+  ];
+}
+function renderTimelineDetailTable(rows, model) {
+  const columns = timelineDetailColumns(model);
+  const visibleRows = applyDataTableControls("timeline", rows, columns, rows);
+  return renderDataTable({
+    tableId: "timeline",
+    columns,
+    rows: visibleRows,
+    tableClass: "timeline-table",
+    shellClass: "timeline-table-shell",
+    filterOptionsRows: rows,
+    rowClass: row => {
+      const selected = state.selectedStep?.trialKey === row.trial_key && String(state.selectedStep?.stepId) === String(row.step_id);
+      return `timeline-detail-${row.kind} timeline-detail-row ${selected ? "timeline-detail-selected" : ""}`;
+    },
+    rowAttrs: row => `data-timeline-step-id="${esc(row.step_id || "")}" data-trial-key="${esc(row.trial_key || "")}" tabindex="0" title="${esc(t("open_step_details", "Open step details"))}: #${esc(row.step_id || "-")}"`,
+  });
+}
+function renderTimelineStageLabel(row) {
+  const meta = row.category_meta || timelineCategoryMeta("tool");
+  return `<span class="timeline-stage-label timeline-category-${esc(meta.key)}" aria-label="${esc(`${meta.label}: ${row.stage}`)}">${esc(row.stage)}</span>`;
+}
+function fmtTimelineDuration(value) {
+  if (!hasMetricValue(value)) return "-";
+  const ms = Math.max(0, Number(value));
+  const seconds = ms / 1000;
+  if (seconds < 60) return `${seconds.toFixed(3)}s`;
+  return `${Math.floor(seconds / 60)}m${(seconds % 60).toFixed(1)}s`;
+}
+function fmtTimelineMaybeEstimated(value, row) {
+  if (!row?.estimated || value === "-") return value;
+  return `≈${value}`;
+}
+function fmtTimelineAxis(value, intervalMs = null) {
+  const ms = Math.max(0, Number(value || 0));
+  const interval = hasMetricValue(intervalMs) ? Math.max(1, Number(intervalMs)) : null;
+  if (ms === 0) return interval && interval < 1000 ? "0ms" : "0s";
+  if (interval && interval < 1000) return `${Math.round(ms)}ms`;
+  const seconds = ms / 1000;
+  if (seconds < 60) {
+    const decimals = interval && interval < 10000 ? 1 : 0;
+    return `${seconds.toFixed(decimals)}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  if (interval && interval < 60000 && remainder) return `${minutes}m${Math.round(remainder)}s`;
+  return `${minutes}m`;
+}
+function fmtClockMs(value) {
+  if (!hasMetricValue(value)) return "-";
+  const date = new Date(Number(value));
+  const pad = (number, size = 2) => String(number).padStart(size, "0");
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`;
 }
 function renderStepsHeader(trajectory) {
   const count = (trajectory?.steps || []).length;

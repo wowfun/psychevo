@@ -7,11 +7,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from peval_py.adapters.base import ConversionResult, ObservationMeta, StepMeta, ToolMeta
+from peval_py.adapters.base import (
+    ConversionResult,
+    ObservationMeta,
+    StepMeta,
+    ToolMeta,
+    timestamp_fallback_duration_ms,
+)
 from peval_py.config import ToolConfig
 from peval_py.redaction import redact_value
 
-VIEW_SCHEMA_VERSION = 17
+VIEW_SCHEMA_VERSION = 18
 
 
 @dataclass(frozen=True)
@@ -99,28 +105,22 @@ def prepare_session_report(
     trial_key = trial_key_for(index, trajectory, config, multi, seen_trial_keys)
     started = conversion.started_at_ms or 0
     finished = conversion.finished_at_ms or started
+    wall_duration = max(0, finished - started)
+    steps = step_meta_reports(conversion.steps_meta, started)
     status = "failed" if conversion.warnings or conversion.unmapped_events else "passed"
     data_ref = data_ref_for_input(session.input_label, session.input_path)
     adapter_id = session.adapter_id or config.adapter
     meta = {
         "trial_key": trial_key,
-        "matrix_cell_key": "session:matrix",
-        "benchmark": "session",
-        "cell_root_relative": ".",
-        "case_id": "session",
-        "task_set_id": "session",
-        "task_id": "session",
-        "task_family": "session",
         "adapter": adapter_id,
         "started_at_ms": started,
         "finished_at_ms": finished,
-        "duration_ms": max(0, finished - started),
+        "wall_duration_ms": wall_duration,
+        "duration_ms": trial_active_duration_ms(conversion.steps_meta, steps),
         "status": status,
         "failure_class": None if status == "passed" else "conversion",
-        "score_passed": status == "passed",
         "score": None,
         "score_message": "offline session conversion",
-        "score_details": {},
         "warnings": conversion.warnings,
         "data_ref": data_ref,
         "total_events": conversion.total_events,
@@ -128,7 +128,7 @@ def prepare_session_report(
         "prompt_unavailable": not any(
             step.get("source") == "user" for step in trajectory.get("steps", [])
         ),
-        "steps": step_meta_reports(conversion.steps_meta, started),
+        "steps": steps,
     }
     return {
         "index": index,
@@ -188,12 +188,9 @@ def path_selections(prepared: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def comparison_report(prepared: list[dict[str, Any]]) -> dict[str, Any]:
     rows = [comparison_row(item) for item in prepared]
     selected = next((row for row in rows if row["status"] != "passed"), rows[0])
-    for row in rows:
-        row["selected"] = row["trial_key"] == selected["trial_key"]
     total_cost = sum(row["cost_usd"] for row in rows if row["cost_usd"] is not None)
     have_cost = any(row["cost_usd"] is not None for row in rows)
     return {
-        "default_metric": "duration",
         "selected_trial_key": selected["trial_key"],
         "summary": {
             "session_count": len(rows),
@@ -207,8 +204,6 @@ def comparison_report(prepared: list[dict[str, Any]]) -> dict[str, Any]:
             "cost_usd": round(total_cost, 12) if have_cost else None,
         },
         "leaderboard": {"entries": [dict(row) for row in rows]},
-        "session_heatmap": {"rows": [dict(row) for row in rows]},
-        "session_table": {"rows": [dict(row) for row in rows]},
     }
 
 
@@ -224,15 +219,14 @@ def comparison_row(item: dict[str, Any]) -> dict[str, Any]:
         "adapter": meta.get("adapter"),
         "model": trajectory.get("agent", {}).get("model_name"),
         "status": meta.get("status"),
-        "duration_ms": trial_wall_duration_ms(meta),
+        "duration_ms": meta.get("duration_ms"),
+        "wall_duration_ms": trial_wall_duration_ms(meta),
         "turns": metrics.get("total_turns"),
         "total_tool_calls": total_tool_calls,
         "total_tool_errors": total_tool_errors,
-        "successful_tool_calls": max(0, total_tool_calls - total_tool_errors),
         "tokens": token_total(metrics),
         "cost_usd": metrics.get("total_cost_usd"),
         "warnings": len(meta.get("warnings") or []),
-        "selected": False,
     }
 
 
@@ -262,6 +256,23 @@ def annotations_report(notes: list[NoteInput], metas: list[dict[str, Any]]) -> d
             }
         )
     return {"report_notes": report_notes, "notes": trial_notes}
+
+
+def trial_active_duration_ms(
+    steps: list[StepMeta],
+    step_reports: list[dict[str, Any]],
+) -> int:
+    total = 0
+    for step, report in zip(steps, step_reports, strict=True):
+        if step.source != "agent":
+            continue
+        duration = report.get("duration_ms")
+        if duration is not None:
+            total += int(duration)
+        for tool in step.tool_calls:
+            if tool.execution_duration_ms is not None:
+                total += int(tool.execution_duration_ms)
+    return total
 
 
 def step_meta_reports(steps: list[StepMeta], started: int) -> list[dict[str, Any]]:
@@ -301,26 +312,19 @@ def step_duration_ms(step: StepMeta, next_timestamp_ms: int | None) -> int | Non
     timestamp_ms = step.timestamp_ms
     if timestamp_ms is None:
         return step.duration_ms
-    end_candidates: list[int] = []
     if step.duration_ms is not None:
-        end_candidates.append(timestamp_ms + step.duration_ms)
-    grouped_end = grouped_step_end_timestamp_ms(step)
-    if grouped_end is not None:
-        end_candidates.append(grouped_end)
-    if end_candidates:
-        return max(0, max(end_candidates) - timestamp_ms)
-    if step.source == "agent" and next_timestamp_ms is not None:
-        return max(0, next_timestamp_ms - timestamp_ms)
+        return max(0, step.duration_ms)
+    if step.source == "agent" and next_timestamp_ms is not None and not step.tool_calls:
+        return timestamp_fallback_duration_ms(timestamp_ms, next_timestamp_ms)
     return None
 
 
-def grouped_step_end_timestamp_ms(step: StepMeta) -> int | None:
+def grouped_step_end_timestamp_ms(step: StepMeta, start_ms: int) -> int | None:
     end_candidates: list[int] = []
-    end_candidates.extend(
-        observation.timestamp_ms
-        for observation in step.observations
-        if observation.timestamp_ms is not None
-    )
+    for observation in step.observations:
+        duration = timestamp_fallback_duration_ms(start_ms, observation.timestamp_ms)
+        if duration is not None:
+            end_candidates.append(start_ms + duration)
     for tool in step.tool_calls:
         tool_end = tool_end_timestamp_ms(tool)
         if tool_end is not None:
@@ -362,6 +366,8 @@ def observation_meta_report(observation: ObservationMeta) -> dict[str, Any]:
 
 
 def trial_wall_duration_ms(meta: dict[str, Any]) -> int | None:
+    if meta.get("wall_duration_ms") is not None:
+        return int(meta["wall_duration_ms"])
     if meta.get("started_at_ms") is not None and meta.get("finished_at_ms") is not None:
         return max(0, int(meta["finished_at_ms"]) - int(meta["started_at_ms"]))
     return meta.get("duration_ms")

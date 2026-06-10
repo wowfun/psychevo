@@ -8,6 +8,7 @@ from peval_py.adapters.base import (
     ObservationMeta,
     StepMeta,
     ToolMeta,
+    timestamp_fallback_duration_ms,
 )
 from peval_py.config import ToolConfig
 from peval_py.redaction import redact_value
@@ -146,6 +147,9 @@ class CommonMessageAdapter:
             truncated = truncated or reasoning_truncated
         tool_calls = []
         tool_meta = []
+        model_timestamp = metadata_started_at_ms(record) or timestamp
+        duration = metadata_elapsed_ms(record)
+        duration_source = metadata_elapsed_ms_source(record)
         for call in tool_calls_from_message(message):
             call_id = str(call.get("id") or call.get("tool_call_id") or "tool-call")
             name = str(call.get("name") or call.get("function_name") or call.get("tool") or "tool")
@@ -187,7 +191,9 @@ class CommonMessageAdapter:
             step_id=step_id,
             source="agent",
             tool_calls=tool_meta,
-            timestamp_ms=timestamp,
+            timestamp_ms=model_timestamp,
+            duration_ms=duration,
+            duration_source=duration_source,
             data_preview=preview_text(text),
             truncated=truncated,
         )
@@ -221,11 +227,12 @@ class CommonMessageAdapter:
         source_call_id = str(call_id) if call_id else None
         result = {"source_call_id": source_call_id} if source_call_id else {}
         result["content"] = redact_value(content) if config.redact else content
+        finished_at_ms = metadata_finished_at_ms(record) or timestamp
         return result, ObservationMeta(
             source_call_id=source_call_id,
             status="error" if is_error else "completed",
             title=tool_name,
-            timestamp_ms=timestamp,
+            timestamp_ms=finished_at_ms,
             tool_error=is_error,
             truncated=truncated,
         )
@@ -274,12 +281,20 @@ def attach_observation(
         tool_meta.status = "error"
     elif tool_meta.status != "error":
         tool_meta.status = observation_meta.status or "completed"
+    explicit_start_ms = metadata_started_at_ms(record)
+    if explicit_start_ms is not None:
+        tool_meta.timestamp_ms = explicit_start_ms
     execution_duration_ms, execution_duration_source = tool_execution_duration(
         record,
         tool_meta.timestamp_ms,
         observation_meta.timestamp_ms,
     )
     if execution_duration_ms is not None:
+        if explicit_start_ms is None and observation_meta.timestamp_ms is not None:
+            tool_meta.timestamp_ms = max(
+                0,
+                observation_meta.timestamp_ms - execution_duration_ms,
+            )
         tool_meta.execution_duration_ms = execution_duration_ms
         tool_meta.execution_duration_source = execution_duration_source
 
@@ -395,12 +410,10 @@ def tool_execution_duration(
 ) -> tuple[int | None, str | None]:
     elapsed = metadata_elapsed_ms(record)
     if elapsed is not None:
-        return max(0, elapsed), "message_metadata"
-    if assistant_timestamp_ms is not None and observation_timestamp_ms is not None:
-        return (
-            max(0, observation_timestamp_ms - assistant_timestamp_ms),
-            "event_timestamps",
-        )
+        return max(0, elapsed), metadata_elapsed_ms_source(record) or "message_metadata"
+    fallback = timestamp_fallback_duration_ms(assistant_timestamp_ms, observation_timestamp_ms)
+    if fallback is not None:
+        return fallback, "event_timestamps"
     return None, None
 
 
@@ -408,6 +421,30 @@ def metadata_elapsed_ms(record: MessageRecord) -> int | None:
     for source in [record.metadata, as_dict(record.message.get("metadata"))]:
         if isinstance(source, dict):
             value = numeric_value(source.get("elapsed_ms"))
+            if value is not None:
+                return int(value)
+    return None
+
+
+def metadata_elapsed_ms_source(record: MessageRecord) -> str | None:
+    for source in [record.metadata, as_dict(record.message.get("metadata"))]:
+        if isinstance(source, dict) and isinstance(source.get("elapsed_ms_source"), str):
+            return str(source["elapsed_ms_source"])
+    return None
+
+
+def metadata_started_at_ms(record: MessageRecord) -> int | None:
+    return metadata_time_ms(record, "started_at_ms")
+
+
+def metadata_finished_at_ms(record: MessageRecord) -> int | None:
+    return metadata_time_ms(record, "finished_at_ms")
+
+
+def metadata_time_ms(record: MessageRecord, key: str) -> int | None:
+    for source in [record.metadata, as_dict(record.message.get("metadata"))]:
+        if isinstance(source, dict):
+            value = numeric_value(source.get(key))
             if value is not None:
                 return int(value)
     return None

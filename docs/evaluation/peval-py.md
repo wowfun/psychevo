@@ -209,11 +209,13 @@ report header.
 
 `view tr` can compare retained sessions without requiring a peval workspace.
 Each input session becomes one trial in a session-first report. The report
-shows report notes, a metric-switchable Visible Heatmap, a Leaderboard, then
-the selected Trial trajectory. The comparison tables intentionally omit
-benchmark and task columns. In the heatmap, each session occupies one row with
-a session/trial label on the left and a metric cell on the right, so large
-comparisons grow vertically instead of forming one long horizontal strip.
+shows report notes, a filterable Leaderboard, a Trajectory Overview, then the
+selected Trial trajectory. The comparison JSON stores one canonical
+`leaderboard.entries` row list and intentionally omits benchmark/task matrix
+fields plus older duplicate heatmap/table row lists.
+Leaderboard `duration_ms` is active agent/tool work time and excludes retained
+session idle gaps longer than 10 minutes. The original first-to-last event span
+is preserved as `wall_duration_ms` in Trial metadata and leaderboard rows.
 
 Compare JSONL sessions:
 
@@ -283,6 +285,22 @@ session order in the command. Repeating `-n/--note` appends notes in CLI order.
 HTML report notes, Leaderboard note snippets, and selected Trial notes follow
 the same display style as `peval view`.
 
+## Serve UI Layout
+
+The static HTML report remains the canonical offline report. A future
+`peval-py serve` web UI uses the same report body instead of a separate
+dashboard layout: Report Notes, Leaderboard, Trajectory Overview, and the
+selected Trial trajectory keep the static report order and styling.
+
+Serve UI mode only adds web-only controls around that shared body. Its import
+area is collapsed by default above the report title. In the Leaderboard, web UI
+mode may add row checkboxes for export selection and a split export control in
+the section header. Row clicks still select the Trial; checkbox clicks only
+control export scope. Exports use visible checked rows when any currently
+visible row is checked, otherwise they use the current filtered and sorted
+visible rows. JSON and HTML exports follow the same row scope as CSV table
+exports.
+
 ## Localized HTML Reports
 
 English is the default report UI language. To localize the report title and
@@ -346,8 +364,9 @@ visual only and are not written into ATIF or report JSON.
 
 Steps timing chips use a subtle proportional fill when timing metadata is
 available. Step duration, elapsed time, and tool execution time each scale
-against comparable timings in the selected Trial, so the fill is a visual cue
-rather than a new report metric.
+against comparable timings in the selected Trial; elapsed time scales against
+the retained wall duration when available. The fill is a visual cue rather than
+a new report metric.
 
 If a tool result has no matching tool call, `peval-py` keeps it visible as a
 standalone observation step and records a conversion warning in the report.
