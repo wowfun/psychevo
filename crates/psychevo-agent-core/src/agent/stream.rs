@@ -74,7 +74,42 @@ pub(crate) async fn stream_assistant(
         metadata: request.generation_metadata.clone(),
     };
 
-    let mut stream = provider.stream(generation_request, abort).await?;
+    let generation_started_at_ms = now_ms();
+    let generation_started = Instant::now();
+    let generation_id = format!("generation:{generation_started_at_ms}:{}", context.len());
+    emit(
+        &sink,
+        AgentEvent::GenerationStart {
+            generation_id: generation_id.clone(),
+            provider: request.model_provider.clone(),
+            model: request.model.clone(),
+            message_count: generation_request.messages.len(),
+            tool_count: generation_request.tools.len(),
+            started_at_ms: generation_started_at_ms,
+        },
+    )
+    .await?;
+    let mut stream = match provider.stream(generation_request, abort).await {
+        Ok(stream) => stream,
+        Err(err) => {
+            let message = err.to_string();
+            emit(
+                &sink,
+                AgentEvent::GenerationEnd {
+                    generation_id,
+                    provider: request.model_provider.clone(),
+                    model: request.model.clone(),
+                    outcome: Outcome::Failed,
+                    elapsed_ms: duration_ms_u64(generation_started.elapsed()),
+                    usage: None,
+                    metadata: None,
+                    error: Some(message),
+                },
+            )
+            .await?;
+            return Err(err.into());
+        }
+    };
     let mut raw_text = String::new();
     let mut provider_reasoning = String::new();
     let mut reasoning_details = Vec::new();
@@ -104,7 +139,28 @@ pub(crate) async fn stream_assistant(
 
     while let Some(event) = stream.next().await {
         let mut visible_changed = false;
-        match event? {
+        let event = match event {
+            Ok(event) => event,
+            Err(err) => {
+                let message = err.to_string();
+                emit(
+                    &sink,
+                    AgentEvent::GenerationEnd {
+                        generation_id,
+                        provider: request.model_provider.clone(),
+                        model: request.model.clone(),
+                        outcome: Outcome::Failed,
+                        elapsed_ms: duration_ms_u64(generation_started.elapsed()),
+                        usage,
+                        metadata,
+                        error: Some(message),
+                    },
+                )
+                .await?;
+                return Err(err.into());
+            }
+        };
+        match event {
             StreamEvent::TextDelta { text: delta } => {
                 raw_text.push_str(&delta);
                 let (_, inline_reasoning) = split_inline_think_blocks(&raw_text, true);
@@ -269,6 +325,20 @@ pub(crate) async fn stream_assistant(
         )
         .await?;
     }
+    emit(
+        &sink,
+        AgentEvent::GenerationEnd {
+            generation_id,
+            provider: request.model_provider.clone(),
+            model: request.model.clone(),
+            outcome,
+            elapsed_ms: duration_ms_u64(generation_started.elapsed()),
+            usage: usage.clone(),
+            metadata: metadata.clone(),
+            error: None,
+        },
+    )
+    .await?;
     if !reasoning.is_empty() {
         emit(&sink, AgentEvent::ReasoningEnd { text: reasoning }).await?;
     }

@@ -22,6 +22,7 @@ pub(crate) mod run;
 pub(crate) mod sandbox;
 pub(crate) mod session_export;
 pub(crate) mod session_lookup;
+pub(crate) mod session_trace;
 pub(crate) mod skills;
 pub(crate) mod snapshot;
 pub(crate) mod state_runtime;
@@ -97,6 +98,10 @@ pub use session_export::{
     default_session_export_filename, render_session_export, write_session_export,
 };
 pub use session_lookup::{latest_run_session_for_workdir, session_exists};
+pub use session_trace::{
+    SESSION_TRACE_DEFAULT_LIMIT, SESSION_TRACE_MAX_LIMIT, SessionTraceReadOptions,
+    SessionTraceReadResult, read_session_trace, session_trace_path,
+};
 pub use skills::{
     InstallOptions, ListSkillsOptions, SaveSkillBundleOptions, ScanResult, ScanVerdict,
     SelectedSkill, SkillBundle, SkillCatalog, SkillDiagnostic, SkillDiscoveryOptions,

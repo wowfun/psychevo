@@ -636,6 +636,29 @@ pub struct ThreadDeleteResult {
     pub thread_id: String,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadTraceParams {
+    pub thread_id: String,
+    #[serde(default)]
+    pub after_seq: Option<u64>,
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadTraceResult {
+    pub thread_id: String,
+    pub available: bool,
+    #[ts(type = "Array<Record<string, unknown>>")]
+    pub events: Vec<Value>,
+    pub warnings: Vec<String>,
+    pub truncated: bool,
+    #[serde(default)]
+    pub next_after_seq: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct CompletionListParams {
@@ -1216,6 +1239,8 @@ pub enum ClientRequest {
     ThreadResume(ThreadResumeParams),
     #[serde(rename = "thread/read")]
     ThreadRead(ThreadReadParams),
+    #[serde(rename = "thread/trace")]
+    ThreadTrace(ThreadTraceParams),
     #[serde(rename = "thread/list")]
     ThreadList(ThreadListParams),
     #[serde(rename = "thread/rename")]
@@ -1609,6 +1634,8 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(ThreadStartParams),
         exported_type!(ThreadResumeParams),
         exported_type!(ThreadReadParams),
+        exported_type!(ThreadTraceParams),
+        exported_type!(ThreadTraceResult),
         exported_type!(ThreadListParams),
         exported_type!(ThreadIdParams),
         exported_type!(ThreadRenameParams),

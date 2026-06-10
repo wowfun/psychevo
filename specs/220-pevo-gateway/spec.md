@@ -205,6 +205,16 @@ the same rule to the incoming event. A live tool update for an already
 message-derived tool call may update that message-derived tool row's transient
 running state, but it must not render as a separate duplicate live row.
 
+`thread/trace` reads the selected thread's persisted observability trace when a
+sidecar exists. It accepts `threadId`, optional `afterSeq`, and optional `limit`.
+The result returns `available`, bounded `events`, `warnings`, `truncated`, and
+`nextAfterSeq`. The API is for debugging and evaluation timing enrichment only:
+`events` may include legacy schema v1 records or compact schema v2 facts, and
+debug surfaces must render them as generic JSON rather than transcript data.
+Trace read failures and missing trace files must not affect transcript reads,
+live transcript rendering, turn execution, or ordinary Workbench interaction.
+Workbench must not feed `thread/trace` records into transcript rendering.
+
 Creating a new Web thread or selecting an existing history thread rebinds the
 current Web source without archiving the previously selected thread. Only an
 explicit `source/reset`, archive action, or delete action may remove a thread
@@ -289,7 +299,16 @@ insertion. Navigation commands switch panels, structured inspection commands
 open their domain view such as preview or status, active-turn controls update
 local activity state, submit-style slash commands start a normal model turn, and
 export commands invoke the host download/share path. Display-only feedback from
-commands must not be persisted as transcript entries.
+commands must not be persisted as transcript entries. Panel host actions must
+reveal their destination in desktop and mobile layouts; focusing Status or
+History is not sufficient if the corresponding inspector/sidebar is collapsed.
+Composer-triggered help or browse actions for commands and agents use closeable
+overlays over the current transcript so the active session and composer remain
+visible. Composer-triggered inspect feedback may be mirrored near the composer
+while the destination panel is revealed. Queue actions preserve the original
+slash line as their display text when they submit expanded prompt text through
+`turn/start`. Display-only command feedback and overlays are transient to the
+current session/workdir and are cleared on session switches and new input.
 
 The Web Shell supports TUI-compatible shell mode through `shell/start`.
 `shell/start` accepts `scope`, optional `threadId`, and a stripped local shell

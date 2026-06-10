@@ -17,6 +17,7 @@ Define Psychevo's storage and persistence boundary for durable semantic facts.
 - retrieval by semantic relationship
 - representation evolution boundary
 - first-slice SQLite persistence attachment
+- session observability trace sidecar attachment
 
 Out of scope:
 - JSONL, SQLite, tables, files, indexes, storage engines, migrations, FTS, search, query languages, pagination, or sorting except where an attachment explicitly defines an implementation slice
@@ -95,6 +96,7 @@ This spec does not define version fields, migration algorithms, compatibility ma
 ## Attachments
 
 - [SQLite Persistence](sqlite-persistence.md) defines the default first implementation slice contract for SQLite-backed session and message persistence.
+- [Session Observability Trace Sidecar](session-observability-trace.md) defines the append-only JSONL sidecar for redacted typed runtime observability events.
 
 ## Related Topics
 

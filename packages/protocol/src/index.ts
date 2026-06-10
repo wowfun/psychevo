@@ -19,6 +19,7 @@ import type {
   JsonRpcSuccess,
   SettingsReadResult,
   ThreadListResult,
+  ThreadTraceResult,
   ThreadSnapshot,
   TurnResultPayload,
   WorkspaceDiffResult,
@@ -45,6 +46,7 @@ export const JsonRpcErrorResponseSchema =
 export const GatewayEventSchema = schema<GatewayEvent>("GatewayEvent");
 export const ThreadSnapshotSchema = schema<ThreadSnapshot>("ThreadSnapshot");
 export const ThreadListResultSchema = schema<ThreadListResult>("ThreadListResult");
+export const ThreadTraceResultSchema = schema<ThreadTraceResult>("ThreadTraceResult");
 export const CompletionListResultSchema =
   schema<CompletionListResult>("CompletionListResult");
 export const TurnResultNotificationSchema =

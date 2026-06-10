@@ -30,13 +30,14 @@ use psychevo_runtime::{
     Message as RuntimeMessage, PermissionApprovalDecision, PermissionApprovalOutcome,
     PermissionMode, RunMode, RunOptions, SESSION_MAIN_AGENT_METADATA_KEY, SessionArtifactKind,
     SessionExportFormat, SessionExportIncludeSet, SessionExportOptions, SessionSummary,
-    SkillDiscoveryOptions, StateRuntime, UserContentBlock, UserShellContextOptions,
-    WorkspaceDiffFileStatus, canonicalize_workdir, collect_workspace_diff, configured_models,
-    context_snapshot, discover_agents, discover_skills, format_context_total_value,
-    list_agents_value, list_skill_bundles, list_skills_value_with_options,
-    load_agent_backend_configs, main_agent_default_metadata, main_agent_from_session_metadata,
-    main_agent_metadata, render_session_export, resolve_agent_definition,
-    selected_configured_model, valid_agent_name, view_agent_value_with_catalog,
+    SessionTraceReadOptions, SkillDiscoveryOptions, StateRuntime, UserContentBlock,
+    UserShellContextOptions, WorkspaceDiffFileStatus, canonicalize_workdir, collect_workspace_diff,
+    configured_models, context_snapshot, discover_agents, discover_skills,
+    format_context_total_value, list_agents_value, list_skill_bundles,
+    list_skills_value_with_options, load_agent_backend_configs, main_agent_default_metadata,
+    main_agent_from_session_metadata, main_agent_metadata, render_session_export,
+    resolve_agent_definition, selected_configured_model, valid_agent_name,
+    view_agent_value_with_catalog,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -796,6 +797,23 @@ async fn handle_rpc(
             let scope = resolved_scope_for_thread(&state, &params.thread_id)?;
             thread_snapshot(&state, &scope, Some(&params.thread_id))
         }
+        "thread/trace" => {
+            let params = request.required_params::<wire::ThreadTraceParams>()?;
+            authorize_thread(&state, &auth, &params.thread_id)?;
+            let runtime_state = state.inner.state.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                runtime_state.read_session_trace(
+                    &params.thread_id,
+                    SessionTraceReadOptions {
+                        after_seq: params.after_seq,
+                        limit: params.limit,
+                    },
+                )
+            })
+            .await
+            .map_err(|err| Error::Message(format!("thread trace read task failed: {err}")))?;
+            Ok(serde_json::to_value(result)?)
+        }
         "thread/list" => {
             let params = request.params::<wire::ThreadListParams>()?;
             let limit = params.limit.unwrap_or(50).clamp(1, 200);
@@ -859,11 +877,7 @@ async fn handle_rpc(
             let params = request.required_params::<wire::ThreadIdParams>()?;
             authorize_thread(&state, &auth, &params.thread_id)?;
             guard_session_mutation(&state, &auth, &params.thread_id, false)?;
-            state
-                .inner
-                .state
-                .store()
-                .delete_session(&params.thread_id)?;
+            state.inner.state.delete_session(&params.thread_id)?;
             Ok(json!({"deleted": true, "threadId": params.thread_id}))
         }
         "turn/start" => {
@@ -2442,7 +2456,7 @@ fn command_result_from_effect(
         SlashCommandEffect::Queue(text) => Ok(command_action(
             raw,
             action,
-            json!({"type": "queuePrompt", "text": text}),
+            json!({"type": "queuePrompt", "text": text, "displayText": raw}),
         )),
         SlashCommandEffect::PendingCancel => Ok(command_action(
             raw,
@@ -4793,9 +4807,12 @@ command = "cursor-agent"
 
         for (command, panel) in [
             ("/status", "status"),
+            ("/usage", "status"),
+            ("/context", "status"),
             ("/help", "commands"),
             ("/commands", "commands"),
             ("/agents", "agents"),
+            ("/sessions", "history"),
         ] {
             let result = handle_rpc(
                 state.clone(),
@@ -4822,6 +4839,41 @@ command = "cursor-agent"
             assert!(result["presentationKind"].as_str().is_some());
             assert!(result["feedbackAnchor"].as_str().is_some());
         }
+    }
+
+    #[tokio::test]
+    async fn command_execute_queue_preserves_original_slash_display_text() {
+        let (_temp, state) = web_state();
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let result = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "command/execute".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "command": "/queue hello",
+                    "threadId": null
+                })),
+            },
+        )
+        .await
+        .expect("command/execute");
+
+        assert_eq!(result["accepted"], true);
+        assert_eq!(result["known"], true);
+        assert_eq!(result["presentationKind"], "control");
+        assert_eq!(result["feedbackAnchor"], "composer");
+        assert_eq!(result["action"]["type"], "queuePrompt");
+        assert_eq!(result["action"]["text"], "hello");
+        assert_eq!(result["action"]["displayText"], "/queue hello");
     }
 
     #[tokio::test]

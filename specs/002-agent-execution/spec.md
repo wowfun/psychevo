@@ -74,12 +74,19 @@ provider transport reads or a local child process.
 Agent execution defines these canonical event families:
 - `agent_start`, `agent_end`
 - `turn_start`, `turn_end`
+- `generation_start`, `generation_end`
 - `message_start`, `message_update`, `message_end`
 - `tool_execution_start`, `tool_execution_update`, `tool_execution_end`
 
 `agent_start` and `agent_end` bound one accepted agent invocation. `agent_end` supports a semantic projection of the invocation terminal outcome, optional terminal reason, and final messages or final material needed by observers. That projection may be derived from loop messages, provider results, runtime completion facts, or interface settlement facts; this spec does not require a low-level core event payload to natively carry every projected field. `agent_end` does not indicate that the session has ended.
 
 `turn_start` and `turn_end` bound one turn within an agent invocation.
+
+`generation_start` and `generation_end` bound one provider generation attempt
+inside a turn. They may expose provider/model identifiers, message/tool counts,
+usage/accounting metadata, outcome, and elapsed generation duration. They must
+not expose raw provider request or response payloads unless a downstream
+diagnostic format explicitly opts into that material.
 
 `message_start`, `message_update`, and `message_end` describe loop-visible message production. `message_update` is for assistant streaming. User and tool-result messages may emit only start and end events.
 
@@ -97,6 +104,11 @@ not force an otherwise empty `message_update`.
 Every started agent invocation emits `agent_start` before its inner events and `agent_end` after its loop events.
 
 Turns are ordered within an agent invocation. A turn emits `turn_start` before its turn-local messages or tool executions and `turn_end` after them.
+
+Each provider generation attempt emits `generation_start` before provider stream
+consumption and `generation_end` after success or failure. A failed generation
+may emit no assistant `message_end`, but it must still complete the generation
+lifecycle if `generation_start` was emitted.
 
 Each message emits `message_start` before `message_update` or `message_end`. `message_end` completes that message's lifecycle.
 

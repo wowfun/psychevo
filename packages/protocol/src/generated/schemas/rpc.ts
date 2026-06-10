@@ -857,6 +857,35 @@ export const rpcSchemas = {
       ],
       "type": "object"
     },
+    "ThreadTraceParams": {
+      "properties": {
+        "afterSeq": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "limit": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "threadId"
+      ],
+      "type": "object"
+    },
     "TurnInterruptParams": {
       "properties": {
         "sourceKey": {
@@ -1082,6 +1111,24 @@ export const rpcSchemas = {
         },
         "params": {
           "$ref": "#/definitions/ThreadReadParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "thread/trace"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadTraceParams"
         }
       },
       "required": [

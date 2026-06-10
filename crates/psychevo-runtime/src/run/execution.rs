@@ -175,6 +175,14 @@ pub(crate) async fn run_live_internal(
             true,
         )
     };
+    let invocation_started = Instant::now();
+    let trace_warning_emitted = Arc::new(Mutex::new(false));
+    let invocation_id = uuid::Uuid::now_v7().to_string();
+    let (trace, trace_open_warning) =
+        match SessionTraceSink::open(options.state.db_path(), &session_id, invocation_id) {
+            Ok(trace) => (trace, None),
+            Err(err) => (None, Some(err)),
+        };
 
     store.cleanup_reverted_messages(&session_id)?;
     maybe_preflight_compact_session(
@@ -222,6 +230,37 @@ pub(crate) async fn run_live_internal(
         stream(RunStreamEvent::Event(run_start.clone()));
     }
     let events = Arc::new(Mutex::new(vec![run_start]));
+    let mut trace_warnings = Vec::new();
+    if let Some(warning) = trace_open_warning {
+        trace_warnings.push(RunWarning {
+            kind: "session_trace".to_string(),
+            message: format!("session observability trace is unavailable: {warning}"),
+            source_path: None,
+            suggestion: None,
+        });
+    }
+    let run_start_trace_payload = events
+        .lock()
+        .expect("event lock poisoned")
+        .first()
+        .cloned()
+        .unwrap_or_else(|| json!({ "type": "run_start" }));
+    if let Some(trace) = &trace
+        && let Some(warning) = trace.enqueue_run_start(&run_start_trace_payload)
+    {
+        trace_warnings.push(RunWarning {
+            kind: "session_trace".to_string(),
+            message: format!("session observability trace is unavailable: {warning}"),
+            source_path: None,
+            suggestion: None,
+        });
+    }
+    if !trace_warnings.is_empty() {
+        if let Ok(mut emitted) = trace_warning_emitted.lock() {
+            *emitted = true;
+        }
+        emit_warning_events(&trace_warnings, &events, stream_events.as_ref());
+    }
     emit_warning_events(
         &project_instructions.warnings,
         &events,
@@ -506,12 +545,15 @@ pub(crate) async fn run_live_internal(
         prompt_snapshot,
         prompt_snapshot_written: Arc::new(Mutex::new(false)),
         prompt_context_evidence: Arc::new(prompt_context_evidence),
-        started: Instant::now(),
+        started: invocation_started,
         tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
+        current_turn_index: Arc::new(Mutex::new(None)),
         control: SmokeControl::None,
         control_handle: Some(control_handle.clone()),
         events: Some(Arc::clone(&events)),
         stream_events: stream_events.clone(),
+        trace: trace.clone(),
+        trace_warning_emitted,
         include_reasoning: options.include_reasoning,
         reasoning_effort: resolved.reasoning_effort.clone(),
         model_metadata: resolved.metadata.clone(),

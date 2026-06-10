@@ -17,6 +17,27 @@ pub enum AgentEvent {
         turn_index: usize,
         outcome: Outcome,
     },
+    GenerationStart {
+        generation_id: String,
+        provider: String,
+        model: String,
+        message_count: usize,
+        tool_count: usize,
+        started_at_ms: i64,
+    },
+    GenerationEnd {
+        generation_id: String,
+        provider: String,
+        model: String,
+        outcome: Outcome,
+        elapsed_ms: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        usage: Option<Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        metadata: Option<Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
     MessageStart {
         message: Message,
     },

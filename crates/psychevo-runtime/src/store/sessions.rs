@@ -314,25 +314,31 @@ impl SqliteStore {
         workdir: &Path,
         source: &str,
     ) -> Result<usize> {
-        let workdir = workdir.to_string_lossy().to_string();
+        let ids = self.session_ids_for_workdir_with_source(workdir, source)?;
         self.write_retry(|conn| {
-            let ids = {
-                let mut stmt = conn.prepare(
-                    "SELECT id FROM sessions WHERE workdir = ?1 AND source = ?2 ORDER BY id ASC",
-                )?;
-                let rows =
-                    stmt.query_map(params![&workdir, source], |row| row.get::<_, String>(0))?;
-                let mut ids = Vec::new();
-                for row in rows {
-                    ids.push(row?);
-                }
-                ids
-            };
             for id in &ids {
                 conn.execute("DELETE FROM messages WHERE session_id = ?1", params![id])?;
                 conn.execute("DELETE FROM sessions WHERE id = ?1", params![id])?;
             }
             Ok(ids.len())
         })
+    }
+
+    pub fn session_ids_for_workdir_with_source(
+        &self,
+        workdir: &Path,
+        source: &str,
+    ) -> Result<Vec<String>> {
+        let workdir = workdir.to_string_lossy().to_string();
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id FROM sessions WHERE workdir = ?1 AND source = ?2 ORDER BY id ASC",
+        )?;
+        let rows = stmt.query_map(params![&workdir, source], |row| row.get::<_, String>(0))?;
+        let mut ids = Vec::new();
+        for row in rows {
+            ids.push(row?);
+        }
+        Ok(ids)
     }
 }

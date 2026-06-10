@@ -53,6 +53,8 @@ export const gatewaySchemas = {
   ThreadStartParams: threadSchemas.ThreadStartParams,
   ThreadResumeParams: threadSchemas.ThreadResumeParams,
   ThreadReadParams: threadSchemas.ThreadReadParams,
+  ThreadTraceParams: threadSchemas.ThreadTraceParams,
+  ThreadTraceResult: threadSchemas.ThreadTraceResult,
   ThreadListParams: threadSchemas.ThreadListParams,
   ThreadIdParams: threadSchemas.ThreadIdParams,
   ThreadRenameParams: threadSchemas.ThreadRenameParams,

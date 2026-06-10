@@ -49,6 +49,7 @@ pub(crate) use crate::prompt_assembly::{
 };
 pub(crate) use crate::prompt_image::prompt_message_from_inputs_with_options;
 pub(crate) use crate::prompt_templates;
+pub(crate) use crate::session_trace::SessionTraceSink;
 pub(crate) use crate::skills::{
     SelectedSkill, SkillCatalog, SkillDiscoveryOptions, discover_skills, resolve_skills_home,
     select_explicit_skills, select_skills_for_prompt, skill_context_fragments,

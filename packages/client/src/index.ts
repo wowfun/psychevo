@@ -33,6 +33,8 @@ import {
   type ThreadResumeParams,
   type ThreadSnapshot,
   type ThreadStartParams,
+  type ThreadTraceParams,
+  type ThreadTraceResult,
   type TurnControlResult,
   type TurnStartParams,
   type TurnStartResult,
@@ -77,6 +79,7 @@ export interface GatewayRequestParams {
   "thread/restore": ThreadIdParams;
   "thread/resume": ThreadResumeParams;
   "thread/start": ThreadStartParams;
+  "thread/trace": ThreadTraceParams;
   "turn/interrupt": { sourceKey?: string | null; threadId?: string | null };
   "turn/start": TurnStartParams;
   "turn/steer": TurnSteerParams;
@@ -107,6 +110,7 @@ export interface GatewayRequestResults {
   "thread/restore": ThreadMutationResult;
   "thread/resume": ThreadSnapshot;
   "thread/start": ThreadSnapshot;
+  "thread/trace": ThreadTraceResult;
   "turn/interrupt": TurnControlResult;
   "turn/start": TurnStartResult;
   "turn/steer": TurnControlResult;

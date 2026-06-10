@@ -11,6 +11,7 @@ use crate::context_usage::ContextRecorder;
 use crate::messages::{
     add_assistant_metadata, add_elapsed_ms_metadata, sanitize_message_for_output,
 };
+use crate::session_trace::SessionTraceSink;
 use crate::store::{ContextEvidenceInput, SqliteStore};
 use crate::types::{
     MessageAccounting, ModelMetadata, PromptDisplayMetadata, RunStreamEvent, RunStreamSink,
@@ -25,10 +26,13 @@ pub(crate) struct PersistenceSink {
     pub(crate) prompt_context_evidence: Arc<Vec<ContextEvidenceInput>>,
     pub(crate) started: Instant,
     pub(crate) tool_elapsed_ms: Arc<Mutex<BTreeMap<String, u64>>>,
+    pub(crate) current_turn_index: Arc<Mutex<Option<usize>>>,
     pub(crate) control: SmokeControl,
     pub(crate) control_handle: Option<ControlHandle>,
     pub(crate) events: Option<Arc<Mutex<Vec<Value>>>>,
     pub(crate) stream_events: Option<RunStreamSink>,
+    pub(crate) trace: Option<SessionTraceSink>,
+    pub(crate) trace_warning_emitted: Arc<Mutex<bool>>,
     pub(crate) include_reasoning: bool,
     pub(crate) reasoning_effort: Option<String>,
     pub(crate) model_metadata: ModelMetadata,
@@ -58,6 +62,9 @@ impl EventSink for PersistenceSink {
         let prompt_prefix_metadata = self.prompt_prefix_metadata.clone();
         let started = self.started;
         let tool_elapsed_ms = Arc::clone(&self.tool_elapsed_ms);
+        let current_turn_index = Arc::clone(&self.current_turn_index);
+        let trace = self.trace.clone();
+        let trace_warning_emitted = Arc::clone(&self.trace_warning_emitted);
         Box::pin(async move {
             let elapsed = started.elapsed();
             if let AgentEvent::ToolExecutionEnd {
@@ -88,7 +95,31 @@ impl EventSink for PersistenceSink {
                 recorder.record_provider_usage(usage.as_ref());
             }
             let accounting = message_accounting_for_event(&event, &model_metadata);
-            if let Some(events) = events
+            let turn_index_for_event = turn_index_for_event(&event, &current_turn_index);
+            if let Some(trace) = &trace {
+                if let Some(message) = trace.observe_agent_event(
+                    &event,
+                    accounting.as_ref(),
+                    duration_ms_u64(elapsed),
+                    turn_index_for_event,
+                ) {
+                    emit_trace_warning_once(
+                        &message,
+                        &trace_warning_emitted,
+                        events.as_ref(),
+                        stream_events.as_ref(),
+                    );
+                }
+                if let Some(message) = trace.take_error() {
+                    emit_trace_warning_once(
+                        &message,
+                        &trace_warning_emitted,
+                        events.as_ref(),
+                        stream_events.as_ref(),
+                    );
+                }
+            }
+            if let Some(events) = &events
                 && let Some(value) = project_agent_event_with_accounting(
                     &event,
                     include_reasoning,
@@ -97,7 +128,7 @@ impl EventSink for PersistenceSink {
             {
                 events.lock().expect("event lock poisoned").push(value);
             }
-            if let Some(stream_events) = stream_events
+            if let Some(stream_events) = &stream_events
                 && let Some(value) =
                     project_run_stream_event_with_accounting(&event, accounting.as_ref())
             {
@@ -184,6 +215,52 @@ impl EventSink for PersistenceSink {
             Ok(())
         })
     }
+}
+
+fn turn_index_for_event(
+    event: &AgentEvent,
+    current_turn_index: &Arc<Mutex<Option<usize>>>,
+) -> Option<usize> {
+    match event {
+        AgentEvent::TurnStart { turn_index } => {
+            let mut current = current_turn_index.lock().expect("turn index lock poisoned");
+            *current = Some(*turn_index);
+            Some(*turn_index)
+        }
+        AgentEvent::TurnEnd { turn_index, .. } => Some(*turn_index),
+        _ => *current_turn_index.lock().expect("turn index lock poisoned"),
+    }
+}
+
+fn emit_trace_warning_once(
+    message: &str,
+    emitted: &Arc<Mutex<bool>>,
+    events: Option<&Arc<Mutex<Vec<Value>>>>,
+    stream_events: Option<&RunStreamSink>,
+) {
+    let mut emitted = emitted.lock().expect("trace warning lock poisoned");
+    if *emitted {
+        return;
+    }
+    *emitted = true;
+    let value = json!({
+        "type": "warning",
+        "kind": "session_trace",
+        "message": format!("session observability trace is unavailable: {message}"),
+    });
+    if let Some(events) = events {
+        events
+            .lock()
+            .expect("event lock poisoned")
+            .push(value.clone());
+    }
+    if let Some(stream_events) = stream_events {
+        stream_events(RunStreamEvent::Event(value));
+    }
+}
+
+fn duration_ms_u64(duration: Duration) -> u64 {
+    duration.as_millis().min(u128::from(u64::MAX)) as u64
 }
 
 pub(crate) fn message_accounting_for_event(

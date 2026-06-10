@@ -863,6 +863,79 @@ export const threadSchemas = {
   "title": "ThreadReadParams",
   "type": "object"
 },
+  ThreadTraceParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "afterSeq": {
+      "default": null,
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "limit": {
+      "default": null,
+      "format": "uint",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "threadId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "threadId"
+  ],
+  "title": "ThreadTraceParams",
+  "type": "object"
+},
+  ThreadTraceResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "available": {
+      "type": "boolean"
+    },
+    "events": {
+      "items": true,
+      "type": "array"
+    },
+    "nextAfterSeq": {
+      "default": null,
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "threadId": {
+      "type": "string"
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "available",
+    "events",
+    "threadId",
+    "truncated",
+    "warnings"
+  ],
+  "title": "ThreadTraceResult",
+  "type": "object"
+},
   ThreadListParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
