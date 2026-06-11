@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-06-11
+
+- Expanded `peval-py` reporting with Timeline timing fixes, Hermes/OpenCode DB
+  timing fusion, single-session Timeline drawer support, and package-backed
+  HTML assets.
+- Added minimal `peval-py init` and `peval-py serve` saved-workspace support,
+  including stdlib localhost APIs, source management, upload snapshots, locale
+  defaults, path-token adapter inference, and DB session picking.
+- Added `pevo profile` management with named homes, sticky/global selection,
+  cloneable setup, local aliases, profile-local managed Gateway state, and
+  status display across CLI/TUI/Workbench.
+- Added profile-scoped workspace roots and GUI workspace creation through
+  Gateway, protocol, and Workbench while keeping runtime scopes workdir-based.
+- Polished Workbench Sessions/search/files language and spacing around
+  workspace semantics, including the icon-only workspace creation action.
+
 ## 2026-06-10
 
 - Added opt-in sandbox enforcement for file writes and shell children, including
