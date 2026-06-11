@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from peval_py_test_support import *
 
 
@@ -22,8 +24,13 @@ class PevalPyConfigAdapterTests(unittest.TestCase):
 
 
     def test_config_locale_defaults_aliases_and_invalid_values(self) -> None:
-        self.assertEqual(load_config(None).locale, "en")
         with tempfile.TemporaryDirectory() as tmp:
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(tmp)
+                self.assertEqual(load_config(None).locale, "en")
+            finally:
+                os.chdir(old_cwd)
             for value, expected in [
                 ("en", "en"),
                 ("en-US", "en"),
@@ -48,6 +55,42 @@ class PevalPyConfigAdapterTests(unittest.TestCase):
                 "unsupported locale: fr-FR; supported locales: en, zh-CN",
             ):
                 load_config(str(invalid_config))
+
+    def test_peval_py_toml_locale_discovery_and_config_overlay(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            child = root / "nested" / "child"
+            child.mkdir(parents=True)
+            root.joinpath("peval-py.toml").write_text(
+                'state_db = "state.db"\nlocale = "zh-CN"\n',
+                encoding="utf-8",
+            )
+            explicit = root / "explicit.toml"
+            explicit.write_text("[defaults]\nadapter = \"opencode\"\n", encoding="utf-8")
+            explicit_locale = root / "explicit-locale.toml"
+            explicit_locale.write_text("[defaults]\nlocale = \"en\"\n", encoding="utf-8")
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(child)
+                self.assertEqual(load_config(None).locale, "zh-CN")
+                overlaid = load_config(str(explicit))
+                self.assertEqual(overlaid.adapter, "opencode")
+                self.assertEqual(overlaid.locale, "zh-CN")
+                self.assertEqual(load_config(str(explicit_locale)).locale, "en")
+            finally:
+                os.chdir(old_cwd)
+
+            root.joinpath("peval-py.toml").write_text(
+                'state_db = "state.db"\nlocale = "fr-FR"\n',
+                encoding="utf-8",
+            )
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(child)
+                with self.assertRaisesRegex(ValueError, "unsupported locale"):
+                    load_config(None)
+            finally:
+                os.chdir(old_cwd)
 
 
     def test_config_passes_selected_adapter_options(self) -> None:

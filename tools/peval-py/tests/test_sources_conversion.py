@@ -486,6 +486,46 @@ class PevalPySourceConversionTests(unittest.TestCase):
             self.assertEqual(old.trajectory["steps"][0]["message"], "old prompt")
 
 
+    def test_opencode_db_adapter_prefers_event_fused_timing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "opencode.db"
+            create_opencode_event_timing_db(db_path)
+            config = ToolConfig(adapter="opencode")
+
+            latest = convert_db(str(db_path), None, config)
+
+            self.assertEqual(latest.trajectory["session_id"], "ses-latest")
+            agent_meta = latest.steps_meta[1]
+            self.assertEqual(agent_meta.duration_ms, 100)
+            self.assertEqual(
+                agent_meta.duration_source,
+                "opencode_model_boundary_estimate",
+            )
+            tool_meta = agent_meta.tool_calls[0]
+            self.assertEqual(tool_meta.timestamp_ms, 2_500)
+            self.assertEqual(tool_meta.execution_duration_ms, 48_000)
+            self.assertEqual(
+                tool_meta.execution_duration_source,
+                "opencode_event_tool_timestamps",
+            )
+            report = build_report(latest, config, "inline")
+            step_meta = report["trajectory_meta"][0]["steps"][1]
+            self.assertEqual(step_meta["duration_ms"], 100)
+            self.assertEqual(
+                step_meta["duration_source"],
+                "opencode_model_boundary_estimate",
+            )
+            self.assertEqual(
+                step_meta["tool_calls"][0]["execution_duration_ms"],
+                48_000,
+            )
+            self.assertEqual(
+                step_meta["tool_calls"][0]["execution_duration_source"],
+                "opencode_event_tool_timestamps",
+            )
+            self.assertEqual(report["trajectory_meta"][0]["duration_ms"], 48_100)
+
+
     def test_hermes_db_adapter_reads_latest_and_explicit_sessions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "state.db"
@@ -524,12 +564,16 @@ class PevalPySourceConversionTests(unittest.TestCase):
                 ],
                 "call-lookup",
             )
+            self.assertEqual(latest.timestamp_semantics, "order_only")
             report = build_report(latest, config, "inline")
+            meta = report["trajectory_meta"][0]
+            self.assertEqual(meta["timestamp_semantics"], "order_only")
+            self.assertEqual(meta["wall_duration_ms"], 30_000)
+            self.assertIsNone(meta["duration_ms"])
             step_meta = report["trajectory_meta"][0]["steps"][2]
             self.assertIsNone(step_meta["duration_ms"])
             self.assertEqual(step_meta["tool_calls"][0]["timestamp_ms"], 220_000)
-            self.assertEqual(step_meta["tool_calls"][0]["execution_duration_ms"], 10_000)
-            self.assertEqual(report["trajectory_meta"][0]["duration_ms"], 10_000)
+            self.assertNotIn("execution_duration_ms", step_meta["tool_calls"][0])
             self.assertEqual(latest.trajectory["final_metrics"]["total_tool_calls"], 1)
             self.assertEqual(latest.trajectory["final_metrics"]["usage"]["input_tokens"], 11)
             self.assertEqual(latest.trajectory["final_metrics"]["usage"]["output_tokens"], 13)
@@ -544,6 +588,67 @@ class PevalPySourceConversionTests(unittest.TestCase):
             self.assertEqual(old.trajectory["steps"][0]["message"], "old prompt")
             self.assertEqual(len(old.trajectory["steps"]), 1)
             self.assertEqual(old.trajectory["final_metrics"]["usage"]["input_tokens"], 1)
+
+
+    def test_hermes_db_adapter_fuses_current_agent_log_timing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = create_hermes_log_timing_home(Path(tmp) / ".hermes")
+            config = ToolConfig(adapter="hermes")
+
+            result = convert_db(str(db_path), None, config)
+            report = build_report(result, config, "inline")
+            meta = report["trajectory_meta"][0]
+            first_agent = result.steps_meta[1]
+            second_agent = result.steps_meta[2]
+            final_agent = result.steps_meta[-1]
+
+            self.assertEqual(result.trajectory["session_id"], "hermes-log")
+            self.assertEqual(first_agent.duration_ms, 5_700)
+            self.assertEqual(first_agent.duration_source, "hermes_agent_log")
+            self.assertEqual(first_agent.tool_calls[0].execution_duration_ms, 53_890)
+            self.assertEqual(
+                first_agent.tool_calls[0].execution_duration_source,
+                "hermes_agent_log",
+            )
+            self.assertEqual(second_agent.duration_ms, 8_500)
+            self.assertEqual(second_agent.tool_calls[1].execution_duration_ms, 80)
+            self.assertTrue(second_agent.tool_error)
+            self.assertEqual(final_agent.duration_ms, 6_500)
+            self.assertEqual(meta["duration_ms"], 118_730)
+            self.assertEqual(meta["wall_duration_ms"], 121_820)
+            self.assertEqual(meta["steps"][1]["duration_ms"], 5_700)
+            self.assertEqual(
+                meta["steps"][1]["tool_calls"][0]["execution_duration_ms"],
+                53_890,
+            )
+            self.assertEqual(
+                meta["steps"][1]["tool_calls"][0]["execution_duration_source"],
+                "hermes_agent_log",
+            )
+            self.assertEqual(result.warnings, [])
+
+
+    def test_hermes_db_agent_log_mismatch_keeps_timing_unknown(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            hermes_home = Path(tmp) / ".hermes"
+            db_path = create_hermes_log_timing_home(hermes_home)
+            log_path = hermes_home / "logs" / "agent.log"
+            log_path.write_text(
+                hermes_agent_log_fixture("hermes-log")
+                .replace("API call #7", "API call #ignored")
+                .replace("tool write_file completed", "tool read_file completed"),
+                encoding="utf-8",
+            )
+            config = ToolConfig(adapter="hermes")
+
+            result = convert_db(str(db_path), None, config)
+            report = build_report(result, config, "inline")
+            meta = report["trajectory_meta"][0]
+
+            self.assertIsNone(result.steps_meta[1].duration_ms)
+            self.assertIsNone(result.steps_meta[1].tool_calls[0].execution_duration_ms)
+            self.assertIsNone(meta["duration_ms"])
+            self.assertEqual(result.warnings, [])
 
 
     def test_tool_timing_fallback_and_unmatched_warning(self) -> None:
@@ -708,8 +813,8 @@ class PevalPySourceConversionTests(unittest.TestCase):
         meta = report["trajectory_meta"][0]
 
         self.assertEqual(meta["started_at_ms"], 1_000)
-        self.assertEqual(meta["finished_at_ms"], 10_867_000)
-        self.assertEqual(meta["wall_duration_ms"], 10_866_000)
+        self.assertEqual(meta["finished_at_ms"], 10_874_000)
+        self.assertEqual(meta["wall_duration_ms"], 10_873_000)
         self.assertEqual(meta["duration_ms"], 42_000)
         self.assertEqual(
             [step["duration_ms"] for step in meta["steps"]],

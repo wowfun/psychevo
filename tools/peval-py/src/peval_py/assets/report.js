@@ -30,7 +30,7 @@ function fmtScore(value) { return hasMetricValue(value) ? Number(value).toLocale
 function hasMetricValue(value) { return value !== null && value !== undefined && value !== "" && !Number.isNaN(Number(value)); }
 function data() { return JSON.parse($("peval-py-data").textContent || "{}"); }
 function serveMode() { return RENDER_OPTIONS?.mode === "serve"; }
-const state = { view: null, selectedTrial: null, selectedStep: null, rowSelection: new Set(), tables: {}, timelineChart: null, boundGlobalControls: false };
+const state = { view: null, selectedTrial: null, selectedStep: null, rowSelection: new Set(), tables: {}, timelineChart: null, boundGlobalControls: false, serveSources: Array.isArray(RENDER_OPTIONS?.sources) ? RENDER_OPTIONS.sources : [] };
 function reportRows() {
   return state.view?.comparison?.leaderboard?.entries || [];
 }
@@ -59,6 +59,7 @@ function render(view) {
     const firstFailed = reportRows().find(row => lower(row.status) !== "passed");
     state.selectedTrial = (firstFailed || reportRows()[0])?.trial_key || view.trajectory_meta?.[0]?.trial_key || null;
   }
+  if (serveMode()) renderServeSources();
   bindGlobalControls();
   renderReportNotes(view.annotations?.report_notes || []);
   renderComparison();
@@ -231,6 +232,12 @@ function toggleDataTableSort(tableId, key) {
   controls.direction = "asc";
 }
 function syncSelectionWithVisibleRows(rows) {
+  const allRows = reportRows();
+  if (!allRows.length) {
+    if (!state.selectedTrial) state.selectedTrial = selectedKey();
+    if (!selectedStepExists(state.selectedStep)) state.selectedStep = null;
+    return;
+  }
   const key = selectedKey();
   const selectedVisible = rows.some(row => row.trial_key === key);
   if (!rows.length) {
@@ -244,11 +251,20 @@ function syncSelectionWithVisibleRows(rows) {
   }
   if (!selectedStepVisible(rows)) state.selectedStep = null;
 }
+function selectedStepExists(selection) {
+  if (!selection) return true;
+  const { trialKey, stepId } = selection;
+  const metas = state.view?.trajectory_meta || [];
+  const index = metas.findIndex(meta => meta.trial_key === trialKey);
+  if (index < 0) return false;
+  const steps = (state.view?.trajectory || [])[index]?.steps || [];
+  return steps.some(step => String(step.step_id) === String(stepId));
+}
 function selectedStepVisible(rows) {
   if (!state.selectedStep) return true;
   const { trialKey, stepId } = state.selectedStep;
   if (!rows.some(row => row.trial_key === trialKey)) return false;
-  return (trajectoryFor(trialKey)?.steps || []).some(step => String(step.step_id) === String(stepId));
+  return selectedStepExists({ trialKey, stepId });
 }
 function compareTableValues(left, right, type, direction) {
   const leftMissing = left === null || left === undefined || left === "" || (type === "number" && Number.isNaN(Number(left)));
@@ -679,6 +695,9 @@ function setStepDrawerOpen(open) {
 function bindGlobalControls() {
   if (state.boundGlobalControls) return;
   document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && closeServeSourceManager()) {
+      return;
+    }
     if (event.key !== "Escape" || !state.selectedStep) return;
     state.selectedStep = null;
     renderComparisonPanels();
@@ -686,14 +705,361 @@ function bindGlobalControls() {
   document.addEventListener("click", event => {
     if (!state.selectedStep) return;
     const target = event.target;
-    if (target?.closest?.("#step-drawer") || target?.closest?.("[data-step-id]") || target?.closest?.("[data-timeline-step-id]") || target?.closest?.("[data-timeline-chart]")) return;
+    if (target?.closest?.("#step-drawer") || target?.closest?.("[data-source-manager]") || target?.closest?.("[data-step-id]") || target?.closest?.("[data-timeline-step-id]") || target?.closest?.("[data-timeline-chart]")) return;
     state.selectedStep = null;
     renderComparisonPanels();
   });
   window.addEventListener("resize", () => {
     if (state.timelineChart) state.timelineChart.resize();
   });
+  if (serveMode()) bindServeSourceControls();
   state.boundGlobalControls = true;
+}
+function bindServeSourceControls() {
+  document.querySelectorAll("[data-source-manager-open]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      openServeSourceManager();
+    });
+  });
+  document.querySelectorAll("[data-source-manager-close]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      closeServeSourceManager();
+    });
+  });
+  const manager = document.querySelector("[data-source-manager]");
+  if (manager) {
+    manager.addEventListener("click", event => {
+      if (event.target === manager) closeServeSourceManager();
+    });
+  }
+  document.querySelectorAll("[data-refresh-all]").forEach(button => {
+    button.addEventListener("click", () => refreshServeReportFromServer({ refresh: true }));
+  });
+  document.querySelectorAll("[data-refresh-sources]").forEach(button => {
+    button.addEventListener("click", () => refreshServeSourcesFromServer());
+  });
+  document.querySelectorAll("[data-source-add-form]").forEach(form => {
+    form.addEventListener("submit", event => {
+      event.preventDefault();
+      submitServeSourceForm(form);
+    });
+  });
+  document.querySelectorAll("[data-db-inspect]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      inspectDbSessions(button.closest("[data-source-add-form]"));
+    });
+  });
+  document.querySelectorAll("[data-db-session-picker]").forEach(picker => {
+    picker.addEventListener("change", event => {
+      if (event.target?.matches?.("[data-db-select-all]")) {
+        setDbSessionSelection(picker, event.target.checked);
+      }
+    });
+    picker.addEventListener("click", event => {
+      const button = event.target?.closest?.("[data-db-add-selected]");
+      if (!button) return;
+      event.preventDefault();
+      addSelectedDbSessions(button.closest("[data-source-add-form]"));
+    });
+  });
+  document.querySelectorAll("[data-source-upload-form]").forEach(form => {
+    form.addEventListener("submit", event => {
+      event.preventDefault();
+      submitServeUploadForm(form);
+    });
+  });
+  const sourceList = document.querySelector("[data-source-list]");
+  if (sourceList) {
+    sourceList.addEventListener("click", event => {
+      const button = event.target?.closest?.("[data-source-action]");
+      if (!button) return;
+      event.preventDefault();
+      mutateServeSource(button.dataset.sourceKey, button.dataset.sourceAction);
+    });
+  }
+}
+function openServeSourceManager() {
+  const manager = document.querySelector("[data-source-manager]");
+  if (!manager) return;
+  manager.hidden = false;
+  document.body.classList.add("source-manager-open");
+}
+function closeServeSourceManager() {
+  const manager = document.querySelector("[data-source-manager]");
+  if (!manager || manager.hidden) return false;
+  manager.hidden = true;
+  document.body.classList.remove("source-manager-open");
+  return true;
+}
+function renderServeSources() {
+  if (!serveMode()) return;
+  const sources = Array.isArray(state.serveSources) ? state.serveSources : [];
+  const countNode = document.querySelector("[data-source-count]");
+  if (countNode) {
+    const word = sources.length === 1 ? t("serve_source_count", "source") : t("serve_sources_count", "sources");
+    countNode.textContent = `${sources.length} ${word}`;
+  }
+  const list = document.querySelector("[data-source-list]");
+  if (list) {
+    list.innerHTML = sources.length ? sources.map(renderServeSourceRow).join("") : `<li class="source-row empty">${esc(t("serve_no_sources", "No sources loaded"))}</li>`;
+  }
+}
+function renderServeSourceRow(source) {
+  const key = source?.source_key || "";
+  const active = source?.active !== false;
+  const snapshot = Boolean(source?.snapshot);
+  const refreshable = source?.refreshable !== false && !snapshot;
+  const status = source?.last_status || "-";
+  const stateLabel = active ? t("serve_active", "active") : t("serve_archived", "archived");
+  const refreshButton = refreshable && key
+    ? `<button type="button" data-source-action="refresh" data-source-key="${esc(key)}">${esc(t("serve_refresh", "Refresh"))}</button>`
+    : `<span>${esc(t("serve_snapshot", "snapshot"))}</span>`;
+  const archiveAction = active ? "archive" : "activate";
+  const archiveLabel = active ? t("serve_archive", "Archive") : t("serve_activate", "Activate");
+  const archiveButton = key ? `<button type="button" data-source-action="${archiveAction}" data-source-key="${esc(key)}">${esc(archiveLabel)}</button>` : "";
+  return `<li class="source-row ${active ? "" : "archived"}">
+    <div class="source-row-main">
+      <strong>${esc(source?.label || key || "source")}</strong>
+      <span>${esc(source?.kind || "source")} / ${esc(source?.adapter || "-")} / ${esc(status)} / ${esc(stateLabel)}</span>
+    </div>
+    <div class="source-row-actions">${refreshButton}${archiveButton}</div>
+  </li>`;
+}
+async function submitServeSourceForm(form) {
+  const body = formPayload(form);
+  const kind = form.dataset.sourceKind;
+  if (!kind) return;
+  const sourceValue = String(body[kind] || "").trim();
+  if (!sourceValue) return;
+  try {
+    setServeStatus(t("serve_refresh", "Refresh"));
+    const payload = await serveApi("/api/sources", { method: "POST", body });
+    form.reset();
+    applyServeMutationPayload(payload);
+  } catch (error) {
+    setServeStatus(error.message || String(error), true);
+  }
+}
+async function inspectDbSessions(form) {
+  if (!form) return;
+  const body = formPayload(form);
+  const db = String(body.db || "").trim();
+  if (!db) return;
+  const picker = form.querySelector("[data-db-session-picker]");
+  try {
+    setServeStatus(t("serve_inspect_db", "Inspect DB"));
+    const payload = await serveApi("/api/db-sessions", {
+      method: "POST",
+      body: {
+        db,
+        adapter: String(body.adapter || "").trim() || undefined
+      }
+    });
+    const adapterInput = form.querySelector('[name="adapter"]');
+    if (adapterInput && payload?.adapter) adapterInput.value = payload.adapter;
+    renderDbSessionPicker(form, payload);
+    setServeStatus(t("serve_latest_snapshots", "Latest snapshots"));
+  } catch (error) {
+    if (picker) {
+      picker.hidden = false;
+      picker.innerHTML = `<p class="copy danger">${esc(error.message || String(error))}</p>`;
+    }
+    setServeStatus(error.message || String(error), true);
+  }
+}
+function renderDbSessionPicker(form, payload) {
+  const picker = form.querySelector("[data-db-session-picker]");
+  if (!picker) return;
+  const sessions = Array.isArray(payload?.sessions) ? payload.sessions : [];
+  form.dataset.inspectedDb = payload?.db || "";
+  form.dataset.inspectedAdapter = payload?.adapter || "";
+  picker.hidden = false;
+  if (!sessions.length) {
+    picker.innerHTML = `<div class="db-picker-head"><strong>${esc(t("serve_db_sessions", "DB sessions"))}</strong><span>${esc(t("serve_no_sessions", "No sessions found"))}</span></div>`;
+    return;
+  }
+  const adapterLabel = payload?.inferred ? t("serve_adapter_inferred", "Adapter inferred") : t("serve_adapter_selected", "Adapter selected");
+  picker.innerHTML = `
+    <div class="db-picker-head">
+      <div><strong>${esc(t("serve_db_sessions", "DB sessions"))}</strong><span>${esc(adapterLabel)}: ${esc(payload?.adapter || "-")}</span></div>
+      <label class="db-select-all"><input type="checkbox" data-db-select-all> ${esc(t("serve_select_all_visible", "Select all visible"))}</label>
+    </div>
+    <div class="db-session-table-wrap">
+      <table class="db-session-table">
+        <thead><tr><th></th><th>#</th><th>${esc(t("session", "Session"))}</th><th>${esc(t("serve_session_name", "Name"))}</th></tr></thead>
+        <tbody>${sessions.map(renderDbSessionRow).join("")}</tbody>
+      </table>
+    </div>
+    <div class="db-picker-actions">
+      <span data-db-selected-count>0 ${esc(t("serve_selected_count", "selected"))}</span>
+      <button class="step-toggle-button primary" type="button" data-db-add-selected>${esc(t("serve_add_selected", "Add selected"))}</button>
+    </div>
+  `;
+  bindDbSessionSelectionCounters(picker);
+}
+function renderDbSessionRow(session) {
+  const sessionId = String(session?.session_id || "");
+  return `<tr>
+    <td><input type="checkbox" data-db-session-checkbox value="${esc(sessionId)}" aria-label="${esc(sessionId)}"></td>
+    <td>${esc(session?.index || "")}</td>
+    <td><code>${esc(sessionId)}</code></td>
+    <td>${esc(session?.name || "-")}</td>
+  </tr>`;
+}
+function bindDbSessionSelectionCounters(picker) {
+  picker.querySelectorAll("[data-db-session-checkbox]").forEach(box => {
+    box.addEventListener("change", () => updateDbSelectedCount(picker));
+  });
+  updateDbSelectedCount(picker);
+}
+function setDbSessionSelection(picker, checked) {
+  picker.querySelectorAll("[data-db-session-checkbox]").forEach(box => {
+    box.checked = Boolean(checked);
+  });
+  updateDbSelectedCount(picker);
+}
+function selectedDbSessionIds(form) {
+  return Array.from(form.querySelectorAll("[data-db-session-checkbox]:checked"))
+    .map(box => String(box.value || "").trim())
+    .filter(Boolean);
+}
+function updateDbSelectedCount(picker) {
+  const count = picker.querySelectorAll("[data-db-session-checkbox]:checked").length;
+  const target = picker.querySelector("[data-db-selected-count]");
+  if (target) target.textContent = `${count} ${t("serve_selected_count", "selected")}`;
+}
+async function addSelectedDbSessions(form) {
+  if (!form) return;
+  const sessionIds = selectedDbSessionIds(form);
+  if (!sessionIds.length) {
+    setServeStatus(t("serve_select_sessions", "Select sessions"), true);
+    return;
+  }
+  const body = formPayload(form);
+  try {
+    setServeStatus(t("serve_refresh", "Refresh"));
+    const payload = await serveApi("/api/sources", {
+      method: "POST",
+      body: {
+        db: form.dataset.inspectedDb || body.db,
+        adapter: form.dataset.inspectedAdapter || body.adapter || undefined,
+        session_ids: sessionIds
+      }
+    });
+    form.reset();
+    const picker = form.querySelector("[data-db-session-picker]");
+    if (picker) {
+      picker.hidden = true;
+      picker.innerHTML = "";
+    }
+    delete form.dataset.inspectedDb;
+    delete form.dataset.inspectedAdapter;
+    applyServeMutationPayload(payload);
+  } catch (error) {
+    setServeStatus(error.message || String(error), true);
+  }
+}
+async function submitServeUploadForm(form) {
+  const formData = new FormData(form);
+  const file = formData.get("file");
+  if (!file || !file.name || typeof file.text !== "function") return;
+  try {
+    setServeStatus(t("serve_upload", "Upload"));
+    const payload = await serveApi("/api/upload", {
+      method: "POST",
+      body: {
+        filename: file.name,
+        content: await file.text(),
+        adapter: String(formData.get("adapter") || "").trim() || undefined
+      }
+    });
+    form.reset();
+    applyServeMutationPayload(payload);
+  } catch (error) {
+    setServeStatus(error.message || String(error), true);
+  }
+}
+function formPayload(form) {
+  const formData = new FormData(form);
+  const body = {};
+  for (const [key, value] of formData.entries()) {
+    const text = String(value || "").trim();
+    if (text) body[key] = text;
+  }
+  return body;
+}
+async function mutateServeSource(sourceKey, action) {
+  if (!sourceKey || !action) return;
+  try {
+    const payload = await serveApi(`/api/sources/${encodeURIComponent(sourceKey)}/${encodeURIComponent(action)}`, { method: "POST", body: {} });
+    applyServeMutationPayload(payload);
+  } catch (error) {
+    setServeStatus(error.message || String(error), true);
+  }
+}
+async function refreshServeReportFromServer(options = {}) {
+  try {
+    const payload = options.refresh
+      ? await serveApi("/api/refresh", { method: "POST", body: {} })
+      : { report: await serveApi("/api/report") };
+    applyServeMutationPayload(payload);
+  } catch (error) {
+    setServeStatus(error.message || String(error), true);
+  }
+}
+async function refreshServeSourcesFromServer() {
+  try {
+    const payload = await serveApi("/api/sources");
+    if (Array.isArray(payload.sources)) {
+      state.serveSources = payload.sources;
+      renderServeSources();
+      setServeStatus(t("serve_latest_snapshots", "Latest snapshots"));
+    }
+  } catch (error) {
+    setServeStatus(error.message || String(error), true);
+  }
+}
+async function serveApi(path, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  let body = options.body;
+  if (body !== undefined && typeof body !== "string") {
+    headers["Content-Type"] = "application/json";
+    body = JSON.stringify(body);
+  }
+  const response = await fetch(path, {
+    method: options.method || "GET",
+    headers,
+    body,
+    credentials: "same-origin"
+  });
+  const text = await response.text();
+  const payload = text ? JSON.parse(text) : {};
+  if (!response.ok) {
+    throw new Error(payload?.error || response.statusText);
+  }
+  return payload;
+}
+function applyServeMutationPayload(payload) {
+  if (Array.isArray(payload?.sources)) {
+    state.serveSources = payload.sources;
+    renderServeSources();
+  }
+  if (payload?.report) {
+    state.selectedTrial = null;
+    state.selectedStep = null;
+    state.rowSelection.clear();
+    render(payload.report);
+  }
+  setServeStatus(t("serve_latest_snapshots", "Latest snapshots"));
+}
+function setServeStatus(text, error = false) {
+  const node = document.querySelector("[data-source-status]");
+  if (!node) return;
+  node.textContent = text;
+  node.classList.toggle("danger", Boolean(error));
 }
 function infoGrid(items) {
   return `<div class="info-grid">${items.map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join("")}</div>`;
@@ -864,7 +1230,10 @@ function timelineTrace(trajectory, meta) {
       }
     } else if (source === "agent" || source === "assistant") {
       const hasExactModelDuration = positiveMetric(stepDuration);
-      const modelEstimate = hasExactModelDuration ? {} : timelineEstimatedModelCall(sm, step, stepStart, previousTimestamp);
+      const modelDurationIsBoundaryEstimate = timelineModelDurationIsEstimate(sm);
+      const modelEstimate = hasExactModelDuration || !timelineAllowsTimestampEstimates(meta)
+        ? {}
+        : timelineEstimatedModelCall(sm, step, stepStart, previousTimestamp);
       const modelDuration = hasExactModelDuration ? stepDuration : modelEstimate.duration_ms;
       timelinePushStage(stages, {
         kind: "agent",
@@ -874,7 +1243,7 @@ function timelineTrace(trajectory, meta) {
         wallStart: hasExactModelDuration ? stepStart : modelEstimate.wall_start_ms,
         wallEnd: hasExactModelDuration ? stepEnd : modelEstimate.wall_end_ms,
         duration: modelDuration,
-        estimated: !hasExactModelDuration && modelEstimate.estimated,
+        estimated: modelDurationIsBoundaryEstimate || (!hasExactModelDuration && modelEstimate.estimated),
         origin,
         trialKey: meta?.trial_key,
         stepId,
@@ -935,6 +1304,12 @@ function timelineTrace(trajectory, meta) {
   }));
   return { stages: displayStages, markers: displayMarkers, model };
 }
+function timelineAllowsTimestampEstimates(meta) {
+  return meta?.timestamp_semantics !== "order_only";
+}
+function timelineModelDurationIsEstimate(stepMeta) {
+  return lower(stepMeta?.duration_source) === "opencode_model_boundary_estimate";
+}
 function timelineAssignActiveOffsets(stages, model) {
   let cursor = 0;
   return stages.map(stage => {
@@ -961,8 +1336,12 @@ function timelineMarkerActiveOffset(marker, stages) {
 }
 function timelinePushStage(stages, args) {
   const stage = timelineStage(args);
-  if (!positiveMetric(stage.duration_ms) || !hasMetricValue(stage.start_offset_ms)) return;
+  if (!timelineStageHasMeasuredDuration(stage) || !hasMetricValue(stage.start_offset_ms)) return;
   stages.push(stage);
+}
+function timelineStageHasMeasuredDuration(stage) {
+  if (!stage || !hasMetricValue(stage.duration_ms)) return false;
+  return stage.kind === "tool" ? Number(stage.duration_ms) >= 0 : positiveMetric(stage.duration_ms);
 }
 function timelinePushMarker(markers, args) {
   const marker = timelineMarker(args);
@@ -1310,7 +1689,7 @@ function bindTimelineControls() {
   });
 }
 function timelineActivePctValue(row, model) {
-  return positiveMetric(row.duration_ms) && positiveMetric(model.active_total_ms)
+  return hasMetricValue(row.duration_ms) && positiveMetric(model.active_total_ms)
     ? Number(row.duration_ms) / Number(model.active_total_ms) * 100
     : null;
 }

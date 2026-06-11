@@ -4,8 +4,9 @@ Language: English | [简体中文](../i18n/zh-CN/evaluation/peval-py.md)
 
 `peval-py` is a lightweight Python edition of peval for retained agent
 trajectories. It reads JSONL sessions or adapter-owned SQLite databases and
-writes derived ATIF trajectories or static peval-style reports. It does not run
-agents, score tasks, or mutate peval workspaces.
+writes derived ATIF trajectories or static peval-style reports. It can
+initialize a local peval workspace for `serve`, but it does not run agents or
+score tasks.
 
 For install, source-tree usage, and local binary packaging, see
 [tools/peval-py/README.md](../../tools/peval-py/README.md).
@@ -115,6 +116,11 @@ peval-py view tr -c custom.toml -p custom-session.log -o
 peval-py export tr -a custom -p custom-session.log -o
 ```
 
+When an input has no explicit `-a`, `pN=`, `dN=`, or manifest adapter, peval-py
+can infer the adapter from the path. The adapter id must appear as a full path
+component or filename token, so paths under `.hermes/` and `.psychevo/` infer
+`hermes` and `psychevo`. Ambiguous matches fail and ask for `-a`.
+
 If a custom adapter only implements `convert_path`, use it with `-p/--path`.
 For SQLite `-d/--db` input, implement `convert_db(path, session_id, config)` to
 own the database parsing. Adapters without `convert_db` can still use
@@ -143,6 +149,20 @@ peval-py view tr \
   -o
 ```
 
+List available sessions before choosing:
+
+```bash
+peval-py view tr -a opencode -d ~/.local/share/opencode/opencode.db --list
+peval-py view tr -a opencode -d ~/.local/share/opencode/opencode.db -s #2 -o
+peval-py view tr -a opencode -d ~/.local/share/opencode/opencode.db -li -o
+```
+
+For current OpenCode databases that include the `event` table, peval-py uses
+the event stream to recover tool execution duration from first `running` start
+to final `completed` or `error` end. Model timing is shown as an OpenCode
+assistant/tool boundary estimate, not as provider API latency. Older databases
+without matching events keep the existing part timestamp fallback.
+
 ## Report From A Hermes DB
 
 The `hermes` adapter can read the current Hermes SQLite persistence format
@@ -150,6 +170,14 @@ directly. Pass the Hermes database path with `--db`. If `--session-id` is
 omitted, the adapter selects the most recently active session. Stored
 `sessions.system_prompt` content is included as the first system step when it
 is present.
+
+Hermes DB message timestamps are treated as persistence/order timestamps. The
+report preserves wall duration from those timestamps, but active model and tool
+durations stay unknown unless Hermes records include explicit elapsed/start/end
+timing metadata. For current Hermes DB inputs, peval-py also checks the sibling
+`logs/agent.log` file and uses its strictly matched API/tool timing as explicit
+model and tool duration. If the log is missing or does not match the DB
+transcript, active timing remains unknown.
 
 ```bash
 peval-py view tr \
@@ -167,6 +195,10 @@ peval-py view tr \
   -s <session-id> \
   -o
 ```
+
+Use `--list`/`-l` to print session indexes, ids, and names. Use `-s #N` to
+select by list index, or `--list-interactive`/`-li` to enter selections such as
+`1,3-4` or `all`.
 
 ## Report From A Psychevo State DB
 
@@ -200,6 +232,10 @@ peval-py view tr \
   -s <session-id> \
   -o
 ```
+
+`peval-py view tr -d ~/.psychevo/state.db --list` prints `#`, `session_id`, and
+`name`. `-s 3` first tries a real session id `3`; if absent, it selects list
+index 3. `-s #3` always means index 3.
 
 The Psychevo DB reader selects a session first, then reads that session's
 `messages` rows. It preserves the selected session id in the trajectory and
@@ -287,29 +323,64 @@ the same display style as `peval view`.
 
 ## Serve UI Layout
 
-The static HTML report remains the canonical offline report. A future
-`peval-py serve` web UI uses the same report body instead of a separate
-dashboard layout: Report Notes, Leaderboard, Trajectory Overview, and the
-selected Trial trajectory keep the static report order and styling.
+Use `init` once when you want a local saved workspace for `serve`:
 
-Serve UI mode only adds web-only controls around that shared body. Its import
-area is collapsed by default above the report title. In the Leaderboard, web UI
-mode may add row checkboxes for export selection and a split export control in
-the section header. Row clicks still select the Trial; checkbox clicks only
-control export scope. Exports use visible checked rows when any currently
-visible row is checked, otherwise they use the current filtered and sorted
-visible rows. JSON and HTML exports follow the same row scope as CSV table
-exports.
+```bash
+peval-py init --root .local/peval-py
+peval-py serve --root .local/peval-py
+```
+
+`peval-py init` creates only the files needed by `peval-py serve`:
+`peval-py.toml` and `state.db`. It preserves existing valid `peval-py.toml`
+state DB paths and does not create `peval.toml`, `runs/`, `datasets/`,
+`scripts/`, eval templates, `$PSYCHEVO_HOME/peval-config.toml`, or `.gitignore`.
+Use `--json` for machine-readable output. `serve` uses an explicit `--root`,
+`PEVAL_ROOT`, or current-or-parent `peval-py.toml`; the environment variable is
+only a shared root-override name and does not make `serve` require a Rust
+`peval` workspace.
+
+The static HTML report remains the canonical offline report. `peval-py serve`
+uses the same report body instead of a separate dashboard layout: Report Notes,
+Leaderboard, Trajectory Overview, and the selected Trial trajectory keep the
+static report order and styling.
+
+Serve UI mode only adds web-only controls around that shared body. It shows a
+compact source/status toolbar and opens source management in a modal for local
+paths, SQLite DBs, input tables, JSONL uploads, ATIF JSON uploads, and report
+JSON uploads. In the Leaderboard, web UI mode may add row checkboxes for export
+selection and a split export control in the section header. Row clicks still
+select the Trial; checkbox clicks only control export scope. Exports use
+visible checked rows when any currently visible row is checked, otherwise they
+use the current filtered and sorted visible rows. JSON and HTML exports follow
+the same row scope as CSV table exports.
+
+For SQLite DB sources, the modal includes an Inspect flow. Enter or paste the DB
+path, optionally type an adapter, and click Inspect DB. Without an explicit
+adapter, `serve` uses the same path-token adapter inference as `view tr -d`;
+paths under `.hermes/`, `.psychevo/`, or `.opencode/` infer those adapters. If
+the path cannot be inferred or matches multiple adapters, choose the adapter and
+inspect again. Selected sessions are saved as independent refreshable sources,
+so each can be archived, restored, or refreshed on its own.
 
 ## Localized HTML Reports
 
 English is the default report UI language. To localize the report title and
-comparison chrome to Simplified Chinese, set the locale in config:
+comparison chrome to Simplified Chinese, set the locale in `-c` config:
 
 ```toml
 [defaults]
 locale = "zh-CN"
 ```
+
+For workspace-local defaults, put top-level locale in `peval-py.toml`:
+
+```toml
+state_db = "state.db"
+locale = "zh-CN"
+```
+
+An explicit `-c` file overlays `peval-py.toml`; keys omitted from `-c` keep the
+workspace value.
 
 `zh` is accepted as an alias for `zh-CN`, and `en-US` normalizes to `en`.
 Locale is config-only; there is no CLI flag. In Simplified Chinese reports,
@@ -326,7 +397,11 @@ selected Trial Steps detail section also remains English.
 - `-d, --db PATH`: read an adapter-owned SQLite database. Repeat it with
   `view tr` for cross-DB comparison.
 - `-s, --session-id ID`: select a DB session. With one DB, bare `-s ID`
-  remains valid and repeatable. With multiple DBs, use `-s dN=ID`.
+  remains valid and repeatable. Use `-s #N` for list indexes; with multiple
+  DBs, use `-s dN=ID` or `-s dN=#M`.
+- `--list, -l`: print DB session indexes, ids, and names, then exit.
+- `--list-interactive, -li`: prompt for session indexes such as `1,3-4` or
+  `all`, then render the selected sessions.
 - `-a, --adapter ADAPTER`: select the default built-in adapter or installed
   adapter entry point. Repeat it with `pN=ADAPTER` or `dN=ADAPTER` for
   per-input overrides.

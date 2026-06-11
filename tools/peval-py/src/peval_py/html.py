@@ -17,16 +17,22 @@ def render_html(
     report: dict[str, Any],
     locale: str = "en",
     mode: str = "report",
+    sources: list[dict[str, Any]] | None = None,
 ) -> str:
     normalized_mode = normalize_render_mode(mode)
     normalized_locale = normalize_locale(locale)
     messages = messages_for(normalized_locale)
-    payload = HTML_TEMPLATE.replace("__LANG__", escape(normalized_locale))
+    serve_source_payload = (
+        list(sources) if sources is not None else serve_sources(report)
+    )
+    payload = load_asset_text("report.html").replace("__LANG__", escape(normalized_locale))
     payload = payload.replace("__TITLE__", escape(messages["title"]))
     payload = payload.replace("__BODY_CLASS__", escape(f"{normalized_mode}-mode"))
     payload = payload.replace(
-        "__SERVE_IMPORT__",
-        render_serve_import(report, messages) if normalized_mode == "serve" else "",
+        "__SERVE_SOURCE_MANAGER__",
+        render_serve_source_manager(serve_source_payload, messages)
+        if normalized_mode == "serve"
+        else "",
     )
     payload = payload.replace("__CSS__", load_asset_text("report.css"))
     payload = payload.replace("__JS__", load_asset_text("report.js"))
@@ -50,7 +56,7 @@ def render_html(
             json.dumps(
                 {
                     "mode": normalized_mode,
-                    "sources": serve_sources(report) if normalized_mode == "serve" else [],
+                    "sources": serve_source_payload if normalized_mode == "serve" else [],
                 },
                 ensure_ascii=False,
             )
@@ -59,8 +65,12 @@ def render_html(
     return payload
 
 
-def render_serve_html(report: dict[str, Any], locale: str = "en") -> str:
-    return render_html(report, locale=locale, mode="serve")
+def render_serve_html(
+    report: dict[str, Any],
+    locale: str = "en",
+    sources: list[dict[str, Any]] | None = None,
+) -> str:
+    return render_html(report, locale=locale, mode="serve", sources=sources)
 
 
 def normalize_render_mode(mode: object) -> str:
@@ -70,31 +80,133 @@ def normalize_render_mode(mode: object) -> str:
     raise ValueError(f"unsupported HTML render mode: {mode}; supported modes: report, serve")
 
 
-def render_serve_import(report: dict[str, Any], messages: dict[str, str]) -> str:
-    sources = serve_sources(report)
+def render_serve_source_manager(
+    sources: list[dict[str, Any]],
+    messages: dict[str, str],
+) -> str:
     count = len(sources)
     source_word = messages["serve_source_count"]
     if count != 1:
         source_word = messages["serve_sources_count"]
-    source_list = "".join(
-        f'<li><span>{escape(source["label"])}</span><strong>{escape(source["kind"])}</strong></li>'
-        for source in sources
+    return replace_template_tokens(
+        load_asset_text("serve_source_manager.html"),
+        {
+            "SOURCE_COUNT": str(count),
+            "SOURCE_WORD": escape(source_word),
+            "LATEST_SNAPSHOTS": escape(messages["serve_latest_snapshots"]),
+            "REFRESH": escape(messages["serve_refresh"]),
+            "SOURCE_MANAGER": escape(messages["serve_source_manager"]),
+            "DROP_COPY": escape(messages["serve_drop_copy"]),
+            "CLOSE": escape(messages["close"]),
+            "ADD_SOURCE": escape(messages["serve_add_source"]),
+            "SOURCE_FORMS": "".join(
+                [
+                    render_source_add_form("path", messages),
+                    render_source_add_form("db", messages),
+                    render_source_add_form("input_table", messages),
+                    render_upload_form(messages),
+                ]
+            ),
+            "SOURCES": escape(messages["serve_sources"]),
+            "RELOAD": escape(messages["serve_reload"]),
+            "SOURCE_LIST_ITEMS": render_source_list_items(sources, messages),
+        },
     )
-    if not source_list:
-        source_list = f'<li><span>{escape(messages["serve_no_sources"])}</span><strong>-</strong></li>'
+
+
+def render_source_add_form(kind: str, messages: dict[str, str]) -> str:
+    label_key = {
+        "path": "serve_path_source",
+        "db": "serve_db_source",
+        "input_table": "serve_input_table_source",
+    }[kind]
+    name = "input_table" if kind == "input_table" else kind
+    session_field = ""
+    if kind == "db":
+        session_field = f"""
+            <label>{escape(messages["serve_session_id"])}
+              <input name="session_id" autocomplete="off">
+            </label>"""
+    inspect_button = ""
+    picker = ""
+    if kind == "db":
+        inspect_button = f"""
+              <button class="step-toggle-button" type="button" data-db-inspect>{escape(messages["serve_inspect_db"])}</button>"""
+        picker = f"""
+            <div class="db-session-picker" data-db-session-picker hidden></div>"""
     return f"""
-  <section class="serve-import-panel" data-serve-only>
-    <details class="serve-import">
-      <summary>
-        <span class="serve-add">{escape(messages["serve_add_source"])}</span>
-        <span class="serve-summary">{count} {escape(source_word)}</span>
-      </summary>
-      <div class="serve-import-body">
-        <div class="serve-drop">{escape(messages["serve_drop_copy"])}</div>
-        <ul class="serve-source-list">{source_list}</ul>
-      </div>
-    </details>
-  </section>"""
+          <form class="source-form" data-source-add-form data-source-kind="{escape(kind)}">
+            <strong>{escape(messages[label_key])}</strong>
+            <label>{escape(messages[label_key])}
+              <input name="{escape(name)}" autocomplete="off" required>
+            </label>
+            {session_field}
+            <label>{escape(messages["serve_adapter"])}
+              <input name="adapter" autocomplete="off">
+            </label>
+            <div class="source-form-actions">{inspect_button}
+              <button class="step-toggle-button" type="submit">{escape(messages["serve_add_source"])}</button>
+            </div>
+            {picker}
+          </form>"""
+
+
+def render_upload_form(messages: dict[str, str]) -> str:
+    return f"""
+          <form class="source-form upload-form" data-source-upload-form>
+            <strong>{escape(messages["serve_upload_snapshot"])}</strong>
+            <label>{escape(messages["serve_upload_file"])}
+              <input name="file" type="file" accept=".json,.jsonl,application/json,application/x-ndjson" required>
+            </label>
+            <label>{escape(messages["serve_adapter"])}
+              <input name="adapter" autocomplete="off">
+            </label>
+            <button class="step-toggle-button" type="submit">{escape(messages["serve_upload"])}</button>
+          </form>"""
+
+
+def render_source_list_items(
+    sources: list[dict[str, Any]],
+    messages: dict[str, str],
+) -> str:
+    if not sources:
+        return f'<li class="source-row empty">{escape(messages["serve_no_sources"])}</li>'
+    return "".join(render_source_list_item(source, messages) for source in sources)
+
+
+def render_source_list_item(
+    source: dict[str, Any],
+    messages: dict[str, str],
+) -> str:
+    label = str(source.get("label") or source.get("source_key") or "source")
+    kind = str(source.get("kind") or "source")
+    adapter = str(source.get("adapter") or "-")
+    status = str(source.get("last_status") or "-")
+    active = bool(source.get("active", True))
+    snapshot = bool(source.get("snapshot", False))
+    refreshable = bool(source.get("refreshable", not snapshot))
+    source_key = str(source.get("source_key") or "")
+    archive_label = messages["serve_archive"] if active else messages["serve_activate"]
+    archive_action = "archive" if active else "activate"
+    refresh_button = (
+        f'<button type="button" data-source-action="refresh" data-source-key="{escape(source_key)}">{escape(messages["serve_refresh"])}</button>'
+        if refreshable and source_key
+        else f'<span>{escape(messages["serve_snapshot"])}</span>'
+    )
+    archive_button = (
+        f'<button type="button" data-source-action="{escape(archive_action)}" data-source-key="{escape(source_key)}">{escape(archive_label)}</button>'
+        if source_key
+        else ""
+    )
+    state_label = messages["serve_active"] if active else messages["serve_archived"]
+    return f"""
+            <li class="source-row {'archived' if not active else ''}">
+              <div class="source-row-main">
+                <strong>{escape(label)}</strong>
+                <span>{escape(kind)} / {escape(adapter)} / {escape(status)} / {escape(state_label)}</span>
+              </div>
+              <div class="source-row-actions">{refresh_button}{archive_button}</div>
+            </li>"""
 
 
 def serve_sources(report: dict[str, Any]) -> list[dict[str, str]]:
@@ -116,6 +228,13 @@ def serve_sources(report: dict[str, Any]) -> list[dict[str, str]]:
 
 def load_asset_text(name: str) -> str:
     return files(ASSET_PACKAGE).joinpath(name).read_text(encoding="utf-8")
+
+
+def replace_template_tokens(template: str, values: dict[str, str]) -> str:
+    rendered = template
+    for key, value in values.items():
+        rendered = rendered.replace(f"__{key}__", value)
+    return rendered
 
 
 def step_token_estimates(report: dict[str, Any]) -> dict[str, dict[str, dict[str, Any]]]:
@@ -239,39 +358,6 @@ def as_dict(value: Any) -> dict[str, Any]:
 
 def list_value(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
-
-
-HTML_TEMPLATE = """<!doctype html>
-<html lang="__LANG__">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>__TITLE__</title>
-<style>
-__CSS__
-</style>
-</head>
-<body class="__BODY_CLASS__">
-<div class="workspace">
-  __SERVE_IMPORT__
-  <section class="topline">
-    <h1>__TITLE__</h1>
-  </section>
-  <section id="report-notes"></section>
-  <section class="panel-stack" id="comparison"></section>
-  <section class="trace-panel" id="trace"></section>
-</div>
-<aside class="step-drawer" id="step-drawer" hidden></aside>
-<script type="application/json" id="peval-py-data">__DATA__</script>
-<script type="application/json" id="peval-py-token-estimates">__TOKEN_ESTIMATES__</script>
-<script type="application/json" id="peval-py-i18n">__I18N__</script>
-<script type="application/json" id="peval-py-render-options">__RENDER_OPTIONS__</script>
-<script src="https://cdn.jsdelivr.net/npm/echarts@6.0.0/dist/echarts.min.js"></script>
-<script>
-__JS__
-</script>
-</body>
-</html>"""
 
 
 def safe_json_for_script(value: str) -> str:

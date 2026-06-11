@@ -15,7 +15,9 @@ same command tree.
 - offline trajectory export of one session from JSONL or SQLite `messages` rows
 - ATIF v1.7 trajectory projection
 - single-session and session-comparison JSON/HTML report generation
-- a reusable HTML report renderer mode for a future local `serve` web UI
+- minimal `peval-py serve` workspace initialization for local report state
+- a local `serve` web UI over a saved peval-py workspace, backed by a
+  Python-owned state layer
 - config-selected English and Simplified Chinese HTML report UI localization
 - translated canonical docs under `docs/i18n/<locale>/...`
 - localized tool README files beside their original README files
@@ -24,12 +26,10 @@ same command tree.
 
 Out of scope:
 
-- agent execution, benchmark execution, scoring, reruns, or `peval` workspace
-  mutation
-- live providers, network services, ACP server startup, or official benchmark
-  harnesses
-- the complete HTTP lifecycle, upload storage, authentication, or token model
-  for a future `peval-py serve` command
+- agent execution, benchmark execution, scoring, or reruns
+- live providers, ACP server startup, official benchmark harnesses, remote bind,
+  or multi-user service behavior
+- a token or authentication model for `peval-py serve`
 - benchmark/task comparison matrices; `peval-py` comparison is session-first
   and does not introduce benchmark or task axes
 - generic runtime debug tables as canonical sources for v1 conversion
@@ -43,8 +43,12 @@ independent from the Rust workspace and has no runtime dependencies outside the
 Python standard library.
 
 The tool reads existing retained session material and produces derived files.
-It must not update Psychevo state databases, peval workspaces, benchmark
-artifacts, or user config.
+It must not update Psychevo state databases, benchmark artifacts, Rust peval
+workspace registries, or live provider state. `init` creates only the
+Python-owned files required by `peval-py serve`: `<workspace>/peval-py.toml`
+and `peval_py_*` tables inside `<workspace>/state.db`. `serve` startup must not
+depend on unrelated Rust peval workspace files such as `peval.toml`, `runs/`,
+`datasets/`, `scripts/`, eval templates, or `$PSYCHEVO_HOME/peval-config.toml`.
 
 ## Inputs
 
@@ -71,7 +75,11 @@ input set contains more than one session.
 With one DB input, bare `-s ID` remains valid and may be repeated to compare
 multiple sessions from that DB in `view trajectory`. With multiple DB inputs,
 session ids must use `-s dN=ID`, where `N` is the one-based DB input index.
-Repeating `-s dN=ID` selects multiple sessions from that DB. A DB input without
+Repeating `-s dN=ID` selects multiple sessions from that DB. `view trajectory`
+also accepts session indexes for adapter-owned DBs: `-s #3` always selects the
+third listed session, while `-s 3` first tries a real session id `3` and falls
+back to index 3 only when that id is absent. With multiple DB inputs, index
+selectors use the same DB prefix, such as `-s d1=#3`. A DB input without
 explicit session ids lets its adapter choose its default or latest session.
 
 The command surface follows a peval-style verb and scenario shape:
@@ -79,9 +87,14 @@ The command surface follows a peval-style verb and scenario shape:
 - `peval-py view trajectory ...` writes a peval-compatible JSON or HTML report
   for one or more sessions.
 - `peval-py export trajectory ...` writes a single ATIF trajectory object.
+- `peval-py init ...` creates or repairs the minimal peval-py serve state.
+- `peval-py serve ...` starts a local Report First saved-workspace web UI over
+  trajectory sources.
 
 `tr` is an accepted alias for `trajectory`, so `peval-py view tr ...` and
-`peval-py export tr ...` are equivalent to the long scenario form.
+`peval-py export tr ...` are equivalent to the long scenario form. `init` and
+`serve` are top-level commands and do not require a trajectory scenario
+argument.
 
 Common trajectory flags use both long and short forms:
 
@@ -92,6 +105,49 @@ Common trajectory flags use both long and short forms:
 - `-f, --format json|html` for `view trajectory`
 - `-n, --note N=TEXT` for `view trajectory`, where `0` is report-level and
   positive one-based indexes attach to the ordered input sessions
+- `--list, -l` for `view trajectory` with one or more `-d/--db` inputs, which
+  prints DB sessions and exits
+- `--list-interactive, -li` for `view trajectory` with exactly one `-d/--db`
+  input, which prints DB sessions, prompts for a comma/range selection, and then
+  renders the selected sessions
+
+`init` accepts `-r, --root DIR` and `--json`. Without `--root`, it initializes
+the current directory. It creates `<workspace>/peval-py.toml` when missing and
+migrates `<workspace>/state.db`. Existing valid `peval-py.toml` files are
+preserved, including custom relative or absolute `state_db` paths. It must not
+create or edit `peval.toml`, `runs/`, `datasets/`, `scripts/`, workspace
+templates, `$PSYCHEVO_HOME/peval-config.toml`, or `.gitignore`. `--json` emits
+`schema_version`, `root`, `peval_py_config`, and `state_db`.
+
+`serve` accepts `-r, --root DIR` to select a peval-py workspace root. Explicit
+`--root` and `PEVAL_ROOT` roots are accepted directly and create missing
+`peval-py.toml` / `state.db` defaults as needed. `PEVAL_ROOT` is only a shared
+environment variable name for the root path override; it does not imply Rust
+`peval` workspace discovery or validation. Without an explicit or environment
+root, discovery walks the current directory and parents for `peval-py.toml`; if
+none is found, `serve` fails clearly and names `peval-py init`, `--root/-r`,
+and `PEVAL_ROOT`. `serve` discovery must not read or require Rust
+`peval.toml` or `$PSYCHEVO_HOME/peval-config.toml`.
+
+`serve` accepts `-c`, `-a`, `-p`, `-d`, `-s`, `-i`, and `-n` with the same
+trajectory-source semantics as `view trajectory`. Source flags are persistent:
+they create or update stable saved sources in `<workspace>/state.db`, then
+immediately refresh those sources into the canonical state layer before the
+server starts. Stable source keys are derived from adapter, input kind,
+normalized path, and selected session id so repeated imports update the same
+source instead of appending duplicates. Uploaded JSONL, ATIF JSON, and report
+JSON sources are stored as canonical snapshots and are not refreshable.
+In the web UI, DB sources may also be added through a session picker: the user
+enters a DB path, inspects it, selects one or more listed sessions, and saves
+each selected session as its own refreshable source. This picker must reuse the
+same path-token adapter inference rules as direct `-d` inputs, but inspection
+does not fall back to the default adapter when inference cannot choose one; the
+user must provide an explicit adapter and retry.
+
+`serve` binds only localhost addresses. By default it tries `127.0.0.1:58010`
+and falls back sequentially through `58029` when the default port is busy.
+Explicit `--port PORT` binds strictly and fails if unavailable. `serve` prints
+the selected URL and does not open a browser.
 
 `-a ADAPTER` sets the default adapter for all inputs. `-a pN=ADAPTER` overrides
 the adapter for the one-based path input `N`; `-a dN=ADAPTER` overrides the
@@ -103,6 +159,16 @@ adapter ids must fail clearly and list available adapters for unknown ids.
 Selector forms apply only to directly supplied `-p/--path` and `-d/--db`
 inputs. Manifest rows use their own `adapter` or `a` column for row-level
 adapter selection, falling back to the effective default adapter when omitted.
+For direct `-p` and `-d` inputs without a per-input selector and without a bare
+CLI `-a ADAPTER`, `peval-py` may infer the adapter from the path before falling
+back to the config/default adapter. Inference is generic over available adapter
+ids: an adapter id must appear as a complete path component or filename token,
+not as an arbitrary substring; hidden directory names such as `.hermes` and
+`.psychevo` are tokenized the same way. If multiple adapter ids match one path,
+inference fails clearly and asks for `-a`. ATIF and peval-py report JSON
+passthrough inputs remain pseudo-adapter sources and are not overridden by
+inference. `peval-py` must not hard-code built-in adapter schema probes for
+adapter inference.
 
 Input table manifests are input lists, not batch job runners: they do not
 introduce per-row output paths or multiple command executions. CSV manifests use
@@ -140,12 +206,15 @@ clearly for export.
 TOML config uses `defaults.adapter` for the input adapter default. Older
 `defaults.agent` config keys may be accepted for local compatibility, but the
 public CLI and docs use `adapter`. `defaults.locale` selects the generated HTML
-report UI locale and is config-only; there is no CLI locale flag. Supported
-values are `en`, `en-US`, `zh-CN`, and `zh`; `en-US` normalizes to `en`, and
-`zh` normalizes to `zh-CN`. Unsupported locale values must fail with a clear
-config error. Adapter-specific options live under `[adapters.<adapter-id>]`.
-`peval-py` passes each effective adapter's raw option table through to that
-adapter and does not define adapter-specific CLI flags.
+report UI locale from `-c/--config` files; top-level `locale = "zh-CN"` in a
+discovered `peval-py.toml` provides the same locale default for all commands.
+When both exist, `-c/--config` overlays the discovered `peval-py.toml` and only
+keys present in the explicit config replace workspace values. There is no CLI
+locale flag. Supported values are `en`, `en-US`, `zh-CN`, and `zh`; `en-US`
+normalizes to `en`, and `zh` normalizes to `zh-CN`. Unsupported locale values
+must fail with a clear config error. Adapter-specific options live under
+`[adapters.<adapter-id>]`. `peval-py` passes each effective adapter's raw option
+table through to that adapter and does not define adapter-specific CLI flags.
 
 JSONL accepts either direct message objects or wrapper objects containing
 `message`, optional `usage`, optional `metadata`, optional `accounting`, and
@@ -176,7 +245,11 @@ when it is not duplicated inside individual message rows. ATIF output must set
 session selection behavior. Psychevo defaults to the most recently updated
 session from the `sessions` table, OpenCode defaults to the most recently
 updated session, and Hermes defaults to the session with the most recent active
-message, ending, or start time when `--session-id` is omitted.
+message, ending, or start time when `--session-id` is omitted. Psychevo,
+OpenCode, and Hermes also expose read-only session lists for
+`view trajectory --list`, ordered by their default-selection recency semantics.
+The rendered list columns are `#`, `session_id`, and `name`; missing names
+render as `-`.
 When a Psychevo DB session has a sibling observability trace sidecar, the
 Psychevo adapter prefers version 1 or version 2 trace timing for generation and
 tool execution wall start/end timing, then falls back to message metadata, then
@@ -196,9 +269,25 @@ Built-in adapters are always available:
   `sessions` and `messages` tables. It may enrich retained messages with
   sibling `sessions/<session_id>/events.jsonl` observability traces.
 - `opencode` supports the common single-session message JSONL shape and current
-  OpenCode SQLite persistence with `session`, `message`, and `part` tables.
+  OpenCode SQLite persistence with `session`, `message`, and `part` tables. For
+  DB inputs, it may enrich current-session timing from the same database's
+  `event` table when `message.part.updated` events are available: tool
+  execution uses the first `running` start and final `completed`/`error` end,
+  while model timing is an OpenCode boundary estimate from assistant message
+  creation to the first tool call, or to assistant completion for no-tool final
+  responses.
 - `hermes` supports the common single-session message JSONL shape and current
-  Hermes SQLite persistence with `sessions` and `messages` tables.
+  Hermes SQLite persistence with `sessions` and `messages` tables. For DB
+  inputs, it may enrich the current session with explicit timing from the
+  sibling `logs/agent.log` when the log's session-scoped API/tool events
+  strictly match the DB transcript.
+
+Adapters may mark source timestamps as order-only persistence timestamps rather
+than measured execution timing. For order-only sources such as Hermes DB
+records, peval-py preserves `wall_duration_ms` from available timestamps but
+must not infer active model or tool durations from adjacent message timestamp
+deltas. Explicit elapsed/start/end metadata remains trusted when a source
+provides it, including Hermes `agent.log` timing fused into DB records.
 
 Third-party adapters register through installed Python package entry points in
 the `peval_py.adapters` group. The entry point name is the adapter id after
@@ -222,6 +311,40 @@ unsupported-input diagnostic.
 
 Adapters may preserve source metadata in report sidecars, but ATIF output must
 stay standard and must not include peval-only fields.
+
+## Serve Workspace State
+
+`peval-py serve` is backed by a selected peval-py workspace. Python-owned
+configuration lives at `<workspace>/peval-py.toml`. The first version stores
+`state_db = "state.db"`, optional top-level `locale`, and serve defaults only.
+Runtime state lives in
+`<workspace>/state.db`, which may become a shared state database later; this
+version creates and updates only `peval_py_*` tables:
+
+- `peval_py_schema_migrations` records peval-py state schema versions.
+- `peval_py_sources` stores stable source keys, source kind, adapter, original
+  path or DB/session metadata, active/archived state, refreshability, and latest
+  status/error summary.
+- `peval_py_trials` stores the latest canonical trajectory/report JSON blobs and
+  index columns for session, status, duration, wall duration, turns, tools,
+  tokens, and cost.
+- `peval_py_refresh_log` stores refresh attempts with time, status, source key,
+  warning count, and error summary.
+
+Active sources compose the default served report. Archived sources remain in the
+state database and can be restored, but they do not contribute Trial rows. The
+state layer keeps only the latest canonical snapshot for each source plus a
+bounded refresh log; it does not preserve every historical report blob.
+
+Uploaded JSONL files are converted through the selected adapter. Uploaded ATIF
+JSON trajectory objects and uploaded peval-py report JSON are accepted without
+requiring a message adapter. Uploaded source payloads are limited to 20 MiB,
+converted immediately, persisted only as canonical state rows, and discarded
+after ingestion; raw uploaded files are not written to disk or stored as blobs.
+
+`peval-py init` writes only the Python-owned serve state described above.
+Existing unrelated workspace files are left untouched, but they are neither
+created nor required.
 
 ## Outputs
 
@@ -249,16 +372,21 @@ writes either JSON or HTML:
   model generation from tool execution, active duration is model generation
   duration plus tool execution duration rather than a duplicated outer step
   span. For adapters such as OpenCode or Hermes, tool execution timing may come
-  from adapter message/part timestamps or message metadata. When no explicit
-  model generation duration is available, peval-py must not present inferred
-  model timing as exact; HTML Timeline may estimate the model span from
-  adjacent message/tool timestamps and must visibly prefix displayed start, end,
-  and duration values with `≈`. The original wall span is retained as
-  `wall_duration_ms = finished_at_ms - started_at_ms`. Leaderboard rows use the
-  same active `duration_ms` value and also carry `wall_duration_ms`.
+  from adapter message/part timestamps, same-database events, message metadata,
+  or a strictly matched current-source log such as Hermes `agent.log`; these
+  sources populate the existing per-step and per-tool timing metadata without
+  adding JSON v18 fields. OpenCode DB model timing from assistant/tool
+  boundaries is an estimate and must be displayed as estimated rather than as
+  provider API latency.
+  When no explicit model generation duration is available, peval-py must not
+  present inferred model timing as exact; HTML Timeline may estimate the model
+  span from adjacent message/tool timestamps and must visibly prefix displayed
+  start, end, and duration values with `≈`. The original wall span is retained
+  as `wall_duration_ms = finished_at_ms - started_at_ms`. Leaderboard rows use
+  the same active `duration_ms` value and also carry `wall_duration_ms`.
 - HTML is emitted as a single offline file with inline CSS and JavaScript,
-  while the source CSS and JavaScript live in package asset files instead of a
-  large Python string. It renders the selected Trial trajectory, step rows,
+  while the source HTML templates, CSS, and JavaScript live in package asset
+  files instead of large Python strings. It renders the selected Trial trajectory, step rows,
   reasoning, message, tool-call, observation, metrics cues, and one combined
   Expand all / Collapse all control. The page head contains only the localized
   report title; agent/model and metric summaries stay inside the Run and Result
@@ -289,8 +417,11 @@ writes either JSON or HTML:
   `Input processing` or `System context processing` stages. Model generation
   steps render as `Model: <model_name>` when a model name is known, otherwise
   `Model`; if model timing is inferred from adjacent timestamps rather than
-  explicit metadata, Timeline table and tooltip values are prefixed with
-  `≈`. Tools render as `Tool: <name>`, and failed tool stages are
+  explicit metadata, Timeline table and tooltip values are prefixed with `≈`.
+  Order-only source timestamps must not produce estimated model stages. Tools
+  with explicit timing metadata render as `Tool: <name>`, including measured
+  zero-duration tools with `0.0%` active share; tools with missing or null
+  timing are omitted from the Timeline. Failed tool stages are
   categorized as `Error`. Retained-session idle gaps are
   intentionally omitted from Timeline diagnostics; they remain represented by
   Trial `wall_duration_ms` outside the Timeline.
@@ -317,8 +448,10 @@ writes either JSON or HTML:
   Steps content for diagnostics. Red Timeline color is reserved for `Error`;
   non-error `External` work uses a neutral category color. Clicking a Timeline
   Waterfall bar or Timeline Detail Table row opens the existing right-side Step
-  details drawer for the corresponding source step. This interaction does not
-  change Timeline row order, selected Trial semantics, or JSON payload shape.
+  details drawer for the corresponding source step, including in single-session
+  reports that do not render Leaderboard or Trajectory Overview rows. This
+  interaction does not change Timeline row order, selected Trial semantics, or
+  JSON payload shape.
   The selected Detail Table row uses one subtle row background and one left
   edge indicator on the first cell; it must not draw repeated vertical
   selection bars across every table column. Sortable data-table headers cycle
@@ -364,13 +497,38 @@ line. The rendered comparison sections must not show benchmark, task, task-set,
 task-family, or matrix task-axis fields.
 
 Serve UI mode keeps the report body as the primary mental model rather than
-turning the page into a separate dashboard. It may show a collapsed import
-panel above the report title; the default collapsed state exposes only an Add
-source affordance and a compact source/status summary. Expanding the import
-panel shows the drop/import affordance and loaded source list without adding a
-left sidebar or reducing the report body width. Serve-only controls use the
-same color, radius, typography, and panel tokens as static reports but sit at a
-lower visual priority than report content.
+turning the page into a separate dashboard. It shows a compact source/status
+toolbar above the report title and opens source management in a modal dialog.
+The modal supports local path, DB, and input-table source forms, upload of JSONL,
+ATIF JSON, or peval-py report JSON snapshots, explicit refresh, active/archive
+source lifecycle, and per-source status display. The DB form includes an
+Inspect action that lists adapter-owned sessions in the modal, supports
+checkbox multi-select, and adds selected sessions as independent DB sources.
+It does not add a persistent left sidebar or reduce the report body width.
+Serve-only controls use the same color, radius, typography, and panel tokens as
+static reports but sit at a lower visual priority than report content.
+
+`serve` does not refresh sources on startup unless source flags were supplied on
+that invocation. The page opens from the latest canonical snapshots and marks
+sources with their latest status. Refresh is explicit from the source manager or
+through source flags on the `serve` command.
+
+Serve HTTP APIs are same-origin local APIs. The server must not enable CORS.
+Mutating APIs require JSON `POST` requests and must reject non-same-origin
+`Origin` or `Referer` headers. Localhost binding is the only network exposure
+model in this version; there is no token, account, or remote-host authentication
+surface.
+
+`POST /api/db-sessions` accepts JSON `{ "db": "PATH", "adapter": "optional" }`.
+The DB path resolves like other serve source paths: relative paths are resolved
+under the workspace root and absolute paths are expanded directly. Without an
+explicit adapter, the endpoint uses generic path-token adapter inference only;
+if no adapter or more than one adapter matches, it fails clearly and asks for an
+adapter. On success it returns the resolved DB path, adapter id, whether the
+adapter was inferred, and session rows with one-based `index`, `session_id`, and
+`name`. `POST /api/sources` continues to accept a single `session_id` and also
+accepts `session_ids` for DB payloads; each selected session creates or updates
+one independent refreshable source before the response report is rebuilt.
 
 In serve UI mode, the Leaderboard may add a row-selection checkbox column at
 the start of the existing full column set. Header and row checkboxes control

@@ -8,6 +8,7 @@ from peval_py.adapters.base import (
     ObservationMeta,
     StepMeta,
     ToolMeta,
+    timestamp_fallback_allowed,
     timestamp_fallback_duration_ms,
 )
 from peval_py.config import ToolConfig
@@ -98,6 +99,7 @@ class CommonMessageAdapter:
             unmapped_events=unmapped,
             started_at_ms=started,
             finished_at_ms=finished,
+            timestamp_semantics=first_metadata_value(records, "timestamp_semantics"),
         )
 
     def step_from_record(
@@ -411,10 +413,23 @@ def tool_execution_duration(
     elapsed = metadata_elapsed_ms(record)
     if elapsed is not None:
         return max(0, elapsed), metadata_elapsed_ms_source(record) or "message_metadata"
+    if not timestamp_fallback_allowed(record_timestamp_semantics(record)):
+        return None, None
     fallback = timestamp_fallback_duration_ms(assistant_timestamp_ms, observation_timestamp_ms)
     if fallback is not None:
         return fallback, "event_timestamps"
     return None, None
+
+
+def record_timestamp_semantics(record: MessageRecord) -> str | None:
+    for source in [
+        record.metadata,
+        as_dict(record.message.get("metadata")),
+        record.message,
+    ]:
+        if isinstance(source, dict) and source.get("timestamp_semantics") is not None:
+            return str(source["timestamp_semantics"])
+    return None
 
 
 def metadata_elapsed_ms(record: MessageRecord) -> int | None:
@@ -640,8 +655,15 @@ def step_timestamps(step: StepMeta) -> list[int]:
     timestamps: list[int] = []
     if step.timestamp_ms is not None:
         timestamps.append(step.timestamp_ms)
+        if step.duration_ms is not None:
+            timestamps.append(step.timestamp_ms + max(0, step.duration_ms))
     timestamps.extend(
         tool.timestamp_ms for tool in step.tool_calls if tool.timestamp_ms is not None
+    )
+    timestamps.extend(
+        tool.timestamp_ms + max(0, tool.execution_duration_ms)
+        for tool in step.tool_calls
+        if tool.timestamp_ms is not None and tool.execution_duration_ms is not None
     )
     timestamps.extend(
         observation.timestamp_ms
@@ -653,7 +675,11 @@ def step_timestamps(step: StepMeta) -> list[int]:
 
 def first_metadata_value(records: list[MessageRecord], key: str) -> Any:
     for record in records:
-        for source in [record.metadata, record.message]:
+        for source in [
+            record.metadata,
+            as_dict(record.message.get("metadata")),
+            record.message,
+        ]:
             if isinstance(source, dict) and source.get(key) is not None:
                 return source[key]
     return None

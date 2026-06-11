@@ -9,6 +9,7 @@ from typing import Any
 from peval_py.i18n import normalize_locale
 
 IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+PEVAL_PY_CONFIG = "peval-py.toml"
 
 
 @dataclass(frozen=True)
@@ -39,60 +40,100 @@ class ToolConfig:
     )
 
 
-def load_config(path: str | None) -> ToolConfig:
-    if not path:
-        return ToolConfig()
-    data = tomllib.loads(Path(path).read_text(encoding="utf-8"))
+def load_config(path: str | None, *, workspace_root: str | None = None) -> ToolConfig:
     config = ToolConfig()
+    workspace_config = discover_peval_py_config(workspace_root)
+    if workspace_config is not None:
+        data = tomllib.loads(workspace_config.read_text(encoding="utf-8"))
+        config = apply_toml_config(config, data, top_level_locale=True)
+    if path:
+        data = tomllib.loads(Path(path).read_text(encoding="utf-8"))
+        config = apply_toml_config(config, data, top_level_locale=True)
+    return config
+
+
+def discover_peval_py_config(workspace_root: str | None = None) -> Path | None:
+    if workspace_root:
+        candidate = Path(workspace_root).expanduser() / PEVAL_PY_CONFIG
+        return candidate.resolve() if candidate.is_file() else None
+    current = Path.cwd().resolve()
+    while True:
+        candidate = current / PEVAL_PY_CONFIG
+        if candidate.is_file():
+            return candidate
+        if current.parent == current:
+            return None
+        current = current.parent
+
+
+def apply_toml_config(
+    config: ToolConfig,
+    data: dict[str, Any],
+    *,
+    top_level_locale: bool = False,
+) -> ToolConfig:
+    if top_level_locale and "locale" in data:
+        config = replace(config, locale=normalize_locale(data["locale"]))
     defaults = data.get("defaults", {})
     if defaults:
-        config = replace(
-            config,
-            adapter=str(
+        if not isinstance(defaults, dict):
+            raise ValueError("defaults config must be a TOML table")
+        updates: dict[str, Any] = {}
+        if "adapter" in defaults or "agent" in defaults:
+            updates["adapter"] = str(
                 defaults.get(
                     "adapter",
                     defaults.get("agent", config.adapter),
                 )
-            ),
-            agent_name=_optional_string(defaults.get("agent_name", config.agent_name)),
-            agent_version=str(defaults.get("agent_version", config.agent_version)),
-            locale=normalize_locale(defaults.get("locale", config.locale)),
-            model=_optional_string(defaults.get("model", config.model)),
-            trajectory_id=_optional_string(
-                defaults.get("trajectory_id", config.trajectory_id)
-            ),
-            max_content_chars=int(
-                defaults.get("max_content_chars", config.max_content_chars)
-            ),
-            redact=bool(defaults.get("redact", config.redact)),
+            )
+        if "agent_name" in defaults:
+            updates["agent_name"] = _optional_string(defaults.get("agent_name"))
+        if "agent_version" in defaults:
+            updates["agent_version"] = str(defaults.get("agent_version"))
+        if "locale" in defaults:
+            updates["locale"] = normalize_locale(defaults.get("locale"))
+        if "model" in defaults:
+            updates["model"] = _optional_string(defaults.get("model"))
+        if "trajectory_id" in defaults:
+            updates["trajectory_id"] = _optional_string(defaults.get("trajectory_id"))
+        if "max_content_chars" in defaults:
+            updates["max_content_chars"] = int(defaults.get("max_content_chars"))
+        if "redact" in defaults:
+            updates["redact"] = bool(defaults.get("redact"))
+        config = replace(
+            config,
+            **updates,
         )
     db = data.get("db", {})
     if db:
-        mapping = DbMapping(
-            messages_table=_safe_identifier(
-                db.get("messages_table", config.db.messages_table)
-            ),
-            session_id_column=_safe_identifier(
-                db.get("session_id_column", config.db.session_id_column)
-            ),
-            sequence_column=_safe_identifier(
-                db.get("sequence_column", config.db.sequence_column)
-            ),
-            message_column=_safe_identifier(
-                db.get("message_column", config.db.message_column)
-            ),
-            usage_column=_safe_identifier(db.get("usage_column", config.db.usage_column)),
-            metadata_column=_safe_identifier(
-                db.get("metadata_column", config.db.metadata_column)
-            ),
-        )
-        config = replace(config, db=mapping)
+        if not isinstance(db, dict):
+            raise ValueError("db config must be a TOML table")
+        db_updates: dict[str, str] = {}
+        for key in [
+            "messages_table",
+            "session_id_column",
+            "sequence_column",
+            "message_column",
+            "usage_column",
+            "metadata_column",
+        ]:
+            if key in db:
+                db_updates[key] = _safe_identifier(db[key])
+        if db_updates:
+            config = replace(config, db=replace(config.db, **db_updates))
     adapter_options_by_id = _adapter_options_by_id(data.get("adapters", {}))
     if adapter_options_by_id:
+        merged_options = {
+            key: dict(value) for key, value in config.adapter_options_by_id.items()
+        }
+        for adapter_id, options in adapter_options_by_id.items():
+            merged = dict(merged_options.get(adapter_id, {}))
+            merged.update(options)
+            merged_options[adapter_id] = merged
         config = replace(
             config,
-            adapter_options_by_id=adapter_options_by_id,
-            adapter_options=_adapter_options_for(config.adapter, adapter_options_by_id),
+            adapter_options_by_id=merged_options,
+            adapter_options=_adapter_options_for(config.adapter, merged_options),
         )
     return config
 

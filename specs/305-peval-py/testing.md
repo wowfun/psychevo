@@ -14,11 +14,13 @@ Define deterministic validation for the `peval-py` Python CLI.
 - JSONL and SQLite input behavior
 - ATIF and peval-compatible report shape
 - session-comparison view behavior and CLI notes
+- saved-workspace `serve` state and local HTTP behavior
+- minimal peval-py serve state initialization from `peval-py init`
 
 Out of scope:
 
-- live providers, ACP servers, official benchmark harnesses, Docker, or network
-  services
+- live providers, ACP servers, official benchmark harnesses, Docker, remote
+  network services, or browser automation against live providers
 - default Rust workspace validation changes
 
 ## Deterministic Coverage
@@ -70,15 +72,23 @@ Coverage must verify:
 - DB adapters can handle `-d/--db` without the generic SQLite `messages` loader.
 - OpenCode DB conversion reads current `session`, `message`, and `part` tables,
   defaults to the most recently updated session when `--session-id` is omitted,
-  and supports explicit `--session-id` selection.
+  supports explicit `--session-id` selection, prefers same-DB `event` timing for
+  tool execution when available, marks assistant/tool boundary model timing as
+  an OpenCode estimate, and falls back to part row timing without warnings when
+  event timing is unavailable.
 - Hermes DB conversion reads current `sessions` and `messages` tables, includes
   stored `sessions.system_prompt` as a system step, defaults to the most
   recently active, ended, or started session when `--session-id` is omitted,
-  and supports explicit `--session-id` selection.
+  supports explicit `--session-id` selection, and marks Hermes DB message
+  timestamps as order-only so active model/tool durations remain unknown unless
+  explicit elapsed/start/end timing metadata exists or current Hermes
+  `logs/agent.log` API/tool timing strictly matches the DB transcript.
 - adapters used with `--db` that support neither native DB input nor record
   conversion fail with a clear unsupported-input diagnostic.
 - locale config defaults to English, accepts the `en-US`, `zh-CN`, and `zh`
-  aliases, and rejects unsupported values with a clear config error.
+  aliases, reads top-level `locale` from discovered `peval-py.toml`, overlays
+  explicit `-c/--config` without resetting unspecified workspace values, and
+  rejects unsupported values with a clear config error.
 - malformed JSONL lines fail with a clear line-number diagnostic.
 - ATIF step ids are sequential and tool observations link to source tool calls.
 - final metrics aggregate available usage, accounting, turn, tool-call, and
@@ -86,6 +96,10 @@ Coverage must verify:
 - report JSON contains the v18 subset top-level fields.
 - report JSON records active `duration_ms` plus `wall_duration_ms` for each
   Trial and comparison leaderboard row.
+- peval-py report JSON can be ingested as a canonical snapshot source without a
+  message adapter.
+- report JSON can derive Hermes active model/tool durations from strictly
+  matched `agent.log` timing while preserving the existing JSON v18 shape.
 - retained sessions with multi-hour idle gaps keep the full `wall_duration_ms`
   but exclude that idle gap from active `duration_ms`.
 - active duration fallback counts short missing-metadata timestamp spans and
@@ -114,6 +128,17 @@ Coverage must verify:
 - with multiple DB inputs, `-s dN=ID` binds session ids to the one-based DB
   input, while bare `-s ID` fails clearly.
 - with one DB input, bare `-s ID` remains compatible.
+- DB session selection accepts `-s #N`, ID-first bare numeric `-s N`, and
+  multi-DB `-s dN=#M` index selectors against the adapter session list.
+- `view trajectory --list/-l` prints `#`, `session_id`, and `name` for DB
+  inputs and exits without rendering a report.
+- `view trajectory --list-interactive/-li` requires a TTY and exactly one DB,
+  accepts comma/range input such as `1,3-4` and `all`, treats blank input as
+  cancel, and renders the selected sessions.
+- adapter inference for direct `-p` and `-d` inputs uses available adapter ids
+  as complete path components or filename tokens only; explicit bare `-a`,
+  per-input selectors, and manifest row adapters override inference, while
+  ambiguous path matches fail clearly.
 - `export trajectory` rejects multiple sessions clearly.
 - `export trajectory` accepts `-i/--input-table` only when the expanded input
   set contains exactly one session.
@@ -129,15 +154,30 @@ Coverage must verify:
 - HTML escapes text, safely embeds JSON, exposes one step visibility toggle,
   and renders peval-style tool names, tool execution timing, and observations
   inside the corresponding Agent step.
-- HTML renderer source CSS and JavaScript live in package asset files and are
-  still inlined into the emitted offline HTML report.
+- HTML renderer source templates, CSS, and JavaScript live in package asset
+  files and are still inlined into the emitted offline HTML report.
 - static HTML reports use the default report presentation mode and do not
-  render serve-only import controls, Leaderboard row-selection checkboxes, or
-  Leaderboard export controls.
-- serve UI HTML mode reuses the static report body while rendering a collapsed
-  import panel above the report title, a Leaderboard row-selection checkbox
-  column, a header select-visible checkbox, and a split Leaderboard export
-  control for rows, JSON report, and HTML report.
+  render serve-only source manager controls, Leaderboard row-selection
+  checkboxes, or Leaderboard export controls.
+- serve UI HTML mode reuses the static report body while rendering a compact
+  source/status toolbar, modal source manager, a Leaderboard row-selection
+  checkbox column, a header select-visible checkbox, and a split Leaderboard
+  export control for rows, JSON report, and HTML report.
+- serve UI source manager renders local path/DB/input-table forms, JSONL/ATIF
+  JSON/report JSON upload affordance, explicit refresh controls, active/archive
+  controls, non-refreshable snapshot labels, and latest source status without a
+  persistent sidebar.
+- serve UI source manager renders a DB Inspect control, adapter override input,
+  session multi-select table, select-all-visible control, and add-selected
+  action only in serve mode.
+- serve HTTP exposes `POST /api/db-sessions` for local DB inspection. Tests cover
+  `.hermes`, `.psychevo`, and `.opencode` path-token adapter inference,
+  explicit adapter retry after failed inference, ambiguous path errors,
+  unsupported session-list adapters, missing DB diagnostics, and same-origin
+  rejection.
+- serve HTTP `POST /api/sources` accepts DB `session_ids` arrays and creates one
+  independent refreshable source/trial per selected session while preserving the
+  existing single `session_id` payload behavior.
 - serve UI row-selection state is independent from selected-Trial state:
   checkbox clicks stop row selection, row clicks still update the selected
   Trial, and Trajectory Overview rows keep following filtered and sorted
@@ -202,7 +242,10 @@ Coverage must verify:
   Timeline, preserve true model and tool wall start/end values in the detail
   table, render model generation as `Model: <model_name>` or `Model`, render
   estimated model timing with visible `≈` prefixes when explicit model duration
-  is unavailable, avoid duplicating tool spans as model duration,
+  is unavailable, suppress estimated model stages for order-only source
+  timestamps, avoid duplicating tool spans as model duration,
+  keep measured zero-duration tool stages visible while omitting tools with
+  missing timing,
   render heuristic category colors on Detail Table Stage values instead of a
   separate visible Category column, visible Waterfall duration labels, and active-share values, size the
   Waterfall left gutter from y-axis
@@ -211,8 +254,10 @@ Coverage must verify:
   of Waterfall labels/tooltips and Detail Table Stage cells, and do not mutate
   the embedded JSON v18 report data. Timeline bar and Detail Table row clicks
   open the existing Step details drawer for the corresponding source step
-  without changing the selected Trial. The selected Detail Table row uses a
-  single first-cell indicator rather than repeated vertical bars in every cell.
+  without changing the selected Trial, including in single-session reports that
+  have no Leaderboard rows to synchronize against. The selected Detail Table
+  row uses a single first-cell indicator rather than repeated vertical bars in
+  every cell.
   Timeline Detail Table tests cover sortable `#`, `Stage`, `Start`, `End`,
   `Duration`, and `Active Share` columns, sortable table headers cycling
   through ascending, descending, and no-sort states, Stage-only filtering,
@@ -243,6 +288,26 @@ Coverage must verify:
 - CLI smoke commands cover `view trajectory`, `export trajectory`, the `tr`
   scenario alias, localized HTML output from `[defaults].locale = "zh-CN"`, and
   short flags including `-p`, `-a`, `-i`, `-n`, and `-o`.
+- init tests verify `peval-py init` creates only `<workspace>/peval-py.toml` and
+  migrated `<workspace>/state.db`, preserves existing valid `peval-py.toml`
+  state DB paths, rejects invalid peval-py TOML, and does not create
+  `peval.toml`, `runs/`, `datasets/`, `scripts/`, default templates,
+  `$PSYCHEVO_HOME/peval-config.toml`, or `.gitignore`.
+- saved-workspace tests verify peval-py workspace discovery from current-or-parent
+  `peval-py.toml`, explicit `--root` and `PEVAL_ROOT` handling as a peval-py
+  root override without requiring `peval.toml`, `<workspace>/peval-py.toml` defaults,
+  `<workspace>/state.db` creation, `peval_py_*` migrations, stable source keys,
+  source update instead of duplicate append, active/archive lifecycle, latest
+  canonical Trial snapshots, refresh-log rows, and no non-peval-py table writes.
+- CLI smoke tests cover `init --root`, `init --root --json`, `serve -p`,
+  `serve -d`, `serve -i`, persistent save-and-refresh behavior, default
+  `58010..58029` port fallback, strict explicit-port failure, config-free
+  defaults, and missing-workspace diagnostics.
+- HTTP tests use only the Python standard library and temporary workspaces. They
+  verify `/`, report JSON, source listing, add source, archive/activate, refresh,
+  JSONL upload, ATIF JSON upload, report JSON upload, unsupported upload
+  rejection, 20 MiB upload cap rejection, no CORS header, JSON POST requirement,
+  and same-origin rejection for mutating APIs.
 - legacy top-level `report` and `convert` commands are rejected.
 - translated evaluation docs exist under `docs/i18n/zh-CN/...`, the peval-py
   tool README translation exists beside `tools/peval-py/README.md`, English

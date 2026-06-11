@@ -1,13 +1,28 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
+import math
 import sqlite3
 from pathlib import Path
 from typing import Any
 
+from peval_py.adapters.base import SessionInfo
 from peval_py.adapters.common import CommonMessageAdapter
 from peval_py.config import ToolConfig
 from peval_py.sources import MessageRecord, read_jsonl
+
+
+OPENCODE_PART_TIMING_SOURCE = "opencode_part_timestamps"
+OPENCODE_EVENT_TOOL_TIMING_SOURCE = "opencode_event_tool_timestamps"
+OPENCODE_MODEL_BOUNDARY_ESTIMATE_SOURCE = "opencode_model_boundary_estimate"
+
+
+@dataclass
+class OpencodeToolTiming:
+    started_at_ms: int | None = None
+    finished_at_ms: int | None = None
+    status: str | None = None
 
 
 class OpencodeAdapter(CommonMessageAdapter):
@@ -28,6 +43,9 @@ class OpencodeAdapter(CommonMessageAdapter):
     ):
         records = read_opencode_db(path, session_id)
         return self.convert(records, config)
+
+    def list_sessions(self, path: str) -> list[SessionInfo]:
+        return list_opencode_sessions(resolve_opencode_db(path))
 
 
 def read_opencode_db(path: str, session_id: str | None) -> list[MessageRecord]:
@@ -54,6 +72,10 @@ def read_opencode_db(path: str, session_id: str | None) -> list[MessageRecord]:
             """,
             (session["id"],),
         ).fetchall()
+        event_tool_timings = read_opencode_event_tool_timings(
+            conn,
+            str(session["id"]),
+        )
     except sqlite3.Error as exc:
         raise ValueError(f"failed to read OpenCode DB: {exc}") from exc
     finally:
@@ -73,6 +95,7 @@ def read_opencode_db(path: str, session_id: str | None) -> list[MessageRecord]:
             grouped_parts.get(str(row["id"]), []),
             session,
             seq,
+            event_tool_timings,
         )
         records.append(record)
         seq += 1
@@ -117,18 +140,40 @@ def select_session(conn: sqlite3.Connection, session_id: str | None) -> sqlite3.
     return row
 
 
+def list_opencode_sessions(path: Path) -> list[SessionInfo]:
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        rows = conn.execute(
+            """
+            SELECT id, title
+            FROM session
+            ORDER BY time_updated DESC, id DESC
+            """
+        ).fetchall()
+    except sqlite3.Error as exc:
+        raise ValueError(f"failed to read OpenCode DB: {exc}") from exc
+    finally:
+        conn.close()
+    return [
+        SessionInfo(session_id=str(row[0]), name=str(row[1]) if row[1] else None)
+        for row in rows
+    ]
+
+
 def record_from_message_row(
     row: sqlite3.Row,
     message_data: dict[str, Any],
     parts: list[sqlite3.Row],
     session: sqlite3.Row,
     seq: int,
+    event_tool_timings: dict[str, OpencodeToolTiming],
 ) -> tuple[MessageRecord, list[MessageRecord]]:
     role = str(message_data.get("role") or "assistant").lower()
     content: list[dict[str, Any]] = []
     tool_results: list[MessageRecord] = []
     usage = usage_from_tokens(message_data.get("tokens"))
     cost = message_data.get("cost")
+    first_tool_created_ms: int | None = None
 
     for part_row in parts:
         part_data = parse_json_object(part_row["data"], "part.data")
@@ -142,7 +187,16 @@ def record_from_message_row(
             if isinstance(text, str) and text:
                 content.append({"type": "reasoning", "text": text})
         elif part_type == "tool":
-            tool_call, tool_result = tool_records_from_part(part_row, part_data, session)
+            first_tool_created_ms = min_known_int(
+                first_tool_created_ms,
+                int_or_none(part_row["time_created"]),
+            )
+            tool_call, tool_result = tool_records_from_part(
+                part_row,
+                part_data,
+                session,
+                event_tool_timings.get(str(part_row["id"])),
+            )
             content.append(tool_call)
             if tool_result:
                 tool_results.append(tool_result)
@@ -162,11 +216,20 @@ def record_from_message_row(
     if role == "user" and len(content) == 1 and content[0].get("type") == "text":
         message["content"] = content[0]["text"]
 
+    metadata = metadata_for(session, row["id"])
+    if role in {"assistant", "agent"}:
+        metadata.update(
+            model_boundary_metadata(
+                message_data,
+                first_tool_created_ms,
+            )
+        )
+
     return (
         MessageRecord(
             message=message,
             usage=usage or None,
-            metadata=metadata_for(session, row["id"]),
+            metadata=metadata,
             accounting=accounting_from_cost(cost),
             session_seq=seq,
             source_session_id=str(session["id"]),
@@ -179,6 +242,7 @@ def tool_records_from_part(
     part_row: sqlite3.Row,
     part_data: dict[str, Any],
     session: sqlite3.Row,
+    event_timing: OpencodeToolTiming | None = None,
 ) -> tuple[dict[str, Any], MessageRecord | None]:
     state = part_data.get("state") if isinstance(part_data.get("state"), dict) else {}
     call_id = str(part_data.get("callID") or part_data.get("id") or part_row["id"])
@@ -196,15 +260,26 @@ def tool_records_from_part(
     status = str(state.get("status") or "completed").lower()
     started_at_ms = int(part_row["time_created"])
     finished_at_ms = int(part_row["time_updated"] or part_row["time_created"])
+    timing_source = OPENCODE_PART_TIMING_SOURCE
+    if (
+        event_timing
+        and event_timing.started_at_ms is not None
+        and event_timing.finished_at_ms is not None
+    ):
+        started_at_ms = event_timing.started_at_ms
+        finished_at_ms = event_timing.finished_at_ms
+        timing_source = OPENCODE_EVENT_TOOL_TIMING_SOURCE
+        if event_timing.status:
+            status = event_timing.status
     metadata = metadata_for(session, part_row["message_id"], part_row["id"])
     metadata.update(
         {
             "started_at_ms": started_at_ms,
-            "started_at_ms_source": "opencode_part_timestamps",
+            "started_at_ms_source": timing_source,
             "finished_at_ms": finished_at_ms,
-            "finished_at_ms_source": "opencode_part_timestamps",
+            "finished_at_ms_source": timing_source,
             "elapsed_ms": max(0, finished_at_ms - started_at_ms),
-            "elapsed_ms_source": "opencode_part_timestamps",
+            "elapsed_ms_source": timing_source,
         }
     )
     return tool_call, MessageRecord(
@@ -219,6 +294,89 @@ def tool_records_from_part(
         metadata=metadata,
         source_session_id=str(session["id"]),
     )
+
+
+def read_opencode_event_tool_timings(
+    conn: sqlite3.Connection,
+    session_id: str,
+) -> dict[str, OpencodeToolTiming]:
+    try:
+        rows = conn.execute(
+            """
+            SELECT seq, type, data
+            FROM event
+            WHERE aggregate_id = ?
+            ORDER BY seq
+            """,
+            (session_id,),
+        ).fetchall()
+    except sqlite3.Error:
+        return {}
+
+    timings: dict[str, OpencodeToolTiming] = {}
+    for row in rows:
+        if str(row["type"]) != "message.part.updated.1":
+            continue
+        data = parse_json_object_or_none(row["data"])
+        part = data.get("part") if isinstance(data, dict) else None
+        if not isinstance(part, dict) or part.get("type") != "tool":
+            continue
+        part_id = part.get("id")
+        if not part_id:
+            continue
+        state = part.get("state")
+        if not isinstance(state, dict):
+            continue
+        status = str(state.get("status") or "").lower()
+        time = state.get("time")
+        if not isinstance(time, dict):
+            continue
+        timing = timings.setdefault(str(part_id), OpencodeToolTiming())
+        if status == "running":
+            started_at_ms = int_or_none(time.get("start"))
+            if started_at_ms is not None:
+                timing.started_at_ms = min_known_int(
+                    timing.started_at_ms,
+                    started_at_ms,
+                )
+        elif status in {"completed", "error"}:
+            finished_at_ms = int_or_none(time.get("end"))
+            if finished_at_ms is not None:
+                timing.finished_at_ms = finished_at_ms
+                timing.status = status
+            started_at_ms = int_or_none(time.get("start"))
+            if started_at_ms is not None:
+                timing.started_at_ms = min_known_int(
+                    timing.started_at_ms,
+                    started_at_ms,
+                )
+    return timings
+
+
+def model_boundary_metadata(
+    message_data: dict[str, Any],
+    first_tool_created_ms: int | None,
+) -> dict[str, Any]:
+    time = message_data.get("time")
+    if not isinstance(time, dict):
+        return {}
+    started_at_ms = int_or_none(time.get("created"))
+    if started_at_ms is None:
+        return {}
+    finished_at_ms = first_tool_created_ms
+    if finished_at_ms is None:
+        finished_at_ms = int_or_none(time.get("completed"))
+    if finished_at_ms is None or finished_at_ms < started_at_ms:
+        return {}
+    elapsed_ms = finished_at_ms - started_at_ms
+    return {
+        "started_at_ms": started_at_ms,
+        "started_at_ms_source": OPENCODE_MODEL_BOUNDARY_ESTIMATE_SOURCE,
+        "finished_at_ms": finished_at_ms,
+        "finished_at_ms_source": OPENCODE_MODEL_BOUNDARY_ESTIMATE_SOURCE,
+        "elapsed_ms": elapsed_ms,
+        "elapsed_ms_source": OPENCODE_MODEL_BOUNDARY_ESTIMATE_SOURCE,
+    }
 
 
 def with_session_seq(record: MessageRecord, seq: int) -> MessageRecord:
@@ -240,6 +398,34 @@ def parse_json_object(raw: object, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"OpenCode {label} is not an object")
     return value
+
+
+def parse_json_object_or_none(raw: object) -> dict[str, Any]:
+    try:
+        value = json.loads(str(raw))
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def int_or_none(raw: object) -> int | None:
+    if isinstance(raw, bool):
+        return None
+    try:
+        value = float(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value):
+        return None
+    return int(value)
+
+
+def min_known_int(left: int | None, right: int | None) -> int | None:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return min(left, right)
 
 
 def metadata_for(

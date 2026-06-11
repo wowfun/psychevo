@@ -37,19 +37,30 @@ def read_jsonl(path: str) -> list[MessageRecord]:
     source = Path(path)
     with source.open("r", encoding="utf-8") as handle:
         for line_number, raw_line in enumerate(handle, start=1):
-            line = raw_line.strip()
-            if not line:
-                continue
-            try:
-                value = json.loads(line)
-            except json.JSONDecodeError as exc:
-                raise ValueError(
-                    f"failed to parse JSONL line {line_number}: {exc.msg}"
-                ) from exc
-            if not isinstance(value, dict):
-                raise ValueError(f"JSONL line {line_number} is not an object")
-            records.append(_record_from_json_object(value))
+            records.extend(_records_from_jsonl_line(raw_line, line_number))
     return sorted(records, key=lambda record: record.session_seq or 0)
+
+
+def read_jsonl_text(text: str) -> list[MessageRecord]:
+    records: list[MessageRecord] = []
+    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+        records.extend(_records_from_jsonl_line(raw_line, line_number))
+    return sorted(records, key=lambda record: record.session_seq or 0)
+
+
+def _records_from_jsonl_line(raw_line: str, line_number: int) -> list[MessageRecord]:
+    line = raw_line.strip()
+    if not line:
+        return []
+    try:
+        value = json.loads(line)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"failed to parse JSONL line {line_number}: {exc.msg}"
+        ) from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"JSONL line {line_number} is not an object")
+    return [_record_from_json_object(value)]
 
 
 def read_sqlite_messages(path: str, session_id: str, mapping: DbMapping) -> list[MessageRecord]:

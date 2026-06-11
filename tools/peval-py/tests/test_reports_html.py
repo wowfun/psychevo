@@ -301,6 +301,9 @@ class PevalPyReportHtmlTests(unittest.TestCase):
 
         self.assertIn('<body class="report-mode">', static_html)
         self.assertNotIn('class="serve-import-panel"', static_html)
+        self.assertNotIn('class="source-manager-modal"', static_html)
+        self.assertNotIn('<form class="source-form"', static_html)
+        self.assertNotIn('type="button" data-db-inspect', static_html)
         self.assertIn("Timeline Waterfall", static_html)
         self.assertIn("Timeline Detail Table", static_html)
         self.assertEqual(
@@ -312,8 +315,16 @@ class PevalPyReportHtmlTests(unittest.TestCase):
         self.assertEqual(serve_options["mode"], "serve")
         self.assertEqual(len(serve_options["sources"]), 2)
         self.assertIn('<body class="serve-mode">', serve_html)
-        self.assertIn('class="serve-import-panel"', serve_html)
-        self.assertIn("Add source", serve_html)
+        self.assertNotIn('class="serve-import-panel"', serve_html)
+        self.assertIn('class="serve-source-toolbar"', serve_html)
+        self.assertIn('class="source-manager-modal"', serve_html)
+        self.assertIn("Upload snapshot", serve_html)
+        self.assertIn("report JSON uploads", serve_html)
+        self.assertIn("Inspect DB", serve_html)
+        self.assertIn("data-db-inspect", serve_html)
+        self.assertIn("data-db-session-picker", serve_html)
+        self.assertIn("data-db-add-selected", serve_html)
+        self.assertIn("data-db-select-all", serve_html)
         self.assertIn("2 sources", serve_html)
         self.assertIn("common_session.jsonl", serve_html)
         self.assertIn("Timeline Waterfall", serve_html)
@@ -328,6 +339,17 @@ class PevalPyReportHtmlTests(unittest.TestCase):
         self.assertIn("data-select-visible", serve_html)
         self.assertIn("data-row-select", serve_html)
         self.assertIn("leaderboard-export", serve_html)
+        self.assertIn("function bindServeSourceControls()", serve_html)
+        self.assertIn('serveApi("/api/db-sessions"', serve_html)
+        self.assertIn("function inspectDbSessions(form)", serve_html)
+        self.assertIn("function addSelectedDbSessions(form)", serve_html)
+        self.assertIn("session_ids: sessionIds", serve_html)
+        self.assertIn('serveApi("/api/upload"', serve_html)
+        self.assertIn('serveApi("/api/sources"', serve_html)
+        self.assertIn('serveApi("/api/refresh"', serve_html)
+        self.assertIn("data-source-manager-open", serve_html)
+        self.assertIn("data-source-list", serve_html)
+        self.assertIn("data-source-upload-form", serve_html)
         self.assertIn('data-export-kind="csv"', serve_html)
         self.assertIn('data-export-kind="json"', serve_html)
         self.assertIn('data-export-kind="html"', serve_html)
@@ -784,8 +806,513 @@ class PevalPyReportHtmlTests(unittest.TestCase):
         self.assertNotIn("Idle gap", html)
         self.assertNotIn("chart.js", html.lower())
 
+    def test_html_timeline_trace_keeps_zero_duration_tool_stages(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("node is required to execute report.js timeline helpers")
+        report = {
+            "schema_version": 18,
+            "includes": ["core"],
+            "trajectory": [
+                {
+                    "trajectory_id": "trial:zero-tool",
+                    "session_id": "zero-tool",
+                    "agent": {"name": "custom", "model_name": "test-model"},
+                    "steps": [
+                        {
+                            "step_id": 1,
+                            "source": "agent",
+                            "message": "inspect files",
+                            "tool_calls": [
+                                {
+                                    "tool_call_id": "call-positive",
+                                    "function_name": "exec_command",
+                                    "arguments": {"cmd": "true"},
+                                },
+                                {
+                                    "tool_call_id": "call-zero",
+                                    "function_name": "read",
+                                    "arguments": {"path": "README.md"},
+                                },
+                                {
+                                    "tool_call_id": "call-missing",
+                                    "function_name": "glob",
+                                    "arguments": {"pattern": "*.md"},
+                                },
+                            ],
+                        }
+                    ],
+                    "final_metrics": {},
+                }
+            ],
+            "trajectory_meta": [
+                {
+                    "trial_key": "trial:zero-tool",
+                    "status": "passed",
+                    "started_at_ms": 1_000,
+                    "duration_ms": 75,
+                    "steps": [
+                        {
+                            "step_id": 1,
+                            "timestamp_ms": 1_000,
+                            "elapsed_ms": 0,
+                            "duration_ms": 50,
+                            "tool_calls": [
+                                {
+                                    "tool_call_id": "call-positive",
+                                    "title": "exec_command",
+                                    "timestamp_ms": 1_050,
+                                    "execution_duration_ms": 25,
+                                },
+                                {
+                                    "tool_call_id": "call-zero",
+                                    "title": "read",
+                                    "timestamp_ms": 1_075,
+                                    "execution_duration_ms": 0,
+                                },
+                                {
+                                    "tool_call_id": "call-missing",
+                                    "title": "glob",
+                                    "timestamp_ms": 1_080,
+                                    "execution_duration_ms": None,
+                                },
+                            ],
+                            "observations": [],
+                        }
+                    ],
+                    "warnings": [],
+                }
+            ],
+        }
+        before = json.loads(json.dumps(report))
+        html = render_html(report)
+        payload = script_json(html, "peval-py-data")
+        asset = load_asset_text("report.js")
+        self.assertIn("\nrender(data());", asset)
+        asset = asset.rsplit("\nrender(data());", 1)[0]
+        script = f"""
+const vm = require("vm");
+const asset = {json.dumps(asset)};
+const report = {json.dumps(report)};
+const context = {{
+  document: {{ getElementById: () => null, querySelector: () => null }},
+  window: {{}},
+  console,
+  JSON,
+  Number,
+  String,
+  Object,
+  Math,
+  Date,
+  Set,
+  Array,
+  RegExp,
+}};
+vm.createContext(context);
+vm.runInContext(asset, context);
+const trace = context.timelineTrace(report.trajectory[0], report.trajectory_meta[0]);
+console.log(JSON.stringify(trace.stages.map(stage => ({{
+  stage: stage.stage,
+  tool_call_id: stage.tool_call_id,
+  duration_ms: stage.duration_ms,
+  active_pct: context.timelineActivePctValue(stage, trace.model),
+}}))));
+"""
+        result = subprocess.run(
+            ["node"],
+            input=script,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        stages = json.loads(result.stdout)
+        by_call_id = {
+            stage["tool_call_id"]: stage
+            for stage in stages
+            if stage.get("tool_call_id")
+        }
 
-    def test_html_inlines_css_and_js_package_assets(self) -> None:
+        self.assertEqual(report, before)
+        self.assertEqual(payload, before)
+        self.assertIn("call-positive", by_call_id)
+        self.assertIn("call-zero", by_call_id)
+        self.assertNotIn("call-missing", by_call_id)
+        self.assertEqual(by_call_id["call-zero"]["stage"], "Tool: read")
+        self.assertEqual(by_call_id["call-zero"]["duration_ms"], 0)
+        self.assertEqual(by_call_id["call-zero"]["active_pct"], 0)
+
+
+    def test_html_timeline_trace_omits_order_only_timestamp_estimates(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("node is required to execute report.js timeline helpers")
+        report = {
+            "schema_version": 18,
+            "includes": ["core"],
+            "trajectory": [
+                {
+                    "trajectory_id": "trial:order-only",
+                    "session_id": "order-only",
+                    "agent": {"name": "hermes", "model_name": "test-model"},
+                    "steps": [
+                        {"step_id": 1, "source": "user", "message": "start"},
+                        {
+                            "step_id": 2,
+                            "source": "agent",
+                            "message": "run tool",
+                            "tool_calls": [
+                                {
+                                    "tool_call_id": "call-missing",
+                                    "function_name": "terminal",
+                                    "arguments": {"cmd": "sleep 30"},
+                                }
+                            ],
+                        },
+                    ],
+                    "final_metrics": {},
+                }
+            ],
+            "trajectory_meta": [
+                {
+                    "trial_key": "trial:order-only",
+                    "timestamp_semantics": "order_only",
+                    "status": "passed",
+                    "started_at_ms": 1_000,
+                    "duration_ms": None,
+                    "steps": [
+                        {
+                            "step_id": 1,
+                            "timestamp_ms": 1_000,
+                            "elapsed_ms": 0,
+                            "duration_ms": None,
+                            "tool_calls": [],
+                            "observations": [],
+                        },
+                        {
+                            "step_id": 2,
+                            "timestamp_ms": 2_000,
+                            "elapsed_ms": 1_000,
+                            "duration_ms": None,
+                            "tool_calls": [
+                                {
+                                    "tool_call_id": "call-missing",
+                                    "title": "terminal",
+                                    "timestamp_ms": 2_050,
+                                    "execution_duration_ms": None,
+                                }
+                            ],
+                            "observations": [
+                                {
+                                    "source_call_id": "call-missing",
+                                    "timestamp_ms": 5_000,
+                                    "status": "completed",
+                                }
+                            ],
+                        },
+                    ],
+                    "warnings": [],
+                }
+            ],
+        }
+        asset = load_asset_text("report.js")
+        self.assertIn("\nrender(data());", asset)
+        asset = asset.rsplit("\nrender(data());", 1)[0]
+        script = f"""
+const vm = require("vm");
+const asset = {json.dumps(asset)};
+const report = {json.dumps(report)};
+const context = {{
+  document: {{ getElementById: () => null, querySelector: () => null }},
+  window: {{}},
+  console,
+  JSON,
+  Number,
+  String,
+  Object,
+  Math,
+  Date,
+  Set,
+  Array,
+  RegExp,
+}};
+vm.createContext(context);
+vm.runInContext(asset, context);
+const trace = context.timelineTrace(report.trajectory[0], report.trajectory_meta[0]);
+console.log(JSON.stringify(trace.stages.map(stage => ({{
+  stage: stage.stage,
+  tool_call_id: stage.tool_call_id,
+  duration_ms: stage.duration_ms,
+  estimated: stage.estimated,
+}}))));
+"""
+        result = subprocess.run(
+            ["node"],
+            input=script,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        stages = json.loads(result.stdout)
+
+        self.assertEqual(stages, [])
+
+
+    def test_html_timeline_trace_uses_hermes_log_fused_timing(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("node is required to execute report.js timeline helpers")
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = create_hermes_log_timing_home(Path(tmp) / ".hermes")
+            config = ToolConfig(adapter="hermes")
+            result = convert_db(str(db_path), None, config)
+            report = build_report(result, config, "inline")
+        asset = load_asset_text("report.js")
+        self.assertIn("\nrender(data());", asset)
+        asset = asset.rsplit("\nrender(data());", 1)[0]
+        script = f"""
+const vm = require("vm");
+const asset = {json.dumps(asset)};
+const report = {json.dumps(report)};
+const context = {{
+  document: {{ getElementById: () => null, querySelector: () => null }},
+  window: {{}},
+  console,
+  JSON,
+  Number,
+  String,
+  Object,
+  Math,
+  Date,
+  Set,
+  Array,
+  RegExp,
+}};
+vm.createContext(context);
+vm.runInContext(asset, context);
+const trace = context.timelineTrace(report.trajectory[0], report.trajectory_meta[0]);
+console.log(JSON.stringify(trace.stages.map(stage => ({{
+  stage: stage.stage,
+  kind: stage.kind,
+  tool_call_id: stage.tool_call_id,
+  duration_ms: stage.duration_ms,
+  estimated: stage.estimated,
+}}))));
+"""
+        node = subprocess.run(
+            ["node"],
+            input=script,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(node.returncode, 0, node.stderr)
+        stages = json.loads(node.stdout)
+        model_stages = [stage for stage in stages if stage["kind"] == "agent"]
+        tool_stages = {
+            stage["tool_call_id"]: stage
+            for stage in stages
+            if stage.get("tool_call_id")
+        }
+
+        self.assertEqual(model_stages[0]["duration_ms"], 5_700)
+        self.assertFalse(model_stages[0]["estimated"])
+        self.assertEqual(tool_stages["call-fetch"]["duration_ms"], 53_890)
+        self.assertEqual(tool_stages["call-error"]["duration_ms"], 80)
+
+
+    def test_html_timeline_trace_uses_opencode_event_fused_timing(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("node is required to execute report.js timeline helpers")
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "opencode.db"
+            create_opencode_event_timing_db(db_path)
+            config = ToolConfig(adapter="opencode")
+            result = convert_db(str(db_path), None, config)
+            report = build_report(result, config, "inline")
+        asset = load_asset_text("report.js")
+        self.assertIn("\nrender(data());", asset)
+        asset = asset.rsplit("\nrender(data());", 1)[0]
+        script = f"""
+const vm = require("vm");
+const asset = {json.dumps(asset)};
+const report = {json.dumps(report)};
+const context = {{
+  document: {{ getElementById: () => null, querySelector: () => null }},
+  window: {{}},
+  console,
+  JSON,
+  Number,
+  String,
+  Object,
+  Math,
+  Date,
+  Set,
+  Array,
+  RegExp,
+}};
+vm.createContext(context);
+vm.runInContext(asset, context);
+const trace = context.timelineTrace(report.trajectory[0], report.trajectory_meta[0]);
+console.log(JSON.stringify(trace.stages.map(stage => ({{
+  stage: stage.stage,
+  kind: stage.kind,
+  tool_call_id: stage.tool_call_id,
+  duration_ms: stage.duration_ms,
+  estimated: stage.estimated,
+}}))));
+"""
+        node = subprocess.run(
+            ["node"],
+            input=script,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(node.returncode, 0, node.stderr)
+        stages = json.loads(node.stdout)
+        model_stages = [stage for stage in stages if stage["kind"] == "agent"]
+        tool_stages = {
+            stage["tool_call_id"]: stage
+            for stage in stages
+            if stage.get("tool_call_id")
+        }
+
+        self.assertEqual(model_stages[0]["duration_ms"], 100)
+        self.assertTrue(model_stages[0]["estimated"])
+        self.assertEqual(tool_stages["call-read"]["duration_ms"], 48_000)
+        self.assertFalse(tool_stages["call-read"]["estimated"])
+
+
+    def test_html_timeline_click_opens_drawer_for_single_session_report(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("node is required to execute report.js interaction helpers")
+        report = {
+            "schema_version": 18,
+            "includes": ["core"],
+            "trajectory": [
+                {
+                    "trajectory_id": "trial:single",
+                    "session_id": "single",
+                    "agent": {"name": "hermes", "model_name": "test-model"},
+                    "steps": [
+                        {"step_id": 1, "source": "user", "message": "run it"},
+                        {
+                            "step_id": 2,
+                            "source": "agent",
+                            "message": "reading",
+                            "tool_calls": [
+                                {
+                                    "tool_call_id": "call-read",
+                                    "function_name": "read",
+                                    "arguments": {"file_path": "README.md"},
+                                }
+                            ],
+                        },
+                    ],
+                    "final_metrics": {},
+                }
+            ],
+            "trajectory_meta": [
+                {
+                    "trial_key": "trial:single",
+                    "status": "passed",
+                    "started_at_ms": 1_000,
+                    "finished_at_ms": 1_200,
+                    "duration_ms": 100,
+                    "steps": [
+                        {
+                            "step_id": 1,
+                            "timestamp_ms": 1_000,
+                            "elapsed_ms": 0,
+                            "duration_ms": None,
+                            "tool_calls": [],
+                            "observations": [],
+                        },
+                        {
+                            "step_id": 2,
+                            "timestamp_ms": 1_100,
+                            "elapsed_ms": 100,
+                            "duration_ms": 100,
+                            "tool_calls": [
+                                {
+                                    "tool_call_id": "call-read",
+                                    "title": "read",
+                                    "timestamp_ms": 1_120,
+                                    "execution_duration_ms": 50,
+                                }
+                            ],
+                            "observations": [],
+                        },
+                    ],
+                    "warnings": [],
+                }
+            ],
+        }
+        asset = load_asset_text("report.js")
+        self.assertIn("\nrender(data());", asset)
+        asset = asset.rsplit("\nrender(data());", 1)[0]
+        script = f"""
+const vm = require("vm");
+const asset = {json.dumps(asset)};
+const report = {json.dumps(report)};
+const context = {{
+  document: {{
+    body: {{ classList: {{ toggle() {{}} }} }},
+    addEventListener() {{}},
+    getElementById: () => null,
+    querySelector: () => null,
+  }},
+  window: {{ addEventListener() {{}} }},
+  console,
+  JSON,
+  Number,
+  String,
+  Object,
+  Math,
+  Date,
+  Set,
+  Array,
+  RegExp,
+  report,
+  rendered: [],
+}};
+vm.createContext(context);
+vm.runInContext(asset, context);
+const result = vm.runInContext(`
+  state.view = report;
+  state.selectedTrial = report.trajectory_meta[0].trial_key;
+  renderLeaderboard = () => rendered.push("leaderboard");
+  renderTrajectoryOverview = () => rendered.push("overview");
+  renderTrace = () => rendered.push("trace");
+  renderStepDrawer = () => rendered.push(state.selectedStep ? "drawer-open" : "drawer-closed");
+  openTimelineStep({{ kind: "stage", trial_key: "trial:single", step_id: 2 }});
+  JSON.stringify({{ selectedTrial: state.selectedTrial, selectedStep: state.selectedStep, rendered }});
+`, context);
+console.log(result);
+"""
+        node = subprocess.run(
+            ["node"],
+            input=script,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(node.returncode, 0, node.stderr)
+        result = json.loads(node.stdout)
+
+        self.assertEqual(result["selectedTrial"], "trial:single")
+        self.assertEqual(
+            result["selectedStep"],
+            {"trialKey": "trial:single", "stepId": "2"},
+        )
+        self.assertIn("drawer-open", result["rendered"])
+
+
+    def test_html_inlines_template_css_and_js_package_assets(self) -> None:
         report = {
             "schema_version": 18,
             "includes": ["core"],
@@ -809,9 +1336,12 @@ class PevalPyReportHtmlTests(unittest.TestCase):
         }
         css = load_asset_text("report.css")
         js = load_asset_text("report.js")
+        template = load_asset_text("report.html")
         html = render_html(report)
         compact_css = compact_css_text(css)
 
+        self.assertIn("__SERVE_SOURCE_MANAGER__", template)
+        self.assertIn('<script type="application/json" id="peval-py-data">__DATA__</script>', template)
         self.assertIn(".time-gradient", css)
         self.assertIn(".timeline-waterfall-shell", css)
         self.assertIn(".timeline-waterfall-chart", css)
@@ -919,6 +1449,9 @@ class PevalPyReportHtmlTests(unittest.TestCase):
             html,
         )
         self.assertIn("function renderTrace()", html)
+        self.assertIn('<script type="application/json" id="peval-py-data">', html)
+        self.assertNotIn("__SERVE_SOURCE_MANAGER__", html)
+        self.assertNotIn("__DATA__", html)
         self.assertNotIn("__CSS__", html)
         self.assertNotIn("__JS__", html)
 

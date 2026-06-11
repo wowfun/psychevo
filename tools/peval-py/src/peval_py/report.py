@@ -12,6 +12,7 @@ from peval_py.adapters.base import (
     ObservationMeta,
     StepMeta,
     ToolMeta,
+    timestamp_fallback_allowed,
     timestamp_fallback_duration_ms,
 )
 from peval_py.config import ToolConfig
@@ -88,6 +89,77 @@ def build_multi_report(
     return report
 
 
+def build_report_from_snapshots(
+    trajectories: list[dict[str, Any]],
+    metas: list[dict[str, Any]],
+    *,
+    input_label: str = "serve",
+) -> dict[str, Any]:
+    if len(trajectories) != len(metas):
+        raise ValueError("trajectory and meta snapshot counts differ")
+    if not trajectories:
+        return empty_report(input_label)
+    includes = ["core"]
+    report: dict[str, Any] = {
+        "schema_version": VIEW_SCHEMA_VERSION,
+        "includes": includes,
+        "scope": {
+            "workspace_root": ".",
+            "path": input_label,
+            "benchmark": None,
+        },
+        "path_selections": [
+            {
+                "id": "input" if len(trajectories) == 1 else f"input-{index}",
+                "label": str(
+                    trajectory.get("session_id")
+                    or meta.get("trial_key")
+                    or f"session-{index}"
+                ),
+                "path": str(
+                    trajectory.get("session_id")
+                    or meta.get("trial_key")
+                    or f"session-{index}"
+                ),
+                "cell_count": 1,
+            }
+            for index, (trajectory, meta) in enumerate(
+                zip(trajectories, metas, strict=True),
+                start=1,
+            )
+        ],
+        "trajectory": trajectories,
+        "trajectory_meta": metas,
+    }
+    if len(trajectories) > 1:
+        includes.append("comparison")
+        report["comparison"] = comparison_report(
+            [
+                {"index": index, "trajectory": trajectory, "meta": meta}
+                for index, (trajectory, meta) in enumerate(
+                    zip(trajectories, metas, strict=True),
+                    start=1,
+                )
+            ]
+        )
+    return report
+
+
+def empty_report(input_label: str = "serve") -> dict[str, Any]:
+    return {
+        "schema_version": VIEW_SCHEMA_VERSION,
+        "includes": ["core"],
+        "scope": {
+            "workspace_root": ".",
+            "path": input_label,
+            "benchmark": None,
+        },
+        "path_selections": [],
+        "trajectory": [],
+        "trajectory_meta": [],
+    }
+
+
 def prepare_session_report(
     index: int,
     session: ReportSession,
@@ -106,13 +178,18 @@ def prepare_session_report(
     started = conversion.started_at_ms or 0
     finished = conversion.finished_at_ms or started
     wall_duration = max(0, finished - started)
-    steps = step_meta_reports(conversion.steps_meta, started)
+    steps = step_meta_reports(
+        conversion.steps_meta,
+        started,
+        conversion.timestamp_semantics,
+    )
     status = "failed" if conversion.warnings or conversion.unmapped_events else "passed"
     data_ref = data_ref_for_input(session.input_label, session.input_path)
     adapter_id = session.adapter_id or config.adapter
     meta = {
         "trial_key": trial_key,
         "adapter": adapter_id,
+        **optional("timestamp_semantics", conversion.timestamp_semantics),
         "started_at_ms": started,
         "finished_at_ms": finished,
         "wall_duration_ms": wall_duration,
@@ -261,21 +338,28 @@ def annotations_report(notes: list[NoteInput], metas: list[dict[str, Any]]) -> d
 def trial_active_duration_ms(
     steps: list[StepMeta],
     step_reports: list[dict[str, Any]],
-) -> int:
+) -> int | None:
     total = 0
+    observed = False
     for step, report in zip(steps, step_reports, strict=True):
         if step.source != "agent":
             continue
         duration = report.get("duration_ms")
         if duration is not None:
+            observed = True
             total += int(duration)
         for tool in step.tool_calls:
             if tool.execution_duration_ms is not None:
+                observed = True
                 total += int(tool.execution_duration_ms)
-    return total
+    return total if observed else None
 
 
-def step_meta_reports(steps: list[StepMeta], started: int) -> list[dict[str, Any]]:
+def step_meta_reports(
+    steps: list[StepMeta],
+    started: int,
+    timestamp_semantics: str | None,
+) -> list[dict[str, Any]]:
     reports = []
     for index, step in enumerate(steps):
         timestamp = step.timestamp_ms
@@ -288,7 +372,7 @@ def step_meta_reports(steps: list[StepMeta], started: int) -> list[dict[str, Any
             ),
             None,
         )
-        duration = step_duration_ms(step, next_timestamp)
+        duration = step_duration_ms(step, next_timestamp, timestamp_semantics)
         reports.append(
             {
                 "step_id": step.step_id,
@@ -301,6 +385,7 @@ def step_meta_reports(steps: list[StepMeta], started: int) -> list[dict[str, Any
                 **optional("timestamp_ms", timestamp),
                 **optional("elapsed_ms", elapsed),
                 "duration_ms": duration,
+                **optional("duration_source", step.duration_source),
                 **optional("data_preview", step.data_preview),
                 "truncated": step.truncated,
             }
@@ -308,13 +393,22 @@ def step_meta_reports(steps: list[StepMeta], started: int) -> list[dict[str, Any
     return reports
 
 
-def step_duration_ms(step: StepMeta, next_timestamp_ms: int | None) -> int | None:
+def step_duration_ms(
+    step: StepMeta,
+    next_timestamp_ms: int | None,
+    timestamp_semantics: str | None,
+) -> int | None:
     timestamp_ms = step.timestamp_ms
     if timestamp_ms is None:
         return step.duration_ms
     if step.duration_ms is not None:
         return max(0, step.duration_ms)
-    if step.source == "agent" and next_timestamp_ms is not None and not step.tool_calls:
+    if (
+        step.source == "agent"
+        and next_timestamp_ms is not None
+        and not step.tool_calls
+        and timestamp_fallback_allowed(timestamp_semantics)
+    ):
         return timestamp_fallback_duration_ms(timestamp_ms, next_timestamp_ms)
     return None
 

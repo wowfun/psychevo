@@ -1,0 +1,402 @@
+from __future__ import annotations
+
+import json
+import sys
+from argparse import Namespace
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+from urllib.parse import unquote, urlsplit
+
+from peval_py.adapters import available_adapter_ids, normalize_adapter_id
+from peval_py.config import ToolConfig
+from peval_py.html import render_serve_html
+from peval_py.inputs import (
+    AdapterAssignments,
+    infer_adapter_from_path,
+    parse_adapter_assignments,
+    validate_selected_adapter,
+)
+from peval_py.session_select import list_adapter_sessions
+from peval_py.state import (
+    UPLOAD_LIMIT_BYTES,
+    ServeStateStore,
+    load_serve_inputs,
+    open_workspace_state,
+)
+
+DEFAULT_PORT_START = 58010
+DEFAULT_PORT_END = 58029
+LOCALHOSTS = {"127.0.0.1", "localhost", "::1"}
+MAX_JSON_BODY_BYTES = UPLOAD_LIMIT_BYTES + 2 * 1024 * 1024
+
+
+class HttpError(Exception):
+    def __init__(self, status: int, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+        self.message = message
+
+
+class LocalHTTPServer(HTTPServer):
+    allow_reuse_address = True
+
+
+def run_serve_command(
+    args: Namespace,
+    config: ToolConfig,
+    adapter_assignments: AdapterAssignments,
+) -> None:
+    host = validate_localhost(getattr(args, "host", None) or "127.0.0.1")
+    store = open_workspace_state(getattr(args, "root", None))
+    server: HTTPServer | None = None
+    try:
+        loaded_inputs = load_serve_inputs(args, adapter_assignments)
+        source_keys = store.upsert_loaded_sources(loaded_inputs, config)
+        if source_keys:
+            store.refresh_sources(source_keys, config)
+
+        handler = make_handler(store, config)
+        server = bind_server(host, getattr(args, "port", None), handler)
+        print(f"peval-py serve: {format_url(host, server.server_port)}", flush=True)
+        server.serve_forever()
+    except KeyboardInterrupt:
+        return
+    finally:
+        if server is not None:
+            server.server_close()
+        store.close()
+
+
+def validate_localhost(host: str) -> str:
+    text = str(host).strip()
+    normalized = text[1:-1] if text.startswith("[") and text.endswith("]") else text
+    if normalized.lower() not in LOCALHOSTS:
+        raise ValueError("serve only binds localhost by default; use 127.0.0.1, localhost, or ::1")
+    return normalized
+
+
+def bind_server(
+    host: str,
+    requested_port: int | None,
+    handler: type[BaseHTTPRequestHandler],
+) -> HTTPServer:
+    if requested_port is not None:
+        return LocalHTTPServer((host, requested_port), handler)
+
+    last_error: OSError | None = None
+    for port in range(DEFAULT_PORT_START, DEFAULT_PORT_END + 1):
+        try:
+            return LocalHTTPServer((host, port), handler)
+        except OSError as exc:
+            last_error = exc
+    raise OSError(
+        f"could not bind {host}:{DEFAULT_PORT_START}..{DEFAULT_PORT_END}"
+    ) from last_error
+
+
+def format_url(host: str, port: int) -> str:
+    display_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
+    return f"http://{display_host}:{port}/"
+
+
+def make_handler(
+    store: ServeStateStore,
+    config: ToolConfig,
+) -> type[BaseHTTPRequestHandler]:
+    class ServeHandler(BaseHTTPRequestHandler):
+        server_version = "peval-py-serve/1"
+
+        def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+            return
+
+        def do_GET(self) -> None:  # noqa: N802
+            path = urlsplit(self.path).path
+            try:
+                if path == "/":
+                    self.write_html(
+                        render_serve_html(
+                            store.active_report(),
+                            locale=config.locale,
+                            sources=store.source_payload(),
+                        )
+                    )
+                    return
+                if path == "/api/report":
+                    self.write_json(store.active_report())
+                    return
+                if path == "/api/sources":
+                    self.write_json({"sources": store.source_payload()})
+                    return
+                raise HttpError(404, "not found")
+            except HttpError as exc:
+                self.write_error(exc.status, exc.message)
+            except Exception as exc:  # noqa: BLE001 - HTTP boundary.
+                self.write_error(500, str(exc))
+
+        def do_POST(self) -> None:  # noqa: N802
+            path = urlsplit(self.path).path
+            try:
+                payload = self.read_json_payload()
+                if path == "/api/db-sessions":
+                    self.write_json(db_sessions_payload(store, payload))
+                    return
+                if path == "/api/sources":
+                    keys = add_source_payload(store, config, payload)
+                    store.refresh_sources(keys, config)
+                    self.write_json(mutation_payload(store))
+                    return
+                if path == "/api/upload":
+                    filename = required_string(payload, "filename")
+                    content = required_string(payload, "content")
+                    adapter = optional_string(payload.get("adapter"))
+                    store.ingest_upload(filename, content, config, adapter=adapter)
+                    self.write_json(mutation_payload(store))
+                    return
+                if path == "/api/refresh":
+                    store.refresh_sources(source_keys_payload(payload), config)
+                    self.write_json(mutation_payload(store))
+                    return
+
+                source_action = source_action_path(path)
+                if source_action is not None:
+                    source_key, action = source_action
+                    if action == "archive":
+                        store.set_source_active(source_key, False)
+                    elif action == "activate":
+                        store.set_source_active(source_key, True)
+                    elif action == "refresh":
+                        store.refresh_sources([source_key], config)
+                    else:
+                        raise HttpError(404, "unknown source action")
+                    self.write_json(mutation_payload(store))
+                    return
+
+                raise HttpError(404, "not found")
+            except HttpError as exc:
+                self.write_error(exc.status, exc.message)
+            except Exception as exc:  # noqa: BLE001 - HTTP boundary.
+                self.write_error(400, str(exc))
+
+        def read_json_payload(self) -> dict[str, Any]:
+            self.require_same_origin()
+            content_type = self.headers.get("Content-Type", "")
+            media_type = content_type.split(";", 1)[0].strip().lower()
+            if media_type != "application/json":
+                raise HttpError(415, "mutating APIs require application/json POST")
+            try:
+                content_length = int(self.headers.get("Content-Length", "0"))
+            except ValueError as exc:
+                raise HttpError(400, "invalid Content-Length") from exc
+            if content_length > MAX_JSON_BODY_BYTES:
+                raise HttpError(413, "request body exceeds serve upload limit")
+            raw = self.rfile.read(content_length) if content_length else b"{}"
+            try:
+                payload = json.loads(raw.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise HttpError(400, "request body must be a JSON object") from exc
+            if not isinstance(payload, dict):
+                raise HttpError(400, "request body must be a JSON object")
+            return payload
+
+        def require_same_origin(self) -> None:
+            origin = self.headers.get("Origin")
+            if origin and not self.is_same_origin(origin):
+                raise HttpError(403, "mutating APIs require same-origin Origin")
+            referer = self.headers.get("Referer")
+            if not origin and referer and not self.is_same_origin(referer):
+                raise HttpError(403, "mutating APIs require same-origin Referer")
+
+        def is_same_origin(self, value: str) -> bool:
+            parsed = urlsplit(value)
+            if not parsed.scheme or not parsed.netloc:
+                return True
+            host = self.headers.get("Host")
+            if not host:
+                return False
+            return parsed.scheme == "http" and parsed.netloc.lower() == host.lower()
+
+        def write_html(self, html: str, status: int = 200) -> None:
+            data = html.encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def write_json(self, payload: Any, status: int = 200) -> None:
+            data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def write_error(self, status: int, message: str) -> None:
+            if urlsplit(self.path).path.startswith("/api/"):
+                self.write_json({"error": message}, status=status)
+                return
+            self.write_html(f"{status} {message}\n", status=status)
+
+    return ServeHandler
+
+
+def mutation_payload(store: ServeStateStore) -> dict[str, Any]:
+    return {
+        "sources": store.source_payload(),
+        "report": store.active_report(),
+    }
+
+
+def add_source_payload(
+    store: ServeStateStore,
+    config: ToolConfig,
+    payload: dict[str, Any],
+) -> list[str]:
+    source_args = source_args_from_payload(store, payload)
+    raw_adapter = optional_string(payload.get("adapter"))
+    assignments = parse_adapter_assignments(
+        [raw_adapter] if raw_adapter else [],
+        config.adapter,
+    )
+    loaded = load_serve_inputs(source_args, assignments)
+    return store.upsert_loaded_sources(loaded, config)
+
+
+def db_sessions_payload(
+    store: ServeStateStore,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    raw_db = required_string(payload, "db")
+    db_path = workspace_relative_path(store, raw_db)
+    if db_path is None:
+        raise HttpError(400, "db is required")
+    path = Path(db_path)
+    if not path.is_file():
+        raise HttpError(400, f"DB path does not exist: {path}")
+    raw_adapter = optional_string(payload.get("adapter"))
+    adapter_id, inferred = adapter_for_db_inspect(str(path), raw_adapter)
+    sessions = list_adapter_sessions(adapter_id, str(path))
+    return {
+        "db": str(path),
+        "adapter": adapter_id,
+        "inferred": inferred,
+        "sessions": [
+            {
+                "index": index,
+                "session_id": session.session_id,
+                "name": session.name,
+            }
+            for index, session in enumerate(sessions, start=1)
+        ],
+    }
+
+
+def adapter_for_db_inspect(path: str, raw_adapter: str | None) -> tuple[str, bool]:
+    available = set(available_adapter_ids())
+    if raw_adapter:
+        return validate_selected_adapter(
+            normalize_adapter_id(raw_adapter),
+            available,
+            "DB session inspect",
+        ), False
+    adapter_id = infer_adapter_from_path(path, available)
+    if adapter_id is None:
+        options = ", ".join(sorted(available)) or "<none>"
+        raise HttpError(
+            400,
+            f"could not infer adapter for {path}; choose adapter "
+            f"(available adapters: {options})",
+        )
+    return adapter_id, True
+
+
+def source_args_from_payload(
+    store: ServeStateStore,
+    payload: dict[str, Any],
+) -> SimpleNamespace:
+    path = optional_string(payload.get("path"))
+    db = optional_string(payload.get("db"))
+    input_table = optional_string(payload.get("input_table"))
+    present = [value for value in [path, db, input_table] if value]
+    if len(present) != 1:
+        raise HttpError(400, "provide exactly one source: path, db, or input_table")
+    session_id = optional_string(payload.get("session_id"))
+    session_ids = session_ids_payload(payload)
+    if session_id and session_ids:
+        raise HttpError(400, "provide either session_id or session_ids, not both")
+    if (session_id or session_ids) and not db:
+        raise HttpError(400, "session_id and session_ids are only valid with db sources")
+    return SimpleNamespace(
+        path=[workspace_relative_path(store, path)] if path else None,
+        db=[workspace_relative_path(store, db)] if db else None,
+        input_table=[workspace_relative_path(store, input_table)] if input_table else None,
+        session_id=([session_id] if session_id and db else session_ids if db else None),
+        adapter=[],
+        note=[],
+    )
+
+
+def session_ids_payload(payload: dict[str, Any]) -> list[str] | None:
+    raw = payload.get("session_ids")
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise HttpError(400, "session_ids must be an array")
+    session_ids: list[str] = []
+    for value in raw:
+        text = optional_string(value)
+        if text is not None:
+            session_ids.append(text)
+    if not session_ids:
+        raise HttpError(400, "session_ids must include at least one session id")
+    return session_ids
+
+
+def workspace_relative_path(store: ServeStateStore, raw_path: str | None) -> str | None:
+    if raw_path is None:
+        return None
+    path = Path(raw_path).expanduser()
+    if not path.is_absolute():
+        path = store.paths.root / path
+    return str(path)
+
+
+def source_keys_payload(payload: dict[str, Any]) -> list[str] | None:
+    raw_keys = payload.get("source_keys")
+    if raw_keys is None and payload.get("source_key") is not None:
+        raw_keys = [payload["source_key"]]
+    if raw_keys is None:
+        return None
+    if not isinstance(raw_keys, list):
+        raise HttpError(400, "source_keys must be an array")
+    return [str(key) for key in raw_keys]
+
+
+def source_action_path(path: str) -> tuple[str, str] | None:
+    prefix = "/api/sources/"
+    if not path.startswith(prefix):
+        return None
+    parts = path[len(prefix) :].split("/")
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        raise HttpError(404, "unknown source action")
+    return unquote(parts[0]), parts[1]
+
+
+def required_string(payload: dict[str, Any], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise HttpError(400, f"{key} is required")
+    return value
+
+
+def optional_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+if __name__ == "__main__":
+    print("peval_py.serve is not a standalone entry point", file=sys.stderr)

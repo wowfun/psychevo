@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from peval_py.adapters.base import TIMESTAMP_SEMANTICS_ORDER_ONLY, SessionInfo
 from peval_py.adapters.common import CommonMessageAdapter
 from peval_py.config import ToolConfig
 from peval_py.sources import MessageRecord, read_jsonl
+
+HERMES_AGENT_LOG_TIMING_SOURCE = "hermes_agent_log"
 
 
 class HermesAdapter(CommonMessageAdapter):
@@ -28,6 +34,9 @@ class HermesAdapter(CommonMessageAdapter):
     ):
         records = read_hermes_db(path, session_id)
         return self.convert(records, config)
+
+    def list_sessions(self, path: str) -> list[SessionInfo]:
+        return list_hermes_sessions(resolve_hermes_db(path))
 
 
 def read_hermes_db(path: str, session_id: str | None) -> list[MessageRecord]:
@@ -91,7 +100,165 @@ def read_hermes_db(path: str, session_id: str | None) -> list[MessageRecord]:
             pending_accounting = {}
         records.append(record)
         seq += 1
-    return records
+    return records_with_hermes_log_timing(records, db_path, str(session["id"]))
+
+
+@dataclass(frozen=True)
+class HermesLogEvent:
+    name: str | None
+    started_at_ms: int
+    finished_at_ms: int
+    elapsed_ms: int
+    failed: bool = False
+
+
+@dataclass(frozen=True)
+class HermesLogTiming:
+    model_events: list[HermesLogEvent]
+    tool_events: list[HermesLogEvent]
+
+
+def records_with_hermes_log_timing(
+    records: list[MessageRecord],
+    db_path: Path,
+    session_id: str,
+) -> list[MessageRecord]:
+    timing = read_hermes_agent_log_timing(hermes_agent_log_path(db_path), session_id)
+    if not timing.model_events and not timing.tool_events:
+        return records
+
+    enriched = list(records)
+    assistant_indexes = [
+        index
+        for index, record in enumerate(records)
+        if message_role(record) in {"assistant", "agent"}
+    ]
+    if len(timing.model_events) == len(assistant_indexes):
+        for index, event in zip(assistant_indexes, timing.model_events, strict=True):
+            enriched[index] = record_with_hermes_timing(enriched[index], event)
+
+    tool_indexes = [
+        index
+        for index, record in enumerate(records)
+        if message_role(record) in {"tool", "tool_result"}
+    ]
+    if len(timing.tool_events) == len(tool_indexes) and all(
+        hermes_tool_event_matches_record(event, records[index])
+        for index, event in zip(tool_indexes, timing.tool_events, strict=True)
+    ):
+        for index, event in zip(tool_indexes, timing.tool_events, strict=True):
+            enriched[index] = record_with_hermes_timing(enriched[index], event)
+
+    return enriched
+
+
+def hermes_agent_log_path(db_path: Path) -> Path:
+    return db_path.parent / "logs" / "agent.log"
+
+
+def read_hermes_agent_log_timing(log_path: Path, session_id: str) -> HermesLogTiming:
+    model_events: list[HermesLogEvent] = []
+    tool_events: list[HermesLogEvent] = []
+    if not log_path.exists():
+        return HermesLogTiming(model_events, tool_events)
+
+    session = re.escape(session_id)
+    api_pattern = re.compile(
+        rf"^(?P<ts>\d{{4}}-\d\d-\d\d \d\d:\d\d:\d\d),(?P<ms>\d{{3}})"
+        rf".*\[{session}\] agent\.conversation_loop: API call #\d+: "
+        rf".* latency=(?P<duration>\d+(?:\.\d+)?)s"
+    )
+    tool_ok_pattern = re.compile(
+        rf"^(?P<ts>\d{{4}}-\d\d-\d\d \d\d:\d\d:\d\d),(?P<ms>\d{{3}})"
+        rf".*\[{session}\] agent\.tool_executor: tool (?P<name>\S+) "
+        rf"completed \((?P<duration>\d+(?:\.\d+)?)s,"
+    )
+    tool_error_pattern = re.compile(
+        rf"^(?P<ts>\d{{4}}-\d\d-\d\d \d\d:\d\d:\d\d),(?P<ms>\d{{3}})"
+        rf".*\[{session}\] agent\.tool_executor: Tool (?P<name>\S+) "
+        rf"returned error \((?P<duration>\d+(?:\.\d+)?)s\):"
+    )
+
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return HermesLogTiming(model_events, tool_events)
+
+    for line in lines:
+        if session_id not in line:
+            continue
+        if match := api_pattern.match(line):
+            model_events.append(hermes_log_event_from_match(match, None))
+            continue
+        if match := tool_ok_pattern.match(line):
+            tool_events.append(hermes_log_event_from_match(match, match.group("name")))
+            continue
+        if match := tool_error_pattern.match(line):
+            tool_events.append(
+                hermes_log_event_from_match(match, match.group("name"), failed=True)
+            )
+    return HermesLogTiming(model_events, tool_events)
+
+
+def hermes_log_event_from_match(
+    match: re.Match[str],
+    name: str | None,
+    failed: bool = False,
+) -> HermesLogEvent:
+    finished_at_ms = hermes_log_timestamp_ms(match.group("ts"), match.group("ms"))
+    elapsed_ms = int(round(float(match.group("duration")) * 1000))
+    return HermesLogEvent(
+        name=name,
+        started_at_ms=finished_at_ms - elapsed_ms,
+        finished_at_ms=finished_at_ms,
+        elapsed_ms=elapsed_ms,
+        failed=failed,
+    )
+
+
+def hermes_log_timestamp_ms(timestamp: str, milliseconds: str) -> int:
+    value = datetime.strptime(f"{timestamp}.{milliseconds}", "%Y-%m-%d %H:%M:%S.%f")
+    return int(round(value.timestamp() * 1000))
+
+
+def hermes_tool_event_matches_record(event: HermesLogEvent, record: MessageRecord) -> bool:
+    event_name = normalized_tool_name(event.name)
+    record_name = normalized_tool_name(record.message.get("tool_name"))
+    return bool(event_name and record_name and event_name == record_name)
+
+
+def normalized_tool_name(value: object) -> str | None:
+    return str(value).lower() if isinstance(value, str) and value else None
+
+
+def record_with_hermes_timing(
+    record: MessageRecord,
+    event: HermesLogEvent,
+) -> MessageRecord:
+    metadata = dict(record.metadata or {})
+    metadata.update(
+        {
+            "started_at_ms": event.started_at_ms,
+            "finished_at_ms": event.finished_at_ms,
+            "elapsed_ms": event.elapsed_ms,
+            "elapsed_ms_source": HERMES_AGENT_LOG_TIMING_SOURCE,
+        }
+    )
+    message = dict(record.message)
+    if event.failed:
+        message["error"] = message.get("error") or True
+    return MessageRecord(
+        message=message,
+        usage=record.usage,
+        metadata=metadata,
+        accounting=record.accounting,
+        session_seq=record.session_seq,
+        source_session_id=record.source_session_id,
+    )
+
+
+def message_role(record: MessageRecord) -> str:
+    return str(record.message.get("role", "")).lower()
 
 
 def resolve_hermes_db(path: str) -> Path:
@@ -135,6 +302,34 @@ def select_session(conn: sqlite3.Connection, session_id: str | None) -> sqlite3.
     if row is None:
         raise ValueError("Hermes DB contains no sessions")
     return row
+
+
+def list_hermes_sessions(path: Path) -> list[SessionInfo]:
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        rows = conn.execute(
+            """
+            SELECT s.id, s.title
+            FROM sessions s
+            LEFT JOIN (
+                SELECT session_id, MAX(timestamp) AS last_active
+                FROM messages
+                WHERE active = 1
+                GROUP BY session_id
+            ) latest ON latest.session_id = s.id
+            ORDER BY COALESCE(latest.last_active, s.ended_at, s.started_at) DESC,
+                     s.started_at DESC,
+                     s.id DESC
+            """
+        ).fetchall()
+    except sqlite3.Error as exc:
+        raise ValueError(f"failed to read Hermes DB: {exc}") from exc
+    finally:
+        conn.close()
+    return [
+        SessionInfo(session_id=str(row[0]), name=str(row[1]) if row[1] else None)
+        for row in rows
+    ]
 
 
 def record_from_message_row(
@@ -329,6 +524,7 @@ def metadata_for(
     metadata: dict[str, Any] = {
         "session_id": str(session["id"]),
         "source": source,
+        "timestamp_semantics": TIMESTAMP_SEMANTICS_ORDER_ONLY,
     }
     for column, key in [
         ("source", "session_source"),

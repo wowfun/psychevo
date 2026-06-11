@@ -8,6 +8,13 @@ from peval_py.sources import MessageRecord
 
 
 ACTIVE_DURATION_FALLBACK_CAP_MS = 600_000
+TIMESTAMP_SEMANTICS_ORDER_ONLY = "order_only"
+
+
+def timestamp_fallback_allowed(timestamp_semantics: str | None) -> bool:
+    if timestamp_semantics is None:
+        return True
+    return str(timestamp_semantics).lower() != TIMESTAMP_SEMANTICS_ORDER_ONLY
 
 
 def timestamp_fallback_duration_ms(
@@ -68,6 +75,13 @@ class ConversionResult:
     unmapped_events: int
     started_at_ms: int | None
     finished_at_ms: int | None
+    timestamp_semantics: str | None = None
+
+
+@dataclass(frozen=True)
+class SessionInfo:
+    session_id: str
+    name: str | None = None
 
 
 class Adapter(Protocol):
@@ -91,4 +105,9 @@ class DbAdapter(Adapter, Protocol):
         session_id: str | None,
         config: ToolConfig,
     ) -> ConversionResult:
+        ...
+
+
+class SessionListAdapter(Adapter, Protocol):
+    def list_sessions(self, path: str) -> list[SessionInfo]:
         ...

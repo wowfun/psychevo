@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -416,6 +417,176 @@ def create_opencode_db(path: Path) -> None:
     conn.close()
 
 
+def create_opencode_event_timing_db(path: Path) -> None:
+    create_opencode_db(path)
+    conn = sqlite3.connect(path)
+    conn.execute(
+        """
+        CREATE TABLE event (
+            id TEXT PRIMARY KEY,
+            aggregate_id TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            type TEXT NOT NULL,
+            data TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        UPDATE session
+        SET time_updated = ?
+        WHERE id = ?
+        """,
+        (51_000, "ses-latest"),
+    )
+    conn.execute(
+        """
+        UPDATE message
+        SET time_updated = ?, data = ?
+        WHERE id = ?
+        """,
+        (
+            50_500,
+            json.dumps(
+                {
+                    "role": "assistant",
+                    "time": {"created": 2_100, "completed": 50_500},
+                    "modelID": "oc-message-model",
+                    "tokens": {"input": 2, "output": 3, "total": 5},
+                    "cost": 0.000001,
+                }
+            ),
+            "msg-latest-agent",
+        ),
+    )
+    conn.execute(
+        """
+        UPDATE part
+        SET data = ?
+        WHERE id = ?
+        """,
+        (
+            json.dumps(
+                {
+                    "type": "tool",
+                    "tool": "read",
+                    "callID": "call-read",
+                    "state": {
+                        "status": "completed",
+                        "input": {"file": "README.md"},
+                        "output": "file contents",
+                        "time": {"start": 50_490, "end": 50_500},
+                    },
+                }
+            ),
+            "part-latest-tool",
+        ),
+    )
+    events = [
+        (
+            "evt-tool-pending",
+            "ses-latest",
+            1,
+            "message.part.updated.1",
+            {
+                "sessionID": "ses-latest",
+                "part": {
+                    "id": "part-latest-tool",
+                    "messageID": "msg-latest-agent",
+                    "sessionID": "ses-latest",
+                    "type": "tool",
+                    "tool": "read",
+                    "callID": "call-read",
+                    "state": {
+                        "status": "pending",
+                        "input": {"file": "README.md"},
+                        "raw": "{}",
+                    },
+                },
+            },
+        ),
+        (
+            "evt-tool-running-first",
+            "ses-latest",
+            2,
+            "message.part.updated.1",
+            {
+                "sessionID": "ses-latest",
+                "part": {
+                    "id": "part-latest-tool",
+                    "messageID": "msg-latest-agent",
+                    "sessionID": "ses-latest",
+                    "type": "tool",
+                    "tool": "read",
+                    "callID": "call-read",
+                    "state": {
+                        "status": "running",
+                        "input": {"file": "README.md"},
+                        "time": {"start": 2_500},
+                    },
+                },
+            },
+        ),
+        (
+            "evt-tool-running-metadata",
+            "ses-latest",
+            3,
+            "message.part.updated.1",
+            {
+                "sessionID": "ses-latest",
+                "part": {
+                    "id": "part-latest-tool",
+                    "messageID": "msg-latest-agent",
+                    "sessionID": "ses-latest",
+                    "type": "tool",
+                    "tool": "read",
+                    "callID": "call-read",
+                    "state": {
+                        "status": "running",
+                        "input": {"file": "README.md"},
+                        "time": {"start": 50_490},
+                    },
+                },
+            },
+        ),
+        (
+            "evt-tool-completed",
+            "ses-latest",
+            4,
+            "message.part.updated.1",
+            {
+                "sessionID": "ses-latest",
+                "part": {
+                    "id": "part-latest-tool",
+                    "messageID": "msg-latest-agent",
+                    "sessionID": "ses-latest",
+                    "type": "tool",
+                    "tool": "read",
+                    "callID": "call-read",
+                    "state": {
+                        "status": "completed",
+                        "input": {"file": "README.md"},
+                        "output": "file contents",
+                        "time": {"start": 50_490, "end": 50_500},
+                    },
+                },
+            },
+        ),
+    ]
+    conn.executemany(
+        """
+        INSERT INTO event (id, aggregate_id, seq, type, data)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        [
+            (id_, aggregate_id, seq, type_, json.dumps(data))
+            for id_, aggregate_id, seq, type_, data in events
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+
 def create_hermes_db(path: Path) -> None:
     conn = sqlite3.connect(path)
     conn.execute(
@@ -612,3 +783,199 @@ def create_hermes_db(path: Path) -> None:
     )
     conn.commit()
     conn.close()
+
+
+def create_hermes_log_timing_home(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    db_path = path / "state.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY,
+            source TEXT,
+            title TEXT,
+            model TEXT,
+            system_prompt TEXT,
+            started_at REAL,
+            ended_at REAL,
+            cwd TEXT,
+            input_tokens INTEGER DEFAULT 0,
+            output_tokens INTEGER DEFAULT 0,
+            cache_read_tokens INTEGER DEFAULT 0,
+            cache_write_tokens INTEGER DEFAULT 0,
+            reasoning_tokens INTEGER DEFAULT 0,
+            estimated_cost_usd REAL,
+            actual_cost_usd REAL,
+            pricing_version TEXT,
+            cost_source TEXT,
+            billing_provider TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT,
+            tool_call_id TEXT,
+            tool_calls TEXT,
+            tool_name TEXT,
+            timestamp REAL NOT NULL,
+            token_count INTEGER,
+            finish_reason TEXT,
+            reasoning TEXT,
+            reasoning_content TEXT,
+            platform_message_id TEXT,
+            active INTEGER NOT NULL DEFAULT 1
+        )
+        """
+    )
+    session_id = "hermes-log"
+    conn.execute(
+        """
+        INSERT INTO sessions
+        (id, source, title, model, system_prompt, started_at, ended_at, cwd,
+         input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+         reasoning_tokens, estimated_cost_usd, actual_cost_usd, pricing_version,
+         cost_source, billing_provider)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            session_id,
+            "cli",
+            "Hermes Log Timing",
+            "mimo-v2.5-pro",
+            None,
+            hermes_fixture_epoch("2026-06-11 14:26:18.939"),
+            hermes_fixture_epoch("2026-06-11 14:28:20.820"),
+            "/tmp/hermes-log",
+            23240,
+            1743,
+            1024,
+            0,
+            0,
+            0.00002,
+            None,
+            "test-prices",
+            None,
+            "test",
+        ),
+    )
+    rewritten_at = hermes_fixture_epoch("2026-06-11 14:28:20.765")
+    rows = [
+        ("user", "x daily", None, None, None, hermes_fixture_epoch("2026-06-11 14:26:18.939"), None),
+        ("assistant", "fetch", None, hermes_tool_calls(("call-fetch", "terminal")), None, rewritten_at, "tool_calls"),
+        ("tool", hermes_tool_result("fetch ok"), "call-fetch", None, "terminal", rewritten_at + 0.003, None),
+        (
+            "assistant",
+            "query",
+            None,
+            hermes_tool_calls(
+                ("call-query", "terminal"),
+                ("call-error", "terminal"),
+                ("call-read", "read_file"),
+            ),
+            None,
+            rewritten_at + 0.007,
+            "tool_calls",
+        ),
+        ("tool", hermes_tool_result("query ok"), "call-query", None, "terminal", rewritten_at + 0.011, None),
+        (
+            "tool",
+            hermes_tool_result("bad query", exit_code=1, error="no such column"),
+            "call-error",
+            None,
+            "terminal",
+            rewritten_at + 0.014,
+            None,
+        ),
+        ("tool", json.dumps({"content": "config"}), "call-read", None, "read_file", rewritten_at + 0.017, None),
+        ("assistant", "count", None, hermes_tool_calls(("call-count", "terminal")), None, rewritten_at + 0.020, "tool_calls"),
+        ("tool", hermes_tool_result("3"), "call-count", None, "terminal", rewritten_at + 0.023, None),
+        ("assistant", "compose", None, hermes_tool_calls(("call-compose", "terminal")), None, rewritten_at + 0.026, "tool_calls"),
+        ("tool", hermes_tool_result(""), "call-compose", None, "terminal", rewritten_at + 0.030, None),
+        ("assistant", "write", None, hermes_tool_calls(("call-write", "write_file")), None, rewritten_at + 0.033, "tool_calls"),
+        ("tool", json.dumps({"bytes_written": 1831}), "call-write", None, "write_file", rewritten_at + 0.037, None),
+        ("assistant", "verify", None, hermes_tool_calls(("call-verify", "terminal")), None, rewritten_at + 0.041, "tool_calls"),
+        ("tool", hermes_tool_result("1831 file.md"), "call-verify", None, "terminal", rewritten_at + 0.045, None),
+        ("assistant", "done", None, None, None, rewritten_at + 0.051, "stop"),
+    ]
+    for index, (role, content, call_id, tool_calls, tool_name, timestamp, finish) in enumerate(rows, start=1):
+        conn.execute(
+            """
+            INSERT INTO messages
+            (session_id, role, content, tool_call_id, tool_calls, tool_name,
+             timestamp, token_count, finish_reason, reasoning, reasoning_content,
+             platform_message_id, active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session_id,
+                role,
+                content,
+                call_id,
+                tool_calls,
+                tool_name,
+                timestamp,
+                None,
+                finish,
+                None,
+                None,
+                f"log-{index}",
+                1,
+            ),
+        )
+    conn.commit()
+    conn.close()
+    logs = path / "logs"
+    logs.mkdir()
+    (logs / "agent.log").write_text(hermes_agent_log_fixture(session_id), encoding="utf-8")
+    return db_path
+
+
+def hermes_tool_calls(*calls: tuple[str, str]) -> str:
+    return json.dumps(
+        [
+            {
+                "id": call_id,
+                "function": {"name": name, "arguments": "{}"},
+            }
+            for call_id, name in calls
+        ]
+    )
+
+
+def hermes_tool_result(output: str, exit_code: int = 0, error: str | None = None) -> str:
+    return json.dumps({"output": output, "exit_code": exit_code, "error": error})
+
+
+def hermes_fixture_epoch(value: str) -> float:
+    return datetime.strptime(value, "%Y-%m-%d %H:%M:%S.%f").timestamp()
+
+
+def hermes_agent_log_fixture(session_id: str) -> str:
+    return "\n".join(
+        [
+            f"2026-06-11 14:26:18,939 INFO [{session_id}] agent.turn_context: conversation turn: session={session_id}",
+            f"2026-06-11 14:26:25,195 INFO [{session_id}] agent.conversation_loop: API call #1: model=mimo-v2.5-pro provider=xiaomi in=19772 out=105 total=19877 latency=5.7s cache=1024/19772 (5%)",
+            f"2026-06-11 14:27:19,542 INFO [{session_id}] agent.tool_executor: tool terminal completed (53.89s, 2070 chars)",
+            f"2026-06-11 14:27:28,009 INFO [{session_id}] agent.conversation_loop: API call #2: model=mimo-v2.5-pro provider=xiaomi in=21091 out=274 total=21365 latency=8.5s cache=19712/21091 (93%)",
+            f"2026-06-11 14:27:28,072 INFO [{session_id}] agent.tool_executor: tool terminal completed (0.05s, 1953 chars)",
+            f"2026-06-11 14:27:29,164 WARNING [{session_id}] agent.tool_executor: Tool terminal returned error (0.08s): {{\"output\":\"bad\",\"exit_code\":1,\"error\":\"no such column\"}}",
+            f"2026-06-11 14:27:30,253 INFO [{session_id}] agent.tool_executor: tool read_file completed (0.08s, 986 chars)",
+            f"2026-06-11 14:27:38,564 INFO [{session_id}] agent.conversation_loop: API call #3: model=mimo-v2.5-pro provider=xiaomi in=22630 out=84 total=22714 latency=8.3s cache=21056/22630 (93%)",
+            f"2026-06-11 14:27:38,631 INFO [{session_id}] agent.tool_executor: tool terminal completed (0.05s, 46 chars)",
+            f"2026-06-11 14:27:46,318 INFO [{session_id}] agent.conversation_loop: API call #4: model=mimo-v2.5-pro provider=xiaomi in=22743 out=145 total=22888 latency=7.7s cache=22592/22743 (99%)",
+            f"2026-06-11 14:27:46,385 INFO [{session_id}] agent.tool_executor: tool terminal completed (0.05s, 45 chars)",
+            f"2026-06-11 14:28:08,868 INFO [{session_id}] agent.conversation_loop: API call #5: model=mimo-v2.5-pro provider=xiaomi in=22915 out=908 total=23823 latency=22.5s cache=22720/22915 (99%)",
+            f"2026-06-11 14:28:08,959 INFO [{session_id}] agent.tool_executor: tool write_file completed (0.08s, 299 chars)",
+            f"2026-06-11 14:28:14,160 INFO [{session_id}] agent.conversation_loop: API call #6: model=mimo-v2.5-pro provider=xiaomi in=23953 out=68 total=24021 latency=5.2s cache=22912/23953 (96%)",
+            f"2026-06-11 14:28:14,222 INFO [{session_id}] agent.tool_executor: tool terminal completed (0.05s, 120 chars)",
+            f"2026-06-11 14:28:20,759 INFO [{session_id}] agent.conversation_loop: API call #7: model=mimo-v2.5-pro provider=xiaomi in=24088 out=159 total=24247 latency=6.5s cache=23936/24088 (99%)",
+            f"2026-06-11 14:28:20,820 INFO [{session_id}] agent.conversation_loop: Turn ended: reason=text_response(finish_reason=stop) model=mimo-v2.5-pro",
+            "",
+        ]
+    )

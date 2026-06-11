@@ -53,6 +53,10 @@ def convert_atif_json_path(path: str) -> ConversionResult | None:
     parsed = read_atif_json_path(path)
     if parsed is None:
         return None
+    return convert_atif_trajectory(parsed)
+
+
+def convert_atif_trajectory(parsed: dict[str, Any]) -> ConversionResult:
     steps = parsed.get("steps")
     if not isinstance(steps, list):
         raise ValueError("ATIF JSON path input must contain a steps list")

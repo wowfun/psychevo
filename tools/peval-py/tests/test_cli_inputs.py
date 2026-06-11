@@ -199,6 +199,98 @@ label_prefix = "selected"
                         self.assertNotEqual(result, 0)
                         self.assertIn(message, stderr.getvalue())
 
+    def test_cli_infers_adapter_from_path_tokens_only_when_not_explicit(self) -> None:
+        from peval_py.cli import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            hermes_dir = tmp_path / ".hermes"
+            psychevo_dir = tmp_path / ".psychevo"
+            hermes_dir.mkdir()
+            psychevo_dir.mkdir()
+            hermes_path = hermes_dir / "common_session.jsonl"
+            psychevo_path = psychevo_dir / "psychevo_session.jsonl"
+            shutil.copy(FIXTURES / "common_session.jsonl", hermes_path)
+            shutil.copy(FIXTURES / "psychevo_session.jsonl", psychevo_path)
+
+            inferred_path_report = tmp_path / "inferred-path.json"
+            result = main(
+                [
+                    "view",
+                    "tr",
+                    "-p",
+                    str(hermes_path),
+                    "-p",
+                    str(psychevo_path),
+                    "-f",
+                    "json",
+                    "-o",
+                    str(inferred_path_report),
+                ]
+            )
+            self.assertEqual(result, 0)
+            payload = json.loads(inferred_path_report.read_text(encoding="utf-8"))
+            self.assertEqual(
+                [meta["adapter"] for meta in payload["trajectory_meta"]],
+                ["hermes", "psychevo"],
+            )
+
+            explicit_report = tmp_path / "explicit.json"
+            result = main(
+                [
+                    "view",
+                    "tr",
+                    "-a",
+                    "opencode",
+                    "-p",
+                    str(hermes_path),
+                    "-f",
+                    "json",
+                    "-o",
+                    str(explicit_report),
+                ]
+            )
+            self.assertEqual(result, 0)
+            payload = json.loads(explicit_report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["trajectory_meta"][0]["adapter"], "opencode")
+
+            create_hermes_db(hermes_dir / "state.db")
+            create_messages_db(psychevo_dir / "state.db")
+            inferred_db_report = tmp_path / "inferred-db.json"
+            result = main(
+                [
+                    "view",
+                    "tr",
+                    "-d",
+                    str(hermes_dir / "state.db"),
+                    "-d",
+                    str(psychevo_dir / "state.db"),
+                    "-s",
+                    "d1=hermes-old",
+                    "-s",
+                    "d2=db-a",
+                    "-f",
+                    "json",
+                    "-o",
+                    str(inferred_db_report),
+                ]
+            )
+            self.assertEqual(result, 0)
+            payload = json.loads(inferred_db_report.read_text(encoding="utf-8"))
+            self.assertEqual(
+                [meta["adapter"] for meta in payload["trajectory_meta"]],
+                ["hermes", "psychevo"],
+            )
+
+            ambiguous = tmp_path / "hermes" / "opencode" / "common_session.jsonl"
+            ambiguous.parent.mkdir(parents=True)
+            shutil.copy(FIXTURES / "common_session.jsonl", ambiguous)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                result = main(["view", "tr", "-p", str(ambiguous)])
+            self.assertNotEqual(result, 0)
+            self.assertIn("ambiguous adapter inference", stderr.getvalue())
+
 
     def test_cli_multi_db_keyed_sessions_and_mixed_sources(self) -> None:
         from peval_py.cli import main
@@ -291,9 +383,212 @@ label_prefix = "selected"
                         "-s",
                         "ses-old",
                     ]
-                )
+            )
             self.assertNotEqual(result, 0)
             self.assertIn("bare --session-id", stderr.getvalue())
+
+    def test_cli_db_session_list_and_index_selection(self) -> None:
+        from peval_py.cli import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            hermes_dir = tmp_path / ".hermes"
+            opencode_dir = tmp_path / ".opencode"
+            hermes_dir.mkdir()
+            opencode_dir.mkdir()
+            hermes_db = hermes_dir / "state.db"
+            opencode_db = opencode_dir / "opencode.db"
+            create_hermes_db(hermes_db)
+            create_opencode_db(opencode_db)
+            conn = sqlite3.connect(hermes_db)
+            conn.execute(
+                """
+                INSERT INTO sessions (id, title, started_at, ended_at)
+                VALUES ('1', 'Numeric Hermes', 1.0, 2.0)
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO messages (session_id, role, content, timestamp, active)
+                VALUES ('1', 'user', 'numeric prompt', 1.5, 1)
+                """
+            )
+            conn.commit()
+            conn.close()
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                result = main(["view", "tr", "-d", str(hermes_db), "--list"])
+            self.assertEqual(result, 0)
+            listing = stdout.getvalue()
+            self.assertIn("#  session_id", listing)
+            self.assertIn("1  hermes-latest", listing)
+            self.assertIn("Latest Hermes", listing)
+
+            index_report = tmp_path / "index.json"
+            result = main(
+                [
+                    "view",
+                    "tr",
+                    "-d",
+                    str(hermes_db),
+                    "-s",
+                    "#2",
+                    "-f",
+                    "json",
+                    "-o",
+                    str(index_report),
+                ]
+            )
+            self.assertEqual(result, 0)
+            payload = json.loads(index_report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["trajectory"][0]["session_id"], "hermes-old")
+
+            id_first_report = tmp_path / "id-first.json"
+            result = main(
+                [
+                    "view",
+                    "tr",
+                    "-d",
+                    str(hermes_db),
+                    "-s",
+                    "1",
+                    "-f",
+                    "json",
+                    "-o",
+                    str(id_first_report),
+                ]
+            )
+            self.assertEqual(result, 0)
+            payload = json.loads(id_first_report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["trajectory"][0]["session_id"], "1")
+            self.assertEqual(
+                payload["trajectory"][0]["steps"][-1]["message"],
+                "numeric prompt",
+            )
+
+            multi_report = tmp_path / "multi-index.json"
+            result = main(
+                [
+                    "view",
+                    "tr",
+                    "-d",
+                    str(hermes_db),
+                    "-d",
+                    str(opencode_db),
+                    "-s",
+                    "d1=#2",
+                    "-s",
+                    "d2=#2",
+                    "-f",
+                    "json",
+                    "-o",
+                    str(multi_report),
+                ]
+            )
+            self.assertEqual(result, 0)
+            payload = json.loads(multi_report.read_text(encoding="utf-8"))
+            self.assertEqual(
+                [item["session_id"] for item in payload["trajectory"]],
+                ["hermes-old", "ses-old"],
+            )
+
+    def test_cli_db_session_interactive_selection(self) -> None:
+        from peval_py.cli import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            hermes_dir = tmp_path / ".hermes"
+            hermes_dir.mkdir()
+            hermes_db = hermes_dir / "state.db"
+            create_hermes_db(hermes_db)
+
+            interactive_report = tmp_path / "interactive.json"
+            stdout = io.StringIO()
+            with (
+                contextlib.redirect_stdout(stdout),
+                patch("peval_py.cli.sys.stdin.isatty", return_value=True),
+                patch("builtins.input", return_value="1-2"),
+            ):
+                result = main(
+                    [
+                        "view",
+                        "tr",
+                        "-d",
+                        str(hermes_db),
+                        "-li",
+                        "-f",
+                        "json",
+                        "-o",
+                        str(interactive_report),
+                    ]
+                )
+            self.assertEqual(result, 0)
+            self.assertIn("hermes-latest", stdout.getvalue())
+            payload = json.loads(interactive_report.read_text(encoding="utf-8"))
+            self.assertEqual(
+                [item["session_id"] for item in payload["trajectory"]],
+                ["hermes-latest", "hermes-old"],
+            )
+
+            all_report = tmp_path / "interactive-all.json"
+            with (
+                contextlib.redirect_stdout(io.StringIO()),
+                patch("peval_py.cli.sys.stdin.isatty", return_value=True),
+                patch("builtins.input", return_value="all"),
+            ):
+                result = main(
+                    [
+                        "view",
+                        "tr",
+                        "-d",
+                        str(hermes_db),
+                        "-li",
+                        "-f",
+                        "json",
+                        "-o",
+                        str(all_report),
+                    ]
+                )
+            self.assertEqual(result, 0)
+            payload = json.loads(all_report.read_text(encoding="utf-8"))
+            self.assertEqual(len(payload["trajectory"]), 2)
+
+            blank_report = tmp_path / "blank.json"
+            with (
+                contextlib.redirect_stdout(io.StringIO()),
+                patch("peval_py.cli.sys.stdin.isatty", return_value=True),
+                patch("builtins.input", return_value=""),
+            ):
+                result = main(
+                    [
+                        "view",
+                        "tr",
+                        "-d",
+                        str(hermes_db),
+                        "--list-interactive",
+                        "-f",
+                        "json",
+                        "-o",
+                        str(blank_report),
+                    ]
+                )
+            self.assertEqual(result, 0)
+            self.assertFalse(blank_report.exists())
+
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                result = main(
+                    [
+                        "view",
+                        "tr",
+                        "-d",
+                        str(hermes_db),
+                        "--list-interactive",
+                    ]
+                )
+            self.assertNotEqual(result, 0)
+            self.assertIn("requires an interactive terminal", stderr.getvalue())
 
 
     def test_cli_view_accepts_exported_atif_json_path(self) -> None:
@@ -981,6 +1276,11 @@ label_prefix = "selected"
                 payload["trajectory"][0]["steps"][0]["message"],
                 "Hermes system prompt",
             )
+            self.assertEqual(
+                payload["trajectory_meta"][0]["timestamp_semantics"],
+                "order_only",
+            )
+            self.assertIsNone(payload["trajectory_meta"][0]["duration_ms"])
 
             psychevo_db = Path(tmp) / "psychevo-state.db"
             create_messages_db(psychevo_db)

@@ -6,6 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from peval_py.adapters.base import SessionInfo
 from peval_py.adapters.common import CommonMessageAdapter
 from peval_py.config import ToolConfig
 from peval_py.sources import MessageRecord, read_jsonl, read_sqlite_messages
@@ -37,6 +38,9 @@ class PsychevoAdapter(CommonMessageAdapter):
         result = self.convert(records, config)
         result.warnings.extend(warnings)
         return result
+
+    def list_sessions(self, path: str) -> list[SessionInfo]:
+        return list_psychevo_sessions(resolve_psychevo_db(path))
 
 
 def read_psychevo_db(
@@ -333,3 +337,23 @@ def select_session_id(path: Path, session_id: str | None) -> str:
     if row is None:
         raise ValueError("Psychevo DB contains no sessions")
     return str(row[0])
+
+
+def list_psychevo_sessions(path: Path) -> list[SessionInfo]:
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        rows = conn.execute(
+            """
+            SELECT id, title
+            FROM sessions
+            ORDER BY updated_at_ms DESC, ended_at_ms DESC, started_at_ms DESC, id DESC
+            """
+        ).fetchall()
+    except sqlite3.Error as exc:
+        raise ValueError(f"failed to read Psychevo DB: {exc}") from exc
+    finally:
+        conn.close()
+    return [
+        SessionInfo(session_id=str(row[0]), name=str(row[1]) if row[1] else None)
+        for row in rows
+    ]
