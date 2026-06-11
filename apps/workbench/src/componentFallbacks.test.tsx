@@ -44,8 +44,8 @@ describe("component fallback rendering", () => {
 
     expect(html).toContain("Old session");
     expect(html).not.toContain("entries");
-    expect(html).toContain("title=\"Collapse all projects\"");
-    expect(html).not.toContain("title=\"Expand all projects\"");
+    expect(html).toContain("title=\"Collapse all workspaces\"");
+    expect(html).not.toContain("title=\"Expand all workspaces\"");
   });
 
   it("renders pin and unpin controls inside the session actions menu", () => {
@@ -75,6 +75,27 @@ describe("component fallback rendering", () => {
     expect(html).toContain("title=\"Unpin\"");
     expect(html).toContain("title=\"Pin\"");
     expect(html).not.toContain("pevo-sessionActions");
+  });
+
+  it("renders workspace creation as a sessions header action", () => {
+    const html = renderToStaticMarkup(
+      <HistoryPanel
+        archived={false}
+        sessions={[sessionSummary({ id: "thread-1", title: "Workspace session" })]}
+        onArchive={noop}
+        onCreateWorkspace={noop}
+        onDelete={noop}
+        onExport={noop}
+        onNew={noop}
+        onRename={noop}
+        onRestore={noop}
+        onResume={noop}
+        onShare={noop}
+      />
+    );
+
+    expect(html).toContain("title=\"New Workspace\"");
+    expect(html.indexOf("title=\"New Workspace\"")).toBeLessThan(html.indexOf("title=\"Collapse all workspaces\""));
   });
 
   it("does not mark the first history row active without a current thread", () => {

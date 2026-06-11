@@ -78,6 +78,22 @@ pub(crate) struct ProjectContextConfig {
     pub(crate) instructions: ProjectContextInstructionMode,
 }
 
+pub const DEFAULT_WORKSPACE_ROOT: &str = "~/workspaces";
+pub const DEFAULT_WORKSPACE_NAME: &str = "general";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspacesConfig {
+    pub root: String,
+}
+
+impl Default for WorkspacesConfig {
+    fn default() -> Self {
+        Self {
+            root: DEFAULT_WORKSPACE_ROOT.to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ToolSelectionConfig {
     pub(crate) modes: BTreeMap<String, ToolModeConfig>,
@@ -239,6 +255,43 @@ pub(crate) fn load_run_config(options: &RunOptions, workdir: &Path) -> Result<Lo
         config,
         env: loaded.env,
     })
+}
+
+pub fn resolve_workspace_root(options: &RunOptions, _workdir: &Path) -> Result<PathBuf> {
+    let mut env_map = options
+        .inherited_env
+        .clone()
+        .unwrap_or_else(|| env::vars().collect());
+    let value = if let Some(config_path) = resolve_config_path(options, &env_map)? {
+        let value = load_toml_config_file(&config_path, true)?;
+        if let Some(parent) = config_path.parent() {
+            load_dotenv_file(&parent.join(".env"), &mut env_map)?;
+        }
+        value
+    } else {
+        let home = resolve_psychevo_home(&env_map)?;
+        let home_config = home.join(CONFIG_FILE_NAME);
+        if !home_config.exists() {
+            return Err(Error::Config(format!(
+                "Psychevo home is not initialized; run `pevo init` to create {}",
+                home_config.display()
+            )));
+        }
+        let value = load_toml_config_file(&home_config, true)?;
+        load_dotenv_file(&home.join(".env"), &mut env_map)?;
+        value
+    };
+    let root = value
+        .get("workspaces")
+        .map(parse_workspaces_config)
+        .transpose()?
+        .unwrap_or_default()
+        .root;
+    resolve_explicit_path(Path::new(&root), &env_map)
+}
+
+pub fn resolve_default_workspace_workdir(options: &RunOptions, workdir: &Path) -> Result<PathBuf> {
+    Ok(resolve_workspace_root(options, workdir)?.join(DEFAULT_WORKSPACE_NAME))
 }
 
 pub(crate) fn load_project_context_instruction_mode(

@@ -35,11 +35,7 @@ pub(crate) fn resolve_psychevo_home(
     env_map: &BTreeMap<String, String>,
     cwd: &Path,
 ) -> Result<PathBuf> {
-    if let Some(value) = env_value("PSYCHEVO_HOME", env_map) {
-        resolve_explicit_path(Path::new(&value), env_map, cwd)
-    } else {
-        resolve_explicit_path(Path::new("~/.psychevo"), env_map, cwd)
-    }
+    Ok(crate::profiles::resolve_active_profile(env_map, cwd)?.home)
 }
 
 pub(crate) fn env_path(
@@ -90,5 +86,22 @@ pub(crate) fn env_value(name: &str, env_map: &BTreeMap<String, String>) -> Optio
 }
 
 pub(crate) fn inherited_env() -> BTreeMap<String, String> {
-    env::vars().collect()
+    let mut env_map: BTreeMap<String, String> = env::vars().collect();
+    if let Ok(cwd) = env::current_dir()
+        && let Ok(profile) = crate::profiles::resolve_active_profile(&env_map, &cwd)
+    {
+        env_map.insert(
+            "PSYCHEVO_HOME".to_string(),
+            profile.home.display().to_string(),
+        );
+        env_map.insert(
+            crate::profiles::PROFILE_ENV.to_string(),
+            crate::profiles::profile_env_value(&profile),
+        );
+        env_map.insert(
+            crate::profiles::PROFILE_HOME_ENV.to_string(),
+            profile.home.display().to_string(),
+        );
+    }
+    env_map
 }

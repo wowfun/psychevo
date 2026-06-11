@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::io::{Error as IoError, ErrorKind, Read};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -36,7 +36,7 @@ use psychevo_runtime::{
     format_context_total_value, list_agents_value, list_skill_bundles,
     list_skills_value_with_options, load_agent_backend_configs, main_agent_default_metadata,
     main_agent_from_session_metadata, main_agent_metadata, render_session_export,
-    resolve_agent_definition, selected_configured_model, valid_agent_name,
+    resolve_agent_definition, resolve_workspace_root, selected_configured_model, valid_agent_name,
     view_agent_value_with_catalog,
 };
 use serde::{Deserialize, Serialize};
@@ -755,12 +755,14 @@ async fn handle_rpc(
             "cwd": scope.workdir,
             "scope": scope.to_wire_scope(),
             "source": scope.source,
+            "profile": gateway_profile_value(&state),
             "capabilities": {
                 "threads": true,
                 "turns": true,
                 "historyManagement": true,
                 "downloads": true,
                 "settingsWrite": "structured",
+                "workspaceCreate": true,
                 "memoryResources": "status_only"
             }
             }))
@@ -1014,6 +1016,10 @@ async fn handle_rpc(
             let scope = resolve_required_scope(&state, &auth, params.scope)?;
             workspace_diff_value(&scope, params.path.as_deref())
         }
+        "workspace/create" => {
+            let params = request.required_params::<wire::WorkspaceCreateParams>()?;
+            workspace_create_value(&state, &auth, params)
+        }
         "context/read" => {
             let params = request.required_params::<wire::ContextReadParams>()?;
             let scope = resolve_required_scope(&state, &auth, params.scope)?;
@@ -1240,6 +1246,21 @@ async fn handle_rpc(
         }
         method => Err(Error::Message(format!("method not found: {method}"))),
     }
+}
+
+fn gateway_profile_value(state: &WebState) -> Value {
+    let name = state
+        .inner
+        .inherited_env
+        .get("PSYCHEVO_PROFILE")
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("default");
+    json!({
+        "name": name,
+        "home": state.inner.home.display().to_string(),
+        "default": name == "default",
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -1865,6 +1886,52 @@ fn workspace_files_value(scope: &ResolvedScope) -> psychevo_runtime::Result<Valu
     })?)
 }
 
+fn workspace_create_value(
+    state: &WebState,
+    auth: &AuthContext,
+    params: wire::WorkspaceCreateParams,
+) -> psychevo_runtime::Result<Value> {
+    let dir_name = workspace_dir_name(&params.name)?;
+    let options = state.run_options(state.inner.workdir.clone(), None);
+    let root = canonicalize_workdir(&resolve_workspace_root(&options, &state.inner.workdir)?)?;
+    let workdir = canonicalize_workdir(&root.join(&dir_name))?;
+    if !workdir.starts_with(&root) {
+        return Err(Error::Message(
+            "workspace path is outside the configured workspace root".to_string(),
+        ));
+    }
+    let scope = ResolvedScope {
+        source: workdir_source(&workdir),
+        workdir,
+    };
+    update_browser_session_scope(state, auth, &scope);
+    Ok(serde_json::to_value(wire::WorkspaceCreateResult {
+        workdir: scope.workdir.display().to_string(),
+        scope: scope.to_wire_scope(),
+    })?)
+}
+
+fn workspace_dir_name(input: &str) -> psychevo_runtime::Result<String> {
+    let name = input.trim();
+    if name.is_empty() {
+        return Err(Error::Message(
+            "workspace name must not be empty".to_string(),
+        ));
+    }
+    if name.contains('/') || name.contains('\\') || name.contains('\0') {
+        return Err(Error::Message(
+            "workspace name must be a single directory name".to_string(),
+        ));
+    }
+    let mut components = Path::new(name).components();
+    match (components.next(), components.next()) {
+        (Some(Component::Normal(_)), None) => Ok(name.to_string()),
+        _ => Err(Error::Message(
+            "workspace name must be a single directory name".to_string(),
+        )),
+    }
+}
+
 fn collect_workspace_file_entries(
     root: &Path,
     dir: &Path,
@@ -1979,7 +2046,7 @@ fn resolve_workspace_relative_path(root: &Path, path: &str) -> psychevo_runtime:
     let canonical = candidate.canonicalize()?;
     if !canonical.starts_with(root) {
         return Err(Error::Message(
-            "workspace path is outside the project".to_string(),
+            "workspace path is outside the workspace".to_string(),
         ));
     }
     Ok(canonical)
@@ -3702,17 +3769,35 @@ mod tests {
     use std::ffi::OsStr;
 
     fn web_state() -> (tempfile::TempDir, WebState) {
+        web_state_with_env(BTreeMap::new())
+    }
+
+    fn web_state_with_env(
+        inherited_env: BTreeMap<String, String>,
+    ) -> (tempfile::TempDir, WebState) {
         let temp = tempfile::tempdir().expect("tempdir");
         let workdir = temp.path().join("work");
+        let home = temp.path().join("home");
         std::fs::create_dir_all(&workdir).expect("workdir");
+        let mut env = BTreeMap::from([
+            (
+                "HOME".to_string(),
+                temp.path().to_string_lossy().to_string(),
+            ),
+            (
+                "PSYCHEVO_HOME".to_string(),
+                home.to_string_lossy().to_string(),
+            ),
+        ]);
+        env.extend(inherited_env);
         let state = StateRuntime::open(temp.path().join("state.db")).expect("state");
         let gateway = Gateway::new(state);
         let config = GatewayWebServerConfig::new(
             gateway,
-            temp.path().join("home"),
+            home,
             workdir,
             None,
-            BTreeMap::new(),
+            env,
             temp.path().join("static"),
         );
         (temp, WebState::new(config))
@@ -3789,6 +3874,33 @@ mod tests {
 
         assert_eq!(bound.local_addr().ip(), occupied_addr.ip());
         assert_eq!(bound.local_addr().port(), occupied_addr.port() + 1);
+    }
+
+    #[tokio::test]
+    async fn initialize_reports_current_profile() {
+        let mut env = BTreeMap::new();
+        env.insert("PSYCHEVO_PROFILE".to_string(), "coder".to_string());
+        let (temp, state) = web_state_with_env(env);
+        let home = temp.path().join("home").display().to_string();
+        let (out_tx, _out_rx) = mpsc::unbounded_channel();
+
+        let value = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            out_tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!(1)),
+                method: "initialize".to_string(),
+                params: None,
+            },
+        )
+        .await
+        .expect("initialize");
+
+        assert_eq!(value["profile"]["name"], "coder");
+        assert_eq!(value["profile"]["home"], home);
+        assert_eq!(value["profile"]["default"], false);
     }
 
     #[test]
@@ -4080,6 +4192,88 @@ mod tests {
         assert_eq!(
             settings["project"]["path"],
             other_workdir.display().to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn browser_workspace_create_uses_configured_root_and_authorizes_workdir() {
+        let (temp, state) = web_state();
+        std::fs::create_dir_all(&state.inner.home).expect("home");
+        std::fs::write(
+            state.inner.home.join("config.toml"),
+            r#"
+[workspaces]
+root = "~/workspaces"
+"#,
+        )
+        .expect("config");
+        let browser_session_id = "browser-session".to_string();
+        state
+            .inner
+            .browser_sessions
+            .lock()
+            .expect("sessions")
+            .insert(
+                browser_session_id.clone(),
+                BrowserSession {
+                    workdir: state.inner.workdir.clone(),
+                    source: state.inner.source.clone(),
+                },
+            );
+        let auth = AuthContext::Browser {
+            session_id: browser_session_id,
+        };
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let created = handle_rpc(
+            state.clone(),
+            auth.clone(),
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!(1)),
+                method: "workspace/create".to_string(),
+                params: Some(json!({ "name": "Notes" })),
+            },
+        )
+        .await
+        .expect("workspace/create");
+        let workdir = temp
+            .path()
+            .join("workspaces")
+            .join("Notes")
+            .canonicalize()
+            .expect("created workdir");
+        let workdir_string = workdir.display().to_string();
+
+        assert_eq!(created["workdir"], workdir_string);
+        assert_eq!(created["scope"]["workdir"], workdir_string);
+
+        let settings = handle_rpc(
+            state,
+            auth,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!(2)),
+                method: "settings/read".to_string(),
+                params: Some(json!({ "workdir": workdir_string.clone() })),
+            },
+        )
+        .await
+        .expect("settings/read after workspace/create");
+
+        assert_eq!(settings["workdir"], workdir_string);
+        assert_eq!(settings["project"]["path"], workdir_string);
+    }
+
+    #[test]
+    fn workspace_dir_name_rejects_path_components() {
+        assert_eq!(workspace_dir_name(" notes ").expect("trimmed"), "notes");
+        let err = workspace_dir_name("../notes").expect_err("parent path rejected");
+        assert!(
+            err.to_string()
+                .contains("workspace name must be a single directory name")
         );
     }
 

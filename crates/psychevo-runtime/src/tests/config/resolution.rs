@@ -204,6 +204,81 @@ pub(crate) fn config_jsonc_is_ignored_when_toml_exists() {
 }
 
 #[test]
+pub(crate) fn workspace_root_defaults_to_home_workspaces() {
+    let temp = tempdir().expect("temp");
+    let options = base_options(&temp);
+    let config_dir = home_dir(&temp);
+    fs::create_dir_all(&config_dir).expect("config dir");
+    write_config(config_dir.join("config.toml"), "").expect("toml config");
+
+    let workdir = canonical_workdir(&options.workdir).expect("workdir");
+    let root = resolve_workspace_root(&options, &workdir).expect("workspace root");
+    let default_workdir =
+        resolve_default_workspace_workdir(&options, &workdir).expect("default workspace");
+
+    assert_eq!(root, temp.path().join("workspaces"));
+    assert_eq!(
+        default_workdir,
+        temp.path().join("workspaces").join("general")
+    );
+}
+
+#[test]
+pub(crate) fn workspace_root_uses_profile_config_without_workdir_overlay() {
+    let temp = tempdir().expect("temp");
+    let options = base_options(&temp);
+    let config_dir = home_dir(&temp);
+    let project_dir = options.workdir.join(".psychevo");
+    fs::create_dir_all(&config_dir).expect("config dir");
+    fs::create_dir_all(&project_dir).expect("project dir");
+    write_config(
+        config_dir.join("config.toml"),
+        r#"
+[workspaces]
+root = "~/shared-workspaces"
+"#,
+    )
+    .expect("home config");
+    write_config(
+        project_dir.join("config.toml"),
+        r#"
+[workspaces]
+root = "~/ignored-workspaces"
+"#,
+    )
+    .expect("project config");
+
+    let workdir = canonical_workdir(&options.workdir).expect("workdir");
+    let root = resolve_workspace_root(&options, &workdir).expect("workspace root");
+
+    assert_eq!(root, temp.path().join("shared-workspaces"));
+}
+
+#[test]
+pub(crate) fn empty_workspace_root_is_rejected() {
+    let temp = tempdir().expect("temp");
+    let options = base_options(&temp);
+    let config_dir = home_dir(&temp);
+    fs::create_dir_all(&config_dir).expect("config dir");
+    write_config(
+        config_dir.join("config.toml"),
+        r#"
+[workspaces]
+root = "  "
+"#,
+    )
+    .expect("home config");
+
+    let workdir = canonical_workdir(&options.workdir).expect("workdir");
+    let err = resolve_workspace_root(&options, &workdir).expect_err("empty root");
+
+    assert!(
+        err.to_string()
+            .contains("workspaces.root must not be empty")
+    );
+}
+
+#[test]
 pub(crate) fn project_context_config_parses_and_cli_override_wins() {
     let temp = tempdir().expect("temp");
     let mut options = base_options(&temp);

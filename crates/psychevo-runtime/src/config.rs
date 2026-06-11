@@ -32,6 +32,7 @@ pub(crate) struct RunConfig {
     pub(crate) sandbox: SandboxConfig,
     pub(crate) lsp: LspConfig,
     pub(crate) project_context: ProjectContextConfig,
+    pub(crate) workspaces: WorkspacesConfig,
     pub(crate) tools: ToolSelectionConfig,
     pub(crate) toolsets: BTreeMap<String, CustomToolsetConfig>,
     pub(crate) agent_backends: BTreeMap<String, AgentBackendConfig>,
@@ -40,9 +41,12 @@ pub(crate) struct RunConfig {
 // Configuration internals are split by loading, parsing, resolution, and catalog concerns.
 #[path = "config/types.rs"]
 pub(crate) mod config_types;
-pub use config_types::load_agent_backend_configs;
 #[allow(unused_imports)]
 pub(crate) use config_types::*;
+pub use config_types::{
+    DEFAULT_WORKSPACE_NAME, DEFAULT_WORKSPACE_ROOT, load_agent_backend_configs,
+    resolve_default_workspace_workdir, resolve_workspace_root,
+};
 #[path = "config/file_env.rs"]
 pub(crate) mod config_file_env;
 #[allow(unused_imports)]

@@ -86,6 +86,17 @@ pub const CLI_COMMANDS: &[CliCommandSpec] = &[
         status: CommandStatus::Active,
     },
     CliCommandSpec {
+        canonical: "profile",
+        aliases: &[],
+        usage: "pevo profile <command>",
+        summary: "manage local profiles",
+        surface: PEVO_CLI,
+        group: COMMANDS,
+        argument_kind: CommandArgumentKind::RequiredValue,
+        output_kind: CommandOutputKind::ProcessResult,
+        status: CommandStatus::Active,
+    },
+    CliCommandSpec {
         canonical: "agent",
         aliases: &[],
         usage: "pevo agent <command>",
@@ -667,8 +678,8 @@ pub(crate) mod tests {
         assert_eq!(
             names,
             [
-                "init", "run", "tui", "serve", "gateway", "acp", "agent", "skill", "tool",
-                "session", "model", "config", "auth", "stats", "context",
+                "init", "run", "tui", "serve", "gateway", "acp", "profile", "agent", "skill",
+                "tool", "session", "model", "config", "auth", "stats", "context",
             ]
         );
         assert!(

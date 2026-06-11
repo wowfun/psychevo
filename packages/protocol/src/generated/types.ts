@@ -64,7 +64,9 @@ export type SessionSummaryView = { id: string, workdir: string, project: Session
 
 export type InitializeParams = Record<string, never>;
 
-export type InitializeResult = { server: string, version: string, cwd: string, scope: GatewayRequestScope, source: GatewaySource, capabilities: Record<string, unknown>, };
+export type InitializeResult = { server: string, version: string, cwd: string, scope: GatewayRequestScope, source: GatewaySource, profile: GatewayProfileView | null, capabilities: Record<string, unknown>, };
+
+export type GatewayProfileView = { name: string, home: string, default: boolean, };
 
 export type ThreadStartParams = { scope: GatewayRequestScope, };
 
@@ -149,6 +151,10 @@ export type SettingsReadResult = { workdir: string, project: WorkbenchProjectVie
 export type WorkbenchProjectView = { path: string, displayPath: string, branch: string | null, };
 
 export type WorkbenchControlsView = { permissionMode: string, mode: string, agent: string | null, model: string | null, variant: string | null, permissionModeOptions: Array<string>, modeOptions: Array<string>, modelOptions: Array<string>, variantOptions: Array<string>, };
+
+export type WorkspaceCreateParams = { name: string, };
+
+export type WorkspaceCreateResult = { workdir: string, scope: GatewayRequestScope, };
 
 export type WorkspaceFileKind = "file" | "directory";
 

@@ -42,8 +42,11 @@ pub(crate) async fn run_serve_command(args: ServeArgs) -> Result<ExitCode> {
         .map(|path| resolve_explicit_path(path, &env_map, &cwd))
         .transpose()?;
 
+    let profile_home = home.clone();
     let state = StateRuntime::open(&db_path)?;
     let gateway = Gateway::new(state);
+    let profile_name = env_value(crate::profiles::PROFILE_ENV, &env_map)
+        .unwrap_or_else(|| crate::profiles::DEFAULT_PROFILE.to_string());
     let mut config =
         GatewayWebServerConfig::headless(gateway, home, workdir, config_path, env_map, token);
     config.bind_addr = args.bind;
@@ -60,6 +63,8 @@ pub(crate) async fn run_serve_command(args: ServeArgs) -> Result<ExitCode> {
             "readyzUrl": format!("{}/readyz", bound.url()),
             "pid": std::process::id(),
             "version": env!("CARGO_PKG_VERSION"),
+            "profile": profile_name,
+            "profileHome": profile_home,
         }))?
     );
     bound.run().await?;

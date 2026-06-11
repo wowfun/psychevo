@@ -39,6 +39,9 @@ pub(crate) fn parse_run_config(value: Value) -> Result<RunConfig> {
     if let Some(project_context) = object.get("project_context") {
         config.project_context = parse_project_context_config(project_context)?;
     }
+    if let Some(workspaces) = object.get("workspaces") {
+        config.workspaces = parse_workspaces_config(workspaces)?;
+    }
     config.permissions = parse_permission_config(object)?;
     if let Some(sandbox) = object.get("sandbox") {
         config.sandbox = parse_sandbox_config(sandbox)?;
@@ -51,6 +54,22 @@ pub(crate) fn parse_run_config(value: Value) -> Result<RunConfig> {
     }
     if let Some(agents) = object.get("agents") {
         config.agent_backends = parse_agent_backend_configs(agents)?;
+    }
+    Ok(config)
+}
+
+pub(crate) fn parse_workspaces_config(value: &Value) -> Result<WorkspacesConfig> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| Error::Config("workspaces must be an object".to_string()))?;
+    let mut config = WorkspacesConfig::default();
+    if let Some(root) = object.get("root") {
+        let root = root
+            .as_str()
+            .map(str::trim)
+            .filter(|root| !root.is_empty())
+            .ok_or_else(|| Error::Config("workspaces.root must not be empty".to_string()))?;
+        config.root = root.to_string();
     }
     Ok(config)
 }

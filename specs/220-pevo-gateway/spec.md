@@ -30,7 +30,8 @@ shells, and automation can parse them without scraping human text.
 
 `pevo web` is a top-level convenience alias for `pevo gateway open`. It keeps
 the same JSON-only stdout contract and defaults to opening the current working
-directory.
+directory. GUI or desktop-shell no-project entrypoints may request the default
+workspace workdir instead of the launcher cwd.
 
 Managed state lives under `$PSYCHEVO_HOME/gateway/`:
 
@@ -41,6 +42,10 @@ Managed state lives under `$PSYCHEVO_HOME/gateway/`:
 - `server.log`: appended stdout/stderr from the background server
 
 The directory is owner-only. `server.json` must not contain the token.
+`$PSYCHEVO_HOME` is the resolved active profile home from
+[057 Profiles](../057-profiles/spec.md). One managed Gateway server belongs to
+one active profile; lifecycle commands do not start, stop, or reuse managed
+servers from other profiles.
 
 `open` and `start` reuse the same server implementation as `pevo serve`.
 Managed mode passes internal flags to mount Web Shell assets, generated token
@@ -76,7 +81,9 @@ because it still exists.
 
 `pevo gateway open --dir <dir>` canonicalizes the workdir, ensures the managed
 server is running, records a launch entry, and opens the browser unless
-`--no-browser` is set. `--print-url` prints the one-time launch URL and expiry
+`--no-browser` is set. `pevo gateway open --default-workspace` resolves the
+configured workspace root, creates `<root>/general` on demand, and launches it
+as an ordinary workdir. `--print-url` prints the one-time launch URL and expiry
 metadata in the JSON response for Playwright and desktop shells.
 
 The launch URL carries only opaque launch material. It must not contain the raw
@@ -88,12 +95,13 @@ without a valid browser-session cookie returns a launch-expired diagnostic page
 with the recovery command.
 
 The managed cookie authorizes workdirs granted by a launch/open flow in the
-current server process and workdirs explicitly adopted from human-visible
-global session projects. A browser session may adopt another project by
-resuming a stored session or by starting a new draft from that project group in
-the Sessions browser, but it may not request arbitrary workdirs that have no
-visible stored session. Direct Bearer API clients may request any local workdir
-accessible to the Psychevo process.
+current server process, workdirs created by browser workspace-management RPCs,
+and workdirs explicitly adopted from human-visible global session groups. A
+browser session may adopt another workdir by resuming a stored session or by
+starting a new draft from that workdir group in the Sessions browser, but it
+may not request arbitrary workdirs that have no visible stored session. Direct
+Bearer API clients may request any local workdir accessible to the Psychevo
+process.
 
 Direct browser visits to the managed base URL without a valid browser-session
 cookie are not authorized Web Shell launches. They should return a local
@@ -118,6 +126,20 @@ The Web Shell source kind is `web`. Source identity is derived from source kind
 plus canonical workdir unless the client provides an explicit `rawId`. Multiple
 managed browser clients for the same workdir share one source/thread, active
 queue, event stream, and control surface.
+
+Gateway request scopes remain workdir-scoped and do not carry profile
+selectors. Workbench may display the profile reported by `initialize`, but the
+first-slice browser UI does not switch profiles inside an existing Gateway
+process. Launching another profile requires a separate `pevo -p <name> web` or
+equivalent process.
+
+Workspace-management RPCs are UI conveniences, not a second execution scope.
+`workspace/create` accepts a display name, creates a direct child directory
+under the configured workspace root, returns the canonical workdir and matching
+`GatewayRequestScope`, and updates the browser session to that scope. It must
+reject empty names, path separators, `.`/`..`, and names that resolve outside
+the workspace root. The created workdir then behaves exactly like any other
+workdir for sessions, files, diff, skills, agents, and `.psychevo` overlays.
 
 The Web Shell uses the same Gateway agent and command APIs as TUI. Its Agents
 panel lists local, generated peer, Markdown-shadowed peer, invalid, and
@@ -223,21 +245,21 @@ from the active history list.
 Workbench history is a global session browser. `thread/list` with no workdir
 filter returns all human-visible sessions from the local state database; the
 stored session workdir is used only for grouping and for the target scope on
-resume. Rows are grouped by project, with the current project first and all
-other projects ordered by latest session activity. Runtime `source` may appear
+resume. Rows are grouped by workdir, with the current workdir first and all
+other workdirs ordered by latest session activity. Runtime `source` may appear
 in diagnostics but must not appear in history rows/search or decide whether
 GUI, TUI, ACP, Web, or Desktop sessions are visible by default.
 
-When Workbench resumes a session from another project, it switches the active
+When Workbench resumes a session from another workdir, it switches the active
 scope to that session's stored workdir before accepting more input. The file
 tree, `@` completion, diff/status panes, agents, skills, and subsequent turns
-refresh against the resumed project. Cross-project resume must not splice the
+refresh against the resumed workdir. Cross-workdir resume must not splice the
 old session's transcript into the launch workdir. Archiving, restoring,
 renaming, and deleting sessions operate from the same global list and must
 respect running/current-session guards across every source.
-Starting a new session from another project group switches the active browser
-scope to that project's stored workdir and returns an empty source snapshot for
-that project, without first requiring the user to resume an older session.
+Starting a new session from another workdir group switches the active browser
+scope to that stored workdir and returns an empty source snapshot for that
+workdir, without first requiring the user to resume an older session.
 
 The left Sessions browser owns the session-history controls. It has one
 compact header with the history icon to the left of `Sessions`; it does not

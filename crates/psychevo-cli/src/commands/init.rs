@@ -9,6 +9,7 @@ use psychevo_runtime::SqliteStore;
 
 use crate::args::InitArgs;
 use crate::env::{inherited_env, resolve_psychevo_home};
+use crate::profiles::protect_env_file;
 
 pub(crate) const STARTER_CONFIG: &str = r#"model = "deepseek/deepseek-chat"
 
@@ -36,17 +37,22 @@ pub(crate) fn run_init_command(args: InitArgs) -> Result<ExitCode> {
     let sessions = home.join("sessions");
     let logs = home.join("logs");
     let cache = home.join("cache");
+    let skills = home.join("skills");
+    let agents = home.join("agents");
 
     fs::create_dir_all(&home)?;
     fs::create_dir_all(&sessions)?;
     fs::create_dir_all(&logs)?;
     fs::create_dir_all(&cache)?;
+    fs::create_dir_all(&skills)?;
+    fs::create_dir_all(&agents)?;
     if !config.exists() {
         fs::write(&config, STARTER_CONFIG)?;
     }
     if !env_file.exists() {
         fs::write(&env_file, STARTER_ENV)?;
     }
+    protect_env_file(&env_file)?;
     if args.reset_state {
         backup_state_files(&home, &state)?;
     }
@@ -59,6 +65,8 @@ pub(crate) fn run_init_command(args: InitArgs) -> Result<ExitCode> {
     println!("sessions: {}", sessions.display());
     println!("logs: {}", logs.display());
     println!("cache: {}", cache.display());
+    println!("skills: {}", skills.display());
+    println!("agents: {}", agents.display());
     Ok(ExitCode::SUCCESS)
 }
 

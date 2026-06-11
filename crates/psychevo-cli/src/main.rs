@@ -10,6 +10,7 @@ pub(crate) mod args;
 pub(crate) mod command_registry;
 pub(crate) mod commands;
 pub(crate) mod env;
+pub(crate) mod profiles;
 pub(crate) mod tui;
 
 use args::{Cli, Commands};
@@ -21,6 +22,7 @@ use commands::doctor::run_doctor_command;
 use commands::gateway::run_gateway_command;
 use commands::init::run_init_command;
 use commands::model::run_model_command;
+use commands::profile::run_profile_command;
 use commands::run::run_run_command;
 use commands::serve::run_serve_command;
 use commands::session::run_session_command;
@@ -47,9 +49,11 @@ pub(crate) async fn run() -> Result<ExitCode> {
             .all(|spec| spec.surface == command_registry::CommandSurface::PevoCli)
     );
     let cli = Cli::parse();
+    profiles::set_cli_profile_override(cli.profile.clone())?;
     match cli.command {
         None => run_default_command().await,
         Some(Commands::Init(args)) => run_init_command(args),
+        Some(Commands::Profile(args)) => run_profile_command(args),
         Some(Commands::Agent(args)) => run_agent_command(args).await,
         Some(Commands::Skill(args)) => run_skills_command(args),
         Some(Commands::Tool(args)) => run_tool_command(args),
@@ -67,7 +71,9 @@ pub(crate) async fn run() -> Result<ExitCode> {
                 );
                 return Ok(ExitCode::SUCCESS);
             }
-            psychevo_acp::run_stdio(psychevo_acp::AcpOptions::from_env()).await?;
+            let env_map = env::inherited_env();
+            let cwd = std::env::current_dir()?;
+            psychevo_acp::run_stdio(psychevo_acp::AcpOptions::from_env_map(env_map, cwd)).await?;
             Ok(ExitCode::SUCCESS)
         }
         Some(Commands::Tui(args)) => tui::run_tui_command(&args).await,

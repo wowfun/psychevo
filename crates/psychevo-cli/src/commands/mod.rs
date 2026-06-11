@@ -7,6 +7,7 @@ pub(crate) mod doctor;
 pub(crate) mod gateway;
 pub(crate) mod init;
 pub(crate) mod model;
+pub(crate) mod profile;
 pub(crate) mod run;
 pub(crate) mod serve;
 pub(crate) mod session;

@@ -13,6 +13,10 @@ impl AcpOptions {
     pub fn from_env() -> Self {
         let inherited_env = std::env::vars().collect::<BTreeMap<_, _>>();
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        Self::from_env_map(inherited_env, cwd)
+    }
+
+    pub fn from_env_map(inherited_env: BTreeMap<String, String>, cwd: PathBuf) -> Self {
         let home = env_path_or_default(&inherited_env, "PSYCHEVO_HOME", "~/.psychevo", &cwd);
         let db_path = env_path_or_default(
             &inherited_env,

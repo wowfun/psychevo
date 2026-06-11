@@ -9,6 +9,25 @@ export const systemSchemas = {
   InitializeResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "GatewayProfileView": {
+      "properties": {
+        "default": {
+          "type": "boolean"
+        },
+        "home": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "default",
+        "home",
+        "name"
+      ],
+      "type": "object"
+    },
     "GatewayRequestScope": {
       "properties": {
         "source": {
@@ -109,6 +128,16 @@ export const systemSchemas = {
     "cwd": {
       "type": "string"
     },
+    "profile": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayProfileView"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "scope": {
       "$ref": "#/definitions/GatewayRequestScope"
     },
@@ -131,6 +160,27 @@ export const systemSchemas = {
     "version"
   ],
   "title": "InitializeResult",
+  "type": "object"
+},
+  GatewayProfileView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "default": {
+      "type": "boolean"
+    },
+    "home": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "default",
+    "home",
+    "name"
+  ],
+  "title": "GatewayProfileView",
   "type": "object"
 },
   ReadyzResult: {

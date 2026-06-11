@@ -299,6 +299,10 @@ use smoke_cli_agent::*;
 mod smoke_cli_skills;
 #[allow(unused_imports)]
 use smoke_cli_skills::*;
+#[path = "smoke_cli/profile.rs"]
+mod smoke_cli_profile;
+#[allow(unused_imports)]
+use smoke_cli_profile::*;
 #[path = "smoke_cli/install.rs"]
 mod smoke_cli_install;
 #[allow(unused_imports)]

@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronRight,
   FileText,
+  FolderPlus,
   FolderTree,
   GitBranch,
   MessageSquare,
@@ -57,6 +58,7 @@ import {
   ThreadListResultSchema,
   ThreadTraceResultSchema,
   WorkspaceDiffResultSchema,
+  WorkspaceCreateResultSchema,
   WorkspaceFileReadResultSchema,
   WorkspaceFilesResultSchema,
   type ContextReadResult,
@@ -221,6 +223,7 @@ export function App() {
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [selectedVariant, setSelectedVariant] = useState<string>("none");
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFilesResult | null>(null);
+  const [workspaceDialogOpen, setWorkspaceDialogOpen] = useState(false);
   const [workspaceDiff, setWorkspaceDiff] = useState<WorkspaceDiffResult | null>(null);
   const [contextUsage, setContextUsage] = useState<ContextReadResult | null>(null);
   const [preview, setPreview] = useState<PreviewState>(null);
@@ -872,6 +875,24 @@ export function App() {
     setMobilePanel("transcript");
   }
 
+  async function createWorkspace(name: string) {
+    if (!client) {
+      return;
+    }
+    const created = WorkspaceCreateResultSchema.parse(await client.request("workspace/create", { name }));
+    const epoch = beginExplicitViewSwitch();
+    const nextSnapshot = parseThreadSnapshot(await client.request("thread/start", { scope: created.scope }));
+    if (viewEpochRef.current === epoch) {
+      setSnapshot(normalizeSnapshot(nextSnapshot));
+      setDraftSession(createHistoryDraftSession(epoch, created.workdir));
+      setArchived(false);
+      await adoptSnapshotScope(client, nextSnapshot);
+    }
+    await refreshHistory(client, false);
+    setMainView("transcript");
+    setMobilePanel("transcript");
+  }
+
   async function runHostAction(action: unknown, trigger: CommandTrigger = "commandsPanel") {
     const record = asRecord(action);
     switch (record.type) {
@@ -1117,6 +1138,16 @@ export function App() {
           <span>{error}</span>
         </div>
       )}
+      {workspaceDialogOpen && (
+        <WorkspaceCreateDialog
+          disabled={disabled}
+          onCancel={() => setWorkspaceDialogOpen(false)}
+          onCreate={(name) => void runAction(async () => {
+            await createWorkspace(name);
+            setWorkspaceDialogOpen(false);
+          })}
+        />
+      )}
 
       <nav className="mobileTabs" aria-label="Workbench panels">
         <button className={mobilePanel === "history" ? "is-selected" : ""} onClick={() => setMobilePanel("history")} type="button">
@@ -1205,6 +1236,7 @@ export function App() {
                   onNew={() => void runAction(async () => {
                     await startNewThread();
                   })}
+                  onCreateWorkspace={() => setWorkspaceDialogOpen(true)}
                   onNewInWorkdir={(workdir) => void runAction(async () => {
                     await startNewThread(workdir);
                   })}
@@ -1379,6 +1411,7 @@ export function App() {
               controls={controls}
               path={settings?.project?.displayPath ?? settings?.workdir ?? ""}
               permissionMode={permissionMode}
+              profile={init?.profile ?? null}
               onBranchClick={() => {
                 setRightTab("status");
                 setMobilePanel("status");
@@ -1461,6 +1494,70 @@ function LeftUtilityRail({
   );
 }
 
+function WorkspaceCreateDialog({
+  disabled,
+  onCancel,
+  onCreate
+}: {
+  disabled: boolean;
+  onCancel(): void;
+  onCreate(name: string): void;
+}) {
+  const [name, setName] = useState("");
+  const trimmed = name.trim();
+
+  return (
+    <div
+      className="modalBackdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onCancel();
+        }
+      }}
+      role="presentation"
+    >
+      <form
+        aria-label="New workspace"
+        className="workspaceDialog"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (trimmed && !disabled) {
+            onCreate(trimmed);
+          }
+        }}
+      >
+        <header>
+          <div className="workspaceDialogTitle">
+            <FolderPlus size={18} aria-hidden />
+            <h2>New Workspace</h2>
+          </div>
+          <button aria-label="Close" onClick={onCancel} title="Close" type="button">
+            <X size={15} />
+          </button>
+        </header>
+        <label>
+          <span>Name</span>
+          <input
+            autoFocus
+            disabled={disabled}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="general notes"
+            value={name}
+          />
+        </label>
+        <footer>
+          <button disabled={disabled} onClick={onCancel} type="button">
+            Cancel
+          </button>
+          <button disabled={disabled || !trimmed} type="submit">
+            Create
+          </button>
+        </footer>
+      </form>
+    </div>
+  );
+}
+
 function PinnedPanel({
   currentThreadId,
   disabled,
@@ -1488,7 +1585,7 @@ function PinnedPanel({
             <div className={`pinnedSessionRow ${session.id === currentThreadId ? "is-active" : ""}`} key={session.id}>
               <button disabled={disabled} onClick={() => onResume(session.id)} type="button">
                 <span>{session.displayTitle?.trim() || session.title?.trim() || shortSessionId(session.id)}</span>
-                <small>{session.project?.label ?? "project"}</small>
+                <small>{session.project?.label ?? "workspace"}</small>
               </button>
               <button aria-label="Unpin session" disabled={disabled} onClick={() => onUnpin(session.id)} title="Unpin" type="button">
                 <X size={13} />
@@ -1705,14 +1802,14 @@ function SearchPage({
         const seen = new Set<string>();
         for (const session of sessions) {
           const title = session.displayTitle?.trim() || session.title?.trim() || shortSessionId(session.id);
-          const project = session.project?.label ?? "";
-          const summaryHaystack = normalizeSearchText(`${session.id} ${title} ${session.preview ?? ""} ${project} ${session.workdir}`);
+          const workspace = session.project?.label ?? "";
+          const summaryHaystack = normalizeSearchText(`${session.id} ${title} ${session.preview ?? ""} ${workspace} ${session.workdir}`);
           if (summaryHaystack.includes(needle)) {
             next.push({
               excerpt: session.id,
               id: session.id,
               kind: "session",
-              subtitle: `${project || "project"} · ${session.visibleEntryCount ?? session.messageCount ?? 0} entries`,
+              subtitle: `${workspace || "workspace"} · ${session.visibleEntryCount ?? session.messageCount ?? 0} entries`,
               title
             });
             seen.add(`${session.id}:session`);
@@ -1759,7 +1856,7 @@ function SearchPage({
           <p>Search session ids, session names, and message text.</p>
         </div>
       </header>
-      <input autoFocus placeholder="Search current project" value={query} onChange={(event) => setQuery(event.target.value)} />
+      <input autoFocus placeholder="Search current workspace" value={query} onChange={(event) => setQuery(event.target.value)} />
       {query.trim() && results.length > 0 ? (
         <div className="searchResults">
           {results.map((result) => (
@@ -1772,7 +1869,7 @@ function SearchPage({
         </div>
       ) : (
         <div className="emptyLedger">
-          <span>{query.trim() ? (searching ? "Searching sessions..." : "No matches in this project.") : "Type to search local session material."}</span>
+          <span>{query.trim() ? (searching ? "Searching sessions..." : "No matches in this workspace.") : "Type to search local session material."}</span>
           <button onClick={onOpenTranscript} type="button">Back to transcript</button>
         </div>
       )}
@@ -1880,7 +1977,7 @@ function FilesPanel({
   }
 
   return (
-    <section className="filesPanel" aria-label="Project files">
+    <section className="filesPanel" aria-label="Workspace files">
       <header>
         <FolderTree size={17} />
         <div>
@@ -1911,7 +2008,7 @@ function FilesPanel({
             </button>
           );
         })}
-        {visibleFiles.length === 0 && <p>No project files.</p>}
+        {visibleFiles.length === 0 && <p>No workspace files.</p>}
       </div>
       {truncated && <footer>File tree truncated.</footer>}
     </section>
@@ -2194,6 +2291,7 @@ function ComposerStatusLine({
   controls,
   path,
   permissionMode,
+  profile,
   onBranchClick,
   onPathClick,
   onPermissionModeChange
@@ -2202,14 +2300,22 @@ function ComposerStatusLine({
   controls: SettingsReadResult["controls"];
   path: string;
   permissionMode: string;
+  profile: InitializeResult["profile"] | null;
   onBranchClick(): void;
   onPathClick(): void;
   onPermissionModeChange(value: string): void;
 }) {
+  const profileLabel = profile && !profile.default ? profile.name : null;
   return (
     <div className="composerStatusLine" aria-label="Composer status">
       <StatusSelect label="Permission mode" value={permissionMode} values={controls?.permissionModeOptions ?? ["default"]} onChange={onPermissionModeChange} />
-      <button className="pathStatusButton" onClick={onPathClick} title={path} type="button">{path || "project"}</button>
+      {profileLabel ? (
+        <span className="profileStatusPill" title={profile?.home ?? profileLabel}>
+          <Pin size={12} />
+          <span>{profileLabel}</span>
+        </span>
+      ) : null}
+      <button className="pathStatusButton" onClick={onPathClick} title={path} type="button">{path || "workspace"}</button>
       <button className="branchStatusButton" onClick={onBranchClick} type="button">
         <GitBranch size={13} />
         <span>{branch || "no-branch"}</span>

@@ -41,6 +41,8 @@ import {
   type TurnSteerParams,
   type WorkspaceDiffParams,
   type WorkspaceDiffResult,
+  type WorkspaceCreateParams,
+  type WorkspaceCreateResult,
   type WorkspaceFileReadParams,
   type WorkspaceFileReadResult,
   type WorkspaceFilesParams,
@@ -83,6 +85,7 @@ export interface GatewayRequestParams {
   "turn/interrupt": { sourceKey?: string | null; threadId?: string | null };
   "turn/start": TurnStartParams;
   "turn/steer": TurnSteerParams;
+  "workspace/create": WorkspaceCreateParams;
   "workspace/diff": WorkspaceDiffParams;
   "workspace/file/read": WorkspaceFileReadParams;
   "workspace/files": WorkspaceFilesParams;
@@ -114,6 +117,7 @@ export interface GatewayRequestResults {
   "turn/interrupt": TurnControlResult;
   "turn/start": TurnStartResult;
   "turn/steer": TurnControlResult;
+  "workspace/create": WorkspaceCreateResult;
   "workspace/diff": WorkspaceDiffResult;
   "workspace/file/read": WorkspaceFileReadResult;
   "workspace/files": WorkspaceFilesResult;

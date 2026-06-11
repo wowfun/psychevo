@@ -7,14 +7,24 @@ pub(crate) use super::*;
     long_about = "pevo runs Psychevo coding-agent tasks, opens the fullscreen terminal UI, and manages local sessions, skills, models, configuration, credentials, and usage data."
 )]
 pub(crate) struct Cli {
+    #[arg(
+        short = 'p',
+        long,
+        global = true,
+        value_name = "NAME",
+        help = "Use a named Psychevo profile for this invocation"
+    )]
+    pub(crate) profile: Option<String>,
     #[command(subcommand)]
     pub(crate) command: Option<Commands>,
 }
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Commands {
-    #[command(about = "Create or repair the global Psychevo home")]
+    #[command(about = "Create or repair the active Psychevo profile home")]
     Init(InitArgs),
+    #[command(about = "List, inspect, create, switch, and manage local profiles")]
+    Profile(ProfileArgs),
     #[command(about = "List, inspect, run, and manage agents", alias = "agents")]
     Agent(AgentArgs),
     #[command(about = "List, view, create, install, and toggle local skills")]
@@ -91,6 +101,103 @@ pub(crate) struct InitArgs {
         help = "Back up existing SQLite state files and create a fresh state database"
     )]
     pub(crate) reset_state: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct ProfileArgs {
+    #[command(subcommand)]
+    pub(crate) command: Option<ProfileCommand>,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum ProfileCommand {
+    #[command(about = "List local Psychevo profiles")]
+    List(ProfileListArgs),
+    #[command(about = "Show one local Psychevo profile")]
+    Show(ProfileShowArgs),
+    #[command(about = "Create a named Psychevo profile")]
+    Create(ProfileCreateArgs),
+    #[command(about = "Set the sticky active Psychevo profile")]
+    Use(ProfileUseArgs),
+    #[command(about = "Delete a named Psychevo profile")]
+    Delete(ProfileDeleteArgs),
+    #[command(about = "Rename a named Psychevo profile")]
+    Rename(ProfileRenameArgs),
+    #[command(about = "Create or remove a shell alias for a profile")]
+    Alias(ProfileAliasArgs),
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct ProfileListArgs {
+    #[arg(long, help = "Emit structured JSON instead of human text")]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct ProfileShowArgs {
+    #[arg(value_name = "NAME", help = "Profile to inspect; defaults to active")]
+    pub(crate) name: Option<String>,
+    #[arg(long, help = "Emit structured JSON instead of human text")]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct ProfileCreateArgs {
+    #[arg(value_name = "NAME", help = "Profile name to create")]
+    pub(crate) name: String,
+    #[arg(long, value_name = "TEXT", help = "Profile description")]
+    pub(crate) description: Option<String>,
+    #[arg(
+        long,
+        help = "Clone config, .env, skills, and agents from another profile"
+    )]
+    pub(crate) clone: bool,
+    #[arg(
+        long = "clone-from",
+        value_name = "NAME",
+        help = "Profile to clone from; defaults to the active profile"
+    )]
+    pub(crate) clone_from: Option<String>,
+    #[arg(
+        long,
+        value_name = "COMMAND",
+        num_args = 0..=1,
+        default_missing_value = "",
+        help = "Create a shell alias; without a value uses the profile name"
+    )]
+    pub(crate) alias: Option<String>,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct ProfileUseArgs {
+    #[arg(value_name = "NAME", help = "Profile name, or `default`")]
+    pub(crate) name: String,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct ProfileDeleteArgs {
+    #[arg(value_name = "NAME", help = "Named profile to delete")]
+    pub(crate) name: String,
+    #[arg(long, help = "Confirm profile deletion without prompting")]
+    pub(crate) yes: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct ProfileRenameArgs {
+    #[arg(value_name = "OLD", help = "Existing profile name")]
+    pub(crate) old: String,
+    #[arg(value_name = "NEW", help = "New profile name")]
+    pub(crate) new: String,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct ProfileAliasArgs {
+    #[arg(value_name = "NAME", help = "Profile to alias")]
+    pub(crate) profile: String,
+    #[arg(long, value_name = "COMMAND", help = "Alias command name")]
+    pub(crate) name: Option<String>,
+    #[arg(long, help = "Remove the alias instead of creating it")]
+    pub(crate) remove: bool,
 }
 
 #[derive(Debug, Parser)]
@@ -182,9 +289,15 @@ pub(crate) struct GatewayOpenArgs {
     #[arg(
         long = "dir",
         value_name = "DIR",
+        conflicts_with = "default_workspace",
         help = "Open this workdir in the Web Shell"
     )]
     pub(crate) dir: Option<PathBuf>,
+    #[arg(
+        long = "default-workspace",
+        help = "Open the configured default GUI workspace instead of the current workdir"
+    )]
+    pub(crate) default_workspace: bool,
     #[arg(
         long,
         value_name = "ADDR",

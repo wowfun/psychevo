@@ -672,9 +672,14 @@ pub(crate) fn bottom_status_context_for_width(
     let branch = bottom_status_branch(&ui.sidebar.branch);
     let context = bottom_status_context_usage(ui);
     let agent_hint = app.agent_breadcrumb_status();
+    let profile = bottom_status_profile(app);
 
     if let Some(context) = context.as_deref() {
-        let mut segments = vec![context, full_workdir.as_str()];
+        let mut segments = vec![context];
+        if let Some(profile) = profile.as_deref() {
+            segments.push(profile);
+        }
+        segments.push(full_workdir.as_str());
         if let Some(branch) = branch.as_deref() {
             segments.push(branch);
         }
@@ -687,6 +692,12 @@ pub(crate) fn bottom_status_context_for_width(
     }
 
     if let Some(context) = context.as_deref() {
+        if let Some(profile) = profile.as_deref()
+            && let Some(value) =
+                joined_segments_if_fits(&[context, profile, full_workdir.as_str()], available_width)
+        {
+            return Some(value);
+        }
         if let Some(value) =
             joined_segments_if_fits(&[context, full_workdir.as_str()], available_width)
         {
@@ -711,7 +722,11 @@ pub(crate) fn bottom_status_context_for_width(
         }
     }
 
-    let mut segments = vec![full_workdir.as_str()];
+    let mut segments = Vec::new();
+    if let Some(profile) = profile.as_deref() {
+        segments.push(profile);
+    }
+    segments.push(full_workdir.as_str());
     if let Some(branch) = branch.as_deref() {
         segments.push(branch);
     }
@@ -770,6 +785,14 @@ pub(crate) fn bottom_status_branch(branch: &str) -> Option<String> {
     } else {
         Some(branch.to_string())
     }
+}
+
+pub(crate) fn bottom_status_profile(app: &TuiApp) -> Option<String> {
+    app.env_map
+        .get(crate::profiles::PROFILE_ENV)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty() && *value != crate::profiles::DEFAULT_PROFILE)
+        .map(|value| format!("profile {value}"))
 }
 
 pub(crate) fn bottom_status_context_usage(ui: &FullscreenUi<'_>) -> Option<String> {

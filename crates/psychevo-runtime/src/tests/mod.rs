@@ -11,7 +11,8 @@ pub(crate) use std::time::{Duration, Instant};
 pub(crate) use crate::config::{
     ResolvedRunProvider, create_global_custom_provider, custom_provider_api_key_env,
     fetch_model_catalog_with_client, load_project_context_instruction_mode, load_run_config,
-    model_catalog_endpoint, model_catalog_providers, resolve_run_provider, set_default_model,
+    model_catalog_endpoint, model_catalog_providers, resolve_default_workspace_workdir,
+    resolve_run_provider, resolve_workspace_root, set_default_model,
     set_default_model_with_reasoning,
 };
 pub(crate) use crate::events::{PersistenceSink, project_agent_event, project_run_stream_event};

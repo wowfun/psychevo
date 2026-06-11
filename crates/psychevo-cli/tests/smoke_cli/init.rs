@@ -15,7 +15,10 @@ pub(crate) fn cli_help_lists_aligned_command_descriptions() {
     );
     let stdout = String::from_utf8(output.stdout).expect("stdout");
     assert!(stdout.contains("init"));
-    assert!(stdout.contains("Create or repair the global Psychevo home"));
+    assert!(stdout.contains("Create or repair the active Psychevo profile home"));
+    assert!(stdout.contains("--profile <NAME>"));
+    assert!(stdout.contains("profile"));
+    assert!(stdout.contains("List, inspect, create, switch, and manage local profiles"));
     assert!(stdout.contains("Run one coding-agent turn"));
     assert!(stdout.contains("Open the fullscreen terminal UI"));
     assert!(stdout.contains("Open the managed local Web UI"));
@@ -90,6 +93,16 @@ pub(crate) fn cli_help_describes_representative_commands_and_flags() {
         &[
             "List discoverable skills",
             "Install one or more skills from a source path",
+        ],
+    );
+    assert_help_contains(
+        temp.path(),
+        &["profile", "create", "--help"],
+        &[
+            "Create a named Psychevo profile",
+            "--clone",
+            "--clone-from <NAME>",
+            "--alias",
         ],
     );
     assert_help_contains(

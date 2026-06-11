@@ -22,6 +22,7 @@ import type {
   ThreadTraceResult,
   ThreadSnapshot,
   TurnResultPayload,
+  WorkspaceCreateResult,
   WorkspaceDiffResult,
   WorkspaceFileReadResult,
   WorkspaceFilesResult
@@ -54,6 +55,8 @@ export const TurnResultNotificationSchema =
 export const InitializeResultSchema = schema<InitializeResult>("InitializeResult");
 export const SettingsReadResultSchema =
   schema<SettingsReadResult>("SettingsReadResult");
+export const WorkspaceCreateResultSchema =
+  schema<WorkspaceCreateResult>("WorkspaceCreateResult");
 export const WorkspaceFilesResultSchema =
   schema<WorkspaceFilesResult>("WorkspaceFilesResult");
 export const WorkspaceFileReadResultSchema =

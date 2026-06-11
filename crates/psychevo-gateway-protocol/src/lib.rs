@@ -568,8 +568,18 @@ pub struct InitializeResult {
     pub cwd: String,
     pub scope: GatewayRequestScope,
     pub source: GatewaySource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<GatewayProfileView>,
     #[ts(type = "Record<string, unknown>")]
     pub capabilities: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayProfileView {
+    pub name: String,
+    pub home: String,
+    pub default: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -995,6 +1005,19 @@ pub struct WorkbenchControlsView {
     pub model_options: Vec<String>,
     #[serde(default)]
     pub variant_options: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceCreateParams {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceCreateResult {
+    pub workdir: String,
+    pub scope: GatewayRequestScope,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -1631,6 +1654,7 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(SessionSummaryView),
         exported_type!(InitializeParams),
         exported_type!(InitializeResult),
+        exported_type!(GatewayProfileView),
         exported_type!(ThreadStartParams),
         exported_type!(ThreadResumeParams),
         exported_type!(ThreadReadParams),
@@ -1673,6 +1697,8 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(SettingsReadResult),
         exported_type!(WorkbenchProjectView),
         exported_type!(WorkbenchControlsView),
+        exported_type!(WorkspaceCreateParams),
+        exported_type!(WorkspaceCreateResult),
         exported_type!(WorkspaceFileKind),
         exported_type!(WorkspaceFileEntry),
         exported_type!(WorkspaceFilesParams),

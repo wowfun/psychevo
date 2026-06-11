@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronRight,
   Download,
+  FolderPlus,
   History,
   MoreHorizontal,
   Pencil,
@@ -29,6 +30,7 @@ export interface HistoryPanelProps {
   onDelete(sessionId: string): void;
   onExport(sessionId: string): void;
   onNew(): void;
+  onCreateWorkspace?(): void;
   onNewInWorkdir?(workdir: string): void;
   onTogglePinned?(sessionId: string): void;
   onRename(sessionId: string, title: string): void;
@@ -101,7 +103,12 @@ export function HistoryPanel(props: HistoryPanelProps) {
           <h2>Sessions</h2>
         </div>
         <div className="pevo-iconRow">
-          <IconButton title={hasCollapsedProjects ? "Expand all projects" : "Collapse all projects"} onClick={toggleAllProjects} disabled={groupedSessions.length === 0}>
+          {props.onCreateWorkspace && (
+            <IconButton title="New Workspace" onClick={props.onCreateWorkspace} disabled={props.disabled}>
+              <FolderPlus size={17} />
+            </IconButton>
+          )}
+          <IconButton title={hasCollapsedProjects ? "Expand all workspaces" : "Collapse all workspaces"} onClick={toggleAllProjects} disabled={groupedSessions.length === 0}>
             {hasCollapsedProjects ? <ChevronDown size={17} /> : <ChevronRight size={17} />}
           </IconButton>
         </div>
@@ -374,7 +381,7 @@ function sessionTime(session: SessionSummary): number {
 
 function projectLabelFromWorkdir(workdir: string): string {
   const parts = workdir.split(/[\\/]/).filter(Boolean);
-  return parts.at(-1) ?? "project";
+  return parts.at(-1) ?? "workspace";
 }
 
 function shortId(value: string): string {

@@ -20,6 +20,7 @@ product-level environment variables.
 - `pevo tui` product positioning
 - `pevo acp` product positioning
 - `pevo skill` product positioning
+- `pevo profile` product positioning
 - local session, model, config, and auth inspection/maintenance commands
 - local session export/share artifacts
 
@@ -34,10 +35,12 @@ Out of scope:
 
 ## Psychevo Home
 
-`PSYCHEVO_HOME` is the single global directory concept for the `pevo` product
-CLI. When unset, it defaults to `~/.psychevo`. `~` expands to the user's home
-directory, and relative `PSYCHEVO_HOME` values resolve relative to the process
-cwd.
+`PSYCHEVO_HOME` is the resolved active profile home for the `pevo` product CLI.
+When no named profile is active, it defaults to `~/.psychevo`. Profile
+resolution, named profile layout, sticky selection, and `-p/--profile` behavior
+are defined by [057 Profiles](../057-profiles/spec.md). `~` expands to the
+user's home directory, and relative `PSYCHEVO_HOME` values resolve relative to
+the process cwd.
 
 The initialized home tree contains:
 
@@ -47,6 +50,11 @@ The initialized home tree contains:
 - `sessions/`
 - `logs/`
 - `cache/`
+- `skills/`
+- `agents/`
+
+Named profiles additionally contain `profile.toml` when created through
+`pevo profile create`.
 
 `state.db` is the only first-slice session/message store. The reserved
 `sessions/` directory is not used for JSON or JSONL transcript sidecars in this
@@ -76,6 +84,7 @@ Implemented first-slice commands:
 - `pevo doctor`
 - `pevo setup`
 - `pevo acp`
+- `pevo profile`
 - `pevo skill`
 - `pevo stats`
 - `pevo context`
@@ -95,6 +104,11 @@ expose sensitive reconstructed prompt material.
 
 `pevo skill` is the only skill command family name. The obsolete plural
 `pevo skills` is not accepted.
+
+`pevo -p, --profile <name>` selects a named Psychevo profile for the entire
+command invocation. It does not change the workspace/workdir protocol scope.
+Profile selection is resolved before subcommand execution and before Gateway or
+ACP child processes are launched.
 
 `pevo` with no subcommand is the interactive default entrypoint. When stdin
 and stdout are both terminals, it is equivalent to `pevo tui`. When either side
@@ -175,6 +189,10 @@ In non-terminal stdin/stdout it exits without prompting and points users to
 implementing protocol handling in `psychevo-cli`.
 `pevo acp --setup` runs provider setup and exits without starting the stdio
 server. It accepts the same setup flags as `pevo auth setup`.
+
+`pevo profile` owns local profile list/show/create/use/delete/rename/alias
+commands. Profile behavior, metadata, clone rules, and alias wrappers are
+defined by [057 Profiles](../057-profiles/spec.md).
 
 `pevo skill` owns the singular skill hub/config/list/view router. With no
 subcommand it shows help. `list` and `view` are read operations; `audit`

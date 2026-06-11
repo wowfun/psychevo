@@ -412,24 +412,31 @@ groups, context usage, and changed-file lists are list-like content on the
 ordinary pane background. They should not render permanent row cards, heavy
 outer panel borders, or filled containers just to separate adjacent controls.
 
-Desktop uses a persistent left history/project pane, center
+Desktop uses a persistent left history/workdir pane, center
 transcript/composer, optional inline center preview split, and a right
 Status/Files inspector that is collapsed by default on Web startup. The composer
 footer carries Agent, Plan, model, variant, context usage, and submit/interrupt
-controls; the quieter status line below carries permission mode, project path,
-and branch. The context item is a compact graphical meter with hover/click
+controls; the quieter status line below carries permission mode, workdir path,
+and Git branch when available. The context item is a compact graphical meter with hover/click
 details, not a token table. Right Status changed-file rows open a read-only diff
 preview in the center split. Diff and code preview panes must remain readable in
 both dark and light appearances; dark code surfaces use dedicated code text
 tokens rather than inheriting ordinary page ink. Permission approval and clarify
 requests render in the composer area, where TUI-style bottom interaction lives,
 and must not be displaced into Status, Files, Debug, or passive metrics.
-Project-group ordering in the Sessions pane is based on actual session or
+Workdir-group ordering in the Sessions pane is based on actual session or
 local draft recency, with label as a deterministic tie-breaker. Selecting or
-resuming a session in a lower project marks that row active but must not lift
-the project group to the top of the Sessions pane. Collapsed project groups
+resuming a session in a lower workdir marks that row active but must not lift
+the workdir group to the top of the Sessions pane. Collapsed workdir groups
 remain a compact top-stacked list with stable row spacing; empty available space
 belongs below the list and must not be distributed between collapsed projects.
+Workdir group labels set the hierarchy for the Sessions list; session titles
+must not render larger or visually heavier than their workdir label. Active
+session rows use a quiet background step for selection instead of oversized
+typography. Session titles are visually nested under their workdir group label
+with a minimal child-row indent instead of starting to the left of the group
+label; the indent should clarify ownership without making the list feel
+stair-stepped.
 The Sessions and Transcript scrollers reserve a stable gutter so surrounding
 layout does not shift, but their scrollbar thumbs stay hidden until the
 scrolling surface itself is hovered, keyboard-focused, or actively scrolling.
@@ -444,8 +451,13 @@ delete controls live behind that secondary More menu instead of rendering as a
 permanent action strip under the session name. Local draft rows do not expose
 session management actions until they become persisted sessions.
 Workbench chrome uses `Psychevo` as the visible product name. Project identity
-belongs in the project/session grouping and settings detail surfaces, not as a
-subtitle under the product brand. The Settings center page exposes an explicit
+belongs in the workdir/session grouping and settings detail surfaces, not as a
+subtitle under the product brand. GUI-created workspaces and opened projects
+are both ordinary workdirs; UI may show project affordances such as Git branch
+only when the current workdir supports them. Creating a GUI workspace is an
+icon-only Sessions header action immediately to the left of the
+expand/collapse-all Sessions control, not a standalone primary left-nav item.
+The Settings center page exposes an explicit
 icon-only return/close control that switches back to the Transcript, carries a
 hover tooltip, and does not require users to infer the left utility icon as a
 close action. The left sidebar collapse

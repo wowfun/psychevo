@@ -136,6 +136,129 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   border-radius: var(--pevo-radius);
 }
 
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: color-mix(in oklch, var(--pevo-bg), transparent 30%);
+  backdrop-filter: blur(6px);
+}
+
+.workspaceDialog {
+  display: grid;
+  width: min(420px, calc(100vw - 32px));
+  min-width: 0;
+  gap: 14px;
+  padding: 14px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius);
+  box-shadow: var(--pevo-shadow-popover);
+}
+
+.workspaceDialog header,
+.workspaceDialog footer,
+.workspaceDialogTitle {
+  display: flex;
+  align-items: center;
+}
+
+.workspaceDialog header {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.workspaceDialogTitle {
+  min-width: 0;
+  gap: 8px;
+}
+
+.workspaceDialog h2 {
+  overflow: hidden;
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspaceDialog header button {
+  display: grid;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.workspaceDialog label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--pevo-muted);
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
+.workspaceDialog input {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 10px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel-muted);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.workspaceDialog footer {
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.workspaceDialog footer button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 76px;
+  min-height: 34px;
+  padding: 0 12px;
+  color: var(--pevo-ink);
+  font-weight: 650;
+  background: var(--pevo-panel-muted);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.workspaceDialog footer button[type="submit"] {
+  color: white;
+  background: var(--pevo-accent);
+  border-color: color-mix(in oklch, var(--pevo-accent), black 12%);
+}
+
+.workspaceDialog button:disabled,
+.workspaceDialog input:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+@media (hover: hover) {
+  .workspaceDialog header button:hover,
+  .workspaceDialog footer button:hover:not(:disabled) {
+    color: var(--pevo-ink);
+    border-color: color-mix(in oklch, var(--pevo-border), white 18%);
+  }
+}
+
 .mobileTabs {
   display: none;
 }
@@ -475,7 +598,15 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   padding: 0 0 8px;
 }
 
+.historyColumn .pevo-sessionGroup {
+  gap: 0;
+}
+
 .historyColumn .pevo-sessionRow {
+  min-height: 24px;
+  padding-top: 1px;
+  padding-bottom: 1px;
+  padding-left: calc(var(--left-nav-icon-column) + var(--left-nav-gap) - 3px);
   background: transparent;
   border-color: transparent;
 }
@@ -488,6 +619,7 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 .historyColumn .pevo-sessionGroupHeader,
 .historyColumn .pevo-sessionGroupToggle {
   color: var(--pevo-nav-muted);
+  font-size: var(--left-nav-font-size);
 }
 
 .historyColumn .pevo-sessionGroupToggle span,
@@ -495,10 +627,25 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   color: var(--pevo-nav-text);
 }
 
+.historyColumn .pevo-sessionGroupToggle span {
+  font-weight: 650;
+}
+
+.historyColumn .pevo-sessionTitle {
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
 .historyColumn .pevo-sessionTime,
 .historyColumn .pevo-muted,
 .historyColumn .pevo-sessionMenu summary {
   color: var(--pevo-nav-muted);
+}
+
+.historyColumn .pevo-sessionMenu summary {
+  width: 22px;
+  height: 22px;
 }
 
 .statusColumn {
@@ -1277,6 +1424,22 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 
 .statusSelect[data-status="variant"] select {
   max-width: 78px;
+}
+
+.profileStatusPill {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 4px;
+  max-width: 120px;
+  min-width: 0;
+  color: var(--pevo-muted);
+}
+
+.profileStatusPill span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .composerSubmitControls .statusSelect[data-status="model"] select {

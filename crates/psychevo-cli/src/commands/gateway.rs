@@ -9,7 +9,7 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 use std::os::unix::process::CommandExt;
 
 use anyhow::{Context, Result, anyhow};
-use psychevo_runtime::canonicalize_workdir;
+use psychevo_runtime::{canonicalize_workdir, resolve_default_workspace_workdir};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -128,6 +128,7 @@ pub(crate) async fn run_gateway_command(args: GatewayArgs) -> Result<ExitCode> {
         None => {
             open(GatewayOpenArgs {
                 dir: None,
+                default_workspace: false,
                 bind: None,
                 no_browser: false,
                 print_url: false,
@@ -149,10 +150,7 @@ pub(crate) async fn open(args: GatewayOpenArgs) -> Result<ExitCode> {
     }
     let bind_policy = ManagedBindPolicy::new(args.bind);
     let state = ensure_started(&ctx, bind_policy, &static_dir.path).await?;
-    let workdir = match &args.dir {
-        Some(dir) => canonicalize_workdir(&resolve_explicit_path(dir, &ctx.env_map, &ctx.cwd)?)?,
-        None => canonicalize_workdir(&ctx.cwd)?,
-    };
+    let workdir = resolve_open_workdir(&ctx, &args)?;
     let launch = create_launch(&state, &ctx.paths, &workdir).await?;
     if !args.no_browser {
         let _ = open_browser(launch.open_url.as_str());
@@ -162,6 +160,8 @@ pub(crate) async fn open(args: GatewayOpenArgs) -> Result<ExitCode> {
         "pid": state.pid,
         "baseUrl": state.base_url,
         "workdir": workdir,
+        "profile": ctx.profile_name,
+        "profileHome": ctx.home,
         "openedBrowser": !args.no_browser,
     });
     if args.print_url {
@@ -170,6 +170,23 @@ pub(crate) async fn open(args: GatewayOpenArgs) -> Result<ExitCode> {
         output["openUrl"] = Value::String(launch.open_url);
     }
     print_json(output)
+}
+
+fn resolve_open_workdir(ctx: &GatewayContext, args: &GatewayOpenArgs) -> Result<PathBuf> {
+    if args.default_workspace {
+        let options = ctx.run_options(ctx.cwd.clone())?;
+        return Ok(canonicalize_workdir(&resolve_default_workspace_workdir(
+            &options, &ctx.cwd,
+        )?)?);
+    }
+    match &args.dir {
+        Some(dir) => Ok(canonicalize_workdir(&resolve_explicit_path(
+            dir,
+            &ctx.env_map,
+            &ctx.cwd,
+        )?)?),
+        None => Ok(canonicalize_workdir(&ctx.cwd)?),
+    }
 }
 
 async fn start(args: GatewayStartArgs) -> Result<ExitCode> {
@@ -188,19 +205,28 @@ async fn start(args: GatewayStartArgs) -> Result<ExitCode> {
         "readyzUrl": state.readyz_url,
         "startedAtMs": state.started_at_ms,
         "version": state.version,
+        "profile": ctx.profile_name,
+        "profileHome": ctx.home,
     }))
 }
 
 async fn status() -> Result<ExitCode> {
     let ctx = GatewayContext::load()?;
-    let status = managed_status(&ctx.paths)?;
+    let mut status = managed_status(&ctx.paths)?;
+    status["profile"] = Value::String(ctx.profile_name);
+    status["profileHome"] = Value::String(ctx.home.display().to_string());
     print_json(status)
 }
 
 async fn stop() -> Result<ExitCode> {
     let ctx = GatewayContext::load()?;
     let stopped = stop_managed(&ctx.paths)?;
-    print_json(json!({"ok": true, "stopped": stopped}))
+    print_json(json!({
+        "ok": true,
+        "stopped": stopped,
+        "profile": ctx.profile_name,
+        "profileHome": ctx.home,
+    }))
 }
 
 async fn restart(args: GatewayStartArgs) -> Result<ExitCode> {
@@ -220,12 +246,16 @@ async fn restart(args: GatewayStartArgs) -> Result<ExitCode> {
         "readyzUrl": state.readyz_url,
         "startedAtMs": state.started_at_ms,
         "version": state.version,
+        "profile": ctx.profile_name,
+        "profileHome": ctx.home,
         "restarted": true,
     }))
 }
 
 struct GatewayContext {
     cwd: PathBuf,
+    home: PathBuf,
+    profile_name: String,
     env_map: std::collections::BTreeMap<String, String>,
     paths: ManagedPaths,
 }
@@ -235,6 +265,8 @@ impl GatewayContext {
         let env_map = inherited_env();
         let cwd = env::current_dir()?;
         let home = resolve_psychevo_home(&env_map, &cwd)?;
+        let profile_name = env_value(crate::profiles::PROFILE_ENV, &env_map)
+            .unwrap_or_else(|| crate::profiles::DEFAULT_PROFILE.to_string());
         let config_path = env_path("PSYCHEVO_CONFIG", &env_map, &cwd)?;
         let bypass_home = config_path.is_some() && env_value("PSYCHEVO_DB", &env_map).is_some();
         if !bypass_home {
@@ -244,8 +276,41 @@ impl GatewayContext {
         ensure_managed_dir(&paths)?;
         Ok(Self {
             cwd,
+            home,
+            profile_name,
             env_map,
             paths,
+        })
+    }
+
+    fn run_options(&self, workdir: PathBuf) -> Result<psychevo_runtime::RunOptions> {
+        Ok(psychevo_runtime::RunOptions {
+            state: psychevo_runtime::StateRuntime::open(self.home.join("state.db"))?,
+            workdir,
+            snapshot_root: Some(self.home.join("snapshots")),
+            session: None,
+            continue_latest: false,
+            prompt: String::new(),
+            image_inputs: Vec::new(),
+            extract_prompt_image_sources: true,
+            prompt_display: None,
+            max_context_messages: None,
+            config_path: None,
+            project_context_override: None,
+            model: None,
+            reasoning_effort: None,
+            include_reasoning: false,
+            mode: psychevo_runtime::RunMode::Default,
+            permission_mode: None,
+            approval_mode: None,
+            approval_handler: None,
+            clarify_enabled: false,
+            inherited_env: Some(self.env_map.clone()),
+            agent: None,
+            no_agents: false,
+            no_skills: false,
+            skill_inputs: Vec::new(),
+            mcp_servers: Vec::new(),
         })
     }
 }
@@ -308,6 +373,9 @@ fn spawn_serve(
     }
     command
         .stdin(Stdio::null())
+        .env("PSYCHEVO_HOME", &ctx.home)
+        .env(crate::profiles::PROFILE_ENV, &ctx.profile_name)
+        .env(crate::profiles::PROFILE_HOME_ENV, &ctx.home)
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(log_err));
     #[cfg(unix)]
