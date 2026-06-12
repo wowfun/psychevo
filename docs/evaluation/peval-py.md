@@ -345,22 +345,35 @@ Leaderboard, Trajectory Overview, and the selected Trial trajectory keep the
 static report order and styling.
 
 Serve UI mode only adds web-only controls around that shared body. It shows a
-compact source/status toolbar and opens source management in a modal for local
-paths, SQLite DBs, input tables, JSONL uploads, ATIF JSON uploads, and report
-JSON uploads. In the Leaderboard, web UI mode may add row checkboxes for export
-selection and a split export control in the section header. Row clicks still
-select the Trial; checkbox clicks only control export scope. Exports use
+compact source/status toolbar and opens source management in a modal for
+Session/ATIF paths, SQLite DBs, input tables, JSONL uploads, ATIF JSON uploads,
+and report JSON uploads. The path and DB fields accept multiple pasted paths;
+quote paths that contain spaces. Adapter controls are compact dropdowns in each
+form's action row next to the add/upload action and default to `auto`, which
+uses the same inference/default adapter rules as the CLI. Failed imports show
+the server error and are not saved as sources. Sources can be archived for later
+restore or deleted from peval-py state without deleting the original file or
+database. Source import forms and Timeline diagnostic sections use transparent
+report-integrated shells, while inputs and menus keep solid readable surfaces.
+
+In the Leaderboard, web UI mode may add row checkboxes for export selection and
+one `Export` menu with Table, JSON Report, and HTML Report choices. Row clicks
+still select the Trial; checkbox clicks only control export scope. Exports use
 visible checked rows when any currently visible row is checked, otherwise they
 use the current filtered and sorted visible rows. JSON and HTML exports follow
-the same row scope as CSV table exports.
+the same row scope as table exports. Export and table filter menus close when
+clicking outside them. Long Trajectory Overview rows wrap nodes onto additional
+lines. Timeline Waterfall and Timeline Detail Table sections are collapsible,
+and clicking user/system markers or timed rows opens the corresponding Step
+details drawer.
 
-For SQLite DB sources, the modal includes an Inspect flow. Enter or paste the DB
-path, optionally type an adapter, and click Inspect DB. Without an explicit
+For SQLite DB sources, the modal includes an Inspect flow. Enter or paste one
+DB path, optionally choose an adapter, and click Inspect DB. Without an explicit
 adapter, `serve` uses the same path-token adapter inference as `view tr -d`;
 paths under `.hermes/`, `.psychevo/`, or `.opencode/` infer those adapters. If
 the path cannot be inferred or matches multiple adapters, choose the adapter and
 inspect again. Selected sessions are saved as independent refreshable sources,
-so each can be archived, restored, or refreshed on its own.
+so each can be archived, deleted, or refreshed on its own.
 
 ## Localized HTML Reports
 

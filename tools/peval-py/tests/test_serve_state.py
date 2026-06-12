@@ -241,6 +241,108 @@ class PevalPyServeStateTests(unittest.TestCase):
                 thread.join(timeout=5)
                 store.close()
 
+    def test_http_sources_batch_path_quotes_failure_and_delete(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp))
+            source_a = root / "common one.jsonl"
+            source_b = root / "common_two.jsonl"
+            shutil.copy(FIXTURES / "common_session.jsonl", source_a)
+            shutil.copy(FIXTURES / "common_session.jsonl", source_b)
+            config = ToolConfig(adapter="opencode")
+            store = open_workspace_state(str(root))
+            server = LocalHTTPServer(
+                ("127.0.0.1", 0),
+                make_handler(store, config),
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            port = server.server_port
+            origin = f"http://127.0.0.1:{port}"
+            try:
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    "/api/sources",
+                    {"path": '"common one.jsonl" common_two.jsonl', "adapter": "auto"},
+                    origin=origin,
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(len(body["sources"]), 2)
+                self.assertEqual(len(body["report"]["trajectory"]), 2)
+                source_keys = [source["source_key"] for source in body["sources"]]
+                log_count = store.conn.execute(
+                    "SELECT COUNT(*) FROM peval_py_refresh_log"
+                ).fetchone()[0]
+
+                status, _, failed = request_json(
+                    port,
+                    "POST",
+                    "/api/sources",
+                    {"path": '"common one.jsonl" missing.jsonl', "adapter": "auto"},
+                    origin=origin,
+                )
+                self.assertEqual(status, 400)
+                self.assertIn("missing.jsonl", failed["error"])
+                self.assertEqual(len(store.source_payload()), 2)
+                self.assertEqual(
+                    store.conn.execute(
+                        "SELECT COUNT(*) FROM peval_py_refresh_log"
+                    ).fetchone()[0],
+                    log_count,
+                )
+
+                status, _, malformed = request_json(
+                    port,
+                    "POST",
+                    "/api/sources",
+                    {"path": '"unterminated', "adapter": "auto"},
+                    origin=origin,
+                )
+                self.assertEqual(status, 400)
+                self.assertIn("path list is invalid", malformed["error"])
+                self.assertEqual(len(store.source_payload()), 2)
+
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    f"/api/sources/{source_keys[0]}/delete",
+                    {},
+                    origin=origin,
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(len(body["sources"]), 1)
+                self.assertTrue(source_a.exists())
+                self.assertEqual(
+                    store.conn.execute(
+                        "SELECT COUNT(*) FROM peval_py_trials WHERE source_key = ?",
+                        (source_keys[0],),
+                    ).fetchone()[0],
+                    0,
+                )
+                self.assertEqual(
+                    store.conn.execute(
+                        "SELECT COUNT(*) FROM peval_py_refresh_log WHERE source_key = ?",
+                        (source_keys[0],),
+                    ).fetchone()[0],
+                    0,
+                )
+
+                status, _, rejected = request_json(
+                    port,
+                    "POST",
+                    f"/api/sources/{source_keys[1]}/delete",
+                    {},
+                    origin="http://example.test",
+                )
+                self.assertEqual(status, 403)
+                self.assertIn("same-origin", rejected["error"])
+                self.assertEqual(len(store.source_payload()), 1)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+                store.close()
+
     def test_http_db_session_inspect_infers_adapters_and_batch_adds_sources(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = peval_py_workspace(Path(tmp))

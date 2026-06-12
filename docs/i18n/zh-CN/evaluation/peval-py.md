@@ -328,19 +328,29 @@ peval-py serve --root .local/peval-py
 选中 Trial trajectory 会保持静态报告中的顺序和样式。
 
 Serve UI mode 只在共享主体周围增加 web-only 控件。页面顶部显示紧凑的
-source/status toolbar，并通过 modal 管理本地路径、SQLite DB、input table、
-JSONL upload、ATIF JSON upload 和 report JSON upload。Leaderboard 在 web UI 中
-可以增加用于导出选择的行复选框，并在 section header 右侧提供分区导出控件。
-点击行仍然选择 Trial；点击复选框只影响导出范围。导出时，如果当前可见行里有
-已勾选行，就导出这些行；否则导出当前筛选和排序后的可见行。JSON 和 HTML 导出
-与 CSV 表格导出使用同一行范围。
+source/status toolbar，并通过 modal 管理 Session/ATIF path、SQLite DB、input
+table、JSONL upload、ATIF JSON upload 和 report JSON upload。Path 和 DB 字段支持
+一次粘贴多个路径；路径中包含空格时需要用引号包住。Adapter 控件是每个表单 action
+row 里的紧凑下拉单选框，放在 add/upload 操作旁边，默认是 `auto`，也就是沿用 CLI
+的推断/默认 adapter 规则。导入失败会显示后端错误，并且不会保存为 source。Source
+可以 archive 以便恢复，也可以只从 peval-py state 中 delete；delete 不会删除原始文件
+或 database。Source 导入表单和 Timeline diagnostics section 使用融入报告主体的透明
+shell，输入框和菜单仍保持可读的实底。
 
-对于 SQLite DB source，modal 内提供 Inspect 流程。输入或粘贴 DB 路径，可选填
+Leaderboard 在 web UI 中可以增加用于导出选择的行复选框，并在 section header 右侧
+提供一个 `Export` 菜单，包含 Table、JSON Report 和 HTML Report。点击行仍然选择
+Trial；点击复选框只影响导出范围。导出时，如果当前可见行里有已勾选行，就导出
+这些行；否则导出当前筛选和排序后的可见行。JSON 和 HTML 导出与 table 导出使用
+同一行范围。点击 Export 或 table filter 菜单外部区域会自动收起菜单。Trajectory
+Overview 的长节点序列会换行显示。Timeline Waterfall 和 Timeline Detail Table
+section 可以折叠，点击 user/system marker 或计时行会打开对应的 Step 详情抽屉。
+
+对于 SQLite DB source，modal 内提供 Inspect 流程。输入或粘贴单个 DB 路径，可选
 adapter，然后点击 Inspect DB。没有显式 adapter 时，`serve` 使用与 `view tr -d`
 相同的 path-token adapter 推断；`.hermes/`、`.psychevo/` 或 `.opencode/` 路径会
 推断为对应 adapter。如果路径无法推断或同时匹配多个 adapter，需要手动选择
 adapter 后重新 inspect。勾选的 sessions 会保存为独立、可刷新的 sources，因此每个
-session 都可以单独 archive、restore 或 refresh。
+session 都可以单独 archive、delete 或 refresh。
 
 ## 本地化 HTML 报告
 

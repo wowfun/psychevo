@@ -446,12 +446,14 @@ writes either JSON or HTML:
   and Detail Table stage cells use compact structural labels and must not
   display step message or reasoning previews, which remain available in the
   Steps content for diagnostics. Red Timeline color is reserved for `Error`;
-  non-error `External` work uses a neutral category color. Clicking a Timeline
-  Waterfall bar or Timeline Detail Table row opens the existing right-side Step
-  details drawer for the corresponding source step, including in single-session
-  reports that do not render Leaderboard or Trajectory Overview rows. This
-  interaction does not change Timeline row order, selected Trial semantics, or
-  JSON payload shape.
+  non-error `External` work uses a neutral category color. Timeline Waterfall
+  and Timeline Detail Table are separate, default-expanded collapsible
+  sections. Clicking a Timeline Waterfall bar, a Waterfall user/system marker
+  with a source `step_id`, or a Timeline Detail Table row opens the existing
+  right-side Step details drawer for the corresponding source step, including
+  in single-session reports that do not render Leaderboard or Trajectory
+  Overview rows. This interaction does not change Timeline row order, selected
+  Trial semantics, or JSON payload shape.
   The selected Detail Table row uses one subtle row background and one left
   edge indicator on the first cell; it must not draw repeated vertical
   selection bars across every table column. Sortable data-table headers cycle
@@ -463,6 +465,9 @@ writes either JSON or HTML:
   based on the same active-share percentage. It does not render a separate
   Distribution column. Timeline Detail Table sorting and filtering do not
   affect Timeline Waterfall row order, bars, markers, or active-latency axis.
+  Timeline diagnostic section shells are structural carriers in the report body
+  and must not use pink or tinted filled panel backgrounds; they may keep
+  borders and spacing while chart/table surfaces stay readable.
 - The HTML renderer has two presentation modes over the same report body:
   static report mode and serve UI mode. Static report mode is the default used
   by `view trajectory --format html` and must not show import controls,
@@ -499,14 +504,27 @@ task-family, or matrix task-axis fields.
 Serve UI mode keeps the report body as the primary mental model rather than
 turning the page into a separate dashboard. It shows a compact source/status
 toolbar above the report title and opens source management in a modal dialog.
-The modal supports local path, DB, and input-table source forms, upload of JSONL,
-ATIF JSON, or peval-py report JSON snapshots, explicit refresh, active/archive
-source lifecycle, and per-source status display. The DB form includes an
-Inspect action that lists adapter-owned sessions in the modal, supports
-checkbox multi-select, and adds selected sessions as independent DB sources.
-It does not add a persistent left sidebar or reduce the report body width.
-Serve-only controls use the same color, radius, typography, and panel tokens as
-static reports but sit at a lower visual priority than report content.
+The modal supports Session/ATIF path, DB, and input-table source forms, upload
+of JSONL, ATIF JSON, or peval-py report JSON snapshots, explicit refresh,
+active/archive/delete source lifecycle, and per-source status display. The
+Session/ATIF path and DB path fields accept one or more whitespace-separated
+paths and honor single- or double-quoted paths; they import refreshable local
+paths and do not upload file contents. The DB Inspect action still inspects
+  exactly one DB path at a time. Adapter choices in the source manager are
+  compact single-select dropdowns in each source form's action row, immediately
+  before the add/upload action area, with `auto` as the default; `auto` omits
+  the adapter override and lets existing inference/default adapter rules apply.
+  The DB form includes an Inspect action that lists adapter-owned sessions in
+  the modal, supports checkbox multi-select, and adds selected sessions as
+  independent DB sources.
+  Failed source imports show a transient error containing the concrete server
+  message and must not persist the failed source or show it in the source list.
+  It does not add a persistent left sidebar or reduce the report body width.
+  Serve-only controls use the same color, radius, typography, and panel tokens as
+  static reports but sit at a lower visual priority than report content.
+  Source Manager form shells are structural carriers rather than filled cards:
+  they must not use pink or tinted filled panel backgrounds, while text inputs,
+  uploads, and menu surfaces remain solid enough to read.
 
 `serve` does not refresh sources on startup unless source flags were supplied on
 that invocation. The page opens from the latest canonical snapshots and marks
@@ -528,7 +546,15 @@ adapter. On success it returns the resolved DB path, adapter id, whether the
 adapter was inferred, and session rows with one-based `index`, `session_id`, and
 `name`. `POST /api/sources` continues to accept a single `session_id` and also
 accepts `session_ids` for DB payloads; each selected session creates or updates
-one independent refreshable source before the response report is rebuilt.
+one independent refreshable source before the response report is rebuilt. For
+path and DB payloads, a single string may contain multiple paths parsed with
+standard shell-like quoting. New source imports are all-or-nothing: if any
+newly submitted source fails to load, convert, or refresh, the endpoint returns
+a JSON error and does not persist any source from that request. Refreshing an
+already persisted source keeps the existing status-and-log behavior. `POST
+/api/sources/{source_key}/delete` deletes only peval-py state for that source,
+including its canonical Trial snapshot and refresh-log rows; it never deletes
+the original local file or DB.
 
 In serve UI mode, the Leaderboard may add a row-selection checkbox column at
 the start of the existing full column set. Header and row checkboxes control
@@ -538,19 +564,24 @@ row remains the canonical selected-Trial interaction. The Trajectory Overview
 continues to follow the currently filtered and sorted Leaderboard rows and
 does not follow checkbox state.
 
-Serve UI mode renders a split export control in the Leaderboard panel header:
-the primary action exports table rows, and the adjacent menu offers JSON report
-and HTML report exports. All serve exports use the same row scope rule:
-visible checked rows when at least one currently visible row is checked,
-otherwise the current filtered and sorted visible row set. Checked rows hidden
-by filters remain checked in UI state but are excluded from the current export
-scope until they become visible again. JSON and HTML exports create report
-subsets for that same export scope; table export defaults to CSV and must not
-introduce an Excel dependency.
+  Serve UI mode renders one Leaderboard `Export` menu in the panel header. Its
+  menu items are `Table`, `JSON Report`, and `HTML Report`. All serve exports use
+  the same row scope rule: visible checked rows when at least one currently
+  visible row is checked, otherwise the current filtered and sorted visible row
+  set. Checked rows hidden by filters remain checked in UI state but are excluded
+  from the current export scope until they become visible again. JSON and HTML
+  exports create report subsets for that same export scope; table export defaults
+  to CSV and must not introduce an Excel dependency.
+  Export and data-table filter menus close when the user clicks outside the open
+  menu or opens another menu, while clicks inside the menu keep it open. This
+  submenu behavior applies only to menu-like `<details>` controls and must not
+  auto-close Timeline diagnostic sections or Step detail sections.
 
 The Trajectory Overview section below the Leaderboard renders one row per
 session in the same order as the currently filtered and sorted Leaderboard
 rows; its row count and row order must exactly match the rendered Leaderboard.
+Long trajectories wrap their fixed-size nodes onto additional lines inside the
+row instead of forcing a single horizontally scrolling node track.
 Each row shows a compact left-to-right node track where each ATIF step is one
 node. Overview nodes use a neutral visual style and show source initials:
 `S` for system, `U` for user, `A` for agent, and `?` for unknown or unsupported

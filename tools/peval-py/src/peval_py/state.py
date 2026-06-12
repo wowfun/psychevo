@@ -13,7 +13,7 @@ from typing import Any
 from peval_py.atif import convert_atif_trajectory, is_atif_trajectory
 from peval_py.config import ToolConfig, config_for_adapter
 from peval_py.inputs import AdapterAssignments, LoadedInputs, LoadedSession, load_inputs
-from peval_py.pipeline import convert_session, report_session_for_loaded
+from peval_py.pipeline import report_session_for_loaded
 from peval_py.report import (
     ReportSession,
     build_multi_report,
@@ -193,9 +193,16 @@ class ServeStateStore:
             keys.append(self.upsert_loaded_source(session, config))
         return keys
 
-    def upsert_loaded_source(self, session: LoadedSession, config: ToolConfig) -> str:
+    def upsert_loaded_source(
+        self,
+        session: LoadedSession,
+        config: ToolConfig,
+        *,
+        commit: bool = True,
+        timestamp: int | None = None,
+    ) -> str:
         key = source_key_for_session(session)
-        timestamp = now_ms()
+        timestamp = timestamp if timestamp is not None else now_ms()
         self.conn.execute(
             """
             INSERT INTO peval_py_sources
@@ -233,8 +240,48 @@ class ServeStateStore:
                 timestamp,
             ),
         )
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
         return key
+
+    def import_loaded_sources(
+        self,
+        loaded_inputs: LoadedInputs,
+        config: ToolConfig,
+    ) -> list[str]:
+        prepared: list[tuple[str, LoadedSession, dict[str, Any], int]] = []
+        for session in loaded_inputs.sessions:
+            source_key = source_key_for_session(session)
+            report_session = report_session_for_loaded(session, config)
+            report = build_multi_report([report_session], config, [])
+            warnings = report["trajectory_meta"][0].get("warnings") or []
+            prepared.append((source_key, session, report, len(warnings)))
+
+        timestamp = now_ms()
+        try:
+            for source_key, session, report, warning_count in prepared:
+                self.upsert_loaded_source(
+                    session,
+                    config,
+                    commit=False,
+                    timestamp=timestamp,
+                )
+                self.store_report_for_source(source_key, report)
+                self.conn.execute(
+                    """
+                    UPDATE peval_py_sources
+                    SET last_status = ?, last_error = NULL,
+                        last_refreshed_at_ms = ?, updated_at_ms = ?
+                    WHERE source_key = ?
+                    """,
+                    ("ok", timestamp, timestamp, source_key),
+                )
+                self.log_refresh(source_key, "ok", warning_count, None, timestamp)
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        return [source_key for source_key, _, _, _ in prepared]
 
     def refresh_sources(self, source_keys: list[str] | None, config: ToolConfig) -> None:
         rows = self.source_rows(source_keys=source_keys, active_only=False)
@@ -492,6 +539,21 @@ class ServeStateStore:
         )
         if cursor.rowcount == 0:
             raise ValueError(f"unknown source: {source_key}")
+        self.conn.commit()
+
+    def delete_source(self, source_key: str) -> None:
+        exists = self.conn.execute(
+            "SELECT 1 FROM peval_py_sources WHERE source_key = ?",
+            (source_key,),
+        ).fetchone()
+        if exists is None:
+            raise ValueError(f"unknown source: {source_key}")
+        self.conn.execute("DELETE FROM peval_py_trials WHERE source_key = ?", (source_key,))
+        self.conn.execute(
+            "DELETE FROM peval_py_refresh_log WHERE source_key = ?",
+            (source_key,),
+        )
+        self.conn.execute("DELETE FROM peval_py_sources WHERE source_key = ?", (source_key,))
         self.conn.commit()
 
     def log_refresh(

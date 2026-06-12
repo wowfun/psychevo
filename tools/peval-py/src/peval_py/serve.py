@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import sys
 from argparse import Namespace
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -144,13 +145,12 @@ def make_handler(
                     return
                 if path == "/api/sources":
                     keys = add_source_payload(store, config, payload)
-                    store.refresh_sources(keys, config)
                     self.write_json(mutation_payload(store))
                     return
                 if path == "/api/upload":
                     filename = required_string(payload, "filename")
                     content = required_string(payload, "content")
-                    adapter = optional_string(payload.get("adapter"))
+                    adapter = adapter_override_payload(payload)
                     store.ingest_upload(filename, content, config, adapter=adapter)
                     self.write_json(mutation_payload(store))
                     return
@@ -168,6 +168,8 @@ def make_handler(
                         store.set_source_active(source_key, True)
                     elif action == "refresh":
                         store.refresh_sources([source_key], config)
+                    elif action == "delete":
+                        store.delete_source(source_key)
                     else:
                         raise HttpError(404, "unknown source action")
                     self.write_json(mutation_payload(store))
@@ -255,27 +257,27 @@ def add_source_payload(
     payload: dict[str, Any],
 ) -> list[str]:
     source_args = source_args_from_payload(store, payload)
-    raw_adapter = optional_string(payload.get("adapter"))
+    raw_adapter = adapter_override_payload(payload)
     assignments = parse_adapter_assignments(
         [raw_adapter] if raw_adapter else [],
         config.adapter,
     )
     loaded = load_serve_inputs(source_args, assignments)
-    return store.upsert_loaded_sources(loaded, config)
+    return store.import_loaded_sources(loaded, config)
 
 
 def db_sessions_payload(
     store: ServeStateStore,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
-    raw_db = required_string(payload, "db")
-    db_path = workspace_relative_path(store, raw_db)
-    if db_path is None:
-        raise HttpError(400, "db is required")
+    db_paths = source_path_values(store, payload, "db")
+    if len(db_paths) != 1:
+        raise HttpError(400, "DB Inspect requires exactly one DB path")
+    db_path = db_paths[0]
     path = Path(db_path)
     if not path.is_file():
         raise HttpError(400, f"DB path does not exist: {path}")
-    raw_adapter = optional_string(payload.get("adapter"))
+    raw_adapter = adapter_override_payload(payload)
     adapter_id, inferred = adapter_for_db_inspect(str(path), raw_adapter)
     sessions = list_adapter_sessions(adapter_id, str(path))
     return {
@@ -316,26 +318,52 @@ def source_args_from_payload(
     store: ServeStateStore,
     payload: dict[str, Any],
 ) -> SimpleNamespace:
-    path = optional_string(payload.get("path"))
-    db = optional_string(payload.get("db"))
+    paths = source_path_values(store, payload, "path")
+    dbs = source_path_values(store, payload, "db")
     input_table = optional_string(payload.get("input_table"))
-    present = [value for value in [path, db, input_table] if value]
+    present = [value for value in [paths, dbs, input_table] if value]
     if len(present) != 1:
         raise HttpError(400, "provide exactly one source: path, db, or input_table")
     session_id = optional_string(payload.get("session_id"))
     session_ids = session_ids_payload(payload)
     if session_id and session_ids:
         raise HttpError(400, "provide either session_id or session_ids, not both")
-    if (session_id or session_ids) and not db:
+    if (session_id or session_ids) and not dbs:
         raise HttpError(400, "session_id and session_ids are only valid with db sources")
+    if (session_id or session_ids) and len(dbs) != 1:
+        raise HttpError(400, "session_id and session_ids require exactly one db source")
     return SimpleNamespace(
-        path=[workspace_relative_path(store, path)] if path else None,
-        db=[workspace_relative_path(store, db)] if db else None,
+        path=paths or None,
+        db=dbs or None,
         input_table=[workspace_relative_path(store, input_table)] if input_table else None,
-        session_id=([session_id] if session_id and db else session_ids if db else None),
+        session_id=([session_id] if session_id and dbs else session_ids if dbs else None),
         adapter=[],
         note=[],
     )
+
+
+def source_path_values(
+    store: ServeStateStore,
+    payload: dict[str, Any],
+    key: str,
+) -> list[str]:
+    raw = optional_string(payload.get(key))
+    if raw is None:
+        return []
+    try:
+        parts = [part for part in shlex.split(raw) if part]
+    except ValueError as exc:
+        raise HttpError(400, f"{key} path list is invalid: {exc}") from exc
+    if not parts:
+        raise HttpError(400, f"{key} path list is empty")
+    return [workspace_relative_path(store, part) for part in parts]
+
+
+def adapter_override_payload(payload: dict[str, Any]) -> str | None:
+    adapter = optional_string(payload.get("adapter"))
+    if adapter is None or adapter.lower() == "auto":
+        return None
+    return adapter
 
 
 def session_ids_payload(payload: dict[str, Any]) -> list[str] | None:

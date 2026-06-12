@@ -199,7 +199,7 @@ class PevalPyReportHtmlTests(unittest.TestCase):
         self.assertNotIn("trajectory-node.role-system", html)
         self.assertNotIn("trajectory-node.role-user", html)
         self.assertNotIn("trajectory-node.role-agent", html)
-        self.assertIn("--step-count", html)
+        self.assertNotIn("--step-count", html)
         self.assertIn("renderLeaderboard(rows);", html)
         self.assertIn("renderTrajectoryOverview(rows);", html)
         self.assertIn("function renderTrajectoryOverview(rows = leaderboardRows())", html)
@@ -320,11 +320,22 @@ class PevalPyReportHtmlTests(unittest.TestCase):
         self.assertIn('class="source-manager-modal"', serve_html)
         self.assertIn("Upload snapshot", serve_html)
         self.assertIn("report JSON uploads", serve_html)
+        self.assertIn("Session / ATIF Path", serve_html)
+        self.assertNotIn("<strong>Session / ATIF Path</strong>", serve_html)
+        self.assertIn('<textarea name="path"', serve_html)
+        self.assertIn('<textarea name="db"', serve_html)
         self.assertIn("Inspect DB", serve_html)
         self.assertIn("data-db-inspect", serve_html)
         self.assertIn("data-db-session-picker", serve_html)
         self.assertIn("data-db-add-selected", serve_html)
         self.assertIn("data-db-select-all", serve_html)
+        self.assertEqual(serve_html.count('class="source-adapter-select"'), 4)
+        self.assertEqual(serve_html.count('class="source-add-actions"'), 4)
+        self.assertIn('name="adapter" aria-label="Adapter"', serve_html)
+        self.assertIn('<option value="auto" selected>Auto</option>', serve_html)
+        self.assertNotIn("adapter-choice-group", serve_html)
+        self.assertNotIn('type="radio" name="adapter"', serve_html)
+        self.assertIn('data-source-action="delete"', serve_html)
         self.assertIn("2 sources", serve_html)
         self.assertIn("common_session.jsonl", serve_html)
         self.assertIn("Timeline Waterfall", serve_html)
@@ -350,6 +361,8 @@ class PevalPyReportHtmlTests(unittest.TestCase):
         self.assertIn("data-source-manager-open", serve_html)
         self.assertIn("data-source-list", serve_html)
         self.assertIn("data-source-upload-form", serve_html)
+        self.assertIn('t("export", "Export")', serve_html)
+        self.assertIn('t("export_table", "Table")', serve_html)
         self.assertIn('data-export-kind="csv"', serve_html)
         self.assertIn('data-export-kind="json"', serve_html)
         self.assertIn('data-export-kind="html"', serve_html)
@@ -1289,7 +1302,9 @@ const result = vm.runInContext(`
   renderTrace = () => rendered.push("trace");
   renderStepDrawer = () => rendered.push(state.selectedStep ? "drawer-open" : "drawer-closed");
   openTimelineStep({{ kind: "stage", trial_key: "trial:single", step_id: 2 }});
-  JSON.stringify({{ selectedTrial: state.selectedTrial, selectedStep: state.selectedStep, rendered }});
+  const stageStep = state.selectedStep;
+  openTimelineStep({{ kind: "marker", trial_key: "trial:single", step_id: 1 }});
+  JSON.stringify({{ selectedTrial: state.selectedTrial, selectedStep: state.selectedStep, stageStep, rendered }});
 `, context);
 console.log(result);
 """
@@ -1306,10 +1321,98 @@ console.log(result);
 
         self.assertEqual(result["selectedTrial"], "trial:single")
         self.assertEqual(
-            result["selectedStep"],
+            result["stageStep"],
             {"trialKey": "trial:single", "stepId": "2"},
         )
+        self.assertEqual(
+            result["selectedStep"],
+            {"trialKey": "trial:single", "stepId": "1"},
+        )
         self.assertIn("drawer-open", result["rendered"])
+
+
+    def test_html_submenu_outside_click_closer_only_targets_menus(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("node is required to execute report.js interaction helpers")
+        asset = load_asset_text("report.js")
+        self.assertIn("\nrender(data());", asset)
+        asset = asset.rsplit("\nrender(data());", 1)[0]
+        script = """
+const vm = require("vm");
+const asset = __ASSET__;
+const exportMenu = { id: "export", open: true };
+const filterMenu = { id: "filter", open: true };
+const timelineSection = { id: "timeline", open: true };
+const handlers = [];
+const documentStub = {
+  body: { classList: { toggle() {} } },
+  addEventListener(type, handler, options) {
+    handlers.push({ type, handler, capture: options === true || options?.capture === true });
+  },
+  getElementById: () => null,
+  querySelector: () => null,
+  querySelectorAll(selector) {
+    if (selector !== ".export-menu[open],.filter-control[open]") {
+      throw new Error(`unexpected selector: ${selector}`);
+    }
+    return [exportMenu, filterMenu].filter(details => details.open);
+  },
+};
+const context = {
+  document: documentStub,
+  window: { addEventListener() {} },
+  console,
+  JSON,
+  Number,
+  String,
+  Object,
+  Math,
+  Date,
+  Set,
+  Array,
+  RegExp,
+  exportMenu,
+  filterMenu,
+  timelineSection,
+  handlers,
+};
+vm.createContext(context);
+vm.runInContext(asset, context);
+const result = vm.runInContext(`
+  bindGlobalControls();
+  const clickHandler = handlers.find(item => item.type === "click" && item.capture).handler;
+  filterMenu.open = true;
+  exportMenu.open = true;
+  clickHandler({ target: { closest: selector => selector === SUBMENU_DETAILS_SELECTOR ? exportMenu : null } });
+  const insideExport = { exportOpen: exportMenu.open, filterOpen: filterMenu.open, timelineOpen: timelineSection.open };
+  filterMenu.open = true;
+  exportMenu.open = true;
+  clickHandler({ target: { closest: () => null } });
+  const outside = { exportOpen: exportMenu.open, filterOpen: filterMenu.open, timelineOpen: timelineSection.open };
+  JSON.stringify({ insideExport, outside, clickHandlerCapture: Boolean(clickHandler) });
+`, context);
+console.log(result);
+""".replace("__ASSET__", json.dumps(asset))
+        node = subprocess.run(
+            ["node"],
+            input=script,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(node.returncode, 0, node.stderr)
+        result = json.loads(node.stdout)
+
+        self.assertEqual(
+            result["insideExport"],
+            {"exportOpen": True, "filterOpen": False, "timelineOpen": True},
+        )
+        self.assertEqual(
+            result["outside"],
+            {"exportOpen": False, "filterOpen": False, "timelineOpen": True},
+        )
+        self.assertTrue(result["clickHandlerCapture"])
 
 
     def test_html_inlines_template_css_and_js_package_assets(self) -> None:
@@ -1343,9 +1446,31 @@ console.log(result);
         self.assertIn("__SERVE_SOURCE_MANAGER__", template)
         self.assertIn('<script type="application/json" id="peval-py-data">__DATA__</script>', template)
         self.assertIn(".time-gradient", css)
+        self.assertIn("flex-wrap:wrap", css)
         self.assertIn(".timeline-waterfall-shell", css)
         self.assertIn(".timeline-waterfall-chart", css)
         self.assertIn(".timeline-fallback", css)
+        self.assertIn(".timeline-section", css)
+        self.assertIn(".timeline-section-body", css)
+        self.assertIn(".source-adapter-select", css)
+        self.assertIn(".source-add-actions", css)
+        self.assertIn(".source-form select", css)
+        self.assertNotIn(".adapter-choice-group", css)
+        self.assertIn(".serve-notice", css)
+        self.assertIn(
+            compact_css_text(
+                ".timeline-section{display:grid;gap:10px;border:1px solid var(--rule);"
+                "border-radius:var(--radius);background:transparent;padding:12px}"
+            ),
+            compact_css,
+        )
+        self.assertIn(
+            compact_css_text(
+                ".source-form{display:grid;gap:8px;border:1px solid var(--rule);"
+                "border-radius:var(--radius);background:transparent;padding:12px}"
+            ),
+            compact_css,
+        )
         self.assertIn("table-layout:auto", css)
         self.assertIn("min-width:max-content", css)
         self.assertIn(
@@ -1413,6 +1538,7 @@ console.log(result);
         self.assertIn('bindDataTableControls(target, "leaderboard"', js)
         self.assertIn('bindDataTableControls(target, "timeline"', js)
         self.assertIn("function renderTimelineDiagnostics", js)
+        self.assertIn("function renderTimelineSection", js)
         self.assertIn("function timelineTrace", js)
         self.assertIn("function timelineAssignActiveOffsets", js)
         self.assertIn("function timelineYAxisLabelWidth", js)
@@ -1421,8 +1547,20 @@ console.log(result);
         self.assertIn("function openTimelineStep", js)
         self.assertIn("function bindTimelineControls", js)
         self.assertIn("function initTimelineWaterfallChart", js)
+        self.assertIn('const SUBMENU_DETAILS_SELECTOR = ".export-menu,.filter-control"', js)
+        self.assertIn(
+            'const OPEN_SUBMENU_DETAILS_SELECTOR = ".export-menu[open],.filter-control[open]"',
+            js,
+        )
+        self.assertIn("function closeOpenSubmenus", js)
+        self.assertIn(
+            "closeOpenSubmenus(event.target?.closest?.(SUBMENU_DETAILS_SELECTOR) || null)",
+            js,
+        )
+        self.assertIn('button.closest("details")?.removeAttribute("open")', js)
         self.assertIn('node.addEventListener("click", event => event.stopPropagation())', js)
         self.assertIn('state.timelineChart.on("click"', js)
+        self.assertIn("if (!item || !item.step_id) return;", js)
         self.assertIn("window.echarts.init", js)
         self.assertIn('type: "custom"', js)
         self.assertIn("active_total_ms", js)

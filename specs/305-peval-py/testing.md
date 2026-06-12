@@ -161,15 +161,15 @@ Coverage must verify:
   checkboxes, or Leaderboard export controls.
 - serve UI HTML mode reuses the static report body while rendering a compact
   source/status toolbar, modal source manager, a Leaderboard row-selection
-  checkbox column, a header select-visible checkbox, and a split Leaderboard
-  export control for rows, JSON report, and HTML report.
-- serve UI source manager renders local path/DB/input-table forms, JSONL/ATIF
-  JSON/report JSON upload affordance, explicit refresh controls, active/archive
-  controls, non-refreshable snapshot labels, and latest source status without a
-  persistent sidebar.
-- serve UI source manager renders a DB Inspect control, adapter override input,
-  session multi-select table, select-all-visible control, and add-selected
-  action only in serve mode.
+  checkbox column, a header select-visible checkbox, and one Leaderboard
+  `Export` menu with `Table`, `JSON Report`, and `HTML Report` choices.
+- serve UI source manager renders Session/ATIF path, DB, and input-table forms,
+  JSONL/ATIF JSON/report JSON upload affordance, explicit refresh controls,
+  active/archive/delete controls, non-refreshable snapshot labels, and latest
+  source status without a persistent sidebar or duplicate form titles.
+- serve UI source manager renders a DB Inspect control, adapter single-choice
+  controls defaulting to `auto`, session multi-select table, select-all-visible
+  control, and add-selected action only in serve mode.
 - serve HTTP exposes `POST /api/db-sessions` for local DB inspection. Tests cover
   `.hermes`, `.psychevo`, and `.opencode` path-token adapter inference,
   explicit adapter retry after failed inference, ambiguous path errors,
@@ -178,6 +178,14 @@ Coverage must verify:
 - serve HTTP `POST /api/sources` accepts DB `session_ids` arrays and creates one
   independent refreshable source/trial per selected session while preserving the
   existing single `session_id` payload behavior.
+- serve HTTP `POST /api/sources` accepts shell-quoted multi-path strings for
+  path and DB payloads, rejects malformed quoted input clearly, treats `auto`
+  adapter as no override, and persists no new source/trial/log rows when a
+  submitted source fails to load, convert, or refresh.
+- serve HTTP exposes `POST /api/sources/{source_key}/delete`; tests verify it
+  removes only peval-py state rows for the source, keeps source files untouched,
+  returns clear errors for unknown sources, and is covered by the same-origin
+  mutating API checks.
 - serve UI row-selection state is independent from selected-Trial state:
   checkbox clicks stop row selection, row clicks still update the selected
   Trial, and Trajectory Overview rows keep following filtered and sorted
@@ -243,7 +251,8 @@ Coverage must verify:
   table, render model generation as `Model: <model_name>` or `Model`, render
   estimated model timing with visible `≈` prefixes when explicit model duration
   is unavailable, suppress estimated model stages for order-only source
-  timestamps, avoid duplicating tool spans as model duration,
+  timestamps, avoid duplicating tool spans as model duration, render Timeline
+  Waterfall and Timeline Detail Table as default-expanded collapsible sections,
   keep measured zero-duration tool stages visible while omitting tools with
   missing timing,
   render heuristic category colors on Detail Table Stage values instead of a
@@ -252,12 +261,12 @@ Coverage must verify:
   labels instead of a large fixed margin, use stable interval-aware x-axis ticks
   that avoid repeated rounded labels on short traces, keep message previews out
   of Waterfall labels/tooltips and Detail Table Stage cells, and do not mutate
-  the embedded JSON v18 report data. Timeline bar and Detail Table row clicks
-  open the existing Step details drawer for the corresponding source step
-  without changing the selected Trial, including in single-session reports that
-  have no Leaderboard rows to synchronize against. The selected Detail Table
-  row uses a single first-cell indicator rather than repeated vertical bars in
-  every cell.
+  the embedded JSON v18 report data. Timeline bar, user/system marker with a
+  source `step_id`, and Detail Table row clicks open the existing Step details
+  drawer for the corresponding source step without changing the selected Trial,
+  including in single-session reports that have no Leaderboard rows to
+  synchronize against. The selected Detail Table row uses a single first-cell
+  indicator rather than repeated vertical bars in every cell.
   Timeline Detail Table tests cover sortable `#`, `Stage`, `Start`, `End`,
   `Duration`, and `Active Share` columns, sortable table headers cycling
   through ascending, descending, and no-sort states, Stage-only filtering,
@@ -267,7 +276,17 @@ Coverage must verify:
   sorting/filtering state does not drive the Waterfall trace order or chart
   data.
   Timeline color tests reserve red for `Error` and keep non-error `External`
-  stages on a neutral color.
+  stages on a neutral color. CSS tests verify Timeline section shells do not
+  use the old pink/tinted filled background.
+- HTML Trajectory Overview tests verify fixed-size nodes can wrap onto multiple
+  rows for long trajectories while preserving node order, selected-node state,
+  and click targets.
+- serve UI HTML and interaction tests verify Source Manager form shells do not
+  use the old pink/tinted filled background, source adapters render as compact
+  single-select dropdowns in each form action row rather than radio groups,
+  Export and table filter submenus stay open for inside clicks, close on outside
+  clicks, and do not apply this outside-click behavior to Timeline or Step
+  collapsible sections.
 - HTML shows visibly marked estimated token chips for steps that lack real
   token metrics, preserves exact token chips when real step metrics exist, can
   use an optional `tiktoken` module, falls back to a deterministic byte-length

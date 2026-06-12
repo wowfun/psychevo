@@ -31,6 +31,13 @@ function hasMetricValue(value) { return value !== null && value !== undefined &&
 function data() { return JSON.parse($("peval-py-data").textContent || "{}"); }
 function serveMode() { return RENDER_OPTIONS?.mode === "serve"; }
 const state = { view: null, selectedTrial: null, selectedStep: null, rowSelection: new Set(), tables: {}, timelineChart: null, boundGlobalControls: false, serveSources: Array.isArray(RENDER_OPTIONS?.sources) ? RENDER_OPTIONS.sources : [] };
+const SUBMENU_DETAILS_SELECTOR = ".export-menu,.filter-control";
+const OPEN_SUBMENU_DETAILS_SELECTOR = ".export-menu[open],.filter-control[open]";
+function closeOpenSubmenus(except = null) {
+  document.querySelectorAll(OPEN_SUBMENU_DETAILS_SELECTOR).forEach(details => {
+    if (details !== except) details.open = false;
+  });
+}
 function reportRows() {
   return state.view?.comparison?.leaderboard?.entries || [];
 }
@@ -155,10 +162,10 @@ function renderLeaderboard(rows = leaderboardRows()) {
 function renderLeaderboardExportControls() {
   if (!serveMode()) return "";
   return `<div class="leaderboard-export" data-serve-only>
-    <button class="step-toggle-button export-main" type="button" data-export-kind="csv">${esc(t("export_rows", "Export rows"))}</button>
     <details class="export-menu">
-      <summary class="export-menu-button" aria-label="${esc(t("export_options", "Export options"))}">${esc(t("more", "More"))}</summary>
+      <summary class="export-menu-button" aria-label="${esc(t("export_options", "Export options"))}">${esc(t("export", "Export"))}</summary>
       <div class="export-menu-panel">
+        <button type="button" data-export-kind="csv">${esc(t("export_table", "Table"))}</button>
         <button type="button" data-export-kind="json">${esc(t("export_json_report", "JSON report"))}</button>
         <button type="button" data-export-kind="html">${esc(t("export_html_report", "HTML report"))}</button>
       </div>
@@ -428,6 +435,7 @@ function bindServeExportControls(target) {
     button.addEventListener("click", event => {
       event.stopPropagation();
       exportCurrentScope(button.dataset.exportKind || "csv");
+      button.closest("details")?.removeAttribute("open");
     });
   });
 }
@@ -540,9 +548,8 @@ function downloadText(filename, mime, text) {
 function renderTrajectoryOverview(rows = leaderboardRows()) {
   const target = $("trajectory-overview");
   if (!target) return;
-  const maxSteps = Math.max(1, ...rows.map(row => (trajectoryFor(row.trial_key)?.steps || []).length));
   const body = rows.length
-    ? rows.map(row => renderTrajectoryOverviewRow(row, maxSteps)).join("")
+    ? rows.map(row => renderTrajectoryOverviewRow(row)).join("")
     : `<div class="trajectory-empty">${esc(t("no_matching_rows", "No matching rows"))}</div>`;
   target.innerHTML = `
     <div class="panel-head"><div><h2 id="trajectory-overview-title">${esc(t("trajectory_overview", "Trajectory Overview"))}</h2><p class="copy">${esc(t("trajectory_overview_copy", "Rows follow the current Leaderboard order. Nodes align by step index and show role initials."))}</p></div></div>
@@ -550,19 +557,19 @@ function renderTrajectoryOverview(rows = leaderboardRows()) {
   `;
   bindTrajectoryControls(target);
 }
-function renderTrajectoryOverviewRow(row, maxSteps) {
+function renderTrajectoryOverviewRow(row) {
   const trajectory = trajectoryFor(row.trial_key);
   const steps = trajectory?.steps || [];
   const selected = row.trial_key === selectedKey();
   const session = row.session_id || row.trial_key || "-";
   const agent = agentNameFor(row);
-  return `<div class="trajectory-row ${selected ? "selected-row" : ""}" data-trial-key="${esc(row.trial_key)}" title="${esc(row.trial_key)}"><div class="trajectory-label"><strong>${esc(session)}</strong><span>${esc(agent)}</span></div><div class="trajectory-track" style="--step-count:${esc(maxSteps)}">${steps.map((step, index) => renderTrajectoryNode(step, index, row.trial_key)).join("")}</div></div>`;
+  return `<div class="trajectory-row ${selected ? "selected-row" : ""}" data-trial-key="${esc(row.trial_key)}" title="${esc(row.trial_key)}"><div class="trajectory-label"><strong>${esc(session)}</strong><span>${esc(agent)}</span></div><div class="trajectory-track">${steps.map((step, index) => renderTrajectoryNode(step, index, row.trial_key)).join("")}</div></div>`;
 }
 function renderTrajectoryNode(step, index, trialKey) {
   const stepId = String(step?.step_id ?? index + 1);
   const selected = state.selectedStep?.trialKey === trialKey && String(state.selectedStep?.stepId) === stepId;
   const label = stepTitle(step, index);
-  return `<button class="trajectory-node ${selected ? "selected-node" : ""}" type="button" data-trial-key="${esc(trialKey)}" data-step-id="${esc(stepId)}" style="grid-column:${esc(index + 1)}" title="${esc(label)}" aria-label="${esc(label)}"><span class="trajectory-node-letter">${esc(roleLetter(step?.source))}</span></button>`;
+  return `<button class="trajectory-node ${selected ? "selected-node" : ""}" type="button" data-trial-key="${esc(trialKey)}" data-step-id="${esc(stepId)}" title="${esc(label)}" aria-label="${esc(label)}"><span class="trajectory-node-letter">${esc(roleLetter(step?.source))}</span></button>`;
 }
 function roleLetter(source) {
   const role = lower(source);
@@ -703,6 +710,9 @@ function bindGlobalControls() {
     renderComparisonPanels();
   });
   document.addEventListener("click", event => {
+    closeOpenSubmenus(event.target?.closest?.(SUBMENU_DETAILS_SELECTOR) || null);
+  }, true);
+  document.addEventListener("click", event => {
     if (!state.selectedStep) return;
     const target = event.target;
     if (target?.closest?.("#step-drawer") || target?.closest?.("[data-source-manager]") || target?.closest?.("[data-step-id]") || target?.closest?.("[data-timeline-step-id]") || target?.closest?.("[data-timeline-chart]")) return;
@@ -820,12 +830,13 @@ function renderServeSourceRow(source) {
   const archiveAction = active ? "archive" : "activate";
   const archiveLabel = active ? t("serve_archive", "Archive") : t("serve_activate", "Activate");
   const archiveButton = key ? `<button type="button" data-source-action="${archiveAction}" data-source-key="${esc(key)}">${esc(archiveLabel)}</button>` : "";
+  const deleteButton = key ? `<button type="button" data-source-action="delete" data-source-key="${esc(key)}">${esc(t("serve_delete", "Delete"))}</button>` : "";
   return `<li class="source-row ${active ? "" : "archived"}">
     <div class="source-row-main">
       <strong>${esc(source?.label || key || "source")}</strong>
       <span>${esc(source?.kind || "source")} / ${esc(source?.adapter || "-")} / ${esc(status)} / ${esc(stateLabel)}</span>
     </div>
-    <div class="source-row-actions">${refreshButton}${archiveButton}</div>
+    <div class="source-row-actions">${refreshButton}${archiveButton}${deleteButton}</div>
   </li>`;
 }
 async function submitServeSourceForm(form) {
@@ -840,6 +851,7 @@ async function submitServeSourceForm(form) {
     form.reset();
     applyServeMutationPayload(payload);
   } catch (error) {
+    showServeNotice(`${t("serve_import_failed", "Import failed")}: ${error.message || String(error)}`, true);
     setServeStatus(error.message || String(error), true);
   }
 }
@@ -855,11 +867,10 @@ async function inspectDbSessions(form) {
       method: "POST",
       body: {
         db,
-        adapter: String(body.adapter || "").trim() || undefined
+        adapter: selectedAdapterValue(form)
       }
     });
-    const adapterInput = form.querySelector('[name="adapter"]');
-    if (adapterInput && payload?.adapter) adapterInput.value = payload.adapter;
+    if (payload?.adapter) setAdapterChoice(form, payload.adapter);
     renderDbSessionPicker(form, payload);
     setServeStatus(t("serve_latest_snapshots", "Latest snapshots"));
   } catch (error) {
@@ -945,7 +956,7 @@ async function addSelectedDbSessions(form) {
       method: "POST",
       body: {
         db: form.dataset.inspectedDb || body.db,
-        adapter: form.dataset.inspectedAdapter || body.adapter || undefined,
+        adapter: form.dataset.inspectedAdapter || selectedAdapterValue(form),
         session_ids: sessionIds
       }
     });
@@ -959,6 +970,7 @@ async function addSelectedDbSessions(form) {
     delete form.dataset.inspectedAdapter;
     applyServeMutationPayload(payload);
   } catch (error) {
+    showServeNotice(`${t("serve_import_failed", "Import failed")}: ${error.message || String(error)}`, true);
     setServeStatus(error.message || String(error), true);
   }
 }
@@ -973,12 +985,13 @@ async function submitServeUploadForm(form) {
       body: {
         filename: file.name,
         content: await file.text(),
-        adapter: String(formData.get("adapter") || "").trim() || undefined
+        adapter: normalizeAdapterValue(formData.get("adapter"))
       }
     });
     form.reset();
     applyServeMutationPayload(payload);
   } catch (error) {
+    showServeNotice(`${t("serve_import_failed", "Import failed")}: ${error.message || String(error)}`, true);
     setServeStatus(error.message || String(error), true);
   }
 }
@@ -993,12 +1006,34 @@ function formPayload(form) {
 }
 async function mutateServeSource(sourceKey, action) {
   if (!sourceKey || !action) return;
+  if (action === "delete" && !window.confirm(t("serve_delete_confirm", "Delete this source from peval-py state?"))) return;
   try {
     const payload = await serveApi(`/api/sources/${encodeURIComponent(sourceKey)}/${encodeURIComponent(action)}`, { method: "POST", body: {} });
     applyServeMutationPayload(payload);
   } catch (error) {
     setServeStatus(error.message || String(error), true);
   }
+}
+function selectedAdapterValue(form) {
+  return normalizeAdapterValue(new FormData(form).get("adapter"));
+}
+function normalizeAdapterValue(value) {
+  const text = String(value || "").trim();
+  return text && text.toLowerCase() !== "auto" ? text : undefined;
+}
+function setAdapterChoice(form, adapter) {
+  const value = String(adapter || "").trim();
+  if (!value) return;
+  const control = form.querySelector('[name="adapter"]');
+  if (!control) return;
+  if (control.tagName === "SELECT") {
+    if (Array.from(control.options || []).some(option => option.value === value)) {
+      control.value = value;
+    }
+    return;
+  }
+  const radio = Array.from(form.querySelectorAll('[name="adapter"]')).find(input => input.value === value);
+  if (radio) radio.checked = true;
 }
 async function refreshServeReportFromServer(options = {}) {
   try {
@@ -1043,6 +1078,7 @@ async function serveApi(path, options = {}) {
   return payload;
 }
 function applyServeMutationPayload(payload) {
+  hideServeNotice();
   if (Array.isArray(payload?.sources)) {
     state.serveSources = payload.sources;
     renderServeSources();
@@ -1060,6 +1096,25 @@ function setServeStatus(text, error = false) {
   if (!node) return;
   node.textContent = text;
   node.classList.toggle("danger", Boolean(error));
+}
+function showServeNotice(text, error = false) {
+  const manager = document.querySelector("[data-source-manager]");
+  if (!manager) return;
+  let notice = manager.querySelector("[data-serve-notice]");
+  if (!notice) {
+    notice = document.createElement("div");
+    notice.dataset.serveNotice = "";
+    notice.className = "serve-notice";
+    const modal = manager.querySelector(".source-manager-modal");
+    modal?.prepend(notice);
+  }
+  notice.textContent = text;
+  notice.classList.toggle("danger", Boolean(error));
+  notice.hidden = false;
+}
+function hideServeNotice() {
+  const notice = document.querySelector("[data-serve-notice]");
+  if (notice) notice.hidden = true;
 }
 function infoGrid(items) {
   return `<div class="info-grid">${items.map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join("")}</div>`;
@@ -1152,11 +1207,15 @@ function renderTimelineDiagnostics(trajectory, meta) {
     ? renderTimelineDetailTable(trace.stages, trace.model)
     : `<p class="timeline-empty">${esc(t("timeline_empty", "No timed step or tool durations available."))}</p>`;
   return `<section class="selected-extra timeline-diagnostics">
-    <div class="timeline-head"><div><h3>${esc(t("timeline_waterfall", "Timeline Waterfall"))}</h3><p class="copy">${esc(t("timeline_waterfall_copy", "Flat active-latency trace for meaningful delay."))}</p></div><span class="timeline-total">${esc(fmtTimelineDuration(trace.model.active_total_ms))}</span></div>
-    ${waterfall}
-    <div class="timeline-head timeline-table-head"><div><h3>${esc(t("timeline_detail_table", "Timeline Detail Table"))}</h3><p class="copy">${esc(t("timeline_table_copy", "Flat latency stages with true wall timing."))}</p></div></div>
-    ${table}
+    ${renderTimelineSection("timeline-waterfall-section", t("timeline_waterfall", "Timeline Waterfall"), t("timeline_waterfall_copy", "Flat active-latency trace for meaningful delay."), `<span class="timeline-total">${esc(fmtTimelineDuration(trace.model.active_total_ms))}</span>`, waterfall)}
+    ${renderTimelineSection("timeline-table-section", t("timeline_detail_table", "Timeline Detail Table"), t("timeline_table_copy", "Flat latency stages with true wall timing."), "", table)}
   </section>`;
+}
+function renderTimelineSection(className, title, copy, meta, body) {
+  return `<details class="timeline-section ${esc(className)}" open>
+    <summary class="timeline-head"><div><h3>${esc(title)}</h3><p class="copy">${esc(copy)}</p></div>${meta || ""}</summary>
+    <div class="timeline-section-body">${body}</div>
+  </details>`;
 }
 function renderTimelineWaterfall(trace) {
   const height = Math.max(300, trace.stages.length * 34 + 96);
@@ -1546,6 +1605,7 @@ function timelineChartOption(trace) {
         name: t("timeline_markers", "Markers"),
         type: "custom",
         renderItem: timelineMarkerRenderItem,
+        cursor: "pointer",
         data: trace.markers.map(marker => ({
           value: [marker.display_offset_ms, 0],
           trace_item: marker,
@@ -1662,7 +1722,7 @@ function timelineTooltipHtml(item) {
   return `<div class="timeline-tooltip"><strong>${esc(title)}</strong>${rows.map(([key, value]) => `<br><span>${esc(key)}:</span> ${esc(value)}`).join("")}</div>`;
 }
 function openTimelineStep(item) {
-  if (!item || item.kind === "marker" || !item.step_id) return;
+  if (!item || !item.step_id) return;
   state.selectedTrial = item.trial_key || selectedKey();
   state.selectedStep = { trialKey: state.selectedTrial, stepId: String(item.step_id) };
   renderComparisonPanels();

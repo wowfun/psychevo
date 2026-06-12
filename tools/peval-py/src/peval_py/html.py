@@ -7,6 +7,7 @@ from importlib import import_module
 from importlib.resources import files
 from typing import Any
 
+from peval_py.adapters import available_adapter_ids
 from peval_py.i18n import messages_for, normalize_locale
 
 
@@ -121,6 +122,11 @@ def render_source_add_form(kind: str, messages: dict[str, str]) -> str:
         "input_table": "serve_input_table_source",
     }[kind]
     name = "input_table" if kind == "input_table" else kind
+    field_tag = (
+        f'<textarea name="{escape(name)}" autocomplete="off" required rows="2"></textarea>'
+        if kind in {"path", "db"}
+        else f'<input name="{escape(name)}" autocomplete="off" required>'
+    )
     session_field = ""
     if kind == "db":
         session_field = f"""
@@ -136,16 +142,16 @@ def render_source_add_form(kind: str, messages: dict[str, str]) -> str:
             <div class="db-session-picker" data-db-session-picker hidden></div>"""
     return f"""
           <form class="source-form" data-source-add-form data-source-kind="{escape(kind)}">
-            <strong>{escape(messages[label_key])}</strong>
             <label>{escape(messages[label_key])}
-              <input name="{escape(name)}" autocomplete="off" required>
+              {field_tag}
             </label>
             {session_field}
-            <label>{escape(messages["serve_adapter"])}
-              <input name="adapter" autocomplete="off">
-            </label>
-            <div class="source-form-actions">{inspect_button}
-              <button class="step-toggle-button" type="submit">{escape(messages["serve_add_source"])}</button>
+            <div class="source-form-actions">
+              {inspect_button}
+              <span class="source-add-actions">
+                {render_adapter_select(messages)}
+                <button class="step-toggle-button" type="submit">{escape(messages["serve_add_source"])}</button>
+              </span>
             </div>
             {picker}
           </form>"""
@@ -158,11 +164,31 @@ def render_upload_form(messages: dict[str, str]) -> str:
             <label>{escape(messages["serve_upload_file"])}
               <input name="file" type="file" accept=".json,.jsonl,application/json,application/x-ndjson" required>
             </label>
-            <label>{escape(messages["serve_adapter"])}
-              <input name="adapter" autocomplete="off">
-            </label>
-            <button class="step-toggle-button" type="submit">{escape(messages["serve_upload"])}</button>
+            <div class="source-form-actions">
+              <span class="source-add-actions">
+                {render_adapter_select(messages)}
+                <button class="step-toggle-button" type="submit">{escape(messages["serve_upload"])}</button>
+              </span>
+            </div>
           </form>"""
+
+
+def render_adapter_select(messages: dict[str, str]) -> str:
+    options = [
+        ("auto", messages["serve_adapter_auto"]),
+        *[(adapter_id, adapter_id) for adapter_id in available_adapter_ids()],
+    ]
+    option_html = "".join(
+        f'<option value="{escape(value)}" {"selected" if value == "auto" else ""}>{escape(label)}</option>'
+        for value, label in options
+    )
+    return f"""
+              <label class="source-adapter-select">
+                <span>{escape(messages["serve_adapter"])}</span>
+                <select name="adapter" aria-label="{escape(messages["serve_adapter"])}">
+                  {option_html}
+                </select>
+              </label>"""
 
 
 def render_source_list_items(
@@ -198,6 +224,11 @@ def render_source_list_item(
         if source_key
         else ""
     )
+    delete_button = (
+        f'<button type="button" data-source-action="delete" data-source-key="{escape(source_key)}">{escape(messages["serve_delete"])}</button>'
+        if source_key
+        else ""
+    )
     state_label = messages["serve_active"] if active else messages["serve_archived"]
     return f"""
             <li class="source-row {'archived' if not active else ''}">
@@ -205,7 +236,7 @@ def render_source_list_item(
                 <strong>{escape(label)}</strong>
                 <span>{escape(kind)} / {escape(adapter)} / {escape(status)} / {escape(state_label)}</span>
               </div>
-              <div class="source-row-actions">{refresh_button}{archive_button}</div>
+              <div class="source-row-actions">{refresh_button}{archive_button}{delete_button}</div>
             </li>"""
 
 
