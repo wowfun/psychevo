@@ -68,6 +68,7 @@
 .pevo-planChip button:focus-visible,
 .pevo-evidenceLine:focus-visible,
 .pevo-reasoningHeader:focus-visible,
+.pevo-jumpBottom:focus-visible,
 .pevo-sessionMain:focus-visible,
 .pevo-sessionMenu summary:focus-visible,
 .pevo-sessionMenu button:focus-visible,
@@ -509,10 +510,10 @@
 }
 
 .pevo-markdown code {
-  padding: 0;
-  color: inherit;
-  background: transparent;
-  border-radius: 0;
+  padding: 0 3px;
+  color: var(--pevo-markdown-code-ink, var(--pevo-code-ink));
+  background: var(--pevo-markdown-inline-bg, transparent);
+  border-radius: var(--pevo-radius-xs);
   font-size: 0.92em;
 }
 
@@ -520,8 +521,9 @@
   max-width: 100%;
   overflow: auto;
   padding: 10px;
-  color: var(--pevo-code-ink);
-  background: var(--pevo-code-bg);
+  color: var(--pevo-markdown-code-ink, var(--pevo-code-ink));
+  background: var(--pevo-markdown-code-bg, var(--pevo-code-bg));
+  border: 1px solid var(--pevo-markdown-code-border, transparent);
   border-radius: var(--pevo-radius-sm);
 }
 
@@ -724,16 +726,93 @@
   white-space: nowrap;
 }
 
-.pevo-evidence pre {
+.pevo-toolDetail {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin-left: 23px;
+  padding: 1px 0 2px 12px;
+  color: var(--pevo-muted-strong);
+  border-left: 1px solid color-mix(in oklch, var(--pevo-border), transparent 42%);
+}
+
+.pevo-toolSection {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.pevo-toolSection h4 {
+  margin: 0;
+  color: var(--pevo-muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.pevo-toolSection dl {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.pevo-toolSection dl div {
+  display: grid;
+  grid-template-columns: minmax(72px, max-content) minmax(0, 1fr);
+  gap: 10px;
+  min-width: 0;
+}
+
+.pevo-toolSection dt,
+.pevo-toolSection dd {
+  margin: 0;
+  min-width: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.pevo-toolSection dt {
+  color: var(--pevo-muted);
+}
+
+.pevo-toolSection dd {
+  color: var(--pevo-ink);
+  overflow-wrap: anywhere;
+}
+
+.pevo-toolSection pre {
   max-width: 100%;
-  max-height: 120px;
+  max-height: 240px;
   overflow: auto;
   margin: 0;
-  padding: 8px;
+  padding: 8px 10px;
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 58%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 48%);
+  border-radius: var(--pevo-radius-sm);
+  font-family: var(--pevo-mono);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.pevo-toolSection.is-code pre {
   color: var(--pevo-code-ink);
   background: var(--pevo-code-bg);
-  border-radius: var(--pevo-radius-sm);
-  white-space: pre-wrap;
+  border-color: color-mix(in oklch, var(--pevo-code-ink), transparent 86%);
+}
+
+.pevo-toolSection.is-error h4,
+.pevo-toolSection.is-error dt,
+.pevo-toolSection.is-error dd {
+  color: var(--pevo-danger);
+}
+
+.pevo-toolSection.is-error pre {
+  color: var(--pevo-danger);
+  background: color-mix(in oklch, var(--pevo-danger), transparent 92%);
+  border-color: color-mix(in oklch, var(--pevo-danger), transparent 68%);
 }
 
 @media (max-width: 640px) {
@@ -781,6 +860,16 @@
 
   .pevo-evidenceLine.is-singleTitle em {
     grid-column: 3 / 4;
+  }
+
+  .pevo-toolDetail {
+    margin-left: 19px;
+    padding-left: 10px;
+  }
+
+  .pevo-toolSection dl div {
+    grid-template-columns: 1fr;
+    gap: 1px;
   }
 }
 
@@ -875,14 +964,45 @@
   right: 18px;
   bottom: 58px;
   z-index: 15;
-  min-height: 32px;
-  padding: 0 10px;
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  padding: 0;
   color: var(--pevo-accent-ink);
   background: var(--pevo-accent);
   border: 1px solid var(--pevo-accent);
   border-radius: var(--pevo-radius-sm);
   box-shadow: 0 6px 16px rgb(21 28 36 / 16%);
   cursor: pointer;
+}
+
+.pevo-jumpBottom::after {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: max-content;
+  max-width: min(220px, calc(100vw - 24px));
+  padding: 5px 7px;
+  color: var(--pevo-panel);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  content: attr(data-tooltip);
+  background: var(--pevo-ink);
+  border: 1px solid color-mix(in oklch, var(--pevo-ink), transparent 28%);
+  border-radius: var(--pevo-radius-sm);
+  box-shadow: var(--pevo-shadow-popover);
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.pevo-jumpBottom:hover::after,
+.pevo-jumpBottom:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .pevo-composer textarea {

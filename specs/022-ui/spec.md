@@ -334,20 +334,32 @@ it must not append a second live row with the same assistant text or tool call.
 
 Tool/evidence rows follow the same reducer semantics as the TUI: a tool row's
 collapsed header is derived from the call name plus argument subject, while
-results stay in the expanded detail or secondary summary. Continuation tools
-such as an empty `write_stdin` poll for a yielded `exec_command` are not
+results stay in structured expanded detail or a secondary summary. Continuation
+tools such as an empty `write_stdin` poll for a yielded `exec_command` are not
 independent transcript rows; their output, terminal status, and elapsed time are
 merged into the owning `exec_command` row. Only non-empty stdin input is allowed
 to render as its own compact terminal interaction. Long command, path, or query
 headers must elide inside the row so the optional status marker and row border
-remain visible at desktop and narrow widths. Full commands, SQL, arguments,
-results, and JSON belong in expandable detail, not in the collapsed header.
+remain visible at desktop and narrow widths. Full commands, SQL, arguments, and
+results belong in structured expandable sections such as Command, Input, Output,
+Files, Diff, Web, Error, or Status. Ordinary transcript rendering must not show
+raw argument/result JSON in either collapsed headers or expanded details; raw
+event payloads belong only in explicit developer diagnostics such as Debug.
 Shell-command rows render the invocation-style subject `exec_command <cmd>` in
 both TUI and Workbench. Workbench must not split an `exec_command` row into a
 truncated tool-name column such as `exec_command p...` plus a second command
 summary column; the collapsed row uses one clipped invocation title with the
 status marker kept visible. Full commands, arguments, results, and internal
-tool metadata remain available through expandable detail.
+tool metadata remain available through structured expandable detail or Debug.
+
+Workbench tool display projection consumes `metadata.display` when present,
+using the same `ToolDisplaySpec` concepts as the runtime/TUI (`category`,
+title-argument keys, title-result keys, summary keys, body keys, and body
+policy). When no display spec is present, Workbench applies built-in defaults
+for core tools such as `exec_command`, `write_stdin`, file tools, web tools,
+clarify, Agent, MCP tools, and generic extension tools. This projection is a UI
+rendering concern and does not change transcript ordering or tool execution
+semantics.
 
 Transcript components must render message-derived entries in canonical order
 even when an app store or reconnect path provides a temporarily shuffled array.
@@ -398,7 +410,14 @@ restrained shadow. Cards are reserved for bounded repeated items, requests,
 drawers, explicit previews, and code surfaces; ordinary page sections should
 read as continuous panes or rows rather than generic floating cards. Buttons use
 a consistent radius scale and press feedback without resizing their layout
-footprint. The left navigation/sidebar reads as one continuous navigation
+footprint. Workbench controls prefer icon-first expression for familiar actions
+such as navigation, close, add, refresh, scroll, copy, and panel toggles; these
+controls expose clear `aria-label` text and hover tooltips rather than permanent
+long labels. Text buttons are reserved for commands whose wording is the
+primary affordance or where an icon would be ambiguous. The transcript
+jump-to-latest affordance is therefore an icon-only control with an accessible
+label and hover tooltip. The left
+navigation/sidebar reads as one continuous navigation
 surface: Actions, Pinned, Sessions, and Settings use spacing, typography, and
 soft selection indicators rather than prominent boxed outlines, heavy divider
 lines, left rails, underline rails, or resting card-like row fills. Section
@@ -413,17 +432,84 @@ ordinary pane background. They should not render permanent row cards, heavy
 outer panel borders, or filled containers just to separate adjacent controls.
 
 Desktop uses a persistent left history/workdir pane, center
-transcript/composer, optional inline center preview split, and a right
-Status/Files inspector that is collapsed by default on Web startup. The composer
-footer carries Agent, Plan, model, variant, context usage, and submit/interrupt
-controls; the quieter status line below carries permission mode, workdir path,
-and Git branch when available. The context item is a compact graphical meter with hover/click
-details, not a token table. Right Status changed-file rows open a read-only diff
-preview in the center split. Diff and code preview panes must remain readable in
-both dark and light appearances; dark code surfaces use dedicated code text
-tokens rather than inheriting ordinary page ink. Permission approval and clarify
-requests render in the composer area, where TUI-style bottom interaction lives,
-and must not be displaced into Status, Files, Debug, or passive metrics.
+transcript/composer, and a resizable right workspace. On Web startup, Workbench
+creates a local detached draft for the launch scope, falling back to the most
+recent project scope and then the initialized default scope. The draft is
+selected so the composer is ready immediately, but it is hidden from the left
+Sessions browser until the first accepted prompt or shell command creates a
+durable session. Startup does not proactively open the right workspace; users
+reveal it from the right-column control or by taking an explicit file/diff
+action.
+
+When revealed without an active tab, the right workspace shows a
+status/navigation home. The home summarizes current connection, session,
+workdir, context, and changed-file state, then offers compact bordered rows for
+Review, Terminal, and Files. Those rows use icon plus label only, with no
+right-side explanatory copy. Selecting a row creates and activates a tab of
+that type. After one tab exists, the right workspace shows a compact tab strip
+plus a `+` menu for opening additional Review, Terminal, or Files tabs. Browser
+is not part of this slice. Debug remains a developer-only tab when the local
+Debug preference is enabled, but is not shown as a normal home navigation
+target.
+
+Review tabs own changed-file review and structured unified diff display. A
+Review tab exposes a top-right Files toggle; when pressed, the tab splits into
+left diff preview and right changed-files tree. Files tabs split into left file
+preview and right workspace tree. This left-preview/right-tree structure is the
+desktop information architecture for both tab types and must not be inverted;
+only narrow responsive layouts may stack the tree below the preview. Review and
+Files share the same filterable tree behavior: case-insensitive path filtering,
+preserved ancestor folders, local folder expand/collapse, selected row state,
+and compact status/count metadata where available. Their preview and tree
+regions are immersive panes on the right-workspace background, separated by
+subtle dividers rather than card frames, filled panel backgrounds, or rounded
+outer containers. Selecting a changed file or a workspace file activates an
+existing compatible tab when practical, otherwise it creates a new
+right-workspace tab.
+
+File and diff previews no longer open an inline center split; the transcript
+surface remains the center workspace. Diff previews render parsed file headers,
+hunks, line-number gutters, and addition/deletion/context rows instead of raw
+plain `<pre>` output. Diff file headers use a compact Codex-style identifier:
+status marker, workspace-relative path, and addition/deletion counts. They do
+not show the raw `diff --git`, `index`, `---`, or `+++` metadata block as
+visible header copy, and absolute paths are reserved for title/tooltip text
+when the active workdir can be joined with the changed file path. Files
+previews render text files as syntax-highlighted code and Markdown files
+through the shared transcript Markdown renderer, with raw HTML escaped. The
+Files tab header keeps only the tab title; the selected file absolute path
+appears above the preview. Code highlighting uses the Workbench-local
+`highlight.js` core integration with a hand-picked language set and app-token
+`.hljs-*` colors, not a stock theme stylesheet.
+Terminal tabs are real
+interactive local terminal sessions scoped to the active project workdir.
+Terminal output is UI-only and is not transcript history or model-visible
+context. Terminal tabs keep the xterm viewport primary and do not render a
+persistent project title, path, or running badge above it. Apart from the
+shared tab strip, a Terminal tab is a full-height terminal canvas; it must not
+leave ordinary right-workspace background visible below a shorter xterm
+viewport. Diff and code panes must remain readable in both dark and light
+appearances; light appearance uses light diff and Markdown code surfaces rather
+than retaining dark diff panels or dark Markdown code blocks, while dark code
+surfaces use dedicated code text tokens rather than inheriting ordinary page
+ink. Permission approval and clarify requests render in the composer area,
+where TUI-style bottom interaction lives, and must not be displaced into
+Review, Terminal, Files, Debug, or passive metrics.
+
+The right workspace width is a Workbench host preference. Desktop users can
+resize it from the left edge of the right column; the chosen width defaults to
+about `520px` so Review and Files can open directly into their split working
+layout, is clamped to a broad desktop range up to about `1200px` with a
+viewport cap that protects the center transcript, persists on drag end, and is
+restored on the next launch. Narrow/mobile layouts ignore the persisted desktop
+width and keep one active surface visible at a time.
+
+The Workbench web build keeps large, stable browser dependencies in named
+vendor chunks instead of one monolithic vendor asset. React runtime,
+Markdown/remark processing, syntax highlighting, terminal rendering, icons,
+schema validation, generated protocol schemas, and local workspace packages may
+be split independently so production builds stay inspectable without raising
+the default chunk-size warning threshold.
 Workdir-group ordering in the Sessions pane is based on actual session or
 local draft recency, with label as a deterministic tie-breaker. Selecting or
 resuming a session in a lower workdir marks that row active but must not lift
@@ -481,9 +567,11 @@ the inspector width; connection, turn, queued, and similar metrics may remain in
 compact columns below it.
 
 Appearance is a frontend/host preference, not a provider or secret setting.
-In light appearance, Workbench accent surfaces use neutral gray highlight
-tokens so selected controls, status accents, and active UI state read as quiet
-application chrome instead of a saturated brand color.
+In light appearance, Workbench uses a warm reading-paper palette rather than a
+cool blue or icy gray shell. The canvas is ivory, panels are warm paper,
+borders are taupe, primary text is warm charcoal, and selected controls,
+status accents, and active UI state use low-chroma amber/taupe tokens so they
+read as quiet application chrome instead of a saturated brand color.
 The bottom Settings utility entry is a location marker, not a primary action;
 when Settings is active it uses the ordinary sidebar selected surface instead
 of an accent fill.
@@ -495,9 +583,12 @@ status/diff preview behavior.
 In dark appearance, primary shell labels such as `New Session`, `Search`,
 `Artifacts`, `Pinned`, `Sessions`, `Settings`, and transcript state labels such
 as `Thinking` must use readable foreground tokens rather than the faintest
-muted text color. Filled user bubbles and selected navigation rows must remain
-visibly separated from the page background without becoming saturated accent
-surfaces.
+muted text color. Dark surfaces use neutral warm-black tokens rather than a
+cold blue sidebar hue, and primary text should sit in a higher luminance range
+so navigation labels, empty transcript states, and transcript copy remain
+legible while preserving the dark ledger structure. Filled user bubbles and
+selected navigation rows must remain visibly separated from the page background
+without becoming saturated accent surfaces.
 
 Settings also provides a local Debug switch. When enabled, the right inspector
 adds a `Debug` tab after `Files`; when disabled, the tab is absent. The Debug

@@ -45,8 +45,8 @@ test.describe("pevo Web Workbench", () => {
 
       await openPanel(page, isMobile, "History");
       await page.getByRole("button", { name: "New Session" }).click();
-      await expect(page.locator(".pevo-sessionRow")).toHaveCount(1);
-      await expect(page.locator(".pevo-sessionRow.is-draft")).toHaveCount(1);
+      await expect(page.locator(".pevo-sessionRow")).toHaveCount(0);
+      await expect(page.locator(".pevo-sessionRow.is-draft")).toHaveCount(0);
 
       await openPanel(page, isMobile, "Transcript");
       await expect(page.getByText("No messages yet")).toBeVisible();
@@ -69,13 +69,13 @@ test.describe("pevo Web Workbench", () => {
       await page.keyboard.press("Escape");
       await page.keyboard.press("Enter");
       await openPanel(page, isMobile, "History");
-      await expect(page.locator(".pevo-sessionRow")).toHaveCount(1);
-      await expect(page.locator(".pevo-sessionRow.is-draft")).toHaveCount(1);
+      await expect(page.locator(".pevo-sessionRow")).toHaveCount(0);
+      await expect(page.locator(".pevo-sessionRow.is-draft")).toHaveCount(0);
 
       await openPanel(page, isMobile, "Status");
-      const statusRegion = page.getByRole("region", { name: "Status" });
+      const statusRegion = page.getByRole("region", { name: "Workspace status" });
       await expect(statusRegion.getByText("idle")).toBeVisible();
-      await expect(statusRegion.getByText("No active session")).toBeVisible();
+      await expect(statusRegion.getByText("draft")).toBeVisible();
     } finally {
       await server.stop();
     }
@@ -113,6 +113,37 @@ test.describe("pevo Web Workbench", () => {
       await expect(row.locator(".pevo-evidenceLine span")).toHaveCount(0);
       expect(statusBox!.x + statusBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width);
       expect(titleClipped).toBe(true);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test("renders structured tool evidence rows without raw JSON", async ({ page, isMobile }, testInfo) => {
+    const server = await startPevoWeb({ live: false });
+    try {
+      await page.goto(server.url);
+      for (const appearance of ["dark", "light"] as const) {
+        await page.evaluate((value) => {
+          localStorage.setItem("psychevo.workbench.v0.prefs", JSON.stringify({ appearance: value, debug: false }));
+        }, appearance);
+        await page.reload();
+        await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+        await openPanel(page, isMobile, "Transcript");
+        await injectStructuredToolRows(page);
+
+        const toolText = await page.locator(".pevo-evidence").evaluateAll((rows) =>
+          rows.map((row) => row.textContent ?? "").join("\n")
+        );
+        expect(toolText).toContain("exec_command python fetch.py");
+        expect(toolText).toContain("Command");
+        expect(toolText).toContain("Output");
+        expect(toolText).not.toMatch(/\{.*"(args|result|bytes_written|exit_code|output|session_id)"/);
+
+        await page.screenshot({
+          fullPage: true,
+          path: testInfo.outputPath(`tool-evidence-${appearance}-${isMobile ? "mobile" : "desktop"}.png`)
+        });
+      }
     } finally {
       await server.stop();
     }
@@ -191,15 +222,66 @@ async function openPanel(page: Page, isMobile: boolean, name: "History" | "Statu
       await page.getByRole("button", { name: "Transcript" }).click();
     }
     const expandInspector = page.getByRole("button", { name: "Show right inspector" });
-    if (await expandInspector.count()) {
+    const collapseInspector = page.getByRole("button", { name: "Collapse right inspector" });
+    if (await collapseInspector.count() === 0) {
       await expect(expandInspector).toBeVisible();
       await expandInspector.click();
+      await expect(collapseInspector).toBeVisible();
     }
   }
   if (isMobile) {
     await page.getByRole("button", { name }).click();
   }
   if (name === "Status") {
-    await expect(page.getByRole("region", { name: "Status" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Workspace status" })).toBeVisible();
   }
+}
+
+async function injectStructuredToolRows(page: Page) {
+  await page.locator(".pevo-threadItems").evaluate((container) => {
+    container.innerHTML = `
+      <article class="pevo-evidence is-completed is-tool-run" data-block-kind="shell" data-testid="structured-exec-row">
+        <button class="pevo-evidenceLine is-singleTitle" type="button">
+          <svg width="15" height="15" aria-hidden="true"></svg>
+          <code>exec_command python fetch.py</code>
+        </button>
+        <div class="pevo-toolDetail">
+          <section class="pevo-toolSection is-text is-code">
+            <h4>Command</h4>
+            <pre>python fetch.py</pre>
+          </section>
+          <section class="pevo-toolSection is-kv">
+            <h4>Input</h4>
+            <dl><div><dt>workdir</dt><dd>/tmp/project</dd></div></dl>
+          </section>
+          <section class="pevo-toolSection is-text is-code">
+            <h4>Output</h4>
+            <pre>first
+second</pre>
+          </section>
+          <section class="pevo-toolSection is-kv">
+            <h4>Status</h4>
+            <dl><div><dt>exit</dt><dd>0</dd></div></dl>
+          </section>
+        </div>
+      </article>
+      <article class="pevo-evidence is-completed is-tool-update" data-block-kind="file" data-testid="structured-write-row">
+        <button class="pevo-evidenceLine" type="button">
+          <svg width="15" height="15" aria-hidden="true"></svg>
+          <code>write feeds/report.md</code>
+          <span>34,093 bytes / ok</span>
+        </button>
+        <div class="pevo-toolDetail">
+          <section class="pevo-toolSection is-kv">
+            <h4>Input</h4>
+            <dl><div><dt>path</dt><dd>feeds/report.md</dd></div></dl>
+          </section>
+          <section class="pevo-toolSection is-kv">
+            <h4>Change</h4>
+            <dl><div><dt>bytes</dt><dd>34093</dd></div><div><dt>status</dt><dd>ok</dd></div></dl>
+          </section>
+        </div>
+      </article>
+    `;
+  });
 }

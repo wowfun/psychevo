@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 
@@ -75,7 +75,26 @@ const gatewayMock = vi.hoisted(() => {
       };
     },
     snapshot,
-    source
+    source,
+    workspaceDiffResult: {
+      isGitRepo: true,
+      files: [] as Array<{
+        path: string;
+        status: "modified" | "added" | "deleted" | "untracked" | "binary" | "unreadable";
+        binary: boolean;
+        unreadable: boolean;
+        placeholder: string | null;
+      }>,
+      unifiedDiff: "",
+      truncation: { truncated: false, maxBytes: 0, maxLines: 0, omittedBytes: 0, omittedLines: 0 },
+      selectedPath: null as string | null
+    },
+    workspaceFileReadResults: new Map<string, unknown>(),
+    workspaceFilesResult: {
+      root: scope.workdir,
+      entries: [] as Array<{ path: string; name: string; kind: "file" | "directory"; depth: number }>,
+      truncated: false
+    }
   };
 });
 
@@ -117,6 +136,16 @@ vi.mock("@psychevo/client", () => {
       if (method === "thread/list") {
         return { sessions: gatewayMock.sessionSummaries };
       }
+      if (method === "thread/start") {
+        return {
+          ...gatewayMock.snapshot,
+          thread: null,
+          entries: [],
+          activity: { running: false, activeTurnId: null, queuedTurns: 0 },
+          pendingPermissions: [],
+          pendingClarifies: []
+        };
+      }
       if (method === "settings/read") {
         return gatewayMock.settingsResult(null);
       }
@@ -150,15 +179,37 @@ vi.mock("@psychevo/client", () => {
         return gatewayMock.commandExecute(record.command ?? "");
       }
       if (method === "workspace/files") {
-        return { root: gatewayMock.scope.workdir, entries: [], truncated: false };
+        return gatewayMock.workspaceFilesResult;
       }
       if (method === "workspace/diff") {
+        const record = params as { path?: string | null } | undefined;
+        const selectedPath = record?.path ?? null;
+        if (!selectedPath) {
+          return gatewayMock.workspaceDiffResult;
+        }
         return {
-          isGitRepo: true,
-          files: [],
-          unifiedDiff: "",
-          truncation: { truncated: false, maxBytes: 0, maxLines: 0, omittedBytes: 0, omittedLines: 0 },
-          selectedPath: null
+          ...gatewayMock.workspaceDiffResult,
+          files: gatewayMock.workspaceDiffResult.files.filter((file) => file.path === selectedPath),
+          unifiedDiff: [
+            `diff --git a/${selectedPath} b/${selectedPath}`,
+            `--- a/${selectedPath}`,
+            `+++ b/${selectedPath}`,
+            "@@ -1 +1 @@",
+            "-old selected",
+            "+new selected"
+          ].join("\n"),
+          selectedPath
+        };
+      }
+      if (method === "workspace/file/read") {
+        const record = params as { path?: string | null } | undefined;
+        const path = record?.path ?? "";
+        return gatewayMock.workspaceFileReadResults.get(path) ?? {
+          path,
+          content: "",
+          binary: false,
+          unreadable: null,
+          truncated: false
         };
       }
       if (method === "context/read") {
@@ -177,6 +228,12 @@ vi.mock("@psychevo/client", () => {
         return { items: [], replacement: null };
       }
       if (method === "turn/start") {
+        return { accepted: true };
+      }
+      if (method === "terminal/start") {
+        return { terminalId: "terminal-1", cwd: gatewayMock.scope.workdir, pid: null };
+      }
+      if (method === "terminal/write" || method === "terminal/resize" || method === "terminal/terminate") {
         return { accepted: true };
       }
       throw new Error(`unexpected request: ${method}`);
@@ -210,9 +267,79 @@ vi.mock("@psychevo/host", () => ({
   downloadUrl: () => "http://127.0.0.1/download"
 }));
 
+vi.mock("@xterm/xterm", () => {
+  class Terminal {
+    cols = 80;
+    rows = 24;
+    options: Record<string, unknown>;
+
+    constructor(options: Record<string, unknown>) {
+      this.options = options;
+    }
+
+    dispose = vi.fn();
+    focus = vi.fn();
+    loadAddon = vi.fn();
+    onData = vi.fn(() => ({ dispose: vi.fn() }));
+    open = vi.fn();
+    write = vi.fn();
+  }
+  return { Terminal };
+});
+
+vi.mock("@xterm/addon-fit", () => ({
+  FitAddon: class {
+    fit = vi.fn();
+  }
+}));
+
 Object.defineProperty(HTMLElement.prototype, "scrollTo", {
   configurable: true,
   value: vi.fn()
+});
+
+Object.defineProperty(window, "matchMedia", {
+  configurable: true,
+  value: vi.fn((query: string) => ({
+    addEventListener: vi.fn(),
+    addListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+    matches: false,
+    media: query,
+    onchange: null,
+    removeEventListener: vi.fn(),
+    removeListener: vi.fn()
+  }))
+});
+
+Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+  configurable: true,
+  value: vi.fn(() => ({
+    clearRect: vi.fn(),
+    fillRect: vi.fn(),
+    getImageData: vi.fn(() => ({ data: new Uint8ClampedArray([0, 0, 0, 255]) })),
+    fillStyle: ""
+  }))
+});
+
+const localStorageItems = new Map<string, string>();
+
+Object.defineProperty(window, "localStorage", {
+  configurable: true,
+  value: {
+    clear: vi.fn(() => localStorageItems.clear()),
+    getItem: vi.fn((key: string) => localStorageItems.get(key) ?? null),
+    key: vi.fn((index: number) => Array.from(localStorageItems.keys())[index] ?? null),
+    removeItem: vi.fn((key: string) => {
+      localStorageItems.delete(key);
+    }),
+    setItem: vi.fn((key: string, value: string) => {
+      localStorageItems.set(key, value);
+    }),
+    get length() {
+      return localStorageItems.size;
+    }
+  }
 });
 
 afterEach(() => {
@@ -234,6 +361,20 @@ afterEach(() => {
     backend: { kind: "psychevo" as const, nativeId: "thread-1" },
     sourceKey: "source-key"
   };
+  gatewayMock.workspaceDiffResult = {
+    isGitRepo: true,
+    files: [],
+    unifiedDiff: "",
+    truncation: { truncated: false, maxBytes: 0, maxLines: 0, omittedBytes: 0, omittedLines: 0 },
+    selectedPath: null
+  };
+  gatewayMock.workspaceFileReadResults.clear();
+  gatewayMock.workspaceFilesResult = {
+    root: gatewayMock.scope.workdir,
+    entries: [],
+    truncated: false
+  };
+  window.localStorage.clear();
 });
 
 function commandItem(
@@ -288,8 +429,17 @@ function workspaceDiffAction() {
     type: "workspaceDiff",
     diff: {
       isGitRepo: true,
-      files: [],
-      unifiedDiff: "diff --git a/src/main.rs b/src/main.rs\n",
+      files: [
+        { path: "src/main.rs", status: "modified", binary: false, unreadable: false, placeholder: null }
+      ],
+      unifiedDiff: [
+        "diff --git a/src/main.rs b/src/main.rs",
+        "--- a/src/main.rs",
+        "+++ b/src/main.rs",
+        "@@ -1 +1 @@",
+        "-old main",
+        "+new main"
+      ].join("\n"),
       truncation: { truncated: false, maxBytes: 0, maxLines: 0, omittedBytes: 0, omittedLines: 0 },
       selectedPath: null
     }
@@ -297,28 +447,204 @@ function workspaceDiffAction() {
 }
 
 describe("Workbench composer agent wiring", () => {
-  it("persists concrete agent selection and submits the selected agent", async () => {
+  it("starts in a hidden draft without rendering a history draft row", async () => {
+    const { container } = render(<App />);
+
+    expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
+    expect((container.querySelector(".workbench") as HTMLElement | null)?.style.getPropertyValue("--right-column-width")).toBe("520px");
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/start",
+        params: expect.objectContaining({ scope: gatewayMock.scope })
+      });
+    });
+    expect(container.querySelectorAll(".pevo-sessionRow.is-draft")).toHaveLength(0);
+    expect(screen.queryByRole("region", { name: "Workspace status" })).toBeNull();
+  });
+
+  it("opens right workspace tabs from Home and the add menu", async () => {
+    render(<App />);
+
+    expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    const home = await screen.findByRole("region", { name: "Workspace status" });
+    expect(within(home).queryByText("local PTY")).toBeNull();
+    expect(within(home).queryByText("workspace tree")).toBeNull();
+    fireEvent.click(within(home).getByRole("button", { name: /Review/ }));
+    expect(await screen.findByRole("region", { name: "Review" })).toBeTruthy();
+
+    fireEvent.click(screen.getByLabelText("Open right workspace tab"));
+    const addMenuFiles = screen.getAllByRole("button", { name: "Files" }).at(-1);
+    expect(addMenuFiles).toBeTruthy();
+    fireEvent.click(addMenuFiles!);
+    expect(await screen.findByRole("region", { name: "Workspace files" })).toBeTruthy();
+
+    fireEvent.click(screen.getByLabelText("Workspace home"));
+    const visibleHome = await screen.findByRole("region", { name: "Workspace status" });
+    fireEvent.click(within(visibleHome).getByRole("button", { name: /Terminal/ }));
+    expect(await screen.findByRole("region", { name: "Terminal" })).toBeTruthy();
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.some((entry) => entry.method === "terminal/start")).toBe(true);
+    });
+  });
+
+  it("restores and clamps the right workspace width preference", async () => {
+    window.localStorage.setItem("psychevo.workbench.v0.prefs", JSON.stringify({
+      appearance: "dark",
+      debug: false,
+      rightWidthPx: 9999
+    }));
+    const { container } = render(<App />);
+
+    expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
+    const workbench = container.querySelector(".workbench") as HTMLElement | null;
+    expect(workbench?.style.getPropertyValue("--right-column-width")).toBe("1200px");
+  });
+
+  it("toggles Review changed files and scopes the diff preview", async () => {
+    gatewayMock.workspaceDiffResult = {
+      isGitRepo: true,
+      files: [
+        { path: "docs/api.md", status: "modified", binary: false, unreadable: false, placeholder: null },
+        { path: "src/main.rs", status: "modified", binary: false, unreadable: false, placeholder: null }
+      ],
+      unifiedDiff: [
+        "diff --git a/docs/api.md b/docs/api.md",
+        "--- a/docs/api.md",
+        "+++ b/docs/api.md",
+        "@@ -1 +1 @@",
+        "-old docs",
+        "+new docs",
+        "diff --git a/src/main.rs b/src/main.rs",
+        "--- a/src/main.rs",
+        "+++ b/src/main.rs",
+        "@@ -1 +1 @@",
+        "-old main",
+        "+new main"
+      ].join("\n"),
+      truncation: { truncated: false, maxBytes: 0, maxLines: 0, omittedBytes: 0, omittedLines: 0 },
+      selectedPath: null
+    };
+    render(<App />);
+
+    expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    const home = await screen.findByRole("region", { name: "Workspace status" });
+    fireEvent.click(within(home).getByRole("button", { name: "Review" }));
+    const review = await screen.findByRole("region", { name: "Review" });
+    expect(within(review).getByText("docs/api.md")).toBeTruthy();
+    expect(within(review).getAllByText("M↓").length).toBeGreaterThan(0);
+    expect(within(review).getAllByLabelText("1 additions, 1 deletions").length).toBeGreaterThan(0);
+    expect(within(review).queryByText("diff --git a/docs/api.md b/docs/api.md")).toBeNull();
+
+    fireEvent.click(within(review).getByRole("button", { name: "Show changed files" }));
+    expect(within(review).getByLabelText("Filter changed files")).toBeTruthy();
+    fireEvent.change(within(review).getByLabelText("Filter changed files"), { target: { value: "main" } });
+    expect(within(review).getByRole("treeitem", { name: /main\.rs/ })).toBeTruthy();
+    expect(within(review).queryByRole("treeitem", { name: /api\.md/ })).toBeNull();
+
+    fireEvent.click(within(review).getByRole("treeitem", { name: /main\.rs/ }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "workspace/diff",
+        params: expect.objectContaining({ path: "src/main.rs" })
+      });
+    });
+    expect(await within(review).findByText("new selected")).toBeTruthy();
+    expect(within(review).getByText("src/main.rs")).toBeTruthy();
+  });
+
+  it("renders Markdown file previews from the shared Markdown component", async () => {
+    gatewayMock.workspaceFilesResult = {
+      root: gatewayMock.scope.workdir,
+      entries: [
+        { path: "docs", name: "docs", kind: "directory", depth: 0 },
+        { path: "docs/README.md", name: "README.md", kind: "file", depth: 1 },
+        { path: "src", name: "src", kind: "directory", depth: 0 },
+        { path: "src/main.rs", name: "main.rs", kind: "file", depth: 1 }
+      ],
+      truncated: false
+    };
+    gatewayMock.workspaceFileReadResults.set("docs/README.md", {
+      path: "docs/README.md",
+      content: "# API Notes\n\n- supports markdown",
+      binary: false,
+      unreadable: null,
+      truncated: false
+    });
+    render(<App />);
+
+    expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    const home = await screen.findByRole("region", { name: "Workspace status" });
+    fireEvent.click(within(home).getByRole("button", { name: "Files" }));
+    const files = await screen.findByRole("region", { name: "Workspace files" });
+    expect(within(files).getByLabelText("Filter workspace files")).toBeTruthy();
+    expect(files.querySelector("header p")).toBeNull();
+
+    fireEvent.click(within(files).getByRole("treeitem", { name: /README\.md/ }));
+    expect(await within(files).findByText("/tmp/project/docs/README.md")).toBeTruthy();
+    expect(await within(files).findByRole("heading", { name: "API Notes" })).toBeTruthy();
+    expect(within(files).getByText("supports markdown")).toBeTruthy();
+  });
+
+  it("renders code previews with absolute paths, syntax tokens, and escaped source text", async () => {
+    gatewayMock.workspaceFilesResult = {
+      root: gatewayMock.scope.workdir,
+      entries: [
+        { path: "src", name: "src", kind: "directory", depth: 0 },
+        { path: "src/main.py", name: "main.py", kind: "file", depth: 1 }
+      ],
+      truncated: false
+    };
+    gatewayMock.workspaceFileReadResults.set("src/main.py", {
+      path: "src/main.py",
+      content: "def greet():\n    return \"<script>alert(1)</script>\"\n",
+      binary: false,
+      unreadable: null,
+      truncated: false
+    });
+    const { container } = render(<App />);
+
+    expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    const home = await screen.findByRole("region", { name: "Workspace status" });
+    fireEvent.click(within(home).getByRole("button", { name: "Files" }));
+    const files = await screen.findByRole("region", { name: "Workspace files" });
+
+    fireEvent.click(within(files).getByRole("treeitem", { name: /main\.py/ }));
+    expect(await within(files).findByText("/tmp/project/src/main.py")).toBeTruthy();
+    const preview = container.querySelector(".rightCodePreview") as HTMLElement | null;
+    expect(preview?.dataset.lang).toBe("python");
+    expect(preview?.querySelector(".hljs-keyword, .hljs-title")).toBeTruthy();
+    expect(preview?.querySelector("script")).toBeNull();
+    expect(preview?.innerHTML).toContain("&lt;script&gt;");
+  });
+
+  it("keeps Terminal interactive without the persistent title and state header", async () => {
+    render(<App />);
+
+    expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    const home = await screen.findByRole("region", { name: "Workspace status" });
+    fireEvent.click(within(home).getByRole("button", { name: "Terminal" }));
+    const terminal = await screen.findByRole("region", { name: "Terminal" });
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.some((entry) => entry.method === "terminal/start")).toBe(true);
+    });
+
+    expect(within(terminal).queryByRole("heading", { name: "project" })).toBeNull();
+    expect(within(terminal).queryByText("/tmp/project")).toBeNull();
+    expect(within(terminal).queryByText("running")).toBeNull();
+  });
+
+  it("keeps concrete draft agent selection and submits the selected agent", async () => {
     render(<App />);
 
     const agentSelect = await screen.findByRole("combobox", { name: "Agent" });
     expect(screen.getByRole("option", { name: "Default Agent" })).toBeTruthy();
     expect(screen.getByRole("option", { name: "Default Permission" })).toBeTruthy();
-    fireEvent.change(agentSelect, { target: { value: "translate" } });
-
-    await waitFor(() => {
-      expect(gatewayMock.requestLog).toContainEqual({
-        method: "settings/update",
-        params: expect.objectContaining({ agent: "translate", threadId: "thread-1" })
-      });
-    });
-
-    fireEvent.change(agentSelect, { target: { value: "" } });
-    await waitFor(() => {
-      expect(gatewayMock.requestLog).toContainEqual({
-        method: "settings/update",
-        params: expect.objectContaining({ agent: null, threadId: "thread-1" })
-      });
-    });
+    expect(await screen.findByRole("option", { name: "translate" })).toBeTruthy();
     fireEvent.change(agentSelect, { target: { value: "translate" } });
 
     const textarea = screen.getByPlaceholderText("Ask Psychevo...");
@@ -462,7 +788,7 @@ describe("Workbench composer agent wiring", () => {
     expect(await screen.findByRole("region", { name: "Commands overlay" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /\/status/ }));
 
-    expect(await screen.findByRole("region", { name: "Status" })).toBeTruthy();
+    expect(await screen.findByRole("region", { name: "Workspace status" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Commands overlay" })).toBeNull();
     expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
   });
@@ -490,7 +816,7 @@ describe("Workbench composer agent wiring", () => {
     expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
   });
 
-  it("reveals Status and shows local feedback for composer-entered status commands", async () => {
+  it("reveals workspace status and shows local feedback for composer-entered status commands", async () => {
     gatewayMock.commandExecute = (command: string) => ({
       accepted: true,
       command,
@@ -502,18 +828,16 @@ describe("Workbench composer agent wiring", () => {
 
     render(<App />);
 
-    expect(screen.queryByRole("region", { name: "Status" })).toBeNull();
-
     const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
     fireEvent.change(textarea, { target: { value: "/status" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(await screen.findByRole("region", { name: "Status" })).toBeTruthy();
+    expect(await screen.findByRole("region", { name: "Workspace status" })).toBeTruthy();
     expect(await screen.findByText("Opened Status.")).toBeTruthy();
     expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
   });
 
-  it("shows sandbox status feedback near the composer while revealing Status", async () => {
+  it("shows sandbox status feedback near the composer while revealing workspace status", async () => {
     gatewayMock.commandExecute = (command: string) => ({
       accepted: true,
       command,
@@ -530,7 +854,7 @@ describe("Workbench composer agent wiring", () => {
     fireEvent.change(textarea, { target: { value: "/sandbox" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(await screen.findByRole("region", { name: "Status" })).toBeTruthy();
+    expect(await screen.findByRole("region", { name: "Workspace status" })).toBeTruthy();
     expect(await screen.findByText("sandbox: workspace-write")).toBeTruthy();
     expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
   });
@@ -735,8 +1059,13 @@ describe("Workbench composer agent wiring", () => {
     fireEvent.change(textarea, { target: { value: "/diff" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(await screen.findByLabelText("Inline preview")).toBeTruthy();
-    expect(screen.getByText("Workspace Diff")).toBeTruthy();
+    expect(await screen.findByRole("region", { name: "Review" })).toBeTruthy();
+    expect(screen.queryByLabelText("Inline preview")).toBeNull();
+    expect(screen.getAllByText("src/main.rs").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("M↓").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("+1").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("-1").length).toBeGreaterThan(0);
+    expect(screen.queryByText("diff --git a/src/main.rs b/src/main.rs")).toBeNull();
 
     fireEvent.change(textarea, { target: { value: "/export" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));

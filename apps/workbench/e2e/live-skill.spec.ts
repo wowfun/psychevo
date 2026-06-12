@@ -103,6 +103,7 @@ async function captureAndAssert(
   );
   const durableRows = loadDurableRows(dbPath);
   assertNoToolHeaderResultJson(rows, sample);
+  assertNoToolRawJson(rows, sample);
   assertNoEvidenceOverflow(rows, sample);
   assertNoInternalReasoningLabels(rows, sample);
   assertNoEmptyReasoningRows(rows, sample);
@@ -250,6 +251,15 @@ function assertNoToolHeaderResultJson(rows: DomRow[], sample: number) {
   );
   if (offenders.length > 0) {
     throw new Error(`sample ${sample}: tool header contains result JSON: ${JSON.stringify(offenders, null, 2)}`);
+  }
+}
+
+function assertNoToolRawJson(rows: DomRow[], sample: number) {
+  const offenders = rows.filter((row) =>
+    row.kind === "tool" && /\{.*"(args|result|chunk_id|bytes_written|exit_code|output|error|wall_time_seconds)"/.test(row.text)
+  );
+  if (offenders.length > 0) {
+    throw new Error(`sample ${sample}: tool row contains raw JSON: ${JSON.stringify(offenders, null, 2)}`);
   }
 }
 

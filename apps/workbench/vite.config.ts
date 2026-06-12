@@ -8,8 +8,42 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           const normalized = id.replace(/\\/g, "/");
+          if (
+            normalized.includes("/node_modules/react/") ||
+            normalized.includes("/node_modules/react-dom/") ||
+            normalized.includes("/node_modules/scheduler/")
+          ) {
+            return "vendor-react";
+          }
+          if (normalized.includes("/node_modules/highlight.js/")) {
+            return "vendor-highlight";
+          }
+          if (
+            normalized.includes("/node_modules/react-markdown/") ||
+            normalized.includes("/node_modules/remark-") ||
+            normalized.includes("/node_modules/unified/") ||
+            normalized.includes("/node_modules/micromark") ||
+            normalized.includes("/node_modules/mdast-") ||
+            normalized.includes("/node_modules/hast-") ||
+            normalized.includes("/node_modules/unist-") ||
+            normalized.includes("/node_modules/vfile") ||
+            normalized.includes("/node_modules/markdown-table/") ||
+            normalized.includes("/node_modules/property-information/")
+          ) {
+            return "vendor-markdown";
+          }
+          if (
+            normalized.includes("/node_modules/ajv/") ||
+            normalized.includes("/node_modules/fast-uri/") ||
+            normalized.includes("/node_modules/json-schema-traverse/")
+          ) {
+            return "vendor-validation";
+          }
           if (normalized.includes("/node_modules/lucide-react/")) {
             return "vendor-icons";
+          }
+          if (normalized.includes("/node_modules/@xterm/")) {
+            return "vendor-terminal";
           }
           if (normalized.includes("/node_modules/")) {
             return "vendor";

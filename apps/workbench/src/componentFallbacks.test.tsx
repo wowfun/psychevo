@@ -1,9 +1,23 @@
-import { describe, expect, it, vi } from "vitest";
+// @vitest-environment jsdom
+
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { HistoryPanel, StatusPanel, TranscriptPanel } from "@psychevo/components";
 import type { SessionSummary, TranscriptBlock, TranscriptEntry } from "@psychevo/protocol";
 
 const noop = vi.fn();
+
+beforeAll(() => {
+  Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+    configurable: true,
+    value: vi.fn()
+  });
+});
+
+afterEach(() => {
+  cleanup();
+});
 
 describe("component fallback rendering", () => {
   it("renders older session summaries without activity metadata", () => {
@@ -531,6 +545,116 @@ describe("component fallback rendering", () => {
     expect(html).not.toContain("write_stdin");
     expect(html).not.toContain("yield_time_ms");
     expect(html).not.toContain("second");
+  });
+
+  it("renders expanded exec tool details without raw JSON", () => {
+    const exec = transcriptBlock({
+      id: "tool-exec",
+      kind: "shell",
+      title: "exec_command",
+      metadata: {
+        projection: "tool",
+        tool_name: "exec_command",
+        args: { cmd: "python fetch.py", workdir: "/tmp/project" }
+      },
+      result: {
+        resultMessageSeq: 2,
+        status: "completed",
+        content: "{\"session_id\":7,\"exit_code\":0,\"output\":\"first\\nsecond\\n\"}",
+        isError: false,
+        metadata: null,
+        createdAtMs: 2,
+        updatedAtMs: 2
+      }
+    });
+
+    const { container } = render(
+      <TranscriptPanel entries={[transcriptEntry({ blocks: [exec] })]} />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /exec_command python fetch\.py/ }));
+
+    expect(screen.getByText("Command")).toBeTruthy();
+    expect(screen.getByText("Output")).toBeTruthy();
+    expect(container.textContent).toContain("first");
+    expect(container.textContent).toContain("second");
+    expect(container.textContent).not.toContain("{\"session_id\"");
+    expect(container.textContent).not.toContain("\"exit_code\"");
+    expect(container.textContent).not.toContain("\"output\"");
+  });
+
+  it("does not expose raw write arguments or result keys in expanded tool details", () => {
+    const tool = transcriptBlock({
+      kind: "file",
+      title: "write",
+      metadata: {
+        projection: "tool",
+        tool_name: "write",
+        tool_call_id: "call-write",
+        args: { path: "feeds/report.md", content: "large markdown body" }
+      },
+      result: {
+        resultMessageSeq: 2,
+        status: "completed",
+        content: "{\"bytes_written\":34093,\"status\":\"ok\"}",
+        isError: false,
+        metadata: null,
+        createdAtMs: 2,
+        updatedAtMs: 2
+      }
+    });
+
+    const { container } = render(
+      <TranscriptPanel entries={[transcriptEntry({ blocks: [tool] })]} />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /write feeds\/report\.md/ }));
+
+    expect(screen.getByText("Input")).toBeTruthy();
+    expect(screen.getByText("Change")).toBeTruthy();
+    expect(container.textContent).toContain("feeds/report.md");
+    expect(container.textContent).not.toContain("large markdown body");
+    expect(container.textContent).not.toContain("bytes_written");
+  });
+
+  it("uses tool display specs for custom tool projection", () => {
+    const tool = transcriptBlock({
+      kind: "toolCall",
+      title: "custom_publish",
+      metadata: {
+        projection: "tool",
+        tool_name: "custom_publish",
+        tool_call_id: "call-custom",
+        args: { target: "draft.md", body: "hidden raw payload" },
+        display: {
+          category: "update",
+          title_arg_keys: ["target"],
+          title_result_keys: ["target"],
+          summary_keys: ["status"],
+          body_keys: ["content"],
+          body_policy: "summary"
+        }
+      },
+      result: {
+        resultMessageSeq: 2,
+        status: "completed",
+        content: "{\"status\":\"ok\",\"content\":\"published\"}",
+        isError: false,
+        metadata: null,
+        createdAtMs: 2,
+        updatedAtMs: 2
+      }
+    });
+
+    const html = renderToStaticMarkup(
+      <TranscriptPanel entries={[transcriptEntry({ blocks: [tool] })]} />
+    );
+
+    expect(html).toContain("is-tool-update");
+    expect(html).toContain("custom_publish draft.md");
+    expect(html).toContain("ok");
+    expect(html).not.toContain("hidden raw payload");
+    expect(html).not.toContain("body_policy");
   });
 
   it("does not render empty prompt placeholder blocks", () => {

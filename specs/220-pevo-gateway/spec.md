@@ -377,36 +377,94 @@ The desktop layout is a three-surface workbench:
   session actions, and a bottom utility rail for Settings. Agents, Skills,
   Tools, and MCP remain deferred utility surfaces and are hidden from the rail
   until the product explicitly enables them.
-- center: transcript/workbench, bottom-fixed composer, and optional inline
-  preview split
-- right: `Status` and `Files` tabs, defaulting to `Status`
+- center: transcript/workbench and bottom-fixed composer
+- right: a resizable workspace with a status/navigation home and typed tabs for
+  `Review`, `Terminal`, and `Files`
 
-The center composer and right inspector are session-scoped. They are hidden
-when no persisted session or local new-session draft is selected. Selecting a
-history session or creating/selecting a local draft reveals the composer and
-right inspector for that session scope.
+On startup, Workbench creates and selects a local detached draft. The launch
+scope is preferred; if unavailable, Workbench uses the most recent project
+scope from session history, then the initialized default scope. This selected
+draft reveals the composer but does not proactively open the right workspace
+and does not render as a left Sessions row. Selecting a history session or
+explicitly creating/selecting a local draft reveals the same session-scoped
+center surface; the right workspace opens only through the right-column control
+or an explicit file/diff action.
 
-The right `Files` tab shows only the launched project's file tree. Selecting a
-supported text file previews it in the center inline split instead of inserting
-a reference or opening an external host file. Unsupported preview formats and
-Gateway binary/unreadable file responses do not open a preview pane. Folder rows
-are locally expandable and collapsible so users can keep large trees compact.
-The inline preview is part of the center surface, not a third right-tab mode,
-and can be closed without changing the selected right tab.
+When the right workspace is revealed without an active tab, its home is a
+navigation and status page. It shows connection, current session or draft
+state, workdir, context usage, and changed-file summary, then offers bordered
+icon-and-label rows to open Review, Terminal, and Files tabs. Rows do not carry
+right-side explanatory copy. Once any tab is open, the tab strip includes a `+`
+menu for creating more tabs of those types. Browser is not exposed in this
+slice.
 
-The right `Status` tab is ordered as current work state: session identity and
-activity first, compact model/permission/mode summaries second, context usage
-as a graphical meter, then changed files as ledger rows. Changed-file rows are
-clickable. Selecting one opens a read-only unified diff preview in the center
-inline split, scoped to that file when Gateway can provide a file-specific
-diff. The same preview surface is used for `/diff`, artifact preview, and file
-preview so display artifacts do not enter ordinary transcript history.
+Review tabs are ordered around current work state and structured diff review.
+A Review tab has a top-right Files toggle; when pressed, the tab splits into
+left diff preview and right changed-files tree. Selecting a changed file scopes
+the active Review tab to that file when Gateway can provide a file-specific
+diff. The `/diff` host action opens or updates a Review tab. Files tabs split
+into left preview and right tree. That left-preview/right-tree split is the
+desktop information architecture for both Review and Files, with stacking only
+for narrow responsive layouts. Review and Files use the same locally filterable
+tree component with folder expand/collapse and selected row state. Preview and
+tree regions are immersive right-workspace panes with subtle split dividers
+instead of framed card backgrounds. Markdown previews reuse the shared
+transcript Markdown renderer with raw HTML escaped and light/dark theme-adapted
+code blocks. Code previews use a Workbench-local `highlight.js` core
+integration with app-token colors. The Files header does not repeat the project
+path; the selected file absolute path is shown above the preview. Diff previews
+use theme-adapted surfaces so light appearance does not retain dark diff
+panels. Diff file headers are compact UI identifiers, not raw Git metadata:
+they show status marker, workspace-relative path, and addition/deletion counts,
+while absolute paths are reserved for tooltip text when the active workdir is
+available. Unsupported preview formats and Gateway binary/unreadable file
+responses stay in the Files tab as unavailable preview states instead of
+opening a center preview.
+
+Workbench persists the right workspace desktop width as a host preference.
+Clients default the opened width to about `520px`, clamp restored and dragged
+values to a broad desktop range up to about `1200px`, keep a viewport cap so
+the center transcript remains usable, and disable the desktop resize handle in
+narrow layouts.
+
+Terminal tabs keep the PTY viewport as the primary surface. They do not render
+a persistent project title, path, or running badge above the terminal. Apart
+from the shared tab strip, the tab behaves as a full-height immersive terminal
+canvas: the xterm surface blends with the right workspace instead of rendering
+a separate framed code panel or leaving non-terminal background below it.
+Transient startup, error, and exit text may appear inside the terminal panel
+only when needed.
+
+The Gateway terminal API backs right-workspace Terminal tabs. It is separate
+from composer shell mode and does not create transcript entries. The methods
+are:
+
+- `terminal/start`: accepts `scope`, optional `cwd`, terminal `cols`, and
+  terminal `rows`; validates the requested workdir against the same scope rules
+  as workspace reads; spawns a PTY shell in that directory; returns
+  `terminalId`, resolved `cwd`, and optional process id.
+- `terminal/write`: accepts `terminalId` and a base64 data chunk to write to
+  the PTY.
+- `terminal/resize`: accepts `terminalId`, `cols`, and `rows` and resizes the
+  PTY.
+- `terminal/terminate`: accepts `terminalId` and terminates the PTY session.
+
+Gateway sends `terminal/output` notifications with `terminalId`, stream name,
+and base64 output chunks, and `terminal/exited` notifications with
+`terminalId`, optional exit code, and reason. Terminal sessions are owned by the
+WebSocket connection that created them and are cleaned up on explicit
+termination, process exit, or connection close. Terminal output is never
+persisted as session history or model-visible context.
 
 Settings includes a local appearance control with `dark` and `light` choices.
 The default is the dark ledger appearance. The setting is a Workbench host
 preference and does not require Gateway to persist provider/runtime
-configuration, but Gateway-rendered status/settings data must remain readable
-under both appearances.
+configuration. The light palette is a warm reading-paper treatment with ivory
+canvas, warm paper panels, taupe borders, warm charcoal text, and low-chroma
+amber/taupe active states rather than cool blue chrome. The dark palette keeps
+the near-black ledger structure, removes cold blue sidebar bias, and uses
+higher-luminance primary, muted, and navigation text so Gateway-rendered
+status/settings data remains readable under both appearances.
 Settings also includes a local Debug switch. Enabling Debug adds a right-side
 `Debug` tab after `Files` and displays the current Workbench event stream and
 Gateway notifications there. Debug output is diagnostic chrome, hidden by
@@ -500,9 +558,15 @@ Workbench tool rows match TUI tool projection. A yielded `exec_command` remains
 one row while later empty `write_stdin` polling appends output and completion to
 that row; the poll itself is hidden from the transcript. Collapsed tool headers
 show the tool name and a short argument subject, never full result JSON. Full
-commands, SQL, arguments, and results stay in expandable detail. Desktop and
-mobile headers must keep the subject clipped inside the row without pushing
-status markers outside the visible transcript width.
+commands, SQL, arguments, and results stay in structured expandable detail.
+Ordinary Workbench transcript rendering must not show raw argument/result JSON
+in collapsed or expanded tool rows; raw payloads remain available only through
+developer diagnostics such as Debug. Workbench consumes the existing
+`metadata.display` tool display spec when present and otherwise falls back to
+core tool defaults, so Gateway does not need an additional display-hint RPC or
+protocol field for this rendering slice. Desktop and mobile headers must keep
+the subject clipped inside the row without pushing status markers outside the
+visible transcript width.
 
 Closing and reopening the browser must call `thread/resume`, hydrate the latest
 snapshot, and continue applying live events without losing prior transcript

@@ -1,14 +1,20 @@
-import { Check, ChevronDown, ChevronRight, Copy } from "lucide-react";
+import { ArrowDownToLine, Check, ChevronDown, ChevronRight, Copy } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { GatewayActivity, TranscriptBlock, TranscriptEntry } from "@psychevo/protocol";
-import { asRecord, compactJson, compactText, prettyJson, stringValue } from "./shared";
+import { asRecord } from "./shared";
+import { evidenceDisplay, type EvidenceDisplay, type ToolDetailSection } from "./toolEvidence";
 
 export interface TranscriptPanelProps {
   activity?: GatewayActivity;
   entries: TranscriptEntry[];
   onCopyText?(text: string): void | Promise<void>;
+}
+
+export interface MarkdownTextProps {
+  streaming?: boolean;
+  text: string;
 }
 
 type CopyTextHandler = ((text: string) => void | Promise<void>) | undefined;
@@ -65,12 +71,19 @@ export function TranscriptPanel({ activity, entries, onCopyText }: TranscriptPan
         )}
       </div>
       {!followingBottom && (
-        <button className="pevo-jumpBottom" onClick={() => {
-          const scroller = scrollRef.current;
-          scroller?.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" });
-          setFollowingBottom(true);
-        }} type="button">
-          Jump to latest
+        <button
+          aria-label="Jump to latest"
+          className="pevo-jumpBottom"
+          data-tooltip="Jump to latest"
+          onClick={() => {
+            const scroller = scrollRef.current;
+            scroller?.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" });
+            setFollowingBottom(true);
+          }}
+          title="Jump to latest"
+          type="button"
+        >
+          <ArrowDownToLine size={17} aria-hidden />
         </button>
       )}
     </section>
@@ -241,20 +254,53 @@ function TranscriptBlockView({
   const display = evidenceDisplay(block, text);
   const evidenceLineClass = `pevo-evidenceLine ${display.singleTitle ? "is-singleTitle" : ""}`.trim();
   return (
-    <article className={`pevo-evidence is-${block.status}`} {...transcriptBlockDataAttributes(entry, block)}>
+    <article className={`pevo-evidence is-${block.status} is-tool-${display.category}`} {...transcriptBlockDataAttributes(entry, block)}>
       <button className={evidenceLineClass} onClick={() => setOpen((value) => !value)} type="button">
         {open ? <ChevronDown size={15} aria-hidden /> : <ChevronRight size={15} aria-hidden />}
         <code>{display.title}</code>
         {display.summary && <span>{display.summary}</span>}
         {status && <em>{status}</em>}
       </button>
-      {open && display.detail && <pre>{display.detail}</pre>}
+      {open && display.sections.length > 0 && <ToolDetail display={display} />}
       {artifactIds.length > 0 && (
         <div className="pevo-artifactRefs">
           {artifactIds.map((artifactId) => <span key={artifactId}>{artifactId}</span>)}
         </div>
       )}
     </article>
+  );
+}
+
+function ToolDetail({ display }: { display: EvidenceDisplay }) {
+  return (
+    <div className="pevo-toolDetail">
+      {display.sections.map((section, index) => <ToolDetailSectionView key={`${section.title}:${index}`} section={section} />)}
+    </div>
+  );
+}
+
+function ToolDetailSectionView({ section }: { section: ToolDetailSection }) {
+  const toneClass = section.tone && section.tone !== "default" ? ` is-${section.tone}` : "";
+  if (section.kind === "kv") {
+    return (
+      <section className={`pevo-toolSection is-kv${toneClass}`}>
+        <h4>{section.title}</h4>
+        <dl>
+          {section.rows.map((row) => (
+            <div key={`${row.label}:${row.value}`}>
+              <dt>{row.label}</dt>
+              <dd>{row.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+    );
+  }
+  return (
+    <section className={`pevo-toolSection is-text${section.code ? " is-code" : ""}${toneClass}`}>
+      <h4>{section.title}</h4>
+      <pre>{section.text}</pre>
+    </section>
   );
 }
 
@@ -357,103 +403,12 @@ function statusLabel(block: TranscriptBlock): string | null {
   }
 }
 
-function MarkdownText({ streaming, text }: { streaming?: boolean; text: string }) {
+export function MarkdownText({ streaming, text }: MarkdownTextProps) {
   return (
     <div className={`pevo-markdown ${streaming ? "is-streaming" : ""}`}>
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
     </div>
   );
-}
-
-function evidenceDisplay(block: TranscriptBlock, fallbackText: string): { detail: string | null; title: string; summary: string | null; singleTitle: boolean } {
-  const metadata = asRecord(block.metadata);
-  const title = block.title ?? block.kind;
-  if (metadata.projection === "tool") {
-    const args = metadata.args ?? metadata.arguments;
-    const result = block.result?.content ?? metadata.result;
-    const detail = [
-      args === undefined ? null : `args\n${prettyJson(args)}`,
-      result === undefined ? null : `result\n${prettyJson(result)}`,
-      block.result?.isError ? "status\nerror" : null,
-      metadata.outcome && metadata.outcome !== "normal" ? `outcome\n${String(metadata.outcome)}` : null
-    ].filter((value): value is string => value !== null).join("\n\n");
-    const invocation = execCommandInvocation(
-      stringValue(metadata.tool_name) ?? title,
-      title,
-      args,
-      block.preview ?? ""
-    );
-    if (invocation) {
-      return { title: invocation, summary: null, detail: detail || null, singleTitle: true };
-    }
-    return {
-      title,
-      summary: toolArgsSummary(title, args, block.preview ?? fallbackText),
-      detail: detail || null,
-      singleTitle: false
-    };
-  }
-  const summary = block.preview ?? compactText(fallbackText, 180);
-  const detail = [block.detail, block.body, block.result?.content, block.preview]
-    .filter((value): value is string => Boolean(value?.trim()))
-    .filter((value) => value.trim() !== summary.trim())[0] ?? null;
-  const invocation = block.kind === "shell" ? execCommandInvocation(title, title, undefined, block.preview ?? "") : null;
-  if (invocation) {
-    return { title: invocation, summary: null, detail, singleTitle: true };
-  }
-  return { title, summary, detail, singleTitle: false };
-}
-
-function execCommandInvocation(toolName: string, title: string, args: unknown, fallbackCommand: string): string | null {
-  const trimmedTitle = title.trim();
-  const trimmedTool = toolName.trim();
-  const isExecCommand = trimmedTool === "exec_command" ||
-    trimmedTitle === "exec_command" ||
-    trimmedTitle.startsWith("exec_command ");
-  if (!isExecCommand) {
-    return null;
-  }
-  const record = asRecord(args);
-  const command = stringValue(record.cmd) ??
-    stringValue(record.command) ??
-    execCommandTitleSubject(trimmedTitle) ??
-    (fallbackCommand.trim() || null);
-  if (!command) {
-    return "exec_command";
-  }
-  return compactText(`exec_command ${firstEffectiveCommand(command)}`, 180);
-}
-
-function execCommandTitleSubject(title: string): string | null {
-  const subject = title.trim().replace(/^exec_command\s+/, "").trim();
-  return subject && subject !== title.trim() ? subject : null;
-}
-
-function toolArgsSummary(toolName: string, args: unknown, fallback: string): string {
-  const record = asRecord(args);
-  const path = stringValue(record.path) ?? stringValue(record.file) ?? stringValue(record.file_path);
-  if (path) {
-    return path;
-  }
-  const command = stringValue(record.cmd) ?? stringValue(record.command);
-  if (command) {
-    return compactText(firstEffectiveCommand(command), 180);
-  }
-  const query = stringValue(record.query) ?? stringValue(record.pattern);
-  if (query) {
-    return compactText(query, 180);
-  }
-  if (args !== undefined) {
-    return compactText(compactJson(args), 180);
-  }
-  return compactText(fallback || toolName, 180);
-}
-
-function firstEffectiveCommand(command: string): string {
-  return command
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find((line) => line && !line.startsWith("#")) ?? command.trim();
 }
 
 function liveOrder(entry: TranscriptEntry): number | null {

@@ -4,5 +4,5 @@ export { HistoryPanel } from "./history";
 export type { HistoryDraftSession, HistoryPanelProps } from "./history";
 export { StatusPanel } from "./status";
 export type { StatusPanelProps } from "./status";
-export { TranscriptPanel } from "./transcript";
-export type { TranscriptPanelProps } from "./transcript";
+export { MarkdownText, TranscriptPanel } from "./transcript";
+export type { MarkdownTextProps, TranscriptPanelProps } from "./transcript";

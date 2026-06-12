@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import type { Terminal as XTermTerminal, ITheme } from "@xterm/xterm";
+import "@xterm/xterm/css/xterm.css";
 import {
   AlertTriangle,
   Archive,
@@ -12,12 +14,16 @@ import {
   FolderPlus,
   FolderTree,
   GitBranch,
+  GitPullRequest,
+  GripVertical,
+  Home,
   MessageSquare,
   Moon,
   PanelLeft,
   PanelRight,
   Pin,
   PlugZap,
+  Plus,
   RefreshCw,
   Search,
   Settings,
@@ -31,7 +37,7 @@ import {
 import {
   Composer,
   HistoryPanel,
-  StatusPanel,
+  MarkdownText,
   TranscriptPanel,
   type HistoryDraftSession
 } from "@psychevo/components";
@@ -55,6 +61,8 @@ import {
   ContextReadResultSchema,
   InitializeResultSchema,
   SettingsReadResultSchema,
+  TerminalExitedPayloadSchema,
+  TerminalOutputPayloadSchema,
   ThreadListResultSchema,
   ThreadTraceResultSchema,
   WorkspaceDiffResultSchema,
@@ -71,6 +79,8 @@ import {
   type PermissionDecision,
   type SessionSummary,
   type SettingsReadResult,
+  type TerminalExitedPayload,
+  type TerminalOutputPayload,
   type ThreadSnapshot,
   type ThreadTraceResult,
   type WorkspaceDiffResult,
@@ -78,6 +88,7 @@ import {
   type WorkspaceFileReadResult,
   type WorkspaceFilesResult
 } from "@psychevo/protocol";
+import { highlightToHtml, languageForPath } from "./highlight";
 import {
   createHistoryDraftSession,
   shouldApplyReadOnlySnapshot,
@@ -130,7 +141,16 @@ type WorkbenchCommand = {
   alternateAction: CommandAlternateAction | null;
 };
 
-type RightTab = "status" | "files" | "debug";
+type RightWorkspaceTabKind = "review" | "terminal" | "files" | "debug";
+type RightWorkspaceTab = {
+  id: string;
+  kind: RightWorkspaceTabKind;
+  title: string;
+  path?: string | null;
+  diff?: WorkspaceDiffResult | null;
+  file?: WorkspaceFileReadResult | null;
+  message?: string | null;
+};
 type MainView = "transcript" | "search" | "artifacts" | "agents" | "skills" | "tools" | "mcp" | "settings";
 type Appearance = "dark" | "light";
 type CommandOverlay = "agents" | "commands";
@@ -149,11 +169,6 @@ type CommandFeedback = {
   feedbackAnchor?: string | null;
   alternateAction?: CommandAlternateAction | null;
 } | null;
-
-type PreviewState =
-  | { body: string; kind: "diff"; path?: string | null; title: string }
-  | { body: string; kind: "file"; path: string; title: string; truncated: boolean; binary: boolean }
-  | null;
 
 type DebugEvent = {
   id: string;
@@ -189,6 +204,42 @@ type SearchResult = {
 type WorkbenchPrefs = {
   appearance: Appearance;
   debug: boolean;
+  rightWidthPx: number;
+};
+
+type TerminalNotificationEvent =
+  | { method: "terminal/output"; params: TerminalOutputPayload; seq: number }
+  | { method: "terminal/exited"; params: TerminalExitedPayload; seq: number };
+
+type WorkspaceFileTreeItem = {
+  badge?: string | null;
+  disabled?: boolean;
+  kind: "directory" | "file";
+  name: string;
+  path: string;
+  depth: number;
+  status?: string | null;
+};
+
+type ParsedDiffLineKind = "add" | "delete" | "context" | "meta";
+
+type ParsedDiffLine = {
+  kind: ParsedDiffLineKind;
+  marker: string;
+  newNumber: number | null;
+  oldNumber: number | null;
+  text: string;
+};
+
+type ParsedDiffHunk = {
+  header: string;
+  lines: ParsedDiffLine[];
+};
+
+type ParsedDiffFile = {
+  headers: string[];
+  hunks: ParsedDiffHunk[];
+  path: string;
 };
 
 const logoUrl = new URL("../../../assets/psychevo-logo.svg", import.meta.url).href;
@@ -196,6 +247,15 @@ const PREFS_KEY = "psychevo.workbench.v0.prefs";
 const PINNED_SESSIONS_KEY = "psychevo.workbench.v0.pinnedSessions";
 const MAX_TEXT_ATTACHMENT_BYTES = 256 * 1024;
 const MAX_IMAGE_ATTACHMENT_BYTES = 6 * 1024 * 1024;
+const DEFAULT_RIGHT_WIDTH_PX = 520;
+const MIN_RIGHT_WIDTH_PX = 300;
+const MAX_RIGHT_WIDTH_PX = 1200;
+let terminalEventSeq = 0;
+
+function nextTerminalEventSeq(): number {
+  terminalEventSeq += 1;
+  return terminalEventSeq;
+}
 
 export function App() {
   const [client, setClient] = useState<GatewayClient | null>(null);
@@ -211,7 +271,8 @@ export function App() {
   const [agents, setAgents] = useState<WorkbenchAgent[]>([]);
   const [backends, setBackends] = useState<WorkbenchBackend[]>([]);
   const [commands, setCommands] = useState<WorkbenchCommand[]>([]);
-  const [rightTab, setRightTab] = useState<RightTab>("status");
+  const [rightTabs, setRightTabs] = useState<RightWorkspaceTab[]>([]);
+  const [activeRightTabId, setActiveRightTabId] = useState<string | null>(null);
   const [mainView, setMainView] = useState<MainView>("transcript");
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(true);
@@ -226,9 +287,9 @@ export function App() {
   const [workspaceDialogOpen, setWorkspaceDialogOpen] = useState(false);
   const [workspaceDiff, setWorkspaceDiff] = useState<WorkspaceDiffResult | null>(null);
   const [contextUsage, setContextUsage] = useState<ContextReadResult | null>(null);
-  const [preview, setPreview] = useState<PreviewState>(null);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
+  const [terminalEvents, setTerminalEvents] = useState<TerminalNotificationEvent[]>([]);
   const [traceState, setTraceState] = useState<TraceState>({
     error: null,
     loading: false,
@@ -238,6 +299,7 @@ export function App() {
   const initialPrefs = useMemo(readWorkbenchPrefs, []);
   const [appearance, setAppearance] = useState<Appearance>(initialPrefs.appearance);
   const [debugEnabled, setDebugEnabled] = useState(initialPrefs.debug);
+  const [rightWidthPx, setRightWidthPx] = useState(initialPrefs.rightWidthPx);
   const [archived, setArchived] = useState(false);
   const [status, setStatus] = useState("connecting");
   const [error, setError] = useState<string | null>(null);
@@ -260,6 +322,7 @@ export function App() {
   const hasSelectedSession = Boolean(currentThreadId || visibleDraftSession);
   const showSessionChrome = mainView === "transcript" && hasSelectedSession;
   const commandContextKey = `${activeScope?.workdir ?? ""}:${currentThreadId ?? visibleDraftSession?.id ?? "none"}`;
+  const activeRightTab = rightTabs.find((tab) => tab.id === activeRightTabId) ?? null;
   const pinnedSessions = useMemo(
     () => pinnedSessionIds
       .map((id) => sessions.find((session) => session.id === id))
@@ -282,25 +345,29 @@ export function App() {
   }, [runnableAgents, selectedAgentName]);
 
   useEffect(() => {
-    if (!debugEnabled && rightTab === "debug") {
-      setRightTab("status");
+    if (debugEnabled) {
+      return;
     }
-  }, [debugEnabled, rightTab]);
+    setRightTabs((current) => current.filter((tab) => tab.kind !== "debug"));
+    if (activeRightTab?.kind === "debug") {
+      setActiveRightTabId(null);
+    }
+  }, [activeRightTab?.kind, debugEnabled]);
 
   useEffect(() => {
-    if (!debugEnabled || rightTab !== "debug" || !client || !currentThreadId) {
+    if (!debugEnabled || activeRightTab?.kind !== "debug" || !client || !currentThreadId) {
       if (!currentThreadId) {
         setTraceState({ error: null, loading: false, result: null, threadId: null });
       }
       return;
     }
     void refreshTrace(client, currentThreadId);
-  }, [client, currentThreadId, debugEnabled, rightTab]);
+  }, [activeRightTab?.kind, client, currentThreadId, debugEnabled]);
 
   useEffect(() => {
     document.documentElement.dataset.pevoAppearance = appearance;
-    host?.storage.setJson<WorkbenchPrefs>(PREFS_KEY, { appearance, debug: debugEnabled });
-  }, [appearance, debugEnabled, host]);
+    host?.storage.setJson<WorkbenchPrefs>(PREFS_KEY, { appearance, debug: debugEnabled, rightWidthPx });
+  }, [appearance, debugEnabled, host, rightWidthPx]);
 
   useEffect(() => {
     if (host) {
@@ -332,6 +399,12 @@ export function App() {
   }, [currentThreadId, draftSession]);
 
   useEffect(() => {
+    if (activeRightTabId && !rightTabs.some((tab) => tab.id === activeRightTabId)) {
+      setActiveRightTabId(rightTabs.at(-1)?.id ?? null);
+    }
+  }, [activeRightTabId, rightTabs]);
+
+  useEffect(() => {
     if (commandContextKeyRef.current === null) {
       commandContextKeyRef.current = commandContextKey;
       return;
@@ -358,6 +431,24 @@ export function App() {
 
     nextClient.subscribe((notification) => {
       pushDebugEvent(notification.method, notification.params);
+      if (notification.method === "terminal/output") {
+        const parsed = TerminalOutputPayloadSchema.safeParse(notification.params);
+        if (parsed.success) {
+          setTerminalEvents((current) => [
+            ...current.slice(-240),
+            { method: "terminal/output", params: parsed.data, seq: nextTerminalEventSeq() }
+          ]);
+        }
+      }
+      if (notification.method === "terminal/exited") {
+        const parsed = TerminalExitedPayloadSchema.safeParse(notification.params);
+        if (parsed.success) {
+          setTerminalEvents((current) => [
+            ...current.slice(-240),
+            { method: "terminal/exited", params: parsed.data, seq: nextTerminalEventSeq() }
+          ]);
+        }
+      }
       if (notification.method === "gateway/event") {
         const parsed = GatewayEventSchema.safeParse(notification.params);
         if (parsed.success) {
@@ -453,10 +544,18 @@ export function App() {
         setInit(initialize);
         setActiveScope(initialize.scope);
         scopeRef.current = initialize.scope;
-        await refreshSnapshot(nextClient, undefined, initialize.scope, false, null, true);
-        await refreshHistory(nextClient, archived);
-        await refreshAgentSurface(nextClient, initialize.scope);
-        await refreshWorkspaceSurface(nextClient, initialize.scope, null);
+        const nextSessions = await refreshHistory(nextClient, archived);
+        const startupScope = startupDraftScope(initialize.scope, nextSessions);
+        const epoch = beginExplicitViewSwitch();
+        const nextSnapshot = parseThreadSnapshot(await nextClient.request("thread/start", { scope: startupScope }));
+        if (!alive) {
+          return;
+        }
+        setSnapshot(normalizeSnapshot(nextSnapshot));
+        setDraftSession(createHistoryDraftSession(epoch, startupScope.workdir));
+        setArchived(false);
+        setMainView("transcript");
+        await adoptSnapshotScope(nextClient, nextSnapshot);
       } catch (err) {
         if (alive) {
           setStatus("error");
@@ -580,14 +679,16 @@ export function App() {
     applyInitialControls(nextSettings);
   }
 
-  async function refreshHistory(nextClient = client, includeArchived = archived, workdir: string | null = null) {
+  async function refreshHistory(nextClient = client, includeArchived = archived, workdir: string | null = null): Promise<SessionSummary[]> {
     if (!nextClient) {
-      return;
+      return [];
     }
     const result = ThreadListResultSchema.parse(
       await nextClient.request("thread/list", { archived: includeArchived, limit: 100, workdir: workdir ?? null })
     );
-    setSessions(result.sessions.map(normalizeSessionSummary));
+    const nextSessions = result.sessions.map(normalizeSessionSummary);
+    setSessions(nextSessions);
+    return nextSessions;
   }
 
   async function refreshAgentSurface(nextClient = client, scope = activeScope ?? init?.scope) {
@@ -714,11 +815,81 @@ export function App() {
     setMobilePanel("history");
   }
 
-  function revealStatusPanel(tab: RightTab = "status") {
+  function revealRightWorkspace(tabId: string | null = activeRightTabId) {
     setActiveCommandOverlay(null);
     setRightCollapsed(false);
-    setRightTab(tab);
+    setActiveRightTabId(tabId);
     setMobilePanel("status");
+  }
+
+  function openRightWorkspaceTab(kind: RightWorkspaceTabKind, patch: Partial<RightWorkspaceTab> = {}, forceNew = false) {
+    if (kind === "debug" && !debugEnabled) {
+      return;
+    }
+    const reusable = kind === "review" || kind === "files" || kind === "debug";
+    const nextId = reusable && !forceNew ? rightTabs.find((tab) => tab.kind === kind)?.id ?? createRightTabId(kind) : createRightTabId(kind);
+    const nextTab: RightWorkspaceTab = {
+      id: nextId,
+      kind,
+      title: patch.title ?? rightWorkspaceDefaultTitle(kind),
+      path: patch.path ?? null,
+      diff: patch.diff ?? null,
+      file: patch.file ?? null,
+      message: patch.message ?? null
+    };
+    setRightTabs((current) => {
+      const existing = current.find((tab) => tab.id === nextId);
+      if (!existing) {
+        return [...current, nextTab];
+      }
+      return current.map((tab) => (
+        tab.id === nextId
+          ? { ...tab, ...nextTab, id: tab.id, kind: tab.kind }
+          : tab
+      ));
+    });
+    revealRightWorkspace(nextId);
+  }
+
+  function closeRightWorkspaceTab(tabId: string) {
+    setRightTabs((current) => current.filter((tab) => tab.id !== tabId));
+    setActiveRightTabId((current) => {
+      if (current !== tabId) {
+        return current;
+      }
+      const remaining = rightTabs.filter((tab) => tab.id !== tabId);
+      return remaining.at(-1)?.id ?? null;
+    });
+  }
+
+  function openReviewTab(diff: WorkspaceDiffResult, path?: string | null) {
+    const selectedPath = diff.selectedPath ?? path ?? null;
+    openRightWorkspaceTab("review", {
+      diff,
+      path: selectedPath,
+      title: selectedPath ? fileBasename(selectedPath) : "Review"
+    });
+  }
+
+  function beginRightResize(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (window.matchMedia("(max-width: 780px)").matches) {
+      return;
+    }
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = rightWidthPx;
+    const pointerId = event.pointerId;
+    event.currentTarget.setPointerCapture(pointerId);
+    function onPointerMove(moveEvent: PointerEvent) {
+      const nextWidth = clampRightWidth(startWidth + startX - moveEvent.clientX);
+      setRightWidthPx(nextWidth);
+    }
+    function onPointerUp() {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    }
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp, { once: true });
   }
 
   function revealCommandsPanel(trigger: CommandTrigger = "commandsPanel") {
@@ -761,17 +932,17 @@ export function App() {
         revealCommandsPanel(trigger);
         return;
       case "preview":
-        revealTranscriptPanel();
+        openRightWorkspaceTab("review", { diff: workspaceDiff, title: "Review" });
         return;
       case "files":
-        revealStatusPanel("files");
+        openRightWorkspaceTab("files");
         return;
       case "debug":
-        revealStatusPanel("debug");
+        openRightWorkspaceTab("debug");
         return;
       case "status":
       default:
-        revealStatusPanel("status");
+        revealRightWorkspace(null);
     }
   }
 
@@ -782,7 +953,7 @@ export function App() {
       return;
     }
     if (anchor === "status") {
-      revealStatusPanel("status");
+      revealRightWorkspace(null);
     }
   }
 
@@ -809,7 +980,7 @@ export function App() {
         await handleAttachment();
         return;
       }
-      revealStatusPanel("status");
+      revealRightWorkspace(null);
     }
   }
 
@@ -968,9 +1139,8 @@ export function App() {
       case "workspaceDiff": {
         const diff = WorkspaceDiffResultSchema.parse(record.diff);
         setActiveCommandOverlay(null);
-        setPreview(diffPreviewState(diff));
-        setMainView("transcript");
-        setMobilePanel("transcript");
+        setWorkspaceDiff(diff);
+        openReviewTab(diff, diff.selectedPath);
         break;
       }
       case "showPanel":
@@ -1078,27 +1248,38 @@ export function App() {
 
   async function openFilePreview(path: string) {
     if (isUnsupportedPreviewFile(path)) {
-      setPreview(null);
+      openRightWorkspaceTab("files", {
+        path,
+        title: fileBasename(path),
+        file: null,
+        message: "Preview is not available for this file type."
+      });
       return;
     }
     const scope = activeScope ?? init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
     const result = WorkspaceFileReadResultSchema.parse(await client?.request("workspace/file/read", { scope, path }));
     if (result.binary || result.content === null) {
-      setPreview(null);
+      openRightWorkspaceTab("files", {
+        path: result.path,
+        title: fileBasename(result.path),
+        file: result,
+        message: result.unreadable ?? "Preview is not available for this file."
+      });
       return;
     }
-    setPreview(filePreviewState(result));
-    setMainView("transcript");
-    setMobilePanel("transcript");
+    openRightWorkspaceTab("files", {
+      path: result.path,
+      title: fileBasename(result.path),
+      file: result,
+      message: result.truncated ? "Preview truncated." : null
+    });
   }
 
   async function openDiffPreview(path?: string | null) {
     const scope = activeScope ?? init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
     const result = WorkspaceDiffResultSchema.parse(await client?.request("workspace/diff", { scope, path: path ?? null }));
     setWorkspaceDiff((current) => path ? current : result);
-    setPreview(diffPreviewState(result));
-    setMainView("transcript");
-    setMobilePanel("transcript");
+    openReviewTab(result, path ?? null);
   }
 
   async function loadThreadSearchText(threadId: string): Promise<string> {
@@ -1161,12 +1342,15 @@ export function App() {
         {showSessionChrome && (
           <button className={mobilePanel === "status" ? "is-selected" : ""} onClick={() => setMobilePanel("status")} type="button">
             <PanelRight size={17} />
-            {rightTabLabel(rightTab)}
+            {activeRightTab ? rightWorkspaceTabLabel(activeRightTab.kind) : "Status"}
           </button>
         )}
       </nav>
 
-      <div className={`workbench ${leftCollapsed ? "is-leftCollapsed" : ""} ${rightCollapsed || !showSessionChrome ? "is-rightCollapsed" : ""}`}>
+      <div
+        className={`workbench ${leftCollapsed ? "is-leftCollapsed" : ""} ${rightCollapsed || !showSessionChrome ? "is-rightCollapsed" : ""}`}
+        style={{ "--right-column-width": `${rightWidthPx}px` } as CSSProperties}
+      >
         <aside className={`historyColumn ${leftCollapsed ? "is-collapsed" : ""} ${mobilePanel === "history" ? "is-mobileSelected" : ""}`}>
           <div className="leftChrome">
             <div className="leftBrandRow">
@@ -1215,7 +1399,7 @@ export function App() {
                   archived={archived}
                   currentThreadId={currentThreadId}
                   disabled={disabled}
-                  draftSession={visibleDraftSession}
+                  draftSession={null}
                   pinnedSessionIds={pinnedSessionIds}
                   sessions={sessions}
                   onArchive={(threadId) => void runAction(async () => {
@@ -1286,7 +1470,7 @@ export function App() {
               </button>
             )}
           </div>
-          <div className={`centerWorkspace ${showSessionChrome && preview ? "has-preview" : ""}`}>
+          <div className="centerWorkspace">
             <MainSurface
               agents={agents}
               appearance={appearance}
@@ -1313,7 +1497,6 @@ export function App() {
               settings={settings}
               transcript={<TranscriptPanel activity={activity} entries={transcriptEntries} onCopyText={copyTranscriptText} />}
             />
-            {showSessionChrome && preview && <PreviewPane preview={preview} onClose={() => setPreview(null)} />}
             {showSessionChrome && activeCommandOverlay && (
               <CommandOverlay
                 agents={agents}
@@ -1362,7 +1545,7 @@ export function App() {
                   controls={controls}
                   model={selectedModel}
                   variant={selectedVariant}
-                  onContextClick={() => setRightTab("status")}
+                  onContextClick={() => revealRightWorkspace(null)}
                   onModelChange={setSelectedModel}
                   onVariantChange={setSelectedVariant}
                 />
@@ -1413,12 +1596,10 @@ export function App() {
               permissionMode={permissionMode}
               profile={init?.profile ?? null}
               onBranchClick={() => {
-                setRightTab("status");
-                setMobilePanel("status");
+                void runAction(async () => openDiffPreview(null));
               }}
               onPathClick={() => {
-                setRightTab("files");
-                setMobilePanel("status");
+                openRightWorkspaceTab("files");
               }}
               onPermissionModeChange={setPermissionMode}
             />
@@ -1427,38 +1608,49 @@ export function App() {
 
         {showSessionChrome && !rightCollapsed && (
           <aside className={`statusColumn ${mobilePanel === "status" ? "is-mobileSelected" : ""}`}>
-            <RightInspectorTabs debugEnabled={debugEnabled} value={rightTab} onChange={setRightTab} />
-            {rightTab === "status" && (
-              <StatusPanel
-                activity={activity}
-                changedFiles={workspaceDiff?.files}
-                context={contextUsage ?? undefined}
-                sessionId={snapshot.thread?.id ?? null}
-                status={status}
-                onChangedFile={(path) => void runAction(async () => openDiffPreview(path))}
-                onRefresh={() => void runAction(async () => {
-                  await refreshSnapshot();
-                  await refreshHistory();
-                  await refreshAgentSurface();
-                  await refreshWorkspaceSurface();
-                })}
-              />
-            )}
-            {rightTab === "files" && (
-              <FilesPanel
-                files={workspaceFiles?.entries ?? []}
-                root={workspaceFiles?.root ?? settings?.workdir ?? ""}
-                truncated={workspaceFiles?.truncated ?? false}
-                onOpen={(path) => void runAction(async () => openFilePreview(path))}
-              />
-            )}
-            {rightTab === "debug" && debugEnabled && (
-              <DebugPanel
-                events={debugEvents}
-                trace={traceState}
-                onRefreshTrace={() => void refreshTrace()}
-              />
-            )}
+            <button
+              aria-label="Resize right workspace"
+              className="rightResizeHandle"
+              onDoubleClick={() => setRightWidthPx(DEFAULT_RIGHT_WIDTH_PX)}
+              onPointerDown={(event) => beginRightResize(event)}
+              title="Resize right workspace"
+              type="button"
+            >
+              <GripVertical size={15} />
+            </button>
+            <RightWorkspace
+              activeTabId={activeRightTabId}
+              activity={activity}
+              appearance={appearance}
+              client={client}
+              context={contextUsage}
+              debugEnabled={debugEnabled}
+              debugEvents={debugEvents}
+              files={workspaceFiles?.entries ?? []}
+              root={workspaceFiles?.root ?? settings?.workdir ?? ""}
+              scope={activeScope ?? init?.scope ?? null}
+              sessionId={snapshot.thread?.id ?? null}
+              status={status}
+              tabs={rightTabs}
+              terminalEvents={terminalEvents}
+              trace={traceState}
+              truncated={workspaceFiles?.truncated ?? false}
+              workdir={settings?.project?.displayPath ?? settings?.workdir ?? ""}
+              workspaceDiff={workspaceDiff}
+              onActivate={setActiveRightTabId}
+              onChangedFile={(path) => void runAction(async () => openDiffPreview(path))}
+              onClose={closeRightWorkspaceTab}
+              onOpenFile={(path) => void runAction(async () => openFilePreview(path))}
+              onOpenKind={(kind) => openRightWorkspaceTab(kind, {}, true)}
+              onRefresh={() => void runAction(async () => {
+                await refreshSnapshot();
+                await refreshHistory();
+                await refreshAgentSurface();
+                await refreshWorkspaceSurface();
+              })}
+              onRefreshTrace={() => void refreshTrace()}
+              onShowHome={() => revealRightWorkspace(null)}
+            />
           </aside>
         )}
       </div>
@@ -1891,70 +2083,493 @@ function PlaceholderPage({ body, icon, title }: { body: string; icon: ReactNode;
   );
 }
 
-function PreviewPane({ preview, onClose }: { preview: NonNullable<PreviewState>; onClose(): void }) {
-  return (
-    <aside className={`previewPane is-${preview.kind}`} aria-label="Inline preview">
-      <header>
-        <div>
-          <span>{preview.kind}</span>
-          <h2>{preview.title}</h2>
-        </div>
-        <button aria-label="Close preview" onClick={onClose} type="button">
-          <X size={16} />
-        </button>
-      </header>
-      <pre>{preview.body || (preview.kind === "diff" ? "No diff content" : "No preview content")}</pre>
-      {preview.kind === "file" && preview.truncated && <p>Preview truncated.</p>}
-      {preview.kind === "file" && preview.binary && <p>Binary file preview is not available.</p>}
-    </aside>
-  );
-}
-
-function RightInspectorTabs({
+function RightWorkspace({
+  activeTabId,
+  activity,
+  appearance,
+  client,
+  context,
   debugEnabled,
-  value,
-  onChange
-}: {
-  debugEnabled: boolean;
-  value: RightTab;
-  onChange(value: RightTab): void;
-}) {
-  const tabs: Array<{ icon: ReactNode; label: string; value: RightTab }> = [
-    { icon: <Shield size={15} />, label: "Status", value: "status" },
-    { icon: <FolderTree size={15} />, label: "Files", value: "files" },
-    ...(debugEnabled ? [{ icon: <Bug size={15} />, label: "Debug", value: "debug" as const }] : [])
-  ];
-  return (
-    <nav className={`rightTabs ${debugEnabled ? "has-debug" : ""}`} aria-label="Inspector tabs">
-      {tabs.map((tab) => (
-        <button className={value === tab.value ? "is-selected" : ""} key={tab.value} onClick={() => onChange(tab.value)} type="button">
-          {tab.icon}
-          <span>{tab.label}</span>
-        </button>
-      ))}
-    </nav>
-  );
-}
-
-function FilesPanel({
+  debugEvents,
   files,
   root,
+  scope,
+  sessionId,
+  status,
+  tabs,
+  terminalEvents,
+  trace,
   truncated,
-  onOpen
+  workdir,
+  workspaceDiff,
+  onActivate,
+  onChangedFile,
+  onClose,
+  onOpenFile,
+  onOpenKind,
+  onRefresh,
+  onRefreshTrace,
+  onShowHome
 }: {
+  activeTabId: string | null;
+  activity: ReturnType<typeof normalizeActivity>;
+  appearance: Appearance;
+  client: GatewayClient | null;
+  context: ContextReadResult | null;
+  debugEnabled: boolean;
+  debugEvents: DebugEvent[];
   files: WorkspaceFileEntry[];
   root: string;
+  scope: GatewayRequestScope | null;
+  sessionId: string | null;
+  status: string;
+  tabs: RightWorkspaceTab[];
+  terminalEvents: TerminalNotificationEvent[];
+  trace: TraceState;
   truncated: boolean;
+  workdir: string;
+  workspaceDiff: WorkspaceDiffResult | null;
+  onActivate(tabId: string): void;
+  onChangedFile(path: string): void;
+  onClose(tabId: string): void;
+  onOpenFile(path: string): void;
+  onOpenKind(kind: RightWorkspaceTabKind): void;
+  onRefresh(): void;
+  onRefreshTrace(): void;
+  onShowHome(): void;
+}) {
+  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
+  return (
+    <section className="rightWorkspace" aria-label="Right workspace">
+      {tabs.length > 0 && (
+        <RightWorkspaceTabs
+          activeTabId={activeTabId}
+          tabs={tabs}
+          onActivate={onActivate}
+          onClose={onClose}
+          onOpenKind={onOpenKind}
+          onShowHome={onShowHome}
+        />
+      )}
+      <div className="rightTabPanels">
+        <div className="rightTabPanel" hidden={activeTab !== null}>
+          <RightWorkspaceHome
+            activity={activity}
+            context={context}
+            files={workspaceDiff?.files ?? []}
+            sessionId={sessionId}
+            status={status}
+            workdir={workdir}
+            onChangedFile={onChangedFile}
+            onOpenKind={onOpenKind}
+            onRefresh={onRefresh}
+          />
+        </div>
+        {tabs.map((tab) => (
+          <div className="rightTabPanel" hidden={tab.id !== activeTab?.id} key={tab.id}>
+            {tab.kind === "review" && (
+              <ReviewPanel
+                activity={activity}
+                changedFiles={workspaceDiff?.files ?? []}
+                context={context}
+                diff={tab.diff ?? workspaceDiff}
+                root={root || workdir}
+                sessionId={sessionId}
+                status={status}
+                workdir={workdir}
+                onChangedFile={onChangedFile}
+                onRefresh={onRefresh}
+              />
+            )}
+            {tab.kind === "files" && (
+              <FilesPanel
+                files={files}
+                preview={tab.file ?? null}
+                previewMessage={tab.message ?? null}
+                root={root}
+                selectedPath={tab.path ?? null}
+                truncated={truncated}
+                onOpen={onOpenFile}
+              />
+            )}
+            {tab.kind === "terminal" && (
+              <TerminalPanel
+                appearance={appearance}
+                client={client}
+                scope={scope}
+                terminalEvents={terminalEvents}
+                workdir={workdir}
+              />
+            )}
+            {tab.kind === "debug" && debugEnabled && (
+              <DebugPanel
+                events={debugEvents}
+                trace={trace}
+                onRefreshTrace={onRefreshTrace}
+              />
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function RightWorkspaceTabs({
+  activeTabId,
+  tabs,
+  onActivate,
+  onClose,
+  onOpenKind,
+  onShowHome
+}: {
+  activeTabId: string | null;
+  tabs: RightWorkspaceTab[];
+  onActivate(tabId: string): void;
+  onClose(tabId: string): void;
+  onOpenKind(kind: RightWorkspaceTabKind): void;
+  onShowHome(): void;
+}) {
+  const menuItems: Array<{ icon: ReactNode; kind: RightWorkspaceTabKind; label: string }> = [
+    { icon: <GitPullRequest size={14} />, kind: "review", label: "Review" },
+    { icon: <TerminalSquare size={14} />, kind: "terminal", label: "Terminal" },
+    { icon: <FolderTree size={14} />, kind: "files", label: "Files" }
+  ];
+  return (
+    <div className="rightWorkspaceTabs" aria-label="Right workspace tabs">
+      <button
+        aria-label="Workspace home"
+        className={activeTabId === null ? "is-selected" : ""}
+        onClick={onShowHome}
+        title="Workspace home"
+        type="button"
+      >
+        <Home size={14} />
+      </button>
+      {tabs.map((tab) => (
+        <div className={`rightWorkspaceTab ${tab.id === activeTabId ? "is-selected" : ""}`} key={tab.id}>
+          <button onClick={() => onActivate(tab.id)} title={tab.title} type="button">
+            {rightWorkspaceTabIcon(tab.kind)}
+            <span>{tab.title}</span>
+          </button>
+          <button aria-label={`Close ${tab.title}`} onClick={() => onClose(tab.id)} title="Close" type="button">
+            <X size={12} />
+          </button>
+        </div>
+      ))}
+      <details className="rightAddMenu">
+        <summary aria-label="Open right workspace tab" title="Open tab">
+          <Plus size={15} />
+        </summary>
+        <div>
+          {menuItems.map((item) => (
+            <button key={item.kind} onClick={() => onOpenKind(item.kind)} type="button">
+              {item.icon}
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function RightWorkspaceHome({
+  activity,
+  context,
+  files,
+  sessionId,
+  status,
+  workdir,
+  onChangedFile,
+  onOpenKind,
+  onRefresh
+}: {
+  activity: ReturnType<typeof normalizeActivity>;
+  context: ContextReadResult | null;
+  files: WorkspaceDiffResult["files"];
+  sessionId: string | null;
+  status: string;
+  workdir: string;
+  onChangedFile(path: string): void;
+  onOpenKind(kind: RightWorkspaceTabKind): void;
+  onRefresh(): void;
+}) {
+  const contextPercent = typeof context?.percent === "number" ? Math.round(context.percent) : 0;
+  return (
+    <section className="rightWorkspaceHome" aria-label="Workspace status">
+      <header>
+        <div>
+          <h2>Status</h2>
+          <p>{workdir || "workspace"}</p>
+        </div>
+        <button aria-label="Refresh workspace" onClick={onRefresh} title="Refresh" type="button">
+          <RefreshCw size={15} />
+        </button>
+      </header>
+      <div className="rightStatusMetrics">
+        <div>
+          <span>Connection</span>
+          <strong>{status}</strong>
+        </div>
+        <div>
+          <span>Session</span>
+          <strong>{sessionId ? shortSessionId(sessionId) : "draft"}</strong>
+        </div>
+        <div>
+          <span>Activity</span>
+          <strong>{activity.running ? "running" : "idle"}</strong>
+        </div>
+        <div>
+          <span>Context</span>
+          <strong>{context?.available ? `${contextPercent}%` : "none"}</strong>
+        </div>
+      </div>
+      <nav className="rightHomeNav" aria-label="Open workspace tab">
+        <button onClick={() => onOpenKind("review")} type="button">
+          <GitPullRequest size={16} />
+          <span>Review</span>
+        </button>
+        <button onClick={() => onOpenKind("terminal")} type="button">
+          <TerminalSquare size={16} />
+          <span>Terminal</span>
+        </button>
+        <button onClick={() => onOpenKind("files")} type="button">
+          <FolderTree size={16} />
+          <span>Files</span>
+        </button>
+      </nav>
+      <div className="rightChangedFiles">
+        <div className="rightSectionLabel">
+          <span>Changed files</span>
+          <b>{files.length}</b>
+        </div>
+        {files.slice(0, 8).map((file) => (
+          <button key={`${file.status}:${file.path}`} onClick={() => onChangedFile(file.path)} type="button">
+            <span>{file.path}</span>
+            <small>{file.status}</small>
+          </button>
+        ))}
+        {files.length === 0 && <p>No changed files.</p>}
+      </div>
+    </section>
+  );
+}
+
+function ReviewPanel({
+  activity,
+  changedFiles,
+  context,
+  diff,
+  root,
+  sessionId,
+  status,
+  workdir,
+  onChangedFile,
+  onRefresh
+}: {
+  activity: ReturnType<typeof normalizeActivity>;
+  changedFiles: WorkspaceDiffResult["files"];
+  context: ContextReadResult | null;
+  diff: WorkspaceDiffResult | null;
+  root: string;
+  sessionId: string | null;
+  status: string;
+  workdir: string;
+  onChangedFile(path: string): void;
+  onRefresh(): void;
+}) {
+  const [filesOpen, setFilesOpen] = useState(false);
+  const contextPercent = typeof context?.percent === "number" ? Math.round(context.percent) : 0;
+  const changedTreeItems = useMemo(() => changedFileTreeItems(changedFiles), [changedFiles]);
+  const selectedPath = diff?.selectedPath ?? diff?.files[0]?.path ?? null;
+  return (
+    <section className={`reviewPanel ${filesOpen ? "has-fileTree" : ""}`} aria-label="Review">
+      <header>
+        <GitPullRequest size={17} />
+        <div>
+          <h2>Review</h2>
+          <p>{workdir || "workspace"}</p>
+        </div>
+        <div className="rightPanelActions">
+          <button
+            aria-label={filesOpen ? "Hide changed files" : "Show changed files"}
+            aria-pressed={filesOpen}
+            className={`reviewFilesToggle ${filesOpen ? "is-pressed" : ""}`}
+            onClick={() => setFilesOpen((value) => !value)}
+            title="Files"
+            type="button"
+          >
+            <FolderTree size={14} />
+            <span>Files</span>
+          </button>
+          <button aria-label="Refresh Review" onClick={onRefresh} title="Refresh" type="button">
+            <RefreshCw size={15} />
+          </button>
+        </div>
+      </header>
+      <div className="reviewStatusRows">
+        <span>{status}</span>
+        <span>{sessionId ? shortSessionId(sessionId) : "draft"}</span>
+        <span>{activity.running ? "running" : "idle"}</span>
+        <span>{context?.available ? `${contextPercent}% context` : "no context"}</span>
+      </div>
+      <div className="reviewSplit">
+        <div className="reviewDiffPane">
+          <DiffPreview diff={diff} root={root} />
+        </div>
+        {filesOpen && (
+          <aside className="reviewFilesPane" aria-label="Changed files">
+            <WorkspaceFileTree
+              emptyLabel="No changed files."
+              filterLabel="Filter changed files"
+              filterPlaceholder="Filter files..."
+              items={changedTreeItems}
+              selectedPath={selectedPath}
+              onOpen={onChangedFile}
+            />
+          </aside>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function DiffPreview({ diff, root }: { diff: WorkspaceDiffResult | null; root: string }) {
+  const diffText = useMemo(() => {
+    if (!diff) {
+      return "";
+    }
+    if (diff.unifiedDiff.trim()) {
+      return diff.unifiedDiff;
+    }
+    return diff.files
+      .map((file) => file.placeholder)
+      .filter((value): value is string => Boolean(value?.trim()))
+      .join("\n\n");
+  }, [diff]);
+  const files = useMemo(() => parseUnifiedDiff(diffText), [diffText]);
+  const statusByPath = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const file of diff?.files ?? []) {
+      map.set(file.path, file.status);
+    }
+    return map;
+  }, [diff?.files]);
+
+  if (!diff || !diffText.trim()) {
+    return (
+      <div className="diffPreview is-empty">
+        <p>No diff content.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="diffPreview" aria-label="Diff preview">
+      {diff.truncation.truncated && (
+        <div className="diffNotice">
+          Diff truncated after {diff.truncation.maxLines} lines.
+        </div>
+      )}
+      {files.map((file, fileIndex) => {
+        const status = statusByPath.get(file.path) ?? null;
+        const statusToken = diffStatusToken(status);
+        const stats = diffLineStats(file);
+        return (
+          <article className="diffFile" key={`${file.path}:${fileIndex}`}>
+            <header title={absoluteWorkspacePath(root, file.path)}>
+              <span className={`diffFileStatus ${statusToken.className}`} title={statusToken.title}>
+                {statusToken.label}
+              </span>
+              <span className="diffFilePath">{normalizedWorkspacePath(file.path)}</span>
+              <span className="diffFileStats" aria-label={`${stats.additions} additions, ${stats.deletions} deletions`}>
+                <span className="diffAddStat">+{stats.additions}</span>
+                <span className="diffDeleteStat">-{stats.deletions}</span>
+              </span>
+            </header>
+            {file.hunks.length === 0 ? (
+              <p className="diffEmptyHunk">No line diff available.</p>
+            ) : (
+              file.hunks.map((hunk, hunkIndex) => (
+                <section className="diffHunk" key={`${hunk.header}:${hunkIndex}`}>
+                  <div className="diffHunkHeader">{hunk.header}</div>
+                  <div className="diffLines">
+                    {hunk.lines.map((line, lineIndex) => (
+                      <div className={`diffLine is-${line.kind}`} key={`${line.oldNumber}:${line.newNumber}:${lineIndex}`}>
+                        <span className="diffLineNumber">{line.oldNumber ?? ""}</span>
+                        <span className="diffLineNumber">{line.newNumber ?? ""}</span>
+                        <span className="diffLineMarker">{line.marker}</span>
+                        <code>{line.text || " "}</code>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ))
+            )}
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function diffLineStats(file: ParsedDiffFile): { additions: number; deletions: number } {
+  let additions = 0;
+  let deletions = 0;
+  for (const hunk of file.hunks) {
+    for (const line of hunk.lines) {
+      if (line.kind === "add") {
+        additions += 1;
+      }
+      if (line.kind === "delete") {
+        deletions += 1;
+      }
+    }
+  }
+  return { additions, deletions };
+}
+
+function diffStatusToken(status: string | null): { className: string; label: string; title: string } {
+  switch (status) {
+    case "added":
+      return { className: "is-added", label: "A+", title: "Added" };
+    case "deleted":
+      return { className: "is-deleted", label: "D-", title: "Deleted" };
+    case "renamed":
+      return { className: "is-renamed", label: "R↷", title: "Renamed" };
+    case "untracked":
+      return { className: "is-added", label: "U+", title: "Untracked" };
+    case "modified":
+    default:
+      return { className: "is-modified", label: "M↓", title: status ?? "Modified" };
+  }
+}
+
+function WorkspaceFileTree({
+  emptyLabel,
+  filterLabel,
+  filterPlaceholder,
+  items,
+  selectedPath,
+  onOpen
+}: {
+  emptyLabel: string;
+  filterLabel: string;
+  filterPlaceholder: string;
+  items: WorkspaceFileTreeItem[];
+  selectedPath: string | null;
   onOpen(path: string): void;
 }) {
   const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(() => new Set());
+  const [filter, setFilter] = useState("");
   const directoryPaths = useMemo(
-    () => new Set(files.filter((file) => file.kind === "directory").map((file) => file.path)),
-    [files]
+    () => new Set(items.filter((item) => item.kind === "directory").map((item) => item.path)),
+    [items]
   );
-  const visibleFiles = useMemo(
-    () => files.filter((file) => !hasCollapsedDirectoryAncestor(file.path, collapsedDirs)),
-    [collapsedDirs, files]
+  const visibleItems = useMemo(
+    () => visibleWorkspaceTreeItems(items, collapsedDirs, filter),
+    [collapsedDirs, filter, items]
   );
 
   useEffect(() => {
@@ -1977,40 +2592,280 @@ function FilesPanel({
   }
 
   return (
-    <section className="filesPanel" aria-label="Workspace files">
-      <header>
-        <FolderTree size={17} />
-        <div>
-          <h2>Files</h2>
-          <p>{root}</p>
-        </div>
-      </header>
-      <div className="fileTree">
-        {visibleFiles.map((file) => {
-          const directory = file.kind === "directory";
-          const collapsed = directory && collapsedDirs.has(file.path);
-          const previewable = directory || !isUnsupportedPreviewFile(file.path);
+    <div className="workspaceFileTree">
+      <label className="workspaceFileTreeFilter">
+        <Search size={14} aria-hidden />
+        <input
+          aria-label={filterLabel}
+          onChange={(event) => setFilter(event.currentTarget.value)}
+          placeholder={filterPlaceholder}
+          type="search"
+          value={filter}
+        />
+      </label>
+      <div className="fileTree" role="tree">
+        {visibleItems.map((item) => {
+          const directory = item.kind === "directory";
+          const collapsed = directory && collapsedDirs.has(item.path);
+          const selected = !directory && selectedPath === item.path;
+          const badge = item.badge ?? item.status ?? null;
           return (
             <button
               aria-expanded={directory ? !collapsed : undefined}
-              className={directory ? "is-directory" : "is-file"}
-              disabled={!previewable}
-              key={`${file.kind}:${file.path}`}
-              onClick={() => directory ? toggleDirectory(file.path) : onOpen(file.path)}
-              style={{ "--depth": file.depth } as CSSProperties}
+              aria-selected={selected || undefined}
+              className={[
+                directory ? "is-directory" : "is-file",
+                selected ? "is-selected" : "",
+                item.status ? `is-${item.status}` : ""
+              ].filter(Boolean).join(" ")}
+              disabled={item.disabled}
+              key={`${item.kind}:${item.path}`}
+              onClick={() => directory ? toggleDirectory(item.path) : onOpen(item.path)}
+              role="treeitem"
+              style={{ "--depth": item.depth } as CSSProperties}
+              title={item.path}
               type="button"
             >
               <span className="fileTreeDisclosure" aria-hidden>
                 {directory ? (collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />) : null}
               </span>
               {directory ? <FolderTree size={14} /> : <FileText size={14} />}
-              <span>{file.name}</span>
+              <span>{item.name}</span>
+              {badge && <small>{badge}</small>}
             </button>
           );
         })}
-        {visibleFiles.length === 0 && <p>No workspace files.</p>}
+        {visibleItems.length === 0 && <p>{emptyLabel}</p>}
       </div>
-      {truncated && <footer>File tree truncated.</footer>}
+    </div>
+  );
+}
+
+function FilesPanel({
+  files,
+  preview,
+  previewMessage,
+  root,
+  selectedPath,
+  truncated,
+  onOpen
+}: {
+  files: WorkspaceFileEntry[];
+  preview: WorkspaceFileReadResult | null;
+  previewMessage: string | null;
+  root: string;
+  selectedPath: string | null;
+  truncated: boolean;
+  onOpen(path: string): void;
+}) {
+  const treeItems = useMemo(() => workspaceFileTreeItems(files), [files]);
+  const previewPath = preview?.path ?? selectedPath ?? "";
+  const previewLabel = previewPath ? absoluteWorkspacePath(root, previewPath) : "Preview";
+  const previewContent = typeof preview?.content === "string" ? preview.content : null;
+
+  return (
+    <section className="filesPanel" aria-label="Workspace files">
+      <header>
+        <FolderTree size={17} />
+        <div>
+          <h2>Files</h2>
+        </div>
+      </header>
+      <div className="filesSplit">
+        <div className="filePreview">
+          <div className="rightSectionLabel filePreviewPath">
+            <span>{previewLabel}</span>
+            {preview?.truncated && <b>truncated</b>}
+          </div>
+          {previewContent !== null ? (
+            isMarkdownFile(previewPath) ? (
+              <div className="fileMarkdownPreview">
+                <MarkdownText text={previewContent} />
+              </div>
+            ) : (
+              <HighlightedCodePreview content={previewContent} path={previewPath} />
+            )
+          ) : (
+            <p>{previewMessage ?? "Select a text file to preview."}</p>
+          )}
+        </div>
+        <aside className="filesTreePane" aria-label="Workspace file tree">
+          <WorkspaceFileTree
+            emptyLabel="No workspace files."
+            filterLabel="Filter workspace files"
+            filterPlaceholder="Filter files..."
+            items={treeItems}
+            selectedPath={selectedPath}
+            onOpen={onOpen}
+          />
+          {truncated && <footer>File tree truncated.</footer>}
+        </aside>
+      </div>
+    </section>
+  );
+}
+
+function HighlightedCodePreview({ content, path }: { content: string; path: string }) {
+  const language = useMemo(() => languageForPath(path), [path]);
+  const html = useMemo(() => highlightToHtml(content, language), [content, language]);
+  return (
+    <pre className="rightCodePreview hljs" data-lang={language || undefined}>
+      <code dangerouslySetInnerHTML={{ __html: html }} />
+    </pre>
+  );
+}
+
+function TerminalPanel({
+  appearance,
+  client,
+  scope,
+  terminalEvents,
+  workdir
+}: {
+  appearance: Appearance;
+  client: GatewayClient | null;
+  scope: GatewayRequestScope | null;
+  terminalEvents: TerminalNotificationEvent[];
+  workdir: string;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const terminalRef = useRef<XTermTerminal | null>(null);
+  const fitRef = useRef<{ fit(): void } | null>(null);
+  const terminalIdRef = useRef<string | null>(null);
+  const lastEventSeqRef = useRef(0);
+  const [terminalId, setTerminalId] = useState<string | null>(null);
+  const [state, setState] = useState<"starting" | "running" | "exited" | "error">("starting");
+  const [message, setMessage] = useState("Starting terminal...");
+
+  useEffect(() => {
+    if (!client || !scope || !containerRef.current) {
+      setState("error");
+      setMessage("Terminal is unavailable until the gateway is connected.");
+      return;
+    }
+    let cancelled = false;
+    let dataDisposable: { dispose(): void } | null = null;
+    let resizeObserver: ResizeObserver | null = null;
+    void Promise.all([
+      import("@xterm/xterm"),
+      import("@xterm/addon-fit")
+    ]).then(([xterm, fitModule]) => {
+      if (cancelled || !containerRef.current) {
+        return;
+      }
+      const terminal = new xterm.Terminal({
+        allowProposedApi: false,
+        convertEol: true,
+        cursorBlink: true,
+        fontFamily: '"SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace',
+        fontSize: 12,
+        scrollback: 4000,
+        theme: terminalTheme(appearance)
+      });
+      const fit = new fitModule.FitAddon();
+      terminal.loadAddon(fit);
+      terminal.open(containerRef.current);
+      fit.fit();
+      terminalRef.current = terminal;
+      fitRef.current = fit;
+      dataDisposable = terminal.onData((data) => {
+        const id = terminalIdRef.current;
+        if (!id) {
+          return;
+        }
+        void client.request("terminal/write", {
+          terminalId: id,
+          dataBase64: bytesToBase64(new TextEncoder().encode(data))
+        }).catch(() => {
+          setState("error");
+          setMessage("Terminal write failed.");
+        });
+      });
+      resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => {
+        fit.fit();
+        const id = terminalIdRef.current;
+        if (id) {
+          void client.request("terminal/resize", {
+            terminalId: id,
+            cols: terminal.cols,
+            rows: terminal.rows
+          }).catch(() => {});
+        }
+      });
+      resizeObserver?.observe(containerRef.current);
+      void client.request("terminal/start", {
+        scope,
+        cwd: null,
+        cols: terminal.cols || 80,
+        rows: terminal.rows || 24
+      }).then((result) => {
+        if (cancelled) {
+          void client.request("terminal/terminate", { terminalId: result.terminalId }).catch(() => {});
+          return;
+        }
+        terminalIdRef.current = result.terminalId;
+        setTerminalId(result.terminalId);
+        setState("running");
+        setMessage(result.cwd);
+        terminal.focus();
+      }).catch((error) => {
+        setState("error");
+        setMessage(error instanceof Error ? error.message : String(error));
+      });
+    }).catch((error) => {
+      setState("error");
+      setMessage(error instanceof Error ? error.message : String(error));
+    });
+    return () => {
+      cancelled = true;
+      resizeObserver?.disconnect();
+      dataDisposable?.dispose();
+      terminalRef.current?.dispose();
+      terminalRef.current = null;
+      fitRef.current = null;
+      const id = terminalIdRef.current;
+      terminalIdRef.current = null;
+      if (id) {
+        void client.request("terminal/terminate", { terminalId: id }).catch(() => {});
+      }
+    };
+  }, [client, scope?.workdir]);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (terminal) {
+      terminal.options.theme = terminalTheme(appearance);
+    }
+  }, [appearance]);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    const id = terminalIdRef.current;
+    if (!terminal || !id) {
+      return;
+    }
+    for (const event of terminalEvents) {
+      if (event.seq <= lastEventSeqRef.current) {
+        continue;
+      }
+      if (event.params.terminalId !== id) {
+        continue;
+      }
+      if (event.method === "terminal/output") {
+        terminal.write(base64ToBytes(event.params.dataBase64));
+      } else {
+        setState("exited");
+        setMessage(event.params.reason || "exited");
+      }
+      lastEventSeqRef.current = event.seq;
+    }
+  }, [terminalEvents, terminalId]);
+
+  return (
+    <section className="terminalPanel" aria-label="Terminal">
+      <div className="terminalViewport" ref={containerRef}>
+        {state !== "running" && <div className={`terminalOverlay is-${state}`}>{message}</div>}
+      </div>
     </section>
   );
 }
@@ -2022,6 +2877,247 @@ function hasCollapsedDirectoryAncestor(path: string, collapsedDirs: Set<string>)
     }
   }
   return false;
+}
+
+function workspaceFileTreeItems(files: WorkspaceFileEntry[]): WorkspaceFileTreeItem[] {
+  return files.map((file) => ({
+    disabled: file.kind === "file" && isUnsupportedPreviewFile(file.path),
+    kind: file.kind,
+    name: file.name,
+    path: file.path,
+    depth: file.depth
+  }));
+}
+
+function changedFileTreeItems(files: WorkspaceDiffResult["files"]): WorkspaceFileTreeItem[] {
+  const items = new Map<string, WorkspaceFileTreeItem>();
+  for (const file of files) {
+    for (const directory of ancestorDirectoryPaths(file.path)) {
+      items.set(`directory:${directory}`, {
+        kind: "directory",
+        name: fileBasename(directory),
+        path: directory,
+        depth: workspacePathDepth(directory)
+      });
+    }
+    items.set(`file:${file.path}`, {
+      badge: file.status,
+      kind: "file",
+      name: fileBasename(file.path),
+      path: file.path,
+      depth: workspacePathDepth(file.path),
+      status: file.status
+    });
+  }
+  return [...items.values()].sort(compareTreeItems);
+}
+
+function visibleWorkspaceTreeItems(
+  items: WorkspaceFileTreeItem[],
+  collapsedDirs: Set<string>,
+  filter: string
+): WorkspaceFileTreeItem[] {
+  const normalizedFilter = filter.trim().toLowerCase();
+  if (!normalizedFilter) {
+    return items.filter((item) => !hasCollapsedDirectoryAncestor(item.path, collapsedDirs));
+  }
+  const matchingPaths = new Set<string>();
+  const visibleAncestorPaths = new Set<string>();
+  const matchingDirectoryPaths = new Set<string>();
+  for (const item of items) {
+    if (!treeItemMatches(item, normalizedFilter)) {
+      continue;
+    }
+    matchingPaths.add(item.path);
+    if (item.kind === "directory") {
+      matchingDirectoryPaths.add(item.path);
+    }
+    for (const ancestor of ancestorDirectoryPaths(item.path)) {
+      visibleAncestorPaths.add(ancestor);
+    }
+  }
+  return items.filter((item) => {
+    if (matchingPaths.has(item.path) || visibleAncestorPaths.has(item.path)) {
+      return true;
+    }
+    for (const directory of matchingDirectoryPaths) {
+      if (item.path !== directory && item.path.startsWith(`${directory}/`)) {
+        return true;
+      }
+    }
+    return false;
+  });
+}
+
+function treeItemMatches(item: WorkspaceFileTreeItem, normalizedFilter: string): boolean {
+  return item.path.toLowerCase().includes(normalizedFilter) || item.name.toLowerCase().includes(normalizedFilter);
+}
+
+function ancestorDirectoryPaths(path: string): string[] {
+  const segments = normalizedWorkspacePath(path).split("/").filter(Boolean);
+  const directories: string[] = [];
+  for (let index = 1; index < segments.length; index += 1) {
+    directories.push(segments.slice(0, index).join("/"));
+  }
+  return directories;
+}
+
+function compareTreeItems(left: WorkspaceFileTreeItem, right: WorkspaceFileTreeItem): number {
+  const leftSegments = left.path.split("/");
+  const rightSegments = right.path.split("/");
+  const length = Math.min(leftSegments.length, rightSegments.length);
+  for (let index = 0; index < length; index += 1) {
+    const leftSegment = leftSegments[index] ?? "";
+    const rightSegment = rightSegments[index] ?? "";
+    if (leftSegment !== rightSegment) {
+      return leftSegment.localeCompare(rightSegment);
+    }
+  }
+  if (leftSegments.length !== rightSegments.length) {
+    return leftSegments.length - rightSegments.length;
+  }
+  if (left.kind !== right.kind) {
+    return left.kind === "directory" ? -1 : 1;
+  }
+  return left.path.localeCompare(right.path);
+}
+
+function workspacePathDepth(path: string): number {
+  return Math.max(0, normalizedWorkspacePath(path).split("/").filter(Boolean).length - 1);
+}
+
+function normalizedWorkspacePath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+$/, "");
+}
+
+function absoluteWorkspacePath(root: string, path: string): string {
+  const trimmedPath = path.trim();
+  if (!trimmedPath) {
+    return root || "";
+  }
+  if (/^(?:[a-zA-Z]:[\\/]|\/)/.test(trimmedPath)) {
+    return trimmedPath;
+  }
+  const trimmedRoot = root.trim().replace(/[\\/]+$/, "");
+  if (!trimmedRoot) {
+    return trimmedPath;
+  }
+  return `${trimmedRoot}/${normalizedWorkspacePath(trimmedPath)}`;
+}
+
+function isMarkdownFile(path: string): boolean {
+  const extension = path.split(/[\\/]/).pop()?.split(".").pop()?.toLowerCase();
+  return extension === "md" || extension === "markdown";
+}
+
+function parseUnifiedDiff(text: string): ParsedDiffFile[] {
+  const trimmed = text.replace(/\r\n/g, "\n").replace(/\n$/, "");
+  if (!trimmed.trim()) {
+    return [];
+  }
+  const lines = trimmed.split("\n");
+  const files: ParsedDiffFile[] = [];
+  let currentFile: ParsedDiffFile | null = null;
+  let currentHunk: ParsedDiffHunk | null = null;
+  let oldLineNumber = 0;
+  let newLineNumber = 0;
+
+  function ensureFile(path = "Diff"): ParsedDiffFile {
+    if (currentFile) {
+      return currentFile;
+    }
+    currentFile = { headers: [], hunks: [], path };
+    files.push(currentFile);
+    return currentFile;
+  }
+
+  for (const line of lines) {
+    if (line.startsWith("diff --git ")) {
+      currentFile = { headers: [line], hunks: [], path: diffPathFromGitHeader(line) };
+      currentHunk = null;
+      files.push(currentFile);
+      continue;
+    }
+    const file = ensureFile();
+    if (line.startsWith("--- ") || line.startsWith("+++ ")) {
+      file.headers.push(line);
+      if (line.startsWith("+++ ")) {
+        const path = cleanDiffPath(line.slice(4).trim());
+        if (path && path !== "/dev/null") {
+          file.path = path;
+        }
+      }
+      continue;
+    }
+    if (line.startsWith("@@ ")) {
+      const range = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+      oldLineNumber = range?.[1] ? Number(range[1]) : 0;
+      newLineNumber = range?.[2] ? Number(range[2]) : 0;
+      currentHunk = { header: line, lines: [] };
+      file.hunks.push(currentHunk);
+      continue;
+    }
+    if (!currentHunk) {
+      file.headers.push(line);
+      continue;
+    }
+    if (line.startsWith("+")) {
+      currentHunk.lines.push({
+        kind: "add",
+        marker: "+",
+        newNumber: newLineNumber,
+        oldNumber: null,
+        text: line.slice(1)
+      });
+      newLineNumber += 1;
+      continue;
+    }
+    if (line.startsWith("-")) {
+      currentHunk.lines.push({
+        kind: "delete",
+        marker: "-",
+        newNumber: null,
+        oldNumber: oldLineNumber,
+        text: line.slice(1)
+      });
+      oldLineNumber += 1;
+      continue;
+    }
+    if (line.startsWith(" ")) {
+      currentHunk.lines.push({
+        kind: "context",
+        marker: "",
+        newNumber: newLineNumber,
+        oldNumber: oldLineNumber,
+        text: line.slice(1)
+      });
+      oldLineNumber += 1;
+      newLineNumber += 1;
+      continue;
+    }
+    currentHunk.lines.push({
+      kind: "meta",
+      marker: "",
+      newNumber: null,
+      oldNumber: null,
+      text: line
+    });
+  }
+
+  return files;
+}
+
+function diffPathFromGitHeader(line: string): string {
+  const [, left, right] = /^diff --git\s+(.+?)\s+(.+)$/.exec(line) ?? [];
+  return cleanDiffPath(right ?? left ?? "Diff") || "Diff";
+}
+
+function cleanDiffPath(path: string): string {
+  const unquoted = path.replace(/^"|"$/g, "");
+  if (unquoted === "/dev/null") {
+    return unquoted;
+  }
+  return unquoted.replace(/^[ab]\//, "");
 }
 
 function isUnsupportedPreviewFile(path: string): boolean {
@@ -2365,6 +3461,14 @@ function compactModelLabel(value: string): string {
   return label || trimmed;
 }
 
+function startupDraftScope(launchScope: GatewayRequestScope, sessions: SessionSummary[]): GatewayRequestScope {
+  if (launchScope.workdir?.trim()) {
+    return launchScope;
+  }
+  const recentWorkdir = sessions.find((session) => session.workdir?.trim())?.workdir;
+  return scopeForWorkdir(recentWorkdir?.trim() || window.location.pathname);
+}
+
 function AgentRunSelector({
   agents,
   disabled,
@@ -2643,28 +3747,17 @@ function CommandFeedbackView({
   );
 }
 
-function rightTabLabel(value: RightTab): string {
-  switch (value) {
-    case "files":
-      return "Files";
-    case "debug":
-      return "Debug";
-    case "status":
-    default:
-      return "Status";
-  }
-}
-
 function readWorkbenchPrefs(): WorkbenchPrefs {
   try {
     const raw = window.localStorage.getItem(PREFS_KEY);
     const value = raw ? JSON.parse(raw) as Partial<WorkbenchPrefs> : {};
     return {
       appearance: value.appearance === "light" ? "light" : "dark",
-      debug: value.debug === true
+      debug: value.debug === true,
+      rightWidthPx: clampRightWidth(value.rightWidthPx)
     };
   } catch {
-    return { appearance: "dark", debug: false };
+    return { appearance: "dark", debug: false, rightWidthPx: DEFAULT_RIGHT_WIDTH_PX };
   }
 }
 
@@ -2687,24 +3780,84 @@ function normalizePinnedSessionIds(value: unknown): string[] {
     : [];
 }
 
-function diffPreviewState(diff: WorkspaceDiffResult): PreviewState {
+function createRightTabId(kind: RightWorkspaceTabKind): string {
+  return `${kind}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+}
+
+function rightWorkspaceDefaultTitle(kind: RightWorkspaceTabKind): string {
+  return rightWorkspaceTabLabel(kind);
+}
+
+function rightWorkspaceTabLabel(kind: RightWorkspaceTabKind): string {
+  switch (kind) {
+    case "files":
+      return "Files";
+    case "terminal":
+      return "Terminal";
+    case "debug":
+      return "Debug";
+    case "review":
+    default:
+      return "Review";
+  }
+}
+
+function rightWorkspaceTabIcon(kind: RightWorkspaceTabKind): ReactNode {
+  switch (kind) {
+    case "files":
+      return <FolderTree size={14} />;
+    case "terminal":
+      return <TerminalSquare size={14} />;
+    case "debug":
+      return <Bug size={14} />;
+    case "review":
+    default:
+      return <GitPullRequest size={14} />;
+  }
+}
+
+function clampRightWidth(value: unknown): number {
+  const numeric = typeof value === "number" ? value : DEFAULT_RIGHT_WIDTH_PX;
+  return Math.max(MIN_RIGHT_WIDTH_PX, Math.min(MAX_RIGHT_WIDTH_PX, Math.round(numeric)));
+}
+
+function fileBasename(path: string): string {
+  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  return normalized.split("/").pop() || normalized || "workspace";
+}
+
+function terminalTheme(appearance: Appearance): ITheme {
+  if (appearance === "light") {
+    return {
+      background: "transparent",
+      foreground: "#2d261f",
+      cursor: "#2d261f",
+      selectionBackground: "#eadfce"
+    };
+  }
   return {
-    body: diff.unifiedDiff,
-    kind: "diff",
-    path: diff.selectedPath,
-    title: diff.selectedPath ? `Diff: ${diff.selectedPath}` : "Workspace Diff"
+    background: "transparent",
+    foreground: "#f3efe7",
+    cursor: "#f3efe7",
+    selectionBackground: "#3f372d"
   };
 }
 
-function filePreviewState(file: WorkspaceFileReadResult): PreviewState {
-  return {
-    binary: file.binary,
-    body: file.content ?? file.unreadable ?? "",
-    kind: "file",
-    path: file.path,
-    title: file.path,
-    truncated: file.truncated
-  };
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 1) {
+    binary += String.fromCharCode(bytes[index] ?? 0);
+  }
+  return window.btoa(binary);
+}
+
+function base64ToBytes(value: string): Uint8Array {
+  const binary = window.atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
 }
 
 async function attachmentFromFile(file: File): Promise<PendingAttachment> {
