@@ -807,6 +807,69 @@ pub struct ShellStartResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct TerminalStartParams {
+    pub scope: GatewayRequestScope,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    pub cols: u16,
+    pub rows: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalStartResult {
+    pub terminal_id: String,
+    pub cwd: String,
+    #[serde(default)]
+    pub pid: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalWriteParams {
+    pub terminal_id: String,
+    pub data_base64: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalResizeParams {
+    pub terminal_id: String,
+    pub cols: u16,
+    pub rows: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalTerminateParams {
+    pub terminal_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalMutationResult {
+    pub accepted: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalOutputPayload {
+    pub terminal_id: String,
+    pub stream: String,
+    pub data_base64: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalExitedPayload {
+    pub terminal_id: String,
+    #[serde(default)]
+    pub exit_code: Option<i32>,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct TurnStartParams {
     pub scope: GatewayRequestScope,
     #[serde(default)]
@@ -1288,6 +1351,14 @@ pub enum ClientRequest {
     CommandExecute(CommandExecuteParams),
     #[serde(rename = "shell/start")]
     ShellStart(ShellStartParams),
+    #[serde(rename = "terminal/start")]
+    TerminalStart(TerminalStartParams),
+    #[serde(rename = "terminal/write")]
+    TerminalWrite(TerminalWriteParams),
+    #[serde(rename = "terminal/resize")]
+    TerminalResize(TerminalResizeParams),
+    #[serde(rename = "terminal/terminate")]
+    TerminalTerminate(TerminalTerminateParams),
     #[serde(rename = "source/reset")]
     SourceReset(SourceResetParams),
     #[serde(rename = "permission/respond")]
@@ -1321,6 +1392,10 @@ pub enum ServerNotification {
     ShellResult(ShellResultPayload),
     #[serde(rename = "shell/error")]
     ShellError(ShellErrorPayload),
+    #[serde(rename = "terminal/output")]
+    TerminalOutput(TerminalOutputPayload),
+    #[serde(rename = "terminal/exited")]
+    TerminalExited(TerminalExitedPayload),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1678,6 +1753,14 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(CommandExecuteResult),
         exported_type!(ShellStartParams),
         exported_type!(ShellStartResult),
+        exported_type!(TerminalStartParams),
+        exported_type!(TerminalStartResult),
+        exported_type!(TerminalWriteParams),
+        exported_type!(TerminalResizeParams),
+        exported_type!(TerminalTerminateParams),
+        exported_type!(TerminalMutationResult),
+        exported_type!(TerminalOutputPayload),
+        exported_type!(TerminalExitedPayload),
         exported_type!(TurnStartParams),
         exported_type!(TurnSteerParams),
         exported_type!(TurnInterruptParams),

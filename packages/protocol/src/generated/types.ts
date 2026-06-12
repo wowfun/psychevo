@@ -114,6 +114,22 @@ export type ShellStartParams = { scope: GatewayRequestScope, threadId: string | 
 
 export type ShellStartResult = { accepted: boolean, threadId: string | null, message: string | null, };
 
+export type TerminalStartParams = { scope: GatewayRequestScope, cwd: string | null, cols: number, rows: number, };
+
+export type TerminalStartResult = { terminalId: string, cwd: string, pid: number | null, };
+
+export type TerminalWriteParams = { terminalId: string, dataBase64: string, };
+
+export type TerminalResizeParams = { terminalId: string, cols: number, rows: number, };
+
+export type TerminalTerminateParams = { terminalId: string, };
+
+export type TerminalMutationResult = { accepted: boolean, };
+
+export type TerminalOutputPayload = { terminalId: string, stream: string, dataBase64: string, };
+
+export type TerminalExitedPayload = { terminalId: string, exitCode: number | null, reason: string, };
+
 export type TurnStartParams = { scope: GatewayRequestScope, threadId: string | null, agentName: string | null, input: Array<GatewayInputPart>, mentions: Array<GatewayMention>, text: string | null, model: string | null, reasoningEffort: string | null, mode: string | null, permissionMode: string | null, };
 
 export type TurnSteerParams = { threadId: string | null, expectedTurnId: string, text: string, };
@@ -204,7 +220,7 @@ export type JsonRpcErrorResponse = { jsonrpc: string, id: JsonRpcId, error: Json
 
 export type JsonRpcError = { code: number, message: string, data: unknown | null, };
 
-export type ClientRequest = { "method": "initialize", "params": InitializeParams } | { "method": "thread/start", "params": ThreadStartParams } | { "method": "thread/resume", "params": ThreadResumeParams } | { "method": "thread/read", "params": ThreadReadParams } | { "method": "thread/trace", "params": ThreadTraceParams } | { "method": "thread/list", "params": ThreadListParams } | { "method": "thread/rename", "params": ThreadRenameParams } | { "method": "thread/archive", "params": ThreadIdParams } | { "method": "thread/restore", "params": ThreadIdParams } | { "method": "thread/delete", "params": ThreadIdParams } | { "method": "turn/start", "params": TurnStartParams } | { "method": "turn/steer", "params": TurnSteerParams } | { "method": "turn/interrupt", "params": TurnInterruptParams } | { "method": "completion/list", "params": CompletionListParams } | { "method": "command/list", "params": CommandListParams } | { "method": "command/execute", "params": CommandExecuteParams } | { "method": "shell/start", "params": ShellStartParams } | { "method": "source/reset", "params": SourceResetParams } | { "method": "permission/respond", "params": PermissionRespondParams } | { "method": "clarify/respond", "params": ClarifyRespondParams } | { "method": "settings/update", "params": SettingsUpdateParams } | { "method": "settings/read", "params": SettingsReadParams } | { "method": "workspace/files", "params": WorkspaceFilesParams } | { "method": "workspace/file/read", "params": WorkspaceFileReadParams } | { "method": "workspace/diff", "params": WorkspaceDiffParams } | { "method": "context/read", "params": ContextReadParams };
+export type ClientRequest = { "method": "initialize", "params": InitializeParams } | { "method": "thread/start", "params": ThreadStartParams } | { "method": "thread/resume", "params": ThreadResumeParams } | { "method": "thread/read", "params": ThreadReadParams } | { "method": "thread/trace", "params": ThreadTraceParams } | { "method": "thread/list", "params": ThreadListParams } | { "method": "thread/rename", "params": ThreadRenameParams } | { "method": "thread/archive", "params": ThreadIdParams } | { "method": "thread/restore", "params": ThreadIdParams } | { "method": "thread/delete", "params": ThreadIdParams } | { "method": "turn/start", "params": TurnStartParams } | { "method": "turn/steer", "params": TurnSteerParams } | { "method": "turn/interrupt", "params": TurnInterruptParams } | { "method": "completion/list", "params": CompletionListParams } | { "method": "command/list", "params": CommandListParams } | { "method": "command/execute", "params": CommandExecuteParams } | { "method": "shell/start", "params": ShellStartParams } | { "method": "terminal/start", "params": TerminalStartParams } | { "method": "terminal/write", "params": TerminalWriteParams } | { "method": "terminal/resize", "params": TerminalResizeParams } | { "method": "terminal/terminate", "params": TerminalTerminateParams } | { "method": "source/reset", "params": SourceResetParams } | { "method": "permission/respond", "params": PermissionRespondParams } | { "method": "clarify/respond", "params": ClarifyRespondParams } | { "method": "settings/update", "params": SettingsUpdateParams } | { "method": "settings/read", "params": SettingsReadParams } | { "method": "workspace/files", "params": WorkspaceFilesParams } | { "method": "workspace/file/read", "params": WorkspaceFileReadParams } | { "method": "workspace/diff", "params": WorkspaceDiffParams } | { "method": "context/read", "params": ContextReadParams };
 
-export type ServerNotification = { "method": "gateway/event", "params": GatewayEvent } | { "method": "turn/result", "params": TurnResultPayload } | { "method": "turn/error", "params": TurnErrorPayload } | { "method": "shell/result", "params": ShellResultPayload } | { "method": "shell/error", "params": ShellErrorPayload };
+export type ServerNotification = { "method": "gateway/event", "params": GatewayEvent } | { "method": "turn/result", "params": TurnResultPayload } | { "method": "turn/error", "params": TurnErrorPayload } | { "method": "shell/result", "params": ShellResultPayload } | { "method": "shell/error", "params": ShellErrorPayload } | { "method": "terminal/output", "params": TerminalOutputPayload } | { "method": "terminal/exited", "params": TerminalExitedPayload };
 

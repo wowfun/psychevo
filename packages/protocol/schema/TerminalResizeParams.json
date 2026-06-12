@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "cols": {
+      "format": "uint16",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "rows": {
+      "format": "uint16",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "terminalId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "cols",
+    "rows",
+    "terminalId"
+  ],
+  "title": "TerminalResizeParams",
+  "type": "object"
+}

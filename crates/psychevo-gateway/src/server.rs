@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, HashMap};
-use std::io::{Error as IoError, ErrorKind, Read};
+use std::io::{Error as IoError, ErrorKind, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::Router;
@@ -15,6 +16,7 @@ use axum::http::header::{
 use axum::http::{HeaderMap, HeaderValue, Response, StatusCode};
 use axum::response::{IntoResponse, Json};
 use axum::routing::{get, post};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use futures::{SinkExt, StreamExt};
 use psychevo_gateway_protocol as wire;
 use psychevo_runtime::command_registry::{
@@ -293,8 +295,283 @@ struct WebStateInner {
     source: GatewaySource,
     launches: Mutex<HashMap<String, LaunchEntry>>,
     browser_sessions: Mutex<HashMap<String, BrowserSession>>,
+    terminals: TerminalManager,
     pending_permissions: Mutex<HashMap<String, PendingPermissionView>>,
     pending_clarifies: Mutex<HashMap<String, PendingClarifyView>>,
+}
+
+#[derive(Clone, Default)]
+struct TerminalManager {
+    sessions: Arc<Mutex<HashMap<String, TerminalSession>>>,
+}
+
+#[derive(Clone)]
+struct TerminalSession {
+    child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
+    master: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+}
+
+impl TerminalManager {
+    fn start(
+        &self,
+        scope: &ResolvedScope,
+        params: wire::TerminalStartParams,
+        inherited_env: &BTreeMap<String, String>,
+        out_tx: mpsc::UnboundedSender<String>,
+    ) -> psychevo_runtime::Result<wire::TerminalStartResult> {
+        let cwd = resolve_terminal_cwd(&scope.workdir, params.cwd.as_deref())?;
+        let rows = params.rows.clamp(4, 200);
+        let cols = params.cols.clamp(20, 400);
+        let pty_system = portable_pty::native_pty_system();
+        let pair = pty_system
+            .openpty(portable_pty::PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|err| Error::Message(err.to_string()))?;
+        let shell = default_terminal_shell(inherited_env);
+        let mut command = portable_pty::CommandBuilder::new(shell);
+        command.cwd(cwd.as_os_str());
+        command.env("TERM", "xterm-256color");
+        for (key, value) in inherited_env {
+            command.env(key, value);
+        }
+        let child = pair
+            .slave
+            .spawn_command(command)
+            .map_err(|err| Error::Message(err.to_string()))?;
+        let pid = child.process_id();
+        drop(pair.slave);
+        let reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|err| Error::Message(err.to_string()))?;
+        let writer = pair
+            .master
+            .take_writer()
+            .map_err(|err| Error::Message(err.to_string()))?;
+        let terminal_id = Uuid::now_v7().to_string();
+        let child = Arc::new(Mutex::new(child));
+        let session = TerminalSession {
+            child: Arc::clone(&child),
+            master: Arc::new(Mutex::new(pair.master)),
+            writer: Arc::new(Mutex::new(writer)),
+        };
+        self.sessions
+            .lock()
+            .expect("web terminal sessions poisoned")
+            .insert(terminal_id.clone(), session);
+        spawn_terminal_reader(terminal_id.clone(), reader, out_tx.clone());
+        spawn_terminal_waiter(
+            terminal_id.clone(),
+            Arc::clone(&child),
+            self.clone(),
+            out_tx,
+        );
+        Ok(wire::TerminalStartResult {
+            terminal_id,
+            cwd: cwd.display().to_string(),
+            pid,
+        })
+    }
+
+    fn write(
+        &self,
+        params: wire::TerminalWriteParams,
+    ) -> psychevo_runtime::Result<wire::TerminalMutationResult> {
+        let bytes = BASE64_STANDARD
+            .decode(params.data_base64.as_bytes())
+            .map_err(|err| Error::Message(format!("invalid terminal data: {err}")))?;
+        let session = self.session(&params.terminal_id)?;
+        let mut writer = session
+            .writer
+            .lock()
+            .map_err(|_| Error::Message("terminal writer is unavailable".to_string()))?;
+        writer.write_all(&bytes)?;
+        writer.flush()?;
+        Ok(wire::TerminalMutationResult { accepted: true })
+    }
+
+    fn resize(
+        &self,
+        params: wire::TerminalResizeParams,
+    ) -> psychevo_runtime::Result<wire::TerminalMutationResult> {
+        let session = self.session(&params.terminal_id)?;
+        let master = session
+            .master
+            .lock()
+            .map_err(|_| Error::Message("terminal pty is unavailable".to_string()))?;
+        master
+            .resize(portable_pty::PtySize {
+                rows: params.rows.clamp(4, 200),
+                cols: params.cols.clamp(20, 400),
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|err| Error::Message(err.to_string()))?;
+        Ok(wire::TerminalMutationResult { accepted: true })
+    }
+
+    fn terminate(
+        &self,
+        params: wire::TerminalTerminateParams,
+        out_tx: mpsc::UnboundedSender<String>,
+    ) -> psychevo_runtime::Result<wire::TerminalMutationResult> {
+        let Some(session) = self
+            .sessions
+            .lock()
+            .expect("web terminal sessions poisoned")
+            .remove(&params.terminal_id)
+        else {
+            return Ok(wire::TerminalMutationResult { accepted: false });
+        };
+        if let Ok(mut child) = session.child.lock() {
+            let _ = child.kill();
+        }
+        let _ = out_tx.send(rpc_notification(
+            "terminal/exited",
+            serde_json::to_value(wire::TerminalExitedPayload {
+                terminal_id: params.terminal_id,
+                exit_code: None,
+                reason: "terminated".to_string(),
+            })?,
+        ));
+        Ok(wire::TerminalMutationResult { accepted: true })
+    }
+
+    fn session(&self, terminal_id: &str) -> psychevo_runtime::Result<TerminalSession> {
+        self.sessions
+            .lock()
+            .expect("web terminal sessions poisoned")
+            .get(terminal_id)
+            .cloned()
+            .ok_or_else(|| Error::Message(format!("unknown terminal: {terminal_id}")))
+    }
+
+    fn remove(&self, terminal_id: &str) -> bool {
+        self.sessions
+            .lock()
+            .expect("web terminal sessions poisoned")
+            .remove(terminal_id)
+            .is_some()
+    }
+}
+
+fn spawn_terminal_reader(
+    terminal_id: String,
+    mut reader: Box<dyn Read + Send>,
+    out_tx: mpsc::UnboundedSender<String>,
+) {
+    thread::spawn(move || {
+        let mut chunk = [0u8; 8192];
+        loop {
+            match reader.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let payload = wire::TerminalOutputPayload {
+                        terminal_id: terminal_id.clone(),
+                        stream: "stdout".to_string(),
+                        data_base64: BASE64_STANDARD.encode(&chunk[..n]),
+                    };
+                    if let Ok(value) = serde_json::to_value(payload) {
+                        let _ = out_tx.send(rpc_notification("terminal/output", value));
+                    }
+                }
+                Err(err) if err.kind() == ErrorKind::Interrupted => {}
+                Err(_) => break,
+            }
+        }
+    });
+}
+
+fn spawn_terminal_waiter(
+    terminal_id: String,
+    child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
+    manager: TerminalManager,
+    out_tx: mpsc::UnboundedSender<String>,
+) {
+    thread::spawn(move || {
+        loop {
+            let status = {
+                let Ok(mut child) = child.lock() else {
+                    return;
+                };
+                child.try_wait()
+            };
+            match status {
+                Ok(Some(status)) => {
+                    if manager.remove(&terminal_id) {
+                        let _ = out_tx.send(rpc_notification(
+                            "terminal/exited",
+                            json!({
+                                "terminalId": terminal_id,
+                                "exitCode": status.exit_code() as i32,
+                                "reason": status.signal().unwrap_or("exited")
+                            }),
+                        ));
+                    }
+                    return;
+                }
+                Ok(None) => thread::sleep(Duration::from_millis(50)),
+                Err(err) => {
+                    if manager.remove(&terminal_id) {
+                        let _ = out_tx.send(rpc_notification(
+                            "terminal/exited",
+                            json!({
+                                "terminalId": terminal_id,
+                                "exitCode": null,
+                                "reason": err.to_string()
+                            }),
+                        ));
+                    }
+                    return;
+                }
+            }
+        }
+    });
+}
+
+fn resolve_terminal_cwd(root: &Path, cwd: Option<&str>) -> psychevo_runtime::Result<PathBuf> {
+    let Some(cwd) = cwd.map(str::trim).filter(|cwd| !cwd.is_empty()) else {
+        return Ok(root.to_path_buf());
+    };
+    if cwd.contains('\0') {
+        return Err(Error::Message("terminal cwd is invalid".to_string()));
+    }
+    let raw = Path::new(cwd);
+    let candidate = if raw.is_absolute() {
+        raw.to_path_buf()
+    } else {
+        root.join(raw)
+    };
+    let canonical = canonicalize_workdir(&candidate)?;
+    if !canonical.starts_with(root) {
+        return Err(Error::Message(
+            "terminal cwd is outside the workspace".to_string(),
+        ));
+    }
+    Ok(canonical)
+}
+
+fn default_terminal_shell(inherited_env: &BTreeMap<String, String>) -> String {
+    inherited_env
+        .get("SHELL")
+        .filter(|value| !value.trim().is_empty())
+        .cloned()
+        .or_else(|| std::env::var("SHELL").ok())
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| inherited_env.get("COMSPEC").cloned())
+        .or_else(|| std::env::var("COMSPEC").ok())
+        .unwrap_or_else(|| {
+            if cfg!(windows) {
+                "cmd.exe".to_string()
+            } else {
+                "/bin/sh".to_string()
+            }
+        })
 }
 
 #[derive(Debug, Clone)]
@@ -340,6 +617,7 @@ impl WebState {
                 source,
                 launches: Mutex::new(HashMap::new()),
                 browser_sessions: Mutex::new(HashMap::new()),
+                terminals: TerminalManager::default(),
                 pending_permissions: Mutex::new(HashMap::new()),
                 pending_clarifies: Mutex::new(HashMap::new()),
             }),
@@ -1216,6 +1494,30 @@ async fn handle_rpc(
                 message: None,
             })?)
         }
+        "terminal/start" => {
+            let params = request.required_params::<wire::TerminalStartParams>()?;
+            let scope = resolve_required_scope(&state, &auth, params.scope.clone())?;
+            Ok(serde_json::to_value(state.inner.terminals.start(
+                &scope,
+                params,
+                &state.inner.inherited_env,
+                out_tx,
+            )?)?)
+        }
+        "terminal/write" => {
+            let params = request.required_params::<wire::TerminalWriteParams>()?;
+            Ok(serde_json::to_value(state.inner.terminals.write(params)?)?)
+        }
+        "terminal/resize" => {
+            let params = request.required_params::<wire::TerminalResizeParams>()?;
+            Ok(serde_json::to_value(state.inner.terminals.resize(params)?)?)
+        }
+        "terminal/terminate" => {
+            let params = request.required_params::<wire::TerminalTerminateParams>()?;
+            Ok(serde_json::to_value(
+                state.inner.terminals.terminate(params, out_tx)?,
+            )?)
+        }
         "settings/read" => {
             let params = request.params::<wire::SettingsReadParams>()?;
             let (workdir, thread_id) = if let Some(thread_id) = params.thread_id {
@@ -2010,7 +2312,7 @@ fn workspace_file_read_value(scope: &ResolvedScope, path: &str) -> psychevo_runt
         }
     };
     let mut bytes = Vec::new();
-    file.by_ref()
+    Read::by_ref(&mut file)
         .take((MAX_WORKSPACE_FILE_READ_BYTES + 1) as u64)
         .read_to_end(&mut bytes)?;
     let truncated = bytes.len() > MAX_WORKSPACE_FILE_READ_BYTES;
@@ -5068,6 +5370,143 @@ command = "cursor-agent"
         assert_eq!(result["action"]["type"], "queuePrompt");
         assert_eq!(result["action"]["text"], "hello");
         assert_eq!(result["action"]["displayText"], "/queue hello");
+    }
+
+    #[tokio::test]
+    async fn terminal_start_rejects_cwd_outside_workspace() {
+        let (temp, state) = web_state();
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&outside).expect("outside dir");
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let err = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "terminal/start".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "cwd": outside,
+                    "cols": 80,
+                    "rows": 24
+                })),
+            },
+        )
+        .await
+        .expect_err("outside cwd should be rejected");
+
+        assert!(err.to_string().contains("outside the workspace"), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn terminal_rpc_streams_output_and_exit_notifications() {
+        let shell = if cfg!(windows) { "cmd.exe" } else { "/bin/sh" };
+        let (_temp, state) =
+            web_state_with_env(BTreeMap::from([("SHELL".to_string(), shell.to_string())]));
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        let started = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "terminal/start".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "cwd": null,
+                    "cols": 80,
+                    "rows": 24
+                })),
+            },
+        )
+        .await
+        .expect("terminal/start");
+        let terminal_id = started["terminalId"]
+            .as_str()
+            .expect("terminal id")
+            .to_string();
+
+        let resize = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("2")),
+                method: "terminal/resize".to_string(),
+                params: Some(json!({
+                    "terminalId": terminal_id.clone(),
+                    "cols": 100,
+                    "rows": 30
+                })),
+            },
+        )
+        .await
+        .expect("terminal/resize");
+        assert_eq!(resize["accepted"], true);
+
+        let command = if cfg!(windows) {
+            "echo pevo-terminal-ok\r\nexit\r\n"
+        } else {
+            "printf pevo-terminal-ok\\n\nexit\n"
+        };
+        let write = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("3")),
+                method: "terminal/write".to_string(),
+                params: Some(json!({
+                    "terminalId": terminal_id.clone(),
+                    "dataBase64": BASE64_STANDARD.encode(command.as_bytes())
+                })),
+            },
+        )
+        .await
+        .expect("terminal/write");
+        assert_eq!(write["accepted"], true);
+
+        let mut output = String::new();
+        let mut saw_exit = false;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(message) = rx.recv().await {
+                let notification: Value = serde_json::from_str(&message).expect("notification");
+                match notification["method"].as_str() {
+                    Some("terminal/output") => {
+                        let encoded = notification["params"]["dataBase64"]
+                            .as_str()
+                            .expect("dataBase64");
+                        let bytes = BASE64_STANDARD.decode(encoded).expect("base64");
+                        output.push_str(&String::from_utf8_lossy(&bytes));
+                    }
+                    Some("terminal/exited") => {
+                        saw_exit = true;
+                    }
+                    _ => {}
+                }
+                if output.contains("pevo-terminal-ok") && saw_exit {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("terminal notifications");
+
+        assert!(output.contains("pevo-terminal-ok"), "{output:?}");
+        assert!(saw_exit);
     }
 
     #[tokio::test]

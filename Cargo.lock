@@ -2671,8 +2671,10 @@ version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
  "axum",
+ "base64",
  "futures",
  "http",
+ "portable-pty",
  "psychevo-ai",
  "psychevo-gateway-protocol",
  "psychevo-runtime",

@@ -183,6 +183,242 @@ export const systemSchemas = {
   "title": "GatewayProfileView",
   "type": "object"
 },
+  TerminalStartParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "cols": {
+      "format": "uint16",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "cwd": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "rows": {
+      "format": "uint16",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "scope": {
+      "$ref": "#/definitions/GatewayRequestScope"
+    }
+  },
+  "required": [
+    "cols",
+    "rows",
+    "scope"
+  ],
+  "title": "TerminalStartParams",
+  "type": "object"
+},
+  TerminalStartResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "cwd": {
+      "type": "string"
+    },
+    "pid": {
+      "default": null,
+      "format": "uint32",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "terminalId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "cwd",
+    "terminalId"
+  ],
+  "title": "TerminalStartResult",
+  "type": "object"
+},
+  TerminalWriteParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "dataBase64": {
+      "type": "string"
+    },
+    "terminalId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "dataBase64",
+    "terminalId"
+  ],
+  "title": "TerminalWriteParams",
+  "type": "object"
+},
+  TerminalResizeParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "cols": {
+      "format": "uint16",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "rows": {
+      "format": "uint16",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "terminalId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "cols",
+    "rows",
+    "terminalId"
+  ],
+  "title": "TerminalResizeParams",
+  "type": "object"
+},
+  TerminalTerminateParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "terminalId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "terminalId"
+  ],
+  "title": "TerminalTerminateParams",
+  "type": "object"
+},
+  TerminalMutationResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "accepted": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "accepted"
+  ],
+  "title": "TerminalMutationResult",
+  "type": "object"
+},
+  TerminalOutputPayload: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "dataBase64": {
+      "type": "string"
+    },
+    "stream": {
+      "type": "string"
+    },
+    "terminalId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "dataBase64",
+    "stream",
+    "terminalId"
+  ],
+  "title": "TerminalOutputPayload",
+  "type": "object"
+},
+  TerminalExitedPayload: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "exitCode": {
+      "default": null,
+      "format": "int32",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "reason": {
+      "type": "string"
+    },
+    "terminalId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "reason",
+    "terminalId"
+  ],
+  "title": "TerminalExitedPayload",
+  "type": "object"
+},
   ReadyzResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {

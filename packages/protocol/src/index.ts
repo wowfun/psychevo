@@ -18,6 +18,8 @@ import type {
   JsonRpcNotification,
   JsonRpcSuccess,
   SettingsReadResult,
+  TerminalExitedPayload,
+  TerminalOutputPayload,
   ThreadListResult,
   ThreadTraceResult,
   ThreadSnapshot,
@@ -52,6 +54,10 @@ export const CompletionListResultSchema =
   schema<CompletionListResult>("CompletionListResult");
 export const TurnResultNotificationSchema =
   schema<TurnResultPayload>("TurnResultPayload");
+export const TerminalOutputPayloadSchema =
+  schema<TerminalOutputPayload>("TerminalOutputPayload");
+export const TerminalExitedPayloadSchema =
+  schema<TerminalExitedPayload>("TerminalExitedPayload");
 export const InitializeResultSchema = schema<InitializeResult>("InitializeResult");
 export const SettingsReadResultSchema =
   schema<SettingsReadResult>("SettingsReadResult");

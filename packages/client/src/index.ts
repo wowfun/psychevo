@@ -23,6 +23,12 @@ import {
   type ShellStartParams,
   type ShellStartResult,
   type SourceResetParams,
+  type TerminalMutationResult,
+  type TerminalResizeParams,
+  type TerminalStartParams,
+  type TerminalStartResult,
+  type TerminalTerminateParams,
+  type TerminalWriteParams,
   type ThreadDeleteResult,
   type ThreadIdParams,
   type ThreadListParams,
@@ -73,6 +79,10 @@ export interface GatewayRequestParams {
   "settings/update": SettingsUpdateParams;
   "shell/start": ShellStartParams;
   "source/reset": SourceResetParams;
+  "terminal/resize": TerminalResizeParams;
+  "terminal/start": TerminalStartParams;
+  "terminal/terminate": TerminalTerminateParams;
+  "terminal/write": TerminalWriteParams;
   "thread/archive": ThreadIdParams;
   "thread/delete": ThreadIdParams;
   "thread/list": ThreadListParams;
@@ -105,6 +115,10 @@ export interface GatewayRequestResults {
   "settings/update": SettingsReadResult;
   "shell/start": ShellStartResult;
   "source/reset": ThreadSnapshot;
+  "terminal/resize": TerminalMutationResult;
+  "terminal/start": TerminalStartResult;
+  "terminal/terminate": TerminalMutationResult;
+  "terminal/write": TerminalMutationResult;
   "thread/archive": ThreadMutationResult;
   "thread/delete": ThreadDeleteResult;
   "thread/list": ThreadListResult;

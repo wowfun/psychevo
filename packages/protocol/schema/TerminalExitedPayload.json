@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "exitCode": {
+      "default": null,
+      "format": "int32",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "reason": {
+      "type": "string"
+    },
+    "terminalId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "reason",
+    "terminalId"
+  ],
+  "title": "TerminalExitedPayload",
+  "type": "object"
+}

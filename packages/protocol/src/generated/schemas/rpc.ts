@@ -758,6 +758,85 @@ export const rpcSchemas = {
       ],
       "type": "object"
     },
+    "TerminalResizeParams": {
+      "properties": {
+        "cols": {
+          "format": "uint16",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "rows": {
+          "format": "uint16",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "terminalId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cols",
+        "rows",
+        "terminalId"
+      ],
+      "type": "object"
+    },
+    "TerminalStartParams": {
+      "properties": {
+        "cols": {
+          "format": "uint16",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "cwd": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rows": {
+          "format": "uint16",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "scope": {
+          "$ref": "#/definitions/GatewayRequestScope"
+        }
+      },
+      "required": [
+        "cols",
+        "rows",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "TerminalTerminateParams": {
+      "properties": {
+        "terminalId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "terminalId"
+      ],
+      "type": "object"
+    },
+    "TerminalWriteParams": {
+      "properties": {
+        "dataBase64": {
+          "type": "string"
+        },
+        "terminalId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "dataBase64",
+        "terminalId"
+      ],
+      "type": "object"
+    },
     "ThreadIdParams": {
       "properties": {
         "threadId": {
@@ -1345,6 +1424,78 @@ export const rpcSchemas = {
         },
         "params": {
           "$ref": "#/definitions/ShellStartParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "terminal/start"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/TerminalStartParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "terminal/write"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/TerminalWriteParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "terminal/resize"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/TerminalResizeParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "terminal/terminate"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/TerminalTerminateParams"
         }
       },
       "required": [
@@ -2023,6 +2174,48 @@ export const rpcSchemas = {
       ],
       "type": "object"
     },
+    "TerminalExitedPayload": {
+      "properties": {
+        "exitCode": {
+          "default": null,
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "terminalId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason",
+        "terminalId"
+      ],
+      "type": "object"
+    },
+    "TerminalOutputPayload": {
+      "properties": {
+        "dataBase64": {
+          "type": "string"
+        },
+        "stream": {
+          "type": "string"
+        },
+        "terminalId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "dataBase64",
+        "stream",
+        "terminalId"
+      ],
+      "type": "object"
+    },
     "TranscriptBlock": {
       "properties": {
         "artifactIds": {
@@ -2403,6 +2596,42 @@ export const rpcSchemas = {
         },
         "params": {
           "$ref": "#/definitions/ShellErrorPayload"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "terminal/output"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/TerminalOutputPayload"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "terminal/exited"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/TerminalExitedPayload"
         }
       },
       "required": [
