@@ -727,6 +727,7 @@ pub(crate) mod tests {
                 CommandCapability::ActiveTurnControl,
                 CommandCapability::Queue,
                 CommandCapability::SessionSwitch,
+                CommandCapability::SessionRevert,
                 CommandCapability::ArtifactWrite,
                 CommandCapability::WorkspaceDiff,
                 CommandCapability::ConfigWrite,
@@ -745,6 +746,8 @@ pub(crate) mod tests {
         assert!(names.contains(&"tools"));
         assert!(names.contains(&"diff"));
         assert!(names.contains(&"resume"));
+        assert!(names.contains(&"undo"));
+        assert!(names.contains(&"redo"));
         assert!(!names.contains(&"copy"));
         assert!(!names.contains(&"image"));
         assert!(!names.contains(&"quit"));
@@ -757,6 +760,7 @@ pub(crate) mod tests {
                 CommandCapability::ActiveTurnControl,
                 CommandCapability::Queue,
                 CommandCapability::SessionSwitch,
+                CommandCapability::SessionRevert,
                 CommandCapability::ArtifactWrite,
                 CommandCapability::WorkspaceDiff,
             ],
@@ -773,6 +777,8 @@ pub(crate) mod tests {
         assert!(names.contains(&"queue"));
         assert!(names.contains(&"diff"));
         assert!(!names.contains(&"resume"));
+        assert!(!names.contains(&"undo"));
+        assert!(!names.contains(&"redo"));
         assert!(!names.contains(&"compact"));
     }
 
@@ -831,6 +837,41 @@ pub(crate) mod tests {
             dynamic.presentation.destination,
             CommandDestination::Composer
         );
+    }
+
+    #[test]
+    fn undo_redo_require_session_revert_capability() {
+        let without_revert = available_slash_commands_for_surface(
+            &[
+                CommandCapability::SessionSwitch,
+                CommandCapability::ArtifactWrite,
+                CommandCapability::WorkspaceDiff,
+            ],
+            false,
+            &[],
+            100,
+        );
+        let names = without_revert
+            .commands
+            .iter()
+            .map(|command| command.name.as_str())
+            .collect::<Vec<_>>();
+        assert!(!names.contains(&"undo"));
+        assert!(!names.contains(&"redo"));
+
+        let with_revert = available_slash_commands_for_surface(
+            &[CommandCapability::SessionRevert],
+            false,
+            &[],
+            100,
+        );
+        let names = with_revert
+            .commands
+            .iter()
+            .map(|command| command.name.as_str())
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"undo"));
+        assert!(names.contains(&"redo"));
     }
 
     #[test]

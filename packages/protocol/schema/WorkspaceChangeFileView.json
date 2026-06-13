@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "WorkspaceChangeReviewStatusView": {
+      "enum": [
+        "pending",
+        "accepted",
+        "rejected",
+        "conflict"
+      ],
+      "type": "string"
+    },
+    "WorkspaceDiffFileStatusView": {
+      "enum": [
+        "modified",
+        "added",
+        "deleted",
+        "untracked",
+        "binary",
+        "unreadable"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "binary": {
+      "type": "boolean"
+    },
+    "canReject": {
+      "type": "boolean"
+    },
+    "message": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "path": {
+      "type": "string"
+    },
+    "reviewStatus": {
+      "$ref": "#/definitions/WorkspaceChangeReviewStatusView"
+    },
+    "status": {
+      "$ref": "#/definitions/WorkspaceDiffFileStatusView"
+    },
+    "unreadable": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "binary",
+    "canReject",
+    "path",
+    "reviewStatus",
+    "status",
+    "unreadable"
+  ],
+  "title": "WorkspaceChangeFileView",
+  "type": "object"
+}

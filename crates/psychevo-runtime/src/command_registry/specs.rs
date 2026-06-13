@@ -51,6 +51,7 @@ pub enum CommandCapability {
     ActiveTurnControl,
     Queue,
     SessionSwitch,
+    SessionRevert,
     ArtifactWrite,
     WorkspaceDiff,
     ConfigWrite,
@@ -235,6 +236,9 @@ impl SlashCommandSpec {
             SlashCommandAction::Image => &[CommandCapability::ImageAttachment],
             SlashCommandAction::Sessions | SlashCommandAction::Resume => {
                 &[CommandCapability::SessionSwitch]
+            }
+            SlashCommandAction::Undo | SlashCommandAction::Redo => {
+                &[CommandCapability::SessionRevert]
             }
             SlashCommandAction::Tools => &[],
             SlashCommandAction::Permissions => &[],

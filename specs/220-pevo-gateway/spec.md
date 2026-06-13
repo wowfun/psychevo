@@ -19,7 +19,8 @@ Out of scope:
 
 - public LAN, relay, TLS, account, or hosted service behavior
 - native desktop or mobile shell packaging
-- arbitrary config-file editing or provider secret storage in the browser
+- provider secret storage in the browser, and arbitrary host-file editing
+  outside the active project root
 - headless API contract, which belongs to [221 pevo Serve](../221-pevo-serve/spec.md)
 
 ## Lifecycle
@@ -237,6 +238,23 @@ Trace read failures and missing trace files must not affect transcript reads,
 live transcript rendering, turn execution, or ordinary Workbench interaction.
 Workbench must not feed `thread/trace` records into transcript rendering.
 
+`observability/read` returns the shared UI observability projection for a
+request `scope` and optional `threadId`. Its `context` field uses the same shape
+as `context/read`; its `usage` field is a session-level summary of persisted
+visible message/accounting facts for context input, billable input/output,
+reasoning, cache read/write, provider-reported total tokens, estimated cost,
+unknown-pricing message count, provider/model, and derived cache-read percent.
+The method is display-only and must not return prompt text, message bodies,
+tool argument bodies, provider request text, or raw trace records. It respects
+the selected session and any resume/authorization boundary used by
+`thread/read` and `thread/resume`. If no session is active or selected,
+`context` is unavailable and `usage.available` is false.
+
+`context/read` remains supported for compatibility. Workbench and future GUI
+status/detail surfaces should prefer `observability/read` so context-window,
+token, cache, and cost displays stay consistent across resume and session
+switches.
+
 Creating a new Web thread or selecting an existing history thread rebinds the
 current Web source without archiving the previously selected thread. Only an
 explicit `source/reset`, archive action, or delete action may remove a thread
@@ -324,6 +342,15 @@ export commands invoke the host download/share path. Display-only feedback from
 commands must not be persisted as transcript entries. Panel host actions must
 reveal their destination in desktop and mobile layouts; focusing Status or
 History is not sufficient if the corresponding inspector/sidebar is collapsed.
+Undo and redo slash commands execute through `command/execute` and return host
+actions instead of adding transcript rows. `sessionUndo` includes the current
+thread id, restored prompt text, and reverted message count; `sessionRedo`
+includes the current thread id, restored message count, and whether redo
+completed the revert chain. Workbench refreshes the thread snapshot, history,
+and workspace-derived views after either action; `/undo` places the restored
+prompt in the composer and `/redo` clears it. If a turn is running, Gateway
+does not restore snapshots and instead returns a local interrupt action with
+bounded feedback asking the user to rerun the command after the turn settles.
 Composer-triggered help or browse actions for commands and agents use closeable
 overlays over the current transcript so the active session and composer remain
 visible. Composer-triggered inspect feedback may be mirrored near the composer
@@ -331,6 +358,14 @@ while the destination panel is revealed. Queue actions preserve the original
 slash line as their display text when they submit expanded prompt text through
 `turn/start`. Display-only command feedback and overlays are transient to the
 current session/workdir and are cleared on session switches and new input.
+
+Workbench refreshes `observability/read` after `thread/resume`, `thread/read`,
+turn completion, undo/redo workspace refresh, and explicit session switches,
+including same-workdir resume where the file tree and diff may not otherwise
+need to change. New detached drafts or no-active-session states clear stale
+session usage metrics. Compact UI surfaces may show context percent, session
+tokens, cache-read percent, and estimated cost; richer details belong in the
+right Status view and the composer context/status popover.
 
 The Web Shell supports TUI-compatible shell mode through `shell/start`.
 `shell/start` accepts `scope`, optional `threadId`, and a stripped local shell
@@ -420,6 +455,29 @@ while absolute paths are reserved for tooltip text when the active workdir is
 available. Unsupported preview formats and Gateway binary/unreadable file
 responses stay in the Files tab as unavailable preview states instead of
 opening a center preview.
+
+Review also exposes Gateway review groups when available. `workspace/changes`
+returns groups ordered by turn with file-level pending, accepted, rejected, and
+conflict states. `workspace/change/accept` only marks a file accepted.
+`workspace/change/reject` restores that file to the turn-start baseline,
+removes files created by that turn, and restores files deleted by that turn.
+Reject must preserve file content that existed before the selected turn,
+including pre-existing dirty or untracked files. If the current file revision
+differs from the stored post-turn revision, Reject is blocked and the file row
+is reported as conflicted.
+
+Files supports authenticated manual text editing for files inside the active
+project root. `workspace/file/read` returns text content plus editability
+metadata: size, revision/hash, line ending, binary/truncated state, and a
+reason when the file cannot be edited. `workspace/file/write` accepts scope,
+relative path, full text content, expected revision, and an explicit force flag.
+The Gateway must reject absolute paths, path traversal, symlink escapes,
+binary content, files over `1 MB`, and unauthenticated browser sessions. GUI
+saves are direct user edits, independent of the selected Agent permission
+mode, and they do not enter `workspace/changes`. If the expected revision no
+longer matches the file on disk, Gateway rejects the save unless force is set.
+Workbench surfaces that conflict by offering compare/reload/force-overwrite
+actions rather than silently merging.
 
 Workbench persists the right workspace desktop width as a host preference.
 Clients default the opened width to about `520px`, clamp restored and dragged

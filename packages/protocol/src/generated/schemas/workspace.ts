@@ -369,8 +369,36 @@ export const workspaceSchemas = {
         "null"
       ]
     },
+    "editable": {
+      "default": false,
+      "type": "boolean"
+    },
+    "editableReason": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "lineEnding": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "path": {
       "type": "string"
+    },
+    "revision": {
+      "default": "",
+      "type": "string"
+    },
+    "sizeBytes": {
+      "default": 0,
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
     },
     "truncated": {
       "type": "boolean"
@@ -389,6 +417,132 @@ export const workspaceSchemas = {
     "truncated"
   ],
   "title": "WorkspaceFileReadResult",
+  "type": "object"
+},
+  WorkspaceFileWriteParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "content": {
+      "type": "string"
+    },
+    "expectedRevision": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "force": {
+      "default": false,
+      "type": "boolean"
+    },
+    "path": {
+      "type": "string"
+    },
+    "scope": {
+      "$ref": "#/definitions/GatewayRequestScope"
+    }
+  },
+  "required": [
+    "content",
+    "path",
+    "scope"
+  ],
+  "title": "WorkspaceFileWriteParams",
+  "type": "object"
+},
+  WorkspaceFileWriteResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "lineEnding": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "path": {
+      "type": "string"
+    },
+    "revision": {
+      "type": "string"
+    },
+    "sizeBytes": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "path",
+    "revision",
+    "sizeBytes"
+  ],
+  "title": "WorkspaceFileWriteResult",
   "type": "object"
 },
   WorkspaceDiffFileStatusView: {
@@ -681,6 +835,575 @@ export const workspaceSchemas = {
     "unifiedDiff"
   ],
   "title": "WorkspaceDiffResult",
+  "type": "object"
+},
+  WorkspaceChangeReviewStatusView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "pending",
+    "accepted",
+    "rejected",
+    "conflict"
+  ],
+  "title": "WorkspaceChangeReviewStatusView",
+  "type": "string"
+},
+  WorkspaceChangeFileView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "WorkspaceChangeReviewStatusView": {
+      "enum": [
+        "pending",
+        "accepted",
+        "rejected",
+        "conflict"
+      ],
+      "type": "string"
+    },
+    "WorkspaceDiffFileStatusView": {
+      "enum": [
+        "modified",
+        "added",
+        "deleted",
+        "untracked",
+        "binary",
+        "unreadable"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "binary": {
+      "type": "boolean"
+    },
+    "canReject": {
+      "type": "boolean"
+    },
+    "message": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "path": {
+      "type": "string"
+    },
+    "reviewStatus": {
+      "$ref": "#/definitions/WorkspaceChangeReviewStatusView"
+    },
+    "status": {
+      "$ref": "#/definitions/WorkspaceDiffFileStatusView"
+    },
+    "unreadable": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "binary",
+    "canReject",
+    "path",
+    "reviewStatus",
+    "status",
+    "unreadable"
+  ],
+  "title": "WorkspaceChangeFileView",
+  "type": "object"
+},
+  WorkspaceChangeGroupView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "WorkspaceChangeFileView": {
+      "properties": {
+        "binary": {
+          "type": "boolean"
+        },
+        "canReject": {
+          "type": "boolean"
+        },
+        "message": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "reviewStatus": {
+          "$ref": "#/definitions/WorkspaceChangeReviewStatusView"
+        },
+        "status": {
+          "$ref": "#/definitions/WorkspaceDiffFileStatusView"
+        },
+        "unreadable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "binary",
+        "canReject",
+        "path",
+        "reviewStatus",
+        "status",
+        "unreadable"
+      ],
+      "type": "object"
+    },
+    "WorkspaceChangeReviewStatusView": {
+      "enum": [
+        "pending",
+        "accepted",
+        "rejected",
+        "conflict"
+      ],
+      "type": "string"
+    },
+    "WorkspaceDiffFileStatusView": {
+      "enum": [
+        "modified",
+        "added",
+        "deleted",
+        "untracked",
+        "binary",
+        "unreadable"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "completedAtMs": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "createdAtMs": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "files": {
+      "items": {
+        "$ref": "#/definitions/WorkspaceChangeFileView"
+      },
+      "type": "array"
+    },
+    "threadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "turnId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "completedAtMs",
+    "createdAtMs",
+    "files",
+    "turnId"
+  ],
+  "title": "WorkspaceChangeGroupView",
+  "type": "object"
+},
+  WorkspaceChangesParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "scope": {
+      "$ref": "#/definitions/GatewayRequestScope"
+    }
+  },
+  "required": [
+    "scope"
+  ],
+  "title": "WorkspaceChangesParams",
+  "type": "object"
+},
+  WorkspaceChangesResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "WorkspaceChangeFileView": {
+      "properties": {
+        "binary": {
+          "type": "boolean"
+        },
+        "canReject": {
+          "type": "boolean"
+        },
+        "message": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "reviewStatus": {
+          "$ref": "#/definitions/WorkspaceChangeReviewStatusView"
+        },
+        "status": {
+          "$ref": "#/definitions/WorkspaceDiffFileStatusView"
+        },
+        "unreadable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "binary",
+        "canReject",
+        "path",
+        "reviewStatus",
+        "status",
+        "unreadable"
+      ],
+      "type": "object"
+    },
+    "WorkspaceChangeGroupView": {
+      "properties": {
+        "completedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "createdAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/definitions/WorkspaceChangeFileView"
+          },
+          "type": "array"
+        },
+        "threadId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "completedAtMs",
+        "createdAtMs",
+        "files",
+        "turnId"
+      ],
+      "type": "object"
+    },
+    "WorkspaceChangeReviewStatusView": {
+      "enum": [
+        "pending",
+        "accepted",
+        "rejected",
+        "conflict"
+      ],
+      "type": "string"
+    },
+    "WorkspaceDiffFileStatusView": {
+      "enum": [
+        "modified",
+        "added",
+        "deleted",
+        "untracked",
+        "binary",
+        "unreadable"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "groups": {
+      "items": {
+        "$ref": "#/definitions/WorkspaceChangeGroupView"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "groups"
+  ],
+  "title": "WorkspaceChangesResult",
+  "type": "object"
+},
+  WorkspaceChangeFileParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "path": {
+      "type": "string"
+    },
+    "scope": {
+      "$ref": "#/definitions/GatewayRequestScope"
+    },
+    "turnId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "path",
+    "scope",
+    "turnId"
+  ],
+  "title": "WorkspaceChangeFileParams",
+  "type": "object"
+},
+  WorkspaceChangeMutationResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "WorkspaceChangeFileView": {
+      "properties": {
+        "binary": {
+          "type": "boolean"
+        },
+        "canReject": {
+          "type": "boolean"
+        },
+        "message": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "reviewStatus": {
+          "$ref": "#/definitions/WorkspaceChangeReviewStatusView"
+        },
+        "status": {
+          "$ref": "#/definitions/WorkspaceDiffFileStatusView"
+        },
+        "unreadable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "binary",
+        "canReject",
+        "path",
+        "reviewStatus",
+        "status",
+        "unreadable"
+      ],
+      "type": "object"
+    },
+    "WorkspaceChangeGroupView": {
+      "properties": {
+        "completedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "createdAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/definitions/WorkspaceChangeFileView"
+          },
+          "type": "array"
+        },
+        "threadId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "completedAtMs",
+        "createdAtMs",
+        "files",
+        "turnId"
+      ],
+      "type": "object"
+    },
+    "WorkspaceChangeReviewStatusView": {
+      "enum": [
+        "pending",
+        "accepted",
+        "rejected",
+        "conflict"
+      ],
+      "type": "string"
+    },
+    "WorkspaceChangesResult": {
+      "properties": {
+        "groups": {
+          "items": {
+            "$ref": "#/definitions/WorkspaceChangeGroupView"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "groups"
+      ],
+      "type": "object"
+    },
+    "WorkspaceDiffFileStatusView": {
+      "enum": [
+        "modified",
+        "added",
+        "deleted",
+        "untracked",
+        "binary",
+        "unreadable"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "accepted": {
+      "type": "boolean"
+    },
+    "changes": {
+      "$ref": "#/definitions/WorkspaceChangesResult"
+    }
+  },
+  "required": [
+    "accepted",
+    "changes"
+  ],
+  "title": "WorkspaceChangeMutationResult",
   "type": "object"
 },
 } as const;

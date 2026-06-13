@@ -1,4 +1,5 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::io::{Error as IoError, ErrorKind, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Component, Path, PathBuf};
@@ -32,14 +33,15 @@ use psychevo_runtime::{
     Message as RuntimeMessage, PermissionApprovalDecision, PermissionApprovalOutcome,
     PermissionMode, RunMode, RunOptions, SESSION_MAIN_AGENT_METADATA_KEY, SessionArtifactKind,
     SessionExportFormat, SessionExportIncludeSet, SessionExportOptions, SessionSummary,
-    SessionTraceReadOptions, SkillDiscoveryOptions, StateRuntime, UserContentBlock,
-    UserShellContextOptions, WorkspaceDiffFileStatus, canonicalize_workdir, collect_workspace_diff,
-    configured_models, context_snapshot, discover_agents, discover_skills,
-    format_context_total_value, list_agents_value, list_skill_bundles,
-    list_skills_value_with_options, load_agent_backend_configs, main_agent_default_metadata,
-    main_agent_from_session_metadata, main_agent_metadata, render_session_export,
-    resolve_agent_definition, resolve_workspace_root, selected_configured_model, valid_agent_name,
-    view_agent_value_with_catalog,
+    SessionTraceReadOptions, SessionUndoOptions, SessionUsageOptions, SkillDiscoveryOptions,
+    StateRuntime, UserContentBlock, UserShellContextOptions, WorkspaceDiffFile,
+    WorkspaceDiffFileStatus, canonicalize_workdir, collect_workspace_diff, configured_models,
+    context_snapshot, discover_agents, discover_skills, format_context_total_value,
+    list_agents_value, list_skill_bundles, list_skills_value_with_options,
+    load_agent_backend_configs, main_agent_default_metadata, main_agent_from_session_metadata,
+    main_agent_metadata, redo_session, render_session_export, resolve_agent_definition,
+    resolve_workspace_root, selected_configured_model, session_usage_summary, undo_session,
+    valid_agent_name, view_agent_value_with_catalog,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -59,7 +61,7 @@ const MAX_COMPLETION_ITEMS: usize = 50;
 const MAX_FILE_COMPLETION_ITEMS: usize = 80;
 const MAX_FILE_COMPLETION_DEPTH: usize = 8;
 const MAX_WORKSPACE_FILE_ITEMS: usize = 1_500;
-const MAX_WORKSPACE_FILE_READ_BYTES: usize = 256 * 1024;
+const MAX_WORKSPACE_TEXT_FILE_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct GatewayWebServerConfig {
@@ -296,6 +298,7 @@ struct WebStateInner {
     launches: Mutex<HashMap<String, LaunchEntry>>,
     browser_sessions: Mutex<HashMap<String, BrowserSession>>,
     terminals: TerminalManager,
+    review: WorkspaceReviewState,
     pending_permissions: Mutex<HashMap<String, PendingPermissionView>>,
     pending_clarifies: Mutex<HashMap<String, PendingClarifyView>>,
 }
@@ -303,6 +306,223 @@ struct WebStateInner {
 #[derive(Clone, Default)]
 struct TerminalManager {
     sessions: Arc<Mutex<HashMap<String, TerminalSession>>>,
+}
+
+#[derive(Clone, Default)]
+struct WorkspaceReviewState {
+    inner: Arc<Mutex<WorkspaceReviewInner>>,
+}
+
+#[derive(Default)]
+struct WorkspaceReviewInner {
+    pending: HashMap<String, PendingReviewTurn>,
+    groups: Vec<WorkspaceReviewGroup>,
+}
+
+#[derive(Clone)]
+struct PendingReviewTurn {
+    thread_id: Option<String>,
+    workdir: PathBuf,
+    baseline: WorkspaceBaseline,
+    created_at_ms: i64,
+}
+
+#[derive(Clone, Default)]
+struct WorkspaceBaseline {
+    files: HashMap<String, ReviewBaseline>,
+}
+
+#[derive(Clone)]
+struct WorkspaceReviewGroup {
+    turn_id: String,
+    thread_id: Option<String>,
+    workdir: PathBuf,
+    created_at_ms: i64,
+    completed_at_ms: i64,
+    files: Vec<WorkspaceReviewFile>,
+}
+
+#[derive(Clone)]
+struct WorkspaceReviewFile {
+    path: String,
+    status: wire::WorkspaceDiffFileStatusView,
+    binary: bool,
+    unreadable: bool,
+    review_status: wire::WorkspaceChangeReviewStatusView,
+    baseline: ReviewBaseline,
+    post_revision: String,
+    message: Option<String>,
+}
+
+#[derive(Clone)]
+enum ReviewBaseline {
+    Text { content: String },
+    Absent,
+    Unsupported { reason: String },
+}
+
+impl ReviewBaseline {
+    fn can_reject(&self) -> bool {
+        !matches!(self, Self::Unsupported { .. })
+    }
+
+    fn message(&self) -> Option<String> {
+        match self {
+            Self::Unsupported { reason } => Some(reason.clone()),
+            _ => None,
+        }
+    }
+}
+
+impl WorkspaceReviewState {
+    fn begin_turn(&self, turn_id: &str, thread_id: Option<String>, workdir: &Path) {
+        let baseline = capture_workspace_baseline(workdir);
+        let mut inner = self.inner.lock().expect("workspace review state poisoned");
+        inner
+            .pending
+            .entry(turn_id.to_string())
+            .or_insert_with(|| PendingReviewTurn {
+                thread_id,
+                workdir: workdir.to_path_buf(),
+                baseline,
+                created_at_ms: now_ms(),
+            });
+    }
+
+    fn complete_turn(&self, turn_id: &str) {
+        let pending = {
+            let mut inner = self.inner.lock().expect("workspace review state poisoned");
+            inner.pending.remove(turn_id)
+        };
+        let Some(pending) = pending else {
+            return;
+        };
+        let files = build_review_files(&pending.workdir, &pending.baseline).unwrap_or_default();
+        if files.is_empty() {
+            return;
+        }
+        let mut inner = self.inner.lock().expect("workspace review state poisoned");
+        inner.groups.retain(|group| group.turn_id != turn_id);
+        inner.groups.insert(
+            0,
+            WorkspaceReviewGroup {
+                turn_id: turn_id.to_string(),
+                thread_id: pending.thread_id,
+                workdir: pending.workdir,
+                created_at_ms: pending.created_at_ms,
+                completed_at_ms: now_ms(),
+                files,
+            },
+        );
+        inner.groups.truncate(40);
+    }
+
+    fn changes_for_scope(&self, scope: &ResolvedScope) -> wire::WorkspaceChangesResult {
+        let inner = self.inner.lock().expect("workspace review state poisoned");
+        wire::WorkspaceChangesResult {
+            groups: inner
+                .groups
+                .iter()
+                .filter(|group| group.workdir == scope.workdir)
+                .map(review_group_to_wire)
+                .collect(),
+        }
+    }
+
+    fn accept(
+        &self,
+        scope: &ResolvedScope,
+        turn_id: &str,
+        path: &str,
+    ) -> psychevo_runtime::Result<wire::WorkspaceChangeMutationResult> {
+        let path = normalize_workspace_path(path);
+        let mut accepted = false;
+        {
+            let mut inner = self.inner.lock().expect("workspace review state poisoned");
+            if let Some(file) = inner
+                .groups
+                .iter_mut()
+                .find(|group| group.workdir == scope.workdir && group.turn_id == turn_id)
+                .and_then(|group| group.files.iter_mut().find(|file| file.path == path))
+            {
+                file.review_status = wire::WorkspaceChangeReviewStatusView::Accepted;
+                file.message = None;
+                accepted = true;
+            }
+        }
+        Ok(wire::WorkspaceChangeMutationResult {
+            accepted,
+            changes: self.changes_for_scope(scope),
+        })
+    }
+
+    fn reject(
+        &self,
+        scope: &ResolvedScope,
+        turn_id: &str,
+        path: &str,
+    ) -> psychevo_runtime::Result<wire::WorkspaceChangeMutationResult> {
+        let path = normalize_workspace_path(path);
+        let file = {
+            let inner = self.inner.lock().expect("workspace review state poisoned");
+            inner
+                .groups
+                .iter()
+                .find(|group| group.workdir == scope.workdir && group.turn_id == turn_id)
+                .and_then(|group| group.files.iter().find(|file| file.path == path))
+                .cloned()
+        };
+        let Some(file) = file else {
+            return Ok(wire::WorkspaceChangeMutationResult {
+                accepted: false,
+                changes: self.changes_for_scope(scope),
+            });
+        };
+        if !file.baseline.can_reject() {
+            return Ok(wire::WorkspaceChangeMutationResult {
+                accepted: false,
+                changes: self.changes_for_scope(scope),
+            });
+        }
+        let current_revision = workspace_path_revision(&scope.workdir, &path)?;
+        if current_revision != file.post_revision {
+            self.mark_conflict(scope, turn_id, &path, "File changed after this turn.");
+            return Ok(wire::WorkspaceChangeMutationResult {
+                accepted: false,
+                changes: self.changes_for_scope(scope),
+            });
+        }
+        restore_review_baseline(&scope.workdir, &path, &file.baseline)?;
+        {
+            let mut inner = self.inner.lock().expect("workspace review state poisoned");
+            if let Some(file) = inner
+                .groups
+                .iter_mut()
+                .find(|group| group.workdir == scope.workdir && group.turn_id == turn_id)
+                .and_then(|group| group.files.iter_mut().find(|file| file.path == path))
+            {
+                file.review_status = wire::WorkspaceChangeReviewStatusView::Rejected;
+                file.message = None;
+            }
+        }
+        Ok(wire::WorkspaceChangeMutationResult {
+            accepted: true,
+            changes: self.changes_for_scope(scope),
+        })
+    }
+
+    fn mark_conflict(&self, scope: &ResolvedScope, turn_id: &str, path: &str, message: &str) {
+        let mut inner = self.inner.lock().expect("workspace review state poisoned");
+        if let Some(file) = inner
+            .groups
+            .iter_mut()
+            .find(|group| group.workdir == scope.workdir && group.turn_id == turn_id)
+            .and_then(|group| group.files.iter_mut().find(|file| file.path == path))
+        {
+            file.review_status = wire::WorkspaceChangeReviewStatusView::Conflict;
+            file.message = Some(message.to_string());
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -618,6 +838,7 @@ impl WebState {
                 launches: Mutex::new(HashMap::new()),
                 browser_sessions: Mutex::new(HashMap::new()),
                 terminals: TerminalManager::default(),
+                review: WorkspaceReviewState::default(),
                 pending_permissions: Mutex::new(HashMap::new()),
                 pending_clarifies: Mutex::new(HashMap::new()),
             }),
@@ -737,6 +958,22 @@ impl WebState {
                     .lock()
                     .expect("web pending clarifies poisoned")
                     .remove(request_id);
+            }
+            _ => {}
+        }
+    }
+
+    fn record_review_event(&self, event: &GatewayEvent, workdir: &Path) {
+        match event {
+            GatewayEvent::TurnStarted {
+                thread_id, turn_id, ..
+            } => {
+                self.inner
+                    .review
+                    .begin_turn(turn_id, thread_id.clone(), workdir);
+            }
+            GatewayEvent::TurnCompleted { turn_id, .. } => {
+                self.inner.review.complete_turn(turn_id);
             }
             _ => {}
         }
@@ -1198,9 +1435,11 @@ async fn handle_rpc(
             apply_mentions_to_run_options(&mut options, &params.mentions);
             let source = scope.source.clone();
             let event_state = state.clone();
+            let review_workdir = scope.workdir.clone();
             let event_tx = out_tx.clone();
             let event_sink: GatewayEventSink = Arc::new(move |event| {
                 event_state.record_event(&event);
+                event_state.record_review_event(&event, &review_workdir);
                 let _ = event_tx.send(rpc_notification("gateway/event", json!(event)));
             });
             let gateway = state.inner.gateway.clone();
@@ -1289,10 +1528,40 @@ async fn handle_rpc(
             let scope = resolve_required_scope(&state, &auth, params.scope)?;
             workspace_file_read_value(&scope, &params.path)
         }
+        "workspace/file/write" => {
+            let params = request.required_params::<wire::WorkspaceFileWriteParams>()?;
+            let scope = resolve_required_scope(&state, &auth, params.scope.clone())?;
+            workspace_file_write_value(&scope, params)
+        }
         "workspace/diff" => {
             let params = request.required_params::<wire::WorkspaceDiffParams>()?;
             let scope = resolve_required_scope(&state, &auth, params.scope)?;
             workspace_diff_value(&scope, params.path.as_deref())
+        }
+        "workspace/changes" => {
+            let params = request.required_params::<wire::WorkspaceChangesParams>()?;
+            let scope = resolve_required_scope(&state, &auth, params.scope)?;
+            Ok(serde_json::to_value(
+                state.inner.review.changes_for_scope(&scope),
+            )?)
+        }
+        "workspace/change/accept" => {
+            let params = request.required_params::<wire::WorkspaceChangeFileParams>()?;
+            let scope = resolve_required_scope(&state, &auth, params.scope)?;
+            Ok(serde_json::to_value(state.inner.review.accept(
+                &scope,
+                &params.turn_id,
+                &params.path,
+            )?)?)
+        }
+        "workspace/change/reject" => {
+            let params = request.required_params::<wire::WorkspaceChangeFileParams>()?;
+            let scope = resolve_required_scope(&state, &auth, params.scope)?;
+            Ok(serde_json::to_value(state.inner.review.reject(
+                &scope,
+                &params.turn_id,
+                &params.path,
+            )?)?)
         }
         "workspace/create" => {
             let params = request.required_params::<wire::WorkspaceCreateParams>()?;
@@ -1305,6 +1574,21 @@ async fn handle_rpc(
                 authorize_thread(&state, &auth, thread_id)?;
             }
             context_read_value(&state, &scope, params.thread_id.as_deref())
+        }
+        "observability/read" => {
+            let params = request.required_params::<wire::ObservabilityReadParams>()?;
+            let requested_scope = resolve_required_scope(&state, &auth, params.scope)?;
+            let (scope, thread_id) = match params.thread_id {
+                Some(thread_id) => {
+                    authorize_thread(&state, &auth, &thread_id)?;
+                    (
+                        resolved_scope_for_thread(&state, &thread_id)?,
+                        Some(thread_id),
+                    )
+                }
+                None => (requested_scope, None),
+            };
+            observability_read_value(&state, &scope, thread_id.as_deref())
         }
         "source/reset" => {
             let params = request.required_params::<wire::SourceResetParams>()?;
@@ -2299,35 +2583,71 @@ fn collect_workspace_file_entries(
 
 fn workspace_file_read_value(scope: &ResolvedScope, path: &str) -> psychevo_runtime::Result<Value> {
     let resolved = resolve_workspace_relative_path(&scope.workdir, path)?;
-    let mut file = match std::fs::File::open(&resolved) {
-        Ok(file) => file,
+    let display_path =
+        path_from_root(&scope.workdir, &resolved).unwrap_or_else(|| normalize_workspace_path(path));
+    let snapshot = match read_workspace_text_snapshot(&resolved) {
+        Ok(snapshot) => snapshot,
         Err(err) => {
             return Ok(serde_json::to_value(wire::WorkspaceFileReadResult {
-                path: normalize_workspace_path(path),
+                path: display_path,
                 content: None,
                 truncated: false,
                 binary: false,
+                editable: false,
+                editable_reason: Some(err.to_string()),
+                size_bytes: 0,
+                revision: "unreadable".to_string(),
+                line_ending: None,
                 unreadable: Some(err.to_string()),
             })?);
         }
     };
-    let mut bytes = Vec::new();
-    Read::by_ref(&mut file)
-        .take((MAX_WORKSPACE_FILE_READ_BYTES + 1) as u64)
-        .read_to_end(&mut bytes)?;
-    let truncated = bytes.len() > MAX_WORKSPACE_FILE_READ_BYTES;
-    if truncated {
-        bytes.truncate(MAX_WORKSPACE_FILE_READ_BYTES);
-    }
-    let binary = bytes.contains(&0) || (!truncated && std::str::from_utf8(&bytes).is_err());
-    let content = (!binary).then(|| String::from_utf8_lossy(&bytes).into_owned());
+    let editable_reason = workspace_editable_reason(&snapshot);
     Ok(serde_json::to_value(wire::WorkspaceFileReadResult {
-        path: path_from_root(&scope.workdir, &resolved)
-            .unwrap_or_else(|| normalize_workspace_path(path)),
-        content,
-        truncated,
-        binary,
+        path: display_path,
+        content: snapshot.content,
+        truncated: snapshot.truncated,
+        binary: snapshot.binary,
+        editable: editable_reason.is_none(),
+        editable_reason,
+        size_bytes: snapshot.size_bytes,
+        revision: snapshot.revision,
+        line_ending: snapshot.line_ending,
         unreadable: None,
+    })?)
+}
+
+fn workspace_file_write_value(
+    scope: &ResolvedScope,
+    params: wire::WorkspaceFileWriteParams,
+) -> psychevo_runtime::Result<Value> {
+    if params.content.len() > MAX_WORKSPACE_TEXT_FILE_BYTES {
+        return Err(Error::Message(
+            "workspace file is larger than 1 MB".to_string(),
+        ));
+    }
+    if params.content.as_bytes().contains(&0) {
+        return Err(Error::Message(
+            "workspace file content must be text".to_string(),
+        ));
+    }
+    let resolved = resolve_workspace_write_path(&scope.workdir, &params.path)?;
+    let path = path_from_root(&scope.workdir, &resolved)
+        .unwrap_or_else(|| normalize_workspace_path(&params.path));
+    let current_revision = workspace_path_revision(&scope.workdir, &path)?;
+    if !params.force
+        && let Some(expected) = params.expected_revision.as_deref()
+        && expected != current_revision
+    {
+        return Err(Error::Message("workspace file changed on disk".to_string()));
+    }
+    std::fs::write(&resolved, params.content.as_bytes())?;
+    let revision = workspace_path_revision(&scope.workdir, &path)?;
+    Ok(serde_json::to_value(wire::WorkspaceFileWriteResult {
+        path,
+        revision,
+        size_bytes: params.content.len(),
+        line_ending: detect_line_ending(&params.content),
     })?)
 }
 
@@ -2354,6 +2674,35 @@ fn resolve_workspace_relative_path(root: &Path, path: &str) -> psychevo_runtime:
     Ok(canonical)
 }
 
+fn resolve_workspace_write_path(root: &Path, path: &str) -> psychevo_runtime::Result<PathBuf> {
+    let raw = Path::new(path);
+    if raw.is_absolute() || path.contains('\0') {
+        return Err(Error::Message(
+            "workspace path must be relative".to_string(),
+        ));
+    }
+    let normalized = normalize_workspace_path(path);
+    if normalized.is_empty() || normalized.starts_with("../") || normalized == ".." {
+        return Err(Error::Message(
+            "workspace path must be relative".to_string(),
+        ));
+    }
+    let candidate = root.join(&normalized);
+    if candidate.exists() {
+        return resolve_workspace_relative_path(root, &normalized);
+    }
+    let parent = candidate
+        .parent()
+        .ok_or_else(|| Error::Message("workspace file parent is unavailable".to_string()))?;
+    let canonical_parent = parent.canonicalize()?;
+    if !canonical_parent.starts_with(root) {
+        return Err(Error::Message(
+            "workspace path is outside the workspace".to_string(),
+        ));
+    }
+    Ok(candidate)
+}
+
 fn normalize_workspace_path(path: &str) -> String {
     path.trim()
         .trim_start_matches('/')
@@ -2368,6 +2717,84 @@ fn path_from_root(root: &Path, path: &Path) -> Option<String> {
     path.strip_prefix(root)
         .ok()
         .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+}
+
+struct WorkspaceTextSnapshot {
+    content: Option<String>,
+    truncated: bool,
+    binary: bool,
+    size_bytes: usize,
+    revision: String,
+    line_ending: Option<String>,
+}
+
+fn read_workspace_text_snapshot(path: &Path) -> psychevo_runtime::Result<WorkspaceTextSnapshot> {
+    let metadata = std::fs::metadata(path)?;
+    let size_bytes = metadata.len() as usize;
+    let mut file = std::fs::File::open(path)?;
+    let mut bytes = Vec::new();
+    Read::by_ref(&mut file)
+        .take((MAX_WORKSPACE_TEXT_FILE_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)?;
+    let truncated = bytes.len() > MAX_WORKSPACE_TEXT_FILE_BYTES;
+    if truncated {
+        bytes.truncate(MAX_WORKSPACE_TEXT_FILE_BYTES);
+    }
+    let binary = bytes.contains(&0) || std::str::from_utf8(&bytes).is_err();
+    let content = if binary {
+        None
+    } else {
+        Some(String::from_utf8_lossy(&bytes).into_owned())
+    };
+    let line_ending = content.as_deref().and_then(detect_line_ending);
+    Ok(WorkspaceTextSnapshot {
+        content,
+        truncated,
+        binary,
+        size_bytes,
+        revision: revision_for_bytes(&bytes, Some(size_bytes)),
+        line_ending,
+    })
+}
+
+fn workspace_editable_reason(snapshot: &WorkspaceTextSnapshot) -> Option<String> {
+    if snapshot.binary {
+        Some("Binary files cannot be edited in Workbench.".to_string())
+    } else if snapshot.truncated || snapshot.size_bytes > MAX_WORKSPACE_TEXT_FILE_BYTES {
+        Some("Files larger than 1 MB cannot be edited in Workbench.".to_string())
+    } else {
+        None
+    }
+}
+
+fn workspace_path_revision(root: &Path, path: &str) -> psychevo_runtime::Result<String> {
+    let resolved = resolve_workspace_write_path(root, path)?;
+    if !resolved.exists() {
+        return Ok("missing".to_string());
+    }
+    let bytes = std::fs::read(&resolved)?;
+    Ok(revision_for_bytes(&bytes, Some(bytes.len())))
+}
+
+fn revision_for_bytes(bytes: &[u8], full_size: Option<usize>) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    full_size.unwrap_or(bytes.len()).hash(&mut hasher);
+    format!(
+        "r{:016x}:{}",
+        hasher.finish(),
+        full_size.unwrap_or(bytes.len())
+    )
+}
+
+fn detect_line_ending(content: &str) -> Option<String> {
+    if content.contains("\r\n") {
+        Some("crlf".to_string())
+    } else if content.contains('\n') {
+        Some("lf".to_string())
+    } else {
+        None
+    }
 }
 
 fn workspace_diff_value(
@@ -2447,6 +2874,191 @@ fn workspace_diff_status(status: WorkspaceDiffFileStatus) -> wire::WorkspaceDiff
     }
 }
 
+fn capture_workspace_baseline(workdir: &Path) -> WorkspaceBaseline {
+    let mut baseline = WorkspaceBaseline::default();
+    if let Ok(diff) = collect_workspace_diff(workdir) {
+        for file in diff.files {
+            baseline
+                .files
+                .insert(file.path.clone(), baseline_from_pre_turn_file(&file));
+        }
+    }
+    baseline
+}
+
+fn baseline_from_pre_turn_file(file: &WorkspaceDiffFile) -> ReviewBaseline {
+    if file.binary {
+        return ReviewBaseline::Unsupported {
+            reason: "Binary baseline cannot be restored.".to_string(),
+        };
+    }
+    if file.unreadable {
+        return ReviewBaseline::Unsupported {
+            reason: "Unreadable baseline cannot be restored.".to_string(),
+        };
+    }
+    if matches!(file.status, WorkspaceDiffFileStatus::Deleted) {
+        return ReviewBaseline::Absent;
+    }
+    file.new_text
+        .as_ref()
+        .map(|content| ReviewBaseline::Text {
+            content: content.clone(),
+        })
+        .unwrap_or_else(|| ReviewBaseline::Unsupported {
+            reason: "Baseline content is unavailable.".to_string(),
+        })
+}
+
+fn build_review_files(
+    workdir: &Path,
+    baseline: &WorkspaceBaseline,
+) -> psychevo_runtime::Result<Vec<WorkspaceReviewFile>> {
+    let diff = collect_workspace_diff(workdir)?;
+    let mut post_by_path = HashMap::new();
+    let mut candidates = HashSet::new();
+    for file in diff.files {
+        candidates.insert(file.path.clone());
+        post_by_path.insert(file.path.clone(), file);
+    }
+    for path in baseline.files.keys() {
+        candidates.insert(path.clone());
+    }
+    let mut files = Vec::new();
+    for path in candidates {
+        let pre = baseline.files.get(&path);
+        if let Some(pre) = pre
+            && baseline_matches_current(workdir, &path, pre)?
+        {
+            continue;
+        }
+        let post = post_by_path.get(&path);
+        let review_baseline = pre
+            .cloned()
+            .or_else(|| post.and_then(baseline_from_post_diff))
+            .unwrap_or_else(|| ReviewBaseline::Unsupported {
+                reason: "Turn-start baseline is unavailable.".to_string(),
+            });
+        if post.is_none() && matches!(review_baseline, ReviewBaseline::Unsupported { .. }) {
+            continue;
+        }
+        let post_revision = workspace_path_revision(workdir, &path)?;
+        let status = post
+            .map(|file| workspace_diff_status(file.status))
+            .unwrap_or(wire::WorkspaceDiffFileStatusView::Modified);
+        let binary = post.is_some_and(|file| file.binary);
+        let unreadable = post.is_some_and(|file| file.unreadable);
+        let message = review_baseline.message();
+        files.push(WorkspaceReviewFile {
+            path,
+            status,
+            binary,
+            unreadable,
+            review_status: wire::WorkspaceChangeReviewStatusView::Pending,
+            baseline: review_baseline,
+            post_revision,
+            message,
+        });
+    }
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(files)
+}
+
+fn baseline_from_post_diff(file: &WorkspaceDiffFile) -> Option<ReviewBaseline> {
+    if file.binary {
+        return Some(ReviewBaseline::Unsupported {
+            reason: "Binary baseline cannot be restored.".to_string(),
+        });
+    }
+    if file.unreadable {
+        return Some(ReviewBaseline::Unsupported {
+            reason: "Unreadable baseline cannot be restored.".to_string(),
+        });
+    }
+    match file.status {
+        WorkspaceDiffFileStatus::Added | WorkspaceDiffFileStatus::Untracked => {
+            Some(ReviewBaseline::Absent)
+        }
+        WorkspaceDiffFileStatus::Deleted | WorkspaceDiffFileStatus::Modified => file
+            .old_text
+            .as_ref()
+            .map(|content| ReviewBaseline::Text {
+                content: content.clone(),
+            })
+            .or_else(|| {
+                Some(ReviewBaseline::Unsupported {
+                    reason: "Baseline content is unavailable.".to_string(),
+                })
+            }),
+        WorkspaceDiffFileStatus::Binary | WorkspaceDiffFileStatus::Unreadable => {
+            Some(ReviewBaseline::Unsupported {
+                reason: "Baseline content is unavailable.".to_string(),
+            })
+        }
+    }
+}
+
+fn baseline_matches_current(
+    workdir: &Path,
+    path: &str,
+    baseline: &ReviewBaseline,
+) -> psychevo_runtime::Result<bool> {
+    let resolved = resolve_workspace_write_path(workdir, path)?;
+    match baseline {
+        ReviewBaseline::Text { content } => {
+            if !resolved.exists() {
+                return Ok(false);
+            }
+            let bytes = std::fs::read(&resolved)?;
+            Ok(bytes == content.as_bytes())
+        }
+        ReviewBaseline::Absent => Ok(!resolved.exists()),
+        ReviewBaseline::Unsupported { .. } => Ok(false),
+    }
+}
+
+fn restore_review_baseline(
+    workdir: &Path,
+    path: &str,
+    baseline: &ReviewBaseline,
+) -> psychevo_runtime::Result<()> {
+    let resolved = resolve_workspace_write_path(workdir, path)?;
+    match baseline {
+        ReviewBaseline::Text { content } => {
+            std::fs::write(resolved, content.as_bytes())?;
+            Ok(())
+        }
+        ReviewBaseline::Absent => match std::fs::remove_file(&resolved) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err.into()),
+        },
+        ReviewBaseline::Unsupported { reason } => Err(Error::Message(reason.clone())),
+    }
+}
+
+fn review_group_to_wire(group: &WorkspaceReviewGroup) -> wire::WorkspaceChangeGroupView {
+    wire::WorkspaceChangeGroupView {
+        turn_id: group.turn_id.clone(),
+        thread_id: group.thread_id.clone(),
+        created_at_ms: group.created_at_ms,
+        completed_at_ms: group.completed_at_ms,
+        files: group.files.iter().map(review_file_to_wire).collect(),
+    }
+}
+
+fn review_file_to_wire(file: &WorkspaceReviewFile) -> wire::WorkspaceChangeFileView {
+    wire::WorkspaceChangeFileView {
+        path: file.path.clone(),
+        status: file.status,
+        binary: file.binary,
+        unreadable: file.unreadable,
+        review_status: file.review_status,
+        can_reject: file.baseline.can_reject(),
+        message: file.message.clone().or_else(|| file.baseline.message()),
+    }
+}
+
 fn extract_unified_diff_for_path(diff: &str, path: &str) -> Option<String> {
     let mut blocks = Vec::new();
     let mut current = String::new();
@@ -2484,14 +3096,22 @@ fn context_read_value(
     scope: &ResolvedScope,
     thread_id: Option<&str>,
 ) -> psychevo_runtime::Result<Value> {
+    Ok(serde_json::to_value(context_read_result(
+        state, scope, thread_id,
+    )?)?)
+}
+
+fn context_read_result(
+    state: &WebState,
+    scope: &ResolvedScope,
+    thread_id: Option<&str>,
+) -> psychevo_runtime::Result<wire::ContextReadResult> {
     let thread_id = match thread_id {
         Some(thread_id) => Some(thread_id.to_string()),
         None => state.inner.gateway.resolve_source_thread(&scope.source)?,
     };
     let Some(thread_id) = thread_id else {
-        return Ok(serde_json::to_value(context_unavailable(
-            "No active session",
-        ))?);
+        return Ok(context_unavailable("No active session"));
     };
     let snapshot = match context_snapshot(ContextOptions {
         state: state.inner.state.clone(),
@@ -2502,7 +3122,7 @@ fn context_read_value(
     }) {
         Ok(snapshot) => snapshot,
         Err(err) => {
-            return Ok(serde_json::to_value(context_unavailable(&err.to_string()))?);
+            return Ok(context_unavailable(&err.to_string()));
         }
     };
     let categories = snapshot
@@ -2518,7 +3138,7 @@ fn context_read_value(
             percent: category.percent,
         })
         .collect::<Vec<_>>();
-    Ok(serde_json::to_value(wire::ContextReadResult {
+    Ok(wire::ContextReadResult {
         available: true,
         label: format_context_total_value(&snapshot),
         status: snapshot.status,
@@ -2531,6 +3151,49 @@ fn context_read_value(
             .into_iter()
             .map(|advice| advice.message)
             .collect(),
+    })
+}
+
+fn observability_read_value(
+    state: &WebState,
+    scope: &ResolvedScope,
+    thread_id: Option<&str>,
+) -> psychevo_runtime::Result<Value> {
+    let resolved_thread_id = match thread_id {
+        Some(thread_id) => Some(thread_id.to_string()),
+        None => state.inner.gateway.resolve_source_thread(&scope.source)?,
+    };
+    let context = context_read_result(state, scope, resolved_thread_id.as_deref())?;
+    let usage = match resolved_thread_id {
+        Some(session_id) => {
+            let summary = session_usage_summary(SessionUsageOptions {
+                state: state.inner.state.clone(),
+                session_id,
+            })?;
+            wire::SessionUsageSummaryView {
+                available: true,
+                session_id: Some(summary.session_id),
+                provider: Some(summary.provider),
+                model: Some(summary.model),
+                message_count: summary.message_count,
+                assistant_message_count: summary.assistant_message_count,
+                context_input_tokens: summary.context_input_tokens,
+                billable_input_tokens: summary.billable_input_tokens,
+                billable_output_tokens: summary.billable_output_tokens,
+                reasoning_tokens: summary.reasoning_tokens,
+                cache_read_tokens: summary.cache_read_tokens,
+                cache_write_tokens: summary.cache_write_tokens,
+                reported_total_tokens: summary.reported_total_tokens,
+                estimated_cost_nanodollars: summary.estimated_cost_nanodollars,
+                unknown_pricing_count: summary.unknown_pricing_count,
+                cache_read_percent: summary.cache_read_percent,
+            }
+        }
+        None => usage_unavailable(),
+    };
+    Ok(serde_json::to_value(wire::ObservabilityReadResult {
+        context,
+        usage,
     })?)
 }
 
@@ -2544,6 +3207,27 @@ fn context_unavailable(label: &str) -> wire::ContextReadResult {
         percent: None,
         categories: Vec::new(),
         advice: Vec::new(),
+    }
+}
+
+fn usage_unavailable() -> wire::SessionUsageSummaryView {
+    wire::SessionUsageSummaryView {
+        available: false,
+        session_id: None,
+        provider: None,
+        model: None,
+        message_count: 0,
+        assistant_message_count: 0,
+        context_input_tokens: 0,
+        billable_input_tokens: 0,
+        billable_output_tokens: 0,
+        reasoning_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        reported_total_tokens: 0,
+        estimated_cost_nanodollars: 0,
+        unknown_pricing_count: 0,
+        cache_read_percent: None,
     }
 }
 
@@ -2738,6 +3422,19 @@ fn command_execute_value(
                     action,
                     web_desktop_unavailable_message(invocation.spec.canonical, action),
                 )
+            } else if active_turn
+                && matches!(action, SlashCommandAction::Undo | SlashCommandAction::Redo)
+            {
+                let command_name = invocation.spec.canonical;
+                command_known_result(
+                    &raw,
+                    action,
+                    true,
+                    Some(format!(
+                        "interrupt requested; run {command_name} again after the turn settles"
+                    )),
+                    Some(json!({"type": "turnInterrupt", "threadId": thread_id})),
+                )
             } else {
                 match slash_invocation_effect(
                     &invocation,
@@ -2883,6 +3580,8 @@ fn command_result_from_effect(
             let status = psychevo_runtime::sandbox_status_text(&options, RunMode::Default)?;
             Ok(command_accepted_message(raw, action, Some(status)))
         }
+        SlashCommandEffect::Undo => Ok(command_session_undo(state, scope, raw, action, thread_id)),
+        SlashCommandEffect::Redo => Ok(command_session_redo(state, scope, raw, action, thread_id)),
         SlashCommandEffect::Unsupported(message) => Ok(command_unsupported(raw, action, message)),
         SlashCommandEffect::ShowModel
         | SlashCommandEffect::SetModel { .. }
@@ -2894,8 +3593,6 @@ fn command_result_from_effect(
         | SlashCommandEffect::ToolsShow
         | SlashCommandEffect::ToolsetSet { .. }
         | SlashCommandEffect::Rename(_)
-        | SlashCommandEffect::Undo
-        | SlashCommandEffect::Redo
         | SlashCommandEffect::Skills { .. }
         | SlashCommandEffect::Bundles { .. }
         | SlashCommandEffect::Curator { .. } => Ok(command_unsupported(
@@ -2904,6 +3601,105 @@ fn command_result_from_effect(
             web_desktop_unavailable_message(raw.split_whitespace().next().unwrap_or(raw), action),
         )),
     }
+}
+
+fn command_session_undo(
+    state: &WebState,
+    scope: &ResolvedScope,
+    raw: &str,
+    action: SlashCommandAction,
+    thread_id: Option<String>,
+) -> wire::CommandExecuteResult {
+    let options = match command_session_undo_options(state, scope, thread_id, "undo") {
+        Ok(options) => options,
+        Err(message) => return command_unsupported(raw, action, message),
+    };
+    match undo_session(options) {
+        Ok(result) => command_known_result(
+            raw,
+            action,
+            true,
+            Some(format!(
+                "undone {} messages; prompt restored",
+                result.reverted_messages
+            )),
+            Some(json!({
+                "type": "sessionUndo",
+                "threadId": result.session_id,
+                "prompt": result.prompt,
+                "revertedMessages": result.reverted_messages
+            })),
+        ),
+        Err(err) => command_unsupported(raw, action, err.to_string()),
+    }
+}
+
+fn command_session_redo(
+    state: &WebState,
+    scope: &ResolvedScope,
+    raw: &str,
+    action: SlashCommandAction,
+    thread_id: Option<String>,
+) -> wire::CommandExecuteResult {
+    let options = match command_session_undo_options(state, scope, thread_id, "redo") {
+        Ok(options) => options,
+        Err(message) => return command_unsupported(raw, action, message),
+    };
+    match redo_session(options) {
+        Ok(result) => {
+            let suffix = if result.complete {
+                "complete"
+            } else {
+                "partial"
+            };
+            command_known_result(
+                raw,
+                action,
+                true,
+                Some(format!(
+                    "redone {} messages; {suffix}",
+                    result.restored_messages
+                )),
+                Some(json!({
+                    "type": "sessionRedo",
+                    "threadId": result.session_id,
+                    "restoredMessages": result.restored_messages,
+                    "complete": result.complete
+                })),
+            )
+        }
+        Err(err) => command_unsupported(raw, action, err.to_string()),
+    }
+}
+
+fn command_session_undo_options(
+    state: &WebState,
+    scope: &ResolvedScope,
+    thread_id: Option<String>,
+    verb: &str,
+) -> std::result::Result<SessionUndoOptions, String> {
+    let Some(thread_id) = thread_id else {
+        return Err(format!("no current session to {verb}"));
+    };
+    let summary = state
+        .inner
+        .state
+        .store()
+        .session_summary(&thread_id)
+        .map_err(|err| err.to_string())?
+        .ok_or_else(|| format!("session not found: {thread_id}"))?;
+    if Path::new(&summary.workdir) != scope.workdir.as_path() {
+        return Err(format!(
+            "session {thread_id} does not belong to {}",
+            scope.workdir.display()
+        ));
+    }
+    Ok(SessionUndoOptions {
+        state: state.inner.state.clone(),
+        workdir: scope.workdir.clone(),
+        snapshot_root: state.inner.home.join("snapshots"),
+        session_id: thread_id,
+    })
 }
 
 fn command_action(
@@ -3323,6 +4119,8 @@ fn web_desktop_command_visible(command: &AvailableSlashCommand) -> bool {
             | SlashCommandAction::Compact
             | SlashCommandAction::Export
             | SlashCommandAction::Share
+            | SlashCommandAction::Undo
+            | SlashCommandAction::Redo
             | SlashCommandAction::SkillInvoke
     )
 }
@@ -3347,6 +4145,8 @@ fn web_desktop_action_visible(action: SlashCommandAction) -> bool {
             | SlashCommandAction::Compact
             | SlashCommandAction::Export
             | SlashCommandAction::Share
+            | SlashCommandAction::Undo
+            | SlashCommandAction::Redo
             | SlashCommandAction::SkillInvoke
     )
 }
@@ -3394,6 +4194,7 @@ fn gateway_command_capabilities() -> Vec<CommandCapability> {
         CommandCapability::ActiveTurnControl,
         CommandCapability::Queue,
         CommandCapability::SessionSwitch,
+        CommandCapability::SessionRevert,
         CommandCapability::ArtifactWrite,
         CommandCapability::WorkspaceDiff,
         CommandCapability::ConfigWrite,
@@ -4128,6 +4929,38 @@ mod tests {
         (temp, state)
     }
 
+    fn append_accounted_assistant(
+        state: &WebState,
+        session_id: &str,
+        context_tokens: u64,
+        cache_read_tokens: u64,
+    ) {
+        state
+            .inner
+            .state
+            .store()
+            .append_message_with_metrics(
+                session_id,
+                &RuntimeMessage::Assistant {
+                    content: vec![psychevo_runtime::AssistantBlock::Text {
+                        text: "done".to_string(),
+                    }],
+                    timestamp_ms: 1,
+                    finish_reason: Some("stop".to_string()),
+                    outcome: psychevo_ai::Outcome::Normal,
+                    model: Some("fake-model".to_string()),
+                    provider: Some("fake-provider".to_string()),
+                },
+                Some(json!({
+                    "input_tokens": context_tokens,
+                    "total_tokens": context_tokens,
+                    "cached_tokens": cache_read_tokens,
+                })),
+                None,
+            )
+            .expect("assistant");
+    }
+
     async fn response_text(response: Response<Body>) -> String {
         let bytes = to_bytes(response.into_body(), usize::MAX)
             .await
@@ -4203,6 +5036,172 @@ mod tests {
         assert_eq!(value["profile"]["name"], "coder");
         assert_eq!(value["profile"]["home"], home);
         assert_eq!(value["profile"]["default"], false);
+    }
+
+    #[tokio::test]
+    async fn observability_read_returns_active_session_usage() {
+        let (_temp, state) = web_state();
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
+        let session_id = state
+            .inner
+            .state
+            .store()
+            .create_session_with_metadata(
+                &state.inner.workdir,
+                "web",
+                "fake-model",
+                "fake-provider",
+                None,
+            )
+            .expect("session");
+        append_accounted_assistant(&state, &session_id, 200, 50);
+        bind_source_to_thread(&state, &scope, &session_id).expect("bind");
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let value = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!(1)),
+                method: "observability/read".to_string(),
+                params: Some(json!({ "scope": scope.to_wire_scope() })),
+            },
+        )
+        .await
+        .expect("observability/read");
+
+        assert_eq!(value["usage"]["available"], true);
+        assert_eq!(value["usage"]["sessionId"], session_id);
+        assert_eq!(value["usage"]["contextInputTokens"], 200);
+        assert_eq!(value["usage"]["cacheReadTokens"], 50);
+        assert_eq!(value["usage"]["estimatedCostNanodollars"], 0);
+        assert_eq!(value["usage"]["cacheReadPercent"], 25.0);
+    }
+
+    #[tokio::test]
+    async fn observability_read_returns_explicit_thread_usage_without_active_binding() {
+        let (_temp, state) = web_state();
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
+        let session_id = state
+            .inner
+            .state
+            .store()
+            .create_session_with_metadata(
+                &state.inner.workdir,
+                "web",
+                "fake-model",
+                "fake-provider",
+                None,
+            )
+            .expect("session");
+        append_accounted_assistant(&state, &session_id, 90, 9);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let value = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!(1)),
+                method: "observability/read".to_string(),
+                params: Some(json!({ "scope": scope.to_wire_scope(), "threadId": session_id })),
+            },
+        )
+        .await
+        .expect("observability/read");
+
+        assert_eq!(value["usage"]["available"], true);
+        assert_eq!(value["usage"]["contextInputTokens"], 90);
+        assert_eq!(value["usage"]["cacheReadPercent"], 10.0);
+    }
+
+    #[tokio::test]
+    async fn observability_read_clears_usage_when_no_active_session() {
+        let (_temp, state) = web_state();
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let value = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!(1)),
+                method: "observability/read".to_string(),
+                params: Some(json!({ "scope": scope.to_wire_scope() })),
+            },
+        )
+        .await
+        .expect("observability/read");
+
+        assert_eq!(value["usage"]["available"], false);
+        assert_eq!(value["usage"]["reportedTotalTokens"], 0);
+        assert_eq!(value["context"]["available"], false);
+    }
+
+    #[tokio::test]
+    async fn browser_observability_read_authorizes_cross_workdir_thread() {
+        let (temp, state) = web_state();
+        let other_workdir = temp.path().join("other-work");
+        std::fs::create_dir_all(&other_workdir).expect("other workdir");
+        let other_workdir = canonicalize_workdir(&other_workdir).expect("other canonical");
+        let session_id = state
+            .inner
+            .state
+            .store()
+            .create_session_with_metadata(
+                &other_workdir,
+                "web",
+                "fake-model",
+                "fake-provider",
+                None,
+            )
+            .expect("session");
+        append_accounted_assistant(&state, &session_id, 300, 150);
+        let browser_session_id = "browser-session".to_string();
+        state
+            .inner
+            .browser_sessions
+            .lock()
+            .expect("sessions")
+            .insert(
+                browser_session_id.clone(),
+                BrowserSession {
+                    workdir: state.inner.workdir.clone(),
+                    source: state.inner.source.clone(),
+                },
+            );
+        let auth = AuthContext::Browser {
+            session_id: browser_session_id,
+        };
+        let current_scope = default_resolved_scope(&state, &auth).expect("scope");
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let value = handle_rpc(
+            state,
+            auth,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!(1)),
+                method: "observability/read".to_string(),
+                params: Some(json!({
+                    "scope": current_scope.to_wire_scope(),
+                    "threadId": session_id
+                })),
+            },
+        )
+        .await
+        .expect("observability/read");
+
+        assert_eq!(value["usage"]["available"], true);
+        assert_eq!(value["usage"]["sessionId"], session_id);
+        assert_eq!(value["usage"]["contextInputTokens"], 300);
+        assert_eq!(value["usage"]["cacheReadPercent"], 50.0);
     }
 
     #[test]
@@ -5256,6 +6255,140 @@ command = "cursor-agent"
     }
 
     #[tokio::test]
+    async fn workspace_file_write_rejects_revision_conflicts_and_allows_force() {
+        let (_temp, state) = web_state();
+        let src = state.inner.workdir.join("src");
+        std::fs::create_dir_all(&src).expect("src");
+        std::fs::write(src.join("main.rs"), "fn main() {}\n").expect("main");
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let read = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "workspace/file/read".to_string(),
+                params: Some(json!({
+                    "scope": scope.clone(),
+                    "path": "src/main.rs"
+                })),
+            },
+        )
+        .await
+        .expect("workspace/file/read");
+        assert_eq!(read["editable"], true, "{read:#}");
+        let revision = read["revision"].as_str().expect("revision").to_string();
+
+        std::fs::write(src.join("main.rs"), "fn external() {}\n").expect("external");
+        let err = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("2")),
+                method: "workspace/file/write".to_string(),
+                params: Some(json!({
+                    "scope": scope.clone(),
+                    "path": "src/main.rs",
+                    "content": "fn gui() {}\n",
+                    "expectedRevision": revision,
+                    "force": false
+                })),
+            },
+        )
+        .await
+        .expect_err("revision conflict");
+        assert_eq!(err.to_string(), "workspace file changed on disk");
+
+        let written = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("3")),
+                method: "workspace/file/write".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "path": "src/main.rs",
+                    "content": "fn gui() {}\n",
+                    "expectedRevision": "stale",
+                    "force": true
+                })),
+            },
+        )
+        .await
+        .expect("force write");
+        assert_eq!(written["path"].as_str(), Some("src/main.rs"));
+        assert_eq!(
+            std::fs::read_to_string(src.join("main.rs")).expect("main"),
+            "fn gui() {}\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_change_reject_restores_pre_turn_dirty_content() {
+        let (_temp, state) = web_state();
+        git(&state.inner.workdir, ["init"]);
+        git(
+            &state.inner.workdir,
+            ["config", "user.email", "test@example.com"],
+        );
+        git(&state.inner.workdir, ["config", "user.name", "Test User"]);
+        let path = state.inner.workdir.join("notes.txt");
+        std::fs::write(&path, "base\n").expect("base");
+        git(&state.inner.workdir, ["add", "."]);
+        git(&state.inner.workdir, ["commit", "-m", "initial"]);
+        std::fs::write(&path, "user dirty\n").expect("dirty");
+
+        state
+            .inner
+            .review
+            .begin_turn("turn-1", Some("thread-1".to_string()), &state.inner.workdir);
+        std::fs::write(&path, "agent changed\n").expect("agent");
+        state.inner.review.complete_turn("turn-1");
+
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let rejected = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "workspace/change/reject".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "turnId": "turn-1",
+                    "path": "notes.txt"
+                })),
+            },
+        )
+        .await
+        .expect("reject");
+
+        assert_eq!(rejected["accepted"], true, "{rejected:#}");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("notes"),
+            "user dirty\n"
+        );
+        assert_eq!(
+            rejected["changes"]["groups"][0]["files"][0]["reviewStatus"].as_str(),
+            Some("rejected"),
+            "{rejected:#}"
+        );
+    }
+
+    #[tokio::test]
     async fn completion_list_ranks_dollar_prefix_matches_first() {
         let (_temp, state) = web_state();
         write_project_skill(&state, "x-daily", "Fetch X daily posts.");
@@ -5370,6 +6503,217 @@ command = "cursor-agent"
         assert_eq!(result["action"]["type"], "queuePrompt");
         assert_eq!(result["action"]["text"], "hello");
         assert_eq!(result["action"]["displayText"], "/queue hello");
+    }
+
+    #[tokio::test]
+    async fn command_execute_undo_redo_restores_session_snapshot() {
+        let (_temp, state) = web_state();
+        git(&state.inner.workdir, ["init"]);
+        let file = state.inner.workdir.join("tracked.txt");
+        std::fs::write(&file, "base\n").expect("base");
+        let session_id = state
+            .inner
+            .state
+            .store()
+            .create_session_with_metadata(
+                &state.inner.workdir,
+                "web",
+                "fake-model",
+                "fake-provider",
+                None,
+            )
+            .expect("session");
+        let snapshot_root = state.inner.home.join("snapshots");
+        let before_first = track_snapshot(&snapshot_root, &session_id, &state.inner.workdir);
+        state
+            .inner
+            .state
+            .store()
+            .append_message_with_undo_snapshot(
+                &session_id,
+                &runtime_user_message("first prompt", 1),
+                Some(before_first),
+            )
+            .expect("first user");
+        std::fs::write(&file, "after first\n").expect("after first");
+        state
+            .inner
+            .state
+            .store()
+            .append_message(&session_id, &runtime_assistant_message("first answer", 2))
+            .expect("first assistant");
+        let before_second = track_snapshot(&snapshot_root, &session_id, &state.inner.workdir);
+        state
+            .inner
+            .state
+            .store()
+            .append_message_with_undo_snapshot(
+                &session_id,
+                &runtime_user_message("second prompt", 3),
+                Some(before_second),
+            )
+            .expect("second user");
+        std::fs::write(&file, "after second\n").expect("after second");
+        state
+            .inner
+            .state
+            .store()
+            .append_message(&session_id, &runtime_assistant_message("second answer", 4))
+            .expect("second assistant");
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let undo = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "command/execute".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "command": "/undo",
+                    "threadId": session_id
+                })),
+            },
+        )
+        .await
+        .expect("command/execute undo");
+
+        assert_eq!(undo["accepted"], true, "{undo:#}");
+        assert_eq!(undo["known"], true, "{undo:#}");
+        assert_eq!(undo["action"]["type"], "sessionUndo");
+        assert_eq!(undo["action"]["threadId"], session_id);
+        assert_eq!(undo["action"]["prompt"], "second prompt");
+        assert_eq!(undo["action"]["revertedMessages"], 2);
+        assert_eq!(
+            std::fs::read_to_string(&file).expect("file"),
+            "after first\n"
+        );
+        assert_eq!(
+            state
+                .inner
+                .state
+                .store()
+                .load_tui_message_summaries(&session_id)
+                .expect("visible")
+                .len(),
+            2
+        );
+
+        let redo = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("2")),
+                method: "command/execute".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "command": "/redo",
+                    "threadId": session_id
+                })),
+            },
+        )
+        .await
+        .expect("command/execute redo");
+
+        assert_eq!(redo["accepted"], true, "{redo:#}");
+        assert_eq!(redo["known"], true, "{redo:#}");
+        assert_eq!(redo["action"]["type"], "sessionRedo");
+        assert_eq!(redo["action"]["threadId"], session_id);
+        assert_eq!(redo["action"]["restoredMessages"], 2);
+        assert_eq!(redo["action"]["complete"], true);
+        assert_eq!(
+            std::fs::read_to_string(&file).expect("file"),
+            "after second\n"
+        );
+        assert_eq!(
+            state
+                .inner
+                .state
+                .store()
+                .load_tui_message_summaries(&session_id)
+                .expect("visible")
+                .len(),
+            4
+        );
+    }
+
+    #[tokio::test]
+    async fn command_execute_undo_redo_bounded_without_matching_session() {
+        let (temp, state) = web_state();
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let no_thread = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "command/execute".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "command": "/undo",
+                    "threadId": null
+                })),
+            },
+        )
+        .await
+        .expect("command/execute no thread");
+        assert_eq!(no_thread["accepted"], false, "{no_thread:#}");
+        assert_eq!(no_thread["known"], true, "{no_thread:#}");
+        assert!(no_thread["action"].is_null(), "{no_thread:#}");
+        assert_eq!(no_thread["message"], "no current session to undo");
+
+        let other_workdir = temp.path().join("other");
+        std::fs::create_dir_all(&other_workdir).expect("other workdir");
+        let other_session = state
+            .inner
+            .state
+            .store()
+            .create_session_with_metadata(
+                &other_workdir,
+                "web",
+                "fake-model",
+                "fake-provider",
+                None,
+            )
+            .expect("other session");
+        let cross_workdir = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("2")),
+                method: "command/execute".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "command": "/redo",
+                    "threadId": other_session
+                })),
+            },
+        )
+        .await
+        .expect("command/execute cross workdir");
+        assert_eq!(cross_workdir["accepted"], false, "{cross_workdir:#}");
+        assert_eq!(cross_workdir["known"], true, "{cross_workdir:#}");
+        assert!(cross_workdir["action"].is_null(), "{cross_workdir:#}");
+        assert!(
+            cross_workdir["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("does not belong")),
+            "{cross_workdir:#}"
+        );
     }
 
     #[tokio::test]
@@ -5540,6 +6884,8 @@ command = "cursor-agent"
             .collect::<Vec<_>>();
         assert!(names.contains(&"diff"), "{names:?}");
         assert!(names.contains(&"sessions"), "{names:?}");
+        assert!(names.contains(&"undo"), "{names:?}");
+        assert!(names.contains(&"redo"), "{names:?}");
         assert!(!names.contains(&"model"), "{names:?}");
         assert!(!names.contains(&"tools"), "{names:?}");
 
@@ -5571,6 +6917,8 @@ command = "cursor-agent"
         .expect("completion/list");
         let items = completion["items"].as_array().expect("items");
         assert!(items.iter().any(|item| item["label"] == "/diff"));
+        assert!(items.iter().any(|item| item["label"] == "/undo"));
+        assert!(items.iter().any(|item| item["label"] == "/redo"));
         assert!(!items.iter().any(|item| item["label"] == "/model"));
         let diff_completion = items
             .iter()
@@ -6020,6 +7368,73 @@ command = "cursor-agent"
             format!("---\nname: {name}\ndescription: {description:?}\n---\n\nUse this skill.\n"),
         )
         .expect("skill");
+    }
+
+    fn runtime_user_message(text: &str, timestamp_ms: i64) -> RuntimeMessage {
+        RuntimeMessage::User {
+            content: vec![UserContentBlock::text(text)],
+            timestamp_ms,
+        }
+    }
+
+    fn runtime_assistant_message(text: &str, timestamp_ms: i64) -> RuntimeMessage {
+        RuntimeMessage::Assistant {
+            content: vec![psychevo_runtime::AssistantBlock::Text {
+                text: text.to_string(),
+            }],
+            timestamp_ms,
+            finish_reason: Some("stop".to_string()),
+            outcome: psychevo_runtime::Outcome::Normal,
+            model: Some("fake-model".to_string()),
+            provider: Some("fake-provider".to_string()),
+        }
+    }
+
+    fn track_snapshot(root: &Path, session_id: &str, workdir: &Path) -> String {
+        let git_dir = root.join("sessions").join(session_id);
+        std::fs::create_dir_all(&git_dir).expect("snapshot git dir");
+        if !git_dir.join("HEAD").exists() {
+            let init = std::process::Command::new("git")
+                .env("GIT_DIR", &git_dir)
+                .env("GIT_WORK_TREE", workdir)
+                .arg("init")
+                .output()
+                .expect("snapshot init");
+            assert!(
+                init.status.success(),
+                "snapshot init failed: {}",
+                String::from_utf8_lossy(&init.stderr)
+            );
+        }
+        let add = std::process::Command::new("git")
+            .arg("--git-dir")
+            .arg(&git_dir)
+            .arg("--work-tree")
+            .arg(workdir)
+            .args(["add", "--all", "--", "."])
+            .output()
+            .expect("snapshot add");
+        assert!(
+            add.status.success(),
+            "snapshot add failed: {}",
+            String::from_utf8_lossy(&add.stderr)
+        );
+        let tree = std::process::Command::new("git")
+            .arg("--git-dir")
+            .arg(&git_dir)
+            .arg("--work-tree")
+            .arg(workdir)
+            .arg("write-tree")
+            .output()
+            .expect("snapshot write-tree");
+        assert!(
+            tree.status.success(),
+            "snapshot write-tree failed: {}",
+            String::from_utf8_lossy(&tree.stderr)
+        );
+        let hash = String::from_utf8_lossy(&tree.stdout).trim().to_string();
+        assert!(!hash.is_empty(), "snapshot hash should not be empty");
+        hash
     }
 
     fn git<I, S>(workdir: &Path, args: I)

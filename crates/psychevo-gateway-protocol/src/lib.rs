@@ -1129,7 +1129,39 @@ pub struct WorkspaceFileReadResult {
     pub truncated: bool,
     pub binary: bool,
     #[serde(default)]
+    pub editable: bool,
+    #[serde(default)]
+    pub editable_reason: Option<String>,
+    #[serde(default)]
+    pub size_bytes: usize,
+    #[serde(default)]
+    pub revision: String,
+    #[serde(default)]
+    pub line_ending: Option<String>,
+    #[serde(default)]
     pub unreadable: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFileWriteParams {
+    pub scope: GatewayRequestScope,
+    pub path: String,
+    pub content: String,
+    #[serde(default)]
+    pub expected_revision: Option<String>,
+    #[serde(default)]
+    pub force: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFileWriteResult {
+    pub path: String,
+    pub revision: String,
+    pub size_bytes: usize,
+    #[serde(default)]
+    pub line_ending: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -1183,6 +1215,66 @@ pub struct WorkspaceDiffResult {
     pub selected_path: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkspaceChangeReviewStatusView {
+    Pending,
+    Accepted,
+    Rejected,
+    Conflict,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceChangeFileView {
+    pub path: String,
+    pub status: WorkspaceDiffFileStatusView,
+    pub binary: bool,
+    pub unreadable: bool,
+    pub review_status: WorkspaceChangeReviewStatusView,
+    pub can_reject: bool,
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceChangeGroupView {
+    pub turn_id: String,
+    #[serde(default)]
+    pub thread_id: Option<String>,
+    pub created_at_ms: i64,
+    pub completed_at_ms: i64,
+    pub files: Vec<WorkspaceChangeFileView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceChangesParams {
+    pub scope: GatewayRequestScope,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceChangesResult {
+    pub groups: Vec<WorkspaceChangeGroupView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceChangeFileParams {
+    pub scope: GatewayRequestScope,
+    pub turn_id: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceChangeMutationResult {
+    pub accepted: bool,
+    pub changes: WorkspaceChangesResult,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ContextReadParams {
@@ -1217,6 +1309,46 @@ pub struct ContextReadResult {
     pub categories: Vec<ContextUsageCategoryView>,
     #[serde(default)]
     pub advice: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ObservabilityReadParams {
+    pub scope: GatewayRequestScope,
+    #[serde(default)]
+    pub thread_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionUsageSummaryView {
+    pub available: bool,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    pub message_count: u64,
+    pub assistant_message_count: u64,
+    pub context_input_tokens: u64,
+    pub billable_input_tokens: u64,
+    pub billable_output_tokens: u64,
+    pub reasoning_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
+    pub reported_total_tokens: u64,
+    pub estimated_cost_nanodollars: i64,
+    pub unknown_pricing_count: u64,
+    #[serde(default)]
+    pub cache_read_percent: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ObservabilityReadResult {
+    pub context: ContextReadResult,
+    pub usage: SessionUsageSummaryView,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -1373,10 +1505,20 @@ pub enum ClientRequest {
     WorkspaceFiles(WorkspaceFilesParams),
     #[serde(rename = "workspace/file/read")]
     WorkspaceFileRead(WorkspaceFileReadParams),
+    #[serde(rename = "workspace/file/write")]
+    WorkspaceFileWrite(WorkspaceFileWriteParams),
     #[serde(rename = "workspace/diff")]
     WorkspaceDiff(WorkspaceDiffParams),
+    #[serde(rename = "workspace/changes")]
+    WorkspaceChanges(WorkspaceChangesParams),
+    #[serde(rename = "workspace/change/accept")]
+    WorkspaceChangeAccept(WorkspaceChangeFileParams),
+    #[serde(rename = "workspace/change/reject")]
+    WorkspaceChangeReject(WorkspaceChangeFileParams),
     #[serde(rename = "context/read")]
     ContextRead(ContextReadParams),
+    #[serde(rename = "observability/read")]
+    ObservabilityRead(ObservabilityReadParams),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -1788,14 +1930,26 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(WorkspaceFilesResult),
         exported_type!(WorkspaceFileReadParams),
         exported_type!(WorkspaceFileReadResult),
+        exported_type!(WorkspaceFileWriteParams),
+        exported_type!(WorkspaceFileWriteResult),
         exported_type!(WorkspaceDiffFileStatusView),
         exported_type!(WorkspaceDiffFileView),
         exported_type!(WorkspaceDiffTruncationView),
         exported_type!(WorkspaceDiffParams),
         exported_type!(WorkspaceDiffResult),
+        exported_type!(WorkspaceChangeReviewStatusView),
+        exported_type!(WorkspaceChangeFileView),
+        exported_type!(WorkspaceChangeGroupView),
+        exported_type!(WorkspaceChangesParams),
+        exported_type!(WorkspaceChangesResult),
+        exported_type!(WorkspaceChangeFileParams),
+        exported_type!(WorkspaceChangeMutationResult),
         exported_type!(ContextReadParams),
         exported_type!(ContextUsageCategoryView),
         exported_type!(ContextReadResult),
+        exported_type!(ObservabilityReadParams),
+        exported_type!(SessionUsageSummaryView),
+        exported_type!(ObservabilityReadResult),
         exported_type!(ReadyzResult),
         exported_type!(CreateLaunchParams),
         exported_type!(CreateLaunchResult),

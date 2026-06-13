@@ -653,6 +653,24 @@ export const rpcSchemas = {
     "InitializeParams": {
       "type": "object"
     },
+    "ObservabilityReadParams": {
+      "properties": {
+        "scope": {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        "threadId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "scope"
+      ],
+      "type": "object"
+    },
     "PermissionDecision": {
       "enum": [
         "allowOnce",
@@ -1080,6 +1098,36 @@ export const rpcSchemas = {
       ],
       "type": "object"
     },
+    "WorkspaceChangeFileParams": {
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "scope",
+        "turnId"
+      ],
+      "type": "object"
+    },
+    "WorkspaceChangesParams": {
+      "properties": {
+        "scope": {
+          "$ref": "#/definitions/GatewayRequestScope"
+        }
+      },
+      "required": [
+        "scope"
+      ],
+      "type": "object"
+    },
     "WorkspaceDiffParams": {
       "properties": {
         "path": {
@@ -1108,6 +1156,36 @@ export const rpcSchemas = {
         }
       },
       "required": [
+        "path",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "WorkspaceFileWriteParams": {
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "expectedRevision": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "force": {
+          "default": false,
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/definitions/GatewayRequestScope"
+        }
+      },
+      "required": [
+        "content",
         "path",
         "scope"
       ],
@@ -1634,6 +1712,24 @@ export const rpcSchemas = {
       "properties": {
         "method": {
           "enum": [
+            "workspace/file/write"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/WorkspaceFileWriteParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
             "workspace/diff"
           ],
           "type": "string"
@@ -1652,12 +1748,84 @@ export const rpcSchemas = {
       "properties": {
         "method": {
           "enum": [
+            "workspace/changes"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/WorkspaceChangesParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "workspace/change/accept"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/WorkspaceChangeFileParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "workspace/change/reject"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/WorkspaceChangeFileParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
             "context/read"
           ],
           "type": "string"
         },
         "params": {
           "$ref": "#/definitions/ContextReadParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "observability/read"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ObservabilityReadParams"
         }
       },
       "required": [

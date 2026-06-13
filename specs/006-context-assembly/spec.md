@@ -150,6 +150,32 @@ persisted session estimates, the projection uses current local runtime
 assembly rules and persisted session messages; historical selected skill
 bodies are not reconstructed unless explicitly available.
 
+## Session Observability Projection
+
+Runtime may expose a session observability projection for UI surfaces. It is a
+display-only summary and does not become transcript content, prompt text,
+message history, context evidence, or model-visible input.
+
+The projection combines the current context usage projection with persisted
+visible message/accounting facts from the selected session. It may include
+session-level totals for context input, billable input, billable output,
+reasoning, cache read, cache write, provider-reported total tokens, estimated
+cost, unknown-pricing message count, provider/model identity, and a derived
+cache-read percentage. The cache-read percentage is computed from cached input
+tokens divided by context input tokens when a non-zero context input total is
+available.
+
+Session observability must respect the current session boundary and any
+history/revert visibility boundary used by transcript reload. It must not sum
+messages from other sessions, hidden reverted ranges, or other workdirs. Missing
+accounting facts are treated as unknown/zero for display rather than
+reconstructing provider requests.
+
+UI surfaces may render compact always-visible metrics such as context percent,
+cache percent, total session tokens, and estimated cost, with richer detail in
+status or usage panels. These displays may be refreshed on resume using the
+persisted session summary plus a fresh context-window estimate.
+
 ## Context Transformation
 
 Context transformations may filter, truncate, summarize, or compact source material before a generation request.

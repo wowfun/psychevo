@@ -1,10 +1,10 @@
-use psychevo_agent_core::now_ms;
+use psychevo_agent_core::{Message, now_ms};
 use rusqlite::{Connection, params_from_iter, types::Value as SqlValue};
 use serde_json::{Value, json};
 
 use crate::error::Result;
 use crate::paths::canonical_workdir;
-use crate::types::StatsOptions;
+use crate::types::{SessionUsageOptions, SessionUsageSummary, StatsOptions};
 
 pub fn usage_stats(options: StatsOptions) -> Result<Value> {
     let workdir = canonical_workdir(&options.workdir)?;
@@ -33,6 +33,145 @@ pub fn usage_stats(options: StatsOptions) -> Result<Value> {
             "top_sessions": top_sessions,
         }))
     })
+}
+
+pub fn session_usage_summary(options: SessionUsageOptions) -> Result<SessionUsageSummary> {
+    let store = options.state.store();
+    let summary = store.session_summary(&options.session_id)?.ok_or_else(|| {
+        crate::Error::Message(format!("session not found: {}", options.session_id))
+    })?;
+    let messages = store.load_tui_message_summaries(&summary.id)?;
+    let mut totals = SessionUsageTotals::default();
+    let mut provider = summary.provider;
+    let mut model = summary.model;
+    for message in messages {
+        totals.message_count += 1;
+        let is_assistant = matches!(message.message, Message::Assistant { .. });
+        if is_assistant {
+            totals.assistant_message_count += 1;
+            if let Message::Assistant {
+                provider: message_provider,
+                model: message_model,
+                ..
+            } = &message.message
+            {
+                if let Some(value) = message_provider {
+                    provider = value.clone();
+                }
+                if let Some(value) = message_model {
+                    model = value.clone();
+                }
+            }
+        }
+        let accounting = message.accounting.as_ref();
+        let usage = message.usage.as_ref();
+        totals.context_input_tokens += usage_u64(
+            accounting,
+            usage,
+            "context_input_tokens",
+            &["input_tokens", "prompt_tokens", "context_input_tokens"],
+        )
+        .unwrap_or(0);
+        totals.billable_input_tokens += json_u64(accounting, "billable_input_tokens").unwrap_or(0);
+        totals.billable_output_tokens +=
+            json_u64(accounting, "billable_output_tokens").unwrap_or(0);
+        totals.reasoning_tokens +=
+            usage_u64(accounting, usage, "reasoning_tokens", &["reasoning_tokens"]).unwrap_or(0);
+        totals.cache_read_tokens += usage_u64(
+            accounting,
+            usage,
+            "cache_read_tokens",
+            &[
+                "cached_tokens",
+                "cached_input_tokens",
+                "cache_read_tokens",
+                "cache_read_input_tokens",
+            ],
+        )
+        .unwrap_or(0);
+        totals.cache_write_tokens += usage_u64(
+            accounting,
+            usage,
+            "cache_write_tokens",
+            &["cache_write_tokens", "cache_creation_input_tokens"],
+        )
+        .unwrap_or(0);
+        let reported_total = usage_u64(
+            accounting,
+            usage,
+            "reported_total_tokens",
+            &["total_tokens", "reported_total_tokens"],
+        )
+        .unwrap_or(0);
+        totals.reported_total_tokens += reported_total;
+        totals.estimated_cost_nanodollars +=
+            json_i64(accounting, "estimated_cost_nanodollars").unwrap_or(0);
+        if is_assistant
+            && reported_total > 0
+            && accounting
+                .and_then(|value| value.get("pricing_source"))
+                .map(Value::is_null)
+                .unwrap_or(true)
+        {
+            totals.unknown_pricing_count += 1;
+        }
+    }
+    let cache_read_percent = (totals.context_input_tokens > 0)
+        .then(|| totals.cache_read_tokens as f64 * 100.0 / totals.context_input_tokens as f64);
+    Ok(SessionUsageSummary {
+        session_id: summary.id,
+        provider,
+        model,
+        message_count: totals.message_count,
+        assistant_message_count: totals.assistant_message_count,
+        context_input_tokens: totals.context_input_tokens,
+        billable_input_tokens: totals.billable_input_tokens,
+        billable_output_tokens: totals.billable_output_tokens,
+        reasoning_tokens: totals.reasoning_tokens,
+        cache_read_tokens: totals.cache_read_tokens,
+        cache_write_tokens: totals.cache_write_tokens,
+        reported_total_tokens: totals.reported_total_tokens,
+        estimated_cost_nanodollars: totals.estimated_cost_nanodollars,
+        unknown_pricing_count: totals.unknown_pricing_count,
+        cache_read_percent,
+    })
+}
+
+#[derive(Default)]
+struct SessionUsageTotals {
+    message_count: u64,
+    assistant_message_count: u64,
+    context_input_tokens: u64,
+    billable_input_tokens: u64,
+    billable_output_tokens: u64,
+    reasoning_tokens: u64,
+    cache_read_tokens: u64,
+    cache_write_tokens: u64,
+    reported_total_tokens: u64,
+    estimated_cost_nanodollars: i64,
+    unknown_pricing_count: u64,
+}
+
+fn usage_u64(
+    accounting: Option<&Value>,
+    usage: Option<&Value>,
+    accounting_key: &str,
+    usage_keys: &[&str],
+) -> Option<u64> {
+    json_u64(accounting, accounting_key)
+        .or_else(|| usage_keys.iter().find_map(|key| json_u64(usage, key)))
+}
+
+fn json_u64(value: Option<&Value>, key: &str) -> Option<u64> {
+    value?.get(key).and_then(|value| {
+        value
+            .as_u64()
+            .or_else(|| value.as_i64().and_then(|value| u64::try_from(value).ok()))
+    })
+}
+
+fn json_i64(value: Option<&Value>, key: &str) -> Option<i64> {
+    value?.get(key).and_then(Value::as_i64)
 }
 
 pub(crate) struct StatsScope {

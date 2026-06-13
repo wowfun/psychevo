@@ -182,7 +182,11 @@ export type WorkspaceFilesResult = { root: string, entries: Array<WorkspaceFileE
 
 export type WorkspaceFileReadParams = { scope: GatewayRequestScope, path: string, };
 
-export type WorkspaceFileReadResult = { path: string, content: string | null, truncated: boolean, binary: boolean, unreadable: string | null, };
+export type WorkspaceFileReadResult = { path: string, content: string | null, truncated: boolean, binary: boolean, editable: boolean, editableReason: string | null, sizeBytes: number, revision: string, lineEnding: string | null, unreadable: string | null, };
+
+export type WorkspaceFileWriteParams = { scope: GatewayRequestScope, path: string, content: string, expectedRevision: string | null, force: boolean, };
+
+export type WorkspaceFileWriteResult = { path: string, revision: string, sizeBytes: number, lineEnding: string | null, };
 
 export type WorkspaceDiffFileStatusView = "modified" | "added" | "deleted" | "untracked" | "binary" | "unreadable";
 
@@ -194,11 +198,31 @@ export type WorkspaceDiffParams = { scope: GatewayRequestScope, path: string | n
 
 export type WorkspaceDiffResult = { isGitRepo: boolean, files: Array<WorkspaceDiffFileView>, unifiedDiff: string, truncation: WorkspaceDiffTruncationView, selectedPath: string | null, };
 
+export type WorkspaceChangeReviewStatusView = "pending" | "accepted" | "rejected" | "conflict";
+
+export type WorkspaceChangeFileView = { path: string, status: WorkspaceDiffFileStatusView, binary: boolean, unreadable: boolean, reviewStatus: WorkspaceChangeReviewStatusView, canReject: boolean, message: string | null, };
+
+export type WorkspaceChangeGroupView = { turnId: string, threadId: string | null, createdAtMs: number, completedAtMs: number, files: Array<WorkspaceChangeFileView>, };
+
+export type WorkspaceChangesParams = { scope: GatewayRequestScope, };
+
+export type WorkspaceChangesResult = { groups: Array<WorkspaceChangeGroupView>, };
+
+export type WorkspaceChangeFileParams = { scope: GatewayRequestScope, turnId: string, path: string, };
+
+export type WorkspaceChangeMutationResult = { accepted: boolean, changes: WorkspaceChangesResult, };
+
 export type ContextReadParams = { scope: GatewayRequestScope, threadId: string | null, };
 
 export type ContextUsageCategoryView = { id: string, label: string, tokens: number, estimated: boolean, status: string, percent: number | null, };
 
 export type ContextReadResult = { available: boolean, label: string, status: string, usedTokens: number, contextLimit: number | null, percent: number | null, categories: Array<ContextUsageCategoryView>, advice: Array<string>, };
+
+export type ObservabilityReadParams = { scope: GatewayRequestScope, threadId: string | null, };
+
+export type SessionUsageSummaryView = { available: boolean, sessionId: string | null, provider: string | null, model: string | null, messageCount: number, assistantMessageCount: number, contextInputTokens: number, billableInputTokens: number, billableOutputTokens: number, reasoningTokens: number, cacheReadTokens: number, cacheWriteTokens: number, reportedTotalTokens: number, estimatedCostNanodollars: number, unknownPricingCount: number, cacheReadPercent: number | null, };
+
+export type ObservabilityReadResult = { context: ContextReadResult, usage: SessionUsageSummaryView, };
 
 export type ReadyzResult = { ok: boolean, server: string, version: string, };
 
@@ -220,7 +244,7 @@ export type JsonRpcErrorResponse = { jsonrpc: string, id: JsonRpcId, error: Json
 
 export type JsonRpcError = { code: number, message: string, data: unknown | null, };
 
-export type ClientRequest = { "method": "initialize", "params": InitializeParams } | { "method": "thread/start", "params": ThreadStartParams } | { "method": "thread/resume", "params": ThreadResumeParams } | { "method": "thread/read", "params": ThreadReadParams } | { "method": "thread/trace", "params": ThreadTraceParams } | { "method": "thread/list", "params": ThreadListParams } | { "method": "thread/rename", "params": ThreadRenameParams } | { "method": "thread/archive", "params": ThreadIdParams } | { "method": "thread/restore", "params": ThreadIdParams } | { "method": "thread/delete", "params": ThreadIdParams } | { "method": "turn/start", "params": TurnStartParams } | { "method": "turn/steer", "params": TurnSteerParams } | { "method": "turn/interrupt", "params": TurnInterruptParams } | { "method": "completion/list", "params": CompletionListParams } | { "method": "command/list", "params": CommandListParams } | { "method": "command/execute", "params": CommandExecuteParams } | { "method": "shell/start", "params": ShellStartParams } | { "method": "terminal/start", "params": TerminalStartParams } | { "method": "terminal/write", "params": TerminalWriteParams } | { "method": "terminal/resize", "params": TerminalResizeParams } | { "method": "terminal/terminate", "params": TerminalTerminateParams } | { "method": "source/reset", "params": SourceResetParams } | { "method": "permission/respond", "params": PermissionRespondParams } | { "method": "clarify/respond", "params": ClarifyRespondParams } | { "method": "settings/update", "params": SettingsUpdateParams } | { "method": "settings/read", "params": SettingsReadParams } | { "method": "workspace/files", "params": WorkspaceFilesParams } | { "method": "workspace/file/read", "params": WorkspaceFileReadParams } | { "method": "workspace/diff", "params": WorkspaceDiffParams } | { "method": "context/read", "params": ContextReadParams };
+export type ClientRequest = { "method": "initialize", "params": InitializeParams } | { "method": "thread/start", "params": ThreadStartParams } | { "method": "thread/resume", "params": ThreadResumeParams } | { "method": "thread/read", "params": ThreadReadParams } | { "method": "thread/trace", "params": ThreadTraceParams } | { "method": "thread/list", "params": ThreadListParams } | { "method": "thread/rename", "params": ThreadRenameParams } | { "method": "thread/archive", "params": ThreadIdParams } | { "method": "thread/restore", "params": ThreadIdParams } | { "method": "thread/delete", "params": ThreadIdParams } | { "method": "turn/start", "params": TurnStartParams } | { "method": "turn/steer", "params": TurnSteerParams } | { "method": "turn/interrupt", "params": TurnInterruptParams } | { "method": "completion/list", "params": CompletionListParams } | { "method": "command/list", "params": CommandListParams } | { "method": "command/execute", "params": CommandExecuteParams } | { "method": "shell/start", "params": ShellStartParams } | { "method": "terminal/start", "params": TerminalStartParams } | { "method": "terminal/write", "params": TerminalWriteParams } | { "method": "terminal/resize", "params": TerminalResizeParams } | { "method": "terminal/terminate", "params": TerminalTerminateParams } | { "method": "source/reset", "params": SourceResetParams } | { "method": "permission/respond", "params": PermissionRespondParams } | { "method": "clarify/respond", "params": ClarifyRespondParams } | { "method": "settings/update", "params": SettingsUpdateParams } | { "method": "settings/read", "params": SettingsReadParams } | { "method": "workspace/files", "params": WorkspaceFilesParams } | { "method": "workspace/file/read", "params": WorkspaceFileReadParams } | { "method": "workspace/file/write", "params": WorkspaceFileWriteParams } | { "method": "workspace/diff", "params": WorkspaceDiffParams } | { "method": "workspace/changes", "params": WorkspaceChangesParams } | { "method": "workspace/change/accept", "params": WorkspaceChangeFileParams } | { "method": "workspace/change/reject", "params": WorkspaceChangeFileParams } | { "method": "context/read", "params": ContextReadParams } | { "method": "observability/read", "params": ObservabilityReadParams };
 
 export type ServerNotification = { "method": "gateway/event", "params": GatewayEvent } | { "method": "turn/result", "params": TurnResultPayload } | { "method": "turn/error", "params": TurnErrorPayload } | { "method": "shell/result", "params": ShellResultPayload } | { "method": "shell/error", "params": ShellErrorPayload } | { "method": "terminal/output", "params": TerminalOutputPayload } | { "method": "terminal/exited", "params": TerminalExitedPayload };
 

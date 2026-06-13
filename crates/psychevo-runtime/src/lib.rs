@@ -115,7 +115,7 @@ pub use skills::{
     view_skill_value, write_skill_file,
 };
 pub use state_runtime::StateRuntime;
-pub use stats::usage_stats;
+pub use stats::{session_usage_summary, usage_stats};
 pub use store::{AgentEdgeRecord, AgentEdgeStatus};
 pub use store::{
     ChildSessionSnapshotInput, ContextEvidenceInput, ContextEvidenceRecord,
@@ -134,9 +134,10 @@ pub use types::{
     ReloadContextOptions, ReloadContextResult, RunControl, RunControlHandle, RunMode, RunOptions,
     RunResult, RunStreamEvent, RunStreamSink, RunWarning, SanitizedMessageSummary,
     ScopedCustomProviderInput, SelectedAgent, SessionExportMessageSummary, SessionRedoResult,
-    SessionSummary, SessionUndoOptions, SessionUndoResult, SmokeControl, StatsOptions,
-    TUI_DISPLAY_METADATA_KEY, TuiMessageSummary, USER_SHELL_METADATA_KEY, UserShellContextOptions,
-    UserShellOptions, UserShellResult, run_control,
+    SessionSummary, SessionUndoOptions, SessionUndoResult, SessionUsageOptions,
+    SessionUsageSummary, SmokeControl, StatsOptions, TUI_DISPLAY_METADATA_KEY, TuiMessageSummary,
+    USER_SHELL_METADATA_KEY, UserShellContextOptions, UserShellOptions, UserShellResult,
+    run_control,
 };
 pub use undo::{redo_session, undo_session};
 pub use user_shell::run_user_shell_command_streaming_controlled;

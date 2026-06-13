@@ -207,6 +207,185 @@ pub(crate) fn sqlite_stats_aggregate_accounting_columns() {
 }
 
 #[test]
+pub(crate) fn session_usage_summary_sums_accounting_and_handles_missing_accounting() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let store = SqliteStore::open(&db).expect("store");
+    let session_id = store
+        .create_session_with_metadata(&workdir, "run", "mimo-v2.5-pro", "xiaomi", None)
+        .expect("session");
+    store
+        .append_message_with_metrics_and_accounting(
+            &session_id,
+            &Message::Assistant {
+                content: vec![AssistantBlock::Text {
+                    text: "done".to_string(),
+                }],
+                timestamp_ms: 1,
+                finish_reason: Some("stop".to_string()),
+                outcome: Outcome::Normal,
+                model: Some("mimo-v2.5-pro".to_string()),
+                provider: Some("xiaomi".to_string()),
+            },
+            Some(json!({
+                "input_tokens": 120,
+                "output_tokens": 30,
+                "total_tokens": 150
+            })),
+            None,
+            Some(MessageAccounting {
+                context_input_tokens: Some(120),
+                billable_input_tokens: Some(100),
+                billable_output_tokens: Some(25),
+                reasoning_tokens: Some(5),
+                cache_read_tokens: Some(10),
+                cache_write_tokens: Some(10),
+                reported_total_tokens: Some(150),
+                estimated_cost_nanodollars: Some(42),
+                pricing_source: Some("test".to_string()),
+                pricing_tier: None,
+            }),
+        )
+        .expect("append accounting");
+    store
+        .append_message_with_metrics(
+            &session_id,
+            &Message::Assistant {
+                content: vec![AssistantBlock::Text {
+                    text: "usage only".to_string(),
+                }],
+                timestamp_ms: 2,
+                finish_reason: Some("stop".to_string()),
+                outcome: Outcome::Normal,
+                model: Some("mimo-v2.5-pro".to_string()),
+                provider: Some("xiaomi".to_string()),
+            },
+            Some(json!({
+                "input_tokens": 50,
+                "output_tokens": 10,
+                "total_tokens": 60,
+                "reasoning_tokens": 2,
+                "cached_tokens": 25
+            })),
+            None,
+        )
+        .expect("append usage");
+    store
+        .append_message(
+            &session_id,
+            &Message::Assistant {
+                content: vec![AssistantBlock::Text {
+                    text: "no usage".to_string(),
+                }],
+                timestamp_ms: 3,
+                finish_reason: Some("stop".to_string()),
+                outcome: Outcome::Normal,
+                model: Some("mimo-v2.5-pro".to_string()),
+                provider: Some("xiaomi".to_string()),
+            },
+        )
+        .expect("append missing");
+
+    let summary = session_usage_summary(SessionUsageOptions {
+        state: StateRuntime::open(&db).expect("state runtime"),
+        session_id: session_id.clone(),
+    })
+    .expect("summary");
+    assert_eq!(summary.session_id, session_id);
+    assert_eq!(summary.message_count, 3);
+    assert_eq!(summary.assistant_message_count, 3);
+    assert_eq!(summary.context_input_tokens, 170);
+    assert_eq!(summary.billable_input_tokens, 100);
+    assert_eq!(summary.billable_output_tokens, 25);
+    assert_eq!(summary.reasoning_tokens, 7);
+    assert_eq!(summary.cache_read_tokens, 35);
+    assert_eq!(summary.cache_write_tokens, 10);
+    assert_eq!(summary.reported_total_tokens, 210);
+    assert_eq!(summary.estimated_cost_nanodollars, 42);
+    assert_eq!(summary.unknown_pricing_count, 1);
+    assert_eq!(
+        summary
+            .cache_read_percent
+            .map(|value| (value * 10.0).round() / 10.0),
+        Some(20.6)
+    );
+}
+
+#[test]
+pub(crate) fn session_usage_summary_respects_session_and_revert_boundaries() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let store = SqliteStore::open(&db).expect("store");
+    let first = store
+        .create_session_with_metadata(&workdir, "run", "model-a", "provider-a", None)
+        .expect("first");
+    let second = store
+        .create_session_with_metadata(&workdir, "run", "model-b", "provider-b", None)
+        .expect("second");
+    for (timestamp_ms, session_id, tokens) in [
+        (1_i64, &first, 100_u64),
+        (2_i64, &first, 200_u64),
+        (3_i64, &second, 900_u64),
+    ] {
+        store
+            .append_message_with_metrics_and_accounting(
+                session_id,
+                &Message::Assistant {
+                    content: vec![AssistantBlock::Text {
+                        text: "answer".to_string(),
+                    }],
+                    timestamp_ms,
+                    finish_reason: Some("stop".to_string()),
+                    outcome: Outcome::Normal,
+                    model: None,
+                    provider: None,
+                },
+                None,
+                None,
+                Some(MessageAccounting {
+                    context_input_tokens: Some(tokens),
+                    billable_input_tokens: Some(tokens),
+                    billable_output_tokens: None,
+                    reasoning_tokens: None,
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    reported_total_tokens: Some(tokens),
+                    estimated_cost_nanodollars: None,
+                    pricing_source: Some("test".to_string()),
+                    pricing_tier: None,
+                }),
+            )
+            .expect("append");
+    }
+    store
+        .set_session_revert_state(
+            &first,
+            crate::store::SessionRevertState {
+                start_seq: 2,
+                original_snapshot: "snapshot".to_string(),
+            },
+        )
+        .expect("revert");
+
+    let first_summary = session_usage_summary(SessionUsageOptions {
+        state: StateRuntime::open(&db).expect("state runtime"),
+        session_id: first,
+    })
+    .expect("first summary");
+    let second_summary = session_usage_summary(SessionUsageOptions {
+        state: StateRuntime::open(&db).expect("state runtime"),
+        session_id: second,
+    })
+    .expect("second summary");
+    assert_eq!(first_summary.context_input_tokens, 100);
+    assert_eq!(first_summary.reported_total_tokens, 100);
+    assert_eq!(second_summary.context_input_tokens, 900);
+    assert_eq!(second_summary.reported_total_tokens, 900);
+}
+
+#[test]
 pub(crate) fn accounting_uses_cache_reasoning_and_over_200k_pricing() {
     let metadata = ModelMetadata {
         cost: Some(ModelCost {

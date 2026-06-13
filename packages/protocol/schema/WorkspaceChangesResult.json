@@ -1,0 +1,111 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "WorkspaceChangeFileView": {
+      "properties": {
+        "binary": {
+          "type": "boolean"
+        },
+        "canReject": {
+          "type": "boolean"
+        },
+        "message": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "reviewStatus": {
+          "$ref": "#/definitions/WorkspaceChangeReviewStatusView"
+        },
+        "status": {
+          "$ref": "#/definitions/WorkspaceDiffFileStatusView"
+        },
+        "unreadable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "binary",
+        "canReject",
+        "path",
+        "reviewStatus",
+        "status",
+        "unreadable"
+      ],
+      "type": "object"
+    },
+    "WorkspaceChangeGroupView": {
+      "properties": {
+        "completedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "createdAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/definitions/WorkspaceChangeFileView"
+          },
+          "type": "array"
+        },
+        "threadId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "completedAtMs",
+        "createdAtMs",
+        "files",
+        "turnId"
+      ],
+      "type": "object"
+    },
+    "WorkspaceChangeReviewStatusView": {
+      "enum": [
+        "pending",
+        "accepted",
+        "rejected",
+        "conflict"
+      ],
+      "type": "string"
+    },
+    "WorkspaceDiffFileStatusView": {
+      "enum": [
+        "modified",
+        "added",
+        "deleted",
+        "untracked",
+        "binary",
+        "unreadable"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "groups": {
+      "items": {
+        "$ref": "#/definitions/WorkspaceChangeGroupView"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "groups"
+  ],
+  "title": "WorkspaceChangesResult",
+  "type": "object"
+}

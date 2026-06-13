@@ -94,12 +94,13 @@ Output kinds are:
 
 Surface capabilities are descriptive gates, not permissions. They include
 picker, clipboard, renderer toggle, process exit, side conversation, image
-attachment, active-turn control, queue, session switch, local artifact write,
-config write, policy write, skill-state write, and structured diff display. A
-surface advertises a command only when it can satisfy the command's capability
-requirements and the command is currently available. If a user types a known
-command that is hidden only because the current surface lacks a capability, the
-command returns bounded guidance instead of silently doing nothing.
+attachment, active-turn control, queue, session switch, session revert, local
+artifact write, config write, policy write, skill-state write, and structured
+diff display. A surface advertises a command only when it can satisfy the
+command's capability requirements and the command is currently available. If a
+user types a known command that is hidden only because the current surface lacks
+a capability, the command returns bounded guidance instead of silently doing
+nothing.
 
 Permission and approval policy remains separate from command capability
 filtering. Capability filtering decides whether a command can be represented on
@@ -195,6 +196,14 @@ usage/accounting. Its concrete semantics are defined by
 Web and Desktop surfaces satisfy this capability by opening a read-only inline
 diff preview in the center workbench split. Right-panel changed-file rows may
 reuse the same structured diff action without executing a slash command.
+
+`/undo` and `/redo` are shared session/file snapshot controls. They require a
+surface capable of restoring runtime-managed session revert state and Git file
+snapshots for the current local session. They must not start provider work, add
+ordinary transcript rows, or pass through to the model when undo/redo state is
+unavailable. Surfaces that cannot safely restore local session snapshots must
+not advertise these commands; explicitly typed commands return bounded
+guidance.
 
 Interactive terminal surfaces may project local slash command feedback as
 surface-local UI state. Such feedback is display-only: it must not become user

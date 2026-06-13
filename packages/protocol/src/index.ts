@@ -17,6 +17,7 @@ import type {
   JsonRpcErrorResponse,
   JsonRpcNotification,
   JsonRpcSuccess,
+  ObservabilityReadResult,
   SettingsReadResult,
   TerminalExitedPayload,
   TerminalOutputPayload,
@@ -25,8 +26,11 @@ import type {
   ThreadSnapshot,
   TurnResultPayload,
   WorkspaceCreateResult,
+  WorkspaceChangeMutationResult,
+  WorkspaceChangesResult,
   WorkspaceDiffResult,
   WorkspaceFileReadResult,
+  WorkspaceFileWriteResult,
   WorkspaceFilesResult
 } from "./generated";
 
@@ -67,10 +71,18 @@ export const WorkspaceFilesResultSchema =
   schema<WorkspaceFilesResult>("WorkspaceFilesResult");
 export const WorkspaceFileReadResultSchema =
   schema<WorkspaceFileReadResult>("WorkspaceFileReadResult");
+export const WorkspaceFileWriteResultSchema =
+  schema<WorkspaceFileWriteResult>("WorkspaceFileWriteResult");
 export const WorkspaceDiffResultSchema =
   schema<WorkspaceDiffResult>("WorkspaceDiffResult");
+export const WorkspaceChangesResultSchema =
+  schema<WorkspaceChangesResult>("WorkspaceChangesResult");
+export const WorkspaceChangeMutationResultSchema =
+  schema<WorkspaceChangeMutationResult>("WorkspaceChangeMutationResult");
 export const ContextReadResultSchema =
   schema<ContextReadResult>("ContextReadResult");
+export const ObservabilityReadResultSchema =
+  schema<ObservabilityReadResult>("ObservabilityReadResult");
 
 export const RpcResponseSchema: RuntimeSchema<JsonRpcSuccess | JsonRpcErrorResponse> = {
   parse(value) {

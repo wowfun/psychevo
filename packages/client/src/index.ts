@@ -15,6 +15,8 @@ import {
   type InitializeParams,
   type InitializeResult,
   type InteractionRespondResult,
+  type ObservabilityReadParams,
+  type ObservabilityReadResult,
   type PermissionRespondParams,
   type RpcNotification,
   type SettingsReadParams,
@@ -45,12 +47,18 @@ import {
   type TurnStartParams,
   type TurnStartResult,
   type TurnSteerParams,
+  type WorkspaceChangeFileParams,
+  type WorkspaceChangeMutationResult,
+  type WorkspaceChangesParams,
+  type WorkspaceChangesResult,
   type WorkspaceDiffParams,
   type WorkspaceDiffResult,
   type WorkspaceCreateParams,
   type WorkspaceCreateResult,
   type WorkspaceFileReadParams,
   type WorkspaceFileReadResult,
+  type WorkspaceFileWriteParams,
+  type WorkspaceFileWriteResult,
   type WorkspaceFilesParams,
   type WorkspaceFilesResult
 } from "@psychevo/protocol";
@@ -73,6 +81,7 @@ export interface GatewayRequestParams {
   "command/list": CommandListParams;
   "completion/list": CompletionListParams;
   "context/read": ContextReadParams;
+  "observability/read": ObservabilityReadParams;
   "initialize": InitializeParams;
   "permission/respond": PermissionRespondParams;
   "settings/read": SettingsReadParams;
@@ -95,9 +104,13 @@ export interface GatewayRequestParams {
   "turn/interrupt": { sourceKey?: string | null; threadId?: string | null };
   "turn/start": TurnStartParams;
   "turn/steer": TurnSteerParams;
+  "workspace/change/accept": WorkspaceChangeFileParams;
+  "workspace/change/reject": WorkspaceChangeFileParams;
+  "workspace/changes": WorkspaceChangesParams;
   "workspace/create": WorkspaceCreateParams;
   "workspace/diff": WorkspaceDiffParams;
   "workspace/file/read": WorkspaceFileReadParams;
+  "workspace/file/write": WorkspaceFileWriteParams;
   "workspace/files": WorkspaceFilesParams;
 }
 
@@ -109,6 +122,7 @@ export interface GatewayRequestResults {
   "command/list": CommandListResult;
   "completion/list": CompletionListResult;
   "context/read": ContextReadResult;
+  "observability/read": ObservabilityReadResult;
   "initialize": InitializeResult;
   "permission/respond": InteractionRespondResult;
   "settings/read": SettingsReadResult;
@@ -131,9 +145,13 @@ export interface GatewayRequestResults {
   "turn/interrupt": TurnControlResult;
   "turn/start": TurnStartResult;
   "turn/steer": TurnControlResult;
+  "workspace/change/accept": WorkspaceChangeMutationResult;
+  "workspace/change/reject": WorkspaceChangeMutationResult;
+  "workspace/changes": WorkspaceChangesResult;
   "workspace/create": WorkspaceCreateResult;
   "workspace/diff": WorkspaceDiffResult;
   "workspace/file/read": WorkspaceFileReadResult;
+  "workspace/file/write": WorkspaceFileWriteResult;
   "workspace/files": WorkspaceFilesResult;
 }
 

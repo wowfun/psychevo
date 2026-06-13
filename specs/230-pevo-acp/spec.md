@@ -112,6 +112,12 @@ emits a synthetic ACP tool-call update containing structured
 it must not mutate runtime model-context messages, export content, statistics,
 or durable session evidence.
 
+ACP handles `/undo` and `/redo` locally through the shared runtime undo/redo
+helpers when the ACP session is bound to a runtime session. They restore local
+session/file snapshot state and send bounded text updates to the client. They
+must not invoke providers, create durable command transcript messages, or pass
+through to the model when no undo/redo target is available.
+
 ## Attachments
 
 - [Testing](testing.md) defines acceptance scenarios and validation expectations.

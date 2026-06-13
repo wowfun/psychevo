@@ -675,6 +675,31 @@ pub struct StatsOptions {
 }
 
 #[derive(Debug, Clone)]
+pub struct SessionUsageOptions {
+    pub state: StateRuntime,
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionUsageSummary {
+    pub session_id: String,
+    pub provider: String,
+    pub model: String,
+    pub message_count: u64,
+    pub assistant_message_count: u64,
+    pub context_input_tokens: u64,
+    pub billable_input_tokens: u64,
+    pub billable_output_tokens: u64,
+    pub reasoning_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
+    pub reported_total_tokens: u64,
+    pub estimated_cost_nanodollars: i64,
+    pub unknown_pricing_count: u64,
+    pub cache_read_percent: Option<f64>,
+}
+
+#[derive(Debug, Clone)]
 pub struct UserShellResult {
     pub command: String,
     pub workdir: PathBuf,

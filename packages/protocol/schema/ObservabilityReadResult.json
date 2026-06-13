@@ -1,0 +1,217 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ContextReadResult": {
+      "properties": {
+        "advice": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "categories": {
+          "items": {
+            "$ref": "#/definitions/ContextUsageCategoryView"
+          },
+          "type": "array"
+        },
+        "contextLimit": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "percent": {
+          "default": null,
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "usedTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "available",
+        "categories",
+        "label",
+        "status",
+        "usedTokens"
+      ],
+      "type": "object"
+    },
+    "ContextUsageCategoryView": {
+      "properties": {
+        "estimated": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "percent": {
+          "default": null,
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "tokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "estimated",
+        "id",
+        "label",
+        "status",
+        "tokens"
+      ],
+      "type": "object"
+    },
+    "SessionUsageSummaryView": {
+      "properties": {
+        "assistantMessageCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "billableInputTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "billableOutputTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "cacheReadPercent": {
+          "default": null,
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cacheReadTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "cacheWriteTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "contextInputTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "estimatedCostNanodollars": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "messageCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "model": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reasoningTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "reportedTotalTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "sessionId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unknownPricingCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "assistantMessageCount",
+        "available",
+        "billableInputTokens",
+        "billableOutputTokens",
+        "cacheReadTokens",
+        "cacheWriteTokens",
+        "contextInputTokens",
+        "estimatedCostNanodollars",
+        "messageCount",
+        "reasoningTokens",
+        "reportedTotalTokens",
+        "unknownPricingCount"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "context": {
+      "$ref": "#/definitions/ContextReadResult"
+    },
+    "usage": {
+      "$ref": "#/definitions/SessionUsageSummaryView"
+    }
+  },
+  "required": [
+    "context",
+    "usage"
+  ],
+  "title": "ObservabilityReadResult",
+  "type": "object"
+}
