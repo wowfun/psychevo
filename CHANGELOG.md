@@ -2,17 +2,16 @@
 
 ## 2026-06-12
 
-- Reworked the Workbench GUI around hidden launch drafts, a resizable
-  Home/Review/Terminal/Files right workspace, immersive file and diff previews,
-  PTY-backed terminal tabs, warmer light/dark themes, highlighted code and
-  Markdown previews, and icon-first transcript controls.
-- Replaced raw Transcript tool-call JSON with structured tool evidence rows and
-  display-spec-aware projections, keeping raw payloads in developer diagnostics.
-- Added Gateway terminal RPCs and notifications with generated protocol schemas,
-  TypeScript client mappings, and lifecycle coverage.
-- Polished `peval-py serve` and reports with better source import/delete flows,
-  export/filter menus, wrapped Timeline diagnostics, and transparent report
-  surfaces.
+- Reworked Workbench GUI and interaction flow around hidden launch drafts,
+  expanded right-column workflows, immersive file/diff previews, PTY terminal
+  tabs, safer menu dismissal, and cleaner model/session control semantics.
+- Added file-editing and review in Workbench: authenticated saves, conflict-safe
+  edits, and turn-scoped Accept/Reject for change reviews.
+- Added shared command/session observability and structured transcript tool evidence
+  projection across Workbench and TUI, keeping raw tool payloads out of user view.
+- Added Gateway terminal RPCs plus protocol/client support, and polished `peval-py
+  serve` report UX with stronger source lifecycle, filtered exports, and clearer
+  timeline rendering.
 
 ## 2026-06-11
 
