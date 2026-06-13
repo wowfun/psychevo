@@ -94,6 +94,9 @@ const gatewayMock = vi.hoisted(() => {
       root: scope.workdir,
       entries: [] as Array<{ path: string; name: string; kind: "file" | "directory"; depth: number }>,
       truncated: false
+    },
+    workspaceChangesResult: {
+      groups: [] as Array<unknown>
     }
   };
 });
@@ -201,6 +204,12 @@ vi.mock("@psychevo/client", () => {
           selectedPath
         };
       }
+      if (method === "workspace/changes") {
+        return gatewayMock.workspaceChangesResult;
+      }
+      if (method === "workspace/change/accept" || method === "workspace/change/reject") {
+        return { accepted: true, changes: gatewayMock.workspaceChangesResult };
+      }
       if (method === "workspace/file/read") {
         const record = params as { path?: string | null } | undefined;
         const path = record?.path ?? "";
@@ -212,16 +221,47 @@ vi.mock("@psychevo/client", () => {
           truncated: false
         };
       }
-      if (method === "context/read") {
+      if (method === "workspace/file/write") {
+        const record = params as { content?: string; path?: string };
         return {
-          available: true,
-          label: "0 tokens",
-          status: "ok",
-          usedTokens: 0,
-          contextLimit: null,
-          percent: 0,
-          categories: [],
-          advice: []
+          path: record.path ?? "",
+          revision: "written",
+          sizeBytes: record.content?.length ?? 0,
+          lineEnding: "lf"
+        };
+      }
+      if (method === "observability/read") {
+        const record = params as { threadId?: string | null } | undefined;
+        const hasThread = Boolean(record?.threadId);
+        return {
+          context: {
+            available: hasThread,
+            label: hasThread ? "0 tokens" : "No active session",
+            status: hasThread ? "ok" : "unavailable",
+            usedTokens: 0,
+            contextLimit: null,
+            percent: hasThread ? 0 : null,
+            categories: [],
+            advice: []
+          },
+          usage: {
+            available: hasThread,
+            sessionId: hasThread ? record?.threadId : null,
+            provider: hasThread ? "mock" : null,
+            model: hasThread ? "mock-model" : null,
+            messageCount: hasThread ? 2 : 0,
+            assistantMessageCount: hasThread ? 1 : 0,
+            contextInputTokens: hasThread ? 200 : 0,
+            billableInputTokens: hasThread ? 150 : 0,
+            billableOutputTokens: hasThread ? 50 : 0,
+            reasoningTokens: hasThread ? 12 : 0,
+            cacheReadTokens: hasThread ? 80 : 0,
+            cacheWriteTokens: hasThread ? 10 : 0,
+            reportedTotalTokens: hasThread ? 250 : 0,
+            estimatedCostNanodollars: hasThread ? 10_000_000 : 0,
+            unknownPricingCount: 0,
+            cacheReadPercent: hasThread ? 40 : null
+          }
         };
       }
       if (method === "completion/list") {
@@ -374,6 +414,7 @@ afterEach(() => {
     entries: [],
     truncated: false
   };
+  gatewayMock.workspaceChangesResult = { groups: [] };
   window.localStorage.clear();
 });
 
@@ -473,8 +514,8 @@ describe("Workbench composer agent wiring", () => {
     fireEvent.click(within(home).getByRole("button", { name: /Review/ }));
     expect(await screen.findByRole("region", { name: "Review" })).toBeTruthy();
 
-    fireEvent.click(screen.getByLabelText("Open right workspace tab"));
-    const addMenuFiles = screen.getAllByRole("button", { name: "Files" }).at(-1);
+    fireEvent.click(document.querySelector(".rightAddMenu summary") as HTMLElement);
+    const addMenuFiles = screen.getAllByRole("menuitem", { name: "Files" }).at(-1);
     expect(addMenuFiles).toBeTruthy();
     fireEvent.click(addMenuFiles!);
     expect(await screen.findByRole("region", { name: "Workspace files" })).toBeTruthy();
@@ -483,6 +524,38 @@ describe("Workbench composer agent wiring", () => {
     const visibleHome = await screen.findByRole("region", { name: "Workspace status" });
     fireEvent.click(within(visibleHome).getByRole("button", { name: /Terminal/ }));
     expect(await screen.findByRole("region", { name: "Terminal" })).toBeTruthy();
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.some((entry) => entry.method === "terminal/start")).toBe(true);
+    });
+  });
+
+  it("closes the right workspace add menu on outside click and item activation", async () => {
+    render(<App />);
+
+    expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    const home = await screen.findByRole("region", { name: "Workspace status" });
+    fireEvent.click(within(home).getByRole("button", { name: /Review/ }));
+    expect(await screen.findByRole("region", { name: "Review" })).toBeTruthy();
+
+    const trigger = document.querySelector(".rightAddMenu summary") as HTMLElement | null;
+    const menu = trigger!.closest("details") as HTMLDetailsElement | null;
+    fireEvent.click(trigger!);
+    await waitFor(() => expect(menu?.open).toBe(true));
+    fireEvent.mouseDown(screen.getByRole("region", { name: "Transcript" }));
+    await waitFor(() => expect(menu?.open).toBe(false));
+
+    fireEvent.click(trigger!);
+    await waitFor(() => expect(menu?.open).toBe(true));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Files" }));
+    expect(await screen.findByRole("region", { name: "Workspace files" })).toBeTruthy();
+    await waitFor(() => expect(menu?.open).toBe(false));
+
+    fireEvent.click(trigger!);
+    await waitFor(() => expect(menu?.open).toBe(true));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Terminal" }));
+    expect(await screen.findByRole("region", { name: "Terminal" })).toBeTruthy();
+    await waitFor(() => expect(menu?.open).toBe(false));
     await waitFor(() => {
       expect(gatewayMock.requestLog.some((entry) => entry.method === "terminal/start")).toBe(true);
     });
@@ -554,6 +627,46 @@ describe("Workbench composer agent wiring", () => {
     expect(within(review).getByText("src/main.rs")).toBeTruthy();
   });
 
+  it("rejects turn-scoped Review files through workspace change RPCs", async () => {
+    gatewayMock.workspaceChangesResult = {
+      groups: [
+        {
+          turnId: "turn-1",
+          threadId: "thread-1",
+          createdAtMs: 1,
+          completedAtMs: 2,
+          files: [
+            {
+              path: "docs/api.md",
+              status: "modified",
+              binary: false,
+              unreadable: false,
+              reviewStatus: "pending",
+              canReject: true,
+              message: null
+            }
+          ]
+        }
+      ]
+    };
+    render(<App />);
+
+    expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    const home = await screen.findByRole("region", { name: "Workspace status" });
+    fireEvent.click(within(home).getByRole("button", { name: "Review" }));
+    const review = await screen.findByRole("region", { name: "Review" });
+
+    expect(within(review).getByText("docs/api.md")).toBeTruthy();
+    fireEvent.click(within(review).getByLabelText("Reject docs/api.md"));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "workspace/change/reject",
+        params: expect.objectContaining({ path: "docs/api.md", turnId: "turn-1" })
+      });
+    });
+  });
+
   it("renders Markdown file previews from the shared Markdown component", async () => {
     gatewayMock.workspaceFilesResult = {
       root: gatewayMock.scope.workdir,
@@ -586,6 +699,54 @@ describe("Workbench composer agent wiring", () => {
     expect(await within(files).findByText("/tmp/project/docs/README.md")).toBeTruthy();
     expect(await within(files).findByRole("heading", { name: "API Notes" })).toBeTruthy();
     expect(within(files).getByText("supports markdown")).toBeTruthy();
+  });
+
+  it("saves text edits manually without entering the Review queue", async () => {
+    gatewayMock.workspaceFilesResult = {
+      root: gatewayMock.scope.workdir,
+      entries: [
+        { path: "docs", name: "docs", kind: "directory", depth: 0 },
+        { path: "docs/README.md", name: "README.md", kind: "file", depth: 1 }
+      ],
+      truncated: false
+    };
+    gatewayMock.workspaceFileReadResults.set("docs/README.md", {
+      path: "docs/README.md",
+      content: "before\n",
+      binary: false,
+      editable: true,
+      editableReason: null,
+      revision: "r1",
+      sizeBytes: 7,
+      lineEnding: "lf",
+      unreadable: null,
+      truncated: false
+    });
+    render(<App />);
+
+    expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    const home = await screen.findByRole("region", { name: "Workspace status" });
+    fireEvent.click(within(home).getByRole("button", { name: "Files" }));
+    const files = await screen.findByRole("region", { name: "Workspace files" });
+    fireEvent.click(within(files).getByRole("treeitem", { name: /README\.md/ }));
+    fireEvent.click(await within(files).findByLabelText("Edit docs/README.md"));
+    const editor = within(files).getByLabelText("Edit docs/README.md");
+    fireEvent.change(editor, { target: { value: "after\n" } });
+    fireEvent.click(within(files).getByLabelText("Save file"));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "workspace/file/write",
+        params: expect.objectContaining({
+          path: "docs/README.md",
+          content: "after\n",
+          expectedRevision: "r1",
+          force: false
+        })
+      });
+    });
+    expect(gatewayMock.requestLog.some((entry) => entry.method.startsWith("workspace/change/"))).toBe(false);
   });
 
   it("renders code previews with absolute paths, syntax tokens, and escaped source text", async () => {
@@ -686,14 +847,58 @@ describe("Workbench composer agent wiring", () => {
     expect(await screen.findByRole("region", { name: "Transcript" })).toBeTruthy();
   });
 
-  it("renders provider-qualified model names as short labels", async () => {
+  it("renders provider-qualified model options while keeping a compact selected indicator", async () => {
     render(<App />);
 
     const modelSelect = await screen.findByRole("combobox", { name: "Model" }) as HTMLSelectElement;
-    expect(modelSelect.selectedOptions[0]?.textContent).toBe("xiaomi-token-high");
+    expect(modelSelect.selectedOptions[0]?.textContent).toBe("xiaomi/xiaomi-token-high");
     expect(modelSelect.title).toBe("xiaomi/xiaomi-token-high");
-    expect(screen.getByRole("option", { name: "gpt-4o" })).toBeTruthy();
-    expect(screen.queryByRole("option", { name: "xiaomi/xiaomi-token-high" })).toBeNull();
+    expect(screen.getByRole("option", { name: "openai/gpt-4o" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "xiaomi/xiaomi-token-high" })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: "xiaomi-token-high" })).toBeNull();
+    expect(screen.getByText("xiaomi-token-high")).toBeTruthy();
+    expect(modelSelect.closest(".statusSelect")?.getAttribute("style")).toContain("--pevo-status-select-value-width: 18ch");
+  });
+
+  it("renders the full session id in the Status panel", async () => {
+    const longSessionId = "019ebc20-1234-5678-9abc-def0123492dd";
+    gatewayMock.sessionSummaries = [sessionSummary(longSessionId, "Long session")];
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByText("Long session"));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/resume",
+        params: expect.objectContaining({ threadId: longSessionId })
+      });
+    });
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "observability/read",
+        params: expect.objectContaining({ threadId: longSessionId })
+      });
+    });
+    fireEvent.click(await screen.findByLabelText("Show right inspector"));
+    const home = await screen.findByRole("region", { name: "Workspace status" });
+    expect(await within(home).findByText(longSessionId)).toBeTruthy();
+    expect(within(home).getByText("Tokens")).toBeTruthy();
+    expect(within(home).getByText("250")).toBeTruthy();
+    expect(within(home).getByText("40%")).toBeTruthy();
+    expect(within(home).getByText("$0.010000")).toBeTruthy();
+    expect(screen.queryByText("019ebc20...92dd")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Context usage" }));
+    const contextPopover = await screen.findByRole("dialog", { name: "Context usage" });
+    expect(within(contextPopover).getByText("Session tokens")).toBeTruthy();
+    expect(within(contextPopover).getByText("Cache read")).toBeTruthy();
+    expect(within(contextPopover).getByText("Cost")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "New Session" }));
+    await waitFor(() => {
+      expect(within(home).getByText("Tokens")).toBeTruthy();
+      expect(within(home).getAllByText("none").length).toBeGreaterThan(0);
+    });
   });
 
   it("groups command panel rows by runtime presentation kind", async () => {
@@ -1029,6 +1234,74 @@ describe("Workbench composer agent wiring", () => {
 
     expect(await screen.findByText("Export is not available for this session.")).toBeTruthy();
     expect(gatewayMock.openDownloadLog).toEqual([]);
+  });
+
+  it("routes session undo and redo without submitting transcript turns", async () => {
+    gatewayMock.commandExecute = (command: string) => {
+      if (command === "/undo") {
+        return {
+          accepted: true,
+          command,
+          known: true,
+          presentationKind: "control",
+          feedbackAnchor: "composer",
+          message: "undone 2 messages; prompt restored",
+          action: {
+            type: "sessionUndo",
+            threadId: "thread-1",
+            prompt: "second prompt",
+            revertedMessages: 2
+          }
+        };
+      }
+      return {
+        accepted: true,
+        command,
+        known: true,
+        presentationKind: "control",
+        feedbackAnchor: "composer",
+        message: "redone 2 messages; complete",
+        action: {
+          type: "sessionRedo",
+          threadId: "thread-1",
+          restoredMessages: 2,
+          complete: true
+        }
+      };
+    };
+
+    render(<App />);
+
+    const textarea = await screen.findByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
+    const beforeUndo = gatewayMock.requestLog.length;
+    fireEvent.change(textarea, { target: { value: "/undo" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(textarea.value).toBe("second prompt");
+    });
+    expect(await screen.findByText("undone 2 messages; prompt restored")).toBeTruthy();
+    const undoMethods = gatewayMock.requestLog.slice(beforeUndo).map((entry) => entry.method);
+    expect(undoMethods).toContain("thread/read");
+    expect(undoMethods).toContain("thread/list");
+    expect(undoMethods).toContain("workspace/diff");
+    expect(undoMethods).toContain("observability/read");
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
+
+    const beforeRedo = gatewayMock.requestLog.length;
+    fireEvent.change(textarea, { target: { value: "/redo" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(textarea.value).toBe("");
+    });
+    expect(await screen.findByText("redone 2 messages; complete")).toBeTruthy();
+    const redoMethods = gatewayMock.requestLog.slice(beforeRedo).map((entry) => entry.method);
+    expect(redoMethods).toContain("thread/read");
+    expect(redoMethods).toContain("thread/list");
+    expect(redoMethods).toContain("workspace/diff");
+    expect(redoMethods).toContain("observability/read");
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
   });
 
   it("routes diff previews and artifact downloads from structured slash actions", async () => {

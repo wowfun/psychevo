@@ -76,6 +76,28 @@ test.describe("pevo Web Workbench", () => {
       const statusRegion = page.getByRole("region", { name: "Workspace status" });
       await expect(statusRegion.getByText("idle")).toBeVisible();
       await expect(statusRegion.getByText("draft")).toBeVisible();
+      const sessionValue = statusRegion.locator(".rightStatusMetrics .is-session strong");
+      const longSessionId = "019ebc20-1234-5678-9abc-def0123492dd";
+      await sessionValue.evaluate((element, value) => {
+        element.textContent = value;
+        element.setAttribute("title", value);
+      }, longSessionId);
+      await expect(sessionValue).toHaveText(longSessionId);
+      await expect(sessionValue).not.toHaveText("019ebc20...92dd");
+      expect(await sessionValue.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          overflow: style.overflow,
+          overflowWrap: style.overflowWrap,
+          textOverflow: style.textOverflow,
+          whiteSpace: style.whiteSpace
+        };
+      })).toEqual({
+        overflow: "visible",
+        overflowWrap: "anywhere",
+        textOverflow: "clip",
+        whiteSpace: "normal"
+      });
     } finally {
       await server.stop();
     }
@@ -144,6 +166,56 @@ test.describe("pevo Web Workbench", () => {
           path: testInfo.outputPath(`tool-evidence-${appearance}-${isMobile ? "mobile" : "desktop"}.png`)
         });
       }
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test("secondary menus close on outside click", async ({ page, isMobile }) => {
+    const server = await startPevoWeb({ live: false });
+    try {
+      await page.goto(server.url);
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+
+      await openPanel(page, isMobile, "Transcript");
+      const composer = page.getByPlaceholder("Ask Psychevo...");
+      await composer.fill("Create a visible history row.");
+      await page.getByRole("button", { name: "Send message" }).click();
+      await expect(page.locator(".pevo-threadItems")).toContainText("Create a visible history row.");
+      await openPanel(page, isMobile, "History");
+      const sessionMenu = page.locator(".pevo-sessionMenu").first();
+      const sessionTrigger = sessionMenu.locator("summary");
+      await expect(sessionMenu).toHaveCount(1);
+      await sessionTrigger.click();
+      await expect(sessionMenu).toHaveJSProperty("open", true);
+      await page.mouse.click(10, 10);
+      await expect(sessionMenu).toHaveJSProperty("open", false);
+      await sessionTrigger.click();
+      await sessionMenu.getByRole("menuitem", { name: "Rename" }).click();
+      await expect(page.locator(".pevo-sessionMenu[open]")).toHaveCount(0);
+      await page.keyboard.press("Escape");
+
+      await openPanel(page, isMobile, "Status");
+      const home = page.getByRole("region", { name: "Workspace status" });
+      await home.getByRole("button", { name: /Review/ }).click();
+      await expect(page.getByRole("region", { name: "Review" })).toBeVisible();
+
+      const addMenu = page.locator(".rightAddMenu");
+      const addTrigger = addMenu.locator("summary");
+      await addTrigger.click();
+      await expect(addMenu).toHaveJSProperty("open", true);
+      await page.mouse.click(10, 10);
+      await expect(addMenu).toHaveJSProperty("open", false);
+
+      await addTrigger.click();
+      await page.getByRole("menuitem", { name: "Files" }).click();
+      await expect(page.getByRole("region", { name: "Workspace files" })).toBeVisible();
+      await expect(addMenu).toHaveJSProperty("open", false);
+
+      await addTrigger.click();
+      await page.getByRole("menuitem", { name: "Terminal" }).click();
+      await expect(page.getByRole("region", { name: "Terminal" })).toBeVisible();
+      await expect(addMenu).toHaveJSProperty("open", false);
     } finally {
       await server.stop();
     }

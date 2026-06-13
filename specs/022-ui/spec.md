@@ -134,9 +134,10 @@ one stylesheet.
 
 First-slice component families include transcript, tool evidence,
 artifact preview/detail, composer, history, status/queue,
-settings, diff/export/share, permission, clarify, tabs, buttons, inputs, and
-layout primitives. Components should support desktop density and mobile/shell
-collapse without requiring a separate native component tree.
+settings, diff/export/share, workspace file review/editing, permission,
+clarify, tabs, buttons, inputs, and layout primitives. Components should
+support desktop density and mobile/shell collapse without requiring a separate
+native component tree.
 
 The client package owns headless UX state machines that must behave the same
 across Web, Desktop, and Mobile shells:
@@ -199,12 +200,20 @@ mode. Composer send and interrupt controls live in the same footer row as the
 `+`, Agent, and `Plan` controls, aligned to the row's right edge with a stable
 height so the composer does not gain an extra row when Plan is active. Model,
 Variant, and context-usage controls sit immediately to the left of that
-send/interrupt slot; provider-qualified model values display using the segment
-after the final `/` while retaining the full value for submission. The compact
-model label must reserve space for the native selector affordance so selected
-characters are not covered, and the model label and context-usage popover must
-not clip their selected value, summary, or visible usage details at desktop or
-narrow Workbench widths.
+send/interrupt slot; the compact model indicator displays provider-qualified
+model values using the segment after the final `/`, retains the full value for
+submission, and leaves native selector options as full `provider/model` values.
+The compact model label must size from that short model segment while reserving
+space for the native selector affordance so selected characters are not covered,
+and the model label and context-usage popover must not clip their selected
+value, summary, or visible usage details at desktop or narrow Workbench widths.
+Context and session observability controls are display-only chrome. Compact
+surfaces may show context percent, session tokens, cache-read percent, and
+estimated cost, while full breakdowns belong in the context/status popover or
+right Status inspector. These values come from Gateway `observability/read`,
+clear on new detached drafts or no-active-session states, and must not become
+transcript content, command feedback, local prompt text, or model-visible
+context.
 Permission,
 path, and branch remain in the quieter status line. The default send control is
 a compact circular arrow-up button; during an
@@ -467,6 +476,15 @@ outer containers. Selecting a changed file or a workspace file activates an
 existing compatible tab when practical, otherwise it creates a new
 right-workspace tab.
 
+Review tabs may show Gateway-provided review groups in addition to the current
+workspace diff. Review groups are ordered by turn, list changed files, and
+allow only file-level Accept or Reject actions. Accept marks the file reviewed
+without changing disk content. Reject asks Gateway to restore that file to the
+baseline captured before the selected turn while preserving user changes that
+already existed before that turn. If the file no longer matches the turn's
+post-change revision, the row enters a conflict state and the user must reload
+or inspect before retrying.
+
 File and diff previews no longer open an inline center split; the transcript
 surface remains the center workspace. Diff previews render parsed file headers,
 hunks, line-number gutters, and addition/deletion/context rows instead of raw
@@ -481,6 +499,15 @@ Files tab header keeps only the tab title; the selected file absolute path
 appears above the preview. Code highlighting uses the Workbench-local
 `highlight.js` core integration with a hand-picked language set and app-token
 `.hljs-*` colors, not a stock theme stylesheet.
+Files tabs support bounded manual text editing in Workbench/Web. A text file
+preview exposes an explicit Edit action. Edit mode uses a plain textarea with
+line numbers, current line/column, Tab indentation, wrap toggle, find, go to
+line, a dirty state, and `Cmd`/`Ctrl+S` save. Saves are explicit manual user
+edits and do not enter the Review changed-file queue. Workbench blocks
+navigation, file switching, and edit-mode exit while unsaved edits exist unless
+the user confirms discarding them. If the file revision has changed since it
+was opened, saving is blocked and the user can inspect the conflict, reload, or
+force overwrite.
 Terminal tabs are real
 interactive local terminal sessions scoped to the active project workdir.
 Terminal output is UI-only and is not transcript history or model-visible
@@ -535,7 +562,11 @@ hover/focus-visible area hides them immediately rather than fading them out.
 Pin, rename, export, share, archive/restore, and
 delete controls live behind that secondary More menu instead of rendering as a
 permanent action strip under the session name. Local draft rows do not expose
-session management actions until they become persisted sessions.
+session management actions until they become persisted sessions. Secondary
+More and `+` menus in Workbench chrome must close when the user clicks outside
+the menu, close on Escape with focus restored to the trigger, and remain open
+when the user clicks inert space inside the menu. This outside-click behavior
+applies to menu popovers, not slash, skill, or file completion listboxes.
 Workbench chrome uses `Psychevo` as the visible product name. Project identity
 belongs in the workdir/session grouping and settings detail surfaces, not as a
 subtitle under the product brand. GUI-created workspaces and opened projects
@@ -562,9 +593,13 @@ separate connection endpoint header. The right inspector expand/collapse
 control is fixed to the top-right edge of the transcript column, above the
 transcript surface, so inspector tabs remain only tab choices and collapsed
 inspector state does not reserve a separate right-side rail.
-The Status inspector treats the session id as a primary identifier row spanning
-the inspector width; connection, turn, queued, and similar metrics may remain in
-compact columns below it.
+The Status inspector treats the full, unshortened session id as a primary
+identifier row spanning the inspector width; connection, turn, queued, and
+similar metrics may remain in compact columns below it. Context-window,
+session-token, cache-read, and cost metrics are compact Status facts, not
+transcript rows. They may be summarized in columns and expanded into a detail
+breakdown, but they must only display numeric/accounting facts and provider or
+model labels.
 
 Appearance is a frontend/host preference, not a provider or secret setting.
 In light appearance, Workbench uses a warm reading-paper palette rather than a

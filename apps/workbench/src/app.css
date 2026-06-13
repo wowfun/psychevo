@@ -1114,6 +1114,10 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   min-width: 0;
 }
 
+.rightStatusMetrics .is-session {
+  grid-column: 1 / -1;
+}
+
 .rightStatusMetrics span,
 .rightChangedFiles small,
 .reviewStatusRows,
@@ -1128,6 +1132,14 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   font-size: 0.82rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.rightStatusMetrics .is-session strong {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-all;
 }
 
 .rightHomeNav {
@@ -1525,7 +1537,122 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 }
 
 .reviewPanel {
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+}
+
+.reviewChanges {
+  display: grid;
+  gap: 8px;
+  max-height: 190px;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 0 10px;
+  border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 42%);
+}
+
+.reviewChanges.is-empty {
+  color: var(--pevo-muted);
+  font-size: 0.76rem;
+}
+
+.reviewChanges.is-empty p {
+  margin: 0;
+}
+
+.reviewChangeGroup {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.reviewChangeGroup > header,
+.reviewChangeFile {
+  display: grid;
+  align-items: center;
+  min-width: 0;
+}
+
+.reviewChangeGroup > header {
+  grid-template-columns: minmax(0, 1fr) auto;
+  color: var(--pevo-muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.reviewChangeGroup > header b {
+  font-weight: 650;
+}
+
+.reviewChangeFile {
+  grid-template-columns: minmax(0, 1fr) auto 26px 26px;
+  gap: 5px;
+  min-height: 30px;
+}
+
+.reviewChangePath,
+.reviewChangeFile > button {
+  min-width: 0;
+  color: var(--pevo-ink);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.reviewChangePath {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 5px 6px;
+  text-align: left;
+}
+
+.reviewChangePath span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reviewChangePath small,
+.reviewChangeState {
+  color: var(--pevo-muted);
+  font-size: 0.7rem;
+}
+
+.reviewChangeState {
+  min-width: 54px;
+  text-align: right;
+}
+
+.reviewChangeFile > button:not(.reviewChangePath) {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  color: var(--pevo-muted);
+  border-color: var(--pevo-border);
+}
+
+.reviewChangePath:hover,
+.reviewChangeFile > button:not(.reviewChangePath):hover {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 38%);
+}
+
+.reviewChangeFile > button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.reviewChangeFile > em {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  margin-top: -2px;
+  color: var(--pevo-muted);
+  font-size: 0.7rem;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .reviewSplit,
@@ -1590,6 +1717,190 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 
 .fileMarkdownPreview .pevo-markdown {
   max-width: 76ch;
+}
+
+.filePreviewPath {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.filePreviewPath span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filePreviewPath button {
+  display: grid;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 24px;
+  margin-left: auto;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.filePreviewPath button:hover {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 38%);
+}
+
+.filePreviewPath button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.fileEditor {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.fileEditorToolbar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 5px 0 6px;
+  border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 48%);
+}
+
+.fileEditorToolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--pevo-muted);
+}
+
+.fileEditorToolbar input {
+  width: 82px;
+  min-width: 0;
+  height: 24px;
+  padding: 0 6px;
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 58%);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.fileEditorToolbar button {
+  display: grid;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 24px;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.fileEditorToolbar button:hover,
+.fileEditorToolbar button[aria-pressed="true"] {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 34%);
+}
+
+.fileEditorToolbar button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.fileEditorToolbar > span {
+  flex: 0 0 auto;
+  min-width: 48px;
+  color: var(--pevo-muted);
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  font-size: 0.72rem;
+  text-align: center;
+}
+
+.fileEditorBody {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--pevo-code-ink);
+  background: var(--pevo-code-bg);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 42%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.fileEditorLines,
+.fileEditorBody textarea {
+  margin: 0;
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  font-size: 0.76rem;
+  line-height: 1.48;
+}
+
+.fileEditorLines {
+  overflow: hidden;
+  padding: 10px 8px 18px 0;
+  color: var(--pevo-diff-muted);
+  text-align: right;
+  user-select: none;
+  border-right: 1px solid var(--pevo-diff-border);
+}
+
+.fileEditorBody textarea {
+  min-width: 0;
+  min-height: 0;
+  padding: 10px 12px 18px;
+  color: var(--pevo-code-ink);
+  background: transparent;
+  border: 0;
+  outline: none;
+  resize: none;
+  tab-size: 2;
+}
+
+.fileEditorBody.is-unwrapped textarea {
+  white-space: pre;
+  overflow: auto;
+}
+
+.fileEditorBody.is-wrapped textarea {
+  overflow: auto;
+}
+
+.fileEditorNotice {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 7px 0 0;
+  color: var(--pevo-muted);
+  font-size: 0.74rem;
+}
+
+.fileEditorNotice span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileEditorNotice button {
+  flex: 0 0 auto;
+  color: var(--pevo-ink);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
 }
 
 .fileMarkdownPreview .pevo-markdown > *:first-child {
@@ -2312,7 +2623,49 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 }
 
 .statusSelect {
+  position: relative;
+  display: inline-grid;
+  align-items: center;
   min-width: 0;
+}
+
+.statusSelect select,
+.statusSelectDisplay {
+  grid-area: 1 / 1;
+}
+
+.statusSelectDisplay {
+  z-index: 1;
+  max-width: var(--pevo-status-select-value-width, 5ch);
+  overflow: hidden;
+  color: var(--pevo-muted);
+  pointer-events: none;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.statusSelect.has-displayValue::after {
+  content: "";
+  z-index: 2;
+  grid-area: 1 / 1;
+  justify-self: end;
+  width: 5px;
+  height: 5px;
+  margin-right: 5px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  pointer-events: none;
+  transform: rotate(45deg) translateY(-2px);
+}
+
+.statusSelect.has-displayValue select {
+  appearance: none;
+  color: transparent;
+}
+
+.statusSelect.has-displayValue select option {
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
 }
 
 .statusSelect[data-status="permission-mode"] select {
@@ -2344,9 +2697,10 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 }
 
 .composerSubmitControls .statusSelect[data-status="model"] select {
-  width: clamp(132px, 18ch, 168px);
-  min-width: 132px;
-  padding: 0 26px 0 0;
+  width: calc(var(--pevo-status-select-value-width, 5ch) + 26px);
+  min-width: calc(var(--pevo-status-select-value-width, 5ch) + 26px);
+  max-width: min(240px, 46vw);
+  padding: 0 24px 0 0;
 }
 
 .composerSubmitControls .statusSelect[data-status="variant"] select {
@@ -2441,6 +2795,36 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 
 .composerContextPopover p {
   margin: 0;
+}
+
+.composerContextUsageGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  padding-top: 2px;
+}
+
+.composerContextUsageGrid div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.composerContextUsageGrid span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--pevo-muted);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composerContextUsageGrid strong {
+  overflow: hidden;
+  color: var(--pevo-ink);
+  font-size: 0.82rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .composerContextBars {
@@ -2865,8 +3249,9 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   }
 
   .composerSubmitControls .statusSelect[data-status="model"] select {
-    width: clamp(120px, 32vw, 148px);
-    min-width: 120px;
+    width: calc(var(--pevo-status-select-value-width, 5ch) + 24px);
+    min-width: calc(var(--pevo-status-select-value-width, 5ch) + 24px);
+    max-width: 38vw;
   }
 
   .composerSubmitControls .statusSelect[data-status="variant"] select {
@@ -2910,8 +3295,9 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   }
 
   .composerSubmitControls .statusSelect[data-status="model"] select {
-    width: clamp(118px, 34vw, 136px);
-    min-width: 118px;
+    width: calc(var(--pevo-status-select-value-width, 5ch) + 22px);
+    min-width: calc(var(--pevo-status-select-value-width, 5ch) + 22px);
+    max-width: 36vw;
   }
 
   .composerSubmitControls .statusSelect[data-status="variant"] select {

@@ -7,6 +7,7 @@ export interface ComposerProps {
   attachments?: ComposerAttachmentView[] | undefined;
   completionProvider?: (text: string, cursor: number) => Promise<CompletionListResult>;
   disabled?: boolean;
+  draftPatch?: ComposerDraftPatch | undefined;
   leftControls?: ReactNode;
   mode?: string;
   requestPanel?: ReactNode;
@@ -22,6 +23,11 @@ export interface ComposerProps {
   onSubmit(text: string, mentions: GatewayMention[]): void;
 }
 
+export interface ComposerDraftPatch {
+  id: number;
+  text: string;
+}
+
 export interface ComposerAttachmentView {
   id: string;
   kind: "file" | "image" | "text";
@@ -33,6 +39,7 @@ export function Composer({
   attachments,
   completionProvider,
   disabled,
+  draftPatch,
   leftControls,
   mode = "default",
   requestPanel,
@@ -75,6 +82,21 @@ export function Composer({
       window.clearTimeout(completionTimer.current);
     }
   }, []);
+
+  useEffect(() => {
+    if (!draftPatch) {
+      return;
+    }
+    cancelCompletion();
+    setInputMode("prompt");
+    setDraft(draftPatch.text);
+    updateMentions([]);
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      const cursor = draftPatch.text.length;
+      textareaRef.current?.setSelectionRange(cursor, cursor);
+    });
+  }, [draftPatch?.id]);
 
   useEffect(() => {
     if (completionItems.length === 0) {

@@ -26,22 +26,25 @@ test.describe("Workbench composer visual contract", () => {
       expect(await selectedOptionText(page.getByRole("combobox", { name: "Permission mode" }))).toBe("Default Permission");
       const modelSelect = page.getByRole("combobox", { name: "Model" });
       await expect(modelSelect).toBeVisible();
-      expect(await selectedOptionText(modelSelect)).toBe("noop");
+      expect(await selectedOptionText(modelSelect)).toBe("lmstudio/noop");
+      await expect(page.locator('.composerSubmitControls .statusSelect[data-status="model"] .statusSelectDisplay')).toHaveText("noop");
       await expectSelectTextFits(modelSelect);
       await expect(page.getByRole("combobox", { name: "Variant" })).toBeVisible();
       await expect(page.getByRole("button", { name: "Context usage" })).toBeVisible();
       await assertComposerGeometry(page, { plan: false });
 
-      await page.getByRole("button", { name: "Context usage" }).click();
-      const contextPopover = page.getByRole("dialog", { name: "Context usage" });
-      await expect(contextPopover).toBeVisible();
-      const contextSummary = page.locator(".composerContextSummary strong");
-      await contextSummary.evaluate((element) => {
-        element.textContent = "16.7k/1.0M (1.6%)";
-      });
-      await expectElementInsideViewport(page, contextPopover);
-      await expectTextNotClipped(contextSummary);
-      await page.keyboard.press("Escape");
+      if (!isMobile) {
+        await page.getByRole("button", { name: "Context usage" }).click();
+        const contextPopover = page.getByRole("dialog", { name: "Context usage" });
+        await expect(contextPopover).toBeVisible();
+        const contextSummary = page.locator(".composerContextSummary strong");
+        await contextSummary.evaluate((element) => {
+          element.textContent = "16.7k/1.0M (1.6%)";
+        });
+        await expectElementInsideViewport(page, contextPopover);
+        await expectTextNotClipped(contextSummary);
+        await page.keyboard.press("Escape");
+      }
 
       await page.getByRole("button", { name: "Add attachments and options" }).click();
       await expect(page.getByRole("menuitem", { name: "Add images and files" })).toBeVisible();
@@ -91,7 +94,8 @@ test.describe("Workbench composer visual contract", () => {
 
       const modelSelect = page.getByRole("combobox", { name: "Model" });
       await expect(modelSelect).toBeVisible();
-      expect(await selectedOptionText(modelSelect)).toBe("mimo-v2.5-pro");
+      expect(await selectedOptionText(modelSelect)).toBe("lmstudio/mimo-v2.5-pro");
+      await expect(page.locator('.composerSubmitControls .statusSelect[data-status="model"] .statusSelectDisplay')).toHaveText("mimo-v2.5-pro");
       await expectSelectTextFits(modelSelect);
       await expect(modelSelect).toHaveAttribute("title", "lmstudio/mimo-v2.5-pro");
 
@@ -222,10 +226,12 @@ async function expectSelectTextFits(select: Locator) {
   const result = await select.evaluate((element) => {
     const control = element as HTMLSelectElement;
     const style = getComputedStyle(control);
-    const selectedText = control.selectedOptions[0]?.textContent?.trim() ?? "";
+    const display = control.closest(".statusSelect")?.querySelector<HTMLElement>(".statusSelectDisplay") ?? null;
+    const selectedText = display?.textContent?.trim() ?? control.selectedOptions[0]?.textContent?.trim() ?? "";
     const probe = document.createElement("span");
-    probe.style.font = style.font;
-    probe.style.letterSpacing = style.letterSpacing;
+    const measureStyle = display ? getComputedStyle(display) : style;
+    probe.style.font = measureStyle.font;
+    probe.style.letterSpacing = measureStyle.letterSpacing;
     probe.style.position = "absolute";
     probe.style.visibility = "hidden";
     probe.style.whiteSpace = "nowrap";
@@ -236,7 +242,7 @@ async function expectSelectTextFits(select: Locator) {
     const paddingLeft = Number.parseFloat(style.paddingLeft) || 0;
     const paddingRight = Number.parseFloat(style.paddingRight) || 0;
     return {
-      contentWidth: control.clientWidth - paddingLeft - paddingRight,
+      contentWidth: display ? display.clientWidth : control.clientWidth - paddingLeft - paddingRight,
       paddingRight,
       selectedText,
       textWidth

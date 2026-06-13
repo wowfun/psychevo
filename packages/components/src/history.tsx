@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { SessionSummary } from "@psychevo/protocol";
+import { DismissibleDetails } from "./dismissibleDetails";
 import { IconButton } from "./primitives";
 
 export interface HistoryPanelProps {
@@ -203,109 +204,112 @@ export function HistoryPanel(props: HistoryPanelProps) {
                               </span>
                             </span>
                           </button>
-                          <details className="pevo-sessionMenu">
-                            <summary aria-label="Session actions" title="Session actions">
-                              <MoreHorizontal size={16} aria-hidden />
-                            </summary>
-                            <div className="pevo-sessionMenuPopover" role="menu" aria-label="Session actions">
-                              <button
-                                role="menuitem"
-                                title={pinned ? "Unpin" : "Pin"}
-                                onClick={(event) => {
-                                  closeSessionMenu(event);
-                                  props.onTogglePinned?.(session.id);
-                                }}
-                                disabled={props.disabled || !props.onTogglePinned}
-                                type="button"
-                              >
-                                <Pin size={15} fill={pinned ? "currentColor" : "none"} aria-hidden />
-                                <span>{pinned ? "Unpin" : "Pin"}</span>
-                              </button>
-                              <button
-                                role="menuitem"
-                                title="Rename"
-                                onClick={(event) => {
-                                  closeSessionMenu(event);
-                                  setDraft(title);
-                                  setEditingId(session.id);
-                                }}
-                                disabled={props.disabled}
-                                type="button"
-                              >
-                                <Pencil size={15} aria-hidden />
-                                <span>Rename</span>
-                              </button>
-                              <button
-                                role="menuitem"
-                                title="Export"
-                                onClick={(event) => {
-                                  closeSessionMenu(event);
-                                  props.onExport(session.id);
-                                }}
-                                disabled={props.disabled}
-                                type="button"
-                              >
-                                <Download size={15} aria-hidden />
-                                <span>Export</span>
-                              </button>
-                              <button
-                                role="menuitem"
-                                title="Share"
-                                onClick={(event) => {
-                                  closeSessionMenu(event);
-                                  props.onShare(session.id);
-                                }}
-                                disabled={props.disabled}
-                                type="button"
-                              >
-                                <Share2 size={15} aria-hidden />
-                                <span>Share</span>
-                              </button>
-                              {props.archived ? (
+                          <DismissibleDetails
+                            className="pevo-sessionMenu"
+                            summary={<MoreHorizontal size={16} aria-hidden />}
+                            summaryProps={{ "aria-label": "Session actions", title: "Session actions" }}
+                          >
+                            {({ close }) => (
+                              <div className="pevo-sessionMenuPopover" role="menu" aria-label="Session actions">
                                 <button
                                   role="menuitem"
-                                  title="Restore"
-                                  onClick={(event) => {
-                                    closeSessionMenu(event);
-                                    props.onRestore(session.id);
+                                  title={pinned ? "Unpin" : "Pin"}
+                                  onClick={() => {
+                                    close();
+                                    props.onTogglePinned?.(session.id);
                                   }}
-                                  disabled={props.disabled || running}
+                                  disabled={props.disabled || !props.onTogglePinned}
                                   type="button"
                                 >
-                                  <RotateCcw size={15} aria-hidden />
-                                  <span>Restore</span>
+                                  <Pin size={15} fill={pinned ? "currentColor" : "none"} aria-hidden />
+                                  <span>{pinned ? "Unpin" : "Pin"}</span>
                                 </button>
-                              ) : (
                                 <button
                                   role="menuitem"
-                                  title="Archive"
-                                  onClick={(event) => {
-                                    closeSessionMenu(event);
-                                    props.onArchive(session.id);
+                                  title="Rename"
+                                  onClick={() => {
+                                    close();
+                                    setDraft(title);
+                                    setEditingId(session.id);
                                   }}
-                                  disabled={props.disabled || running}
+                                  disabled={props.disabled}
                                   type="button"
                                 >
-                                  <Archive size={15} aria-hidden />
-                                  <span>Archive</span>
+                                  <Pencil size={15} aria-hidden />
+                                  <span>Rename</span>
                                 </button>
-                              )}
-                              <button
-                                className="is-danger"
-                                role="menuitem"
-                                title="Delete"
-                                onClick={(event) => {
-                                  closeSessionMenu(event);
-                                  props.onDelete(session.id);
-                                }}
-                                disabled={props.disabled || active || running}
-                                type="button"
-                              >
-                                <Trash2 size={15} aria-hidden />
-                                <span>Delete</span>
-                              </button>
-                            </div>
-                          </details>
+                                <button
+                                  role="menuitem"
+                                  title="Export"
+                                  onClick={() => {
+                                    close();
+                                    props.onExport(session.id);
+                                  }}
+                                  disabled={props.disabled}
+                                  type="button"
+                                >
+                                  <Download size={15} aria-hidden />
+                                  <span>Export</span>
+                                </button>
+                                <button
+                                  role="menuitem"
+                                  title="Share"
+                                  onClick={() => {
+                                    close();
+                                    props.onShare(session.id);
+                                  }}
+                                  disabled={props.disabled}
+                                  type="button"
+                                >
+                                  <Share2 size={15} aria-hidden />
+                                  <span>Share</span>
+                                </button>
+                                {props.archived ? (
+                                  <button
+                                    role="menuitem"
+                                    title="Restore"
+                                    onClick={() => {
+                                      close();
+                                      props.onRestore(session.id);
+                                    }}
+                                    disabled={props.disabled || running}
+                                    type="button"
+                                  >
+                                    <RotateCcw size={15} aria-hidden />
+                                    <span>Restore</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    role="menuitem"
+                                    title="Archive"
+                                    onClick={() => {
+                                      close();
+                                      props.onArchive(session.id);
+                                    }}
+                                    disabled={props.disabled || running}
+                                    type="button"
+                                  >
+                                    <Archive size={15} aria-hidden />
+                                    <span>Archive</span>
+                                  </button>
+                                )}
+                                <button
+                                  className="is-danger"
+                                  role="menuitem"
+                                  title="Delete"
+                                  onClick={() => {
+                                    close();
+                                    props.onDelete(session.id);
+                                  }}
+                                  disabled={props.disabled || active || running}
+                                  type="button"
+                                >
+                                  <Trash2 size={15} aria-hidden />
+                                  <span>Delete</span>
+                                </button>
+                              </div>
+                            )}
+                          </DismissibleDetails>
                         </>
                       )}
                     </article>
@@ -318,10 +322,6 @@ export function HistoryPanel(props: HistoryPanelProps) {
       </div>
     </section>
   );
-}
-
-function closeSessionMenu(event: { currentTarget: HTMLElement }) {
-  event.currentTarget.closest("details")?.removeAttribute("open");
 }
 
 type SessionProjectGroup = {

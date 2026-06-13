@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import type { Terminal as XTermTerminal, ITheme } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import {
@@ -8,8 +8,10 @@ import {
   Box,
   Bug,
   Cable,
+  Check,
   ChevronDown,
   ChevronRight,
+  Edit3,
   FileText,
   FolderPlus,
   FolderTree,
@@ -25,6 +27,8 @@ import {
   PlugZap,
   Plus,
   RefreshCw,
+  RotateCcw,
+  Save,
   Search,
   Settings,
   Shield,
@@ -36,6 +40,7 @@ import {
 } from "lucide-react";
 import {
   Composer,
+  DismissibleDetails,
   HistoryPanel,
   MarkdownText,
   TranscriptPanel,
@@ -58,34 +63,41 @@ import {
 } from "@psychevo/host";
 import {
   GatewayEventSchema,
-  ContextReadResultSchema,
   InitializeResultSchema,
+  ObservabilityReadResultSchema,
   SettingsReadResultSchema,
   TerminalExitedPayloadSchema,
   TerminalOutputPayloadSchema,
   ThreadListResultSchema,
   ThreadTraceResultSchema,
+  WorkspaceChangeMutationResultSchema,
+  WorkspaceChangesResultSchema,
   WorkspaceDiffResultSchema,
   WorkspaceCreateResultSchema,
   WorkspaceFileReadResultSchema,
+  WorkspaceFileWriteResultSchema,
   WorkspaceFilesResultSchema,
   type ContextReadResult,
   type GatewayMention,
   type GatewayInputPart,
   type GatewayRequestScope,
   type InitializeResult,
+  type ObservabilityReadResult,
   type PendingClarify,
   type PendingPermission,
   type PermissionDecision,
   type SessionSummary,
   type SettingsReadResult,
+  type SessionUsageSummaryView,
   type TerminalExitedPayload,
   type TerminalOutputPayload,
   type ThreadSnapshot,
   type ThreadTraceResult,
+  type WorkspaceChangesResult,
   type WorkspaceDiffResult,
   type WorkspaceFileEntry,
   type WorkspaceFileReadResult,
+  type WorkspaceFileWriteResult,
   type WorkspaceFilesResult
 } from "@psychevo/protocol";
 import { highlightToHtml, languageForPath } from "./highlight";
@@ -286,8 +298,11 @@ export function App() {
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFilesResult | null>(null);
   const [workspaceDialogOpen, setWorkspaceDialogOpen] = useState(false);
   const [workspaceDiff, setWorkspaceDiff] = useState<WorkspaceDiffResult | null>(null);
+  const [workspaceChanges, setWorkspaceChanges] = useState<WorkspaceChangesResult | null>(null);
   const [contextUsage, setContextUsage] = useState<ContextReadResult | null>(null);
+  const [observability, setObservability] = useState<ObservabilityReadResult | null>(null);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [composerDraftPatch, setComposerDraftPatch] = useState<{ id: number; text: string } | null>(null);
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
   const [terminalEvents, setTerminalEvents] = useState<TerminalNotificationEvent[]>([]);
   const [traceState, setTraceState] = useState<TraceState>({
@@ -300,6 +315,7 @@ export function App() {
   const [appearance, setAppearance] = useState<Appearance>(initialPrefs.appearance);
   const [debugEnabled, setDebugEnabled] = useState(initialPrefs.debug);
   const [rightWidthPx, setRightWidthPx] = useState(initialPrefs.rightWidthPx);
+  const [dirtyRightTabs, setDirtyRightTabs] = useState<Record<string, boolean>>({});
   const [archived, setArchived] = useState(false);
   const [status, setStatus] = useState("connecting");
   const [error, setError] = useState<string | null>(null);
@@ -334,6 +350,7 @@ export function App() {
     [agents]
   );
   const controls = settings?.controls ?? null;
+  const sessionUsage = observability?.usage ?? null;
 
   useEffect(() => {
     if (
@@ -353,6 +370,18 @@ export function App() {
       setActiveRightTabId(null);
     }
   }, [activeRightTab?.kind, debugEnabled]);
+
+  useEffect(() => {
+    if (!Object.values(dirtyRightTabs).some(Boolean)) {
+      return;
+    }
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [dirtyRightTabs]);
 
   useEffect(() => {
     if (!debugEnabled || activeRightTab?.kind !== "debug" || !client || !currentThreadId) {
@@ -630,6 +659,7 @@ export function App() {
         }
         return normalizeSnapshot(reconcileThreadSnapshot(normalizeSnapshot(current), normalizeSnapshot(nextSnapshot)));
       });
+      await refreshObservability(nextClient, nextSnapshot.scope, nextSnapshot.thread?.id ?? threadId);
       return;
     }
     const nextScope = scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
@@ -654,6 +684,26 @@ export function App() {
     await adoptSnapshotScope(nextClient, nextSnapshot);
   }
 
+  async function refreshRevertedThreadSnapshot(
+    nextClient: GatewayClient | null,
+    threadId: string | null
+  ) {
+    if (!nextClient || !threadId) {
+      return;
+    }
+    const nextSnapshot = normalizeSnapshot(parseThreadSnapshot(await nextClient.request("thread/read", { threadId })));
+    setSnapshot((current) => (
+      (current.thread?.id ?? null) === threadId ? nextSnapshot : current
+    ));
+  }
+
+  function patchComposerDraft(text: string) {
+    setComposerDraftPatch((current) => ({
+      id: (current?.id ?? 0) + 1,
+      text
+    }));
+  }
+
   async function adoptSnapshotScope(nextClient: GatewayClient, nextSnapshot: ThreadSnapshot) {
     const scope = nextSnapshot.scope;
     if (!scope?.workdir) {
@@ -667,6 +717,7 @@ export function App() {
       const nextSettings = SettingsReadResultSchema.parse(await nextClient.request("settings/read", { threadId, workdir: scope.workdir }));
       setSettings(nextSettings);
       applyInitialControls(nextSettings);
+      await refreshObservability(nextClient, scope, threadId);
       return;
     }
     const [settingsValue] = await Promise.all([
@@ -711,16 +762,40 @@ export function App() {
     threadId: string | null = currentThreadId ?? null
   ) {
     if (!nextClient || !scope) {
+      setWorkspaceChanges(null);
+      setObservability(null);
+      setContextUsage(null);
       return;
     }
-    const [files, diff, context] = await Promise.all([
+    const [files, diff, changes, nextObservability] = await Promise.all([
       nextClient.request("workspace/files", { scope }),
       nextClient.request("workspace/diff", { scope, path: null }),
-      nextClient.request("context/read", { scope, threadId })
+      nextClient.request("workspace/changes", { scope }),
+      nextClient.request("observability/read", { scope, threadId })
     ]);
     setWorkspaceFiles(WorkspaceFilesResultSchema.parse(files));
     setWorkspaceDiff(WorkspaceDiffResultSchema.parse(diff));
-    setContextUsage(ContextReadResultSchema.parse(context));
+    setWorkspaceChanges(WorkspaceChangesResultSchema.parse(changes));
+    applyObservability(nextObservability);
+  }
+
+  async function refreshObservability(
+    nextClient = client,
+    scope = activeScope ?? init?.scope,
+    threadId: string | null = currentThreadId ?? null
+  ) {
+    if (!nextClient || !scope) {
+      setObservability(null);
+      setContextUsage(null);
+      return;
+    }
+    applyObservability(await nextClient.request("observability/read", { scope, threadId }));
+  }
+
+  function applyObservability(value: unknown) {
+    const parsed = ObservabilityReadResultSchema.parse(value);
+    setObservability(parsed);
+    setContextUsage(parsed.context);
   }
 
   function pushDebugEvent(method: string, payload: unknown) {
@@ -852,7 +927,15 @@ export function App() {
   }
 
   function closeRightWorkspaceTab(tabId: string) {
+    if (dirtyRightTabs[tabId] && !window.confirm("Discard unsaved file edits?")) {
+      return;
+    }
     setRightTabs((current) => current.filter((tab) => tab.id !== tabId));
+    setDirtyRightTabs((current) => {
+      const next = { ...current };
+      delete next[tabId];
+      return next;
+    });
     setActiveRightTabId((current) => {
       if (current !== tabId) {
         return current;
@@ -1089,6 +1172,28 @@ export function App() {
         await client?.request("turn/interrupt", { threadId: snapshot.thread?.id ?? null });
         await refreshSnapshot();
         break;
+      case "sessionUndo": {
+        const threadId = optionalStringField(record.threadId) ?? snapshot.thread?.id ?? null;
+        await refreshRevertedThreadSnapshot(client, threadId);
+        await refreshHistory();
+        await refreshWorkspaceSurface(client, activeScope ?? init?.scope, threadId);
+        setAttachments([]);
+        patchComposerDraft(stringField(record.prompt));
+        setMainView("transcript");
+        setMobilePanel("transcript");
+        break;
+      }
+      case "sessionRedo": {
+        const threadId = optionalStringField(record.threadId) ?? snapshot.thread?.id ?? null;
+        await refreshRevertedThreadSnapshot(client, threadId);
+        await refreshHistory();
+        await refreshWorkspaceSurface(client, activeScope ?? init?.scope, threadId);
+        setAttachments([]);
+        patchComposerDraft("");
+        setMainView("transcript");
+        setMobilePanel("transcript");
+        break;
+      }
       case "queuePrompt": {
         const text = stringField(record.text).trim();
         const displayText = optionalStringField(record.displayText);
@@ -1273,6 +1378,51 @@ export function App() {
       file: result,
       message: result.truncated ? "Preview truncated." : null
     });
+  }
+
+  async function saveFileFromEditor(
+    path: string,
+    content: string,
+    expectedRevision: string | null,
+    force: boolean
+  ): Promise<WorkspaceFileWriteResult> {
+    const scope = activeScope ?? init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
+    const result = WorkspaceFileWriteResultSchema.parse(await client?.request("workspace/file/write", {
+      scope,
+      path,
+      content,
+      expectedRevision,
+      force
+    }));
+    const read = WorkspaceFileReadResultSchema.parse(await client?.request("workspace/file/read", { scope, path: result.path }));
+    setRightTabs((current) => current.map((tab) => (
+      tab.kind === "files" && tab.path === result.path
+        ? { ...tab, file: read, message: null, title: fileBasename(result.path) }
+        : tab
+    )));
+    await refreshWorkspaceSurface(client, scope, currentThreadId ?? null);
+    return result;
+  }
+
+  async function acceptWorkspaceChange(turnId: string, path: string) {
+    const scope = activeScope ?? init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
+    const result = WorkspaceChangeMutationResultSchema.parse(await client?.request("workspace/change/accept", {
+      scope,
+      turnId,
+      path
+    }));
+    setWorkspaceChanges(result.changes);
+  }
+
+  async function rejectWorkspaceChange(turnId: string, path: string) {
+    const scope = activeScope ?? init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
+    const result = WorkspaceChangeMutationResultSchema.parse(await client?.request("workspace/change/reject", {
+      scope,
+      turnId,
+      path
+    }));
+    setWorkspaceChanges(result.changes);
+    await refreshWorkspaceSurface(client, scope, currentThreadId ?? null);
   }
 
   async function openDiffPreview(path?: string | null) {
@@ -1530,6 +1680,7 @@ export function App() {
                 }) ?? { items: [], replacement: null };
               }}
               disabled={disabled}
+              draftPatch={composerDraftPatch ?? undefined}
               leftControls={(
                 <AgentRunSelector
                   agents={runnableAgents}
@@ -1543,6 +1694,7 @@ export function App() {
                 <ComposerSubmitControls
                   context={contextUsage}
                   controls={controls}
+                  usage={sessionUsage}
                   model={selectedModel}
                   variant={selectedVariant}
                   onContextClick={() => revealRightWorkspace(null)}
@@ -1631,17 +1783,24 @@ export function App() {
               scope={activeScope ?? init?.scope ?? null}
               sessionId={snapshot.thread?.id ?? null}
               status={status}
+              usage={sessionUsage}
               tabs={rightTabs}
               terminalEvents={terminalEvents}
               trace={traceState}
               truncated={workspaceFiles?.truncated ?? false}
               workdir={settings?.project?.displayPath ?? settings?.workdir ?? ""}
+              workspaceChanges={workspaceChanges}
               workspaceDiff={workspaceDiff}
               onActivate={setActiveRightTabId}
+              onAcceptChange={(turnId, path) => void runAction(async () => acceptWorkspaceChange(turnId, path))}
               onChangedFile={(path) => void runAction(async () => openDiffPreview(path))}
               onClose={closeRightWorkspaceTab}
+              onDirtyTabChange={(tabId, dirty) => {
+                setDirtyRightTabs((current) => current[tabId] === dirty ? current : { ...current, [tabId]: dirty });
+              }}
               onOpenFile={(path) => void runAction(async () => openFilePreview(path))}
               onOpenKind={(kind) => openRightWorkspaceTab(kind, {}, true)}
+              onRejectChange={(turnId, path) => void runAction(async () => rejectWorkspaceChange(turnId, path))}
               onRefresh={() => void runAction(async () => {
                 await refreshSnapshot();
                 await refreshHistory();
@@ -1649,6 +1808,7 @@ export function App() {
                 await refreshWorkspaceSurface();
               })}
               onRefreshTrace={() => void refreshTrace()}
+              onSaveFile={(path, content, expectedRevision, force) => saveFileFromEditor(path, content, expectedRevision, force)}
               onShowHome={() => revealRightWorkspace(null)}
             />
           </aside>
@@ -2096,19 +2256,25 @@ function RightWorkspace({
   scope,
   sessionId,
   status,
+  usage,
   tabs,
   terminalEvents,
   trace,
   truncated,
   workdir,
+  workspaceChanges,
   workspaceDiff,
   onActivate,
+  onAcceptChange,
   onChangedFile,
   onClose,
+  onDirtyTabChange,
   onOpenFile,
   onOpenKind,
+  onRejectChange,
   onRefresh,
   onRefreshTrace,
+  onSaveFile,
   onShowHome
 }: {
   activeTabId: string | null;
@@ -2123,19 +2289,25 @@ function RightWorkspace({
   scope: GatewayRequestScope | null;
   sessionId: string | null;
   status: string;
+  usage: SessionUsageSummaryView | null;
   tabs: RightWorkspaceTab[];
   terminalEvents: TerminalNotificationEvent[];
   trace: TraceState;
   truncated: boolean;
   workdir: string;
+  workspaceChanges: WorkspaceChangesResult | null;
   workspaceDiff: WorkspaceDiffResult | null;
   onActivate(tabId: string): void;
+  onAcceptChange(turnId: string, path: string): void;
   onChangedFile(path: string): void;
   onClose(tabId: string): void;
+  onDirtyTabChange(tabId: string, dirty: boolean): void;
   onOpenFile(path: string): void;
   onOpenKind(kind: RightWorkspaceTabKind): void;
+  onRejectChange(turnId: string, path: string): void;
   onRefresh(): void;
   onRefreshTrace(): void;
+  onSaveFile(path: string, content: string, expectedRevision: string | null, force: boolean): Promise<WorkspaceFileWriteResult>;
   onShowHome(): void;
 }) {
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
@@ -2159,6 +2331,7 @@ function RightWorkspace({
             files={workspaceDiff?.files ?? []}
             sessionId={sessionId}
             status={status}
+            usage={usage}
             workdir={workdir}
             onChangedFile={onChangedFile}
             onOpenKind={onOpenKind}
@@ -2171,13 +2344,16 @@ function RightWorkspace({
               <ReviewPanel
                 activity={activity}
                 changedFiles={workspaceDiff?.files ?? []}
+                changes={workspaceChanges}
                 context={context}
                 diff={tab.diff ?? workspaceDiff}
                 root={root || workdir}
                 sessionId={sessionId}
                 status={status}
                 workdir={workdir}
+                onAcceptChange={onAcceptChange}
                 onChangedFile={onChangedFile}
+                onRejectChange={onRejectChange}
                 onRefresh={onRefresh}
               />
             )}
@@ -2188,8 +2364,12 @@ function RightWorkspace({
                 previewMessage={tab.message ?? null}
                 root={root}
                 selectedPath={tab.path ?? null}
+                tabId={tab.id}
                 truncated={truncated}
+                onCompare={onChangedFile}
+                onDirtyChange={onDirtyTabChange}
                 onOpen={onOpenFile}
+                onSave={onSaveFile}
               />
             )}
             {tab.kind === "terminal" && (
@@ -2257,19 +2437,30 @@ function RightWorkspaceTabs({
           </button>
         </div>
       ))}
-      <details className="rightAddMenu">
-        <summary aria-label="Open right workspace tab" title="Open tab">
-          <Plus size={15} />
-        </summary>
-        <div>
-          {menuItems.map((item) => (
-            <button key={item.kind} onClick={() => onOpenKind(item.kind)} type="button">
-              {item.icon}
-              <span>{item.label}</span>
-            </button>
-          ))}
-        </div>
-      </details>
+      <DismissibleDetails
+        className="rightAddMenu"
+        summary={<Plus size={15} />}
+        summaryProps={{ "aria-label": "Open right workspace tab", title: "Open tab" }}
+      >
+        {({ close }) => (
+          <div role="menu" aria-label="Open right workspace tab">
+            {menuItems.map((item) => (
+              <button
+                key={item.kind}
+                onClick={() => {
+                  close();
+                  onOpenKind(item.kind);
+                }}
+                role="menuitem"
+                type="button"
+              >
+                {item.icon}
+                <span>{item.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </DismissibleDetails>
     </div>
   );
 }
@@ -2280,6 +2471,7 @@ function RightWorkspaceHome({
   files,
   sessionId,
   status,
+  usage,
   workdir,
   onChangedFile,
   onOpenKind,
@@ -2290,12 +2482,14 @@ function RightWorkspaceHome({
   files: WorkspaceDiffResult["files"];
   sessionId: string | null;
   status: string;
+  usage: SessionUsageSummaryView | null;
   workdir: string;
   onChangedFile(path: string): void;
   onOpenKind(kind: RightWorkspaceTabKind): void;
   onRefresh(): void;
 }) {
   const contextPercent = typeof context?.percent === "number" ? Math.round(context.percent) : 0;
+  const usageAvailable = Boolean(usage?.available);
   return (
     <section className="rightWorkspaceHome" aria-label="Workspace status">
       <header>
@@ -2308,13 +2502,13 @@ function RightWorkspaceHome({
         </button>
       </header>
       <div className="rightStatusMetrics">
+        <div className="is-session">
+          <span>Session</span>
+          <strong title={sessionId ?? undefined}>{sessionId ?? "draft"}</strong>
+        </div>
         <div>
           <span>Connection</span>
           <strong>{status}</strong>
-        </div>
-        <div>
-          <span>Session</span>
-          <strong>{sessionId ? shortSessionId(sessionId) : "draft"}</strong>
         </div>
         <div>
           <span>Activity</span>
@@ -2323,6 +2517,18 @@ function RightWorkspaceHome({
         <div>
           <span>Context</span>
           <strong>{context?.available ? `${contextPercent}%` : "none"}</strong>
+        </div>
+        <div>
+          <span>Tokens</span>
+          <strong>{usageAvailable ? formatCompactNumber(usage?.reportedTotalTokens ?? 0) : "none"}</strong>
+        </div>
+        <div>
+          <span>Cache</span>
+          <strong>{usageAvailable ? formatPercent(usage?.cacheReadPercent) : "none"}</strong>
+        </div>
+        <div>
+          <span>Cost</span>
+          <strong>{usageAvailable ? formatNanodollars(usage?.estimatedCostNanodollars ?? 0) : "none"}</strong>
         </div>
       </div>
       <nav className="rightHomeNav" aria-label="Open workspace tab">
@@ -2359,24 +2565,30 @@ function RightWorkspaceHome({
 function ReviewPanel({
   activity,
   changedFiles,
+  changes,
   context,
   diff,
   root,
   sessionId,
   status,
   workdir,
+  onAcceptChange,
   onChangedFile,
+  onRejectChange,
   onRefresh
 }: {
   activity: ReturnType<typeof normalizeActivity>;
   changedFiles: WorkspaceDiffResult["files"];
+  changes: WorkspaceChangesResult | null;
   context: ContextReadResult | null;
   diff: WorkspaceDiffResult | null;
   root: string;
   sessionId: string | null;
   status: string;
   workdir: string;
+  onAcceptChange(turnId: string, path: string): void;
   onChangedFile(path: string): void;
+  onRejectChange(turnId: string, path: string): void;
   onRefresh(): void;
 }) {
   const [filesOpen, setFilesOpen] = useState(false);
@@ -2414,6 +2626,12 @@ function ReviewPanel({
         <span>{activity.running ? "running" : "idle"}</span>
         <span>{context?.available ? `${contextPercent}% context` : "no context"}</span>
       </div>
+      <ReviewChanges
+        changes={changes}
+        onAcceptChange={onAcceptChange}
+        onChangedFile={onChangedFile}
+        onRejectChange={onRejectChange}
+      />
       <div className="reviewSplit">
         <div className="reviewDiffPane">
           <DiffPreview diff={diff} root={root} />
@@ -2432,6 +2650,67 @@ function ReviewPanel({
         )}
       </div>
     </section>
+  );
+}
+
+function ReviewChanges({
+  changes,
+  onAcceptChange,
+  onChangedFile,
+  onRejectChange
+}: {
+  changes: WorkspaceChangesResult | null;
+  onAcceptChange(turnId: string, path: string): void;
+  onChangedFile(path: string): void;
+  onRejectChange(turnId: string, path: string): void;
+}) {
+  const groups = changes?.groups ?? [];
+  if (groups.length === 0) {
+    return (
+      <div className="reviewChanges is-empty">
+        <p>No turn changes.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="reviewChanges" aria-label="Turn changes">
+      {groups.map((group) => (
+        <section className="reviewChangeGroup" key={group.turnId}>
+          <header>
+            <span>{shortSessionId(group.turnId)}</span>
+            <b>{group.files.length}</b>
+          </header>
+          {group.files.map((file) => (
+            <div className={`reviewChangeFile is-${file.reviewStatus}`} key={`${group.turnId}:${file.path}`}>
+              <button className="reviewChangePath" onClick={() => onChangedFile(file.path)} title={file.path} type="button">
+                <span>{file.path}</span>
+                <small>{file.status}</small>
+              </button>
+              <span className="reviewChangeState">{file.reviewStatus}</span>
+              <button
+                aria-label={`Accept ${file.path}`}
+                disabled={file.reviewStatus === "accepted"}
+                onClick={() => onAcceptChange(group.turnId, file.path)}
+                title="Accept"
+                type="button"
+              >
+                <Check size={13} />
+              </button>
+              <button
+                aria-label={`Reject ${file.path}`}
+                disabled={!file.canReject || file.reviewStatus === "rejected"}
+                onClick={() => onRejectChange(group.turnId, file.path)}
+                title={file.message ?? "Reject"}
+                type="button"
+              >
+                <RotateCcw size={13} />
+              </button>
+              {file.message && <em title={file.message}>{file.message}</em>}
+            </div>
+          ))}
+        </section>
+      ))}
+    </div>
   );
 }
 
@@ -2647,21 +2926,156 @@ function FilesPanel({
   previewMessage,
   root,
   selectedPath,
+  tabId,
   truncated,
-  onOpen
+  onCompare,
+  onDirtyChange,
+  onOpen,
+  onSave
 }: {
   files: WorkspaceFileEntry[];
   preview: WorkspaceFileReadResult | null;
   previewMessage: string | null;
   root: string;
   selectedPath: string | null;
+  tabId: string;
   truncated: boolean;
+  onCompare(path: string): void;
+  onDirtyChange(tabId: string, dirty: boolean): void;
   onOpen(path: string): void;
+  onSave(path: string, content: string, expectedRevision: string | null, force: boolean): Promise<WorkspaceFileWriteResult>;
 }) {
   const treeItems = useMemo(() => workspaceFileTreeItems(files), [files]);
   const previewPath = preview?.path ?? selectedPath ?? "";
   const previewLabel = previewPath ? absoluteWorkspacePath(root, previewPath) : "Preview";
   const previewContent = typeof preview?.content === "string" ? preview.content : null;
+  const editable = Boolean(previewContent !== null && preview && preview.editable !== false && !preview.binary && !preview.truncated);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [baseRevision, setBaseRevision] = useState<string | null>(null);
+  const [wrap, setWrap] = useState(true);
+  const [findText, setFindText] = useState("");
+  const [goLine, setGoLine] = useState("");
+  const [cursor, setCursor] = useState({ line: 1, column: 1 });
+  const [saving, setSaving] = useState(false);
+  const [editorError, setEditorError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const lineNumbersRef = useRef<HTMLPreElement | null>(null);
+  const dirty = editing && draft !== (previewContent ?? "");
+  const lineCount = Math.max(1, draft.split("\n").length);
+
+  useEffect(() => {
+    setEditing(false);
+    setDraft(previewContent ?? "");
+    setBaseRevision(preview?.revision ?? null);
+    setEditorError(null);
+    setConflict(null);
+    updateCursorFromText(previewContent ?? "", 0, setCursor);
+  }, [preview?.path, preview?.revision, previewContent]);
+
+  useEffect(() => {
+    onDirtyChange(tabId, dirty);
+  }, [dirty, onDirtyChange, tabId]);
+
+  function confirmDiscard(): boolean {
+    return !dirty || window.confirm("Discard unsaved file edits?");
+  }
+
+  function openTreePath(path: string) {
+    if (!confirmDiscard()) {
+      return;
+    }
+    setEditing(false);
+    onOpen(path);
+  }
+
+  function exitEditMode() {
+    if (!confirmDiscard()) {
+      return;
+    }
+    setEditing(false);
+    setDraft(previewContent ?? "");
+    setEditorError(null);
+    setConflict(null);
+  }
+
+  async function saveDraft(force = false) {
+    if (!previewPath || saving) {
+      return;
+    }
+    setSaving(true);
+    setEditorError(null);
+    setConflict(null);
+    try {
+      const result = await onSave(previewPath, draft, baseRevision, force);
+      setBaseRevision(result.revision);
+      setDraft(draft);
+      setEditing(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("changed on disk")) {
+        setConflict(message);
+      } else {
+        setEditorError(message);
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleTextareaKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      void saveDraft(false);
+      return;
+    }
+    if (event.key === "Tab") {
+      event.preventDefault();
+      const input = event.currentTarget;
+      const start = input.selectionStart;
+      const end = input.selectionEnd;
+      const next = `${draft.slice(0, start)}  ${draft.slice(end)}`;
+      setDraft(next);
+      requestAnimationFrame(() => {
+        input.selectionStart = start + 2;
+        input.selectionEnd = start + 2;
+        updateCursorFromText(next, start + 2, setCursor);
+      });
+    }
+  }
+
+  function findInDraft() {
+    if (!findText || !textareaRef.current) {
+      return;
+    }
+    const start = textareaRef.current.selectionEnd;
+    let index = draft.indexOf(findText, start);
+    if (index < 0) {
+      index = draft.indexOf(findText);
+    }
+    if (index >= 0) {
+      textareaRef.current.focus();
+      textareaRef.current.selectionStart = index;
+      textareaRef.current.selectionEnd = index + findText.length;
+      updateCursorFromText(draft, index, setCursor);
+    }
+  }
+
+  function jumpToLine() {
+    const line = Math.max(1, Number.parseInt(goLine, 10) || 1);
+    const lines = draft.split("\n");
+    let index = 0;
+    for (let i = 0; i < Math.min(line - 1, lines.length - 1); i += 1) {
+      index += (lines[i] ?? "").length + 1;
+    }
+    textareaRef.current?.focus();
+    if (textareaRef.current) {
+      textareaRef.current.selectionStart = index;
+      textareaRef.current.selectionEnd = index;
+    }
+    updateCursorFromText(draft, index, setCursor);
+  }
 
   return (
     <section className="filesPanel" aria-label="Workspace files">
@@ -2676,9 +3090,122 @@ function FilesPanel({
           <div className="rightSectionLabel filePreviewPath">
             <span>{previewLabel}</span>
             {preview?.truncated && <b>truncated</b>}
+            {dirty && <b>unsaved</b>}
+            {previewContent !== null && !editing && (
+              <button
+                aria-label={`Edit ${previewPath}`}
+                disabled={!editable}
+                onClick={() => {
+                  setDraft(previewContent);
+                  setBaseRevision(preview?.revision ?? null);
+                  setEditing(true);
+                  requestAnimationFrame(() => textareaRef.current?.focus());
+                }}
+                title={editable ? "Edit" : preview?.editableReason ?? "This file cannot be edited"}
+                type="button"
+              >
+                <Edit3 size={13} />
+              </button>
+            )}
           </div>
           {previewContent !== null ? (
-            isMarkdownFile(previewPath) ? (
+            editing ? (
+              <div className="fileEditor">
+                <div className="fileEditorToolbar">
+                  <label>
+                    <Search size={13} aria-hidden />
+                    <input
+                      aria-label="Find in file"
+                      onChange={(event) => setFindText(event.currentTarget.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          findInDraft();
+                        }
+                      }}
+                      placeholder="Find"
+                      type="search"
+                      value={findText}
+                    />
+                  </label>
+                  <button aria-label="Find next" onClick={findInDraft} title="Find next" type="button">
+                    <Search size={13} />
+                  </button>
+                  <label>
+                    <span>:</span>
+                    <input
+                      aria-label="Go to line"
+                      inputMode="numeric"
+                      onChange={(event) => setGoLine(event.currentTarget.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          jumpToLine();
+                        }
+                      }}
+                      placeholder="Line"
+                      value={goLine}
+                    />
+                  </label>
+                  <button aria-label="Go to line" onClick={jumpToLine} title="Go to line" type="button">
+                    <ChevronRight size={13} />
+                  </button>
+                  <button
+                    aria-label="Toggle word wrap"
+                    aria-pressed={wrap}
+                    onClick={() => setWrap((value) => !value)}
+                    title="Toggle word wrap"
+                    type="button"
+                  >
+                    <FileText size={13} />
+                  </button>
+                  <span>{cursor.line}:{cursor.column}</span>
+                  <button aria-label="Save file" disabled={!dirty || saving} onClick={() => void saveDraft(false)} title="Save" type="button">
+                    <Save size={13} />
+                  </button>
+                  <button aria-label="Exit edit mode" onClick={exitEditMode} title="Exit edit mode" type="button">
+                    <X size={13} />
+                  </button>
+                </div>
+                <div className={`fileEditorBody ${wrap ? "is-wrapped" : "is-unwrapped"}`}>
+                  <pre className="fileEditorLines" aria-hidden ref={lineNumbersRef}>
+                    {Array.from({ length: lineCount }, (_, index) => index + 1).join("\n")}
+                  </pre>
+                  <textarea
+                    ref={textareaRef}
+                    aria-label={`Edit ${previewPath}`}
+                    onChange={(event) => {
+                      setDraft(event.currentTarget.value);
+                      updateCursorFromText(event.currentTarget.value, event.currentTarget.selectionStart, setCursor);
+                    }}
+                    onClick={(event) => updateCursorFromText(draft, event.currentTarget.selectionStart, setCursor)}
+                    onKeyDown={handleTextareaKeyDown}
+                    onKeyUp={(event) => updateCursorFromText(draft, event.currentTarget.selectionStart, setCursor)}
+                    onScroll={(event) => {
+                      if (lineNumbersRef.current) {
+                        lineNumbersRef.current.scrollTop = event.currentTarget.scrollTop;
+                      }
+                    }}
+                    spellCheck={false}
+                    value={draft}
+                    wrap={wrap ? "soft" : "off"}
+                  />
+                </div>
+                {(editorError || conflict) && (
+                  <div className="fileEditorNotice">
+                    <AlertTriangle size={14} />
+                    <span>{conflict ?? editorError}</span>
+                    {conflict && (
+                      <>
+                        <button onClick={() => onCompare(previewPath)} type="button">Compare</button>
+                        <button onClick={() => openTreePath(previewPath)} type="button">Reload</button>
+                        <button onClick={() => void saveDraft(true)} type="button">Force</button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : isMarkdownFile(previewPath) ? (
               <div className="fileMarkdownPreview">
                 <MarkdownText text={previewContent} />
               </div>
@@ -2696,13 +3223,27 @@ function FilesPanel({
             filterPlaceholder="Filter files..."
             items={treeItems}
             selectedPath={selectedPath}
-            onOpen={onOpen}
+            onOpen={openTreePath}
           />
           {truncated && <footer>File tree truncated.</footer>}
         </aside>
       </div>
     </section>
   );
+}
+
+function updateCursorFromText(
+  text: string,
+  position: number,
+  setCursor: (cursor: { line: number; column: number }) => void
+) {
+  const bounded = Math.max(0, Math.min(position, text.length));
+  const before = text.slice(0, bounded);
+  const lines = before.split("\n");
+  setCursor({
+    line: lines.length,
+    column: (lines.at(-1)?.length ?? 0) + 1
+  });
 }
 
 function HighlightedCodePreview({ content, path }: { content: string; path: string }) {
@@ -3287,6 +3828,7 @@ function ClarifyComposerRequest({
 function ComposerSubmitControls({
   context,
   controls,
+  usage,
   model,
   variant,
   onContextClick,
@@ -3295,6 +3837,7 @@ function ComposerSubmitControls({
 }: {
   context: ContextReadResult | null;
   controls: SettingsReadResult["controls"];
+  usage: SessionUsageSummaryView | null;
   model: string | null;
   variant: string;
   onContextClick(): void;
@@ -3302,6 +3845,7 @@ function ComposerSubmitControls({
   onVariantChange(value: string): void;
 }) {
   const contextPercent = typeof context?.percent === "number" ? Math.max(0, Math.min(100, context.percent)) : 0;
+  const usageAvailable = Boolean(usage?.available);
   const [contextOpen, setContextOpen] = useState(false);
   const contextPopoverRef = useRef<HTMLDivElement | null>(null);
 
@@ -3334,7 +3878,7 @@ function ComposerSubmitControls({
         label="Model"
         value={model ?? ""}
         values={["", ...(controls?.modelOptions ?? [])]}
-        renderValue={compactModelLabel}
+        renderDisplayValue={compactModelLabel}
         onChange={(value) => onModelChange(value || null)}
       />
       <StatusSelect label="Variant" value={variant} values={controls?.variantOptions ?? ["none"]} onChange={onVariantChange} />
@@ -3363,6 +3907,26 @@ function ComposerSubmitControls({
                 <small>{context?.status ?? "unavailable"}</small>
               </div>
             </div>
+            {usageAvailable && (
+              <div className="composerContextUsageGrid">
+                <div>
+                  <span>Session tokens</span>
+                  <strong>{formatCompactNumber(usage?.reportedTotalTokens ?? 0)}</strong>
+                </div>
+                <div>
+                  <span>Cache read</span>
+                  <strong>{formatPercent(usage?.cacheReadPercent)}</strong>
+                </div>
+                <div>
+                  <span>Cost</span>
+                  <strong>{formatNanodollars(usage?.estimatedCostNanodollars ?? 0)}</strong>
+                </div>
+                <div>
+                  <span>Reasoning</span>
+                  <strong>{formatCompactNumber(usage?.reasoningTokens ?? 0)}</strong>
+                </div>
+              </div>
+            )}
             {context?.categories?.length ? (
               <div className="composerContextBars">
                 {context.categories.slice(0, 5).map((category) => (
@@ -3422,22 +3986,30 @@ function ComposerStatusLine({
 
 function StatusSelect({
   label,
-  renderValue,
+  renderDisplayValue,
   value,
   values,
   onChange
 }: {
   label: string;
-  renderValue?(value: string): string;
+  renderDisplayValue?(value: string): string;
   value: string;
   values: string[];
   onChange(value: string): void;
 }) {
+  const displayValue = renderDisplayValue?.(value);
+  const valueWidth = displayValue ? `${Math.max(5, displayValue.length + 1)}ch` : undefined;
   return (
-    <label className="statusSelect" data-status={label.toLowerCase().replace(/\s+/g, "-")} title={label}>
+    <label
+      className={`statusSelect ${displayValue ? "has-displayValue" : ""}`}
+      data-status={label.toLowerCase().replace(/\s+/g, "-")}
+      style={valueWidth ? { "--pevo-status-select-value-width": valueWidth } as CSSProperties : undefined}
+      title={label}
+    >
+      {displayValue && <span aria-hidden="true" className="statusSelectDisplay">{displayValue}</span>}
       <select aria-label={label} title={value || label} value={value} onChange={(event) => onChange(event.target.value)}>
         {values.map((option) => (
-          <option key={option || "default"} value={option}>{renderValue?.(option) ?? defaultStatusSelectValue(label, option)}</option>
+          <option key={option || "default"} value={option}>{defaultStatusSelectValue(label, option)}</option>
         ))}
       </select>
     </label>
@@ -3459,6 +4031,30 @@ function compactModelLabel(value: string): string {
   const slash = trimmed.lastIndexOf("/");
   const label = slash >= 0 ? trimmed.slice(slash + 1).trim() : trimmed;
   return label || trimmed;
+}
+
+function formatCompactNumber(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "0";
+  }
+  if (value >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(1)}M`;
+  }
+  if (value >= 1_000) {
+    return `${(value / 1_000).toFixed(1)}k`;
+  }
+  return `${Math.max(0, Math.round(value))}`;
+}
+
+function formatPercent(value: number | null | undefined): string {
+  return typeof value === "number" && Number.isFinite(value) ? `${Math.round(value)}%` : "none";
+}
+
+function formatNanodollars(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "$0.000000";
+  }
+  return `$${(value / 1_000_000_000).toFixed(6)}`;
 }
 
 function startupDraftScope(launchScope: GatewayRequestScope, sessions: SessionSummary[]): GatewayRequestScope {

@@ -333,6 +333,7 @@
 }
 
 .pevo-sessionRow:hover .pevo-sessionMenu,
+.pevo-sessionRow.is-active .pevo-sessionMenu,
 .pevo-sessionRow:has(:focus-visible) .pevo-sessionMenu,
 .pevo-sessionMenu[open] {
   opacity: 1;

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { HistoryPanel, StatusPanel, TranscriptPanel } from "@psychevo/components";
@@ -89,6 +89,84 @@ describe("component fallback rendering", () => {
     expect(html).toContain("title=\"Unpin\"");
     expect(html).toContain("title=\"Pin\"");
     expect(html).not.toContain("pevo-sessionActions");
+  });
+
+  it("closes the session actions menu on outside click", async () => {
+    const { container } = render(
+      <HistoryPanel
+        archived={false}
+        sessions={[sessionSummary({ id: "thread-1", title: "Menu session" })]}
+        onArchive={noop}
+        onDelete={noop}
+        onExport={noop}
+        onNew={noop}
+        onRename={noop}
+        onRestore={noop}
+        onResume={noop}
+        onShare={noop}
+      />
+    );
+    const menu = container.querySelector(".pevo-sessionMenu") as HTMLDetailsElement | null;
+    const trigger = container.querySelector(".pevo-sessionMenu summary") as HTMLElement | null;
+
+    fireEvent.click(trigger!);
+    await waitFor(() => expect(menu?.open).toBe(true));
+    fireEvent.mouseDown(document.body);
+
+    await waitFor(() => expect(menu?.open).toBe(false));
+  });
+
+  it("closes the session actions menu on Escape and restores trigger focus", async () => {
+    const { container } = render(
+      <HistoryPanel
+        archived={false}
+        sessions={[sessionSummary({ id: "thread-1", title: "Escape session" })]}
+        onArchive={noop}
+        onDelete={noop}
+        onExport={noop}
+        onNew={noop}
+        onRename={noop}
+        onRestore={noop}
+        onResume={noop}
+        onShare={noop}
+      />
+    );
+    const trigger = container.querySelector(".pevo-sessionMenu summary") as HTMLElement | null;
+    const menu = container.querySelector(".pevo-sessionMenu") as HTMLDetailsElement | null;
+
+    fireEvent.click(trigger!);
+    await waitFor(() => expect(menu?.open).toBe(true));
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => expect(menu?.open).toBe(false));
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
+  it("closes the session actions menu after an enabled menu item fires", async () => {
+    const onExport = vi.fn();
+    const { container } = render(
+      <HistoryPanel
+        archived={false}
+        sessions={[sessionSummary({ id: "thread-1", title: "Export session" })]}
+        onArchive={noop}
+        onDelete={noop}
+        onExport={onExport}
+        onNew={noop}
+        onRename={noop}
+        onRestore={noop}
+        onResume={noop}
+        onShare={noop}
+      />
+    );
+    const menu = container.querySelector(".pevo-sessionMenu") as HTMLDetailsElement | null;
+    const trigger = container.querySelector(".pevo-sessionMenu summary") as HTMLElement | null;
+
+    fireEvent.click(trigger!);
+    await waitFor(() => expect(menu?.open).toBe(true));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Export" }));
+
+    expect(onExport).toHaveBeenCalledWith("thread-1");
+    await waitFor(() => expect(menu?.open).toBe(false));
   });
 
   it("renders workspace creation as a sessions header action", () => {
