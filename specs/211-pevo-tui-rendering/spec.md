@@ -104,6 +104,18 @@ rows. Empty input uses one visible row. Non-empty input grows from explicit
 logical lines and terminal soft-wrapped rows, and remains capped at six visible
 rows before the textarea scrolls internally.
 
+Session observability in the bottom status line is compact and must degrade
+without overlap at narrow widths. Context usage is the first observability
+segment because it describes the immediate context-window risk. Cache-read
+percent, session token total, and estimated cost may follow when enough width is
+available. If the full sequence does not fit, the renderer drops later
+observability segments before dropping the context usage segment.
+
+The `/usage` panel may render richer current-session usage details above
+workdir totals. These details are metric rows derived from persisted
+accounting, not transcript entries, and must not display prompt bodies,
+message text, tool arguments, or provider request payloads.
+
 ## Scope
 
 - alternate-screen lifecycle and fullscreen viewport layout
@@ -114,7 +126,8 @@ rows before the textarea scrolls internally.
 - typed Gateway transcript entries into live ledger rows and shared transcript
   history entries into history rows
 - fixed composer/status-line rendering, including context usage, path/branch
-  display, running elapsed projection, and child-session status-line behavior
+  display, session usage/cache/cost observability, running elapsed projection,
+  and child-session status-line behavior
 - active editable-surface terminal cursor anchoring for IME candidate windows
   in fullscreen terminals
 - bounded passive redraw cadence for running-state motion, while preserving

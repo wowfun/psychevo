@@ -460,6 +460,7 @@ pub(crate) fn acp_command_capabilities()
         CommandCapability::ActiveTurnControl,
         CommandCapability::Queue,
         CommandCapability::SessionSwitch,
+        CommandCapability::SessionRevert,
         CommandCapability::ArtifactWrite,
         CommandCapability::WorkspaceDiff,
         CommandCapability::ConfigWrite,
@@ -1271,6 +1272,44 @@ mod tests {
         )
         .expect("slash effect");
         assert_eq!(effect, SlashCommandEffect::Diff);
+    }
+
+    #[test]
+    fn acp_advertises_undo_redo_when_idle() {
+        let available = available_slash_commands_for_surface(
+            acp_command_capabilities(),
+            false,
+            &[],
+            ACP_COMMAND_ADVERTISEMENT_LIMIT,
+        );
+        let names = available
+            .commands
+            .iter()
+            .map(|command| command.name.as_str())
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"undo"), "{names:?}");
+        assert!(names.contains(&"redo"), "{names:?}");
+
+        let SlashCommandParse::Known(undo) = parse_slash_command_line("/undo") else {
+            panic!("expected /undo to parse");
+        };
+        let effect = slash_invocation_effect(
+            &undo,
+            acp_command_capabilities(),
+            SlashCommandSurface::Acp,
+            false,
+        )
+        .expect("undo effect");
+        assert_eq!(effect, SlashCommandEffect::Undo);
+
+        let active = available_slash_commands_for_surface(
+            acp_command_capabilities(),
+            true,
+            &[],
+            ACP_COMMAND_ADVERTISEMENT_LIMIT,
+        );
+        assert!(!active.commands.iter().any(|command| command.name == "undo"));
+        assert!(!active.commands.iter().any(|command| command.name == "redo"));
     }
 
     #[test]

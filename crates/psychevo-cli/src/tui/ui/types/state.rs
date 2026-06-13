@@ -360,6 +360,7 @@ pub(crate) struct FullscreenUi<'a> {
     pub(crate) sidebar_context_limit: Option<u64>,
     pub(crate) last_context_snapshot: Option<ContextSnapshot>,
     pub(crate) sidebar_cost_nanodollars: Option<i64>,
+    pub(crate) session_usage_summary: Option<SessionUsageSummary>,
     pub(crate) history: Vec<String>,
     pub(crate) history_kinds: Vec<ComposerHistoryKind>,
     pub(crate) history_index: Option<usize>,

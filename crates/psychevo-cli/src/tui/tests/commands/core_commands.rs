@@ -502,11 +502,12 @@ pub(crate) async fn fullscreen_usage_command_opens_bottom_panel() {
 #[test]
 pub(crate) fn usage_panel_groups_persisted_stats_rows() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(&app.workdir, "tui", "model", "mock", None)
         .expect("session");
+    app.current_session = Some(session_id.clone());
     store
         .set_session_title(&session_id, "Usage session")
         .expect("title");
@@ -520,26 +521,65 @@ pub(crate) fn usage_panel_groups_persisted_stats_rows() {
             cache_read_tokens, cache_write_tokens, reported_total_tokens,
             estimated_cost_nanodollars, pricing_source
         ) VALUES (
-            ?1, 1, 'assistant', 1, '{"role":"assistant","content":[]}',
+            ?1, 1, 'assistant', 1, ?2,
             'done', 'model', 'mock', 321, 200, 80, 21, 20, 7, 321, NULL, NULL
         )
         "#,
-        rusqlite::params![&session_id],
+        rusqlite::params![
+            &session_id,
+            serde_json::json!({
+                "role": "assistant",
+                "content": [],
+                "timestamp_ms": 1,
+                "finish_reason": "stop",
+                "outcome": "normal",
+                "model": "model",
+                "provider": "mock"
+            })
+            .to_string()
+        ],
     )
     .expect("assistant message");
     conn.execute(
         r#"
         INSERT INTO messages (
             session_id, session_seq, role, timestamp_ms, message_json, tool_name
-        ) VALUES (?1, 2, 'tool_result', 2, '{"role":"tool_result"}', 'exec_command')
+        ) VALUES (?1, 2, 'tool_result', 2, ?2, 'exec_command')
         "#,
-        rusqlite::params![&session_id],
+        rusqlite::params![
+            &session_id,
+            serde_json::json!({
+                "role": "tool_result",
+                "tool_call_id": "call_1",
+                "tool_name": "exec_command",
+                "content": "ok",
+                "is_error": false,
+                "timestamp_ms": 2
+            })
+            .to_string()
+        ],
     )
     .expect("tool result");
 
     let panel = app.stats_panel().expect("usage panel");
 
     assert_eq!(panel.title, "Usage");
+    assert!(panel.rows.iter().any(|row| {
+        row.group.as_deref() == Some("Current session")
+            && row.label == "Current session"
+            && row
+                .detail
+                .as_deref()
+                .is_some_and(|text| text.contains("321 tokens"))
+    }));
+    assert!(panel.rows.iter().any(|row| {
+        row.group.as_deref() == Some("Current session")
+            && row.label == "Session cache and cost"
+            && row
+                .description
+                .as_deref()
+                .is_some_and(|text| text.contains("20 cache read"))
+    }));
     assert!(panel.rows.iter().any(|row| {
         row.label == "Cache and reasoning"
             && row

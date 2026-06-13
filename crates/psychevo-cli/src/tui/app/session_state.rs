@@ -630,6 +630,7 @@ impl TuiApp {
         let Some(session_id) = self.current_session.clone() else {
             ui.loaded_session_message_count = 0;
             ui.visible_turn_started = None;
+            ui.session_usage_summary = None;
             ui.replace_session_history_prompts(Vec::new());
             ui.refresh_sidebar(self);
             return Ok(());
@@ -644,6 +645,10 @@ impl TuiApp {
             .state_runtime
             .store()
             .load_tui_message_summaries(&session_id)?;
+        ui.session_usage_summary = Some(session_usage_summary(SessionUsageOptions {
+            state: self.state_runtime.clone(),
+            session_id: session_id.clone(),
+        })?);
         ui.loaded_session_message_count = summaries.len();
         let summary_count = summaries.len();
         let suppress_latest_terminal_meta = ui.status_has_running(Some(&session_id));

@@ -671,11 +671,17 @@ pub(crate) fn bottom_status_context_for_width(
     let full_workdir = directory_display_value(&app.workdir, home.as_deref());
     let branch = bottom_status_branch(&ui.sidebar.branch);
     let context = bottom_status_context_usage(ui);
+    let usage_segments = bottom_status_session_usage_segments(ui);
+    let usage_refs = usage_segments
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
     let agent_hint = app.agent_breadcrumb_status();
     let profile = bottom_status_profile(app);
 
     if let Some(context) = context.as_deref() {
         let mut segments = vec![context];
+        segments.extend(usage_refs.iter().copied());
         if let Some(profile) = profile.as_deref() {
             segments.push(profile);
         }
@@ -692,6 +698,24 @@ pub(crate) fn bottom_status_context_for_width(
     }
 
     if let Some(context) = context.as_deref() {
+        for keep_usage in (1..=usage_refs.len()).rev() {
+            let mut segments = vec![context];
+            segments.extend(usage_refs.iter().take(keep_usage).copied());
+            if let Some(profile) = profile.as_deref() {
+                segments.push(profile);
+            }
+            segments.push(full_workdir.as_str());
+            if let Some(value) = joined_segments_if_fits(&segments, available_width) {
+                return Some(value);
+            }
+        }
+        for keep_usage in (1..=usage_refs.len()).rev() {
+            let mut segments = vec![context];
+            segments.extend(usage_refs.iter().take(keep_usage).copied());
+            if let Some(value) = joined_segments_if_fits(&segments, available_width) {
+                return Some(value);
+            }
+        }
         if let Some(profile) = profile.as_deref()
             && let Some(value) =
                 joined_segments_if_fits(&[context, profile, full_workdir.as_str()], available_width)
@@ -812,6 +836,43 @@ pub(crate) fn bottom_status_context_usage(ui: &FullscreenUi<'_>) -> Option<Strin
         Some(limit),
         Some(percent),
     ))
+}
+
+pub(crate) fn bottom_status_session_usage_segments(ui: &FullscreenUi<'_>) -> Vec<String> {
+    let Some(summary) = ui.session_usage_summary.as_ref() else {
+        return Vec::new();
+    };
+    let mut segments = Vec::new();
+    if let Some(percent) = summary.cache_read_percent {
+        segments.push(format!("cache {:.0}%", percent));
+    }
+    if summary.reported_total_tokens > 0 {
+        segments.push(format!(
+            "tok {}",
+            format_status_compact_count(summary.reported_total_tokens)
+        ));
+    }
+    if summary.estimated_cost_nanodollars > 0 {
+        segments.push(format!(
+            "cost {}",
+            format_status_nanodollars(summary.estimated_cost_nanodollars)
+        ));
+    }
+    segments
+}
+
+fn format_status_compact_count(value: u64) -> String {
+    if value >= 1_000_000 {
+        format!("{:.1}M", value as f64 / 1_000_000.0)
+    } else if value >= 1_000 {
+        format!("{:.1}k", value as f64 / 1_000.0)
+    } else {
+        value.to_string()
+    }
+}
+
+fn format_status_nanodollars(value: i64) -> String {
+    format!("${:.6}", value as f64 / 1_000_000_000.0)
 }
 
 pub(crate) fn joined_segments_if_fits(segments: &[&str], available_width: usize) -> Option<String> {

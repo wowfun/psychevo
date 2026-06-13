@@ -25,7 +25,7 @@ stdin/stdout, it keeps the deterministic line-by-line scripted behavior.
 - history-only reload treatment for unfinished tool calls, including
   process-restart orphan rows that must not animate as live work
 - model, variant, mode, thinking visibility, raw transcript visibility, local
-  stats, context-usage, and status state surfaces
+  stats, context-usage, session observability, and status state surfaces
 - explicit scoped default-model writes from the model picker
 - responsive foreground interruption and preservation of every visible
   assistant answer emitted during a multi-tool turn
@@ -134,6 +134,25 @@ The TUI slash parser remains local UI behavior, but slash command effects must
 map to typed Gateway/runtime APIs. TUI must not add a generic `slash/exec`
 Gateway method and must not shell out to `pevo run` for normal prompting or
 control.
+
+## Session Observability
+
+TUI status and usage surfaces consume the shared runtime session observability
+projection defined by [006 Context Assembly](../006-context-assembly/spec.md).
+The projection is display-only: it never becomes a transcript row, copied
+history, prompt text, or model-visible context.
+
+When `load_current_session_history` rebuilds a resumed session, it restores the
+session-level usage/cache/cost summary from persisted visible message
+accounting and keeps the latest context-window estimate separate. The bottom
+status line renders a compact, width-aware sequence with context first, then
+cache-read percent, session tokens, and cost only when space permits.
+
+`/usage` shows a current-session summary above the existing workdir/global
+stats. The session summary must respect the same session and revert visibility
+boundaries as history reload, treat missing accounting as unknown/zero display
+data, and avoid rendering raw prompt, message, tool argument, or provider
+request text.
 
 ## Attachments
 

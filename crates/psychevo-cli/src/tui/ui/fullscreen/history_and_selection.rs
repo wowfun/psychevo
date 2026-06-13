@@ -86,6 +86,7 @@ impl<'a> FullscreenUi<'a> {
             sidebar_context_limit: None,
             last_context_snapshot: app.last_context_snapshot.clone(),
             sidebar_cost_nanodollars: None,
+            session_usage_summary: None,
             history: Vec::new(),
             history_kinds: Vec::new(),
             history_index: None,
@@ -223,6 +224,7 @@ impl<'a> FullscreenUi<'a> {
         self.sidebar_context_limit = None;
         self.last_context_snapshot = None;
         self.sidebar_cost_nanodollars = None;
+        self.session_usage_summary = None;
         self.history_prompt_started_ms = None;
         self.visible_turn_started = None;
         self.loaded_session_message_count = 0;

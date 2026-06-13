@@ -294,6 +294,37 @@ pub(crate) fn last_context_input_token_count_uses_input_tokens_when_later_usage_
 }
 
 #[test]
+pub(crate) fn bottom_status_session_observability_degrades_with_width() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.sidebar_tokens = Some(900);
+    ui.sidebar_context_limit = Some(1_000);
+    ui.session_usage_summary = Some(SessionUsageSummary {
+        session_id: "session".to_string(),
+        provider: "mock".to_string(),
+        model: "mock-model".to_string(),
+        message_count: 1,
+        assistant_message_count: 1,
+        context_input_tokens: 2_000,
+        billable_input_tokens: 1_000,
+        billable_output_tokens: 500,
+        reasoning_tokens: 0,
+        cache_read_tokens: 1_000,
+        cache_write_tokens: 0,
+        reported_total_tokens: 2_500,
+        estimated_cost_nanodollars: 10_000_000,
+        unknown_pricing_count: 0,
+        cache_read_percent: Some(50.0),
+    });
+
+    let medium = bottom_status_context_for_width(&app, &ui, 32).expect("medium status");
+    assert_eq!(medium, "900/1.0k (90.0%) · cache 50%");
+    let narrow = bottom_status_context_for_width(&app, &ui, 20).expect("narrow status");
+    assert_eq!(narrow, "900/1.0k (90.0%)");
+}
+
+#[test]
 pub(crate) fn last_context_input_token_count_ignores_total_tokens_without_input_tokens() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);

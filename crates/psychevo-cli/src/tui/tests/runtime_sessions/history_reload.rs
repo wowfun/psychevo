@@ -392,8 +392,14 @@ pub(crate) fn fullscreen_loads_current_session_history() {
         r#"
             INSERT INTO messages (
                 session_id, session_seq, role, timestamp_ms, message_json, content_text,
-                usage_json, metadata_json
-            ) VALUES (?1, 2, 'assistant', 2500, ?2, 'hi', ?3, ?4)
+                usage_json, metadata_json, context_input_tokens, billable_input_tokens,
+                billable_output_tokens, reasoning_tokens, cache_read_tokens,
+                cache_write_tokens, reported_total_tokens, estimated_cost_nanodollars,
+                pricing_source
+            ) VALUES (
+                ?1, 2, 'assistant', 2500, ?2, 'hi', ?3, ?4,
+                9, 7, 3, 1, 2, 1, 12, 10000000, 'test'
+            )
             "#,
         rusqlite::params![
             &session_id,
@@ -462,8 +468,18 @@ pub(crate) fn fullscreen_loads_current_session_history() {
     );
     assert_eq!(ui.sidebar_tokens, Some(9));
     assert_eq!(ui.sidebar_context_limit, Some(64_000));
+    let summary = ui
+        .session_usage_summary
+        .as_ref()
+        .expect("session usage summary");
+    assert_eq!(summary.reported_total_tokens, 12);
+    assert_eq!(summary.cache_read_tokens, 2);
+    assert_eq!(summary.estimated_cost_nanodollars, 10_000_000);
     let status = bottom_status_context_for_width(&app, &ui, 80).expect("status context");
-    assert_eq!(status, "9/64.0k (0.0%) · ~/work");
+    assert_eq!(
+        status,
+        "9/64.0k (0.0%) · cache 22% · tok 12 · cost $0.010000 · ~/work"
+    );
     assert_eq!(ui.history, ["hello", "follow-up"]);
     ui.textarea = textarea_with_text("draft");
     ui.recall_history(-1);
@@ -563,6 +579,23 @@ pub(crate) async fn fullscreen_new_command_clears_context_usage_state() {
     ui.sidebar_tokens = Some(9);
     ui.sidebar_context_limit = Some(64_000);
     ui.last_context_snapshot = Some(test_context_snapshot());
+    ui.session_usage_summary = Some(SessionUsageSummary {
+        session_id: "session".to_string(),
+        provider: "mock".to_string(),
+        model: "mock-model".to_string(),
+        message_count: 1,
+        assistant_message_count: 1,
+        context_input_tokens: 9,
+        billable_input_tokens: 7,
+        billable_output_tokens: 2,
+        reasoning_tokens: 0,
+        cache_read_tokens: 2,
+        cache_write_tokens: 0,
+        reported_total_tokens: 11,
+        estimated_cost_nanodollars: 10_000_000,
+        unknown_pricing_count: 0,
+        cache_read_percent: Some(22.0),
+    });
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::New)
         .await
@@ -571,6 +604,7 @@ pub(crate) async fn fullscreen_new_command_clears_context_usage_state() {
     assert_eq!(ui.sidebar_tokens, None);
     assert_eq!(ui.sidebar_context_limit, None);
     assert_eq!(ui.last_context_snapshot, None);
+    assert_eq!(ui.session_usage_summary, None);
     let status = bottom_status_context_for_width(&app, &ui, 80).expect("status context");
     assert_eq!(status, "~/work");
 }

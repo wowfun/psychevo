@@ -284,7 +284,58 @@ impl TuiApp {
             limit: 8,
         })?;
         let totals = report.get("totals").unwrap_or(&Value::Null);
-        let mut rows = vec![
+        let mut rows = Vec::new();
+        if let Some(session_id) = self.current_session.as_ref() {
+            let summary = match session_usage_summary(SessionUsageOptions {
+                state: self.state_runtime.clone(),
+                session_id: session_id.clone(),
+            }) {
+                Ok(summary) => Some(summary),
+                Err(error) if is_missing_session_usage_error(&error, session_id) => None,
+                Err(error) => return Err(error.into()),
+            };
+            if let Some(summary) = summary {
+                rows.push(stats_row(
+                    "session-current",
+                    "Current session",
+                    format!(
+                        "{} messages  {} assistant",
+                        summary.message_count, summary.assistant_message_count
+                    ),
+                    Some(format!(
+                        "{} tokens  {}",
+                        summary.reported_total_tokens,
+                        format_nanodollars(summary.estimated_cost_nanodollars)
+                    )),
+                    Some("Current session".to_string()),
+                ));
+                rows.push(stats_row(
+                    "session-breakdown",
+                    "Session token breakdown",
+                    format!(
+                        "{} input  {} output  {} context",
+                        summary.billable_input_tokens,
+                        summary.billable_output_tokens,
+                        summary.context_input_tokens
+                    ),
+                    Some(format!("{} reasoning", summary.reasoning_tokens)),
+                    Some("Current session".to_string()),
+                ));
+                rows.push(stats_row(
+                    "session-cache",
+                    "Session cache and cost",
+                    format!(
+                        "{} cache read  {} cache write  {} hit",
+                        summary.cache_read_tokens,
+                        summary.cache_write_tokens,
+                        format_cache_read_percent(summary.cache_read_percent)
+                    ),
+                    Some(format!("{} unknown pricing", summary.unknown_pricing_count)),
+                    Some("Current session".to_string()),
+                ));
+            }
+        }
+        rows.extend([
             stats_row(
                 "totals",
                 "Totals",
@@ -327,7 +378,7 @@ impl TuiApp {
                 None,
                 None,
             ),
-        ];
+        ]);
         let unknown_priced_messages = json_i64(totals, "unknown_priced_messages");
         if unknown_priced_messages > 0 {
             rows.push(stats_row(
@@ -872,4 +923,18 @@ impl TuiApp {
         }
         Ok(models.iter().map(format_configured_model).collect())
     }
+}
+
+fn is_missing_session_usage_error(error: &psychevo_runtime::Error, session_id: &str) -> bool {
+    matches!(
+        error,
+        psychevo_runtime::Error::Message(message)
+            if message == &format!("session not found: {session_id}")
+    )
+}
+
+fn format_cache_read_percent(value: Option<f64>) -> String {
+    value
+        .map(|percent| format!("{percent:.0}%"))
+        .unwrap_or_else(|| "-".to_string())
 }
