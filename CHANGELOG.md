@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-06-14
+
+- Expanded ACP interoperability across Gateway, Workbench, and `pevo acp`:
+  standard `session/update` streams, v2/v1 negotiation, model/effort config,
+  Thinking/tool/plan/usage events, live transcript pacing, Status usage, and
+  deterministic plus opt-in live Playwright coverage.
+- Reworked Workbench into an app-level Settings and Status experience with
+  embedded Profile ACP backend editing, optional backend metadata/CWD help,
+  command JSON editing, stale Status guards, no Artifacts surface, and no GUI
+  `/agents` overlay.
+- Added typed agent/backend/status Gateway RPCs, protocol schemas, and
+  Workbench/client wiring for configurable agents and ACP backends.
+- Realigned foundation specs around storage, environment, permissions, sandbox,
+  and design-system numbering, including related spec links.
+- Fixed `peval-py serve` path handling and report duration heat.
+
 ## 2026-06-12
 
 - Reworked Workbench GUI and interaction flow around hidden launch drafts,
@@ -415,7 +431,7 @@
   full runtime metadata for diagnostics, TUI, and exports.
 - Removed external reference-project names from user-visible TUI interaction
   specs.
-- Promoted runtime permissions to foundation `035-permissions`, archived the
+- Promoted runtime permissions to foundation `041-permissions`, archived the
   superseded `130-permissions` topic, and cleaned up active spec links.
 - Completed the design-system spec's required scope and related-topic sections.
 
@@ -566,7 +582,7 @@
 
 ### Added
 
-- Added the 080 Design System spec for `pevo tui`.
+- Added the 075 Design System spec for `pevo tui`.
 
 ### Changed
 
