@@ -110,6 +110,62 @@ export type CommandExecuteParams = { scope: GatewayRequestScope, threadId: strin
 
 export type CommandExecuteResult = { accepted: boolean, command: string, known: boolean | null, presentationKind: string | null, feedbackAnchor: string | null, alternateAction: CommandAlternateAction | null, message: string | null, action: unknown | null, };
 
+export type AgentListParams = { scope: GatewayRequestScope | null, };
+
+export type AgentReadParams = { name: string, scope: GatewayRequestScope | null, };
+
+export type AgentBackendRefInput = { ref: string, };
+
+export type AgentWriteParams = { name: string, description: string, instructions: string, backend: AgentBackendRefInput | null, entrypoints: Array<string>, tools: Array<string>, mcpServers: Array<string>, scope: GatewayRequestScope | null, };
+
+export type AgentDeleteParams = { name: string, scope: GatewayRequestScope | null, };
+
+export type AgentStatusParams = { scope: GatewayRequestScope | null, threadId: string | null, all: boolean | null, };
+
+export type AgentBackendRefView = { ref: string, };
+
+export type AgentDiagnosticView = { kind: string, message: string, path: string | null, };
+
+export type AgentDefinitionView = { name: string, description: string, source: string, generated: boolean, path: string | null, backend: AgentBackendRefView | null, entrypoints: Array<string>, diagnostics: Array<AgentDiagnosticView>, };
+
+export type AgentRunView = { id: string, taskName: string | null, agentName: string, task: string, parentSessionId: string, childSessionId: string | null, role: string, background: boolean, status: string, edgeStatus: string | null, startedAtMs: number, endedAtMs: number | null, outcome: string | null, finalAnswer: string | null, error: string | null, effectiveMaxSpawnDepth: number | null, };
+
+export type AgentStatusControlView = { spawningPaused: boolean, maxSpawnDepthCap: number, concurrencyCap: number | null, };
+
+export type AgentListResult = { agents: Array<AgentDefinitionView>, shadowedAgents: Array<AgentDefinitionView>, diagnostics: Array<AgentDiagnosticView>, };
+
+export type AgentReadResult = { agent: AgentDefinitionView, instructions: string, };
+
+export type AgentWriteResult = { written: boolean, name: string, path: string, };
+
+export type AgentDeleteResult = { deleted: boolean, name: string, path: string, };
+
+export type AgentStatusResult = { agents: Array<AgentRunView>, control: AgentStatusControlView, };
+
+export type BackendConfigTarget = "project" | "profile";
+
+export type BackendListParams = { scope: GatewayRequestScope | null, };
+
+export type BackendDoctorParams = { id: string, scope: GatewayRequestScope | null, };
+
+export type BackendWriteParams = { id: string, target: BackendConfigTarget, enabled: boolean | null, label: string | null, description: string | null, command: string | null, args: Array<string>, env: { [key in string]?: string }, cwd: string | null, entrypoints: Array<string>, clientCapabilities: Array<string>, mcpServers: Array<string>, scope: GatewayRequestScope | null, };
+
+export type BackendDeleteParams = { id: string, target: BackendConfigTarget, scope: GatewayRequestScope | null, };
+
+export type BackendConfigView = { id: string, kind: string, enabled: boolean, label: string, description: string | null, command: string | null, args: Array<string>, cwd: string, entrypoints: Array<string>, clientCapabilities: Array<string>, mcpServers: Array<string>, envKeys: Array<string>, sourceTargets: Array<BackendConfigTarget>, diagnostics: Array<BackendDiagnosticView>, };
+
+export type BackendListResult = { backends: Array<BackendConfigView>, };
+
+export type BackendDiagnosticView = { kind: string, message: string, };
+
+export type BackendDoctorCheck = { name: string, ok: boolean, message: string, path: string | null, };
+
+export type BackendDoctorResult = { id: string, kind: string, ok: boolean, checks: Array<BackendDoctorCheck>, };
+
+export type BackendWriteResult = { written: boolean, changed: boolean, path: string, target: BackendConfigTarget, backend: BackendConfigView, };
+
+export type BackendDeleteResult = { deleted: boolean, changed: boolean, id: string, path: string, target: BackendConfigTarget, };
+
 export type ShellStartParams = { scope: GatewayRequestScope, threadId: string | null, command: string, };
 
 export type ShellStartResult = { accepted: boolean, threadId: string | null, message: string | null, };
@@ -214,7 +270,7 @@ export type WorkspaceChangeMutationResult = { accepted: boolean, changes: Worksp
 
 export type ContextReadParams = { scope: GatewayRequestScope, threadId: string | null, };
 
-export type ContextUsageCategoryView = { id: string, label: string, tokens: number, estimated: boolean, status: string, percent: number | null, };
+export type ContextUsageCategoryView = { id: string, label: string, tokens: number, estimated: boolean, status: string, percent: number | null, details: unknown | null, };
 
 export type ContextReadResult = { available: boolean, label: string, status: string, usedTokens: number, contextLimit: number | null, percent: number | null, categories: Array<ContextUsageCategoryView>, advice: Array<string>, };
 
@@ -244,7 +300,7 @@ export type JsonRpcErrorResponse = { jsonrpc: string, id: JsonRpcId, error: Json
 
 export type JsonRpcError = { code: number, message: string, data: unknown | null, };
 
-export type ClientRequest = { "method": "initialize", "params": InitializeParams } | { "method": "thread/start", "params": ThreadStartParams } | { "method": "thread/resume", "params": ThreadResumeParams } | { "method": "thread/read", "params": ThreadReadParams } | { "method": "thread/trace", "params": ThreadTraceParams } | { "method": "thread/list", "params": ThreadListParams } | { "method": "thread/rename", "params": ThreadRenameParams } | { "method": "thread/archive", "params": ThreadIdParams } | { "method": "thread/restore", "params": ThreadIdParams } | { "method": "thread/delete", "params": ThreadIdParams } | { "method": "turn/start", "params": TurnStartParams } | { "method": "turn/steer", "params": TurnSteerParams } | { "method": "turn/interrupt", "params": TurnInterruptParams } | { "method": "completion/list", "params": CompletionListParams } | { "method": "command/list", "params": CommandListParams } | { "method": "command/execute", "params": CommandExecuteParams } | { "method": "shell/start", "params": ShellStartParams } | { "method": "terminal/start", "params": TerminalStartParams } | { "method": "terminal/write", "params": TerminalWriteParams } | { "method": "terminal/resize", "params": TerminalResizeParams } | { "method": "terminal/terminate", "params": TerminalTerminateParams } | { "method": "source/reset", "params": SourceResetParams } | { "method": "permission/respond", "params": PermissionRespondParams } | { "method": "clarify/respond", "params": ClarifyRespondParams } | { "method": "settings/update", "params": SettingsUpdateParams } | { "method": "settings/read", "params": SettingsReadParams } | { "method": "workspace/files", "params": WorkspaceFilesParams } | { "method": "workspace/file/read", "params": WorkspaceFileReadParams } | { "method": "workspace/file/write", "params": WorkspaceFileWriteParams } | { "method": "workspace/diff", "params": WorkspaceDiffParams } | { "method": "workspace/changes", "params": WorkspaceChangesParams } | { "method": "workspace/change/accept", "params": WorkspaceChangeFileParams } | { "method": "workspace/change/reject", "params": WorkspaceChangeFileParams } | { "method": "context/read", "params": ContextReadParams } | { "method": "observability/read", "params": ObservabilityReadParams };
+export type ClientRequest = { "method": "initialize", "params": InitializeParams } | { "method": "thread/start", "params": ThreadStartParams } | { "method": "thread/resume", "params": ThreadResumeParams } | { "method": "thread/read", "params": ThreadReadParams } | { "method": "thread/trace", "params": ThreadTraceParams } | { "method": "thread/list", "params": ThreadListParams } | { "method": "thread/rename", "params": ThreadRenameParams } | { "method": "thread/archive", "params": ThreadIdParams } | { "method": "thread/restore", "params": ThreadIdParams } | { "method": "thread/delete", "params": ThreadIdParams } | { "method": "turn/start", "params": TurnStartParams } | { "method": "turn/steer", "params": TurnSteerParams } | { "method": "turn/interrupt", "params": TurnInterruptParams } | { "method": "completion/list", "params": CompletionListParams } | { "method": "command/list", "params": CommandListParams } | { "method": "command/execute", "params": CommandExecuteParams } | { "method": "agent/list", "params": AgentListParams } | { "method": "agent/read", "params": AgentReadParams } | { "method": "agent/write", "params": AgentWriteParams } | { "method": "agent/delete", "params": AgentDeleteParams } | { "method": "agent/status", "params": AgentStatusParams } | { "method": "backend/list", "params": BackendListParams } | { "method": "backend/doctor", "params": BackendDoctorParams } | { "method": "backend/write", "params": BackendWriteParams } | { "method": "backend/delete", "params": BackendDeleteParams } | { "method": "shell/start", "params": ShellStartParams } | { "method": "terminal/start", "params": TerminalStartParams } | { "method": "terminal/write", "params": TerminalWriteParams } | { "method": "terminal/resize", "params": TerminalResizeParams } | { "method": "terminal/terminate", "params": TerminalTerminateParams } | { "method": "source/reset", "params": SourceResetParams } | { "method": "permission/respond", "params": PermissionRespondParams } | { "method": "clarify/respond", "params": ClarifyRespondParams } | { "method": "settings/update", "params": SettingsUpdateParams } | { "method": "settings/read", "params": SettingsReadParams } | { "method": "workspace/files", "params": WorkspaceFilesParams } | { "method": "workspace/file/read", "params": WorkspaceFileReadParams } | { "method": "workspace/file/write", "params": WorkspaceFileWriteParams } | { "method": "workspace/diff", "params": WorkspaceDiffParams } | { "method": "workspace/changes", "params": WorkspaceChangesParams } | { "method": "workspace/change/accept", "params": WorkspaceChangeFileParams } | { "method": "workspace/change/reject", "params": WorkspaceChangeFileParams } | { "method": "context/read", "params": ContextReadParams } | { "method": "observability/read", "params": ObservabilityReadParams };
 
 export type ServerNotification = { "method": "gateway/event", "params": GatewayEvent } | { "method": "turn/result", "params": TurnResultPayload } | { "method": "turn/error", "params": TurnErrorPayload } | { "method": "shell/result", "params": ShellResultPayload } | { "method": "shell/error", "params": ShellErrorPayload } | { "method": "terminal/output", "params": TerminalOutputPayload } | { "method": "terminal/exited", "params": TerminalExitedPayload };
 

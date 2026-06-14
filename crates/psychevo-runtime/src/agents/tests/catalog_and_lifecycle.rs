@@ -233,6 +233,10 @@ description = "Cursor ACP coding agent."
 command = "cursor-agent"
 args = ["--acp"]
 client_capabilities = ["fs.read", "terminal"]
+
+[agents.backends.minimal]
+kind = "acp"
+command = "minimal-agent"
 "#,
     )
     .expect("config");
@@ -257,6 +261,20 @@ client_capabilities = ["fs.read", "terminal"]
     );
     assert!(agent.supports_entrypoint(AgentEntrypoint::Peer));
     assert!(agent.supports_entrypoint(AgentEntrypoint::Subagent));
+    let minimal = catalog
+        .agents
+        .iter()
+        .find(|agent| agent.name == "minimal")
+        .expect("generated minimal");
+    assert_eq!(minimal.source, AgentSource::Generated);
+    assert_eq!(minimal.description, "minimal");
+    assert_eq!(
+        minimal
+            .backend
+            .as_ref()
+            .map(|backend| backend.name.as_str()),
+        Some("minimal")
+    );
     let value = list_agents_value(&catalog);
     assert_eq!(value["agents"][0]["generated"], true);
 }

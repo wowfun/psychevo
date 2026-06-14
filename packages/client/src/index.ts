@@ -2,6 +2,24 @@ import {
   RpcNotificationSchema,
   RpcResponseSchema,
   ThreadSnapshotSchema,
+  type AgentDeleteParams,
+  type AgentDeleteResult,
+  type AgentListParams,
+  type AgentListResult,
+  type AgentReadParams,
+  type AgentReadResult,
+  type AgentStatusParams,
+  type AgentStatusResult,
+  type AgentWriteParams,
+  type AgentWriteResult,
+  type BackendDeleteParams,
+  type BackendDeleteResult,
+  type BackendDoctorParams,
+  type BackendDoctorResult,
+  type BackendListParams,
+  type BackendListResult,
+  type BackendWriteParams,
+  type BackendWriteResult,
   type ClarifyRespondParams,
   type CommandExecuteParams,
   type CommandExecuteResult,
@@ -74,8 +92,15 @@ export {
 export type NotificationHandler = (notification: RpcNotification) => void;
 
 export interface GatewayRequestParams {
-  "agent/list": { scope?: GatewayRequestScope | null };
-  "backend/list": { scope?: GatewayRequestScope | null };
+  "agent/delete": AgentDeleteParams;
+  "agent/list": AgentListParams;
+  "agent/read": AgentReadParams;
+  "agent/status": AgentStatusParams;
+  "agent/write": AgentWriteParams;
+  "backend/delete": BackendDeleteParams;
+  "backend/doctor": BackendDoctorParams;
+  "backend/list": BackendListParams;
+  "backend/write": BackendWriteParams;
   "clarify/respond": ClarifyRespondParams;
   "command/execute": CommandExecuteParams;
   "command/list": CommandListParams;
@@ -115,8 +140,15 @@ export interface GatewayRequestParams {
 }
 
 export interface GatewayRequestResults {
-  "agent/list": unknown;
-  "backend/list": unknown;
+  "agent/delete": AgentDeleteResult;
+  "agent/list": AgentListResult;
+  "agent/read": AgentReadResult;
+  "agent/status": AgentStatusResult;
+  "agent/write": AgentWriteResult;
+  "backend/delete": BackendDeleteResult;
+  "backend/doctor": BackendDoctorResult;
+  "backend/list": BackendListResult;
+  "backend/write": BackendWriteResult;
   "clarify/respond": InteractionRespondResult;
   "command/execute": CommandExecuteResult;
   "command/list": CommandListResult;

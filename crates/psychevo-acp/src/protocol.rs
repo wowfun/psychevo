@@ -164,19 +164,19 @@ pub(crate) fn prompt_parts(prompt: Vec<ContentBlock>, cwd: &Path) -> (String, Ve
 }
 
 fn process_embedded_resource(
-    resource: agent_client_protocol::schema::EmbeddedResource,
+    resource: EmbeddedResource,
     text: &mut Vec<String>,
     images: &mut Vec<ImageInput>,
 ) {
     match resource.resource {
-        agent_client_protocol::schema::EmbeddedResourceResource::TextResourceContents(resource) => {
+        EmbeddedResourceResource::TextResourceContents(resource) => {
             text.push(format!(
                 "[resource: {}]\n{}",
                 resource.uri,
                 capped_text_resource(resource.text)
             ));
         }
-        agent_client_protocol::schema::EmbeddedResourceResource::BlobResourceContents(resource) => {
+        EmbeddedResourceResource::BlobResourceContents(resource) => {
             let mime_type = resource
                 .mime_type
                 .as_deref()
@@ -200,7 +200,7 @@ fn process_embedded_resource(
 }
 
 fn process_resource_link(
-    link: agent_client_protocol::schema::ResourceLink,
+    link: ResourceLink,
     cwd: &Path,
     text: &mut Vec<String>,
     images: &mut Vec<ImageInput>,
@@ -380,6 +380,21 @@ impl AcpUsageAccumulator {
         self.accounting
             .estimated_cost_nanodollars
             .map(|value| value as f64 / 1_000_000_000.0)
+    }
+
+    pub(crate) fn context_tokens_for_usage_update(&self) -> Option<u64> {
+        if let Some(total) = self.accounting.reported_total_tokens {
+            return Some(total);
+        }
+        if self.has_usage {
+            return Some(
+                self.total_tokens
+                    .max(self.input_tokens.saturating_add(self.output_tokens)),
+            );
+        }
+        self.accounting
+            .synthesized_usage()
+            .map(|usage| usage.total_tokens)
     }
 
     fn record_runtime_value(&mut self, value: &Value) {
@@ -671,12 +686,6 @@ pub(crate) fn acp_mcp_servers(servers: Vec<McpServer>) -> Vec<McpServerInput> {
                     env: env_variable_map(env),
                 },
             },
-            McpServer::Sse(server) => McpServerInput {
-                name: server.name,
-                transport: McpTransportInput::Unsupported {
-                    kind: "sse".to_string(),
-                },
-            },
             McpServer::Acp(server) => McpServerInput {
                 name: server.name,
                 transport: McpTransportInput::Unsupported {
@@ -697,28 +706,77 @@ pub(crate) fn env_variable_map(vars: Vec<EnvVariable>) -> BTreeMap<String, Strin
     vars.into_iter().map(|var| (var.name, var.value)).collect()
 }
 
-pub(crate) fn mode_state(mode: RunMode) -> SessionModeState {
-    SessionModeState::new(
-        mode.as_str(),
-        vec![
-            SessionMode::new("default", "Default").description("Run tools and edit code"),
-            SessionMode::new("plan", "Plan").description("Discuss and inspect without edits"),
-        ],
-    )
-}
+pub(crate) const REASONING_EFFORT_VALUES: [&str; 7] =
+    ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 pub(crate) fn session_config_options(
     mode: RunMode,
-) -> Vec<agent_client_protocol::schema::SessionConfigOption> {
-    vec![agent_client_protocol::schema::SessionConfigOption::select(
-        "mode",
-        "Mode",
-        mode.as_str(),
-        vec![
-            SessionConfigSelectOption::new("default", "Default"),
-            SessionConfigSelectOption::new("plan", "Plan"),
-        ],
-    )]
+    model: Option<&str>,
+    reasoning_effort: Option<&str>,
+    configured_models: &[ConfiguredModel],
+) -> Vec<SessionConfigOption> {
+    let mut options = vec![
+        SessionConfigOption::select(
+            "mode",
+            "Mode",
+            mode.as_str(),
+            vec![
+                SessionConfigSelectOption::new("default", "Default"),
+                SessionConfigSelectOption::new("plan", "Plan"),
+            ],
+        )
+        .category(SessionConfigOptionCategory::Mode),
+    ];
+    if !configured_models.is_empty() {
+        let model_options = configured_models
+            .iter()
+            .map(|configured| {
+                let id = provider_qualified_model_id(configured);
+                SessionConfigSelectOption::new(id.clone(), id)
+                    .description(configured.provider_label.clone())
+            })
+            .collect::<Vec<_>>();
+        let current = model
+            .map(str::to_string)
+            .filter(|value| {
+                model_options
+                    .iter()
+                    .any(|option| option.value.to_string() == *value)
+            })
+            .or_else(|| model_options.first().map(|option| option.value.to_string()))
+            .unwrap_or_else(|| "default".to_string());
+        options.push(
+            SessionConfigOption::select("model", "Model", current, model_options)
+                .category(SessionConfigOptionCategory::Model),
+        );
+    }
+    let current_effort = reasoning_effort.unwrap_or("none").to_string();
+    let current_effort = if REASONING_EFFORT_VALUES.contains(&current_effort.as_str()) {
+        current_effort
+    } else {
+        "none".to_string()
+    };
+    options.push(
+        SessionConfigOption::select(
+            "effort",
+            "Reasoning effort",
+            current_effort,
+            REASONING_EFFORT_VALUES
+                .iter()
+                .map(|value| SessionConfigSelectOption::new(*value, *value))
+                .collect::<Vec<_>>(),
+        )
+        .category(SessionConfigOptionCategory::ThoughtLevel),
+    );
+    options
+}
+
+pub(crate) fn provider_qualified_model_id(model: &ConfiguredModel) -> String {
+    if model.provider.is_empty() {
+        model.model.clone()
+    } else {
+        format!("{}/{}", model.provider, model.model)
+    }
 }
 
 pub(crate) fn tool_title(tool_name: &str) -> String {
@@ -839,9 +897,9 @@ pub(crate) mod tests {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let (text, images) = prompt_parts(
             vec![
-                ContentBlock::Text(agent_client_protocol::schema::TextContent::new("hello")),
+                ContentBlock::Text(TextContent::new("hello")),
                 ContentBlock::Image(
-                    agent_client_protocol::schema::ImageContent::new("", "image/png")
+                    agent_client_protocol::schema::v2::ImageContent::new("", "image/png")
                         .uri("https://example.com/a.png"),
                 ),
             ],
@@ -870,12 +928,13 @@ pub(crate) mod tests {
             },
         })));
 
-        let usage = usage.to_usage().expect("usage");
-        assert_eq!(usage.input_tokens, 10);
-        assert_eq!(usage.output_tokens, 6);
-        assert_eq!(usage.cached_read_tokens, Some(2));
-        assert_eq!(usage.thought_tokens, Some(1));
-        assert_eq!(usage.total_tokens, 16);
+        assert_eq!(usage.context_tokens_for_usage_update(), Some(16));
+        let metrics = usage.to_usage().expect("usage");
+        assert_eq!(metrics.input_tokens, 10);
+        assert_eq!(metrics.output_tokens, 6);
+        assert_eq!(metrics.cached_read_tokens, Some(2));
+        assert_eq!(metrics.thought_tokens, Some(1));
+        assert_eq!(metrics.total_tokens, 16);
     }
 
     #[test]

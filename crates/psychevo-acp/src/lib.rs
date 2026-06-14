@@ -4,22 +4,24 @@ pub(crate) use std::path::{Path, PathBuf};
 pub(crate) use std::sync::{Arc, Mutex};
 pub(crate) use std::time::{SystemTime, UNIX_EPOCH};
 
-pub(crate) use agent_client_protocol::schema::{
+pub(crate) use agent_client_protocol::schema::ProtocolVersion;
+pub(crate) use agent_client_protocol::schema::v2::{
     AgentAuthCapabilities, AgentCapabilities, AuthMethod, AuthMethodAgent, AuthMethodTerminal,
     AuthenticateRequest, AuthenticateResponse, AvailableCommand, AvailableCommandInput,
     AvailableCommandsUpdate, CancelNotification, ClientCapabilities, CloseSessionRequest,
-    CloseSessionResponse, ConfigOptionUpdate, ContentBlock, ContentChunk, Cost, CurrentModeUpdate,
-    Diff as AcpDiff, EnvVariable, Implementation, InitializeRequest, InitializeResponse,
-    ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
-    McpCapabilities, McpServer, McpServerHttp, McpServerStdio, Meta, NewSessionRequest,
-    NewSessionResponse, PermissionOption, PermissionOptionKind, PromptCapabilities, PromptRequest,
-    PromptResponse, ProtocolVersion, RequestPermissionOutcome, RequestPermissionRequest,
-    SessionCapabilities, SessionCloseCapabilities, SessionConfigSelectOption, SessionId,
-    SessionInfo, SessionListCapabilities, SessionMode, SessionModeState, SessionNotification,
-    SessionUpdate, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
-    SetSessionModeRequest, SetSessionModeResponse, StopReason, Terminal, ToolCall, ToolCallContent,
-    ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind, UnstructuredCommandInput,
-    Usage, UsageUpdate,
+    CloseSessionResponse, ConfigOptionUpdate, ContentBlock, ContentChunk, Cost, Diff as AcpDiff,
+    EmbeddedResource, EmbeddedResourceResource, EnvVariable, Implementation, InitializeRequest,
+    InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
+    LoadSessionResponse, McpCapabilities, McpHttpCapabilities, McpServer, McpServerHttp,
+    McpServerStdio, MessageId, Meta, NewSessionRequest, NewSessionResponse, PermissionOption,
+    PermissionOptionKind, PromptCapabilities, PromptEmbeddedContextCapabilities,
+    PromptImageCapabilities, PromptRequest, PromptResponse, RequestPermissionOutcome,
+    RequestPermissionRequest, ResourceLink, SessionCapabilities, SessionCloseCapabilities,
+    SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption, SessionId,
+    SessionInfo, SessionListCapabilities, SessionLoadCapabilities, SessionNotification,
+    SessionUpdate, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, StopReason,
+    TextContent, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
+    ToolKind, UnstructuredCommandInput, Usage, UsageUpdate,
 };
 pub(crate) use agent_client_protocol::{
     Agent, ByteStreams, Client, ConnectTo, ConnectionTo, Error,
@@ -31,17 +33,17 @@ pub(crate) use psychevo_gateway::{
 };
 pub(crate) use psychevo_runtime::{
     AgentDiscoveryOptions, ApprovalHandler, ApprovalMode, CompactSessionOptions, CompactionReason,
-    ConfigScope, ContextFormatOptions, ContextOptions, ContextSnapshot, ImageInput, InstallOptions,
-    McpServerInput, McpTransportInput, Message, PermissionApprovalDecision,
-    PermissionApprovalRequest, PermissionMode, RunControlHandle, RunMode, RunOptions,
-    RunStreamEvent, SessionArtifactKind, SessionExportFormat, SessionExportIncludeSet,
-    SessionExportOptions, SessionSummary, SessionUndoOptions, SkillDiscoveryOptions, SkillTarget,
-    StateRuntime, UserContentBlock, WorkspaceDiff, WorkspaceDiffFile, append_local_permission_rule,
-    canonicalize_workdir, collect_workspace_diff, compact_session, configured_models,
-    context_snapshot, default_session_export_filename, discover_agents, discover_skills,
-    format_context_snapshot_text_with_options, install_skill, list_agents_value,
-    list_skill_bundles, model_catalog_providers, permission_rules_value, redo_session,
-    remove_local_permission_rule, remove_skill, run_control, scan_skill_path,
+    ConfigScope, ConfiguredModel, ContextFormatOptions, ContextOptions, ContextSnapshot,
+    ImageInput, InstallOptions, McpServerInput, McpTransportInput, Message,
+    PermissionApprovalDecision, PermissionApprovalRequest, PermissionMode, RunControlHandle,
+    RunMode, RunOptions, RunStreamEvent, SessionArtifactKind, SessionExportFormat,
+    SessionExportIncludeSet, SessionExportOptions, SessionSummary, SessionUndoOptions,
+    SkillDiscoveryOptions, SkillTarget, StateRuntime, UserContentBlock, WorkspaceDiff,
+    WorkspaceDiffFile, append_local_permission_rule, canonicalize_workdir, collect_workspace_diff,
+    compact_session, configured_models, context_snapshot, default_session_export_filename,
+    discover_agents, discover_skills, format_context_snapshot_text_with_options, install_skill,
+    list_agents_value, list_skill_bundles, model_catalog_providers, permission_rules_value,
+    redo_session, remove_local_permission_rule, remove_skill, run_control, scan_skill_path,
     selected_configured_model, set_local_toolset_enabled, set_skill_config_value,
     set_skill_enabled, toolsets_value, undo_session, usage_stats,
 };

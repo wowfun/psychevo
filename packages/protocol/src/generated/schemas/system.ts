@@ -564,6 +564,9 @@ export const systemSchemas = {
     },
     "ContextUsageCategoryView": {
       "properties": {
+        "details": {
+          "default": null
+        },
         "estimated": {
           "type": "boolean"
         },

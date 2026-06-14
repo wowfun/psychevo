@@ -19,7 +19,7 @@ license = "MIT"
 
 [workspace.dependencies]
 anyhow = "1.0"
-agent-client-protocol = { version = "=0.13.1", features = ["unstable"] }
+agent-client-protocol = { version = "=0.14.0", features = ["unstable", "unstable_protocol_v2"] }
 axum = { version = "0.8", features = ["ws"] }
 base64 = "0.22.1"
 bytes = "1.9"

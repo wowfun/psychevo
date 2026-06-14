@@ -40,6 +40,8 @@ pub use server::{BoundGatewayWebServer, GatewayWebServerConfig, bind_gateway_web
 
 pub type GatewayEventSink = Arc<dyn Fn(GatewayEvent) + Send + Sync>;
 
+pub(crate) const ACP_PEER_METADATA_KEY: &str = "peer_agent";
+
 #[derive(Clone)]
 pub struct Gateway {
     state: StateRuntime,
@@ -585,6 +587,11 @@ impl Gateway {
         };
 
         let peer = resolve_peer_turn(&options)?;
+        if peer.is_none()
+            && let Some(thread_id) = active_thread_id.as_deref()
+        {
+            clear_acp_peer_usage_update(&self.state, thread_id)?;
+        }
         let backend_request = BackendTurnRequest {
             options,
             runtime_source: source_name,
@@ -1119,6 +1126,28 @@ fn resolve_peer_turn(options: &RunOptions) -> psychevo_runtime::Result<Option<Re
         )));
     }
     Ok(Some(ResolvedPeerTurn { agent, backend }))
+}
+
+fn clear_acp_peer_usage_update(
+    state: &StateRuntime,
+    session_id: &str,
+) -> psychevo_runtime::Result<()> {
+    let Some(metadata) = state.store().session_metadata(session_id)? else {
+        return Ok(());
+    };
+    let Some(peer) = metadata.get(ACP_PEER_METADATA_KEY) else {
+        return Ok(());
+    };
+    let Some(mut peer) = peer.as_object().cloned() else {
+        return Ok(());
+    };
+    if peer.remove("usageUpdate").is_none() {
+        return Ok(());
+    }
+    let value = (!peer.is_empty()).then(|| Value::Object(peer));
+    state
+        .store()
+        .set_session_metadata_field(session_id, ACP_PEER_METADATA_KEY, value)
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -2382,6 +2411,634 @@ Peer instructions.
             .expect("second peer turn");
         assert_eq!(second.result.session_id, first.result.session_id);
         assert!(second.result.final_answer.contains("loaded:native-1"));
+    }
+
+    #[tokio::test]
+    async fn non_peer_turn_clears_acp_peer_usage_projection_without_losing_native_session() {
+        let backend = Arc::new(FakeBackend::default());
+        let harness = harness(backend.clone());
+        let session_id = harness
+            .state
+            .store()
+            .create_session_with_metadata(
+                &harness.workdir,
+                "peer_agent",
+                "opencode",
+                "acp:opencode",
+                Some(json!({
+                    "peer_agent": {
+                        "agentName": "opencode",
+                        "backendId": "opencode",
+                        "backendKind": "acp",
+                        "nativeSessionId": "native-1",
+                        "usageUpdate": {
+                            "sessionUpdate": "usage_update",
+                            "used": 12_400,
+                            "size": 200_000
+                        }
+                    }
+                })),
+            )
+            .expect("session");
+        let mut request = request(
+            &harness,
+            GatewaySource::new("web", "default-after-peer").persistent(),
+            "continue with default",
+        );
+        request.thread_id = Some(session_id.clone());
+
+        let result = harness.gateway.send_turn(request).await.expect("turn");
+
+        assert_eq!(result.result.session_id, session_id);
+        assert_eq!(
+            backend.runs()[0].session.as_deref(),
+            Some(session_id.as_str())
+        );
+        let metadata = harness
+            .state
+            .store()
+            .session_metadata(&session_id)
+            .expect("metadata")
+            .expect("metadata value");
+        let peer = metadata
+            .get("peer_agent")
+            .and_then(Value::as_object)
+            .expect("peer metadata");
+        assert_eq!(
+            peer.get("nativeSessionId").and_then(Value::as_str),
+            Some("native-1")
+        );
+        assert!(!peer.contains_key("usageUpdate"));
+    }
+
+    #[tokio::test]
+    async fn acp_peer_agent_streams_standard_session_updates_to_gateway_events() {
+        let backend = Arc::new(FakeBackend::default());
+        let harness = harness(backend.clone());
+        let home = harness._temp.path().join("home");
+        let script = harness._temp.path().join("fake_acp_stream.py");
+        std::fs::create_dir_all(&home).expect("home");
+        std::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json
+import sys
+
+def send(value):
+    print(json.dumps(value), flush=True)
+
+def update(session_id, update):
+    send({"jsonrpc": "2.0", "method": "session/update", "params": {
+        "sessionId": session_id,
+        "update": update
+    }})
+
+for line in sys.stdin:
+    if not line.strip():
+        continue
+    message = json.loads(line)
+    method = message.get("method")
+    mid = message.get("id")
+    params = message.get("params") or {}
+    if method == "initialize":
+        send({"jsonrpc": "2.0", "id": mid, "result": {"protocolVersion": 1, "agentCapabilities": {}}})
+    elif method == "session/new":
+        send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": "native-stream"}})
+    elif method == "session/prompt":
+        session_id = params.get("sessionId") or "native-stream"
+        update(session_id, {"sessionUpdate": "session_info_update", "title": "ACP streamed title"})
+        update(session_id, {"sessionUpdate": "available_commands_update", "availableCommands": [
+            {"name": "research", "description": "Run peer research"}
+        ]})
+        update(session_id, {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "think "}})
+        update(session_id, {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "first"}})
+        update(session_id, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "hello "}})
+        update(session_id, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "world"}})
+        update(session_id, {"sessionUpdate": "tool_call", "toolCallId": "call-echo", "title": "Run echo", "kind": "execute", "status": "pending", "rawInput": {"cmd": "echo done"}})
+        update(session_id, {"sessionUpdate": "tool_call_update", "toolCallId": "call-echo", "status": "in_progress", "content": [
+            {"type": "content", "content": {"type": "text", "text": "running\n"}}
+        ]})
+        update(session_id, {"sessionUpdate": "plan", "entries": [
+            {"content": "Inspect repo", "priority": "high", "status": "completed"},
+            {"content": "Patch bridge", "priority": "high", "status": "in_progress"}
+        ]})
+        update(session_id, {"sessionUpdate": "tool_call_update", "toolCallId": "call-echo", "status": "completed", "content": [
+            {"type": "content", "content": {"type": "text", "text": "done\n"}}
+        ], "rawOutput": {"output": "done\n"}})
+        send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
+    else:
+        send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "method not found"}})
+"#,
+        )
+        .expect("fake acp stream script");
+        std::fs::write(
+            home.join("config.toml"),
+            format!(
+                r#"[agents.backends.fake]
+kind = "acp"
+description = "Fake ACP agent."
+command = "python3"
+args = ["{}"]
+entrypoints = ["peer"]
+client_capabilities = ["fs.read"]
+"#,
+                script.display()
+            ),
+        )
+        .expect("config");
+        let agents_dir = harness.workdir.join(".psychevo").join("agents");
+        std::fs::create_dir_all(&agents_dir).expect("agents dir");
+        std::fs::write(
+            agents_dir.join("reviewer.md"),
+            r#"---
+name: reviewer
+description: Review with fake ACP.
+backend:
+  ref: fake
+entrypoints: [peer]
+tools: [read]
+---
+"#,
+        )
+        .expect("agent file");
+
+        let env = BTreeMap::from([
+            (
+                "HOME".to_string(),
+                harness._temp.path().display().to_string(),
+            ),
+            ("PSYCHEVO_HOME".to_string(), home.display().to_string()),
+        ]);
+        let gateway_events = Arc::new(Mutex::new(Vec::<GatewayEvent>::new()));
+        let gateway_events_for_sink = Arc::clone(&gateway_events);
+        let raw_events = Arc::new(Mutex::new(Vec::<RunStreamEvent>::new()));
+        let raw_events_for_sink = Arc::clone(&raw_events);
+        let source = GatewaySource::new("web", "peer-stream").persistent();
+        let mut request = request(&harness, source, "hello");
+        request.options.agent = Some("reviewer".to_string());
+        request.options.inherited_env = Some(env);
+        request.event_sink = Some(Arc::new(move |event| {
+            gateway_events_for_sink
+                .lock()
+                .expect("gateway events lock")
+                .push(event);
+        }));
+        request.stream = Some(Arc::new(move |event| {
+            raw_events_for_sink
+                .lock()
+                .expect("raw events lock")
+                .push(event);
+        }));
+
+        let result = harness
+            .gateway
+            .send_turn(request)
+            .await
+            .expect("streaming peer turn");
+
+        assert_eq!(result.result.final_answer, "hello world");
+        assert!(
+            result
+                .result
+                .events
+                .iter()
+                .any(|event| event["update_kind"] == "available_commands_update"),
+            "available commands update should be retained as a structured ACP event"
+        );
+        assert!(
+            result
+                .result
+                .events
+                .iter()
+                .any(|event| event["update_kind"] == "session_info_update"),
+            "session info update should be retained as a structured ACP event"
+        );
+
+        let raw_events = raw_events.lock().expect("raw events lock");
+        assert!(
+            raw_events.iter().any(|event| matches!(
+                event,
+                RunStreamEvent::Event(value)
+                    if value["type"] == "acp_peer_session_update"
+                        && value["update_kind"] == "tool_call_update"
+            )),
+            "raw stream should retain ACP tool updates"
+        );
+        drop(raw_events);
+
+        let gateway_events = gateway_events.lock().expect("gateway events lock");
+        let blocks = gateway_events
+            .iter()
+            .filter_map(|event| match event {
+                GatewayEvent::EntryStarted { entry, .. }
+                | GatewayEvent::EntryUpdated { entry, .. }
+                | GatewayEvent::EntryCompleted { entry, .. } => Some(entry.blocks.as_slice()),
+                _ => None,
+            })
+            .flatten()
+            .collect::<Vec<_>>();
+        assert!(
+            blocks.iter().any(|block| {
+                block.kind == TranscriptBlockKind::Reasoning
+                    && block.body.as_deref() == Some("think first")
+            }),
+            "thought chunks should render as a live Thinking block"
+        );
+        assert!(
+            blocks.iter().any(|block| {
+                block.kind == TranscriptBlockKind::Text
+                    && block.body.as_deref() == Some("hello world")
+            }),
+            "message chunks should render as incremental assistant text"
+        );
+        assert!(
+            blocks.iter().any(|block| {
+                block.kind == TranscriptBlockKind::Shell
+                    && block.title.as_deref() == Some("Run echo")
+                    && block.status == TranscriptBlockStatus::Completed
+                    && block
+                        .body
+                        .as_deref()
+                        .is_some_and(|body| body.contains("done"))
+            }),
+            "ACP tool updates should render as a completed live tool block"
+        );
+        assert!(
+            blocks.iter().any(|block| {
+                block.kind == TranscriptBlockKind::Status
+                    && block.title.as_deref() == Some("Plan")
+                    && block
+                        .body
+                        .as_deref()
+                        .is_some_and(|body| body.contains("Inspect repo"))
+            }),
+            "ACP plan updates should render as a live plan block"
+        );
+        drop(gateway_events);
+
+        let summary = harness
+            .state
+            .store()
+            .session_summary(&result.result.session_id)
+            .expect("session summary")
+            .expect("summary");
+        assert_eq!(summary.title.as_deref(), Some("ACP streamed title"));
+        let transcript = harness
+            .gateway
+            .thread_transcript(&result.result.session_id)
+            .expect("transcript");
+        let persisted_blocks = transcript
+            .iter()
+            .flat_map(|entry| entry.blocks.iter())
+            .collect::<Vec<_>>();
+        assert!(
+            persisted_blocks.iter().any(|block| {
+                block.kind == TranscriptBlockKind::Reasoning
+                    && block.body.as_deref() == Some("think first")
+            }),
+            "completed ACP reasoning should persist for reload"
+        );
+        assert!(
+            persisted_blocks.iter().any(|block| {
+                block.kind == TranscriptBlockKind::Shell
+                    && block.title.as_deref() == Some("Run echo")
+                    && block.result.as_ref().is_some_and(|result| {
+                        result.status == TranscriptBlockStatus::Completed
+                            && result.content.contains("done")
+                    })
+            }),
+            "completed ACP tool result should persist for reload"
+        );
+    }
+
+    #[tokio::test]
+    async fn acp_peer_agent_streams_v2_session_updates_to_gateway_events() {
+        let backend = Arc::new(FakeBackend::default());
+        let harness = harness(backend.clone());
+        let home = harness._temp.path().join("home");
+        let script = harness._temp.path().join("fake_acp_v2_stream.py");
+        std::fs::create_dir_all(&home).expect("home");
+        std::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json
+import sys
+
+model_value = "test/default-model"
+effort_value = "low"
+
+def send(value):
+    print(json.dumps(value), flush=True)
+
+def update(session_id, update):
+    send({"jsonrpc": "2.0", "method": "session/update", "params": {
+        "sessionId": session_id,
+        "update": update
+    }})
+
+def config_options():
+    return [
+        {
+            "id": "model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": model_value,
+            "options": [
+                {"value": "test/default-model", "name": "Default"},
+                {"value": "test/second-model", "name": "Second"}
+            ]
+        },
+        {
+            "id": "effort",
+            "name": "Effort",
+            "category": "thought_level",
+            "type": "select",
+            "currentValue": effort_value,
+            "options": [
+                {"value": "low", "name": "Low"},
+                {"value": "high", "name": "High"}
+            ]
+        }
+    ]
+
+for line in sys.stdin:
+    if not line.strip():
+        continue
+    message = json.loads(line)
+    method = message.get("method")
+    mid = message.get("id")
+    params = message.get("params") or {}
+    if method == "initialize":
+        send({"jsonrpc": "2.0", "id": mid, "result": {"protocolVersion": 2, "capabilities": {}}})
+    elif method == "session/new":
+        send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": "native-v2", "configOptions": config_options()}})
+    elif method == "session/set_config_option":
+        config_id = params.get("configId") or params.get("config_id")
+        value = params.get("value")
+        if isinstance(value, dict):
+            value = value.get("value")
+        if config_id == "model":
+            model_value = value
+        elif config_id == "effort":
+            effort_value = value
+        send({"jsonrpc": "2.0", "id": mid, "result": {"configOptions": config_options()}})
+    elif method == "session/prompt":
+        session_id = params.get("sessionId") or "native-v2"
+        update(session_id, {"sessionUpdate": "session_info_update", "title": "ACP v2 streamed title"})
+        update(session_id, {"sessionUpdate": "available_commands_update", "availableCommands": [
+            {"name": "inspect", "description": "Inspect through v2"}
+        ]})
+        update(session_id, {"sessionUpdate": "config_option_update", "configOptions": [{
+            "id": "mode",
+            "name": "Mode",
+            "category": "mode",
+            "type": "select",
+            "currentValue": "code",
+            "options": [
+                {"value": "code", "name": "Code"},
+                {"value": "ask", "name": "Ask"}
+            ]
+        }]})
+        update(session_id, {"sessionUpdate": "agent_thought_chunk", "messageId": "thought-1", "content": {"type": "text", "text": "v2 think "}})
+        update(session_id, {"sessionUpdate": "agent_thought_chunk", "messageId": "thought-1", "content": {"type": "text", "text": "stream"}})
+        update(session_id, {"sessionUpdate": "agent_message_chunk", "messageId": "message-1", "content": {"type": "text", "text": "v2 hello "}})
+        update(session_id, {"sessionUpdate": "agent_message_chunk", "messageId": "message-1", "content": {"type": "text", "text": model_value + " " + effort_value + " world"}})
+        update(session_id, {"sessionUpdate": "tool_call", "toolCallId": "call-v2", "title": "Run v2 echo", "kind": "execute", "status": "pending", "rawInput": {"cmd": "echo v2"}})
+        update(session_id, {"sessionUpdate": "tool_call_update", "toolCallId": "call-v2", "status": "in_progress", "content": [
+            {"type": "content", "content": {"type": "text", "text": "running v2\n"}}
+        ]})
+        update(session_id, {"sessionUpdate": "plan_update", "plan": {"type": "items", "id": "plan-v2", "entries": [
+            {"content": "Inspect v2 schema", "priority": "high", "status": "completed"},
+            {"content": "Project v2 events", "priority": "high", "status": "in_progress"}
+        ]}})
+        update(session_id, {"sessionUpdate": "usage_update", "used": 42, "size": 1000, "cost": {"amount": 0.012, "currency": "USD"}})
+        update(session_id, {"sessionUpdate": "_status_badge", "label": "custom"})
+        update(session_id, {"sessionUpdate": "tool_call_update", "toolCallId": "call-v2", "status": "completed", "content": [
+            {"type": "content", "content": {"type": "text", "text": "v2 done\n"}}
+        ], "rawOutput": {"output": "v2 done\n"}})
+        send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
+    else:
+        send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "method not found"}})
+"#,
+        )
+        .expect("fake acp v2 stream script");
+        std::fs::write(
+            home.join("config.toml"),
+            format!(
+                r#"[agents.backends.fake]
+kind = "acp"
+description = "Fake ACP v2 agent."
+command = "python3"
+args = ["{}"]
+entrypoints = ["peer"]
+client_capabilities = ["fs.read"]
+"#,
+                script.display()
+            ),
+        )
+        .expect("config");
+        let agents_dir = harness.workdir.join(".psychevo").join("agents");
+        std::fs::create_dir_all(&agents_dir).expect("agents dir");
+        std::fs::write(
+            agents_dir.join("reviewer.md"),
+            r#"---
+name: reviewer
+description: Review with fake ACP v2.
+backend:
+  ref: fake
+entrypoints: [peer]
+tools: [read]
+---
+"#,
+        )
+        .expect("agent file");
+
+        let env = BTreeMap::from([
+            (
+                "HOME".to_string(),
+                harness._temp.path().display().to_string(),
+            ),
+            ("PSYCHEVO_HOME".to_string(), home.display().to_string()),
+        ]);
+        let gateway_events = Arc::new(Mutex::new(Vec::<GatewayEvent>::new()));
+        let gateway_events_for_sink = Arc::clone(&gateway_events);
+        let raw_events = Arc::new(Mutex::new(Vec::<RunStreamEvent>::new()));
+        let raw_events_for_sink = Arc::clone(&raw_events);
+        let source = GatewaySource::new("web", "peer-v2-stream").persistent();
+        let mut request = request(&harness, source, "hello");
+        request.options.agent = Some("reviewer".to_string());
+        request.options.model = Some("test/second-model".to_string());
+        request.options.reasoning_effort = Some("high".to_string());
+        request.options.inherited_env = Some(env);
+        request.event_sink = Some(Arc::new(move |event| {
+            gateway_events_for_sink
+                .lock()
+                .expect("gateway events lock")
+                .push(event);
+        }));
+        request.stream = Some(Arc::new(move |event| {
+            raw_events_for_sink
+                .lock()
+                .expect("raw events lock")
+                .push(event);
+        }));
+
+        let result = harness
+            .gateway
+            .send_turn(request)
+            .await
+            .expect("v2 streaming peer turn");
+
+        assert_eq!(
+            result.result.final_answer,
+            "v2 hello test/second-model high world"
+        );
+        assert!(
+            result.result.events.iter().all(|event| {
+                event["type"] != "acp_peer_session_update"
+                    || event["protocol_version"].as_str() == Some("2")
+            }),
+            "v2 session updates should be tagged with protocol version 2"
+        );
+        assert!(
+            result
+                .result
+                .events
+                .iter()
+                .any(|event| event["update_kind"] == "config_option_update"),
+            "v2 config option updates should be retained"
+        );
+        assert!(
+            result
+                .result
+                .events
+                .iter()
+                .any(|event| event["update_kind"] == "usage_update"),
+            "v2 usage updates should be retained"
+        );
+        assert!(
+            result
+                .result
+                .events
+                .iter()
+                .any(|event| event["update_kind"] == "_status_badge"),
+            "future ACP session updates should be retained raw"
+        );
+
+        let raw_events = raw_events.lock().expect("raw events lock");
+        assert!(
+            raw_events.iter().any(|event| matches!(
+                event,
+                RunStreamEvent::Event(value)
+                    if value["type"] == "acp_peer_protocol_negotiated"
+                        && value["protocol_version"] == "2"
+            )),
+            "v2-capable peers should negotiate protocol version 2"
+        );
+        assert!(
+            !raw_events.iter().any(|event| matches!(
+                event,
+                RunStreamEvent::Event(value)
+                    if value["type"] == "acp_peer_protocol_fallback"
+            )),
+            "v2-capable peers should not fall back to v1"
+        );
+        assert!(
+            raw_events.iter().any(|event| matches!(
+                event,
+                RunStreamEvent::Event(value)
+                    if value["type"] == "acp_peer_usage_update"
+                        && value["usage"]["used"] == 42
+            )),
+            "v2 usage updates should be forwarded to the live stream"
+        );
+        assert!(
+            raw_events.iter().any(|event| matches!(
+                event,
+                RunStreamEvent::Event(value)
+                    if value["type"] == "acp_peer_config_option_set"
+                        && value["config_id"] == "model"
+                        && value["value"] == "test/second-model"
+            )),
+            "Gateway should set the peer model config option before prompting"
+        );
+        assert!(
+            raw_events.iter().any(|event| matches!(
+                event,
+                RunStreamEvent::Event(value)
+                    if value["type"] == "acp_peer_config_option_set"
+                        && value["config_id"] == "effort"
+                        && value["value"] == "high"
+            )),
+            "Gateway should set the peer reasoning effort config option before prompting"
+        );
+        drop(raw_events);
+
+        let gateway_events = gateway_events.lock().expect("gateway events lock");
+        let blocks = gateway_events
+            .iter()
+            .filter_map(|event| match event {
+                GatewayEvent::EntryStarted { entry, .. }
+                | GatewayEvent::EntryUpdated { entry, .. }
+                | GatewayEvent::EntryCompleted { entry, .. } => Some(entry.blocks.as_slice()),
+                _ => None,
+            })
+            .flatten()
+            .collect::<Vec<_>>();
+        assert!(
+            blocks.iter().any(|block| {
+                block.kind == TranscriptBlockKind::Reasoning
+                    && block.body.as_deref() == Some("v2 think stream")
+            }),
+            "v2 thought chunks should render as a live Thinking block"
+        );
+        assert!(
+            blocks.iter().any(|block| {
+                block.kind == TranscriptBlockKind::Text
+                    && block.body.as_deref() == Some("v2 hello test/second-model high world")
+            }),
+            "v2 message chunks should render as incremental assistant text"
+        );
+        assert!(
+            blocks.iter().any(|block| {
+                block.kind == TranscriptBlockKind::Shell
+                    && block.title.as_deref() == Some("Run v2 echo")
+                    && block.status == TranscriptBlockStatus::Completed
+                    && block
+                        .body
+                        .as_deref()
+                        .is_some_and(|body| body.contains("v2 done"))
+            }),
+            "v2 tool updates should render as a completed live tool block"
+        );
+        assert!(
+            blocks.iter().any(|block| {
+                block.kind == TranscriptBlockKind::Status
+                    && block.title.as_deref() == Some("Plan")
+                    && block
+                        .body
+                        .as_deref()
+                        .is_some_and(|body| body.contains("Inspect v2 schema"))
+            }),
+            "v2 plan updates should render as a live plan block"
+        );
+        drop(gateway_events);
+
+        let summary = harness
+            .state
+            .store()
+            .session_summary(&result.result.session_id)
+            .expect("session summary")
+            .expect("summary");
+        assert_eq!(summary.title.as_deref(), Some("ACP v2 streamed title"));
+        let metadata = harness
+            .state
+            .store()
+            .session_metadata(&result.result.session_id)
+            .expect("session metadata")
+            .expect("metadata");
+        assert_eq!(metadata["peer_agent"]["usageUpdate"]["used"], 42);
     }
 
     #[tokio::test]

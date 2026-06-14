@@ -1070,8 +1070,12 @@ pub(crate) struct AgentBackendAddArgs {
         help = "Executable command to start the ACP agent"
     )]
     pub(crate) command: String,
-    #[arg(long, value_name = "TEXT", help = "Generated agent description")]
-    pub(crate) description: String,
+    #[arg(
+        long,
+        value_name = "TEXT",
+        help = "Optional generated agent description"
+    )]
+    pub(crate) description: Option<String>,
     #[arg(
         long,
         value_name = "LABEL",

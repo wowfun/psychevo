@@ -75,6 +75,13 @@ pub struct ConfigSetResult {
     pub changed: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigRemoveResult {
+    pub path: PathBuf,
+    pub key: String,
+    pub changed: bool,
+}
+
 pub fn set_config_value(config_dir: PathBuf, key: &str, value: Value) -> Result<ConfigSetResult> {
     let path_parts = key
         .split('.')
@@ -103,6 +110,34 @@ pub fn set_config_value(config_dir: PathBuf, key: &str, value: Value) -> Result<
     })
 }
 
+pub fn remove_config_value(config_dir: PathBuf, key: &str) -> Result<ConfigRemoveResult> {
+    let path_parts = key
+        .split('.')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if path_parts.is_empty() {
+        return Err(Error::Config("config key must not be empty".to_string()));
+    }
+    let config_path = config_dir.join(CONFIG_FILE_NAME);
+    let mut parsed = load_toml_config_file(&config_path, false)?;
+    if !parsed.is_object() {
+        parsed = json!({});
+    }
+    let before = parsed.clone();
+    remove_config_path_value(&mut parsed, &path_parts)?;
+    let changed = parsed != before;
+    if changed {
+        fs::create_dir_all(&config_dir)?;
+        write_toml_config_file(&config_path, &parsed)?;
+    }
+    Ok(ConfigRemoveResult {
+        path: config_path,
+        key: key.to_string(),
+        changed,
+    })
+}
+
 pub(crate) fn set_config_path_value(root: &mut Value, path: &[&str], value: Value) -> Result<()> {
     let mut current = root
         .as_object_mut()
@@ -119,6 +154,24 @@ pub(crate) fn set_config_path_value(root: &mut Value, path: &[&str], value: Valu
         .last()
         .ok_or_else(|| Error::Config("config key must not be empty".to_string()))?;
     current.insert((*last).to_string(), value);
+    Ok(())
+}
+
+pub(crate) fn remove_config_path_value(root: &mut Value, path: &[&str]) -> Result<()> {
+    let mut current = root
+        .as_object_mut()
+        .ok_or_else(|| Error::Config("config root must be an object".to_string()))?;
+    for part in &path[..path.len().saturating_sub(1)] {
+        let Some(next) = current.get_mut(*part) else {
+            return Ok(());
+        };
+        current = next
+            .as_object_mut()
+            .ok_or_else(|| Error::Config(format!("config path `{part}` must be an object")))?;
+    }
+    if let Some(last) = path.last() {
+        current.remove(*last);
+    }
     Ok(())
 }
 

@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "BackendDoctorCheck": {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "message",
+        "name",
+        "ok"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "checks": {
+      "items": {
+        "$ref": "#/definitions/BackendDoctorCheck"
+      },
+      "type": "array"
+    },
+    "id": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "ok": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "checks",
+    "id",
+    "kind",
+    "ok"
+  ],
+  "title": "BackendDoctorResult",
+  "type": "object"
+}

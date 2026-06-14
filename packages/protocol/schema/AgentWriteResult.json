@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "written": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "name",
+    "path",
+    "written"
+  ],
+  "title": "AgentWriteResult",
+  "type": "object"
+}

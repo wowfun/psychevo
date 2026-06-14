@@ -380,6 +380,23 @@ fn attach_tool_results(entries: &mut [TranscriptEntry], summaries: &[TuiMessageS
                 metadata.insert("elapsed_ms".to_string(), elapsed_ms.clone());
             }
         }
+        if let Some(display) = result_value
+            .get("display")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|display| !display.is_empty())
+        {
+            metadata.insert("display".to_string(), json!(display));
+            block.title = Some(display.to_string());
+        }
+        if let Some(source) = result_value
+            .get("source")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|source| !source.is_empty())
+        {
+            metadata.insert("source".to_string(), json!(source));
+        }
         metadata.insert("result".to_string(), result_value);
         block.metadata = Some(Value::Object(metadata.clone()));
         block.result = Some(TranscriptToolResult {

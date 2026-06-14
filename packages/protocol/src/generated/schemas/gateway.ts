@@ -1323,4 +1323,2159 @@ export const gatewayCoreSchemas = {
   ],
   "title": "GatewayEvent"
 },
+  AgentListParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "title": "AgentListParams",
+  "type": "object"
+},
+  AgentReadParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "AgentReadParams",
+  "type": "object"
+},
+  AgentBackendRefInput: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "ref": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "ref"
+  ],
+  "title": "AgentBackendRefInput",
+  "type": "object"
+},
+  AgentWriteParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AgentBackendRefInput": {
+      "properties": {
+        "ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    },
+    "GatewayRequestScope": {
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "backend": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AgentBackendRefInput"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "description": {
+      "type": "string"
+    },
+    "entrypoints": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "instructions": {
+      "default": "",
+      "type": "string"
+    },
+    "mcpServers": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "name": {
+      "type": "string"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "tools": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "description",
+    "name"
+  ],
+  "title": "AgentWriteParams",
+  "type": "object"
+},
+  AgentDeleteParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "AgentDeleteParams",
+  "type": "object"
+},
+  AgentStatusParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "all": {
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "threadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "AgentStatusParams",
+  "type": "object"
+},
+  AgentBackendRefView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "ref": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "ref"
+  ],
+  "title": "AgentBackendRefView",
+  "type": "object"
+},
+  AgentDiagnosticView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "kind": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    },
+    "path": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "kind",
+    "message"
+  ],
+  "title": "AgentDiagnosticView",
+  "type": "object"
+},
+  AgentDefinitionView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AgentBackendRefView": {
+      "properties": {
+        "ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    },
+    "AgentDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "backend": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AgentBackendRefView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "description": {
+      "type": "string"
+    },
+    "diagnostics": {
+      "items": {
+        "$ref": "#/definitions/AgentDiagnosticView"
+      },
+      "type": "array"
+    },
+    "entrypoints": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "generated": {
+      "type": "boolean"
+    },
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "description",
+    "diagnostics",
+    "entrypoints",
+    "generated",
+    "name",
+    "source"
+  ],
+  "title": "AgentDefinitionView",
+  "type": "object"
+},
+  AgentRunView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "agentName": {
+      "type": "string"
+    },
+    "background": {
+      "type": "boolean"
+    },
+    "childSessionId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "edgeStatus": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "effectiveMaxSpawnDepth": {
+      "default": null,
+      "format": "uint8",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "endedAtMs": {
+      "default": null,
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "error": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "finalAnswer": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "id": {
+      "type": "string"
+    },
+    "outcome": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "parentSessionId": {
+      "type": "string"
+    },
+    "role": {
+      "type": "string"
+    },
+    "startedAtMs": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "status": {
+      "type": "string"
+    },
+    "task": {
+      "type": "string"
+    },
+    "taskName": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "agentName",
+    "background",
+    "id",
+    "parentSessionId",
+    "role",
+    "startedAtMs",
+    "status",
+    "task"
+  ],
+  "title": "AgentRunView",
+  "type": "object"
+},
+  AgentStatusControlView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "concurrencyCap": {
+      "default": null,
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "maxSpawnDepthCap": {
+      "format": "uint8",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "spawningPaused": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "maxSpawnDepthCap",
+    "spawningPaused"
+  ],
+  "title": "AgentStatusControlView",
+  "type": "object"
+},
+  AgentListResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AgentBackendRefView": {
+      "properties": {
+        "ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    },
+    "AgentDefinitionView": {
+      "properties": {
+        "backend": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentBackendRefView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "type": "string"
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/definitions/AgentDiagnosticView"
+          },
+          "type": "array"
+        },
+        "entrypoints": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "generated": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "description",
+        "diagnostics",
+        "entrypoints",
+        "generated",
+        "name",
+        "source"
+      ],
+      "type": "object"
+    },
+    "AgentDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "agents": {
+      "items": {
+        "$ref": "#/definitions/AgentDefinitionView"
+      },
+      "type": "array"
+    },
+    "diagnostics": {
+      "items": {
+        "$ref": "#/definitions/AgentDiagnosticView"
+      },
+      "type": "array"
+    },
+    "shadowedAgents": {
+      "items": {
+        "$ref": "#/definitions/AgentDefinitionView"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "agents",
+    "diagnostics",
+    "shadowedAgents"
+  ],
+  "title": "AgentListResult",
+  "type": "object"
+},
+  AgentReadResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AgentBackendRefView": {
+      "properties": {
+        "ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    },
+    "AgentDefinitionView": {
+      "properties": {
+        "backend": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentBackendRefView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "type": "string"
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/definitions/AgentDiagnosticView"
+          },
+          "type": "array"
+        },
+        "entrypoints": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "generated": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "description",
+        "diagnostics",
+        "entrypoints",
+        "generated",
+        "name",
+        "source"
+      ],
+      "type": "object"
+    },
+    "AgentDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "agent": {
+      "$ref": "#/definitions/AgentDefinitionView"
+    },
+    "instructions": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "agent",
+    "instructions"
+  ],
+  "title": "AgentReadResult",
+  "type": "object"
+},
+  AgentWriteResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "written": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "name",
+    "path",
+    "written"
+  ],
+  "title": "AgentWriteResult",
+  "type": "object"
+},
+  AgentDeleteResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "deleted": {
+      "type": "boolean"
+    },
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "deleted",
+    "name",
+    "path"
+  ],
+  "title": "AgentDeleteResult",
+  "type": "object"
+},
+  AgentStatusResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AgentRunView": {
+      "properties": {
+        "agentName": {
+          "type": "string"
+        },
+        "background": {
+          "type": "boolean"
+        },
+        "childSessionId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "edgeStatus": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "effectiveMaxSpawnDepth": {
+          "default": null,
+          "format": "uint8",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "endedAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "error": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "finalAnswer": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "outcome": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "startedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "task": {
+          "type": "string"
+        },
+        "taskName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "agentName",
+        "background",
+        "id",
+        "parentSessionId",
+        "role",
+        "startedAtMs",
+        "status",
+        "task"
+      ],
+      "type": "object"
+    },
+    "AgentStatusControlView": {
+      "properties": {
+        "concurrencyCap": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "maxSpawnDepthCap": {
+          "format": "uint8",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "spawningPaused": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "maxSpawnDepthCap",
+        "spawningPaused"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "agents": {
+      "items": {
+        "$ref": "#/definitions/AgentRunView"
+      },
+      "type": "array"
+    },
+    "control": {
+      "$ref": "#/definitions/AgentStatusControlView"
+    }
+  },
+  "required": [
+    "agents",
+    "control"
+  ],
+  "title": "AgentStatusResult",
+  "type": "object"
+},
+  BackendConfigTarget: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "project",
+    "profile"
+  ],
+  "title": "BackendConfigTarget",
+  "type": "string"
+},
+  BackendListParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "title": "BackendListParams",
+  "type": "object"
+},
+  BackendDoctorParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "title": "BackendDoctorParams",
+  "type": "object"
+},
+  BackendWriteParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "BackendConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    },
+    "GatewayRequestScope": {
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "args": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "clientCapabilities": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "command": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "cwd": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "description": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "enabled": {
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "entrypoints": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "env": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {},
+      "type": "object"
+    },
+    "id": {
+      "type": "string"
+    },
+    "label": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mcpServers": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "target": {
+      "$ref": "#/definitions/BackendConfigTarget"
+    }
+  },
+  "required": [
+    "id",
+    "target"
+  ],
+  "title": "BackendWriteParams",
+  "type": "object"
+},
+  BackendDeleteParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "BackendConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    },
+    "GatewayRequestScope": {
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "target": {
+      "$ref": "#/definitions/BackendConfigTarget"
+    }
+  },
+  "required": [
+    "id",
+    "target"
+  ],
+  "title": "BackendDeleteParams",
+  "type": "object"
+},
+  BackendConfigView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "BackendConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    },
+    "BackendDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "args": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "clientCapabilities": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "command": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "cwd": {
+      "type": "string"
+    },
+    "description": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "diagnostics": {
+      "items": {
+        "$ref": "#/definitions/BackendDiagnosticView"
+      },
+      "type": "array"
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "entrypoints": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "envKeys": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "id": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "label": {
+      "type": "string"
+    },
+    "mcpServers": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "sourceTargets": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/BackendConfigTarget"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "cwd",
+    "diagnostics",
+    "enabled",
+    "id",
+    "kind",
+    "label"
+  ],
+  "title": "BackendConfigView",
+  "type": "object"
+},
+  BackendListResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "BackendConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    },
+    "BackendConfigView": {
+      "properties": {
+        "args": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "clientCapabilities": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "command": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/definitions/BackendDiagnosticView"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "entrypoints": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "envKeys": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "mcpServers": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sourceTargets": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/BackendConfigTarget"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "cwd",
+        "diagnostics",
+        "enabled",
+        "id",
+        "kind",
+        "label"
+      ],
+      "type": "object"
+    },
+    "BackendDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "backends": {
+      "items": {
+        "$ref": "#/definitions/BackendConfigView"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "backends"
+  ],
+  "title": "BackendListResult",
+  "type": "object"
+},
+  BackendDiagnosticView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "kind": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "message"
+  ],
+  "title": "BackendDiagnosticView",
+  "type": "object"
+},
+  BackendDoctorCheck: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "message": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "path": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "message",
+    "name",
+    "ok"
+  ],
+  "title": "BackendDoctorCheck",
+  "type": "object"
+},
+  BackendDoctorResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "BackendDoctorCheck": {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "message",
+        "name",
+        "ok"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "checks": {
+      "items": {
+        "$ref": "#/definitions/BackendDoctorCheck"
+      },
+      "type": "array"
+    },
+    "id": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "ok": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "checks",
+    "id",
+    "kind",
+    "ok"
+  ],
+  "title": "BackendDoctorResult",
+  "type": "object"
+},
+  BackendWriteResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "BackendConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    },
+    "BackendConfigView": {
+      "properties": {
+        "args": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "clientCapabilities": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "command": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/definitions/BackendDiagnosticView"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "entrypoints": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "envKeys": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "mcpServers": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sourceTargets": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/BackendConfigTarget"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "cwd",
+        "diagnostics",
+        "enabled",
+        "id",
+        "kind",
+        "label"
+      ],
+      "type": "object"
+    },
+    "BackendDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "backend": {
+      "$ref": "#/definitions/BackendConfigView"
+    },
+    "changed": {
+      "type": "boolean"
+    },
+    "path": {
+      "type": "string"
+    },
+    "target": {
+      "$ref": "#/definitions/BackendConfigTarget"
+    },
+    "written": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "backend",
+    "changed",
+    "path",
+    "target",
+    "written"
+  ],
+  "title": "BackendWriteResult",
+  "type": "object"
+},
+  BackendDeleteResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "BackendConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "changed": {
+      "type": "boolean"
+    },
+    "deleted": {
+      "type": "boolean"
+    },
+    "id": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "target": {
+      "$ref": "#/definitions/BackendConfigTarget"
+    }
+  },
+  "required": [
+    "changed",
+    "deleted",
+    "id",
+    "path",
+    "target"
+  ],
+  "title": "BackendDeleteResult",
+  "type": "object"
+},
 } as const;

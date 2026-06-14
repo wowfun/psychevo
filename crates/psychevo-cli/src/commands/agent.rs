@@ -110,9 +110,6 @@ pub(crate) fn agent_backend_add(args: AgentBackendAddArgs) -> Result<ExitCode> {
     if !valid_agent_name(&args.id) {
         return Err(anyhow!("invalid backend id: {}", args.id));
     }
-    if args.description.trim().is_empty() {
-        return Err(anyhow!("backend description must be non-empty"));
-    }
     if args.command.trim().is_empty() {
         return Err(anyhow!("backend command must be non-empty"));
     }
@@ -136,18 +133,35 @@ pub(crate) fn agent_backend_add(args: AgentBackendAddArgs) -> Result<ExitCode> {
     } else {
         validate_backend_client_capabilities(&args.client_capabilities)?
     };
-    let value = json!({
-        "kind": "acp",
-        "enabled": true,
-        "label": args.label.unwrap_or_else(|| args.id.clone()),
-        "description": args.description.trim(),
-        "command": args.command.trim(),
-        "args": args.args,
-        "entrypoints": entrypoints,
-        "client_capabilities": client_capabilities,
-        "cwd": "invocation",
-        "env": {},
-    });
+    let mut value = serde_json::Map::new();
+    value.insert("kind".to_string(), json!("acp"));
+    value.insert("enabled".to_string(), json!(true));
+    if let Some(label) = args
+        .label
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        value.insert("label".to_string(), json!(label));
+    }
+    if let Some(description) = args
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        value.insert("description".to_string(), json!(description));
+    }
+    value.insert("command".to_string(), json!(args.command.trim()));
+    value.insert("args".to_string(), json!(args.args));
+    value.insert("entrypoints".to_string(), json!(entrypoints));
+    value.insert(
+        "client_capabilities".to_string(),
+        json!(client_capabilities),
+    );
+    value.insert("cwd".to_string(), json!("invocation"));
+    value.insert("env".to_string(), json!({}));
+    let value = Value::Object(value);
     let result = set_config_value(config_dir, &format!("agents.backends.{}", args.id), value)?;
     if args.json {
         println!(
@@ -832,16 +846,6 @@ pub(crate) fn agent_backend_diagnostics(backend: &AgentBackendConfig) -> Vec<Val
     if !backend.enabled {
         diagnostics.push(json!({"kind": "disabled", "message": "backend is disabled"}));
     }
-    if backend
-        .description
-        .as_deref()
-        .is_none_or(|value| value.trim().is_empty())
-    {
-        diagnostics.push(json!({
-            "kind": "missing_description",
-            "message": "backend will not generate an agent without a description"
-        }));
-    }
     if backend.command.is_none() {
         diagnostics.push(json!({
             "kind": "missing_command",
@@ -861,17 +865,17 @@ pub(crate) fn agent_backend_doctor_value(
         "ok": backend.enabled,
         "message": if backend.enabled { "backend enabled" } else { "backend disabled" },
     }));
-    let has_description = backend
-        .description
-        .as_deref()
-        .is_some_and(|value| !value.trim().is_empty());
     checks.push(json!({
         "name": "description",
-        "ok": has_description,
-        "message": if has_description {
+        "ok": true,
+        "message": if backend
+            .description
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+        {
             "description configured"
         } else {
-            "description missing; generated agent will be hidden"
+            "description optional; using backend label"
         },
     }));
     checks.push(match backend.command.as_deref() {

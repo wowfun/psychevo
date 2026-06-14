@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "deleted": {
+      "type": "boolean"
+    },
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "deleted",
+    "name",
+    "path"
+  ],
+  "title": "AgentDeleteResult",
+  "type": "object"
+}

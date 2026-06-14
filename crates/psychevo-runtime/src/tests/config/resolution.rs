@@ -103,6 +103,67 @@ api_key_env = "CUSTOM_KEY"
 }
 
 #[test]
+pub(crate) fn explicit_config_agent_backends_still_load_project_overlay() {
+    let temp = tempdir().expect("temp");
+    let options = base_options(&temp);
+    let home = home_dir(&temp);
+    let explicit_dir = temp.path().join("explicit");
+    let project_dir = options.workdir.join(".psychevo");
+    fs::create_dir_all(&home).expect("home dir");
+    fs::create_dir_all(&explicit_dir).expect("explicit dir");
+    fs::create_dir_all(&project_dir).expect("project dir");
+    write_config(
+        home.join("config.toml"),
+        r#"
+[agents.backends.ignored]
+kind = "acp"
+description = "Home backend should be replaced by explicit config."
+command = "ignored"
+"#,
+    )
+    .expect("home config");
+    let explicit = explicit_dir.join("config.toml");
+    write_config(
+        &explicit,
+        r#"
+[agents.backends.cursor]
+kind = "acp"
+description = "Cursor ACP coding agent."
+command = "cursor-agent"
+args = ["--acp"]
+"#,
+    )
+    .expect("explicit config");
+    write_config(
+        project_dir.join("config.toml"),
+        r#"
+[agents.backends.opencode]
+kind = "acp"
+description = "OpenCode ACP coding agent."
+command = "opencode"
+args = ["acp"]
+"#,
+    )
+    .expect("project config");
+    let env = BTreeMap::from([
+        (
+            "PSYCHEVO_CONFIG".to_string(),
+            explicit.to_string_lossy().to_string(),
+        ),
+        (
+            "PSYCHEVO_HOME".to_string(),
+            home.to_string_lossy().to_string(),
+        ),
+    ]);
+
+    let backends = load_agent_backend_configs(&home, &options.workdir, &env).expect("backends");
+
+    assert!(backends.contains_key("cursor"));
+    assert!(backends.contains_key("opencode"));
+    assert!(!backends.contains_key("ignored"));
+}
+
+#[test]
 pub(crate) fn psychevo_config_env_is_supported_and_config_dir_is_ignored() {
     let temp = tempdir().expect("temp");
     let mut options = base_options(&temp);

@@ -88,6 +88,9 @@ export const contextSchemas = {
   ContextUsageCategoryView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
+    "details": {
+      "default": null
+    },
     "estimated": {
       "type": "boolean"
     },
@@ -129,6 +132,9 @@ export const contextSchemas = {
   "definitions": {
     "ContextUsageCategoryView": {
       "properties": {
+        "details": {
+          "default": null
+        },
         "estimated": {
           "type": "boolean"
         },

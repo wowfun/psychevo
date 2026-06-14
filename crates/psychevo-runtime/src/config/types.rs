@@ -348,11 +348,11 @@ pub fn load_agent_backend_configs(
             &mut value,
             load_toml_config_file(&home.join(CONFIG_FILE_NAME), false)?,
         );
-        deep_merge(
-            &mut value,
-            load_toml_config_file(&workdir.join(".psychevo").join(CONFIG_FILE_NAME), false)?,
-        );
     }
+    deep_merge(
+        &mut value,
+        load_toml_config_file(&workdir.join(".psychevo").join(CONFIG_FILE_NAME), false)?,
+    );
     value
         .get("agents")
         .map(parse_agent_backend_configs)

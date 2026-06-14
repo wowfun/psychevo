@@ -3,6 +3,9 @@
   "definitions": {
     "ContextUsageCategoryView": {
       "properties": {
+        "details": {
+          "default": null
+        },
         "estimated": {
           "type": "boolean"
         },

@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "BackendConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "changed": {
+      "type": "boolean"
+    },
+    "deleted": {
+      "type": "boolean"
+    },
+    "id": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "target": {
+      "$ref": "#/definitions/BackendConfigTarget"
+    }
+  },
+  "required": [
+    "changed",
+    "deleted",
+    "id",
+    "path",
+    "target"
+  ],
+  "title": "BackendDeleteResult",
+  "type": "object"
+}

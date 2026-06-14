@@ -1,6 +1,336 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "AgentBackendRefInput": {
+      "properties": {
+        "ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    },
+    "AgentDeleteParams": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewayRequestScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "AgentListParams": {
+      "properties": {
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewayRequestScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "AgentReadParams": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewayRequestScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "AgentStatusParams": {
+      "properties": {
+        "all": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewayRequestScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "threadId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "AgentWriteParams": {
+      "properties": {
+        "backend": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentBackendRefInput"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "type": "string"
+        },
+        "entrypoints": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "instructions": {
+          "default": "",
+          "type": "string"
+        },
+        "mcpServers": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewayRequestScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tools": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "description",
+        "name"
+      ],
+      "type": "object"
+    },
+    "BackendConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    },
+    "BackendDeleteParams": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewayRequestScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "target": {
+          "$ref": "#/definitions/BackendConfigTarget"
+        }
+      },
+      "required": [
+        "id",
+        "target"
+      ],
+      "type": "object"
+    },
+    "BackendDoctorParams": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewayRequestScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "BackendListParams": {
+      "properties": {
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewayRequestScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "BackendWriteParams": {
+      "properties": {
+        "args": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "clientCapabilities": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "command": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cwd": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "entrypoints": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mcpServers": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewayRequestScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "target": {
+          "$ref": "#/definitions/BackendConfigTarget"
+        }
+      },
+      "required": [
+        "id",
+        "target"
+      ],
+      "type": "object"
+    },
     "ClarifyRespondParams": {
       "properties": {
         "answers": {
@@ -1293,6 +1623,168 @@
         },
         "params": {
           "$ref": "#/definitions/CommandExecuteParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "agent/list"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/AgentListParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "agent/read"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/AgentReadParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "agent/write"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/AgentWriteParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "agent/delete"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/AgentDeleteParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "agent/status"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/AgentStatusParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "backend/list"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/BackendListParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "backend/doctor"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/BackendDoctorParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "backend/write"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/BackendWriteParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "backend/delete"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/BackendDeleteParams"
         }
       },
       "required": [

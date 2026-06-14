@@ -152,8 +152,35 @@ impl GatewayLiveProjector {
                 | "tool_execution_update"
                 | "tool_execution_end",
             ) => self.project_tool_event(turn_id, value),
+            Some("acp_peer_plan") => self.project_acp_peer_plan(turn_id, value),
             _ => None,
         }
+    }
+
+    fn project_acp_peer_plan(&mut self, turn_id: &str, value: &Value) -> Option<GatewayEvent> {
+        let body = value
+            .get("body")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|body| !body.is_empty())
+            .map(ToString::to_string)?;
+        let segment = self.assistant_segment;
+        let block = live_block(
+            format!("live:{turn_id}:assistant:{segment}:acp-peer-plan"),
+            TranscriptBlockKind::Status,
+            TranscriptBlockStatus::Running,
+            DEFAULT_TEXT_ORDER + 10,
+            Some("Plan".to_string()),
+            Some(body),
+            Some(json!({
+                "projection": "acp_peer_plan",
+                "origin": "acp_peer",
+                "source": "acp_peer",
+                "plan": value.get("plan").cloned().unwrap_or(Value::Null),
+            })),
+        );
+        self.upsert_block(segment, block);
+        Some(self.emit_entry_event(turn_id, segment, false, false))
     }
 
     fn project_tool_event(&mut self, turn_id: &str, value: &Value) -> Option<GatewayEvent> {
@@ -445,6 +472,9 @@ impl GatewayLiveProjector {
         {
             blocks.insert(reasoning.id.clone(), reasoning);
         }
+        for block in self.preserved_acp_peer_blocks(segment) {
+            blocks.entry(block.id.clone()).or_insert(block);
+        }
         if blocks.is_empty() {
             return false;
         }
@@ -565,6 +595,33 @@ impl GatewayLiveProjector {
                 block.updated_at_ms = crate::gateway_now_ms();
                 block
             })
+    }
+
+    fn preserved_acp_peer_blocks(&self, segment: usize) -> Vec<TranscriptBlock> {
+        self.entries
+            .get(&segment)
+            .map(|state| {
+                state
+                    .blocks
+                    .values()
+                    .filter(|block| {
+                        block.metadata.as_ref().is_some_and(|metadata| {
+                            metadata
+                                .get("source")
+                                .and_then(Value::as_str)
+                                .or_else(|| metadata.get("origin").and_then(Value::as_str))
+                                == Some("acp_peer")
+                                || metadata
+                                    .get("metadata")
+                                    .and_then(|metadata| metadata.get("origin"))
+                                    .and_then(Value::as_str)
+                                    == Some("acp_peer")
+                        })
+                    })
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     fn project_visible_tool_event(
@@ -1460,6 +1517,14 @@ fn live_tool_entry(
 }
 
 fn live_tool_title(tool_name: &str, metadata: &Value) -> String {
+    if let Some(display) = metadata
+        .get("display")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|display| !display.is_empty())
+    {
+        return display.to_string();
+    }
     if tool_name == "exec_command"
         && let Some(command) = metadata
             .get("args")

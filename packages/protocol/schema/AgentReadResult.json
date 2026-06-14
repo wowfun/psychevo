@@ -1,0 +1,107 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AgentBackendRefView": {
+      "properties": {
+        "ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    },
+    "AgentDefinitionView": {
+      "properties": {
+        "backend": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentBackendRefView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "type": "string"
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/definitions/AgentDiagnosticView"
+          },
+          "type": "array"
+        },
+        "entrypoints": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "generated": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "description",
+        "diagnostics",
+        "entrypoints",
+        "generated",
+        "name",
+        "source"
+      ],
+      "type": "object"
+    },
+    "AgentDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "agent": {
+      "$ref": "#/definitions/AgentDefinitionView"
+    },
+    "instructions": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "agent",
+    "instructions"
+  ],
+  "title": "AgentReadResult",
+  "type": "object"
+}

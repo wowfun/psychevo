@@ -43,9 +43,9 @@ pub use agents::{
     AgentDefinition, AgentDiagnostic, AgentDiscoveryOptions, AgentEntrypoint, AgentInvocationRole,
     AgentPermissionMode, AgentRun, AgentRunRecord, AgentRunStatus, AgentSource, AgentToolPolicy,
     LoadedMainAgent, MAX_AGENT_SPAWN_DEPTH_CAP, SESSION_MAIN_AGENT_METADATA_KEY,
-    agent_spawn_paused, agent_status_value, close_agent_id, discover_agents, list_agents_value,
-    main_agent_default_metadata, main_agent_from_session_metadata, main_agent_metadata,
-    resolve_agent_definition, resume_agent_id, send_agent_message,
+    agent_spawn_paused, agent_status_records, agent_status_value, close_agent_id, discover_agents,
+    list_agents_value, main_agent_default_metadata, main_agent_from_session_metadata,
+    main_agent_metadata, resolve_agent_definition, resume_agent_id, send_agent_message,
     session_agent_input_from_metadata, session_base_agent_name_from_metadata,
     session_main_agent_explicit_default, set_agent_spawn_paused, stop_agent_id_with_grace,
     valid_agent_name, view_agent_value, view_agent_value_with_catalog, wait_agent_id,
@@ -62,10 +62,11 @@ pub use config::{
     create_global_custom_provider, create_local_toolset, create_scoped_custom_provider,
     custom_provider_api_key_env, fetch_model_catalog, load_agent_backend_configs,
     model_catalog_endpoint, model_catalog_providers, permission_rules_value,
-    refresh_model_metadata_cache, remove_local_permission_rule, remove_local_toolset,
-    resolve_default_workspace_workdir, resolve_workspace_root, selected_configured_model,
-    set_config_value, set_default_model, set_default_model_with_reasoning,
-    set_local_toolset_enabled, set_provider_api_key, toolsets_value,
+    refresh_model_metadata_cache, remove_config_value, remove_local_permission_rule,
+    remove_local_toolset, resolve_default_workspace_workdir, resolve_workspace_root,
+    selected_configured_model, set_config_value, set_default_model,
+    set_default_model_with_reasoning, set_local_toolset_enabled, set_provider_api_key,
+    toolsets_value,
 };
 pub use context::prune_context;
 pub use context_usage::{
@@ -84,7 +85,7 @@ pub use prompt_image::{
 };
 pub use prompt_templates::side_conversation_boundary_prompt;
 pub use psychevo_agent_core::{
-    AssistantBlock, Message, PendingInputId, TerminalReason, ToolDisplayBodyPolicy,
+    AssistantBlock, Message, PendingInputId, TerminalReason, ToolCallBlock, ToolDisplayBodyPolicy,
     ToolDisplayCategory, ToolDisplaySpec, UserContentBlock,
 };
 pub use psychevo_ai::Outcome;

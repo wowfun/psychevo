@@ -1,27 +1,34 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use agent_client_protocol::schema::{
-    ClientCapabilities, FileSystemCapabilities, Implementation, InitializeRequest,
-    LoadSessionRequest, NewSessionResponse, PermissionOption, PermissionOptionKind,
-    ProtocolVersion, ReadTextFileRequest, ReadTextFileResponse, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
-    WriteTextFileRequest, WriteTextFileResponse,
+    ClientCapabilities, ContentBlock, ContentChunk, FileSystemCapabilities, Implementation,
+    InitializeRequest, LoadSessionRequest, NewSessionResponse, PermissionOption,
+    PermissionOptionKind, ProtocolVersion, ReadTextFileRequest, ReadTextFileResponse,
+    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    SelectedPermissionOutcome, SessionNotification, SessionUpdate, WriteTextFileRequest,
+    WriteTextFileResponse,
 };
-use agent_client_protocol::{ByteStreams, Client};
+use agent_client_protocol::util::MatchDispatch;
+use agent_client_protocol::{
+    Agent, ByteStreams, Client, ConnectionTo, SessionMessage, schema::v2 as acp_v2,
+};
+use futures::{FutureExt, StreamExt, channel::mpsc, channel::oneshot};
 use psychevo_runtime::{
     AgentDefinition, AssistantBlock, Error, ImageInput, Message, Outcome,
     PermissionApprovalDecision, PermissionApprovalOutcome, PermissionApprovalRequest, RunResult,
-    RunStreamEvent, SelectedAgent, UserContentBlock,
+    RunStreamEvent, RunStreamSink, SelectedAgent, ToolCallBlock, UserContentBlock,
 };
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use tokio::process::Command;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
-use crate::{BackendTurnRequest, ResolvedPeerTurn, gateway_now_ms};
-
-const PEER_METADATA_KEY: &str = "peer_agent";
+use crate::{ACP_PEER_METADATA_KEY, BackendTurnRequest, ResolvedPeerTurn, gateway_now_ms};
 
 #[derive(Debug)]
 pub(crate) struct AcpPeerTurnResult {
@@ -54,6 +61,16 @@ pub(crate) async fn run_acp_peer_turn(
         is_new_native_session,
     );
     let prompt_for_history = prompt_history_text(&options.prompt, &options.image_inputs);
+    let acp_context = AcpPeerTurnContext {
+        workdir: options.workdir.clone(),
+        local_session_id: session_id.clone(),
+        native_session_id: existing_native_id,
+        prompt,
+        peer_model: options.model.clone(),
+        peer_reasoning_effort: options.reasoning_effort.clone(),
+        stream: request.stream.clone(),
+        approval_handler: options.approval_handler.clone(),
+    };
 
     emit_runtime_event(
         &request.stream,
@@ -73,14 +90,7 @@ pub(crate) async fn run_acp_peer_turn(
         },
     )?;
 
-    let acp = run_acp_stdio_turn(
-        &peer,
-        &options.workdir,
-        existing_native_id,
-        prompt,
-        options.approval_handler.clone(),
-    )
-    .await;
+    let acp = run_acp_stdio_turn(&peer, &acp_context).await;
     let acp = match acp {
         Ok(acp) => acp,
         Err(err) => {
@@ -113,16 +123,22 @@ pub(crate) async fn run_acp_peer_turn(
 
     store.set_session_metadata_field(
         &session_id,
-        PEER_METADATA_KEY,
-        Some(peer_session_metadata(&peer, Some(&acp.native_session_id))),
+        ACP_PEER_METADATA_KEY,
+        Some(peer_session_metadata(
+            &peer,
+            Some(&acp.native_session_id),
+            acp.usage_update.as_ref(),
+        )),
     )?;
-    if !acp.final_answer.trim().is_empty() {
+    if let Some(title) = acp.session_title.as_deref() {
+        let _ = store.set_session_title(&session_id, title);
+    }
+    let assistant_content = acp.persisted_assistant_content();
+    if !assistant_content.is_empty() {
         store.append_message(
             &session_id,
             &Message::Assistant {
-                content: vec![AssistantBlock::Text {
-                    text: acp.final_answer.clone(),
-                }],
+                content: assistant_content,
                 timestamp_ms: gateway_now_ms(),
                 finish_reason: Some("end_turn".to_string()),
                 outcome: Outcome::Normal,
@@ -131,6 +147,9 @@ pub(crate) async fn run_acp_peer_turn(
             },
         )?;
     }
+    for message in acp.persisted_tool_result_messages() {
+        store.append_message(&session_id, &message)?;
+    }
     emit_runtime_event(
         &request.stream,
         json!({
@@ -138,7 +157,7 @@ pub(crate) async fn run_acp_peer_turn(
             "session_id": session_id.clone(),
             "message": {
                 "role": "assistant",
-                "content": [{"type": "text", "text": acp.final_answer.clone()}],
+                "content": acp.final_message_content(),
             },
         }),
     );
@@ -173,7 +192,7 @@ pub(crate) async fn run_acp_peer_turn(
         }),
         selected_skills: Vec::new(),
         context_snapshot: None,
-        events: Vec::new(),
+        events: acp.events,
         warnings: Vec::new(),
     };
     Ok(AcpPeerTurnResult {
@@ -185,14 +204,1006 @@ pub(crate) async fn run_acp_peer_turn(
 struct AcpTurnOutput {
     native_session_id: String,
     final_answer: String,
+    reasoning_text: String,
+    final_content: Vec<Value>,
+    session_title: Option<String>,
+    tools: Vec<Value>,
+    usage_update: Option<Value>,
+    events: Vec<Value>,
+}
+
+impl AcpTurnOutput {
+    fn persisted_assistant_content(&self) -> Vec<AssistantBlock> {
+        let mut content = Vec::new();
+        if !self.reasoning_text.trim().is_empty() {
+            content.push(AssistantBlock::Reasoning {
+                text: self.reasoning_text.clone(),
+                provider_evidence: None,
+            });
+        }
+        if !self.final_answer.trim().is_empty() {
+            content.push(AssistantBlock::Text {
+                text: self.final_answer.clone(),
+            });
+        }
+        for tool in &self.tools {
+            let call_index = content
+                .iter()
+                .filter(|block| matches!(block, AssistantBlock::ToolCall(_)))
+                .count();
+            let content_index = content.len();
+            content.push(AssistantBlock::ToolCall(acp_tool_call_block(
+                tool,
+                content_index,
+                call_index,
+            )));
+        }
+        content
+    }
+
+    fn final_message_content(&self) -> Vec<Value> {
+        self.final_content.clone()
+    }
+
+    fn persisted_tool_result_messages(&self) -> Vec<Message> {
+        self.tools
+            .iter()
+            .filter_map(|tool| {
+                let status = tool
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .unwrap_or("pending");
+                if !matches!(status, "completed" | "failed") {
+                    return None;
+                }
+                let content = acp_tool_output(tool).unwrap_or_default();
+                if content.trim().is_empty() && status != "failed" {
+                    return None;
+                }
+                let content =
+                    serde_json::to_string_pretty(&acp_tool_result(tool)).unwrap_or(content);
+                Some(Message::ToolResult {
+                    tool_call_id: acp_tool_call_id(tool),
+                    tool_name: acp_tool_runtime_name(tool),
+                    content,
+                    is_error: status == "failed",
+                    timestamp_ms: gateway_now_ms(),
+                })
+            })
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct AcpPeerToolState {
+    value: Value,
+    started: bool,
+}
+
+struct AcpPeerStreamState {
+    stream: Option<RunStreamSink>,
+    local_session_id: String,
+    final_answer: String,
+    reasoning_text: String,
+    reasoning_open: bool,
+    session_title: Option<String>,
+    tools: BTreeMap<String, AcpPeerToolState>,
+    usage_update: Option<Value>,
+    events: Vec<Value>,
+}
+
+impl AcpPeerStreamState {
+    fn new(stream: Option<RunStreamSink>, local_session_id: String) -> Self {
+        Self {
+            stream,
+            local_session_id,
+            final_answer: String::new(),
+            reasoning_text: String::new(),
+            reasoning_open: false,
+            session_title: None,
+            tools: BTreeMap::new(),
+            usage_update: None,
+            events: Vec::new(),
+        }
+    }
+
+    fn handle_notification(&mut self, notification: SessionNotification) {
+        let native_session_id = notification.session_id.to_string();
+        let update_value = serde_json::to_value(&notification.update).unwrap_or_else(|err| {
+            json!({
+                "sessionUpdate": "decode_error",
+                "error": err.to_string(),
+            })
+        });
+        let update_kind = acp_update_kind(&update_value);
+        let event = json!({
+            "type": "acp_peer_session_update",
+            "session_id": self.local_session_id.clone(),
+            "native_session_id": native_session_id,
+            "update_kind": update_kind,
+            "update": update_value.clone(),
+        });
+        self.events.push(event.clone());
+        emit_runtime_event(&self.stream, event);
+
+        match notification.update {
+            SessionUpdate::AgentMessageChunk(chunk) => self.handle_agent_message_chunk(chunk),
+            SessionUpdate::AgentThoughtChunk(chunk) => self.handle_agent_thought_chunk(chunk),
+            SessionUpdate::ToolCall(_tool_call) => self.handle_tool_call(update_value),
+            SessionUpdate::ToolCallUpdate(_tool_call) => self.handle_tool_call_update(update_value),
+            SessionUpdate::Plan(_plan) => self.handle_plan(update_value),
+            SessionUpdate::SessionInfoUpdate(_) => self.handle_session_info_update(update_value),
+            SessionUpdate::UsageUpdate(_) => self.handle_usage_update(update_value),
+            SessionUpdate::UserMessageChunk(_)
+            | SessionUpdate::AvailableCommandsUpdate(_)
+            | SessionUpdate::CurrentModeUpdate(_)
+            | SessionUpdate::ConfigOptionUpdate(_) => {}
+            #[allow(unreachable_patterns)]
+            _ => {}
+        }
+    }
+
+    fn handle_notification_v2(&mut self, notification: acp_v2::SessionNotification) {
+        let native_session_id = notification.session_id.to_string();
+        let update_value = serde_json::to_value(&notification.update).unwrap_or_else(|err| {
+            json!({
+                "sessionUpdate": "decode_error",
+                "error": err.to_string(),
+            })
+        });
+        let update_kind = acp_update_kind(&update_value);
+        let event = json!({
+            "type": "acp_peer_session_update",
+            "session_id": self.local_session_id.clone(),
+            "native_session_id": native_session_id,
+            "protocol_version": "2",
+            "update_kind": update_kind,
+            "update": update_value.clone(),
+        });
+        self.events.push(event.clone());
+        emit_runtime_event(&self.stream, event);
+
+        match notification.update {
+            acp_v2::SessionUpdate::AgentMessageChunk(chunk) => {
+                self.handle_agent_message_chunk_text(acp_v2_content_chunk_text(chunk))
+            }
+            acp_v2::SessionUpdate::AgentThoughtChunk(chunk) => {
+                self.handle_agent_thought_chunk_text(acp_v2_content_chunk_text(chunk))
+            }
+            acp_v2::SessionUpdate::ToolCall(_tool_call) => self.handle_tool_call(update_value),
+            acp_v2::SessionUpdate::ToolCallUpdate(_tool_call) => {
+                self.handle_tool_call_update(update_value)
+            }
+            acp_v2::SessionUpdate::PlanUpdate(_plan) => self.handle_plan(update_value),
+            acp_v2::SessionUpdate::SessionInfoUpdate(_) => {
+                self.handle_session_info_update(update_value)
+            }
+            acp_v2::SessionUpdate::UsageUpdate(_) => self.handle_usage_update(update_value),
+            acp_v2::SessionUpdate::UserMessageChunk(_)
+            | acp_v2::SessionUpdate::AvailableCommandsUpdate(_)
+            | acp_v2::SessionUpdate::ConfigOptionUpdate(_) => {}
+            #[allow(unreachable_patterns)]
+            _ => {}
+        }
+    }
+
+    fn handle_agent_message_chunk(&mut self, chunk: ContentChunk) {
+        self.handle_agent_message_chunk_text(acp_content_chunk_text(chunk));
+    }
+
+    fn handle_agent_message_chunk_text(&mut self, text: Option<String>) {
+        let Some(text) = text else {
+            return;
+        };
+        if text.is_empty() {
+            return;
+        }
+        self.final_answer.push_str(&text);
+        emit_runtime_event(
+            &self.stream,
+            json!({
+                "type": "message_update",
+                "session_id": self.local_session_id.clone(),
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": self.final_answer.clone()}],
+                },
+            }),
+        );
+    }
+
+    fn handle_agent_thought_chunk(&mut self, chunk: ContentChunk) {
+        self.handle_agent_thought_chunk_text(acp_content_chunk_text(chunk));
+    }
+
+    fn handle_agent_thought_chunk_text(&mut self, text: Option<String>) {
+        let Some(text) = text else {
+            return;
+        };
+        if text.is_empty() {
+            return;
+        }
+        self.reasoning_text.push_str(&text);
+        self.reasoning_open = true;
+        if let Some(stream) = &self.stream {
+            stream(RunStreamEvent::ReasoningDelta { text });
+        }
+    }
+
+    fn handle_tool_call(&mut self, update_value: Value) {
+        let tool_call_id = acp_tool_call_id(&update_value);
+        let runtime_event = acp_tool_runtime_event(&self.local_session_id, &update_value, false);
+        let started = acp_tool_started_after_event(&runtime_event);
+        self.tools.insert(
+            tool_call_id,
+            AcpPeerToolState {
+                value: update_value,
+                started,
+            },
+        );
+        emit_runtime_event(&self.stream, runtime_event);
+    }
+
+    fn handle_tool_call_update(&mut self, update_value: Value) {
+        let tool_call_id = acp_tool_call_id(&update_value);
+        let previous = self.tools.get(&tool_call_id).cloned();
+        let merged = match previous.as_ref() {
+            Some(previous) => acp_merge_tool_update(&previous.value, &update_value),
+            None => update_value,
+        };
+        let was_started = previous.as_ref().is_some_and(|state| state.started);
+        let runtime_event = acp_tool_runtime_event(&self.local_session_id, &merged, was_started);
+        let started = was_started || acp_tool_started_after_event(&runtime_event);
+        self.tools.insert(
+            tool_call_id,
+            AcpPeerToolState {
+                value: merged,
+                started,
+            },
+        );
+        emit_runtime_event(&self.stream, runtime_event);
+    }
+
+    fn handle_plan(&mut self, update_value: Value) {
+        let body = acp_plan_body(&update_value);
+        emit_runtime_event(
+            &self.stream,
+            json!({
+                "type": "acp_peer_plan",
+                "session_id": self.local_session_id.clone(),
+                "source": "acp_peer",
+                "body": body,
+                "plan": update_value,
+            }),
+        );
+    }
+
+    fn handle_session_info_update(&mut self, update_value: Value) {
+        if let Some(title) = update_value
+            .get("title")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+        {
+            self.session_title = Some(title.to_string());
+        }
+    }
+
+    fn handle_usage_update(&mut self, update_value: Value) {
+        self.usage_update = Some(update_value.clone());
+        emit_runtime_event(
+            &self.stream,
+            json!({
+                "type": "acp_peer_usage_update",
+                "session_id": self.local_session_id.clone(),
+                "source": "acp_peer",
+                "usage": update_value,
+            }),
+        );
+    }
+
+    fn finish(&mut self) {
+        if self.reasoning_open {
+            if let Some(stream) = &self.stream {
+                stream(RunStreamEvent::ReasoningEnd);
+            }
+            self.reasoning_open = false;
+        }
+    }
+
+    fn final_message_content(&self) -> Vec<Value> {
+        let mut content = Vec::new();
+        if !self.reasoning_text.trim().is_empty() {
+            content.push(json!({
+                "type": "reasoning",
+                "text": self.reasoning_text.clone(),
+                "content_index": content.len(),
+            }));
+        }
+        if !self.final_answer.trim().is_empty() {
+            content.push(json!({
+                "type": "text",
+                "text": self.final_answer.clone(),
+                "content_index": content.len(),
+            }));
+        }
+        content
+    }
+}
+
+fn acp_update_kind(update: &Value) -> String {
+    update
+        .get("sessionUpdate")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string()
+}
+
+fn acp_content_chunk_text(chunk: ContentChunk) -> Option<String> {
+    match chunk.content {
+        ContentBlock::Text(text) => Some(text.text),
+        _ => None,
+    }
+}
+
+fn acp_v2_content_chunk_text(chunk: acp_v2::ContentChunk) -> Option<String> {
+    match chunk.content {
+        acp_v2::ContentBlock::Text(text) => Some(text.text),
+        _ => None,
+    }
+}
+
+fn acp_tool_call_id(value: &Value) -> String {
+    value
+        .get("toolCallId")
+        .or_else(|| value.get("tool_call_id"))
+        .and_then(Value::as_str)
+        .unwrap_or("tool")
+        .to_string()
+}
+
+fn acp_merge_tool_update(existing: &Value, update: &Value) -> Value {
+    let mut merged = existing.as_object().cloned().unwrap_or_default();
+    if let Some(update) = update.as_object() {
+        for (key, value) in update {
+            if key == "sessionUpdate" || value.is_null() {
+                continue;
+            }
+            merged.insert(key.clone(), value.clone());
+        }
+    }
+    merged.insert(
+        "sessionUpdate".to_string(),
+        Value::String("tool_call".to_string()),
+    );
+    Value::Object(merged)
+}
+
+fn acp_tool_runtime_event(local_session_id: &str, tool: &Value, was_started: bool) -> Value {
+    let status = tool
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("pending");
+    let event_type = match status {
+        "completed" | "failed" => "tool_execution_end",
+        "in_progress" if was_started => "tool_execution_update",
+        "in_progress" => "tool_execution_start",
+        _ => "tool_call_pending",
+    };
+    let mut event = Map::new();
+    event.insert("type".to_string(), json!(event_type));
+    event.insert("session_id".to_string(), json!(local_session_id));
+    event.insert("source".to_string(), json!("acp_peer"));
+    event.insert("tool_call_id".to_string(), json!(acp_tool_call_id(tool)));
+    event.insert("tool_name".to_string(), json!(acp_tool_runtime_name(tool)));
+    if let Some(title) = acp_tool_title(tool) {
+        event.insert("display".to_string(), json!(title));
+    }
+    if let Some(args) = acp_tool_args(tool) {
+        event.insert("args".to_string(), args.clone());
+        event.insert(
+            "arguments_json".to_string(),
+            json!(serde_json::to_string(&args).unwrap_or_else(|_| "{}".to_string())),
+        );
+    }
+    match event_type {
+        "tool_execution_update" => {
+            event.insert("partial_result".to_string(), acp_tool_result(tool));
+        }
+        "tool_execution_end" => {
+            event.insert("result".to_string(), acp_tool_result(tool));
+            event.insert(
+                "outcome".to_string(),
+                json!(if status == "failed" {
+                    "failed"
+                } else {
+                    "normal"
+                }),
+            );
+        }
+        _ => {}
+    }
+    event.insert(
+        "metadata".to_string(),
+        json!({
+            "origin": "acp_peer",
+            "acp_update": tool,
+        }),
+    );
+    Value::Object(event)
+}
+
+fn acp_tool_started_after_event(event: &Value) -> bool {
+    matches!(
+        event.get("type").and_then(Value::as_str),
+        Some("tool_execution_start" | "tool_execution_update" | "tool_execution_end")
+    )
+}
+
+fn acp_tool_title(tool: &Value) -> Option<String> {
+    tool.get("title")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .map(ToString::to_string)
+}
+
+fn acp_tool_runtime_name(tool: &Value) -> String {
+    match tool.get("kind").and_then(Value::as_str).unwrap_or("other") {
+        "read" => "read".to_string(),
+        "edit" | "delete" | "move" => "edit".to_string(),
+        "execute" => "exec_command".to_string(),
+        "fetch" => "web_fetch".to_string(),
+        "search" => "search".to_string(),
+        "think" => "task".to_string(),
+        "switch_mode" => "mode".to_string(),
+        _ => acp_tool_title(tool).unwrap_or_else(|| "tool".to_string()),
+    }
+}
+
+fn acp_tool_args(tool: &Value) -> Option<Value> {
+    tool.get("rawInput")
+        .or_else(|| tool.get("raw_input"))
+        .filter(|value| !value.is_null())
+        .cloned()
+}
+
+fn acp_tool_call_block(tool: &Value, content_index: usize, call_index: usize) -> ToolCallBlock {
+    let arguments = acp_tool_args(tool).unwrap_or_else(|| Value::Object(Map::new()));
+    let arguments_json = serde_json::to_string(&arguments).unwrap_or_else(|_| "{}".to_string());
+    ToolCallBlock {
+        id: acp_tool_call_id(tool),
+        name: acp_tool_runtime_name(tool),
+        arguments,
+        arguments_json,
+        arguments_error: None,
+        content_index,
+        call_index,
+    }
+}
+
+fn acp_tool_result(tool: &Value) -> Value {
+    let mut result = Map::new();
+    if let Some(title) = acp_tool_title(tool) {
+        result.insert("display".to_string(), json!(title));
+    }
+    result.insert("source".to_string(), json!("acp_peer"));
+    if let Some(output) = acp_tool_output(tool) {
+        result.insert("output".to_string(), json!(output));
+    }
+    if let Some(raw_output) = tool
+        .get("rawOutput")
+        .or_else(|| tool.get("raw_output"))
+        .filter(|value| !value.is_null())
+    {
+        result.insert("raw_output".to_string(), raw_output.clone());
+    }
+    if let Some(content) = tool.get("content").filter(|value| !value.is_null()) {
+        result.insert("content".to_string(), content.clone());
+    }
+    if let Some(locations) = tool.get("locations").filter(|value| !value.is_null()) {
+        result.insert("locations".to_string(), locations.clone());
+    }
+    Value::Object(result)
+}
+
+fn acp_tool_output(tool: &Value) -> Option<String> {
+    if let Some(content) = tool.get("content").and_then(Value::as_array) {
+        let text = content
+            .iter()
+            .filter_map(acp_tool_content_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !text.trim().is_empty() {
+            return Some(text);
+        }
+    }
+    let raw_output = tool
+        .get("rawOutput")
+        .or_else(|| tool.get("raw_output"))
+        .filter(|value| !value.is_null())?;
+    if let Some(output) = raw_output.as_str() {
+        return Some(output.to_string());
+    }
+    if let Some(output) = raw_output.get("output").and_then(Value::as_str) {
+        return Some(output.to_string());
+    }
+    serde_json::to_string(raw_output).ok()
+}
+
+fn acp_tool_content_text(content: &Value) -> Option<String> {
+    match content.get("type").and_then(Value::as_str) {
+        Some("content") => {
+            let content = content.get("content")?;
+            match content.get("type").and_then(Value::as_str) {
+                Some("text") => content
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string),
+                Some("image") => Some("[image]".to_string()),
+                Some("resource_link") => content
+                    .get("uri")
+                    .and_then(Value::as_str)
+                    .map(|uri| format!("Resource: {uri}")),
+                Some("resource") => Some("[resource]".to_string()),
+                _ => None,
+            }
+        }
+        Some("diff") => {
+            let path = content
+                .get("path")
+                .and_then(Value::as_str)
+                .unwrap_or("file");
+            Some(format!("Diff: {path}"))
+        }
+        Some("terminal") => {
+            let terminal_id = content
+                .get("terminalId")
+                .or_else(|| content.get("terminal_id"))
+                .and_then(Value::as_str)
+                .unwrap_or("terminal");
+            Some(format!("Terminal: {terminal_id}"))
+        }
+        _ => None,
+    }
+}
+
+fn acp_plan_body(plan: &Value) -> String {
+    let entries = plan
+        .get("entries")
+        .and_then(Value::as_array)
+        .or_else(|| plan.get("plan")?.get("entries")?.as_array());
+    let Some(entries) = entries else {
+        return serde_json::to_string_pretty(plan).unwrap_or_else(|_| "ACP plan".to_string());
+    };
+    if entries.is_empty() {
+        return "No plan entries.".to_string();
+    }
+    entries
+        .iter()
+        .map(|entry| {
+            let status = entry
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("pending");
+            let marker = match status {
+                "completed" => "x",
+                "in_progress" => "~",
+                _ => " ",
+            };
+            let content = entry
+                .get("content")
+                .and_then(Value::as_str)
+                .unwrap_or("Untitled task");
+            format!("- [{marker}] {content}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[derive(Clone)]
+struct AcpPeerTurnContext {
+    workdir: PathBuf,
+    local_session_id: String,
+    native_session_id: Option<String>,
+    prompt: String,
+    peer_model: Option<String>,
+    peer_reasoning_effort: Option<String>,
+    stream: Option<RunStreamSink>,
+    approval_handler: Option<Arc<dyn psychevo_runtime::ApprovalHandler>>,
 }
 
 async fn run_acp_stdio_turn(
     peer: &ResolvedPeerTurn,
-    workdir: &Path,
-    native_session_id: Option<String>,
-    prompt: String,
-    approval_handler: Option<Arc<dyn psychevo_runtime::ApprovalHandler>>,
+    context: &AcpPeerTurnContext,
+) -> psychevo_runtime::Result<AcpTurnOutput> {
+    match run_acp_stdio_turn_v2(peer, context).await {
+        Ok(output) => return Ok(output),
+        Err(err) if err.fallback_safe => {
+            emit_runtime_event(
+                &context.stream,
+                json!({
+                    "type": "acp_peer_protocol_fallback",
+                    "session_id": context.local_session_id,
+                    "source": "acp_peer",
+                    "from": "2",
+                    "to": "1",
+                    "error": err.error.to_string(),
+                }),
+            );
+        }
+        Err(err) => return Err(err.error),
+    }
+
+    run_acp_stdio_turn_v1(peer, context).await
+}
+
+struct AcpProtocolAttemptError {
+    fallback_safe: bool,
+    error: Error,
+}
+
+struct AcpPeerConfigSelection<'a> {
+    config_id: &'static str,
+    category: acp_v2::SessionConfigOptionCategory,
+    requested: &'a str,
+}
+
+async fn apply_acp_v2_config_option(
+    cx: &ConnectionTo<Agent>,
+    config_options: &mut Vec<acp_v2::SessionConfigOption>,
+    native_session_id: &str,
+    local_session_id: &str,
+    stream: &Option<RunStreamSink>,
+    selection: AcpPeerConfigSelection<'_>,
+) {
+    let Some(value) = acp_v2_matching_select_value(config_options, &selection) else {
+        emit_runtime_event(
+            stream,
+            json!({
+                "type": "acp_peer_config_option_unmatched",
+                "session_id": local_session_id,
+                "source": "acp_peer",
+                "protocol_version": "2",
+                "config_id": selection.config_id,
+                "requested": selection.requested,
+            }),
+        );
+        return;
+    };
+    match cx
+        .send_request(acp_v2::SetSessionConfigOptionRequest::new(
+            native_session_id.to_string(),
+            selection.config_id,
+            value.as_str(),
+        ))
+        .block_task()
+        .await
+    {
+        Ok(response) => {
+            *config_options = response.config_options;
+            emit_runtime_event(
+                stream,
+                json!({
+                    "type": "acp_peer_config_option_set",
+                    "session_id": local_session_id,
+                    "source": "acp_peer",
+                    "protocol_version": "2",
+                    "config_id": selection.config_id,
+                    "value": value,
+                }),
+            );
+        }
+        Err(err) => emit_runtime_event(
+            stream,
+            json!({
+                "type": "acp_peer_config_option_failed",
+                "session_id": local_session_id,
+                "source": "acp_peer",
+                "protocol_version": "2",
+                "config_id": selection.config_id,
+                "requested": selection.requested,
+                "error": err.to_string(),
+            }),
+        ),
+    }
+}
+
+fn acp_v2_matching_select_value(
+    config_options: &[acp_v2::SessionConfigOption],
+    selection: &AcpPeerConfigSelection<'_>,
+) -> Option<String> {
+    config_options
+        .iter()
+        .filter(|option| option.id.to_string() == selection.config_id)
+        .find_map(|option| acp_v2_select_value(option, selection.requested))
+        .or_else(|| {
+            config_options
+                .iter()
+                .filter(|option| option.category.as_ref() == Some(&selection.category))
+                .find_map(|option| acp_v2_select_value(option, selection.requested))
+        })
+}
+
+fn acp_v2_select_value(option: &acp_v2::SessionConfigOption, requested: &str) -> Option<String> {
+    let acp_v2::SessionConfigKind::Select(select) = &option.kind else {
+        return None;
+    };
+    match &select.options {
+        acp_v2::SessionConfigSelectOptions::Ungrouped(options) => options
+            .iter()
+            .find(|option| option.value.to_string() == requested)
+            .map(|option| option.value.to_string()),
+        acp_v2::SessionConfigSelectOptions::Grouped(groups) => groups
+            .iter()
+            .flat_map(|group| group.options.iter())
+            .find(|option| option.value.to_string() == requested)
+            .map(|option| option.value.to_string()),
+        #[allow(unreachable_patterns)]
+        _ => None,
+    }
+}
+
+async fn run_acp_stdio_turn_v2(
+    peer: &ResolvedPeerTurn,
+    turn: &AcpPeerTurnContext,
+) -> Result<AcpTurnOutput, AcpProtocolAttemptError> {
+    let command = peer
+        .backend
+        .command
+        .as_deref()
+        .map(str::trim)
+        .filter(|command| !command.is_empty())
+        .ok_or_else(|| AcpProtocolAttemptError {
+            fallback_safe: false,
+            error: Error::Message(format!(
+                "agent backend `{}` is missing command",
+                peer.backend.id
+            )),
+        })?;
+    let cwd = backend_cwd(&peer.backend.cwd, &turn.workdir);
+    let mut child = Command::new(command);
+    child
+        .args(&peer.backend.args)
+        .envs(&peer.backend.env)
+        .current_dir(&cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = child.spawn().map_err(|err| AcpProtocolAttemptError {
+        fallback_safe: false,
+        error: Error::Message(format!(
+            "failed to spawn ACP backend `{}` ({command}): {err}",
+            peer.backend.id
+        )),
+    })?;
+    let stdin = child.stdin.take().ok_or_else(|| AcpProtocolAttemptError {
+        fallback_safe: false,
+        error: Error::Message(format!(
+            "ACP backend `{}` did not provide stdin",
+            peer.backend.id
+        )),
+    })?;
+    let stdout = child.stdout.take().ok_or_else(|| AcpProtocolAttemptError {
+        fallback_safe: false,
+        error: Error::Message(format!(
+            "ACP backend `{}` did not provide stdout",
+            peer.backend.id
+        )),
+    })?;
+    let transport = ByteStreams::new(stdin.compat_write(), stdout.compat());
+    let client_context = Arc::new(AcpClientContext {
+        workdir: turn.workdir.clone(),
+        fs_read: peer_allows_fs_read(peer),
+        fs_write: peer_allows_fs_write(peer),
+        approval_handler: turn.approval_handler.clone(),
+    });
+    let workdir = turn.workdir.clone();
+    let prompt_sent = Arc::new(AtomicBool::new(false));
+    let prompt_sent_for_result = Arc::clone(&prompt_sent);
+    let (notification_tx, notification_rx) = mpsc::unbounded::<acp_v2::SessionNotification>();
+
+    emit_runtime_event(
+        &turn.stream,
+        json!({
+            "type": "acp_peer_protocol_attempt",
+            "session_id": turn.local_session_id,
+            "source": "acp_peer",
+            "protocol_version": "2",
+        }),
+    );
+
+    let turn_stream = turn.stream.clone();
+    let turn_local_session_id = turn.local_session_id.clone();
+    let turn_native_session_id = turn.native_session_id.clone();
+    let turn_prompt = turn.prompt.clone();
+    let turn_peer_model = turn.peer_model.clone();
+    let turn_peer_reasoning_effort = turn.peer_reasoning_effort.clone();
+
+    let result = Client
+        .v2()
+        .name("psychevo-gateway-acp-peer")
+        .on_receive_notification(
+            {
+                let notification_tx = notification_tx.clone();
+                async move |notification: acp_v2::SessionNotification, _cx| {
+                    let _ = notification_tx.unbounded_send(notification);
+                    Ok(())
+                }
+            },
+            agent_client_protocol::on_receive_notification!(),
+        )
+        .on_receive_request(
+            {
+                let context = Arc::clone(&client_context);
+                async move |request: acp_v2::RequestPermissionRequest, responder, _cx| {
+                    let context = Arc::clone(&context);
+                    responder.respond_with_result(request_permission_v2(context, request).await)
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .connect_with(transport, async move |cx| {
+            cx.send_request(
+                acp_v2::InitializeRequest::new(ProtocolVersion::V2)
+                    .capabilities(client_capabilities_v2())
+                    .client_info(
+                        acp_v2::Implementation::new(
+                            "psychevo-gateway",
+                            env!("CARGO_PKG_VERSION"),
+                        )
+                        .title("Psychevo Gateway"),
+                    ),
+            )
+            .block_task()
+            .await?;
+            emit_runtime_event(
+                &turn_stream,
+                json!({
+                    "type": "acp_peer_protocol_negotiated",
+                    "session_id": turn_local_session_id,
+                    "source": "acp_peer",
+                    "protocol_version": "2",
+                }),
+            );
+
+            let (native_session_id, mut config_options) = if let Some(native_session_id) = turn_native_session_id {
+                let loaded = cx.send_request(acp_v2::LoadSessionRequest::new(
+                    native_session_id.clone(),
+                    &workdir,
+                ))
+                .block_task()
+                .await?;
+                (native_session_id, loaded.config_options.unwrap_or_default())
+            } else {
+                let created = cx.send_request(acp_v2::NewSessionRequest::new(&workdir))
+                    .block_task()
+                    .await?;
+                (
+                    created.session_id.to_string(),
+                    created.config_options.unwrap_or_default(),
+                )
+            };
+
+            if let Some(model) = turn_peer_model.as_deref() {
+                apply_acp_v2_config_option(
+                    &cx,
+                    &mut config_options,
+                    &native_session_id,
+                    &turn_local_session_id,
+                    &turn_stream,
+                    AcpPeerConfigSelection {
+                        config_id: "model",
+                        category: acp_v2::SessionConfigOptionCategory::Model,
+                        requested: model,
+                    },
+                )
+                .await;
+            }
+
+            if let Some(effort) = turn_peer_reasoning_effort.as_deref() {
+                apply_acp_v2_config_option(
+                    &cx,
+                    &mut config_options,
+                    &native_session_id,
+                    &turn_local_session_id,
+                    &turn_stream,
+                    AcpPeerConfigSelection {
+                        config_id: "effort",
+                        category: acp_v2::SessionConfigOptionCategory::ThoughtLevel,
+                        requested: effort,
+                    },
+                )
+                .await;
+            }
+
+            let prompt_request = acp_v2::PromptRequest::new(
+                native_session_id.clone(),
+                vec![acp_v2::ContentBlock::Text(acp_v2::TextContent::new(
+                    turn_prompt,
+                ))],
+            );
+            let mut state = AcpPeerStreamState::new(turn_stream, turn_local_session_id);
+            let mut notification_rx = notification_rx.fuse();
+            let (done_tx, done_rx) =
+                oneshot::channel::<Result<acp_v2::PromptResponse, agent_client_protocol::Error>>();
+            prompt_sent.store(true, Ordering::SeqCst);
+            cx.spawn({
+                let cx = cx.clone();
+                async move {
+                    let result = cx.send_request(prompt_request).block_task().await;
+                    let _ = done_tx.send(result);
+                    Ok(())
+                }
+            })?;
+            let mut done_rx = done_rx.fuse();
+
+            loop {
+                futures::select! {
+                    notification = notification_rx.next() => {
+                        if let Some(notification) = notification {
+                            if notification.session_id.to_string() == native_session_id {
+                                state.handle_notification_v2(notification);
+                            }
+                        } else {
+                            let response = done_rx
+                                .await
+                                .map_err(|_| agent_client_protocol::Error::internal_error().data("prompt response channel cancelled"))?;
+                            response?;
+                            break;
+                        }
+                    }
+                    response = done_rx => {
+                        let response = response
+                            .map_err(|_| agent_client_protocol::Error::internal_error().data("prompt response channel cancelled"))?;
+                        response?;
+                        break;
+                    }
+                }
+            }
+
+            while let Some(notification) = notification_rx.next().now_or_never().flatten() {
+                if notification.session_id.to_string() == native_session_id {
+                    state.handle_notification_v2(notification);
+                }
+            }
+
+            state.finish();
+            let final_answer = state.final_answer.clone();
+            let reasoning_text = state.reasoning_text.clone();
+            let final_content = state.final_message_content();
+            let session_title = state.session_title.clone();
+            let usage_update = state.usage_update.clone();
+            let tools = state
+                .tools
+                .values()
+                .map(|state| state.value.clone())
+                .collect();
+            Ok(AcpTurnOutput {
+                native_session_id,
+                final_answer,
+                reasoning_text,
+                final_content,
+                session_title,
+                tools,
+                usage_update,
+                events: state.events,
+            })
+        })
+        .await;
+
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+
+    result.map_err(|err| AcpProtocolAttemptError {
+        fallback_safe: !prompt_sent_for_result.load(Ordering::SeqCst),
+        error: Error::Message(format!("ACP peer `{}` v2 failed: {err}", peer.backend.id)),
+    })
+}
+
+async fn run_acp_stdio_turn_v1(
+    peer: &ResolvedPeerTurn,
+    turn: &AcpPeerTurnContext,
 ) -> psychevo_runtime::Result<AcpTurnOutput> {
     let command = peer
         .backend
@@ -206,7 +1217,7 @@ async fn run_acp_stdio_turn(
                 peer.backend.id
             ))
         })?;
-    let cwd = backend_cwd(&peer.backend.cwd, workdir);
+    let cwd = backend_cwd(&peer.backend.cwd, &turn.workdir);
     let mut child = Command::new(command);
     child
         .args(&peer.backend.args)
@@ -235,12 +1246,16 @@ async fn run_acp_stdio_turn(
     })?;
     let transport = ByteStreams::new(stdin.compat_write(), stdout.compat());
     let context = Arc::new(AcpClientContext {
-        workdir: workdir.to_path_buf(),
+        workdir: turn.workdir.clone(),
         fs_read: peer_allows_fs_read(peer),
         fs_write: peer_allows_fs_write(peer),
-        approval_handler,
+        approval_handler: turn.approval_handler.clone(),
     });
-    let workdir = workdir.to_path_buf();
+    let workdir = turn.workdir.clone();
+    let turn_stream = turn.stream.clone();
+    let turn_local_session_id = turn.local_session_id.clone();
+    let turn_native_session_id = turn.native_session_id.clone();
+    let turn_prompt = turn.prompt.clone();
 
     let result = Client
         .builder()
@@ -287,8 +1302,17 @@ async fn run_acp_stdio_turn(
             )
             .block_task()
             .await?;
+            emit_runtime_event(
+                &turn_stream,
+                json!({
+                    "type": "acp_peer_protocol_negotiated",
+                    "session_id": turn_local_session_id,
+                    "source": "acp_peer",
+                    "protocol_version": "1",
+                }),
+            );
 
-            let mut session = if let Some(native_session_id) = native_session_id {
+            let mut session = if let Some(native_session_id) = turn_native_session_id {
                 let loaded = cx
                     .send_request(LoadSessionRequest::new(native_session_id.clone(), &workdir))
                     .block_task()
@@ -305,11 +1329,44 @@ async fn run_acp_stdio_turn(
                     .start_session()
                     .await?
             };
-            session.send_prompt(prompt)?;
-            let final_answer = session.read_to_string().await?;
+            session.send_prompt(turn_prompt)?;
+            let mut state = AcpPeerStreamState::new(turn_stream, turn_local_session_id);
+            loop {
+                let update = session.read_update().await?;
+                match update {
+                    SessionMessage::SessionMessage(dispatch) => {
+                        MatchDispatch::new(dispatch)
+                            .if_notification(async |notif: SessionNotification| {
+                                state.handle_notification(notif);
+                                Ok(())
+                            })
+                            .await
+                            .otherwise_ignore()?;
+                    }
+                    SessionMessage::StopReason(_stop_reason) => break,
+                    _ => {}
+                }
+            }
+            state.finish();
+            let final_answer = state.final_answer.clone();
+            let reasoning_text = state.reasoning_text.clone();
+            let final_content = state.final_message_content();
+            let session_title = state.session_title.clone();
+            let usage_update = state.usage_update.clone();
+            let tools = state
+                .tools
+                .values()
+                .map(|state| state.value.clone())
+                .collect();
             Ok(AcpTurnOutput {
                 native_session_id: session.session_id().to_string(),
                 final_answer,
+                reasoning_text,
+                final_content,
+                session_title,
+                tools,
+                usage_update,
+                events: state.events,
             })
         })
         .await
@@ -342,7 +1399,11 @@ fn ensure_local_session(
     Ok((session_id, None))
 }
 
-fn peer_session_metadata(peer: &ResolvedPeerTurn, native_session_id: Option<&str>) -> Value {
+fn peer_session_metadata(
+    peer: &ResolvedPeerTurn,
+    native_session_id: Option<&str>,
+    usage_update: Option<&Value>,
+) -> Value {
     let mut value = json!({
         "agentName": peer.agent.name.clone(),
         "backendId": peer.backend.id.clone(),
@@ -360,17 +1421,22 @@ fn peer_session_metadata(peer: &ResolvedPeerTurn, native_session_id: Option<&str
             Value::String(format!("acp:{}:{native_session_id}", peer.backend.id)),
         );
     }
+    if let Some(usage_update) = usage_update
+        && let Some(object) = value.as_object_mut()
+    {
+        object.insert("usageUpdate".to_string(), usage_update.clone());
+    }
     value
 }
 
 fn peer_root_metadata(peer: &ResolvedPeerTurn, native_session_id: Option<&str>) -> Value {
     json!({
-        PEER_METADATA_KEY: peer_session_metadata(peer, native_session_id),
+        ACP_PEER_METADATA_KEY: peer_session_metadata(peer, native_session_id, None),
     })
 }
 
 fn peer_native_session_id(metadata: &Value, backend_id: &str) -> Option<String> {
-    let peer = metadata.get(PEER_METADATA_KEY)?;
+    let peer = metadata.get(ACP_PEER_METADATA_KEY)?;
     let stored_backend = peer.get("backendId").and_then(Value::as_str)?;
     if stored_backend != backend_id {
         return None;
@@ -428,6 +1494,10 @@ fn client_capabilities(peer: &ResolvedPeerTurn) -> ClientCapabilities {
         .terminal(false)
 }
 
+fn client_capabilities_v2() -> acp_v2::ClientCapabilities {
+    acp_v2::ClientCapabilities::new()
+}
+
 fn peer_allows_fs_read(peer: &ResolvedPeerTurn) -> bool {
     peer.backend.client_capabilities.contains("fs.read")
         && agent_allows_any_tool(&peer.agent, &["read"])
@@ -454,24 +1524,40 @@ async fn read_text_file(
     context: Arc<AcpClientContext>,
     request: ReadTextFileRequest,
 ) -> Result<ReadTextFileResponse, agent_client_protocol::Error> {
+    let content =
+        read_text_file_content(context, &request.path, request.line, request.limit).await?;
+    Ok(ReadTextFileResponse::new(content))
+}
+
+async fn read_text_file_content(
+    context: Arc<AcpClientContext>,
+    path: &Path,
+    line: Option<u32>,
+    limit: Option<u32>,
+) -> Result<String, agent_client_protocol::Error> {
     if !context.fs_read {
         return Err(agent_client_protocol::Error::invalid_request().data("fs.read is not allowed"));
     }
-    let path = guarded_existing_path(&context.workdir, &request.path)?;
+    let path = guarded_existing_path(&context.workdir, path)?;
     let text = tokio::fs::read_to_string(&path)
         .await
         .map_err(acp_internal_error)?;
-    Ok(ReadTextFileResponse::new(apply_line_window(
-        text,
-        request.line,
-        request.limit,
-    )))
+    Ok(apply_line_window(text, line, limit))
 }
 
 async fn write_text_file(
     context: Arc<AcpClientContext>,
     request: WriteTextFileRequest,
 ) -> Result<WriteTextFileResponse, agent_client_protocol::Error> {
+    write_text_file_content(context, &request.path, request.content).await?;
+    Ok(WriteTextFileResponse::new())
+}
+
+async fn write_text_file_content(
+    context: Arc<AcpClientContext>,
+    path: &Path,
+    content: String,
+) -> Result<(), agent_client_protocol::Error> {
     if !context.fs_write {
         return Err(agent_client_protocol::Error::invalid_request().data("fs.write is not allowed"));
     }
@@ -480,7 +1566,7 @@ async fn write_text_file(
             .request_permission(PermissionApprovalRequest {
                 tool_call_id: format!("acp-write-{}", uuid::Uuid::now_v7()),
                 tool_name: "fs/write_text_file".to_string(),
-                summary: format!("Write {}", request.path.display()),
+                summary: format!("Write {}", path.display()),
                 reason: "ACP peer requested a file write".to_string(),
                 matched_rule: None,
                 suggested_rule: None,
@@ -494,11 +1580,11 @@ async fn write_text_file(
     if matches!(decision.outcome, PermissionApprovalOutcome::Deny) {
         return Err(agent_client_protocol::Error::invalid_request().data("permission denied"));
     }
-    let path = guarded_writable_path(&context.workdir, &request.path)?;
-    tokio::fs::write(&path, request.content)
+    let path = guarded_writable_path(&context.workdir, path)?;
+    tokio::fs::write(&path, content)
         .await
         .map_err(acp_internal_error)?;
-    Ok(WriteTextFileResponse::new())
+    Ok(())
 }
 
 async fn request_permission(
@@ -544,6 +1630,47 @@ async fn request_permission(
     ))
 }
 
+async fn request_permission_v2(
+    context: Arc<AcpClientContext>,
+    request: acp_v2::RequestPermissionRequest,
+) -> Result<acp_v2::RequestPermissionResponse, agent_client_protocol::Error> {
+    let title = request
+        .tool_call
+        .fields
+        .title
+        .clone()
+        .unwrap_or_else(|| "ACP tool".to_string());
+    let decision = if let Some(handler) = &context.approval_handler {
+        handler
+            .request_permission(PermissionApprovalRequest {
+                tool_call_id: request.tool_call.tool_call_id.to_string(),
+                tool_name: title.clone(),
+                summary: title,
+                reason: "ACP peer requested permission".to_string(),
+                matched_rule: None,
+                suggested_rule: None,
+                allow_always: request
+                    .options
+                    .iter()
+                    .any(|option| option.kind == acp_v2::PermissionOptionKind::AllowAlways),
+                timeout_secs: handler.timeout_secs(),
+            })
+            .await
+    } else {
+        PermissionApprovalDecision::deny()
+    };
+    let Some(option_id) = permission_option_id_v2(&request.options, decision.outcome) else {
+        return Ok(acp_v2::RequestPermissionResponse::new(
+            acp_v2::RequestPermissionOutcome::Cancelled,
+        ));
+    };
+    Ok(acp_v2::RequestPermissionResponse::new(
+        acp_v2::RequestPermissionOutcome::Selected(acp_v2::SelectedPermissionOutcome::new(
+            option_id,
+        )),
+    ))
+}
+
 fn permission_option_id(
     options: &[PermissionOption],
     outcome: PermissionApprovalOutcome,
@@ -570,6 +1697,41 @@ fn permission_option_id(
                     ) | (
                         PermissionApprovalOutcome::Deny,
                         PermissionOptionKind::RejectOnce | PermissionOptionKind::RejectAlways
+                    )
+                )
+            })
+        })
+        .map(|option| option.option_id.to_string())
+}
+
+fn permission_option_id_v2(
+    options: &[acp_v2::PermissionOption],
+    outcome: PermissionApprovalOutcome,
+) -> Option<String> {
+    let preferred = match outcome {
+        PermissionApprovalOutcome::AllowAlways => acp_v2::PermissionOptionKind::AllowAlways,
+        PermissionApprovalOutcome::AllowOnce | PermissionApprovalOutcome::AllowSession => {
+            acp_v2::PermissionOptionKind::AllowOnce
+        }
+        PermissionApprovalOutcome::Deny => acp_v2::PermissionOptionKind::RejectOnce,
+    };
+    options
+        .iter()
+        .find(|option| option.kind == preferred)
+        .or_else(|| {
+            options.iter().find(|option| {
+                matches!(
+                    (outcome, &option.kind),
+                    (
+                        PermissionApprovalOutcome::AllowOnce
+                            | PermissionApprovalOutcome::AllowSession
+                            | PermissionApprovalOutcome::AllowAlways,
+                        acp_v2::PermissionOptionKind::AllowOnce
+                            | acp_v2::PermissionOptionKind::AllowAlways
+                    ) | (
+                        PermissionApprovalOutcome::Deny,
+                        acp_v2::PermissionOptionKind::RejectOnce
+                            | acp_v2::PermissionOptionKind::RejectAlways
                     )
                 )
             })

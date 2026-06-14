@@ -1,0 +1,88 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "AgentDeleteParams",
+  "type": "object"
+}

@@ -28,20 +28,22 @@ use psychevo_runtime::command_registry::{
     slash_invocation_effect,
 };
 use psychevo_runtime::{
-    AgentBackendConfig, AgentDiscoveryOptions, AgentEntrypoint, ClarifyAnswer, ClarifyResponse,
-    ClarifyResult, ContextOptions, Error, ListSkillsOptions, LoadedMainAgent,
+    AgentBackendConfig, AgentCatalog, AgentDefinition, AgentDiagnostic, AgentDiscoveryOptions,
+    AgentEntrypoint, AgentRunRecord, ClarifyAnswer, ClarifyResponse, ClarifyResult, ConfigScope,
+    ContextOptions, Error, ListSkillsOptions, LoadedMainAgent, MAX_AGENT_SPAWN_DEPTH_CAP,
     Message as RuntimeMessage, PermissionApprovalDecision, PermissionApprovalOutcome,
     PermissionMode, RunMode, RunOptions, SESSION_MAIN_AGENT_METADATA_KEY, SessionArtifactKind,
     SessionExportFormat, SessionExportIncludeSet, SessionExportOptions, SessionSummary,
     SessionTraceReadOptions, SessionUndoOptions, SessionUsageOptions, SkillDiscoveryOptions,
     StateRuntime, UserContentBlock, UserShellContextOptions, WorkspaceDiffFile,
-    WorkspaceDiffFileStatus, canonicalize_workdir, collect_workspace_diff, configured_models,
-    context_snapshot, discover_agents, discover_skills, format_context_total_value,
-    list_agents_value, list_skill_bundles, list_skills_value_with_options,
-    load_agent_backend_configs, main_agent_default_metadata, main_agent_from_session_metadata,
-    main_agent_metadata, redo_session, render_session_export, resolve_agent_definition,
-    resolve_workspace_root, selected_configured_model, session_usage_summary, undo_session,
-    valid_agent_name, view_agent_value_with_catalog,
+    WorkspaceDiffFileStatus, agent_spawn_paused, agent_status_records, canonicalize_workdir,
+    collect_workspace_diff, configured_models, context_snapshot, discover_agents, discover_skills,
+    format_context_total_value, format_context_total_value_parts, list_skill_bundles,
+    list_skills_value_with_options, load_agent_backend_configs, main_agent_default_metadata,
+    main_agent_from_session_metadata, main_agent_metadata, redo_session, remove_config_value,
+    render_session_export, resolve_agent_definition, resolve_workspace_root,
+    selected_configured_model, session_usage_summary, set_config_value, undo_session,
+    valid_agent_name,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -50,10 +52,10 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::{
-    BackendKind, Gateway, GatewayActivity, GatewayBackendInfo, GatewayEvent, GatewayEventSink,
-    GatewayInputPart, GatewayShellResult, GatewaySource, GatewaySourceLifetime, GatewayThread,
-    GatewayThreadSelector, GatewayTurnResult, PermissionDecision, SendShellRequest, SourceKey,
-    TranscriptEntry, TranscriptEntryRole, gateway_now_ms,
+    ACP_PEER_METADATA_KEY, BackendKind, Gateway, GatewayActivity, GatewayBackendInfo, GatewayEvent,
+    GatewayEventSink, GatewayInputPart, GatewayShellResult, GatewaySource, GatewaySourceLifetime,
+    GatewayThread, GatewayThreadSelector, GatewayTurnResult, PermissionDecision, SendShellRequest,
+    SourceKey, TranscriptEntry, TranscriptEntryRole, gateway_now_ms,
 };
 
 const INTERNAL_SESSION_SOURCES: &[&str] = &["tui-side"];
@@ -62,7 +64,6 @@ const MAX_FILE_COMPLETION_ITEMS: usize = 80;
 const MAX_FILE_COMPLETION_DEPTH: usize = 8;
 const MAX_WORKSPACE_FILE_ITEMS: usize = 1_500;
 const MAX_WORKSPACE_TEXT_FILE_BYTES: usize = 1024 * 1024;
-
 #[derive(Debug, Clone)]
 pub struct GatewayWebServerConfig {
     pub gateway: Gateway,
@@ -995,64 +996,6 @@ struct PendingClarifyView {
     raw: Value,
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AgentListParams {
-    scope: Option<wire::GatewayRequestScope>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AgentReadParams {
-    name: String,
-    scope: Option<wire::GatewayRequestScope>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AgentBackendRefInput {
-    #[serde(rename = "ref")]
-    name: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AgentWriteParams {
-    name: String,
-    description: String,
-    #[serde(default)]
-    instructions: String,
-    #[serde(default)]
-    backend: Option<AgentBackendRefInput>,
-    #[serde(default)]
-    entrypoints: Vec<String>,
-    #[serde(default)]
-    tools: Vec<String>,
-    #[serde(default, rename = "mcpServers")]
-    mcp_servers: Vec<String>,
-    scope: Option<wire::GatewayRequestScope>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AgentDeleteParams {
-    name: String,
-    scope: Option<wire::GatewayRequestScope>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct BackendListParams {
-    scope: Option<wire::GatewayRequestScope>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct BackendDoctorParams {
-    id: String,
-    scope: Option<wire::GatewayRequestScope>,
-}
-
 async fn readyz() -> impl IntoResponse {
     Json(wire::ReadyzResult {
         ok: true,
@@ -1634,13 +1577,13 @@ async fn handle_rpc(
             Ok(json!({"accepted": accepted}))
         }
         "agent/list" => {
-            let params = request.params::<AgentListParams>()?;
+            let params = request.params::<wire::AgentListParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
             let catalog = discover_gateway_agents(&state, &scope)?;
-            Ok(list_agents_value(&catalog))
+            Ok(serde_json::to_value(agent_list_result(&catalog))?)
         }
         "agent/read" => {
-            let params = request.required_params::<AgentReadParams>()?;
+            let params = request.required_params::<wire::AgentReadParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
             let catalog = discover_gateway_agents(&state, &scope)?;
             let agent = resolve_agent_definition(
@@ -1649,32 +1592,50 @@ async fn handle_rpc(
                 &scope.workdir,
                 &state.inner.inherited_env,
             )?;
-            Ok(view_agent_value_with_catalog(&agent, Some(&catalog)))
+            Ok(serde_json::to_value(agent_read_result(&agent))?)
         }
         "agent/write" => {
-            let params = request.required_params::<AgentWriteParams>()?;
+            let params = request.required_params::<wire::AgentWriteParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
             write_project_agent_definition(&scope.workdir, params)
         }
         "agent/delete" => {
-            let params = request.required_params::<AgentDeleteParams>()?;
+            let params = request.required_params::<wire::AgentDeleteParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
             delete_project_agent_definition(&scope.workdir, &params.name)
         }
+        "agent/status" => {
+            let params = request.params::<wire::AgentStatusParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            if let Some(thread_id) = params.thread_id.as_deref() {
+                authorize_thread(&state, &auth, thread_id)?;
+            }
+            let source_thread_id = if params.thread_id.is_some() || params.all.unwrap_or(false) {
+                None
+            } else {
+                state.inner.gateway.resolve_source_thread(&scope.source)?
+            };
+            let thread_id = params.thread_id.as_deref().or(source_thread_id.as_deref());
+            Ok(serde_json::to_value(agent_status_result(
+                Some(state.inner.state.store()),
+                thread_id,
+                params.all.unwrap_or(false),
+            ))?)
+        }
         "backend/list" => {
-            let params = request.params::<BackendListParams>()?;
+            let params = request.params::<wire::BackendListParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
             let backends = load_agent_backend_configs(
                 &state.inner.home,
                 &scope.workdir,
                 &state.inner.inherited_env,
             )?;
-            Ok(json!({
-                "backends": backends.values().map(backend_value).collect::<Vec<_>>()
-            }))
+            Ok(serde_json::to_value(wire::BackendListResult {
+                backends: backend_values_for_scope(&state, &scope, &backends)?,
+            })?)
         }
         "backend/doctor" => {
-            let params = request.required_params::<BackendDoctorParams>()?;
+            let params = request.required_params::<wire::BackendDoctorParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
             let backends = load_agent_backend_configs(
                 &state.inner.home,
@@ -1684,7 +1645,20 @@ async fn handle_rpc(
             let backend = backends
                 .get(&params.id)
                 .ok_or_else(|| Error::Message(format!("unknown backend: {}", params.id)))?;
-            Ok(backend_doctor_value(backend, &state.inner.inherited_env)?)
+            Ok(serde_json::to_value(backend_doctor_value(
+                backend,
+                &state.inner.inherited_env,
+            )?)?)
+        }
+        "backend/write" => {
+            let params = request.required_params::<wire::BackendWriteParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            write_backend_config(&state, &scope, params)
+        }
+        "backend/delete" => {
+            let params = request.required_params::<wire::BackendDeleteParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            delete_backend_config(&state, &scope, params)
         }
         "command/list" => {
             let params = request.params::<wire::CommandListParams>()?;
@@ -1956,7 +1930,7 @@ fn gateway_backend_info_for_thread(
     if summary.source == "peer_agent" {
         let native_id = store
             .session_metadata(thread_id)?
-            .and_then(|metadata| metadata.get("peer_agent").cloned())
+            .and_then(|metadata| metadata.get(ACP_PEER_METADATA_KEY).cloned())
             .and_then(|peer| {
                 peer.get("nativeSessionId")
                     .and_then(Value::as_str)
@@ -3136,6 +3110,7 @@ fn context_read_result(
             estimated: category.estimated,
             status: category.status.clone(),
             percent: category.percent,
+            details: Some(category.details.clone()),
         })
         .collect::<Vec<_>>();
     Ok(wire::ContextReadResult {
@@ -3163,14 +3138,22 @@ fn observability_read_value(
         Some(thread_id) => Some(thread_id.to_string()),
         None => state.inner.gateway.resolve_source_thread(&scope.source)?,
     };
-    let context = context_read_result(state, scope, resolved_thread_id.as_deref())?;
+    let metadata = match resolved_thread_id.as_deref() {
+        Some(session_id) => state.inner.state.store().session_metadata(session_id)?,
+        None => None,
+    };
+    let peer_usage = metadata.as_ref().and_then(acp_peer_usage_update);
+    let context = match peer_usage.and_then(acp_peer_context_read_result) {
+        Some(context) => context,
+        None => context_read_result(state, scope, resolved_thread_id.as_deref())?,
+    };
     let usage = match resolved_thread_id {
         Some(session_id) => {
             let summary = session_usage_summary(SessionUsageOptions {
                 state: state.inner.state.clone(),
                 session_id,
             })?;
-            wire::SessionUsageSummaryView {
+            let mut view = wire::SessionUsageSummaryView {
                 available: true,
                 session_id: Some(summary.session_id),
                 provider: Some(summary.provider),
@@ -3187,7 +3170,9 @@ fn observability_read_value(
                 estimated_cost_nanodollars: summary.estimated_cost_nanodollars,
                 unknown_pricing_count: summary.unknown_pricing_count,
                 cache_read_percent: summary.cache_read_percent,
-            }
+            };
+            apply_acp_peer_usage_to_summary(&mut view, peer_usage);
+            view
         }
         None => usage_unavailable(),
     };
@@ -3195,6 +3180,72 @@ fn observability_read_value(
         context,
         usage,
     })?)
+}
+
+fn acp_peer_usage_update(metadata: &Value) -> Option<&Value> {
+    metadata.get(ACP_PEER_METADATA_KEY)?.get("usageUpdate")
+}
+
+fn acp_peer_context_read_result(usage: &Value) -> Option<wire::ContextReadResult> {
+    let used = usage_u64_field(usage, "used")?;
+    let size = usage_u64_field(usage, "size")?;
+    let percent = (size > 0).then(|| (used as f64 / size as f64) * 100.0);
+    Some(wire::ContextReadResult {
+        available: true,
+        label: format_context_total_value_parts(used, false, Some(size), percent),
+        status: "reported by ACP peer".to_string(),
+        used_tokens: used,
+        context_limit: Some(size),
+        percent,
+        categories: Vec::new(),
+        advice: Vec::new(),
+    })
+}
+
+fn apply_acp_peer_usage_to_summary(
+    usage: &mut wire::SessionUsageSummaryView,
+    peer_usage: Option<&Value>,
+) {
+    let Some(peer_usage) = peer_usage else {
+        return;
+    };
+    if let Some(used) = usage_u64_field(peer_usage, "used") {
+        if usage.reported_total_tokens == 0 {
+            usage.reported_total_tokens = used;
+        }
+        if usage.context_input_tokens == 0 {
+            usage.context_input_tokens = used;
+        }
+    }
+    if usage.estimated_cost_nanodollars == 0
+        && let Some(cost) = acp_peer_usage_cost_nanodollars(peer_usage)
+    {
+        usage.estimated_cost_nanodollars = cost;
+    }
+}
+
+fn usage_u64_field(value: &Value, field: &str) -> Option<u64> {
+    value.get(field).and_then(|value| {
+        value.as_u64().or_else(|| {
+            value
+                .as_f64()
+                .filter(|number| *number >= 0.0)
+                .map(|number| number as u64)
+        })
+    })
+}
+
+fn acp_peer_usage_cost_nanodollars(usage: &Value) -> Option<i64> {
+    let cost = usage.get("cost")?;
+    let amount = cost.get("amount").and_then(Value::as_f64)?;
+    let currency = cost
+        .get("currency")
+        .and_then(Value::as_str)
+        .unwrap_or("USD");
+    if !currency.eq_ignore_ascii_case("USD") || amount < 0.0 {
+        return None;
+    }
+    Some((amount * 1_000_000_000.0).round() as i64)
 }
 
 fn context_unavailable(label: &str) -> wire::ContextReadResult {
@@ -3777,6 +3828,9 @@ fn web_desktop_unavailable_message(command: &str, action: SlashCommandAction) ->
         SlashCommandAction::Permissions => {
             format!("{command} is managed by Workbench status controls.")
         }
+        SlashCommandAction::Agents => {
+            format!("{command} is managed by the Workbench agent selector and Settings Agents.")
+        }
         SlashCommandAction::Sessions | SlashCommandAction::Resume => {
             format!("{command} is managed by Workbench history.")
         }
@@ -3804,7 +3858,7 @@ fn compact_prompt_text(instructions: Option<String>) -> String {
 
 fn write_project_agent_definition(
     workdir: &Path,
-    params: AgentWriteParams,
+    params: wire::AgentWriteParams,
 ) -> psychevo_runtime::Result<Value> {
     if !valid_agent_name(&params.name) {
         return Err(Error::Message(format!(
@@ -3904,11 +3958,11 @@ fn write_project_agent_definition(
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(&path, text)?;
-    Ok(json!({
-        "written": true,
-        "name": params.name,
-        "path": path,
-    }))
+    Ok(serde_json::to_value(wire::AgentWriteResult {
+        written: true,
+        name: params.name,
+        path: path.display().to_string(),
+    })?)
 }
 
 fn delete_project_agent_definition(workdir: &Path, name: &str) -> psychevo_runtime::Result<Value> {
@@ -3921,11 +3975,11 @@ fn delete_project_agent_definition(workdir: &Path, name: &str) -> psychevo_runti
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
         Err(err) => return Err(err.into()),
     };
-    Ok(json!({
-        "deleted": deleted,
-        "name": name,
-        "path": path,
-    }))
+    Ok(serde_json::to_value(wire::AgentDeleteResult {
+        deleted,
+        name: name.to_string(),
+        path: path.display().to_string(),
+    })?)
 }
 
 fn project_agent_definition_path(workdir: &Path, name: &str) -> PathBuf {
@@ -3935,46 +3989,470 @@ fn project_agent_definition_path(workdir: &Path, name: &str) -> PathBuf {
         .join(format!("{name}.md"))
 }
 
-fn backend_value(backend: &AgentBackendConfig) -> Value {
-    json!({
-        "id": backend.id,
-        "kind": backend.kind.as_str(),
-        "enabled": backend.enabled,
-        "label": backend.label,
-        "description": backend.description,
-        "command": backend.command,
-        "args": backend.args,
-        "cwd": backend.cwd,
-        "entrypoints": backend.entrypoints,
-        "clientCapabilities": backend.client_capabilities,
-        "mcpServers": backend.mcp_servers,
-        "envKeys": backend.env.keys().cloned().collect::<Vec<_>>(),
-        "diagnostics": backend_diagnostics(backend),
-    })
+fn agent_list_result(catalog: &AgentCatalog) -> wire::AgentListResult {
+    wire::AgentListResult {
+        agents: catalog.agents.iter().map(agent_definition_view).collect(),
+        shadowed_agents: catalog
+            .shadowed_agents
+            .iter()
+            .map(agent_definition_view)
+            .collect(),
+        diagnostics: catalog
+            .diagnostics
+            .iter()
+            .map(agent_diagnostic_view)
+            .collect(),
+    }
 }
 
-fn backend_diagnostics(backend: &AgentBackendConfig) -> Vec<Value> {
-    let mut diagnostics = Vec::new();
-    if !backend.enabled {
-        diagnostics.push(json!({"kind": "disabled", "message": "backend is disabled"}));
+fn agent_read_result(agent: &AgentDefinition) -> wire::AgentReadResult {
+    wire::AgentReadResult {
+        agent: agent_definition_view(agent),
+        instructions: agent.instructions.clone(),
     }
-    if backend
+}
+
+fn agent_definition_view(agent: &AgentDefinition) -> wire::AgentDefinitionView {
+    wire::AgentDefinitionView {
+        name: agent.name.clone(),
+        description: agent.description.clone(),
+        source: agent.source.as_str().to_string(),
+        generated: matches!(agent.source, psychevo_runtime::AgentSource::Generated),
+        path: agent
+            .file_path
+            .as_ref()
+            .map(|path| path.display().to_string()),
+        backend: agent
+            .backend
+            .as_ref()
+            .map(|backend| wire::AgentBackendRefView {
+                name: backend.name.clone(),
+            }),
+        entrypoints: agent
+            .entrypoints
+            .iter()
+            .map(|entrypoint| entrypoint.as_str().to_string())
+            .collect(),
+        diagnostics: agent
+            .diagnostics
+            .iter()
+            .map(agent_diagnostic_view)
+            .collect(),
+    }
+}
+
+fn agent_diagnostic_view(diagnostic: &AgentDiagnostic) -> wire::AgentDiagnosticView {
+    wire::AgentDiagnosticView {
+        kind: diagnostic.kind.clone(),
+        message: diagnostic.message.clone(),
+        path: diagnostic
+            .path
+            .as_ref()
+            .map(|path| path.display().to_string()),
+    }
+}
+
+fn agent_status_result(
+    store: Option<&psychevo_runtime::SqliteStore>,
+    parent_session_id: Option<&str>,
+    all: bool,
+) -> wire::AgentStatusResult {
+    wire::AgentStatusResult {
+        agents: agent_status_records(store, parent_session_id, all)
+            .iter()
+            .map(agent_run_view)
+            .collect(),
+        control: wire::AgentStatusControlView {
+            spawning_paused: agent_spawn_paused(),
+            max_spawn_depth_cap: MAX_AGENT_SPAWN_DEPTH_CAP,
+            concurrency_cap: None,
+        },
+    }
+}
+
+fn agent_run_view(record: &AgentRunRecord) -> wire::AgentRunView {
+    wire::AgentRunView {
+        id: record.id.clone(),
+        task_name: record.task_name.clone(),
+        agent_name: record.agent_name.clone(),
+        task: record.task.clone(),
+        parent_session_id: record.parent_session_id.clone(),
+        child_session_id: record.child_session_id.clone(),
+        role: record.role.as_str().to_string(),
+        background: record.background,
+        status: record.status.as_str().to_string(),
+        edge_status: record.edge_status.map(|status| status.as_str().to_string()),
+        started_at_ms: record.started_at_ms,
+        ended_at_ms: record.ended_at_ms,
+        outcome: record.outcome.clone(),
+        final_answer: record.final_answer.clone(),
+        error: record.error.clone(),
+        effective_max_spawn_depth: record.effective_max_spawn_depth,
+    }
+}
+
+fn backend_value_with_sources(
+    backend: &AgentBackendConfig,
+    source_targets: Vec<wire::BackendConfigTarget>,
+) -> wire::BackendConfigView {
+    wire::BackendConfigView {
+        id: backend.id.clone(),
+        kind: backend.kind.as_str().to_string(),
+        enabled: backend.enabled,
+        label: backend.label.clone(),
+        description: backend.description.clone(),
+        command: backend.command.clone(),
+        args: backend.args.clone(),
+        cwd: backend.cwd.clone(),
+        entrypoints: backend
+            .entrypoints
+            .iter()
+            .map(|entrypoint| entrypoint.as_str().to_string())
+            .collect(),
+        client_capabilities: backend.client_capabilities.iter().cloned().collect(),
+        mcp_servers: backend.mcp_servers.iter().cloned().collect(),
+        env_keys: backend.env.keys().cloned().collect(),
+        source_targets,
+        diagnostics: backend_diagnostics(backend),
+    }
+}
+
+fn backend_values_for_scope(
+    state: &WebState,
+    scope: &ResolvedScope,
+    backends: &BTreeMap<String, AgentBackendConfig>,
+) -> psychevo_runtime::Result<Vec<wire::BackendConfigView>> {
+    backends
+        .values()
+        .map(|backend| {
+            Ok(backend_value_with_sources(
+                backend,
+                backend_source_targets(state, scope, &backend.id)?,
+            ))
+        })
+        .collect()
+}
+
+fn write_backend_config(
+    state: &WebState,
+    scope: &ResolvedScope,
+    params: wire::BackendWriteParams,
+) -> psychevo_runtime::Result<Value> {
+    if !valid_agent_name(&params.id) {
+        return Err(Error::Message(format!("invalid backend id: {}", params.id)));
+    }
+    ensure_profile_config_for_backend_write(state, scope, params.target)?;
+    let existing_backends = load_agent_backend_configs(
+        &state.inner.home,
+        &scope.workdir,
+        &state.inner.inherited_env,
+    )?;
+    let value = backend_config_json(&params, existing_backends.get(&params.id))?;
+    let target = params.target;
+    let config_dir = backend_config_dir(state, scope, target)?;
+    let result = set_config_value(config_dir, &format!("agents.backends.{}", params.id), value)?;
+    let backends = load_agent_backend_configs(
+        &state.inner.home,
+        &scope.workdir,
+        &state.inner.inherited_env,
+    )?;
+    let backend = backends
+        .get(&params.id)
+        .ok_or_else(|| Error::Message(format!("backend write did not reload: {}", params.id)))?;
+    Ok(serde_json::to_value(wire::BackendWriteResult {
+        written: true,
+        changed: result.changed,
+        path: result.path.display().to_string(),
+        target,
+        backend: backend_value_with_sources(
+            backend,
+            backend_source_targets(state, scope, &backend.id)?,
+        ),
+    })?)
+}
+
+fn delete_backend_config(
+    state: &WebState,
+    scope: &ResolvedScope,
+    params: wire::BackendDeleteParams,
+) -> psychevo_runtime::Result<Value> {
+    if !valid_agent_name(&params.id) {
+        return Err(Error::Message(format!("invalid backend id: {}", params.id)));
+    }
+    let target = params.target;
+    let config_dir = backend_config_dir(state, scope, target)?;
+    let result = remove_config_value(config_dir, &format!("agents.backends.{}", params.id))?;
+    Ok(serde_json::to_value(wire::BackendDeleteResult {
+        deleted: result.changed,
+        changed: result.changed,
+        id: params.id,
+        path: result.path.display().to_string(),
+        target,
+    })?)
+}
+
+fn backend_config_dir(
+    state: &WebState,
+    scope: &ResolvedScope,
+    target: wire::BackendConfigTarget,
+) -> psychevo_runtime::Result<PathBuf> {
+    match target {
+        wire::BackendConfigTarget::Project => Ok(scope.workdir.join(".psychevo")),
+        wire::BackendConfigTarget::Profile => Ok(active_profile_config_dir(state, scope)),
+    }
+}
+
+fn ensure_profile_config_for_backend_write(
+    state: &WebState,
+    scope: &ResolvedScope,
+    target: wire::BackendConfigTarget,
+) -> psychevo_runtime::Result<()> {
+    if target != wire::BackendConfigTarget::Profile
+        || !state
+            .inner
+            .inherited_env
+            .get("PSYCHEVO_CONFIG")
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false)
+    {
+        return Ok(());
+    }
+    let config_path = active_profile_config_dir(state, scope).join("config.toml");
+    if config_path.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(config_path, "")?;
+    Ok(())
+}
+
+fn active_profile_config_dir(state: &WebState, scope: &ResolvedScope) -> PathBuf {
+    state
+        .inner
+        .inherited_env
+        .get("PSYCHEVO_CONFIG")
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .and_then(|value| {
+            let path = resolve_gateway_env_path(value, state, scope);
+            path.parent().map(Path::to_path_buf)
+        })
+        .unwrap_or_else(|| state.inner.home.clone())
+}
+
+fn resolve_gateway_env_path(value: &str, state: &WebState, scope: &ResolvedScope) -> PathBuf {
+    if let Some(rest) = value.strip_prefix("~/") {
+        let home = state
+            .inner
+            .inherited_env
+            .get("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| state.inner.home.clone());
+        return home.join(rest);
+    }
+    let path = PathBuf::from(value);
+    if path.is_absolute() {
+        path
+    } else {
+        scope.workdir.join(path)
+    }
+}
+
+fn backend_config_json(
+    params: &wire::BackendWriteParams,
+    existing: Option<&AgentBackendConfig>,
+) -> psychevo_runtime::Result<Value> {
+    let entrypoints = if params.entrypoints.is_empty() {
+        vec!["peer".to_string(), "subagent".to_string()]
+    } else {
+        validate_backend_entrypoints(&params.entrypoints)?
+    };
+    let client_capabilities = if params.client_capabilities.is_empty() {
+        vec![
+            "fs.read".to_string(),
+            "fs.write".to_string(),
+            "terminal".to_string(),
+        ]
+    } else {
+        validate_backend_client_capabilities(&params.client_capabilities)?
+    };
+    let args = trimmed_string_list(&params.args);
+    let mcp_servers = trimmed_string_list(&params.mcp_servers);
+    let env = if params.env.is_empty() {
+        existing
+            .map(|backend| backend.env.clone())
+            .unwrap_or_default()
+    } else {
+        params
+            .env
+            .iter()
+            .filter_map(|(key, value)| {
+                let key = key.trim();
+                if key.is_empty() {
+                    None
+                } else {
+                    Some((key.to_string(), value.to_string()))
+                }
+            })
+            .collect::<BTreeMap<_, _>>()
+    };
+    let label = params
+        .label
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let cwd = params
+        .cwd
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("invocation");
+    let mut object = serde_json::Map::new();
+    object.insert("kind".to_string(), json!("acp"));
+    object.insert("enabled".to_string(), json!(params.enabled.unwrap_or(true)));
+    if let Some(label) = label {
+        object.insert("label".to_string(), json!(label));
+    }
+    if let Some(description) = params
         .description
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .is_none()
     {
-        diagnostics.push(json!({
-            "kind": "missing_description",
-            "message": "backend will not generate an agent without a description"
-        }));
+        object.insert("description".to_string(), json!(description));
+    }
+    if let Some(command) = params
+        .command
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        object.insert("command".to_string(), json!(command));
+    }
+    object.insert("args".to_string(), json!(args));
+    object.insert("env".to_string(), json!(env));
+    object.insert("cwd".to_string(), json!(cwd));
+    object.insert("entrypoints".to_string(), json!(entrypoints));
+    object.insert(
+        "client_capabilities".to_string(),
+        json!(client_capabilities),
+    );
+    object.insert("mcp_servers".to_string(), json!(mcp_servers));
+    Ok(Value::Object(object))
+}
+
+fn validate_backend_entrypoints(values: &[String]) -> psychevo_runtime::Result<Vec<String>> {
+    let mut entrypoints = Vec::new();
+    for value in values {
+        let value = value.trim();
+        let entrypoint = AgentEntrypoint::parse(value).ok_or_else(|| {
+            Error::Message(format!(
+                "backend entrypoint `{value}` must be peer or subagent"
+            ))
+        })?;
+        let entrypoint = entrypoint.as_str().to_string();
+        if !entrypoints.contains(&entrypoint) {
+            entrypoints.push(entrypoint);
+        }
+    }
+    if entrypoints.is_empty() {
+        return Err(Error::Message(
+            "backend entrypoints must include peer or subagent".to_string(),
+        ));
+    }
+    Ok(entrypoints)
+}
+
+fn validate_backend_client_capabilities(
+    values: &[String],
+) -> psychevo_runtime::Result<Vec<String>> {
+    let mut capabilities = Vec::new();
+    for value in values {
+        let value = value.trim();
+        if !matches!(value, "fs.read" | "fs.write" | "terminal") {
+            return Err(Error::Message(format!(
+                "backend client capability `{value}` must be fs.read, fs.write, or terminal"
+            )));
+        }
+        if !capabilities.iter().any(|capability| capability == value) {
+            capabilities.push(value.to_string());
+        }
+    }
+    Ok(capabilities)
+}
+
+fn trimmed_string_list(values: &[String]) -> Vec<String> {
+    values
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn backend_source_targets(
+    state: &WebState,
+    scope: &ResolvedScope,
+    id: &str,
+) -> psychevo_runtime::Result<Vec<wire::BackendConfigTarget>> {
+    let mut targets = Vec::new();
+    if backend_exists_in_scope(state, scope, id, ConfigScope::Global)? {
+        targets.push(wire::BackendConfigTarget::Profile);
+    }
+    if backend_exists_in_scope(state, scope, id, ConfigScope::Local)? {
+        targets.push(wire::BackendConfigTarget::Project);
+    }
+    Ok(targets)
+}
+
+fn backend_exists_in_scope(
+    state: &WebState,
+    scope: &ResolvedScope,
+    id: &str,
+    config_scope: ConfigScope,
+) -> psychevo_runtime::Result<bool> {
+    let config_dir = match config_scope {
+        ConfigScope::Global => active_profile_config_dir(state, scope),
+        ConfigScope::Local => scope.workdir.join(".psychevo"),
+        ConfigScope::Effective => {
+            return Err(Error::Config(
+                "backend source target checks require a concrete config scope".to_string(),
+            ));
+        }
+    };
+    backend_exists_in_config_dir(&config_dir, id)
+}
+
+fn backend_exists_in_config_dir(config_dir: &Path, id: &str) -> psychevo_runtime::Result<bool> {
+    let config_path = config_dir.join("config.toml");
+    if !config_path.exists() {
+        return Ok(false);
+    }
+    let text = std::fs::read_to_string(&config_path)?;
+    let parsed: toml::Value = toml::from_str(&text)
+        .map_err(|err| Error::Config(format!("{}: {err}", config_path.display())))?;
+    Ok(parsed
+        .get("agents")
+        .and_then(|value| value.get("backends"))
+        .and_then(|value| value.get(id))
+        .is_some())
+}
+
+fn backend_diagnostics(backend: &AgentBackendConfig) -> Vec<wire::BackendDiagnosticView> {
+    let mut diagnostics = Vec::new();
+    if !backend.enabled {
+        diagnostics.push(wire::BackendDiagnosticView {
+            kind: "disabled".to_string(),
+            message: "backend is disabled".to_string(),
+        });
     }
     if backend.command.is_none() {
-        diagnostics.push(json!({
-            "kind": "missing_command",
-            "message": "backend command is required for execution"
-        }));
+        diagnostics.push(wire::BackendDiagnosticView {
+            kind: "missing_command".to_string(),
+            message: "backend command is required for execution".to_string(),
+        });
     }
     diagnostics
 }
@@ -3982,52 +4460,64 @@ fn backend_diagnostics(backend: &AgentBackendConfig) -> Vec<Value> {
 fn backend_doctor_value(
     backend: &AgentBackendConfig,
     env: &BTreeMap<String, String>,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo_runtime::Result<wire::BackendDoctorResult> {
     let mut checks = Vec::new();
-    checks.push(json!({
-        "name": "enabled",
-        "ok": backend.enabled,
-        "message": if backend.enabled { "backend enabled" } else { "backend disabled" },
-    }));
-    checks.push(json!({
-        "name": "description",
-        "ok": backend.description.as_deref().is_some_and(|value| !value.trim().is_empty()),
-        "message": if backend.description.as_deref().is_some_and(|value| !value.trim().is_empty()) {
+    checks.push(wire::BackendDoctorCheck {
+        name: "enabled".to_string(),
+        ok: backend.enabled,
+        message: if backend.enabled {
+            "backend enabled"
+        } else {
+            "backend disabled"
+        }
+        .to_string(),
+        path: None,
+    });
+    checks.push(wire::BackendDoctorCheck {
+        name: "description".to_string(),
+        ok: true,
+        message: if backend
+            .description
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+        {
             "description configured"
         } else {
-            "description missing; generated agent will be hidden"
-        },
-    }));
+            "description optional; using backend label"
+        }
+        .to_string(),
+        path: None,
+    });
     let command_check = match backend.command.as_deref() {
         Some(command) => match resolve_command_path(command, env) {
-            Some(path) => json!({
-                "name": "command",
-                "ok": true,
-                "message": "command resolved",
-                "path": path,
-            }),
-            None => json!({
-                "name": "command",
-                "ok": false,
-                "message": "command was not found on PATH or as a configured path",
-            }),
+            Some(path) => wire::BackendDoctorCheck {
+                name: "command".to_string(),
+                ok: true,
+                message: "command resolved".to_string(),
+                path: Some(path.display().to_string()),
+            },
+            None => wire::BackendDoctorCheck {
+                name: "command".to_string(),
+                ok: false,
+                message: "command was not found on PATH or as a configured path".to_string(),
+                path: None,
+            },
         },
-        None => json!({
-            "name": "command",
-            "ok": false,
-            "message": "command missing",
-        }),
+        None => wire::BackendDoctorCheck {
+            name: "command".to_string(),
+            ok: false,
+            message: "command missing".to_string(),
+            path: None,
+        },
     };
     checks.push(command_check);
-    let ok = checks
-        .iter()
-        .all(|check| check.get("ok").and_then(Value::as_bool).unwrap_or(false));
-    Ok(json!({
-        "id": backend.id,
-        "kind": backend.kind.as_str(),
-        "ok": ok,
-        "checks": checks,
-    }))
+    let ok = checks.iter().all(|check| check.ok);
+    Ok(wire::BackendDoctorResult {
+        id: backend.id.clone(),
+        kind: backend.kind.as_str().to_string(),
+        ok,
+        checks,
+    })
 }
 
 fn resolve_command_path(command: &str, env: &BTreeMap<String, String>) -> Option<PathBuf> {
@@ -4114,7 +4604,6 @@ fn web_desktop_command_visible(command: &AvailableSlashCommand) -> bool {
             | SlashCommandAction::Queue
             | SlashCommandAction::Pending
             | SlashCommandAction::Sandbox
-            | SlashCommandAction::Agents
             | SlashCommandAction::Fork
             | SlashCommandAction::Compact
             | SlashCommandAction::Export
@@ -4140,7 +4629,6 @@ fn web_desktop_action_visible(action: SlashCommandAction) -> bool {
             | SlashCommandAction::Queue
             | SlashCommandAction::Pending
             | SlashCommandAction::Sandbox
-            | SlashCommandAction::Agents
             | SlashCommandAction::Fork
             | SlashCommandAction::Compact
             | SlashCommandAction::Export
@@ -5078,6 +5566,78 @@ mod tests {
         assert_eq!(value["usage"]["cacheReadTokens"], 50);
         assert_eq!(value["usage"]["estimatedCostNanodollars"], 0);
         assert_eq!(value["usage"]["cacheReadPercent"], 25.0);
+        let categories = value["context"]["categories"]
+            .as_array()
+            .expect("context categories");
+        assert!(!categories.is_empty());
+        assert!(
+            categories
+                .iter()
+                .all(|category| category.get("details").is_some())
+        );
+        assert!(
+            categories
+                .iter()
+                .all(|category| category.get("id").and_then(Value::as_str) != Some("free_space"))
+        );
+        let serialized_categories = serde_json::to_string(categories).expect("categories json");
+        assert!(!serialized_categories.contains("done"));
+        assert!(!serialized_categories.contains("content"));
+    }
+
+    #[tokio::test]
+    async fn observability_read_projects_acp_peer_usage_update() {
+        let (_temp, state) = web_state();
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
+        let session_id = state
+            .inner
+            .state
+            .store()
+            .create_session_with_metadata(
+                &state.inner.workdir,
+                "peer_agent",
+                "opencode",
+                "acp:opencode",
+                Some(json!({
+                    "peer_agent": {
+                        "agentName": "opencode",
+                        "backendId": "opencode",
+                        "backendKind": "acp",
+                        "nativeSessionId": "native-1",
+                        "usageUpdate": {
+                            "sessionUpdate": "usage_update",
+                            "used": 1234,
+                            "size": 8000,
+                            "cost": {"amount": 0.0025, "currency": "USD"}
+                        }
+                    }
+                })),
+            )
+            .expect("session");
+        bind_source_to_thread(&state, &scope, &session_id).expect("bind");
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let value = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!(1)),
+                method: "observability/read".to_string(),
+                params: Some(json!({ "scope": scope.to_wire_scope() })),
+            },
+        )
+        .await
+        .expect("observability/read");
+
+        assert_eq!(value["context"]["usedTokens"], 1234);
+        assert_eq!(value["context"]["contextLimit"], 8000);
+        assert_eq!(value["context"]["status"], "reported by ACP peer");
+        assert_eq!(value["context"]["categories"], json!([]));
+        assert_eq!(value["usage"]["reportedTotalTokens"], 1234);
+        assert_eq!(value["usage"]["contextInputTokens"], 1234);
+        assert_eq!(value["usage"]["estimatedCostNanodollars"], 2_500_000);
     }
 
     #[tokio::test]
@@ -5807,14 +6367,88 @@ command = "cursor-agent"
         .await
         .expect("backend/list");
         assert_eq!(backends["backends"][0]["id"], "cursor");
+        assert_eq!(backends["backends"][0]["sourceTargets"], json!(["profile"]));
 
-        let agents = handle_rpc(
-            state,
+        let write = handle_rpc(
+            state.clone(),
             AuthContext::Bearer,
-            tx,
+            tx.clone(),
             RpcRequest {
                 jsonrpc: wire::JSONRPC_VERSION.to_string(),
                 id: Some(json!("2")),
+                method: "backend/write".to_string(),
+                params: Some(json!({
+                    "id": "opencode",
+                    "target": "project",
+                    "enabled": true,
+                    "label": "OpenCode",
+                    "description": "OpenCode ACP coding agent.",
+                    "command": "opencode",
+                    "args": ["acp"],
+                    "entrypoints": ["peer", "subagent"],
+                    "clientCapabilities": ["fs.read", "fs.write", "terminal"]
+                })),
+            },
+        )
+        .await
+        .expect("backend/write");
+        assert_eq!(write["backend"]["id"], "opencode");
+        assert_eq!(write["backend"]["sourceTargets"], json!(["project"]));
+
+        let backends = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("3")),
+                method: "backend/list".to_string(),
+                params: None,
+            },
+        )
+        .await
+        .expect("backend/list after write");
+        let opencode_backend = backends["backends"]
+            .as_array()
+            .expect("backends")
+            .iter()
+            .find(|backend| backend["id"] == "opencode")
+            .expect("opencode backend");
+        assert_eq!(opencode_backend["sourceTargets"], json!(["project"]));
+        assert_eq!(opencode_backend["args"], json!(["acp"]));
+
+        let minimal = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("4")),
+                method: "backend/write".to_string(),
+                params: Some(json!({
+                    "id": "minimal-acp",
+                    "target": "profile",
+                    "enabled": true,
+                    "command": "minimal-agent",
+                    "args": ["acp"],
+                    "entrypoints": ["peer", "subagent"],
+                    "clientCapabilities": ["fs.read", "fs.write", "terminal"]
+                })),
+            },
+        )
+        .await
+        .expect("backend/write minimal");
+        assert_eq!(minimal["backend"]["label"], "minimal-acp");
+        assert_eq!(minimal["backend"]["description"], Value::Null);
+        assert_eq!(minimal["backend"]["diagnostics"], json!([]));
+
+        let agents = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("5")),
                 method: "agent/list".to_string(),
                 params: None,
             },
@@ -5829,6 +6463,109 @@ command = "cursor-agent"
             .expect("cursor agent");
         assert_eq!(cursor["generated"], true);
         assert_eq!(cursor["backend"]["ref"], "cursor");
+        assert!(agents.get("shadowedAgents").is_some());
+        let opencode = agents["agents"]
+            .as_array()
+            .expect("agents")
+            .iter()
+            .find(|agent| agent["name"] == "opencode")
+            .expect("opencode agent");
+        assert_eq!(opencode["backend"]["ref"], "opencode");
+        let minimal_agent = agents["agents"]
+            .as_array()
+            .expect("agents")
+            .iter()
+            .find(|agent| agent["name"] == "minimal-acp")
+            .expect("minimal agent");
+        assert_eq!(minimal_agent["description"], "minimal-acp");
+        assert_eq!(minimal_agent["backend"]["ref"], "minimal-acp");
+
+        let status = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("6")),
+                method: "agent/status".to_string(),
+                params: None,
+            },
+        )
+        .await
+        .expect("agent/status");
+        assert!(status.get("control").is_some());
+        assert!(status.get("agents").is_some());
+
+        let delete = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("7")),
+                method: "backend/delete".to_string(),
+                params: Some(json!({
+                    "id": "opencode",
+                    "target": "project"
+                })),
+            },
+        )
+        .await
+        .expect("backend/delete");
+        assert_eq!(delete["deleted"], true);
+    }
+
+    #[tokio::test]
+    async fn backend_profile_write_uses_explicit_config_when_set() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let explicit_config = temp.path().join("explicit").join("config.toml");
+        let (_state_temp, state) = web_state_with_env(BTreeMap::from([(
+            "PSYCHEVO_CONFIG".to_string(),
+            explicit_config.to_string_lossy().to_string(),
+        )]));
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let write = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "backend/write".to_string(),
+                params: Some(json!({
+                    "id": "minimal-acp",
+                    "target": "profile",
+                    "command": "minimal-agent",
+                    "entrypoints": ["peer", "subagent"],
+                    "clientCapabilities": ["fs.read", "fs.write", "terminal"]
+                })),
+            },
+        )
+        .await
+        .expect("backend/write");
+        assert_eq!(write["backend"]["id"], "minimal-acp");
+        assert_eq!(write["backend"]["label"], "minimal-acp");
+        assert_eq!(write["backend"]["description"], Value::Null);
+
+        let backends = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("2")),
+                method: "backend/list".to_string(),
+                params: None,
+            },
+        )
+        .await
+        .expect("backend/list");
+        assert!(backends["backends"].as_array().is_some_and(|backends| {
+            backends
+                .iter()
+                .any(|backend| backend["id"] == "minimal-acp")
+        }));
     }
 
     #[tokio::test]
@@ -6440,7 +7177,6 @@ command = "cursor-agent"
             ("/context", "status"),
             ("/help", "commands"),
             ("/commands", "commands"),
-            ("/agents", "agents"),
             ("/sessions", "history"),
         ] {
             let result = handle_rpc(
@@ -6468,6 +7204,32 @@ command = "cursor-agent"
             assert!(result["presentationKind"].as_str().is_some());
             assert!(result["feedbackAnchor"].as_str().is_some());
         }
+
+        let result = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "command/execute".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "command": "/agents",
+                    "threadId": null
+                })),
+            },
+        )
+        .await
+        .expect("command/execute");
+
+        assert_eq!(result["accepted"], false, "{result:?}");
+        assert_eq!(result["known"], true, "{result:?}");
+        assert!(result["action"].is_null(), "{result:?}");
+        assert_eq!(
+            result["message"],
+            "/agents is managed by the Workbench agent selector and Settings Agents."
+        );
     }
 
     #[tokio::test]
@@ -6886,6 +7648,7 @@ command = "cursor-agent"
         assert!(names.contains(&"sessions"), "{names:?}");
         assert!(names.contains(&"undo"), "{names:?}");
         assert!(names.contains(&"redo"), "{names:?}");
+        assert!(!names.contains(&"agents"), "{names:?}");
         assert!(!names.contains(&"model"), "{names:?}");
         assert!(!names.contains(&"tools"), "{names:?}");
 
@@ -6919,6 +7682,7 @@ command = "cursor-agent"
         assert!(items.iter().any(|item| item["label"] == "/diff"));
         assert!(items.iter().any(|item| item["label"] == "/undo"));
         assert!(items.iter().any(|item| item["label"] == "/redo"));
+        assert!(!items.iter().any(|item| item["label"] == "/agents"));
         assert!(!items.iter().any(|item| item["label"] == "/model"));
         let diff_completion = items
             .iter()

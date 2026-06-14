@@ -477,9 +477,30 @@ pub(crate) fn send_slash_text(
     send_session_update(
         cx,
         session_id.clone(),
-        SessionUpdate::AgentMessageChunk(ContentChunk::new(text.into().into())),
+        agent_message_update(session_id, text),
     );
     SlashPromptAction::Handled(PromptResponse::new(StopReason::EndTurn))
+}
+
+pub(crate) fn agent_message_update(
+    session_id: &SessionId,
+    text: impl Into<String>,
+) -> SessionUpdate {
+    SessionUpdate::AgentMessageChunk(text_chunk(session_id, "agent", text))
+}
+
+pub(crate) fn agent_thought_update(
+    session_id: &SessionId,
+    text: impl Into<String>,
+) -> SessionUpdate {
+    SessionUpdate::AgentThoughtChunk(text_chunk(session_id, "thought", text))
+}
+
+fn text_chunk(session_id: &SessionId, stream: &str, text: impl Into<String>) -> ContentChunk {
+    ContentChunk::new(
+        ContentBlock::Text(TextContent::new(text)),
+        MessageId::new(format!("{session_id}:{stream}")),
+    )
 }
 
 pub(crate) fn send_diff_tool_call(
@@ -877,18 +898,13 @@ impl ApprovalHandler for AcpApprovalHandler {
 pub(crate) fn send_session_setup_updates(
     cx: &ConnectionTo<Client>,
     session_id: SessionId,
-    mode: RunMode,
+    config_options: Vec<SessionConfigOption>,
     commands: Vec<AvailableCommand>,
 ) {
     send_session_update(
         cx,
         session_id.clone(),
-        SessionUpdate::CurrentModeUpdate(CurrentModeUpdate::new(mode.as_str())),
-    );
-    send_session_update(
-        cx,
-        session_id.clone(),
-        SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(session_config_options(mode))),
+        SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(config_options)),
     );
     send_session_update(
         cx,
@@ -931,27 +947,27 @@ pub(crate) fn send_gateway_event_update(
         GatewayEvent::EntryDelta { delta, .. } => send_session_update(
             cx,
             session_id.clone(),
-            SessionUpdate::AgentThoughtChunk(ContentChunk::new(delta.into())),
+            agent_thought_update(session_id, delta),
         ),
         GatewayEvent::EntryStarted { entry, .. }
         | GatewayEvent::EntryUpdated { entry, .. }
         | GatewayEvent::EntryCompleted { entry, .. } => {
-            for update in transcript_entry_session_updates(&entry, projection, true) {
+            for update in transcript_entry_session_updates(&entry, session_id, projection, true) {
                 send_session_update(cx, session_id.clone(), update);
             }
         }
         GatewayEvent::Warning { message, .. } => send_session_update(
             cx,
             session_id.clone(),
-            SessionUpdate::AgentMessageChunk(ContentChunk::new(
-                format!("warning: {message}").into(),
-            )),
+            agent_message_update(session_id, format!("warning: {message}")),
         ),
         GatewayEvent::TurnCompleted {
             committed_entries, ..
         } => {
             for entry in committed_entries {
-                for update in transcript_entry_session_updates(&entry, projection, false) {
+                for update in
+                    transcript_entry_session_updates(&entry, session_id, projection, false)
+                {
                     send_session_update(cx, session_id.clone(), update);
                 }
             }
@@ -967,6 +983,7 @@ pub(crate) fn send_gateway_event_update(
 
 fn transcript_entry_session_updates(
     entry: &TranscriptEntry,
+    session_id: &SessionId,
     projection: &mut AcpLiveProjection,
     include_reasoning: bool,
 ) -> Vec<SessionUpdate> {
@@ -976,9 +993,7 @@ fn transcript_entry_session_updates(
             && block.kind == TranscriptBlockKind::Reasoning
             && let Some(delta) = reasoning_block_delta(block, projection)
         {
-            updates.push(SessionUpdate::AgentThoughtChunk(ContentChunk::new(
-                delta.into(),
-            )));
+            updates.push(agent_thought_update(session_id, delta));
         }
         if let Some(update) = transcript_block_session_update(block, projection, include_reasoning)
         {
@@ -1076,7 +1091,7 @@ fn transcript_tool_title(block: &TranscriptBlock, tool_name: &str) -> String {
 fn transcript_tool_content(
     block: &TranscriptBlock,
     tool_name: &str,
-    call_id: &str,
+    _call_id: &str,
     use_terminal_output: bool,
 ) -> Vec<ToolCallContent> {
     if tool_name == "exec_command"
@@ -1084,10 +1099,7 @@ fn transcript_tool_content(
     {
         let command_text = format!("$ {command}");
         if use_terminal_output {
-            return vec![
-                ToolCallContent::from(command_text),
-                ToolCallContent::Terminal(Terminal::new(call_id.to_string())),
-            ];
+            return vec![ToolCallContent::from(command_text)];
         }
         let mut text = command_text;
         if let Some(output) = transcript_block_text(block).filter(|value| !value.trim().is_empty())
@@ -1404,20 +1416,21 @@ mod tests {
             None,
         );
         let entry = sample_transcript_entry(vec![block.clone()]);
+        let session_id = SessionId::new("session-test");
 
-        let updates = transcript_entry_session_updates(&entry, &mut projection, true);
+        let updates = transcript_entry_session_updates(&entry, &session_id, &mut projection, true);
         assert_eq!(updates.len(), 1);
         assert_eq!(thought_text(&updates[0]), Some("first"));
 
         block.body = Some("first second".to_string());
         let entry = sample_transcript_entry(vec![block.clone()]);
-        let updates = transcript_entry_session_updates(&entry, &mut projection, true);
+        let updates = transcript_entry_session_updates(&entry, &session_id, &mut projection, true);
         assert_eq!(updates.len(), 1);
         assert_eq!(thought_text(&updates[0]), Some(" second"));
 
-        let updates = transcript_entry_session_updates(&entry, &mut projection, true);
+        let updates = transcript_entry_session_updates(&entry, &session_id, &mut projection, true);
         assert!(updates.is_empty(), "{updates:?}");
-        let updates = transcript_entry_session_updates(&entry, &mut projection, false);
+        let updates = transcript_entry_session_updates(&entry, &session_id, &mut projection, false);
         assert!(updates.is_empty(), "{updates:?}");
     }
 
@@ -1487,7 +1500,6 @@ mod tests {
         };
         let content = update.fields.content.expect("terminal content");
         assert_eq!(tool_content_text(&content[0]), Some("$ python fetch.py"));
-        assert!(matches!(&content[1], ToolCallContent::Terminal(_)));
         let meta = update.meta.expect("terminal meta");
         assert_eq!(meta["terminal_info"]["terminal_id"], "call_exec");
         assert_eq!(

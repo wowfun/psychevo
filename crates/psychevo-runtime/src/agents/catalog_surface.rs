@@ -209,6 +209,17 @@ pub enum AgentInvocationRole {
     System,
 }
 
+impl AgentInvocationRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Main => "main",
+            Self::Subagent => "subagent",
+            Self::Fork => "fork",
+            Self::System => "system",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AgentDiscoveryOptions {
     pub home: PathBuf,
@@ -231,7 +242,7 @@ pub enum AgentRunStatus {
 }
 
 impl AgentRunStatus {
-    pub(crate) fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::PendingInit => "pending_init",
             Self::Running => "running",
@@ -433,14 +444,6 @@ pub fn discover_agents(options: &AgentDiscoveryOptions) -> Result<AgentCatalog> 
             for backend in backends.values() {
                 if let Some(agent) = generated_agent_from_backend(backend) {
                     insert_agent(&mut catalog, &mut winners, agent);
-                } else if backend.enabled && backend.description.is_none() {
-                    catalog.diagnostics.push(AgentDiagnostic::warning(
-                        format!(
-                            "agent backend `{}` is missing description and did not generate an agent",
-                            backend.id
-                        ),
-                        None,
-                    ));
                 }
             }
         }
@@ -485,7 +488,12 @@ pub(crate) fn generated_agent_from_backend(
         .description
         .as_deref()
         .map(str::trim)
-        .filter(|value| !value.is_empty())?
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            let label = backend.label.trim();
+            (!label.is_empty()).then_some(label)
+        })
+        .unwrap_or(&backend.id)
         .to_string();
     let mut diagnostics = Vec::new();
     if backend.command.is_none() {
@@ -859,7 +867,7 @@ pub(crate) fn agent_status_model_value(
     })
 }
 
-pub(crate) fn agent_status_records(
+pub fn agent_status_records(
     store: Option<&SqliteStore>,
     parent_session_id: Option<&str>,
     all: bool,

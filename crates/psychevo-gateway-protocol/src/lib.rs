@@ -1293,6 +1293,9 @@ pub struct ContextUsageCategoryView {
     pub status: String,
     #[serde(default)]
     pub percent: Option<f64>,
+    #[serde(default)]
+    #[ts(type = "unknown | null")]
+    pub details: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -1349,6 +1352,312 @@ pub struct SessionUsageSummaryView {
 pub struct ObservabilityReadResult {
     pub context: ContextReadResult,
     pub usage: SessionUsageSummaryView,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentListParams {
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentReadParams {
+    pub name: String,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentBackendRefInput {
+    #[serde(rename = "ref")]
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentWriteParams {
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub instructions: String,
+    #[serde(default)]
+    pub backend: Option<AgentBackendRefInput>,
+    #[serde(default)]
+    pub entrypoints: Vec<String>,
+    #[serde(default)]
+    pub tools: Vec<String>,
+    #[serde(default, rename = "mcpServers")]
+    pub mcp_servers: Vec<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentDeleteParams {
+    pub name: String,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentStatusParams {
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+    #[serde(default, rename = "threadId")]
+    pub thread_id: Option<String>,
+    #[serde(default)]
+    pub all: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentListResult {
+    pub agents: Vec<AgentDefinitionView>,
+    pub shadowed_agents: Vec<AgentDefinitionView>,
+    pub diagnostics: Vec<AgentDiagnosticView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentReadResult {
+    pub agent: AgentDefinitionView,
+    pub instructions: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentWriteResult {
+    pub written: bool,
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentDeleteResult {
+    pub deleted: bool,
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentStatusResult {
+    pub agents: Vec<AgentRunView>,
+    pub control: AgentStatusControlView,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentBackendRefView {
+    #[serde(rename = "ref")]
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentDiagnosticView {
+    pub kind: String,
+    pub message: String,
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentDefinitionView {
+    pub name: String,
+    pub description: String,
+    pub source: String,
+    pub generated: bool,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub backend: Option<AgentBackendRefView>,
+    pub entrypoints: Vec<String>,
+    pub diagnostics: Vec<AgentDiagnosticView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunView {
+    pub id: String,
+    #[serde(default)]
+    pub task_name: Option<String>,
+    pub agent_name: String,
+    pub task: String,
+    pub parent_session_id: String,
+    #[serde(default)]
+    pub child_session_id: Option<String>,
+    pub role: String,
+    pub background: bool,
+    pub status: String,
+    #[serde(default)]
+    pub edge_status: Option<String>,
+    pub started_at_ms: i64,
+    #[serde(default)]
+    pub ended_at_ms: Option<i64>,
+    #[serde(default)]
+    pub outcome: Option<String>,
+    #[serde(default)]
+    pub final_answer: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub effective_max_spawn_depth: Option<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentStatusControlView {
+    pub spawning_paused: bool,
+    pub max_spawn_depth_cap: u8,
+    #[serde(default)]
+    pub concurrency_cap: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum BackendConfigTarget {
+    Project,
+    Profile,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct BackendListParams {
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct BackendDoctorParams {
+    pub id: String,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct BackendWriteParams {
+    pub id: String,
+    pub target: BackendConfigTarget,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default)]
+    pub entrypoints: Vec<String>,
+    #[serde(default, rename = "clientCapabilities")]
+    pub client_capabilities: Vec<String>,
+    #[serde(default, rename = "mcpServers")]
+    pub mcp_servers: Vec<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct BackendDeleteParams {
+    pub id: String,
+    pub target: BackendConfigTarget,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct BackendConfigView {
+    pub id: String,
+    pub kind: String,
+    pub enabled: bool,
+    pub label: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    pub cwd: String,
+    #[serde(default)]
+    pub entrypoints: Vec<String>,
+    #[serde(default, rename = "clientCapabilities")]
+    pub client_capabilities: Vec<String>,
+    #[serde(default, rename = "mcpServers")]
+    pub mcp_servers: Vec<String>,
+    #[serde(default, rename = "envKeys")]
+    pub env_keys: Vec<String>,
+    #[serde(default, rename = "sourceTargets")]
+    pub source_targets: Vec<BackendConfigTarget>,
+    pub diagnostics: Vec<BackendDiagnosticView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct BackendListResult {
+    pub backends: Vec<BackendConfigView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct BackendDiagnosticView {
+    pub kind: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct BackendDoctorCheck {
+    pub name: String,
+    pub ok: bool,
+    pub message: String,
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct BackendDoctorResult {
+    pub id: String,
+    pub kind: String,
+    pub ok: bool,
+    pub checks: Vec<BackendDoctorCheck>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct BackendWriteResult {
+    pub written: bool,
+    pub changed: bool,
+    pub path: String,
+    pub target: BackendConfigTarget,
+    pub backend: BackendConfigView,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct BackendDeleteResult {
+    pub deleted: bool,
+    pub changed: bool,
+    pub id: String,
+    pub path: String,
+    pub target: BackendConfigTarget,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -1481,6 +1790,24 @@ pub enum ClientRequest {
     CommandList(CommandListParams),
     #[serde(rename = "command/execute")]
     CommandExecute(CommandExecuteParams),
+    #[serde(rename = "agent/list")]
+    AgentList(AgentListParams),
+    #[serde(rename = "agent/read")]
+    AgentRead(AgentReadParams),
+    #[serde(rename = "agent/write")]
+    AgentWrite(AgentWriteParams),
+    #[serde(rename = "agent/delete")]
+    AgentDelete(AgentDeleteParams),
+    #[serde(rename = "agent/status")]
+    AgentStatus(AgentStatusParams),
+    #[serde(rename = "backend/list")]
+    BackendList(BackendListParams),
+    #[serde(rename = "backend/doctor")]
+    BackendDoctor(BackendDoctorParams),
+    #[serde(rename = "backend/write")]
+    BackendWrite(BackendWriteParams),
+    #[serde(rename = "backend/delete")]
+    BackendDelete(BackendDeleteParams),
     #[serde(rename = "shell/start")]
     ShellStart(ShellStartParams),
     #[serde(rename = "terminal/start")]
@@ -1678,6 +2005,9 @@ fn schema_group_module(name: &str) -> &'static str {
     }
     if name.starts_with("Command") {
         return "command";
+    }
+    if name.starts_with("Agent") || name.starts_with("Backend") {
+        return "gateway";
     }
     if name.starts_with("Shell") {
         return "shell";
@@ -1893,6 +2223,34 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(CommandListResult),
         exported_type!(CommandExecuteParams),
         exported_type!(CommandExecuteResult),
+        exported_type!(AgentListParams),
+        exported_type!(AgentReadParams),
+        exported_type!(AgentBackendRefInput),
+        exported_type!(AgentWriteParams),
+        exported_type!(AgentDeleteParams),
+        exported_type!(AgentStatusParams),
+        exported_type!(AgentBackendRefView),
+        exported_type!(AgentDiagnosticView),
+        exported_type!(AgentDefinitionView),
+        exported_type!(AgentRunView),
+        exported_type!(AgentStatusControlView),
+        exported_type!(AgentListResult),
+        exported_type!(AgentReadResult),
+        exported_type!(AgentWriteResult),
+        exported_type!(AgentDeleteResult),
+        exported_type!(AgentStatusResult),
+        exported_type!(BackendConfigTarget),
+        exported_type!(BackendListParams),
+        exported_type!(BackendDoctorParams),
+        exported_type!(BackendWriteParams),
+        exported_type!(BackendDeleteParams),
+        exported_type!(BackendConfigView),
+        exported_type!(BackendListResult),
+        exported_type!(BackendDiagnosticView),
+        exported_type!(BackendDoctorCheck),
+        exported_type!(BackendDoctorResult),
+        exported_type!(BackendWriteResult),
+        exported_type!(BackendDeleteResult),
         exported_type!(ShellStartParams),
         exported_type!(ShellStartResult),
         exported_type!(TerminalStartParams),

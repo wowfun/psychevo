@@ -618,10 +618,14 @@ impl PsychevoAcpAgent {
         };
         if let Some(mode) = RunMode::parse(value) {
             session.mode = mode;
+            let updated_session = session.clone();
+            drop(sessions);
             send_session_update(
                 cx,
                 session_id.clone(),
-                SessionUpdate::CurrentModeUpdate(CurrentModeUpdate::new(mode.as_str())),
+                SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(
+                    self.session_config_options_for_session(&updated_session),
+                )),
             );
             return Ok(format!("mode: {}", mode.as_str()));
         }
