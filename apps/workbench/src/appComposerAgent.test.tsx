@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 
@@ -46,9 +46,13 @@ const gatewayMock = vi.hoisted(() => {
     }),
     commandList: [] as Array<Record<string, unknown>>,
     endpoint: { wsUrl: "ws://127.0.0.1/test", baseUrl: "http://127.0.0.1/test" } as { wsUrl: string; baseUrl: string } | null,
+    observabilityRead: null as null | ((params: unknown) => unknown | Promise<unknown>),
     openDownloadLog: [] as string[],
     optimisticLog: [] as string[],
     requestLog: [] as Array<{ method: string; params: unknown }>,
+    subscribers: [] as Array<(notification: { method: string; params?: unknown }) => void>,
+    archivedSessionSummaries: [] as Array<Record<string, unknown>>,
+    backendRecords: [] as Array<Record<string, unknown>>,
     scope,
     sessionSummaries: [] as Array<Record<string, unknown>>,
     settingsResult(agent: string | null) {
@@ -103,7 +107,12 @@ const gatewayMock = vi.hoisted(() => {
 
 vi.mock("@psychevo/client", () => {
   class GatewayClient {
-    subscribe = vi.fn();
+    subscribe = vi.fn((callback: (notification: { method: string; params?: unknown }) => void) => {
+      gatewayMock.subscribers.push(callback);
+      return () => {
+        gatewayMock.subscribers = gatewayMock.subscribers.filter((item) => item !== callback);
+      };
+    });
     close = vi.fn();
 
     async connect() {
@@ -137,7 +146,8 @@ vi.mock("@psychevo/client", () => {
         };
       }
       if (method === "thread/list") {
-        return { sessions: gatewayMock.sessionSummaries };
+        const record = params as { archived?: boolean } | undefined;
+        return { sessions: record?.archived ? gatewayMock.archivedSessionSummaries : gatewayMock.sessionSummaries };
       }
       if (method === "thread/start") {
         return {
@@ -168,11 +178,86 @@ vi.mock("@psychevo/client", () => {
               entrypoints: ["main"]
             }
           ],
-          shadowed_agents: []
+          shadowedAgents: [],
+          diagnostics: []
+        };
+      }
+      if (method === "agent/status") {
+        return {
+          agents: [],
+          control: {
+            spawningPaused: false,
+            maxSpawnDepthCap: 3,
+            concurrencyCap: null
+          }
         };
       }
       if (method === "backend/list") {
-        return { backends: [] };
+        return { backends: gatewayMock.backendRecords };
+      }
+      if (method === "backend/write") {
+        const record = params as {
+          id?: string;
+          target?: "project" | "profile";
+          enabled?: boolean;
+          label?: string | null;
+          description?: string | null;
+          command?: string | null;
+          args?: string[];
+          cwd?: string | null;
+          entrypoints?: string[];
+          clientCapabilities?: string[];
+          mcpServers?: string[];
+        };
+        const backend = {
+          id: record.id ?? "opencode",
+          kind: "acp",
+          enabled: record.enabled ?? true,
+          label: record.label ?? record.id ?? "OpenCode",
+          description: record.description ?? null,
+          command: record.command ?? "opencode",
+          args: record.args ?? ["acp"],
+          cwd: record.cwd ?? "invocation",
+          entrypoints: record.entrypoints ?? ["peer", "subagent"],
+          clientCapabilities: record.clientCapabilities ?? ["fs.read", "fs.write", "terminal"],
+          mcpServers: record.mcpServers ?? [],
+          envKeys: [],
+          sourceTargets: [record.target ?? "profile"],
+          diagnostics: []
+        };
+        gatewayMock.backendRecords = [
+          ...gatewayMock.backendRecords.filter((item) => item.id !== backend.id),
+          backend
+        ];
+        return {
+          written: true,
+          changed: true,
+          path: "/tmp/home/config.toml",
+          target: record.target ?? "profile",
+          backend
+        };
+      }
+      if (method === "backend/delete") {
+        const record = params as { id?: string; target?: "project" | "profile" };
+        return {
+          deleted: true,
+          changed: true,
+          id: record.id ?? "opencode",
+          path: "/tmp/home/config.toml",
+          target: record.target ?? "profile"
+        };
+      }
+      if (method === "backend/doctor") {
+        const record = params as { id?: string };
+        return {
+          id: record.id ?? "opencode",
+          kind: "acp",
+          ok: true,
+          checks: [
+            { name: "enabled", ok: true, message: "backend enabled", path: null },
+            { name: "command", ok: true, message: "command resolved", path: "/usr/bin/opencode" }
+          ]
+        };
       }
       if (method === "command/list") {
         return { commands: gatewayMock.commandList, hiddenDynamic: 0 };
@@ -231,17 +316,56 @@ vi.mock("@psychevo/client", () => {
         };
       }
       if (method === "observability/read") {
+        if (gatewayMock.observabilityRead) {
+          return gatewayMock.observabilityRead(params);
+        }
         const record = params as { threadId?: string | null } | undefined;
         const hasThread = Boolean(record?.threadId);
         return {
           context: {
             available: hasThread,
-            label: hasThread ? "0 tokens" : "No active session",
-            status: hasThread ? "ok" : "unavailable",
-            usedTokens: 0,
-            contextLimit: null,
-            percent: hasThread ? 0 : null,
-            categories: [],
+            label: hasThread ? "200/1.0k (20.0%)" : "No active session",
+            status: hasThread ? "provider_usage" : "unavailable",
+            usedTokens: hasThread ? 200 : 0,
+            contextLimit: hasThread ? 1000 : null,
+            percent: hasThread ? 20 : null,
+            categories: hasThread ? [
+              {
+                id: "base_policy",
+                label: "Base policy",
+                tokens: 20,
+                estimated: true,
+                status: "estimated",
+                percent: 2,
+                details: {}
+              },
+              {
+                id: "developer_prompt",
+                label: "Developer prompt",
+                tokens: 60,
+                estimated: true,
+                status: "estimated",
+                percent: 6,
+                details: {
+                  skill_count: 1,
+                  skill_entries: [{ name: "design", tokens: 42 }]
+                }
+              },
+              {
+                id: "history",
+                label: "History",
+                tokens: 120,
+                estimated: true,
+                status: "estimated",
+                percent: 12,
+                details: {
+                  roles: {
+                    assistant: { count: 1, tokens: 70 },
+                    user: { count: 1, tokens: 50 }
+                  }
+                }
+              }
+            ] : [],
             advice: []
           },
           usage: {
@@ -384,6 +508,7 @@ Object.defineProperty(window, "localStorage", {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   gatewayMock.commandExecute = (command: string) => ({
     accepted: false,
     command,
@@ -392,9 +517,13 @@ afterEach(() => {
   });
   gatewayMock.commandList = [];
   gatewayMock.endpoint = { wsUrl: "ws://127.0.0.1/test", baseUrl: "http://127.0.0.1/test" };
+  gatewayMock.observabilityRead = null;
   gatewayMock.openDownloadLog.length = 0;
   gatewayMock.optimisticLog.length = 0;
   gatewayMock.requestLog.length = 0;
+  gatewayMock.subscribers = [];
+  gatewayMock.archivedSessionSummaries = [];
+  gatewayMock.backendRecords = [];
   gatewayMock.sessionSummaries = [];
   gatewayMock.snapshot.thread = {
     id: "thread-1",
@@ -462,6 +591,50 @@ function sessionSummary(id: string, title: string): Record<string, unknown> {
     title,
     displayTitle: title,
     preview: "session preview"
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function observabilityResult(threadId: string | null, peer = false): Record<string, unknown> {
+  const hasThread = Boolean(threadId);
+  return {
+    context: {
+      available: hasThread,
+      label: hasThread ? (peer ? "8.0k/200.0k (4.0%)" : "200/1.0k (20.0%)") : "No active session",
+      status: hasThread ? (peer ? "reported by ACP peer" : "provider_usage") : "unavailable",
+      usedTokens: hasThread ? (peer ? 8_000 : 200) : 0,
+      contextLimit: hasThread ? (peer ? 200_000 : 1000) : null,
+      percent: hasThread ? (peer ? 4 : 20) : null,
+      categories: [],
+      advice: []
+    },
+    usage: {
+      available: hasThread,
+      sessionId: hasThread ? threadId : null,
+      provider: hasThread ? "mock" : null,
+      model: hasThread ? "mock-model" : null,
+      messageCount: hasThread ? 2 : 0,
+      assistantMessageCount: hasThread ? 1 : 0,
+      contextInputTokens: hasThread ? (peer ? 8_000 : 200) : 0,
+      billableInputTokens: hasThread ? (peer ? 6_100 : 150) : 0,
+      billableOutputTokens: hasThread ? (peer ? 356 : 50) : 0,
+      reasoningTokens: hasThread ? (peer ? 18 : 12) : 0,
+      cacheReadTokens: hasThread ? (peer ? 6_200 : 80) : 0,
+      cacheWriteTokens: hasThread ? 10 : 0,
+      reportedTotalTokens: hasThread ? (peer ? 8_000 : 250) : 0,
+      estimatedCostNanodollars: hasThread ? (peer ? 0 : 10_000_000) : 0,
+      unknownPricingCount: 0,
+      cacheReadPercent: hasThread ? (peer ? 50 : 40) : null
+    }
   };
 }
 
@@ -827,7 +1000,7 @@ describe("Workbench composer agent wiring", () => {
 
     expect(screen.getByRole("button", { name: "New Session" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Search" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Artifacts" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Artifacts" })).toBeNull();
     expect(screen.queryByText("Pinned")).toBeNull();
     expect(screen.queryByText("Sessions")).toBeNull();
     expect(screen.getByRole("button", { name: "Settings" })).toBeTruthy();
@@ -837,14 +1010,64 @@ describe("Workbench composer agent wiring", () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
-    expect(await screen.findByRole("region", { name: "Settings" })).toBeTruthy();
+    const settingsRegion = await screen.findByRole("region", { name: "Settings" });
+    expect(settingsRegion).toBeTruthy();
+    expect(within(settingsRegion).getByRole("button", { name: "Appearance" }).getAttribute("aria-current")).toBe("page");
+    expect(within(settingsRegion).getByRole("heading", { name: "Appearance" })).toBeTruthy();
+    expect(within(settingsRegion).getByRole("button", { name: "Archived sessions" })).toBeTruthy();
+    expect(within(settingsRegion).getByRole("button", { name: "Debug" })).toBeTruthy();
+    expect(within(settingsRegion).getByRole("button", { name: "Agents" })).toBeTruthy();
+    for (const removed of ["General", "Session", "Session history", "Commands", "Integrations", "Diagnostics"]) {
+      expect(within(settingsRegion).queryByRole("button", { name: removed })).toBeNull();
+    }
+    expect(within(settingsRegion).getByRole("searchbox", { name: "Search settings" })).toBeTruthy();
+    expect(within(settingsRegion).queryByText("/tmp/project")).toBeNull();
+    expect(within(settingsRegion).queryByRole("heading", { name: "Settings" })).toBeNull();
+    expect(within(settingsRegion).queryByRole("button", { name: "Back to transcript" })).toBeNull();
 
-    const backButton = screen.getByRole("button", { name: "Back to transcript" });
-    expect(backButton.textContent).toBe("");
-    expect(backButton.getAttribute("title")).toBe("Back to transcript");
+    const backButton = within(settingsRegion).getByRole("button", { name: "Back to app" });
 
     fireEvent.click(backButton);
     expect(await screen.findByRole("region", { name: "Transcript" })).toBeTruthy();
+  });
+
+  it("switches Settings sections while keeping session controls in the composer", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    const settingsRegion = await screen.findByRole("region", { name: "Settings" });
+    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Agents" }));
+
+    expect(within(settingsRegion).getByRole("button", { name: "Agents" }).getAttribute("aria-current")).toBe("page");
+    expect(within(settingsRegion).getByRole("region", { name: "Agents" })).toBeTruthy();
+    expect(within(settingsRegion).getByText("Profile ACP Backends")).toBeTruthy();
+    expect(within(settingsRegion).queryByText("Translate user messages")).toBeNull();
+    expect(within(settingsRegion).queryByRole("combobox", { name: "Agent" })).toBeNull();
+    expect(within(settingsRegion).queryByRole("combobox", { name: "Model" })).toBeNull();
+    expect(within(settingsRegion).queryByRole("combobox", { name: "Permission mode" })).toBeNull();
+
+    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Back to app" }));
+    expect(await screen.findByRole("combobox", { name: "Agent" })).toBeTruthy();
+  });
+
+  it("shows archived sessions from Settings without turning the sidebar into an archive filter", async () => {
+    gatewayMock.sessionSummaries = [sessionSummary("active-thread", "Active session")];
+    gatewayMock.archivedSessionSummaries = [sessionSummary("archived-thread", "Archived session")];
+
+    render(<App />);
+
+    expect(await screen.findByText("Active session")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    const settingsRegion = await screen.findByRole("region", { name: "Settings" });
+    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Archived sessions" }));
+
+    const archivedPanel = await within(settingsRegion).findByRole("region", { name: "Archived sessions" });
+    expect(await within(archivedPanel).findByText("Archived session")).toBeTruthy();
+    expect(within(settingsRegion).queryByText("Active session")).toBeNull();
+    expect(gatewayMock.requestLog).toContainEqual({
+      method: "thread/list",
+      params: expect.objectContaining({ archived: true })
+    });
   });
 
   it("renders provider-qualified model options while keeping a compact selected indicator", async () => {
@@ -882,10 +1105,35 @@ describe("Workbench composer agent wiring", () => {
     fireEvent.click(await screen.findByLabelText("Show right inspector"));
     const home = await screen.findByRole("region", { name: "Workspace status" });
     expect(await within(home).findByText(longSessionId)).toBeTruthy();
-    expect(within(home).getByText("Tokens")).toBeTruthy();
+    expect(within(home).queryByText("/tmp/project")).toBeNull();
+    expect(home.querySelector(".rightStatusMetrics")).toBeNull();
+    expect(within(home).queryByText("Session")).toBeNull();
+    expect(within(home).queryByText("Connection")).toBeNull();
+    expect(within(home).queryByText("Turn")).toBeNull();
+    expect(within(home).queryByText("Queued")).toBeNull();
+    expect(within(home).getByText("Session tokens")).toBeTruthy();
     expect(within(home).getByText("250")).toBeTruthy();
     expect(within(home).getByText("40%")).toBeTruthy();
     expect(within(home).getByText("$0.010000")).toBeTruthy();
+    expect(within(home).queryByText("Messages")).toBeNull();
+    expect(within(home).queryByText("Provider")).toBeNull();
+    expect(within(home).queryByText("Model")).toBeNull();
+    expect(home.querySelector(".sessionContextRing")).toBeNull();
+    const stack = home.querySelector(".promptTokenStack");
+    expect(stack).toBeTruthy();
+    expect(stack?.querySelectorAll(".promptTokenSegment").length).toBe(3);
+    expect(stack?.querySelector('[title^="Developer prompt:"]')).toBeTruthy();
+    const promptTokens = within(home).getByText("Prompt tokens").closest("details") as HTMLDetailsElement | null;
+    expect(promptTokens).toBeTruthy();
+    expect(promptTokens?.classList.contains("promptTokensDisclosure")).toBe(true);
+    expect(promptTokens?.open).toBe(false);
+    const promptSummary = promptTokens!.querySelector("summary") as HTMLElement;
+    expect(within(promptSummary).queryByText("3")).toBeNull();
+    expect(promptTokens?.querySelectorAll(".promptTokenCategory details").length).toBe(0);
+    fireEvent.click(promptSummary);
+    expect(promptTokens?.open).toBe(true);
+    expect(within(promptTokens as HTMLElement).getByText("Developer prompt")).toBeTruthy();
+    expect(within(promptTokens as HTMLElement).getByText("design")).toBeTruthy();
     expect(screen.queryByText("019ebc20...92dd")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Context usage" }));
@@ -893,12 +1141,107 @@ describe("Workbench composer agent wiring", () => {
     expect(within(contextPopover).getByText("Session tokens")).toBeTruthy();
     expect(within(contextPopover).getByText("Cache read")).toBeTruthy();
     expect(within(contextPopover).getByText("Cost")).toBeTruthy();
+    expect(within(contextPopover).queryByText("Developer prompt")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "New Session" }));
     await waitFor(() => {
-      expect(within(home).getByText("Tokens")).toBeTruthy();
-      expect(within(home).getAllByText("none").length).toBeGreaterThan(0);
+      expect(within(home).getByText("No session usage yet.")).toBeTruthy();
     });
+  });
+
+  it("does not apply stale session observability after creating a new draft", async () => {
+    const staleObservability = deferred<Record<string, unknown>>();
+    gatewayMock.sessionSummaries = [sessionSummary("old-thread", "Old session")];
+    gatewayMock.observabilityRead = (params: unknown) => {
+      const threadId = (params as { threadId?: string | null } | undefined)?.threadId ?? null;
+      if (threadId === "old-thread") {
+        return staleObservability.promise;
+      }
+      return observabilityResult(threadId);
+    };
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByText("Old session"));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/resume",
+        params: expect.objectContaining({ threadId: "old-thread" })
+      });
+    });
+    fireEvent.click(await screen.findByLabelText("Show right inspector"));
+    fireEvent.click(screen.getByLabelText("New Session"));
+
+    const home = await screen.findByRole("region", { name: "Workspace status" });
+    await waitFor(() => {
+      expect(within(home).getByText("draft")).toBeTruthy();
+      expect(within(home).getByText("No active session")).toBeTruthy();
+    });
+
+    await act(async () => {
+      staleObservability.resolve(observabilityResult("old-thread", true));
+      await staleObservability.promise;
+    });
+
+    expect(within(home).getByText("No active session")).toBeTruthy();
+    expect(within(home).queryByText("reported by ACP peer")).toBeNull();
+    expect(within(home).queryByText("8.0k/200.0k (4.0%)")).toBeNull();
+  });
+
+  it("ignores late completed-turn observability refreshes for a previous session", async () => {
+    gatewayMock.observabilityRead = (params: unknown) => {
+      const threadId = (params as { threadId?: string | null } | undefined)?.threadId ?? null;
+      return observabilityResult(threadId, threadId === "old-thread");
+    };
+
+    render(<App />);
+
+    expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "New Session" }));
+    fireEvent.click(await screen.findByLabelText("Show right inspector"));
+    const home = await screen.findByRole("region", { name: "Workspace status" });
+    await waitFor(() => {
+      expect(within(home).getByText("draft")).toBeTruthy();
+      expect(within(home).getByText("No active session")).toBeTruthy();
+    });
+
+    await act(async () => {
+      for (const subscriber of gatewayMock.subscribers) {
+        subscriber({
+          method: "gateway/event",
+          params: {
+            type: "turnCompleted",
+            threadId: "old-thread",
+            turnId: "old-turn",
+            outcome: "normal",
+            committedEntries: []
+          }
+        });
+      }
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "observability/read",
+        params: expect.objectContaining({ threadId: "old-thread" })
+      });
+    });
+    expect(within(home).getByText("No active session")).toBeTruthy();
+    expect(within(home).queryByText("reported by ACP peer")).toBeNull();
+    expect(within(home).queryByText("8.0k/200.0k (4.0%)")).toBeNull();
+  });
+
+  it("opens the composer context usage popover without revealing Status", async () => {
+    render(<App />);
+
+    expect(screen.queryByRole("region", { name: "Workspace status" })).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "Context usage" }));
+
+    const contextPopover = await screen.findByRole("dialog", { name: "Context usage" });
+    expect(within(contextPopover).getByText("No session context is active.")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Workspace status" })).toBeNull();
+    expect(screen.getByLabelText("Show right inspector")).toBeTruthy();
   });
 
   it("groups command panel rows by runtime presentation kind", async () => {
@@ -941,14 +1284,14 @@ describe("Workbench composer agent wiring", () => {
     expect(screen.getByPlaceholderText("Ask Psychevo...")).toBeTruthy();
   });
 
-  it("opens commands and agents slash results as transcript overlays", async () => {
+  it("opens commands slash results as transcript overlays", async () => {
     gatewayMock.commandExecute = (command: string) => ({
       accepted: true,
       command,
       known: true,
       presentationKind: "navigate",
       feedbackAnchor: "commandsPanel",
-      action: { type: "showPanel", panel: command === "/agents" ? "agents" : "commands" }
+      action: { type: "showPanel", panel: "commands" }
     });
 
     render(<App />);
@@ -960,15 +1303,155 @@ describe("Workbench composer agent wiring", () => {
     expect(await screen.findByRole("region", { name: "Commands overlay" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "Transcript" })).toBeTruthy();
     expect(screen.getByPlaceholderText("Ask Psychevo...")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Close Commands" }));
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
+  });
 
+  it("does not expose /agents as a GUI command surface", async () => {
+    gatewayMock.commandList = [
+      commandItem("commands", "navigate", "commands")
+    ];
+    gatewayMock.commandExecute = (command: string) => ({
+      accepted: false,
+      command,
+      known: true,
+      message: "/agents is managed by the Workbench agent selector and Settings Agents.",
+      feedbackAnchor: "composer",
+      action: null
+    });
+
+    render(<App />);
+
+    const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
     fireEvent.change(textarea, { target: { value: "/agents" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(await screen.findByRole("region", { name: "Agents overlay" })).toBeTruthy();
-    expect(screen.getByRole("region", { name: "Transcript" })).toBeTruthy();
-    expect(screen.getByPlaceholderText("Ask Psychevo...")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByText("/agents is managed by the Workbench agent selector and Settings Agents.")).toBeTruthy();
+    });
+    expect(screen.queryByRole("region", { name: "Commands overlay" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Agents overlay" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Settings" })).toBeNull();
     expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
+  });
+
+  it("creates a Profile ACP backend from the generic Settings Agents add action", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    const settingsRegion = await screen.findByRole("region", { name: "Settings" });
+    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Agents" }));
+
+    const agentsPanel = await within(settingsRegion).findByRole("region", { name: "Agents" });
+    const addButton = within(agentsPanel).getByRole("button", { name: "Add ACP backend" });
+    expect(addButton.textContent).toBe("");
+    fireEvent.click(addButton);
+    const form = await within(agentsPanel).findByRole("form", { name: "Profile ACP backend" });
+    expect(within(form).queryByLabelText("Target")).toBeNull();
+    expect((within(form).getByLabelText("ID") as HTMLInputElement).value).toBe("");
+    const commandJson = within(form).getByLabelText("Command JSON") as HTMLTextAreaElement;
+    expect(commandJson.value).toBe("");
+    expect(commandJson.placeholder).toContain("\"command\": \"opencode\"");
+    expect(commandJson.placeholder).toContain("\"args\": [\"acp\"]");
+    expect(within(form).queryByLabelText("Command")).toBeNull();
+    expect(within(form).queryByLabelText("Args")).toBeNull();
+    expect(within(form).queryByLabelText("Env")).toBeNull();
+    expect((within(form).getByLabelText("CWD") as HTMLInputElement).value).toBe("");
+    expect(within(form).getByLabelText("Label").closest("label")?.textContent).toContain("Optional");
+    expect(within(form).getByLabelText("Description").closest("label")?.textContent).toContain("Optional");
+    expect(within(form).getByText(/Resolves to \/tmp\/project$/)).toBeTruthy();
+    expect(within(form).queryByLabelText("Enabled")).toBeNull();
+    expect(within(form).queryByText("Entrypoints")).toBeNull();
+    fireEvent.change(within(form).getByLabelText("CWD"), { target: { value: "agents" } });
+    expect(within(form).getByText(/Resolves to \/tmp\/project\/agents$/)).toBeTruthy();
+    fireEvent.change(within(form).getByLabelText("CWD"), { target: { value: "/opt/acp" } });
+    expect(within(form).getByText(/Resolves to \/opt\/acp$/)).toBeTruthy();
+    fireEvent.change(within(form).getByLabelText("CWD"), { target: { value: "" } });
+    fireEvent.change(within(form).getByLabelText("ID"), { target: { value: "local-acp" } });
+    fireEvent.change(commandJson, { target: { value: "{" } });
+    expect(within(form).getByText("Command JSON must be valid JSON.")).toBeTruthy();
+    expect((within(form).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(commandJson, {
+      target: {
+        value: JSON.stringify({
+          command: "local-agent",
+          args: ["acp", "--stdio"],
+          env: { ACP_LOG: "debug" }
+        }, null, 2)
+      }
+    });
+    fireEvent.click(within(form).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "backend/write",
+        params: expect.objectContaining({
+          id: "local-acp",
+          target: "profile",
+          label: null,
+          description: null,
+          command: "local-agent",
+          args: ["acp", "--stdio"],
+          env: { ACP_LOG: "debug" },
+          cwd: "invocation",
+          entrypoints: ["peer", "subagent"],
+          clientCapabilities: ["fs.read", "fs.write", "terminal"]
+        })
+      });
+    });
+  });
+
+  it("updates Profile ACP backend enabled and entrypoints from Settings Agents rows", async () => {
+    gatewayMock.backendRecords = [
+      {
+        id: "opencode",
+        kind: "acp",
+        enabled: true,
+        label: "OpenCode",
+        description: null,
+        command: "opencode",
+        args: ["acp"],
+        cwd: "invocation",
+        entrypoints: ["peer", "subagent"],
+        clientCapabilities: ["fs.read", "fs.write", "terminal"],
+        mcpServers: [],
+        envKeys: [],
+        sourceTargets: ["profile"],
+        diagnostics: []
+      }
+    ];
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    const settingsRegion = await screen.findByRole("region", { name: "Settings" });
+    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Agents" }));
+    const agentsPanel = await within(settingsRegion).findByRole("region", { name: "Agents" });
+
+    fireEvent.click(await within(agentsPanel).findByRole("switch", { name: "Disable opencode" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "backend/write",
+        params: expect.objectContaining({
+          id: "opencode",
+          target: "profile",
+          enabled: false,
+          entrypoints: ["peer", "subagent"]
+        })
+      });
+    });
+
+    fireEvent.click(await within(agentsPanel).findByLabelText("opencode peer entrypoint"));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "backend/write",
+        params: expect.objectContaining({
+          id: "opencode",
+          target: "profile",
+          enabled: false,
+          entrypoints: ["subagent"]
+        })
+      });
+    });
   });
 
   it("routes commands clicked inside the overlay without submitting transcript turns", async () => {
@@ -1042,6 +1525,37 @@ describe("Workbench composer agent wiring", () => {
     expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
   });
 
+  it("auto-dismisses successful inspect command feedback", async () => {
+    gatewayMock.commandExecute = (command: string) => ({
+      accepted: true,
+      command,
+      known: true,
+      presentationKind: "inspect",
+      feedbackAnchor: "status",
+      action: { type: "showPanel", panel: "status" }
+    });
+
+    render(<App />);
+
+    const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "/context" } });
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText("Opened Status.")).toBeTruthy();
+    await act(async () => {
+      vi.advanceTimersByTime(2_999);
+    });
+    expect(screen.getByText("Opened Status.")).toBeTruthy();
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(screen.queryByText("Opened Status.")).toBeNull();
+  });
+
   it("shows sandbox status feedback near the composer while revealing workspace status", async () => {
     gatewayMock.commandExecute = (command: string) => ({
       accepted: true,
@@ -1061,6 +1575,11 @@ describe("Workbench composer agent wiring", () => {
 
     expect(await screen.findByRole("region", { name: "Workspace status" })).toBeTruthy();
     expect(await screen.findByText("sandbox: workspace-write")).toBeTruthy();
+    fireEvent.mouseDown(document.body);
+    await waitFor(() => {
+      expect(screen.queryByText("sandbox: workspace-write")).toBeNull();
+    });
+    expect(screen.getByRole("region", { name: "Workspace status" })).toBeTruthy();
     expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
   });
 

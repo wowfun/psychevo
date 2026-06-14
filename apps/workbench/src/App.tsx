@@ -4,10 +4,9 @@ import "@xterm/xterm/css/xterm.css";
 import {
   AlertTriangle,
   Archive,
+  ArrowLeft,
   Bot,
-  Box,
   Bug,
-  Cable,
   Check,
   ChevronDown,
   ChevronRight,
@@ -32,9 +31,9 @@ import {
   Search,
   Settings,
   Shield,
-  Sparkles,
   Sun,
   TerminalSquare,
+  Trash2,
   Wrench,
   X
 } from "lucide-react";
@@ -79,6 +78,7 @@ import {
   WorkspaceFilesResultSchema,
   type ContextReadResult,
   type GatewayMention,
+  type GatewayEvent,
   type GatewayInputPart,
   type GatewayRequestScope,
   type InitializeResult,
@@ -119,6 +119,19 @@ const EMPTY_SNAPSHOT: ThreadSnapshot = {
   pendingClarifies: []
 };
 
+const COMMAND_FEEDBACK_AUTO_DISMISS_MS = 3_000;
+const CONTEXT_CATEGORY_ORDER = [
+  "base_policy",
+  "developer_prompt",
+  "project_context",
+  "history",
+  "turn_context",
+  "current_prompt",
+  "system_tools"
+];
+
+type ContextUsageCategory = ContextReadResult["categories"][number];
+
 type WorkbenchAgent = {
   name: string;
   description: string;
@@ -136,7 +149,45 @@ type WorkbenchBackend = {
   label: string;
   description?: string | null;
   command?: string | null;
+  args: string[];
+  cwd: string;
   entrypoints: string[];
+  clientCapabilities: string[];
+  mcpServers: string[];
+  envKeys: string[];
+  sourceTargets: BackendConfigTarget[];
+  diagnostics: WorkbenchDiagnostic[];
+};
+
+type BackendConfigTarget = "project" | "profile";
+
+type WorkbenchDiagnostic = {
+  kind: string;
+  message: string;
+};
+
+type WorkbenchBackendDoctor = {
+  id: string;
+  ok: boolean;
+  checks: Array<{ name: string; ok: boolean; message: string; path: string | null }>;
+};
+
+type BackendDraft = {
+  id: string;
+  enabled: boolean;
+  label: string;
+  description: string;
+  commandJsonText: string;
+  cwd: string;
+  entrypoints: string[];
+  clientCapabilities: string[];
+  mcpServersText: string;
+};
+
+type BackendCommandJson = {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
 };
 
 type WorkbenchCommand = {
@@ -163,9 +214,34 @@ type RightWorkspaceTab = {
   file?: WorkspaceFileReadResult | null;
   message?: string | null;
 };
-type MainView = "transcript" | "search" | "artifacts" | "agents" | "skills" | "tools" | "mcp" | "settings";
+type MainView = "transcript" | "search" | "settings";
+type SettingsSection = "appearance" | "debug" | "agents" | "archived";
 type Appearance = "dark" | "light";
-type CommandOverlay = "agents" | "commands";
+const BACKEND_ENTRYPOINTS = ["peer", "subagent"] as const;
+const BACKEND_CLIENT_CAPABILITIES = ["fs.read", "fs.write", "terminal"] as const;
+const BACKEND_COMMAND_JSON_PLACEHOLDER = `{
+  "command": "opencode",
+  "args": ["acp"],
+  "env": {}
+}`;
+const EMPTY_BACKEND_DRAFT: BackendDraft = {
+  id: "",
+  enabled: true,
+  label: "",
+  description: "",
+  commandJsonText: "",
+  cwd: "",
+  entrypoints: ["peer", "subagent"],
+  clientCapabilities: ["fs.read", "fs.write", "terminal"],
+  mcpServersText: ""
+};
+const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description: string }> = [
+  { id: "appearance", label: "Appearance", description: "Theme" },
+  { id: "debug", label: "Debug", description: "Developer diagnostics" },
+  { id: "agents", label: "Agents", description: "Profile ACP backends" },
+  { id: "archived", label: "Archived sessions", description: "Restore or delete" }
+];
+type CommandOverlay = "commands";
 type CommandTrigger = "composer" | "commandsPanel" | "commandOverlay";
 
 type CommandAlternateAction = {
@@ -262,11 +338,20 @@ const MAX_IMAGE_ATTACHMENT_BYTES = 6 * 1024 * 1024;
 const DEFAULT_RIGHT_WIDTH_PX = 520;
 const MIN_RIGHT_WIDTH_PX = 300;
 const MAX_RIGHT_WIDTH_PX = 1200;
+const LIVE_EVENT_REFRESH_SETTLE_MS = 650;
 let terminalEventSeq = 0;
 
 function nextTerminalEventSeq(): number {
   terminalEventSeq += 1;
   return terminalEventSeq;
+}
+
+function pacedGatewayEvent(event: GatewayEvent): boolean {
+  return event.type === "entryStarted" ||
+    event.type === "entryUpdated" ||
+    event.type === "entryCompleted" ||
+    event.type === "entryDelta" ||
+    event.type === "turnCompleted";
 }
 
 export function App() {
@@ -277,15 +362,19 @@ export function App() {
   const [activeScope, setActiveScope] = useState<GatewayRequestScope | null>(null);
   const [snapshot, setSnapshot] = useState<ThreadSnapshot>(EMPTY_SNAPSHOT);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [archivedSessions, setArchivedSessions] = useState<SessionSummary[]>([]);
   const [pinnedSessionIds, setPinnedSessionIds] = useState<string[]>(readPinnedSessionIds);
   const [draftSession, setDraftSession] = useState<HistoryDraftSession | null>(null);
   const [settings, setSettings] = useState<SettingsReadResult | undefined>();
   const [agents, setAgents] = useState<WorkbenchAgent[]>([]);
   const [backends, setBackends] = useState<WorkbenchBackend[]>([]);
+  const [backendDraft, setBackendDraft] = useState<BackendDraft | null>(null);
+  const [backendDoctor, setBackendDoctor] = useState<Record<string, WorkbenchBackendDoctor>>({});
   const [commands, setCommands] = useState<WorkbenchCommand[]>([]);
   const [rightTabs, setRightTabs] = useState<RightWorkspaceTab[]>([]);
   const [activeRightTabId, setActiveRightTabId] = useState<string | null>(null);
   const [mainView, setMainView] = useState<MainView>("transcript");
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("appearance");
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(true);
   const [commandFeedback, setCommandFeedback] = useState<CommandFeedback>(null);
@@ -316,16 +405,19 @@ export function App() {
   const [debugEnabled, setDebugEnabled] = useState(initialPrefs.debug);
   const [rightWidthPx, setRightWidthPx] = useState(initialPrefs.rightWidthPx);
   const [dirtyRightTabs, setDirtyRightTabs] = useState<Record<string, boolean>>({});
-  const [archived, setArchived] = useState(false);
   const [status, setStatus] = useState("connecting");
   const [error, setError] = useState<string | null>(null);
   const [mobilePanel, setMobilePanel] = useState<"history" | "transcript" | "status">("transcript");
   const viewEpochRef = useRef(0);
+  const mainViewRef = useRef<MainView>("transcript");
+  const selectedThreadIdRef = useRef<string | null>(null);
   const scopeRef = useRef<GatewayRequestScope | null>(null);
   const commandContextKeyRef = useRef<string | null>(null);
   const detachedShellTokenRef = useRef(0);
   const pendingDetachedShellRef = useRef<PendingDetachedShell | null>(null);
   const skipNextPinnedPersistRef = useRef(false);
+  const gatewayEventQueueRef = useRef<GatewayEvent[]>([]);
+  const gatewayEventRafRef = useRef<number | null>(null);
 
   const activity = normalizeActivity(snapshot.activity);
   const transcriptEntries = Array.isArray(snapshot.entries) ? snapshot.entries : [];
@@ -334,10 +426,11 @@ export function App() {
   const running = activity.running;
   const disabled = status !== "connected";
   const currentThreadId = snapshot.thread?.id;
-  const visibleDraftSession = visibleHistoryDraftSession(draftSession, archived);
+  const visibleDraftSession = visibleHistoryDraftSession(draftSession, false);
   const hasSelectedSession = Boolean(currentThreadId || visibleDraftSession);
   const showSessionChrome = mainView === "transcript" && hasSelectedSession;
   const commandContextKey = `${activeScope?.workdir ?? ""}:${currentThreadId ?? visibleDraftSession?.id ?? "none"}`;
+  const activeWorkbenchWorkdir = activeScope?.workdir ?? init?.scope.workdir ?? settings?.workdir ?? window.location.pathname;
   const activeRightTab = rightTabs.find((tab) => tab.id === activeRightTabId) ?? null;
   const pinnedSessions = useMemo(
     () => pinnedSessionIds
@@ -349,7 +442,59 @@ export function App() {
     () => agents.filter((agent) => agent.name),
     [agents]
   );
+
+  function scheduleGatewayEventFlush() {
+    if (gatewayEventRafRef.current !== null) {
+      return;
+    }
+    gatewayEventRafRef.current = window.requestAnimationFrame(() => {
+      gatewayEventRafRef.current = null;
+      const event = gatewayEventQueueRef.current.shift();
+      if (event) {
+        setSnapshot((current) => {
+          const next = normalizeSnapshot(applyLiveTranscriptEvent(current, event));
+          selectedThreadIdRef.current = next.thread?.id ?? null;
+          return next;
+        });
+      }
+      if (gatewayEventQueueRef.current.length > 0) {
+        scheduleGatewayEventFlush();
+      }
+    });
+  }
+
+  function applyGatewayEvent(event: GatewayEvent) {
+    if (!pacedGatewayEvent(event)) {
+      setSnapshot((current) => {
+        const next = normalizeSnapshot(applyLiveTranscriptEvent(current, event));
+        selectedThreadIdRef.current = next.thread?.id ?? null;
+        return next;
+      });
+      return;
+    }
+    gatewayEventQueueRef.current.push(event);
+    scheduleGatewayEventFlush();
+  }
+
+  function scheduleSnapshotRefreshAfterLiveSettle(
+    nextClient: GatewayClient,
+    threadId: string | null,
+    epoch = viewEpochRef.current
+  ) {
+    window.setTimeout(() => {
+      if (threadId) {
+        void refreshSnapshot(nextClient, threadId, undefined, true, epoch);
+      } else {
+        void refreshSnapshot(nextClient);
+      }
+    }, LIVE_EVENT_REFRESH_SETTLE_MS);
+  }
   const controls = settings?.controls ?? null;
+
+  function updateMainView(value: MainView) {
+    mainViewRef.current = value;
+    setMainView(value);
+  }
   const sessionUsage = observability?.usage ?? null;
 
   useEffect(() => {
@@ -445,6 +590,32 @@ export function App() {
   }, [commandContextKey]);
 
   useEffect(() => {
+    if (!commandFeedback) {
+      return;
+    }
+    let timer: number | null = null;
+    if (commandFeedbackAutoDismissable(commandFeedback)) {
+      timer = window.setTimeout(() => {
+        setCommandFeedback(null);
+      }, COMMAND_FEEDBACK_AUTO_DISMISS_MS);
+    }
+    function onPointerDown(event: MouseEvent) {
+      const target = event.target;
+      if (target instanceof Element && target.closest(".commandFeedback")) {
+        return;
+      }
+      setCommandFeedback(null);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    return () => {
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
+      document.removeEventListener("mousedown", onPointerDown);
+    };
+  }, [commandFeedback]);
+
+  useEffect(() => {
     if (!showSessionChrome && mobilePanel === "status") {
       setMobilePanel("transcript");
     }
@@ -482,15 +653,15 @@ export function App() {
         const parsed = GatewayEventSchema.safeParse(notification.params);
         if (parsed.success) {
           const event = parsed.data;
-          setSnapshot((current) => applyLiveTranscriptEvent(current, event));
+          applyGatewayEvent(event);
           if (event.type === "turnStarted" && event.threadId) {
-            void refreshHistory(nextClient, archived);
+            void refreshHistory(nextClient);
           }
           if (event.type === "turnCompleted" && event.threadId) {
             const threadId = event.threadId;
             const eventEpoch = viewEpochRef.current;
-            void refreshSnapshot(nextClient, threadId, undefined, true, eventEpoch);
-            void refreshHistory(nextClient, archived);
+            scheduleSnapshotRefreshAfterLiveSettle(nextClient, threadId, eventEpoch);
+            void refreshHistory(nextClient);
             const scope = scopeRef.current;
             if (scope) {
               void refreshWorkspaceSurface(nextClient, scope, threadId);
@@ -498,7 +669,7 @@ export function App() {
             for (const delay of [1_500, 3_000, 7_500, 15_000, 30_000, 60_000, 120_000]) {
               window.setTimeout(() => {
                 void refreshSnapshot(nextClient, threadId, undefined, true, eventEpoch);
-                void refreshHistory(nextClient, archived);
+                void refreshHistory(nextClient);
               }, delay);
             }
             window.setTimeout(() => {
@@ -525,11 +696,12 @@ export function App() {
           const scope = scopeRef.current;
           if (scope) {
             void refreshWorkspaceSurface(nextClient, scope, threadId);
+            void refreshAgentSurface(nextClient, scope);
           }
         } else {
           void refreshSnapshot(nextClient);
         }
-        void refreshHistory(nextClient, archived);
+        void refreshHistory(nextClient);
       }
       if (notification.method === "shell/error") {
         const record = asRecord(notification.params);
@@ -538,14 +710,14 @@ export function App() {
         if (threadId) {
           void refreshSnapshot(nextClient, threadId, undefined, true, viewEpochRef.current);
         }
-        void refreshHistory(nextClient, archived);
+        void refreshHistory(nextClient);
       }
       if (notification.method === "turn/result") {
         const record = asRecord(notification.params);
         const thread = asRecord(record.thread);
         const threadId = optionalStringField(thread.id);
         if (threadId) {
-          void refreshSnapshot(nextClient, threadId, undefined, true, viewEpochRef.current);
+          scheduleSnapshotRefreshAfterLiveSettle(nextClient, threadId, viewEpochRef.current);
           const scope = scopeRef.current;
           if (scope) {
             void refreshWorkspaceSurface(nextClient, scope, threadId);
@@ -553,11 +725,11 @@ export function App() {
         } else {
           void refreshSnapshot(nextClient);
         }
-        void refreshHistory(nextClient, archived);
+        void refreshHistory(nextClient);
       }
       if (notification.method === "turn/error") {
         void refreshSnapshot(nextClient);
-        void refreshHistory(nextClient, archived);
+        void refreshHistory(nextClient);
       }
     });
 
@@ -573,17 +745,20 @@ export function App() {
         setInit(initialize);
         setActiveScope(initialize.scope);
         scopeRef.current = initialize.scope;
-        const nextSessions = await refreshHistory(nextClient, archived);
+        const nextSessions = await refreshHistory(nextClient);
         const startupScope = startupDraftScope(initialize.scope, nextSessions);
         const epoch = beginExplicitViewSwitch();
         const nextSnapshot = parseThreadSnapshot(await nextClient.request("thread/start", { scope: startupScope }));
         if (!alive) {
           return;
         }
-        setSnapshot(normalizeSnapshot(nextSnapshot));
+        const normalized = normalizeSnapshot(nextSnapshot);
+        selectedThreadIdRef.current = normalized.thread?.id ?? null;
+        setSnapshot(normalized);
         setDraftSession(createHistoryDraftSession(epoch, startupScope.workdir));
-        setArchived(false);
-        setMainView("transcript");
+        if (mainViewRef.current === "transcript") {
+          updateMainView("transcript");
+        }
         await adoptSnapshotScope(nextClient, nextSnapshot);
       } catch (err) {
         if (alive) {
@@ -596,6 +771,11 @@ export function App() {
     void boot();
     return () => {
       alive = false;
+      gatewayEventQueueRef.current = [];
+      if (gatewayEventRafRef.current !== null) {
+        window.cancelAnimationFrame(gatewayEventRafRef.current);
+        gatewayEventRafRef.current = null;
+      }
       nextClient.close();
     };
   }, []);
@@ -608,9 +788,15 @@ export function App() {
 
   useEffect(() => {
     if (client) {
-      void refreshHistory(client, archived);
+      void refreshHistory(client);
     }
-  }, [archived, client]);
+  }, [client]);
+
+  useEffect(() => {
+    if (client && mainView === "settings" && settingsSection === "archived") {
+      void refreshHistory(client, true);
+    }
+  }, [client, mainView, settingsSection]);
 
   useEffect(() => {
     if (client && activeScope) {
@@ -623,6 +809,9 @@ export function App() {
     pendingDetachedShellRef.current = null;
     clearCommandTransientUi();
     setDraftSession(null);
+    selectedThreadIdRef.current = null;
+    setObservability(null);
+    setContextUsage(null);
     return viewEpochRef.current;
   }
 
@@ -647,6 +836,9 @@ export function App() {
     }
     if (threadId && readOnly) {
       const nextSnapshot = parseThreadSnapshot(await nextClient.request("thread/read", { threadId }));
+      if (expectedEpoch != null && expectedEpoch !== viewEpochRef.current) {
+        return;
+      }
       setSnapshot((current) => {
         if (!shouldApplyReadOnlySnapshot(
           current,
@@ -657,9 +849,14 @@ export function App() {
         )) {
           return current;
         }
-        return normalizeSnapshot(reconcileThreadSnapshot(normalizeSnapshot(current), normalizeSnapshot(nextSnapshot)));
+        const next = normalizeSnapshot(reconcileThreadSnapshot(normalizeSnapshot(current), normalizeSnapshot(nextSnapshot)));
+        selectedThreadIdRef.current = next.thread?.id ?? null;
+        return next;
       });
-      await refreshObservability(nextClient, nextSnapshot.scope, nextSnapshot.thread?.id ?? threadId);
+      if ((selectedThreadIdRef.current ?? null) !== (nextSnapshot.thread?.id ?? threadId)) {
+        return;
+      }
+      await refreshObservability(nextClient, nextSnapshot.scope, nextSnapshot.thread?.id ?? threadId, expectedEpoch);
       return;
     }
     const nextScope = scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
@@ -679,8 +876,13 @@ export function App() {
       ) {
         return current;
       }
-      return normalizeSnapshot(reconcileThreadSnapshot(currentSnapshot, incomingSnapshot));
+      const next = normalizeSnapshot(reconcileThreadSnapshot(currentSnapshot, incomingSnapshot));
+      selectedThreadIdRef.current = next.thread?.id ?? null;
+      return next;
     });
+    if (expectedEpoch != null && expectedEpoch !== viewEpochRef.current) {
+      return;
+    }
     await adoptSnapshotScope(nextClient, nextSnapshot);
   }
 
@@ -693,7 +895,10 @@ export function App() {
     }
     const nextSnapshot = normalizeSnapshot(parseThreadSnapshot(await nextClient.request("thread/read", { threadId })));
     setSnapshot((current) => (
-      (current.thread?.id ?? null) === threadId ? nextSnapshot : current
+      (current.thread?.id ?? null) === threadId ? (() => {
+        selectedThreadIdRef.current = nextSnapshot.thread?.id ?? null;
+        return nextSnapshot;
+      })() : current
     ));
   }
 
@@ -730,7 +935,7 @@ export function App() {
     applyInitialControls(nextSettings);
   }
 
-  async function refreshHistory(nextClient = client, includeArchived = archived, workdir: string | null = null): Promise<SessionSummary[]> {
+  async function refreshHistory(nextClient = client, includeArchived = false, workdir: string | null = null): Promise<SessionSummary[]> {
     if (!nextClient) {
       return [];
     }
@@ -738,7 +943,11 @@ export function App() {
       await nextClient.request("thread/list", { archived: includeArchived, limit: 100, workdir: workdir ?? null })
     );
     const nextSessions = result.sessions.map(normalizeSessionSummary);
-    setSessions(nextSessions);
+    if (includeArchived) {
+      setArchivedSessions(nextSessions);
+    } else {
+      setSessions(nextSessions);
+    }
     return nextSessions;
   }
 
@@ -759,7 +968,8 @@ export function App() {
   async function refreshWorkspaceSurface(
     nextClient = client,
     scope = activeScope ?? init?.scope,
-    threadId: string | null = currentThreadId ?? null
+    threadId: string | null = currentThreadId ?? null,
+    expectedEpoch: number | null = viewEpochRef.current
   ) {
     if (!nextClient || !scope) {
       setWorkspaceChanges(null);
@@ -773,6 +983,9 @@ export function App() {
       nextClient.request("workspace/changes", { scope }),
       nextClient.request("observability/read", { scope, threadId })
     ]);
+    if (!shouldApplyAsyncSurfaceResult(scope, expectedEpoch, threadId)) {
+      return;
+    }
     setWorkspaceFiles(WorkspaceFilesResultSchema.parse(files));
     setWorkspaceDiff(WorkspaceDiffResultSchema.parse(diff));
     setWorkspaceChanges(WorkspaceChangesResultSchema.parse(changes));
@@ -782,14 +995,34 @@ export function App() {
   async function refreshObservability(
     nextClient = client,
     scope = activeScope ?? init?.scope,
-    threadId: string | null = currentThreadId ?? null
+    threadId: string | null = currentThreadId ?? null,
+    expectedEpoch: number | null = viewEpochRef.current
   ) {
     if (!nextClient || !scope) {
       setObservability(null);
       setContextUsage(null);
       return;
     }
-    applyObservability(await nextClient.request("observability/read", { scope, threadId }));
+    const nextObservability = await nextClient.request("observability/read", { scope, threadId });
+    if (!shouldApplyAsyncSurfaceResult(scope, expectedEpoch, threadId)) {
+      return;
+    }
+    applyObservability(nextObservability);
+  }
+
+  function shouldApplyAsyncSurfaceResult(
+    scope: GatewayRequestScope,
+    expectedEpoch: number | null,
+    threadId: string | null
+  ): boolean {
+    if (expectedEpoch != null && expectedEpoch !== viewEpochRef.current) {
+      return false;
+    }
+    if ((selectedThreadIdRef.current ?? null) !== threadId) {
+      return false;
+    }
+    const currentScope = scopeRef.current ?? activeScope ?? init?.scope ?? null;
+    return !currentScope?.workdir || currentScope.workdir === scope.workdir;
   }
 
   function applyObservability(value: unknown) {
@@ -875,12 +1108,19 @@ export function App() {
     } else {
       setActiveCommandOverlay(null);
     }
-    setMainView(value);
+    updateMainView(value);
+  }
+
+  function openSettingsSection(section: SettingsSection) {
+    setActiveCommandOverlay(null);
+    setSettingsSection(section);
+    updateMainView("settings");
+    setMobilePanel("transcript");
   }
 
   function openCommandOverlay(kind: CommandOverlay) {
     setActiveCommandOverlay(kind);
-    setMainView("transcript");
+    updateMainView("transcript");
     setMobilePanel("transcript");
   }
 
@@ -976,28 +1216,12 @@ export function App() {
   }
 
   function revealCommandsPanel(trigger: CommandTrigger = "commandsPanel") {
-    if (trigger === "composer" || trigger === "commandOverlay") {
-      openCommandOverlay("commands");
-      return;
-    }
-    setActiveCommandOverlay(null);
-    setMainView("tools");
-    setMobilePanel("transcript");
-  }
-
-  function revealAgentsPanel(trigger: CommandTrigger = "commandsPanel") {
-    if (trigger === "composer" || trigger === "commandOverlay") {
-      openCommandOverlay("agents");
-      return;
-    }
-    setActiveCommandOverlay(null);
-    setMainView("agents");
-    setMobilePanel("transcript");
+    openCommandOverlay("commands");
   }
 
   function revealTranscriptPanel() {
     clearCommandTransientUi();
-    setMainView("transcript");
+    updateMainView("transcript");
     setMobilePanel("transcript");
   }
 
@@ -1006,9 +1230,6 @@ export function App() {
       case "history":
       case "sessions":
         revealHistoryPanel();
-        return;
-      case "agents":
-        revealAgentsPanel(trigger);
         return;
       case "commands":
       case "help":
@@ -1048,7 +1269,6 @@ export function App() {
       switch (action.target) {
         case "history":
         case "sessions":
-        case "agents":
         case "commands":
         case "status":
         case "preview":
@@ -1120,12 +1340,13 @@ export function App() {
       : activeScope ?? init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
     const nextSnapshot = parseThreadSnapshot(await client.request("thread/start", { scope }));
     if (viewEpochRef.current === epoch) {
-      setSnapshot(normalizeSnapshot(nextSnapshot));
+      const normalized = normalizeSnapshot(nextSnapshot);
+      selectedThreadIdRef.current = normalized.thread?.id ?? null;
+      setSnapshot(normalized);
       setDraftSession(createHistoryDraftSession(epoch, scope.workdir));
-      setArchived(false);
       await adoptSnapshotScope(client, nextSnapshot);
     }
-    await refreshHistory(client, false);
+    await refreshHistory(client);
     setMobilePanel("transcript");
   }
 
@@ -1137,13 +1358,14 @@ export function App() {
     const epoch = beginExplicitViewSwitch();
     const nextSnapshot = parseThreadSnapshot(await client.request("thread/start", { scope: created.scope }));
     if (viewEpochRef.current === epoch) {
-      setSnapshot(normalizeSnapshot(nextSnapshot));
+      const normalized = normalizeSnapshot(nextSnapshot);
+      selectedThreadIdRef.current = normalized.thread?.id ?? null;
+      setSnapshot(normalized);
       setDraftSession(createHistoryDraftSession(epoch, created.workdir));
-      setArchived(false);
       await adoptSnapshotScope(client, nextSnapshot);
     }
-    await refreshHistory(client, false);
-    setMainView("transcript");
+    await refreshHistory(client);
+    updateMainView("transcript");
     setMobilePanel("transcript");
   }
 
@@ -1179,7 +1401,7 @@ export function App() {
         await refreshWorkspaceSurface(client, activeScope ?? init?.scope, threadId);
         setAttachments([]);
         patchComposerDraft(stringField(record.prompt));
-        setMainView("transcript");
+        updateMainView("transcript");
         setMobilePanel("transcript");
         break;
       }
@@ -1190,7 +1412,7 @@ export function App() {
         await refreshWorkspaceSurface(client, activeScope ?? init?.scope, threadId);
         setAttachments([]);
         patchComposerDraft("");
-        setMainView("transcript");
+        updateMainView("transcript");
         setMobilePanel("transcript");
         break;
       }
@@ -1327,9 +1549,9 @@ export function App() {
       setCommandFeedback({
         accepted: false,
         command: `!${command}`,
-        message: optionalStringField(record.message) ?? "Shell command was not accepted."
+        message: optionalStringField(record.message) ?? "Shell command was not accepted.",
+        feedbackAnchor: "composer"
       });
-      setMainView("tools");
       setMobilePanel("transcript");
       return;
     }
@@ -1461,6 +1683,81 @@ export function App() {
     setError(null);
   }
 
+  async function writeBackendDraft(draft: BackendDraft) {
+    if (!client) {
+      throw new Error("Gateway client is unavailable.");
+    }
+    const commandConfig = parseBackendCommandJson(draft.commandJsonText);
+    if (commandConfig.error) {
+      throw new Error(commandConfig.error);
+    }
+    const scope = activeScope ?? init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
+    await client.request("backend/write", {
+      scope,
+      id: draft.id.trim(),
+      target: "profile",
+      enabled: draft.enabled,
+      label: draft.label.trim() || null,
+      description: draft.description.trim() || null,
+      command: commandConfig.command.trim() || null,
+      args: commandConfig.args,
+      env: commandConfig.env,
+      cwd: draft.cwd.trim() || "invocation",
+      entrypoints: draft.entrypoints,
+      clientCapabilities: draft.clientCapabilities,
+      mcpServers: multilineList(draft.mcpServersText)
+    });
+    await refreshAgentSurface(client, scope);
+  }
+
+  async function saveBackendDraft(draft: BackendDraft) {
+    await writeBackendDraft(draft);
+    setBackendDraft(null);
+  }
+
+  async function updateBackendDraftFields(backend: WorkbenchBackend, patch: Partial<BackendDraft>) {
+    await writeBackendDraft({ ...backendDraftFromBackend(backend), ...patch });
+  }
+
+  async function deleteBackend(backend: WorkbenchBackend) {
+    if (!client) {
+      throw new Error("Gateway client is unavailable.");
+    }
+    const scope = activeScope ?? init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
+    await client.request("backend/delete", { scope, id: backend.id, target: "profile" });
+    await refreshAgentSurface(client, scope);
+  }
+
+  async function doctorBackend(backend: WorkbenchBackend) {
+    if (!client) {
+      throw new Error("Gateway client is unavailable.");
+    }
+    const scope = activeScope ?? init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
+    const result = await client.request("backend/doctor", { scope, id: backend.id });
+    setBackendDoctor((current) => ({
+      ...current,
+      [backend.id]: parseBackendDoctor(result)
+    }));
+  }
+
+  async function restoreArchivedSession(threadId: string) {
+    if (!client) {
+      return;
+    }
+    await client.request("thread/restore", { threadId });
+    await refreshHistory(client);
+    await refreshHistory(client, true);
+  }
+
+  async function deleteArchivedSession(threadId: string) {
+    if (!client) {
+      return;
+    }
+    await client.request("thread/delete", { threadId });
+    await refreshHistory(client);
+    await refreshHistory(client, true);
+  }
+
   return (
     <main className="appShell" data-main-view={mainView}>
       {error && (
@@ -1479,7 +1776,6 @@ export function App() {
           })}
         />
       )}
-
       <nav className="mobileTabs" aria-label="Workbench panels">
         <button className={mobilePanel === "history" ? "is-selected" : ""} onClick={() => setMobilePanel("history")} type="button">
           <PanelLeft size={17} />
@@ -1527,9 +1823,6 @@ export function App() {
               <button aria-label="Search" className={mainView === "search" ? "is-selected" : ""} onClick={() => switchMainView("search")} type="button">
                 <Search size={16} /> <span>Search</span>
               </button>
-              <button aria-label="Artifacts" className={mainView === "artifacts" ? "is-selected" : ""} onClick={() => switchMainView("artifacts")} type="button">
-                <Archive size={16} /> <span>Artifacts</span>
-              </button>
             </div>
             {!leftCollapsed && (
               <>
@@ -1540,13 +1833,13 @@ export function App() {
                   onResume={(threadId) => void runAction(async () => {
                     const epoch = beginExplicitViewSwitch();
                     await refreshSnapshot(client, threadId, undefined, false, epoch);
-                    setMainView("transcript");
+                    updateMainView("transcript");
                     setMobilePanel("transcript");
                   })}
                   onUnpin={togglePinnedSession}
                 />
                 <HistoryPanel
-                  archived={archived}
+                  archived={false}
                   currentThreadId={currentThreadId}
                   disabled={disabled}
                   draftSession={null}
@@ -1556,11 +1849,13 @@ export function App() {
                     setDraftSession(null);
                     await client?.request("thread/archive", { threadId });
                     await refreshHistory();
+                    await refreshHistory(client, true);
                   })}
                   onDelete={(threadId) => void runAction(async () => {
                     setDraftSession(null);
                     await client?.request("thread/delete", { threadId });
                     await refreshHistory();
+                    await refreshHistory(client, true);
                   })}
                   onExport={(threadId) => {
                     if (endpoint) {
@@ -1583,6 +1878,7 @@ export function App() {
                     setDraftSession(null);
                     await client?.request("thread/restore", { threadId });
                     await refreshHistory();
+                    await refreshHistory(client, true);
                   })}
                   onResumeDraft={() => {
                     switchMainView("transcript");
@@ -1591,7 +1887,7 @@ export function App() {
                   onResume={(threadId) => void runAction(async () => {
                     const epoch = beginExplicitViewSwitch();
                     await refreshSnapshot(client, threadId, undefined, false, epoch);
-                    setMainView("transcript");
+                    updateMainView("transcript");
                     setMobilePanel("transcript");
                   })}
                   onShare={(threadId) => {
@@ -1602,7 +1898,16 @@ export function App() {
                 />
               </>
             )}
-            <LeftUtilityRail value={mainView} onChange={switchMainView} />
+            <LeftUtilityRail
+              value={mainView}
+              onChange={(value) => {
+                if (value === "settings") {
+                  openSettingsSection(settingsSection);
+                } else {
+                  switchMainView(value);
+                }
+              }}
+            />
           </div>
         </aside>
 
@@ -1622,38 +1927,48 @@ export function App() {
           </div>
           <div className="centerWorkspace">
             <MainSurface
-              agents={agents}
               appearance={appearance}
-              archived={archived}
+              archivedSessions={archivedSessions}
+              backendDraft={backendDraft}
+              backendDoctor={backendDoctor}
               backends={backends}
-              commands={commands}
               debugEnabled={debugEnabled}
-              feedback={commandFeedback}
+              disabled={disabled}
               mainView={mainView}
               sessions={sessions}
+              settingsSection={settingsSection}
+              workdir={activeWorkbenchWorkdir}
               loadThreadSearchText={loadThreadSearchText}
               onAppearanceChange={setAppearance}
-              onArchivedChange={setArchived}
-              onCommand={(slash) => void runAction(async () => executeCommand(slash, "commandsPanel"))}
-              onCommandAlternateAction={(action) => void runAction(async () => runCommandAlternateAction(action))}
+              onDeleteArchivedSession={(threadId) => void runAction(async () => deleteArchivedSession(threadId))}
+              onRestoreArchivedSession={(threadId) => void runAction(async () => restoreArchivedSession(threadId))}
               onDebugChange={setDebugEnabled}
+              onCancelBackendEdit={() => setBackendDraft(null)}
+              onChangeBackendDraft={setBackendDraft}
+              onDeleteBackend={(backend) => void runAction(async () => deleteBackend(backend))}
+              onDoctorBackend={(backend) => void runAction(async () => doctorBackend(backend))}
+              onEditBackend={(backend) => setBackendDraft(backendDraftFromBackend(backend))}
+              onSetBackendEnabled={(backend, enabled) => void runAction(async () => updateBackendDraftFields(backend, { enabled }))}
+              onSetBackendEntrypoints={(backend, entrypoints) => void runAction(async () => updateBackendDraftFields(backend, { entrypoints }))}
               onMainViewChange={switchMainView}
+              onNewBackend={() => {
+                setSettingsSection("agents");
+                setBackendDraft({ ...EMPTY_BACKEND_DRAFT });
+              }}
               onOpenSession={(threadId) => void runAction(async () => {
                 const epoch = beginExplicitViewSwitch();
                 await refreshSnapshot(client, threadId, undefined, false, epoch);
-                setMainView("transcript");
+                updateMainView("transcript");
                 setMobilePanel("transcript");
               })}
-              settings={settings}
+              onSettingsSectionChange={setSettingsSection}
+              onSaveBackendDraft={(draft) => void runAction(async () => saveBackendDraft(draft))}
               transcript={<TranscriptPanel activity={activity} entries={transcriptEntries} onCopyText={copyTranscriptText} />}
             />
             {showSessionChrome && activeCommandOverlay && (
               <CommandOverlay
-                agents={agents}
-                backends={backends}
                 commands={commands}
                 feedback={commandFeedback}
-                kind={activeCommandOverlay}
                 onAlternateAction={(action) => void runAction(async () => runCommandAlternateAction(action))}
                 onClose={clearCommandTransientUi}
                 onExecute={(slash) => void runAction(async () => executeCommand(slash, "commandOverlay"))}
@@ -1697,7 +2012,6 @@ export function App() {
                   usage={sessionUsage}
                   model={selectedModel}
                   variant={selectedVariant}
-                  onContextClick={() => revealRightWorkspace(null)}
                   onModelChange={setSelectedModel}
                   onVariantChange={setSelectedVariant}
                 />
@@ -1951,45 +2265,65 @@ function PinnedPanel({
 }
 
 function MainSurface({
-  agents,
   appearance,
-  archived,
+  archivedSessions,
+  backendDraft,
+  backendDoctor,
   backends,
-  commands,
   debugEnabled,
-  feedback,
+  disabled,
   loadThreadSearchText,
   mainView,
   onAppearanceChange,
-  onArchivedChange,
-  onCommand,
-  onCommandAlternateAction,
+  onCancelBackendEdit,
+  onChangeBackendDraft,
   onDebugChange,
+  onDeleteArchivedSession,
+  onDeleteBackend,
+  onDoctorBackend,
+  onEditBackend,
   onMainViewChange,
+  onNewBackend,
   onOpenSession,
-  settings,
+  onRestoreArchivedSession,
+  onSaveBackendDraft,
+  onSetBackendEnabled,
+  onSetBackendEntrypoints,
+  onSettingsSectionChange,
+  settingsSection,
   sessions,
-  transcript
+  transcript,
+  workdir
 }: {
-  agents: WorkbenchAgent[];
   appearance: Appearance;
-  archived: boolean;
+  archivedSessions: SessionSummary[];
+  backendDraft: BackendDraft | null;
+  backendDoctor: Record<string, WorkbenchBackendDoctor>;
   backends: WorkbenchBackend[];
-  commands: WorkbenchCommand[];
   debugEnabled: boolean;
-  feedback: CommandFeedback;
+  disabled: boolean;
   loadThreadSearchText(threadId: string): Promise<string>;
   mainView: MainView;
   onAppearanceChange(value: Appearance): void;
-  onArchivedChange(value: boolean): void;
-  onCommand(slash: string): void;
-  onCommandAlternateAction(action: CommandAlternateAction): void;
+  onCancelBackendEdit(): void;
+  onChangeBackendDraft(draft: BackendDraft): void;
   onDebugChange(value: boolean): void;
+  onDeleteArchivedSession(threadId: string): void;
+  onDeleteBackend(backend: WorkbenchBackend): void;
+  onDoctorBackend(backend: WorkbenchBackend): void;
+  onEditBackend(backend: WorkbenchBackend): void;
   onMainViewChange(value: MainView): void;
+  onNewBackend(): void;
   onOpenSession(threadId: string): void;
-  settings: SettingsReadResult | undefined;
+  onRestoreArchivedSession(threadId: string): void;
+  onSaveBackendDraft(draft: BackendDraft): void;
+  onSetBackendEnabled(backend: WorkbenchBackend, enabled: boolean): void;
+  onSetBackendEntrypoints(backend: WorkbenchBackend, entrypoints: string[]): void;
+  onSettingsSectionChange(value: SettingsSection): void;
+  settingsSection: SettingsSection;
   sessions: SessionSummary[];
   transcript: ReactNode;
+  workdir: string;
 }) {
   if (mainView === "transcript") {
     return <>{transcript}</>;
@@ -1998,26 +2332,29 @@ function MainSurface({
     return (
       <SettingsPage
         appearance={appearance}
-        archived={archived}
+        archivedSessions={archivedSessions}
+        backendDraft={backendDraft}
+        backendDoctor={backendDoctor}
+        backends={backends}
         debugEnabled={debugEnabled}
-        settings={settings}
+        disabled={disabled}
+        section={settingsSection}
         onAppearanceChange={onAppearanceChange}
-        onArchivedChange={onArchivedChange}
+        onCancelBackendEdit={onCancelBackendEdit}
+        onChangeBackendDraft={onChangeBackendDraft}
         onDebugChange={onDebugChange}
+        onDeleteArchivedSession={onDeleteArchivedSession}
+        onDeleteBackend={onDeleteBackend}
+        onDoctorBackend={onDoctorBackend}
+        onEditBackend={onEditBackend}
+        onNewBackend={onNewBackend}
         onOpenTranscript={() => onMainViewChange("transcript")}
-      />
-    );
-  }
-  if (mainView === "agents") {
-    return <AgentsPanel agents={agents} backends={backends} />;
-  }
-  if (mainView === "tools") {
-    return (
-      <CommandsPanel
-        commands={commands}
-        feedback={feedback}
-        onAlternateAction={onCommandAlternateAction}
-        onExecute={onCommand}
+        onRestoreArchivedSession={onRestoreArchivedSession}
+        onSaveBackendDraft={onSaveBackendDraft}
+        onSectionChange={onSettingsSectionChange}
+        onSetBackendEnabled={onSetBackendEnabled}
+        onSetBackendEntrypoints={onSetBackendEntrypoints}
+        workdir={workdir}
       />
     );
   }
@@ -2031,97 +2368,339 @@ function MainSurface({
       />
     );
   }
-  if (mainView === "artifacts") {
-    return <PlaceholderPage icon={<Archive size={18} />} title="Artifacts" body="No artifacts in this session." />;
-  }
-  if (mainView === "skills") {
-    return <PlaceholderPage icon={<Sparkles size={18} />} title="Skills" body="Skill browsing is available through completion and command surfaces in this slice." />;
-  }
-  return <PlaceholderPage icon={<Cable size={18} />} title="MCP" body="MCP status will appear here when servers are configured." />;
+  return <>{transcript}</>;
 }
 
 function SettingsPage({
   appearance,
-  archived,
+  archivedSessions,
+  backendDraft,
+  backendDoctor,
+  backends,
   debugEnabled,
-  settings,
+  disabled,
+  section,
   onAppearanceChange,
-  onArchivedChange,
+  onCancelBackendEdit,
+  onChangeBackendDraft,
   onDebugChange,
-  onOpenTranscript
+  onDeleteArchivedSession,
+  onDeleteBackend,
+  onDoctorBackend,
+  onEditBackend,
+  onNewBackend,
+  onOpenTranscript,
+  onRestoreArchivedSession,
+  onSaveBackendDraft,
+  onSectionChange,
+  onSetBackendEnabled,
+  onSetBackendEntrypoints,
+  workdir
 }: {
   appearance: Appearance;
-  archived: boolean;
+  archivedSessions: SessionSummary[];
+  backendDraft: BackendDraft | null;
+  backendDoctor: Record<string, WorkbenchBackendDoctor>;
+  backends: WorkbenchBackend[];
   debugEnabled: boolean;
-  settings: SettingsReadResult | undefined;
+  disabled: boolean;
+  section: SettingsSection;
   onAppearanceChange(value: Appearance): void;
-  onArchivedChange(value: boolean): void;
+  onCancelBackendEdit(): void;
+  onChangeBackendDraft(draft: BackendDraft): void;
   onDebugChange(value: boolean): void;
+  onDeleteArchivedSession(threadId: string): void;
+  onDeleteBackend(backend: WorkbenchBackend): void;
+  onDoctorBackend(backend: WorkbenchBackend): void;
+  onEditBackend(backend: WorkbenchBackend): void;
+  onNewBackend(): void;
   onOpenTranscript(): void;
+  onRestoreArchivedSession(threadId: string): void;
+  onSaveBackendDraft(draft: BackendDraft): void;
+  onSectionChange(value: SettingsSection): void;
+  onSetBackendEnabled(backend: WorkbenchBackend, enabled: boolean): void;
+  onSetBackendEntrypoints(backend: WorkbenchBackend, entrypoints: string[]): void;
+  workdir: string;
 }) {
+  const [query, setQuery] = useState("");
+  const active = SETTINGS_SECTIONS.find((item) => item.id === section) ?? SETTINGS_SECTIONS[0]!;
+  const normalizedQuery = query.trim().toLowerCase();
+  const primarySections = SETTINGS_SECTIONS.filter((item) => item.id !== "archived");
+  const archivedSection = SETTINGS_SECTIONS.find((item) => item.id === "archived")!;
+  const sectionMatches = (item: (typeof SETTINGS_SECTIONS)[number]) => (
+    !normalizedQuery
+    || item.label.toLowerCase().includes(normalizedQuery)
+    || item.description.toLowerCase().includes(normalizedQuery)
+  );
+  const visiblePrimarySections = primarySections.filter(sectionMatches);
+  const showArchivedSection = sectionMatches(archivedSection);
   return (
     <section className="centerPage settingsPage" aria-label="Settings">
-      <header>
-        <div className="centerPageTitle">
-          <Settings size={18} />
-          <div>
-            <h2>Settings</h2>
-            <p>{settings?.project?.displayPath ?? settings?.workdir ?? "local workbench"}</p>
-          </div>
-        </div>
-        <button
-          aria-label="Back to transcript"
-          className="centerPageBack"
-          data-tooltip="Back to transcript"
-          onClick={onOpenTranscript}
-          title="Back to transcript"
-          type="button"
-        >
-          <X size={15} />
-        </button>
-      </header>
-      <div className="settingsRows">
-        <div className="settingsRow">
-          <div>
-            <strong>Appearance</strong>
-            <span>Switch the shared Workbench surface between dark and light.</span>
-          </div>
-          <div className="segmentedControl">
-            <button className={appearance === "dark" ? "is-selected" : ""} onClick={() => onAppearanceChange("dark")} type="button">
-              <Moon size={15} /> Dark
+      <div className="settingsShell">
+        <aside className="settingsNav" aria-label="Settings sections">
+          <div className="settingsNavTop">
+            <button className="settingsBackButton" onClick={onOpenTranscript} type="button">
+              <ArrowLeft size={15} />
+              <span>Back to app</span>
             </button>
-            <button className={appearance === "light" ? "is-selected" : ""} onClick={() => onAppearanceChange("light")} type="button">
-              <Sun size={15} /> Light
-            </button>
+            <label className="settingsSearch">
+              <Search size={14} aria-hidden />
+              <input
+                aria-label="Search settings"
+                onChange={(event) => setQuery(event.currentTarget.value)}
+                placeholder="Search settings"
+                type="search"
+                value={query}
+              />
+            </label>
           </div>
-        </div>
-        <div className="settingsRow">
-          <div>
-            <strong>Session history</strong>
-            <span>Choose whether the Sessions list shows active or archived sessions.</span>
+          <div className="settingsNavGroups">
+            {visiblePrimarySections.map((item) => (
+              <button
+                aria-current={item.id === section ? "page" : undefined}
+                className={item.id === section ? "is-selected" : ""}
+                key={item.id}
+                onClick={() => onSectionChange(item.id)}
+                type="button"
+              >
+                {settingsSectionIcon(item.id, 15)}
+                <span>{item.label}</span>
+              </button>
+            ))}
+            {visiblePrimarySections.length === 0 && !showArchivedSection && (
+              <p className="settingsNavEmpty">No settings found</p>
+            )}
           </div>
-          <div className="segmentedControl">
-            <button className={!archived ? "is-selected" : ""} onClick={() => onArchivedChange(false)} type="button">
-              <MessageSquare size={15} /> Active
-            </button>
-            <button className={archived ? "is-selected" : ""} onClick={() => onArchivedChange(true)} type="button">
-              <Archive size={15} /> Archived
-            </button>
+          <div className="settingsNavFooter">
+            {showArchivedSection && (
+              <button
+                aria-current={section === archivedSection.id ? "page" : undefined}
+                className={section === archivedSection.id ? "is-selected" : ""}
+                onClick={() => onSectionChange(archivedSection.id)}
+                type="button"
+              >
+                {settingsSectionIcon(archivedSection.id, 15)}
+                <span>{archivedSection.label}</span>
+              </button>
+            )}
           </div>
-        </div>
-        <div className="settingsRow">
-          <div>
-            <strong>Debug</strong>
-            <span>Show a right-side Debug tab with recent Gateway notifications.</span>
-          </div>
-          <label className="switchControl">
-            <input checked={debugEnabled} onChange={(event) => onDebugChange(event.target.checked)} type="checkbox" />
-            <span>{debugEnabled ? "On" : "Off"}</span>
-          </label>
+        </aside>
+        <div className="settingsContent">
+          <header className="settingsSectionHeader">
+            <span>{settingsSectionIcon(active.id, 17)}</span>
+            <div>
+              <h3>{active.label}</h3>
+            </div>
+          </header>
+          <SettingsSectionPanel
+            appearance={appearance}
+            archivedSessions={archivedSessions}
+            backendDraft={backendDraft}
+            backendDoctor={backendDoctor}
+            backends={backends}
+            debugEnabled={debugEnabled}
+            disabled={disabled}
+            section={section}
+            onAppearanceChange={onAppearanceChange}
+            onCancelBackendEdit={onCancelBackendEdit}
+            onChangeBackendDraft={onChangeBackendDraft}
+            onDebugChange={onDebugChange}
+            onDeleteArchivedSession={onDeleteArchivedSession}
+            onDeleteBackend={onDeleteBackend}
+            onDoctorBackend={onDoctorBackend}
+            onEditBackend={onEditBackend}
+            onNewBackend={onNewBackend}
+            onRestoreArchivedSession={onRestoreArchivedSession}
+            onSaveBackendDraft={onSaveBackendDraft}
+            onSetBackendEnabled={onSetBackendEnabled}
+            onSetBackendEntrypoints={onSetBackendEntrypoints}
+            workdir={workdir}
+          />
         </div>
       </div>
     </section>
   );
+}
+
+function SettingsSectionPanel({
+  appearance,
+  archivedSessions,
+  backendDraft,
+  backendDoctor,
+  backends,
+  debugEnabled,
+  disabled,
+  section,
+  onAppearanceChange,
+  onCancelBackendEdit,
+  onChangeBackendDraft,
+  onDebugChange,
+  onDeleteArchivedSession,
+  onDeleteBackend,
+  onDoctorBackend,
+  onEditBackend,
+  onNewBackend,
+  onRestoreArchivedSession,
+  onSaveBackendDraft,
+  onSetBackendEnabled,
+  onSetBackendEntrypoints,
+  workdir
+}: {
+  appearance: Appearance;
+  archivedSessions: SessionSummary[];
+  backendDraft: BackendDraft | null;
+  backendDoctor: Record<string, WorkbenchBackendDoctor>;
+  backends: WorkbenchBackend[];
+  debugEnabled: boolean;
+  disabled: boolean;
+  section: SettingsSection;
+  onAppearanceChange(value: Appearance): void;
+  onCancelBackendEdit(): void;
+  onChangeBackendDraft(draft: BackendDraft): void;
+  onDebugChange(value: boolean): void;
+  onDeleteArchivedSession(threadId: string): void;
+  onDeleteBackend(backend: WorkbenchBackend): void;
+  onDoctorBackend(backend: WorkbenchBackend): void;
+  onEditBackend(backend: WorkbenchBackend): void;
+  onNewBackend(): void;
+  onRestoreArchivedSession(threadId: string): void;
+  onSaveBackendDraft(draft: BackendDraft): void;
+  onSetBackendEnabled(backend: WorkbenchBackend, enabled: boolean): void;
+  onSetBackendEntrypoints(backend: WorkbenchBackend, entrypoints: string[]): void;
+  workdir: string;
+}) {
+  switch (section) {
+    case "appearance":
+      return (
+        <div className="settingsRows">
+          <SettingsOptionRow title="Theme" description="Dark or light Workbench appearance.">
+            <div className="segmentedControl">
+              <button className={appearance === "dark" ? "is-selected" : ""} onClick={() => onAppearanceChange("dark")} type="button">
+                <Moon size={15} /> Dark
+              </button>
+              <button className={appearance === "light" ? "is-selected" : ""} onClick={() => onAppearanceChange("light")} type="button">
+                <Sun size={15} /> Light
+              </button>
+            </div>
+          </SettingsOptionRow>
+        </div>
+      );
+    case "archived":
+      return (
+        <ArchivedSessionsPanel
+          disabled={disabled}
+          sessions={archivedSessions}
+          onDelete={onDeleteArchivedSession}
+          onRestore={onRestoreArchivedSession}
+        />
+      );
+    case "debug":
+      return (
+        <div className="settingsRows">
+          <SettingsOptionRow title="Show debug tab" description="Recent Gateway notifications in the right inspector.">
+            <label className="switchControl">
+              <input checked={debugEnabled} onChange={(event) => onDebugChange(event.target.checked)} type="checkbox" />
+              <span>{debugEnabled ? "On" : "Off"}</span>
+            </label>
+          </SettingsOptionRow>
+        </div>
+      );
+    case "agents":
+      return (
+        <AgentsConfigPanel
+          backendDraft={backendDraft}
+          backendDoctor={backendDoctor}
+          backends={backends}
+          disabled={disabled}
+          onCancelBackendEdit={onCancelBackendEdit}
+          onChangeBackendDraft={onChangeBackendDraft}
+          onDeleteBackend={onDeleteBackend}
+          onDoctorBackend={onDoctorBackend}
+          onEditBackend={onEditBackend}
+          onNewBackend={onNewBackend}
+          onSaveBackendDraft={onSaveBackendDraft}
+          onSetBackendEnabled={onSetBackendEnabled}
+          onSetBackendEntrypoints={onSetBackendEntrypoints}
+          workdir={workdir}
+        />
+      );
+  }
+}
+
+function SettingsOptionRow({
+  children,
+  description,
+  title
+}: {
+  children: ReactNode;
+  description: string;
+  title: string;
+}) {
+  return (
+    <div className="settingsRow">
+      <div>
+        <strong>{title}</strong>
+        <span>{description}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function ArchivedSessionsPanel({
+  disabled,
+  sessions,
+  onDelete,
+  onRestore
+}: {
+  disabled: boolean;
+  sessions: SessionSummary[];
+  onDelete(threadId: string): void;
+  onRestore(threadId: string): void;
+}) {
+  return (
+    <section className="archivedSessionsPanel" aria-label="Archived sessions">
+      {sessions.length === 0 ? (
+        <p>No archived sessions.</p>
+      ) : (
+        <div className="archivedSessionList">
+          {sessions.map((session) => {
+            const title = session.displayTitle?.trim() || session.title?.trim() || shortSessionId(session.id);
+            const workspace = session.project?.label || session.project?.displayPath || session.workdir || "workspace";
+            return (
+              <div className="archivedSessionRow" key={session.id}>
+                <div>
+                  <strong>{title}</strong>
+                  <span>{workspace}</span>
+                </div>
+                <div className="archivedSessionActions">
+                  <button aria-label={`Restore ${title}`} disabled={disabled} onClick={() => onRestore(session.id)} title="Restore" type="button">
+                    <RotateCcw size={13} />
+                  </button>
+                  <button aria-label={`Delete ${title}`} disabled={disabled} onClick={() => onDelete(session.id)} title="Delete" type="button">
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function settingsSectionIcon(section: SettingsSection, size: number): ReactNode {
+  switch (section) {
+    case "appearance":
+      return <Sun size={size} />;
+    case "archived":
+      return <Archive size={size} />;
+    case "debug":
+      return <Bug size={size} />;
+    case "agents":
+      return <Bot size={size} />;
+  }
 }
 
 function SearchPage({
@@ -2229,20 +2808,6 @@ function SearchPage({
   );
 }
 
-function PlaceholderPage({ body, icon, title }: { body: string; icon: ReactNode; title: string }) {
-  return (
-    <section className="centerPage" aria-label={title}>
-      <header>
-        {icon}
-        <div>
-          <h2>{title}</h2>
-          <p>{body}</p>
-        </div>
-      </header>
-    </section>
-  );
-}
-
 function RightWorkspace({
   activeTabId,
   activity,
@@ -2326,13 +2891,10 @@ function RightWorkspace({
       <div className="rightTabPanels">
         <div className="rightTabPanel" hidden={activeTab !== null}>
           <RightWorkspaceHome
-            activity={activity}
             context={context}
             files={workspaceDiff?.files ?? []}
             sessionId={sessionId}
-            status={status}
             usage={usage}
-            workdir={workdir}
             onChangedFile={onChangedFile}
             onOpenKind={onOpenKind}
             onRefresh={onRefresh}
@@ -2466,71 +3028,34 @@ function RightWorkspaceTabs({
 }
 
 function RightWorkspaceHome({
-  activity,
   context,
   files,
   sessionId,
-  status,
   usage,
-  workdir,
   onChangedFile,
   onOpenKind,
   onRefresh
 }: {
-  activity: ReturnType<typeof normalizeActivity>;
   context: ContextReadResult | null;
   files: WorkspaceDiffResult["files"];
   sessionId: string | null;
-  status: string;
   usage: SessionUsageSummaryView | null;
-  workdir: string;
   onChangedFile(path: string): void;
   onOpenKind(kind: RightWorkspaceTabKind): void;
   onRefresh(): void;
 }) {
-  const contextPercent = typeof context?.percent === "number" ? Math.round(context.percent) : 0;
-  const usageAvailable = Boolean(usage?.available);
   return (
     <section className="rightWorkspaceHome" aria-label="Workspace status">
       <header>
         <div>
           <h2>Status</h2>
-          <p>{workdir || "workspace"}</p>
+          <p className="rightWorkspaceSessionId" title={sessionId ?? undefined}>{sessionId ?? "draft"}</p>
         </div>
         <button aria-label="Refresh workspace" onClick={onRefresh} title="Refresh" type="button">
           <RefreshCw size={15} />
         </button>
       </header>
-      <div className="rightStatusMetrics">
-        <div className="is-session">
-          <span>Session</span>
-          <strong title={sessionId ?? undefined}>{sessionId ?? "draft"}</strong>
-        </div>
-        <div>
-          <span>Connection</span>
-          <strong>{status}</strong>
-        </div>
-        <div>
-          <span>Activity</span>
-          <strong>{activity.running ? "running" : "idle"}</strong>
-        </div>
-        <div>
-          <span>Context</span>
-          <strong>{context?.available ? `${contextPercent}%` : "none"}</strong>
-        </div>
-        <div>
-          <span>Tokens</span>
-          <strong>{usageAvailable ? formatCompactNumber(usage?.reportedTotalTokens ?? 0) : "none"}</strong>
-        </div>
-        <div>
-          <span>Cache</span>
-          <strong>{usageAvailable ? formatPercent(usage?.cacheReadPercent) : "none"}</strong>
-        </div>
-        <div>
-          <span>Cost</span>
-          <strong>{usageAvailable ? formatNanodollars(usage?.estimatedCostNanodollars ?? 0) : "none"}</strong>
-        </div>
-      </div>
+      <SessionObservability context={context} usage={usage} showCategories />
       <nav className="rightHomeNav" aria-label="Open workspace tab">
         <button onClick={() => onOpenKind("review")} type="button">
           <GitPullRequest size={16} />
@@ -2559,6 +3084,162 @@ function RightWorkspaceHome({
         {files.length === 0 && <p>No changed files.</p>}
       </div>
     </section>
+  );
+}
+
+function SessionObservability({
+  context,
+  usage,
+  showCategories = false
+}: {
+  context: ContextReadResult | null;
+  usage: SessionUsageSummaryView | null;
+  showCategories?: boolean;
+}) {
+  const contextPercent = normalizedPercent(context?.percent);
+  const orderedCategories = orderedContextCategories(context?.categories ?? []);
+  const rawContextPercent = context?.percent;
+  const contextPercentAvailable = typeof rawContextPercent === "number" && Number.isFinite(rawContextPercent);
+  return (
+    <section className="sessionObservability" aria-label="Session observability">
+      <div className="sessionObservabilitySummary">
+        <strong>{context?.label ?? "No active context"}</strong>
+        <small>{context?.status ?? "unavailable"}</small>
+      </div>
+      {showCategories && orderedCategories.length > 0 && (
+        <PromptTokenStack
+          categories={orderedCategories}
+          contextPercent={contextPercent}
+          contextPercentAvailable={contextPercentAvailable}
+        />
+      )}
+      {usage?.available ? (
+        <SessionUsageGrid usage={usage} />
+      ) : (
+        <p className="sessionObservabilityEmpty">No session usage yet.</p>
+      )}
+      {showCategories && orderedCategories.length > 0 && (
+        <details className="promptTokensDisclosure">
+          <summary>
+            <span>Prompt tokens</span>
+            <ChevronRight size={13} aria-hidden="true" />
+          </summary>
+          <div className="promptTokenCategoryList">
+            {orderedCategories.map((category) => (
+              <PromptTokenCategory category={category} key={category.id} />
+            ))}
+          </div>
+        </details>
+      )}
+    </section>
+  );
+}
+
+function PromptTokenStack({
+  categories,
+  contextPercent,
+  contextPercentAvailable
+}: {
+  categories: ContextUsageCategory[];
+  contextPercent: number;
+  contextPercentAvailable: boolean;
+}) {
+  const totalTokens = categories.reduce((total, category) => total + Math.max(0, category.tokens), 0);
+  const rawSegments = categories.map((category) => {
+    const categoryPercent = typeof category.percent === "number" && Number.isFinite(category.percent)
+      ? Math.max(0, category.percent)
+      : totalTokens > 0
+        ? (Math.max(0, category.tokens) / totalTokens) * (contextPercentAvailable ? contextPercent : 100)
+        : 0;
+    return { category, percent: categoryPercent };
+  }).filter((segment) => segment.percent > 0 || segment.category.tokens > 0);
+  const rawPercentTotal = rawSegments.reduce((total, segment) => total + segment.percent, 0);
+  const scale = rawPercentTotal > 100 ? 100 / rawPercentTotal : 1;
+  const displayPercentTotal = Math.min(100, rawPercentTotal * scale);
+  const freePercent = contextPercentAvailable ? Math.max(0, 100 - displayPercentTotal) : 0;
+  if (rawSegments.length === 0) {
+    return <div className="promptTokenStack is-empty" aria-label="No prompt token categories" />;
+  }
+  return (
+    <div
+      className="promptTokenStack"
+      aria-label={`Prompt token categories use ${formatPercentPrecise(displayPercentTotal)} of the context window`}
+    >
+      {rawSegments.map(({ category, percent }) => {
+        const title = `${contextCategoryLabel(category)}: ${formatTokenEstimate(category.tokens, category.estimated)} (${formatPercentPrecise(category.percent ?? percent)})`;
+        return (
+          <span
+            aria-label={title}
+            className="promptTokenSegment"
+            key={category.id}
+            style={{
+              "--prompt-token-color": promptTokenCategoryColor(category.id),
+              "--prompt-token-width": `${Math.max(0, percent * scale)}%`
+            } as CSSProperties}
+            title={title}
+          />
+        );
+      })}
+      {freePercent > 0 && (
+        <span
+          aria-hidden="true"
+          className="promptTokenFreeSpace"
+          style={{ "--prompt-token-width": `${freePercent}%` } as CSSProperties}
+        />
+      )}
+    </div>
+  );
+}
+
+function SessionUsageGrid({
+  compact = false,
+  usage
+}: {
+  compact?: boolean;
+  usage: SessionUsageSummaryView;
+}) {
+  const metrics = [
+    { label: "Session tokens", value: formatCompactNumber(usage.reportedTotalTokens) },
+    { label: "Cache read", value: formatPercent(usage.cacheReadPercent) },
+    { label: "Cost", value: formatNanodollars(usage.estimatedCostNanodollars) },
+    { label: "Reasoning", value: formatCompactNumber(usage.reasoningTokens) },
+    { label: "Input", value: formatCompactNumber(usage.billableInputTokens) },
+    { label: "Output", value: formatCompactNumber(usage.billableOutputTokens) },
+    { label: "Cache write", value: formatCompactNumber(usage.cacheWriteTokens) }
+  ];
+  const visibleMetrics = compact ? metrics.slice(0, 4) : metrics;
+  return (
+    <div className={compact ? "composerContextUsageGrid" : "sessionUsageGrid"}>
+      {visibleMetrics.map((metric) => (
+        <div key={metric.label} title={metric.value}>
+          <span>{metric.label}</span>
+          <strong>{metric.value}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PromptTokenCategory({ category }: { category: ContextUsageCategory }) {
+  const rows = contextCategoryDetailRows(category);
+  return (
+    <div className="promptTokenCategory">
+      <div className="promptTokenCategorySummary">
+        <span>{contextCategoryLabel(category)}</span>
+        <strong>{formatTokenEstimate(category.tokens, category.estimated)}</strong>
+        <small>{formatPercentPrecise(category.percent)}</small>
+      </div>
+      {rows.length > 0 && (
+        <dl className="promptTokenCategoryDetails">
+          {rows.map((row) => (
+            <div key={`${row.label}:${row.value}`}>
+              <dt>{row.label}</dt>
+              <dd>{row.value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </div>
   );
 }
 
@@ -3831,7 +4512,6 @@ function ComposerSubmitControls({
   usage,
   model,
   variant,
-  onContextClick,
   onModelChange,
   onVariantChange
 }: {
@@ -3840,12 +4520,10 @@ function ComposerSubmitControls({
   usage: SessionUsageSummaryView | null;
   model: string | null;
   variant: string;
-  onContextClick(): void;
   onModelChange(value: string | null): void;
   onVariantChange(value: string): void;
 }) {
-  const contextPercent = typeof context?.percent === "number" ? Math.max(0, Math.min(100, context.percent)) : 0;
-  const usageAvailable = Boolean(usage?.available);
+  const contextPercent = normalizedPercent(context?.percent);
   const [contextOpen, setContextOpen] = useState(false);
   const contextPopoverRef = useRef<HTMLDivElement | null>(null);
 
@@ -3889,7 +4567,6 @@ function ComposerSubmitControls({
           className="contextStatusButton"
           onClick={() => {
             setContextOpen((value) => !value);
-            onContextClick();
           }}
           title={context?.label ?? "No active context"}
           type="button"
@@ -3907,36 +4584,10 @@ function ComposerSubmitControls({
                 <small>{context?.status ?? "unavailable"}</small>
               </div>
             </div>
-            {usageAvailable && (
-              <div className="composerContextUsageGrid">
-                <div>
-                  <span>Session tokens</span>
-                  <strong>{formatCompactNumber(usage?.reportedTotalTokens ?? 0)}</strong>
-                </div>
-                <div>
-                  <span>Cache read</span>
-                  <strong>{formatPercent(usage?.cacheReadPercent)}</strong>
-                </div>
-                <div>
-                  <span>Cost</span>
-                  <strong>{formatNanodollars(usage?.estimatedCostNanodollars ?? 0)}</strong>
-                </div>
-                <div>
-                  <span>Reasoning</span>
-                  <strong>{formatCompactNumber(usage?.reasoningTokens ?? 0)}</strong>
-                </div>
-              </div>
+            {usage?.available && (
+              <SessionUsageGrid compact usage={usage} />
             )}
-            {context?.categories?.length ? (
-              <div className="composerContextBars">
-                {context.categories.slice(0, 5).map((category) => (
-                  <div className="composerContextBar" key={category.id}>
-                    <span>{category.label}</span>
-                    <meter max={100} min={0} value={category.percent ?? 0} />
-                  </div>
-                ))}
-              </div>
-            ) : (
+            {!context?.available && (
               <p>No session context is active.</p>
             )}
           </div>
@@ -4033,6 +4684,50 @@ function compactModelLabel(value: string): string {
   return label || trimmed;
 }
 
+function normalizedPercent(value: number | null | undefined): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, Math.min(100, value))
+    : 0;
+}
+
+function orderedContextCategories(categories: ContextUsageCategory[]): ContextUsageCategory[] {
+  const order = new Map(CONTEXT_CATEGORY_ORDER.map((id, index) => [id, index]));
+  return [...categories].sort((left, right) => {
+    const leftOrder = order.get(left.id) ?? 99;
+    const rightOrder = order.get(right.id) ?? 99;
+    return leftOrder - rightOrder || left.label.localeCompare(right.label);
+  });
+}
+
+function contextCategoryLabel(category: ContextUsageCategory): string {
+  return category.label || category.id;
+}
+
+function promptTokenCategoryColor(categoryId: string): string {
+  switch (categoryId) {
+    case "base_policy":
+      return "var(--pevo-context-base-policy)";
+    case "developer_prompt":
+      return "var(--pevo-context-developer-prompt)";
+    case "project_context":
+      return "var(--pevo-context-project-context)";
+    case "history":
+      return "var(--pevo-context-history)";
+    case "turn_context":
+      return "var(--pevo-context-turn-context)";
+    case "current_prompt":
+      return "var(--pevo-context-current-prompt)";
+    case "system_tools":
+      return "var(--pevo-context-system-tools)";
+    default:
+      return "var(--pevo-accent)";
+  }
+}
+
+function formatTokenEstimate(value: number, estimated = false): string {
+  return `${estimated ? "~" : ""}${formatCompactNumber(value)}`;
+}
+
 function formatCompactNumber(value: number): string {
   if (!Number.isFinite(value)) {
     return "0";
@@ -4050,11 +4745,84 @@ function formatPercent(value: number | null | undefined): string {
   return typeof value === "number" && Number.isFinite(value) ? `${Math.round(value)}%` : "none";
 }
 
+function formatPercentPrecise(value: number | null | undefined): string {
+  return typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(1)}%` : "none";
+}
+
 function formatNanodollars(value: number): string {
   if (!Number.isFinite(value) || value <= 0) {
     return "$0.000000";
   }
   return `$${(value / 1_000_000_000).toFixed(6)}`;
+}
+
+function contextCategoryDetailRows(category: ContextUsageCategory): Array<{ label: string; value: string }> {
+  const rows: Array<{ label: string; value: string }> = [];
+  const details = asOptionalRecord(category.details);
+  if (!details) {
+    return rows;
+  }
+  if (category.id === "developer_prompt") {
+    const entries = Array.isArray(details.skill_entries) ? details.skill_entries : [];
+    const skillRows = entries
+      .map(asOptionalRecord)
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry))
+      .map((entry) => ({
+        name: optionalStringField(entry.name) ?? "skill",
+        tokens: numericDetail(entry.tokens)
+      }))
+      .filter((entry) => entry.tokens > 0)
+      .sort((left, right) => right.tokens - left.tokens || left.name.localeCompare(right.name));
+    for (const entry of skillRows) {
+      rows.push({ label: entry.name, value: formatTokenEstimate(entry.tokens, true) });
+    }
+    const skillCount = numericDetail(details.skill_count);
+    if (skillRows.length === 0 && skillCount > 0) {
+      rows.push({ label: "Skills", value: `${skillCount}` });
+    }
+  }
+  if (category.id === "history") {
+    const roles = asOptionalRecord(details.roles);
+    for (const [role, value] of Object.entries(roles ?? {}).sort(([left], [right]) => left.localeCompare(right))) {
+      const record = asOptionalRecord(value);
+      if (!record) {
+        continue;
+      }
+      const count = numericDetail(record.count);
+      const tokens = numericDetail(record.tokens);
+      rows.push({
+        label: role,
+        value: `${count} ${count === 1 ? "msg" : "msgs"}, ${formatTokenEstimate(tokens, true)}`
+      });
+    }
+  }
+  if (category.id === "project_context") {
+    const count = numericDetail(details.count);
+    if (count > 0) {
+      rows.push({ label: "project_context", value: `${count} ${count === 1 ? "msg" : "msgs"}` });
+    }
+  }
+  if (category.id === "turn_context") {
+    const count = numericDetail(details.selected_skill_context_count);
+    const tokens = numericDetail(details.selected_skill_context_tokens);
+    if (count > 0 || tokens > 0) {
+      rows.push({
+        label: "selected_skill_context",
+        value: `${count} ${count === 1 ? "msg" : "msgs"}, ${formatTokenEstimate(tokens, true)}`
+      });
+    }
+  }
+  if (category.id === "system_tools") {
+    const count = numericDetail(details.tool_count);
+    if (count > 0) {
+      rows.push({ label: "tools", value: `${count}` });
+    }
+  }
+  return rows;
+}
+
+function numericDetail(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
 }
 
 function startupDraftScope(launchScope: GatewayRequestScope, sessions: SessionSummary[]): GatewayRequestScope {
@@ -4087,7 +4855,7 @@ function AgentRunSelector({
         <option value="">Default Agent</option>
         {agents.map((agent) => (
           <option key={`${agent.source}:${agent.path ?? agent.name}`} value={agentOptionValue(agent)}>
-            {agent.name}
+            {agent.backend?.ref ? `${agent.name} (ACP)` : agent.name}
           </option>
         ))}
       </select>
@@ -4099,98 +4867,31 @@ function agentOptionValue(agent: WorkbenchAgent): string {
   return agent.source === "explicit" ? agent.path?.trim() || agent.name : agent.name;
 }
 
-function AgentSurfacePanel({
-  agents,
-  backends,
-  commands
-}: {
-  agents: WorkbenchAgent[];
-  backends: WorkbenchBackend[];
-  commands: WorkbenchCommand[];
-}) {
-  return (
-    <section className="agentSurfacePanel" aria-label="Agents and commands">
-      <header>
-        <span>Agents</span>
-        <b>{agents.length}</b>
-      </header>
-      <div className="agentSurfaceList">
-        {agents.slice(0, 5).map((agent) => (
-          <div className="agentSurfaceRow" key={`${agent.source}:${agent.name}`}>
-            <div>
-              <strong>{agent.name}</strong>
-              <span>{agent.description}</span>
-            </div>
-            <small>{agent.entrypoints.join("/") || agent.source}</small>
-          </div>
-        ))}
-        {agents.length === 0 && <p>No agents configured.</p>}
-      </div>
-
-      <header>
-        <span><PlugZap size={15} /> Backends</span>
-        <b>{backends.length}</b>
-      </header>
-      <div className="agentSurfaceList">
-        {backends.slice(0, 4).map((backend) => (
-          <div className="agentSurfaceRow" key={backend.id}>
-            <div>
-              <strong>{backend.label || backend.id}</strong>
-              <span>{backend.command || backend.description || backend.kind}</span>
-            </div>
-            <small>{backend.enabled ? "enabled" : "disabled"}</small>
-          </div>
-        ))}
-        {backends.length === 0 && <p>No peer backends.</p>}
-      </div>
-
-      <header>
-        <span><TerminalSquare size={15} /> Commands</span>
-        <b>{commands.length}</b>
-      </header>
-      <div className="commandChipList">
-        {commands.slice(0, 10).map((command) => (
-          <span title={command.summary} key={`${command.source}:${command.name}`}>
-            {command.slash}
-          </span>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 function CommandOverlay({
-  agents,
-  backends,
   commands,
   feedback,
-  kind,
   onAlternateAction,
   onClose,
   onExecute
 }: {
-  agents: WorkbenchAgent[];
-  backends: WorkbenchBackend[];
   commands: WorkbenchCommand[];
   feedback: CommandFeedback;
-  kind: CommandOverlay;
   onAlternateAction(action: CommandAlternateAction): void;
   onClose(): void;
   onExecute: (slash: string) => void;
 }) {
-  const title = kind === "agents" ? "Agents" : "Commands";
   return (
-    <section className="commandOverlay" aria-label={`${title} overlay`}>
+    <section className="commandOverlay" aria-label="Commands overlay">
       <header>
         <div className="centerPageTitle">
-          {kind === "agents" ? <Bot size={18} /> : <TerminalSquare size={18} />}
+          <TerminalSquare size={18} />
           <div>
-            <h2>{title}</h2>
-            <p>{kind === "agents" ? "Available agent surfaces" : "Slash command catalog"}</p>
+            <h2>Commands</h2>
+            <p>Slash command catalog</p>
           </div>
         </div>
         <button
-          aria-label={`Close ${title}`}
+          aria-label="Close Commands"
           className="centerPageBack"
           data-tooltip="Back to transcript"
           onClick={onClose}
@@ -4201,65 +4902,376 @@ function CommandOverlay({
         </button>
       </header>
       <div className="commandOverlayBody">
-        {kind === "agents" ? (
-          <AgentsPanel agents={agents} backends={backends} />
-        ) : (
-          <CommandsPanel
-            commands={commands}
-            feedback={feedback}
-            onAlternateAction={onAlternateAction}
-            onExecute={onExecute}
-          />
-        )}
+        <CommandsPanel
+          commands={commands}
+          feedback={feedback}
+          onAlternateAction={onAlternateAction}
+          onExecute={onExecute}
+        />
       </div>
     </section>
   );
 }
 
-function AgentsPanel({
-  agents,
-  backends
+function AgentsConfigPanel({
+  backendDraft,
+  backendDoctor,
+  backends,
+  disabled,
+  onCancelBackendEdit,
+  onChangeBackendDraft,
+  onDeleteBackend,
+  onDoctorBackend,
+  onEditBackend,
+  onNewBackend,
+  onSaveBackendDraft,
+  onSetBackendEnabled,
+  onSetBackendEntrypoints,
+  workdir
 }: {
-  agents: WorkbenchAgent[];
+  backendDraft: BackendDraft | null;
+  backendDoctor: Record<string, WorkbenchBackendDoctor>;
   backends: WorkbenchBackend[];
+  disabled: boolean;
+  onCancelBackendEdit(): void;
+  onChangeBackendDraft(draft: BackendDraft): void;
+  onDeleteBackend(backend: WorkbenchBackend): void;
+  onDoctorBackend(backend: WorkbenchBackend): void;
+  onEditBackend(backend: WorkbenchBackend): void;
+  onNewBackend(): void;
+  onSaveBackendDraft(draft: BackendDraft): void;
+  onSetBackendEnabled(backend: WorkbenchBackend, enabled: boolean): void;
+  onSetBackendEntrypoints(backend: WorkbenchBackend, entrypoints: string[]): void;
+  workdir: string;
 }) {
+  const profileBackends = backends.filter((backend) => backend.sourceTargets.includes("profile"));
   return (
-    <section className="agentSurfacePanel" aria-label="Agents">
-      <header>
-        <span>Agents</span>
-        <b>{agents.length}</b>
+    <section className="agentSurfacePanel agentsConfigPanel" aria-label="Agents">
+      <header className="agentSurfaceHeaderWithAction">
+        <span><PlugZap size={15} /> Profile ACP Backends <b>{profileBackends.length}</b></span>
+        {!backendDraft && (
+          <button aria-label="Add ACP backend" disabled={disabled} onClick={onNewBackend} title="Add ACP backend" type="button">
+            <Plus size={14} />
+          </button>
+        )}
       </header>
-      <div className="agentSurfaceList">
-        {agents.map((agent) => (
-          <div className="agentSurfaceRow" key={`${agent.source}:${agent.name}`}>
-            <div>
-              <strong>{agent.name}</strong>
-              <span>{agent.description}</span>
+      {backendDraft && (
+        <BackendEditorForm
+          draft={backendDraft}
+          disabled={disabled}
+          invocationWorkdir={workdir}
+          onCancel={onCancelBackendEdit}
+          onChange={onChangeBackendDraft}
+          onSave={onSaveBackendDraft}
+        />
+      )}
+      {(!backendDraft || profileBackends.length > 0) && <div className="agentSurfaceList">
+        {profileBackends.map((backend) => {
+          const doctor = backendDoctor[backend.id] ?? null;
+          return (
+            <div className="agentSurfaceRow agentBackendRow" key={backend.id}>
+	              <div>
+	                <strong>{backend.label || backend.id}</strong>
+	                <span>{backend.command ? [backend.command, ...backend.args].join(" ") : backend.description || backend.kind}</span>
+	                {backend.diagnostics.length > 0 && (
+	                  <small className="agentSurfaceWarning">{backend.diagnostics.map((diagnostic) => diagnostic.message).join(" · ")}</small>
+	                )}
+                {doctor && (
+                  <small className={doctor.ok ? "agentSurfaceOk" : "agentSurfaceWarning"}>
+                    {doctor.checks.map((check) => `${check.name}: ${check.ok ? "ok" : check.message}`).join(" · ")}
+                  </small>
+                )}
+              </div>
+              <div className="agentBackendSide">
+                <div className="agentBackendControls">
+                  <label className="backendSwitch">
+                    <input
+                      aria-label={`${backend.enabled ? "Disable" : "Enable"} ${backend.id}`}
+                      checked={backend.enabled}
+                      disabled={disabled}
+                      onChange={(event) => onSetBackendEnabled(backend, event.currentTarget.checked)}
+                      role="switch"
+                      type="checkbox"
+                    />
+                    <span className="backendSwitchTrack" aria-hidden />
+                    <span>{backend.enabled ? "Enabled" : "Disabled"}</span>
+                  </label>
+                  <BackendEntrypointControls
+                    backend={backend}
+                    disabled={disabled}
+                    onChange={(entrypoints) => onSetBackendEntrypoints(backend, entrypoints)}
+                  />
+                </div>
+                <div className="agentBackendActions">
+                  <button aria-label={`Edit ${backend.id}`} disabled={disabled} onClick={() => onEditBackend(backend)} title="Edit Profile backend" type="button">
+                    <Edit3 size={13} />
+                  </button>
+                  <button aria-label={`Doctor ${backend.id}`} disabled={disabled} onClick={() => onDoctorBackend(backend)} title="Doctor" type="button">
+                    <Wrench size={13} />
+                  </button>
+                  <button
+                    aria-label={`Delete ${backend.id} from Profile`}
+                    disabled={disabled}
+                    onClick={() => onDeleteBackend(backend)}
+                    title="Delete Profile backend"
+                    type="button"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              </div>
             </div>
-            <small>{agent.entrypoints.join("/") || agent.source}</small>
-          </div>
-        ))}
-        {agents.length === 0 && <p>No agents configured.</p>}
-      </div>
-
-      <header>
-        <span><PlugZap size={15} /> Backends</span>
-        <b>{backends.length}</b>
-      </header>
-      <div className="agentSurfaceList">
-        {backends.map((backend) => (
-          <div className="agentSurfaceRow" key={backend.id}>
-            <div>
-              <strong>{backend.label || backend.id}</strong>
-              <span>{backend.command || backend.description || backend.kind}</span>
-            </div>
-            <small>{backend.enabled ? "enabled" : "disabled"}</small>
-          </div>
-        ))}
-        {backends.length === 0 && <p>No peer backends.</p>}
-      </div>
+          );
+        })}
+        {profileBackends.length === 0 && <p>No Profile ACP backends configured.</p>}
+      </div>}
     </section>
   );
+}
+
+function BackendEntrypointControls({
+  backend,
+  disabled,
+  onChange
+}: {
+  backend: WorkbenchBackend;
+  disabled: boolean;
+  onChange(entrypoints: string[]): void;
+}) {
+  const selected = backend.entrypoints.length > 0 ? backend.entrypoints : ["peer", "subagent"];
+  return (
+    <div className="backendEntrypointControls" aria-label={`${backend.id} entrypoints`}>
+      {BACKEND_ENTRYPOINTS.map((entrypoint) => {
+        const checked = selected.includes(entrypoint);
+        const isLastSelected = checked && selected.length === 1;
+        return (
+          <label key={entrypoint}>
+            <input
+              aria-label={`${backend.id} ${entrypoint} entrypoint`}
+              checked={checked}
+              disabled={disabled || isLastSelected}
+              onChange={(event) => {
+                const next = event.currentTarget.checked
+                  ? [...selected, entrypoint]
+                  : selected.filter((item) => item !== entrypoint);
+                onChange(BACKEND_ENTRYPOINTS.filter((item) => next.includes(item)));
+              }}
+              type="checkbox"
+            />
+            <span>{entrypoint}</span>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
+function BackendEditorForm({
+  draft,
+  disabled,
+  invocationWorkdir,
+  onCancel,
+  onChange,
+  onSave
+}: {
+  draft: BackendDraft;
+  disabled: boolean;
+  invocationWorkdir: string;
+  onCancel(): void;
+  onChange(draft: BackendDraft): void;
+  onSave(draft: BackendDraft): void;
+}) {
+  const commandConfig = parseBackendCommandJson(draft.commandJsonText);
+  const commandJsonError = draft.commandJsonText.trim() ? commandConfig.error : null;
+  const canSave = Boolean(draft.id.trim() && commandConfig.command.trim() && !commandConfig.error);
+  const resolvedCwd = resolvedBackendCwd(draft.cwd, invocationWorkdir);
+  function patch(patch: Partial<BackendDraft>) {
+    onChange({ ...draft, ...patch });
+  }
+  function toggleClientCapability(value: string) {
+    const current = draft.clientCapabilities;
+    patch({
+      clientCapabilities: current.includes(value)
+        ? current.filter((item) => item !== value)
+        : [...current, value]
+    });
+  }
+  return (
+    <form
+      aria-label="Profile ACP backend"
+      className="backendEditor"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (canSave && !disabled) {
+          onSave(draft);
+        }
+      }}
+    >
+      <header>
+        <div className="workspaceDialogTitle">
+          <PlugZap size={18} aria-hidden />
+          <h4>Backend details</h4>
+        </div>
+        <button aria-label="Close backend editor" onClick={onCancel} title="Close" type="button">
+          <X size={15} />
+        </button>
+      </header>
+        <label>
+          <span>ID</span>
+          <input aria-label="ID" disabled={disabled} onChange={(event) => patch({ id: event.currentTarget.value })} value={draft.id} />
+        </label>
+        <label>
+          <span>Label <em>Optional</em></span>
+          <input aria-label="Label" disabled={disabled} onChange={(event) => patch({ label: event.currentTarget.value })} value={draft.label} />
+        </label>
+        <label>
+          <span>Description <em>Optional</em></span>
+          <input aria-label="Description" disabled={disabled} onChange={(event) => patch({ description: event.currentTarget.value })} value={draft.description} />
+        </label>
+        <label>
+          <span>Command JSON</span>
+          <textarea
+            aria-describedby={commandJsonError ? "backend-command-json-error" : undefined}
+            aria-invalid={commandJsonError ? true : undefined}
+            aria-label="Command JSON"
+            className="backendJsonInput"
+            disabled={disabled}
+            onChange={(event) => patch({ commandJsonText: event.currentTarget.value })}
+            placeholder={BACKEND_COMMAND_JSON_PLACEHOLDER}
+            spellCheck={false}
+            value={draft.commandJsonText}
+          />
+          {commandJsonError && <small className="backendFieldError" id="backend-command-json-error">{commandJsonError}</small>}
+        </label>
+        <label>
+          <span>CWD</span>
+          <input
+            aria-describedby="backend-cwd-resolution"
+            aria-label="CWD"
+            disabled={disabled}
+            onChange={(event) => patch({ cwd: event.currentTarget.value })}
+            placeholder="Invocation workdir"
+            value={draft.cwd}
+          />
+          <small className="backendFieldHint" id="backend-cwd-resolution">Resolves to {resolvedCwd}</small>
+        </label>
+        <fieldset className="backendDialogChecks">
+          <legend>Client Capabilities</legend>
+          {BACKEND_CLIENT_CAPABILITIES.map((capability) => (
+            <label key={capability}>
+              <input
+                checked={draft.clientCapabilities.includes(capability)}
+                disabled={disabled}
+                onChange={() => toggleClientCapability(capability)}
+                type="checkbox"
+              />
+              <span>{capability}</span>
+            </label>
+          ))}
+        </fieldset>
+        <label>
+          <span>MCP Servers</span>
+          <textarea aria-label="MCP Servers" disabled={disabled} onChange={(event) => patch({ mcpServersText: event.currentTarget.value })} value={draft.mcpServersText} />
+        </label>
+        <footer>
+          <button disabled={disabled} onClick={onCancel} type="button">
+            <X size={14} />
+            Cancel
+          </button>
+          <button disabled={disabled || !canSave} type="submit">
+            <Save size={14} />
+            Save
+          </button>
+        </footer>
+    </form>
+  );
+}
+
+function backendDraftFromBackend(backend: WorkbenchBackend): BackendDraft {
+  return {
+    id: backend.id,
+    enabled: backend.enabled,
+    label: backend.label && backend.label !== backend.id ? backend.label : "",
+    description: backend.description ?? "",
+    commandJsonText: backend.command ? formatBackendCommandJson({
+      command: backend.command,
+      args: backend.args,
+      env: {}
+    }) : "",
+    cwd: backend.cwd && backend.cwd !== "invocation" ? backend.cwd : "",
+    entrypoints: backend.entrypoints.length > 0 ? backend.entrypoints : ["peer", "subagent"],
+    clientCapabilities: backend.clientCapabilities.length > 0
+      ? backend.clientCapabilities
+      : ["fs.read", "fs.write", "terminal"],
+    mcpServersText: backend.mcpServers.join("\n")
+  };
+}
+
+function formatBackendCommandJson(config: BackendCommandJson): string {
+  return prettyJson({
+    command: config.command,
+    args: config.args,
+    env: config.env
+  });
+}
+
+function parseBackendCommandJson(value: string): BackendCommandJson & { error: string | null } {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return { command: "", args: [], env: {}, error: null };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return { command: "", args: [], env: {}, error: "Command JSON must be valid JSON." };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { command: "", args: [], env: {}, error: "Command JSON must be an object." };
+  }
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.command !== "string") {
+    return { command: "", args: [], env: {}, error: "Command JSON must include a string command." };
+  }
+  const args = record.args === undefined ? [] : record.args;
+  if (!Array.isArray(args) || !args.every((item) => typeof item === "string")) {
+    return { command: "", args: [], env: {}, error: "Command JSON args must be an array of strings." };
+  }
+  const envValue = record.env === undefined ? {} : record.env;
+  if (!envValue || typeof envValue !== "object" || Array.isArray(envValue)) {
+    return { command: "", args: [], env: {}, error: "Command JSON env must be an object." };
+  }
+  const env: Record<string, string> = {};
+  for (const [key, envItem] of Object.entries(envValue as Record<string, unknown>)) {
+    if (typeof envItem !== "string") {
+      return { command: "", args: [], env: {}, error: "Command JSON env values must be strings." };
+    }
+    if (key.trim()) {
+      env[key.trim()] = envItem;
+    }
+  }
+  return {
+    command: record.command,
+    args,
+    env,
+    error: null
+  };
+}
+
+function resolvedBackendCwd(cwd: string, invocationWorkdir: string): string {
+  const value = cwd.trim();
+  const root = invocationWorkdir.trim() || ".";
+  if (!value || value === "invocation") {
+    return root;
+  }
+  if (isAbsoluteDisplayPath(value)) {
+    return value;
+  }
+  return `${root.replace(/\/+$/, "")}/${value.replace(/^\.\//, "")}`;
+}
+
+function isAbsoluteDisplayPath(value: string): boolean {
+  return value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\");
 }
 
 function CommandsPanel({
@@ -4636,9 +5648,51 @@ function parseBackendList(value: unknown): WorkbenchBackend[] {
           label: stringField(item.label),
           description: optionalStringField(item.description),
           command: optionalStringField(item.command),
-          entrypoints: stringArray(item.entrypoints)
+          args: stringArray(item.args),
+          cwd: optionalStringField(item.cwd) ?? "invocation",
+          entrypoints: stringArray(item.entrypoints),
+          clientCapabilities: stringArray(item.clientCapabilities),
+          mcpServers: stringArray(item.mcpServers),
+          envKeys: stringArray(item.envKeys),
+          sourceTargets: parseBackendTargets(item.sourceTargets),
+          diagnostics: parseDiagnostics(item.diagnostics)
         };
       }).filter((backend) => backend.id)
+    : [];
+}
+
+function parseBackendDoctor(value: unknown): WorkbenchBackendDoctor {
+  const item = asRecord(value);
+  const checks = Array.isArray(item.checks) ? item.checks : [];
+  return {
+    id: stringField(item.id),
+    ok: item.ok === true,
+    checks: checks.map((check) => {
+      const record = asRecord(check);
+      return {
+        name: stringField(record.name),
+        ok: record.ok === true,
+        message: stringField(record.message),
+        path: optionalStringField(record.path)
+      };
+    }).filter((check) => check.name)
+  };
+}
+
+function parseBackendTargets(value: unknown): BackendConfigTarget[] {
+  return stringArray(value)
+    .filter((item): item is BackendConfigTarget => item === "project" || item === "profile");
+}
+
+function parseDiagnostics(value: unknown): WorkbenchDiagnostic[] {
+  return Array.isArray(value)
+    ? value.map((diagnostic) => {
+        const item = asRecord(diagnostic);
+        return {
+          kind: stringField(item.kind),
+          message: stringField(item.message)
+        };
+      }).filter((diagnostic) => diagnostic.message)
     : [];
 }
 
@@ -4662,6 +5716,13 @@ function parseCommandList(value: unknown): WorkbenchCommand[] {
         };
       }).filter((command) => command.name)
     : [];
+}
+
+function multilineList(value: string): string[] {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 function parseCommandAlternateAction(value: unknown): CommandAlternateAction | null {
@@ -4694,6 +5755,10 @@ function commandFeedbackFromResult(
     feedbackAnchor: resolveCommandFeedbackAnchor(optionalStringField(record.feedbackAnchor), trigger),
     alternateAction: parseCommandAlternateAction(record.alternateAction)
   };
+}
+
+function commandFeedbackAutoDismissable(feedback: NonNullable<CommandFeedback>): boolean {
+  return feedback.accepted && !feedback.alternateAction;
 }
 
 function resolveCommandFeedbackAnchor(anchor: string | null, trigger: CommandTrigger): string {

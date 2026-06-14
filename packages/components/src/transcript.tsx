@@ -19,6 +19,10 @@ export interface MarkdownTextProps {
 
 type CopyTextHandler = ((text: string) => void | Promise<void>) | undefined;
 
+const STREAM_REVEAL_INITIAL_CHARS = 24;
+const STREAM_REVEAL_INTERVAL_MS = 24;
+const STREAM_REVEAL_MAX_STEP_CHARS = 16;
+
 export function TranscriptPanel({ activity, entries, onCopyText }: TranscriptPanelProps) {
   const [followingBottom, setFollowingBottom] = useState(true);
   const [scrolling, setScrolling] = useState(false);
@@ -404,11 +408,101 @@ function statusLabel(block: TranscriptBlock): string | null {
 }
 
 export function MarkdownText({ streaming, text }: MarkdownTextProps) {
+  const visibleText = useStreamingReveal(text, streaming === true);
   return (
     <div className={`pevo-markdown ${streaming ? "is-streaming" : ""}`}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{visibleText}</ReactMarkdown>
     </div>
   );
+}
+
+function useStreamingReveal(text: string, streaming: boolean): string {
+  const canReveal = canUseBrowserTextReveal();
+  const [visibleText, setVisibleText] = useState(() => initialVisibleText(text, streaming && canReveal));
+  const visibleRef = useRef(visibleText);
+  const targetRef = useRef(text);
+  const wasStreamingRef = useRef(streaming && canReveal);
+
+  function setVisible(next: string) {
+    visibleRef.current = next;
+    setVisibleText(next);
+  }
+
+  useEffect(() => {
+    if (!canReveal) {
+      if (visibleRef.current !== text) {
+        setVisible(text);
+      }
+      return;
+    }
+
+    targetRef.current = text;
+    if (streaming) {
+      wasStreamingRef.current = true;
+      if (!text.startsWith(visibleRef.current) || visibleRef.current.length > text.length) {
+        setVisible(initialVisibleText(text, true));
+      }
+      return;
+    }
+
+    if (
+      wasStreamingRef.current &&
+      text.startsWith(visibleRef.current) &&
+      visibleRef.current.length < text.length
+    ) {
+      return;
+    }
+
+    wasStreamingRef.current = false;
+    if (visibleRef.current !== text) {
+      setVisible(text);
+    }
+  }, [canReveal, streaming, text]);
+
+  useEffect(() => {
+    if (!canReveal || (!streaming && !wasStreamingRef.current)) {
+      return;
+    }
+
+    const timer = globalThis.setInterval(() => {
+      const target = targetRef.current;
+      const current = visibleRef.current;
+      if (current === target) {
+        if (!streaming) {
+          wasStreamingRef.current = false;
+          globalThis.clearInterval(timer);
+        }
+        return;
+      }
+
+      if (!target.startsWith(current) || current.length > target.length) {
+        setVisible(target);
+        return;
+      }
+
+      const remaining = target.length - current.length;
+      const step = Math.max(1, Math.min(STREAM_REVEAL_MAX_STEP_CHARS, Math.ceil(remaining / 5)));
+      setVisible(target.slice(0, current.length + step));
+    }, STREAM_REVEAL_INTERVAL_MS);
+
+    return () => globalThis.clearInterval(timer);
+  }, [canReveal, streaming, text]);
+
+  return visibleText;
+}
+
+function initialVisibleText(text: string, streaming: boolean): string {
+  if (!streaming || text.length <= STREAM_REVEAL_INITIAL_CHARS) {
+    return text;
+  }
+  return text.slice(0, STREAM_REVEAL_INITIAL_CHARS);
+}
+
+function canUseBrowserTextReveal(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  return !window.navigator.userAgent.toLowerCase().includes("jsdom");
 }
 
 function liveOrder(entry: TranscriptEntry): number | null {

@@ -4,6 +4,13 @@
 }
 
 .appShell {
+  --pevo-context-base-policy: oklch(66% 0.08 252);
+  --pevo-context-developer-prompt: oklch(68% 0.11 30);
+  --pevo-context-project-context: oklch(67% 0.1 150);
+  --pevo-context-history: oklch(72% 0.11 82);
+  --pevo-context-turn-context: oklch(66% 0.09 305);
+  --pevo-context-current-prompt: oklch(70% 0.08 195);
+  --pevo-context-system-tools: oklch(64% 0.08 16);
   display: flex;
   flex-direction: column;
   min-height: 100dvh;
@@ -11,6 +18,16 @@
   overflow: hidden;
   padding: 4px;
   gap: 4px;
+}
+
+html[data-pevo-appearance="light"] .appShell {
+  --pevo-context-base-policy: oklch(48% 0.105 252);
+  --pevo-context-developer-prompt: oklch(51% 0.135 30);
+  --pevo-context-project-context: oklch(47% 0.12 150);
+  --pevo-context-history: oklch(55% 0.125 82);
+  --pevo-context-turn-context: oklch(50% 0.11 305);
+  --pevo-context-current-prompt: oklch(50% 0.105 195);
+  --pevo-context-system-tools: oklch(48% 0.1 16);
 }
 
 .topBar {
@@ -208,7 +225,9 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   font-weight: 650;
 }
 
-.workspaceDialog input {
+.workspaceDialog input,
+.workspaceDialog select,
+.workspaceDialog textarea {
   width: 100%;
   min-width: 0;
   min-height: 36px;
@@ -217,6 +236,12 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   background: var(--pevo-panel-muted);
   border: 1px solid var(--pevo-border);
   border-radius: var(--pevo-radius-sm);
+}
+
+.workspaceDialog textarea {
+  min-height: 68px;
+  padding: 8px 10px;
+  resize: vertical;
 }
 
 .workspaceDialog footer {
@@ -246,7 +271,9 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 }
 
 .workspaceDialog button:disabled,
-.workspaceDialog input:disabled {
+.workspaceDialog input:disabled,
+.workspaceDialog select:disabled,
+.workspaceDialog textarea:disabled {
   cursor: not-allowed;
   opacity: 0.62;
 }
@@ -1101,24 +1128,14 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   font-size: 0.8rem;
 }
 
-.rightStatusMetrics {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px 10px;
-  padding: 4px 0 10px;
+.rightWorkspaceSessionId {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-all;
 }
 
-.rightStatusMetrics div {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.rightStatusMetrics .is-session {
-  grid-column: 1 / -1;
-}
-
-.rightStatusMetrics span,
 .rightChangedFiles small,
 .reviewStatusRows,
 .rightSectionLabel {
@@ -1126,20 +1143,199 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   font-size: 0.74rem;
 }
 
-.rightStatusMetrics strong {
+.sessionObservability {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  padding: 6px 0 12px;
+  border-top: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
+  border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 68%);
+}
+
+.sessionObservabilitySummary {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sessionObservabilitySummary strong,
+.sessionUsageGrid strong,
+.promptTokenCategorySummary strong {
+  min-width: 0;
   overflow: hidden;
   color: var(--pevo-ink);
-  font-size: 0.82rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.rightStatusMetrics .is-session strong {
-  overflow: visible;
-  text-overflow: clip;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-all;
+.sessionObservabilitySummary strong {
+  display: block;
+  font-size: 0.84rem;
+}
+
+.sessionObservabilitySummary small,
+.sessionUsageGrid span,
+.promptTokensDisclosure summary,
+.promptTokenCategorySummary span,
+.promptTokenCategorySummary small,
+.promptTokenCategoryDetails dt,
+.sessionObservabilityEmpty {
+  color: var(--pevo-muted);
+  font-size: 0.72rem;
+}
+
+.promptTokenStack {
+  display: flex;
+  width: 100%;
+  height: 9px;
+  min-width: 0;
+  overflow: hidden;
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 46%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 20%);
+  border-radius: 999px;
+}
+
+.promptTokenStack.is-empty {
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 70%);
+}
+
+.promptTokenSegment,
+.promptTokenFreeSpace {
+  flex: 0 0 var(--prompt-token-width, 0%);
+  min-width: 0;
+}
+
+.promptTokenSegment {
+  min-width: 3px;
+  background: var(--prompt-token-color, var(--pevo-accent));
+}
+
+.promptTokenFreeSpace {
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 70%);
+}
+
+.sessionUsageGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 10px;
+  min-width: 0;
+}
+
+.sessionUsageGrid div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sessionUsageGrid strong {
+  font-size: 0.8rem;
+}
+
+.promptTokensDisclosure {
+  min-width: 0;
+}
+
+.promptTokensDisclosure summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  padding: 2px 0;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  list-style: none;
+  text-transform: uppercase;
+}
+
+.promptTokensDisclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.promptTokensDisclosure summary span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.promptTokensDisclosure summary svg {
+  justify-self: end;
+  transition: transform 140ms ease;
+}
+
+.promptTokensDisclosure[open] summary svg {
+  transform: rotate(90deg);
+}
+
+.promptTokenCategoryList {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 0 0;
+}
+
+.promptTokenCategory {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding-left: 10px;
+  border-left: 1px solid color-mix(in oklch, var(--pevo-border), transparent 24%);
+}
+
+.promptTokenCategorySummary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(48px, auto) minmax(42px, auto);
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+  min-height: 22px;
+}
+
+.promptTokenCategorySummary span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--pevo-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.promptTokenCategorySummary strong,
+.promptTokenCategorySummary small {
+  text-align: right;
+}
+
+.promptTokenCategoryDetails {
+  display: grid;
+  gap: 2px;
+  margin: 0 0 2px 8px;
+}
+
+.promptTokenCategoryDetails div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(58px, auto);
+  gap: 8px;
+  min-width: 0;
+}
+
+.promptTokenCategoryDetails dt,
+.promptTokenCategoryDetails dd {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.promptTokenCategoryDetails dd {
+  margin: 0;
+  color: var(--pevo-ink);
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  font-size: 0.72rem;
+  text-align: right;
+}
+
+.sessionObservabilityEmpty {
+  margin: 0;
 }
 
 .rightHomeNav {
@@ -2168,16 +2364,208 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 
 .settingsRows {
   display: grid;
+  align-content: start;
+  min-width: 0;
+  min-height: 0;
   gap: 6px;
   padding: 4px 0 0;
 }
 
 .settingsPage {
-  width: min(900px, 100%);
+  align-content: stretch;
+  width: min(1040px, 100%);
+  min-height: 0;
 }
 
-.settingsPage > header {
-  justify-content: space-between;
+.settingsShell {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.28fr) minmax(0, 1fr);
+  gap: 16px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 4px 0 0;
+}
+
+.settingsNav {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0 12px 0 0;
+  border-right: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
+}
+
+.settingsNavTop {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.settingsBackButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 7px;
+  color: var(--pevo-muted);
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.settingsSearch {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 8px;
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 52%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 34%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.settingsSearch input {
+  min-width: 0;
+  color: var(--pevo-ink);
+  background: transparent;
+  border: 0;
+  outline: 0;
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.settingsSearch input::placeholder {
+  color: var(--pevo-muted);
+}
+
+.settingsNavGroups {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.settingsNavFooter {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.settingsNavGroups button,
+.settingsNavFooter button {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 7px;
+  color: var(--pevo-nav-text);
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  transition-duration: 140ms;
+  transition-property: background-color, color, transform;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.settingsNavGroups button:active,
+.settingsNavFooter button:active,
+.settingsBackButton:active {
+  transform: scale(0.96);
+}
+
+.settingsNavGroups button > svg,
+.settingsNavFooter button > svg {
+  justify-self: center;
+}
+
+.settingsNavGroups button > span,
+.settingsNavFooter button > span,
+.settingsBackButton > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settingsNavGroups button.is-selected,
+.settingsNavFooter button.is-selected {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-sidebar-active), transparent 18%);
+  box-shadow: var(--pevo-shadow-active);
+}
+
+.settingsNavEmpty {
+  margin: 6px 7px;
+  color: var(--pevo-muted);
+  font-size: 0.78rem;
+}
+
+@media (hover: hover) {
+  .settingsBackButton:hover,
+  .settingsNavGroups button:hover,
+  .settingsNavFooter button:hover {
+    color: var(--pevo-ink);
+    background: color-mix(in oklch, var(--pevo-sidebar-active), transparent 48%);
+  }
+}
+
+.settingsContent {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.settingsSectionHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 32px;
+}
+
+.settingsSectionHeader > span {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 50%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 44%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.settingsSectionHeader > div {
+  min-width: 0;
+}
+
+.settingsSectionHeader h3 {
+  margin: 0;
+  color: var(--pevo-ink);
+  font-size: 0.95rem;
 }
 
 .settingsRow {
@@ -2200,6 +2588,88 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 .settingsRow span {
   color: var(--pevo-muted);
   font-size: 0.8rem;
+}
+
+.settingsContent > .agentSurfacePanel,
+.settingsContent > .archivedSessionsPanel {
+  align-self: start;
+  align-content: start;
+  min-height: 0;
+  overflow: auto;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.archivedSessionsPanel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.archivedSessionsPanel > p {
+  margin: 0;
+  color: var(--pevo-muted);
+  font-size: 0.84rem;
+}
+
+.archivedSessionList {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.archivedSessionRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 7px 8px;
+  background: var(--pevo-panel-muted);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.archivedSessionRow > div:first-child {
+  min-width: 0;
+}
+
+.archivedSessionRow strong,
+.archivedSessionRow span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archivedSessionRow strong {
+  color: var(--pevo-ink);
+  font-size: 0.86rem;
+  font-weight: 650;
+}
+
+.archivedSessionRow span {
+  color: var(--pevo-muted);
+  font-size: 0.76rem;
+}
+
+.archivedSessionActions {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.archivedSessionActions button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
 }
 
 .segmentedControl {
@@ -2237,6 +2707,155 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 
 .switchControl input {
   margin: 0;
+}
+
+.appShell[data-main-view="settings"] {
+  padding: 4px;
+}
+
+.appShell[data-main-view="settings"] .mobileTabs,
+.appShell[data-main-view="settings"] .historyColumn,
+.appShell[data-main-view="settings"] .statusColumn,
+.appShell[data-main-view="settings"] .conversationChrome,
+.appShell[data-main-view="settings"] .composerDock {
+  display: none;
+}
+
+.appShell[data-main-view="settings"] .workbench,
+.appShell[data-main-view="settings"] .workbench.is-leftCollapsed,
+.appShell[data-main-view="settings"] .workbench.is-rightCollapsed,
+.appShell[data-main-view="settings"] .workbench.is-leftCollapsed.is-rightCollapsed {
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+}
+
+.appShell[data-main-view="settings"] .conversationColumn {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+}
+
+.appShell[data-main-view="settings"] .centerWorkspace {
+  min-height: 0;
+}
+
+.appShell[data-main-view="settings"] .settingsPage {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+}
+
+.appShell[data-main-view="settings"] .settingsShell {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+}
+
+.appShell[data-main-view="settings"] .settingsNav {
+  padding: 24px 14px 16px 12px;
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 58%);
+  border-right: 1px solid color-mix(in oklch, var(--pevo-border), transparent 46%);
+}
+
+.appShell[data-main-view="settings"] .settingsContent {
+  width: min(860px, 100%);
+  padding: 24px 32px;
+  overflow: auto;
+}
+
+@media (max-width: 860px) {
+  .settingsShell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .settingsNav {
+    padding: 0 0 10px;
+    border-right: 0;
+    border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
+  }
+
+  .settingsNavGroups {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 1px;
+  }
+
+  .settingsNavGroups button {
+    flex: 0 0 auto;
+    min-width: 126px;
+  }
+
+  .settingsNavFooter {
+    display: flex;
+    gap: 6px;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .settingsNavFooter button {
+    flex: 0 0 auto;
+    min-width: 150px;
+  }
+
+  .appShell[data-main-view="settings"] {
+    padding: 10px;
+  }
+
+  .appShell[data-main-view="settings"] .settingsPage {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .appShell[data-main-view="settings"] .settingsShell {
+    grid-column: 1;
+    grid-row: 1;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .appShell[data-main-view="settings"] .settingsNav {
+    padding: 0 0 10px;
+    background: transparent;
+    border-right: 0;
+    border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
+  }
+
+  .appShell[data-main-view="settings"] .settingsContent {
+    width: 100%;
+    padding: 0;
+  }
+}
+
+@media (max-width: 620px) {
+  .settingsRow {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .agentBackendRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .agentBackendSide {
+    justify-items: stretch;
+  }
+
+  .agentBackendControls,
+  .agentBackendActions {
+    justify-content: flex-start;
+  }
+
+  .backendDialogGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .searchPage {
@@ -2770,8 +3389,7 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   font-weight: 700;
 }
 
-.composerContextSummary small,
-.composerContextBar span {
+.composerContextSummary small {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2825,25 +3443,6 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   font-size: 0.82rem;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.composerContextBars {
-  display: grid;
-  gap: 7px;
-}
-
-.composerContextBar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 96px;
-  align-items: center;
-  gap: 8px;
-  color: var(--pevo-muted);
-  font-size: 0.76rem;
-}
-
-.composerContextBar meter {
-  width: 100%;
-  height: 6px;
 }
 
 .pathStatusButton {
@@ -2923,6 +3522,24 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   gap: 6px;
 }
 
+.agentSurfaceHeaderWithAction button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 650;
+  text-transform: none;
+}
+
 .agentSurfacePanel header b {
   color: var(--pevo-ink);
   font-size: 0.8rem;
@@ -2973,6 +3590,327 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 .agentSurfaceRow small {
   color: var(--pevo-muted);
   font-size: 0.76rem;
+}
+
+.agentBackendRow {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.agentBackendRow div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.agentBackendSide {
+  display: grid;
+  justify-items: end;
+  gap: 7px;
+  min-width: 0;
+}
+
+.agentBackendControls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px 10px;
+  min-width: 0;
+}
+
+.backendSwitch,
+.backendEntrypointControls,
+.backendEntrypointControls label {
+  display: inline-flex;
+  align-items: center;
+}
+
+.backendSwitch {
+  gap: 6px;
+  min-height: 22px;
+  color: var(--pevo-muted);
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+
+.backendSwitch input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.backendSwitchTrack {
+  position: relative;
+  width: 31px;
+  height: 17px;
+  flex: 0 0 auto;
+  background: color-mix(in oklch, var(--pevo-panel), transparent 12%);
+  border: 1px solid var(--pevo-border);
+  border-radius: 999px;
+}
+
+.backendSwitchTrack::after {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 11px;
+  height: 11px;
+  content: "";
+  background: var(--pevo-muted);
+  border-radius: 999px;
+  transition: transform 140ms ease, background 140ms ease;
+}
+
+.backendSwitch input:checked + .backendSwitchTrack {
+  background: color-mix(in oklch, var(--pevo-accent), transparent 72%);
+  border-color: color-mix(in oklch, var(--pevo-accent), transparent 32%);
+}
+
+.backendSwitch input:checked + .backendSwitchTrack::after {
+  background: var(--pevo-ink);
+  transform: translateX(14px);
+}
+
+.backendSwitch input:focus-visible + .backendSwitchTrack {
+  outline: 2px solid color-mix(in oklch, var(--pevo-accent), transparent 28%);
+  outline-offset: 2px;
+}
+
+.backendSwitch span,
+.backendEntrypointControls span {
+  display: inline;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.backendEntrypointControls {
+  gap: 6px;
+  min-height: 22px;
+}
+
+.backendEntrypointControls label {
+  gap: 4px;
+  color: var(--pevo-muted);
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+
+.backendEntrypointControls input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+}
+
+.backendEntrypointControls input:disabled + span {
+  opacity: 0.48;
+}
+
+.agentSurfaceWarning {
+  color: var(--pevo-danger) !important;
+  white-space: normal !important;
+}
+
+.agentSurfaceOk {
+  color: var(--pevo-success, var(--pevo-accent)) !important;
+  white-space: normal !important;
+}
+
+.agentBackendActions {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.agentBackendActions button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.agentBackendActions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.backendEditor {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 38%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 24%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.backendEditor header,
+.backendEditor footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.backendEditor h4 {
+  margin: 0;
+  color: var(--pevo-ink);
+  font-size: 0.88rem;
+  line-height: 1.2;
+}
+
+.backendEditor label > span em {
+  margin-left: 4px;
+  color: var(--pevo-muted);
+  font-style: normal;
+  font-weight: 500;
+}
+
+.backendFieldHint {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  color: var(--pevo-muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.backendFieldError {
+  display: block;
+  color: var(--pevo-danger);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.backendEditor header button {
+  display: grid;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.backendEditor label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--pevo-muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.backendEditor input,
+.backendEditor textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 9px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.backendEditor input:not([type="checkbox"]) {
+  height: 32px;
+}
+
+.backendEditor textarea {
+  min-height: 58px;
+  padding: 7px 9px;
+  resize: vertical;
+}
+
+.backendEditor textarea.backendJsonInput {
+  min-height: 168px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
+  line-height: 1.45;
+  tab-size: 2;
+}
+
+.backendEditor footer {
+  justify-content: flex-end;
+}
+
+.backendEditor footer button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 78px;
+  min-height: 30px;
+  padding: 0 10px;
+  color: var(--pevo-ink);
+  font-weight: 650;
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.backendEditor footer button[type="submit"] {
+  color: white;
+  background: var(--pevo-accent);
+  border-color: color-mix(in oklch, var(--pevo-accent), black 12%);
+}
+
+.backendEditor footer button:disabled,
+.backendEditor header button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.backendDialogGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.55fr);
+  gap: 10px;
+}
+
+.backendDialogCheck,
+.backendDialogChecks label {
+  display: inline-flex !important;
+  grid-template-columns: none !important;
+  align-items: center;
+  gap: 7px;
+}
+
+.backendDialogCheck input,
+.backendDialogChecks input {
+  width: 16px;
+  min-height: 16px;
+  padding: 0;
+}
+
+.backendDialogChecks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--pevo-muted);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.backendDialogChecks legend {
+  padding: 0 4px;
+  font-size: 0.78rem;
+  font-weight: 650;
 }
 
 .commandChipList {
@@ -3236,6 +4174,27 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 
   .conversationColumn {
     min-height: 0;
+  }
+
+  .appShell[data-main-view="settings"] .mobileTabs,
+  .appShell[data-main-view="settings"] .historyColumn,
+  .appShell[data-main-view="settings"] .statusColumn,
+  .appShell[data-main-view="settings"] .conversationChrome,
+  .appShell[data-main-view="settings"] .composerDock {
+    display: none;
+  }
+
+  .appShell[data-main-view="settings"] .workbench,
+  .appShell[data-main-view="settings"] .workbench.is-leftCollapsed,
+  .appShell[data-main-view="settings"] .workbench.is-rightCollapsed,
+  .appShell[data-main-view="settings"] .workbench.is-leftCollapsed.is-rightCollapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .appShell[data-main-view="settings"] .conversationColumn,
+  .appShell[data-main-view="settings"] .conversationColumn.is-mobileSelected {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
   }
 }
 

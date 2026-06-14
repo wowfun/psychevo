@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { startPevoWeb } from "./harness";
 
 test.describe("pevo Web Workbench", () => {
@@ -14,31 +14,27 @@ test.describe("pevo Web Workbench", () => {
         const logoToggle = page.getByRole("button", { name: "Expand left sidebar" });
         const newSessionButton = page.getByRole("button", { name: "New Session" });
         const searchButton = page.getByRole("button", { name: "Search" });
-        const artifactsButton = page.getByRole("button", { name: "Artifacts" });
         const settingsButton = page.getByRole("button", { name: "Settings" });
         await expect(logoToggle).toBeVisible();
         await expect(newSessionButton).toBeVisible();
         await expect(searchButton).toBeVisible();
-        await expect(artifactsButton).toBeVisible();
+        await expect(page.getByRole("button", { name: "Artifacts" })).toHaveCount(0);
         await expect(settingsButton).toBeVisible();
-        const [railBox, logoBox, newSessionBox, searchBox, artifactsBox, settingsBox] = await Promise.all([
+        const [railBox, logoBox, newSessionBox, searchBox, settingsBox] = await Promise.all([
           page.locator(".historyColumn").boundingBox(),
           logoToggle.boundingBox(),
           newSessionButton.boundingBox(),
           searchButton.boundingBox(),
-          artifactsButton.boundingBox(),
           settingsButton.boundingBox()
         ]);
         expect(railBox).not.toBeNull();
         expect(logoBox).not.toBeNull();
         expect(newSessionBox).not.toBeNull();
         expect(searchBox).not.toBeNull();
-        expect(artifactsBox).not.toBeNull();
         expect(settingsBox).not.toBeNull();
         expect(newSessionBox!.y).toBeGreaterThanOrEqual(logoBox!.y + logoBox!.height);
         expect(searchBox!.y).toBeGreaterThan(newSessionBox!.y);
-        expect(artifactsBox!.y).toBeGreaterThan(searchBox!.y);
-        expect(settingsBox!.y).toBeGreaterThan(artifactsBox!.y + artifactsBox!.height);
+        expect(settingsBox!.y).toBeGreaterThan(searchBox!.y + searchBox!.height);
         expect(railBox!.y + railBox!.height - (settingsBox!.y + settingsBox!.height)).toBeLessThanOrEqual(18);
         await logoToggle.click();
       }
@@ -74,9 +70,9 @@ test.describe("pevo Web Workbench", () => {
 
       await openPanel(page, isMobile, "Status");
       const statusRegion = page.getByRole("region", { name: "Workspace status" });
-      await expect(statusRegion.getByText("idle")).toBeVisible();
       await expect(statusRegion.getByText("draft")).toBeVisible();
-      const sessionValue = statusRegion.locator(".rightStatusMetrics .is-session strong");
+      await expect(statusRegion.locator(".rightStatusMetrics")).toHaveCount(0);
+      const sessionValue = statusRegion.locator(".rightWorkspaceSessionId");
       const longSessionId = "019ebc20-1234-5678-9abc-def0123492dd";
       await sessionValue.evaluate((element, value) => {
         element.textContent = value;
@@ -98,6 +94,112 @@ test.describe("pevo Web Workbench", () => {
         textOverflow: "clip",
         whiteSpace: "normal"
       });
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test("shows Settings as an app-level configuration center", async ({ page, isMobile }, testInfo) => {
+      const server = await startPevoWeb({ live: false });
+      try {
+        await page.goto(server.url);
+        await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+        await expect(page.getByRole("combobox", { name: "Agent" })).toContainText("translate");
+        if (isMobile) {
+          await openPanel(page, isMobile, "History");
+        }
+      await page.getByRole("button", { name: "Settings" }).click();
+
+      const settings = page.getByRole("region", { name: "Settings" });
+      await expect(settings).toBeVisible();
+      await expect(settings.locator(".centerPageTitle p")).toHaveCount(0);
+      await expect(settings.getByRole("heading", { name: "Settings" })).toHaveCount(0);
+      await expect(settings.getByRole("button", { name: "Back to transcript" })).toHaveCount(0);
+      await expect(settings.getByRole("button", { name: "Back to app" })).toBeVisible();
+      await expect(settings.getByRole("searchbox", { name: "Search settings" })).toBeVisible();
+      await expect(settings.getByRole("button", { name: "Appearance" })).toBeVisible();
+      await expect(settings.getByRole("button", { name: "Debug" })).toBeVisible();
+      await expect(settings.getByRole("button", { name: "Agents" })).toBeVisible();
+      await expect(settings.getByRole("button", { name: "Archived sessions" })).toBeVisible();
+      await expect(settings.getByRole("button", { name: "General", exact: true })).toHaveCount(0);
+      await expect(settings.getByRole("button", { name: "Session", exact: true })).toHaveCount(0);
+      await expect(settings.getByRole("button", { name: "Session history", exact: true })).toHaveCount(0);
+      await expect(settings.getByRole("button", { name: "Commands", exact: true })).toHaveCount(0);
+      await expect(settings.getByRole("button", { name: "Artifacts", exact: true })).toHaveCount(0);
+      await expect(page.locator(".historyColumn")).toBeHidden();
+      await expect(page.locator(".statusColumn")).toBeHidden();
+      await expect(page.locator(".composerDock")).toHaveCount(0);
+      await expect(page.locator(".mobileTabs")).toBeHidden();
+
+      if (isMobile) {
+        await expect(settings.locator(".settingsNavGroups")).toHaveCSS("display", "flex");
+      } else {
+        const [navBox, contentBox] = await Promise.all([
+          settings.locator(".settingsNav").boundingBox(),
+          settings.locator(".settingsContent").boundingBox()
+        ]);
+        expect(navBox).not.toBeNull();
+        expect(contentBox).not.toBeNull();
+        expect(navBox!.x + navBox!.width).toBeLessThanOrEqual(contentBox!.x);
+        expect(navBox!.y).toBeLessThan(70);
+        expect(contentBox!.y).toBeLessThan(120);
+      }
+      await assertNoHorizontalOverflow(page, settings);
+      await captureWorkbench(page, testInfo, `settings-appearance-${isMobile ? "mobile" : "desktop"}`);
+
+      await settings.getByRole("button", { name: "Debug" }).click();
+      await expect(settings.getByRole("heading", { name: "Debug" })).toBeVisible();
+      await assertNoHorizontalOverflow(page, settings);
+      await captureWorkbench(page, testInfo, `settings-debug-${isMobile ? "mobile" : "desktop"}`);
+
+      await settings.getByRole("button", { name: "Agents" }).click();
+      await expect(settings.getByRole("region", { name: "Agents" })).toBeVisible();
+      await expect(settings.getByRole("button", { name: "Add ACP backend" })).toBeVisible();
+      await expect(settings.getByText("translate")).toHaveCount(0);
+      await expect(settings.getByText("Translate user messages")).toHaveCount(0);
+      await expect(settings.getByText("Runs")).toHaveCount(0);
+      await assertNoHorizontalOverflow(page, settings);
+      await captureWorkbench(page, testInfo, `settings-agents-${isMobile ? "mobile" : "desktop"}`);
+
+      await settings.getByRole("button", { name: "Archived sessions" }).click();
+      await expect(settings.getByRole("region", { name: "Archived sessions" })).toBeVisible();
+      await assertNoHorizontalOverflow(page, settings);
+      await captureWorkbench(page, testInfo, `settings-archived-${isMobile ? "mobile" : "desktop"}`);
+
+      await settings.getByRole("button", { name: "Agents" }).click();
+      await settings.getByRole("button", { name: "Add ACP backend" }).click();
+      const form = settings.getByRole("form", { name: "Profile ACP backend" });
+      await expect(form).toBeVisible();
+      await expect(form.getByLabel("Target")).toHaveCount(0);
+      await expect(form.getByLabel("ID")).toHaveValue("");
+      const commandJson = form.getByLabel("Command JSON");
+      await expect(commandJson).toHaveValue("");
+      await expect(commandJson).toHaveAttribute("placeholder", /"command": "opencode"/);
+      await expect(commandJson).toHaveAttribute("placeholder", /"args": \["acp"\]/);
+      await expect(form.getByLabel("Command", { exact: true })).toHaveCount(0);
+      await expect(form.getByLabel("Args")).toHaveCount(0);
+      await expect(form.getByLabel("Env")).toHaveCount(0);
+      await expect(form.getByLabel("CWD")).toHaveValue("");
+      await expect(form.locator("label").filter({ hasText: "Label" }).getByText("Optional")).toBeVisible();
+      await expect(form.locator("label").filter({ hasText: "Description" }).getByText("Optional")).toBeVisible();
+      await expect(form.getByText(/Resolves to /)).toBeVisible();
+      await expect(form.getByLabel("Enabled")).toHaveCount(0);
+      await expect(form.getByText("Entrypoints")).toHaveCount(0);
+      await assertNoHorizontalOverflow(page, form);
+      await expectControlsFitHorizontally(form);
+      await captureWorkbench(page, testInfo, `settings-backend-form-${isMobile ? "mobile" : "desktop"}`);
+      await form.getByLabel("ID").fill("playwright-acp");
+      await commandJson.fill(JSON.stringify({ command: "playwright-acp", args: ["acp"], env: {} }, null, 2));
+      await expect(form.getByRole("button", { name: "Save" })).toBeEnabled();
+      await form.getByRole("button", { name: "Save" }).click();
+      await expect(settings.getByRole("switch", { name: "Disable playwright-acp" })).toBeVisible();
+      await expect(settings.getByLabel("playwright-acp peer entrypoint")).toBeChecked();
+      await expect(settings.getByLabel("playwright-acp subagent entrypoint")).toBeChecked();
+      await assertNoHorizontalOverflow(page, settings);
+      await captureWorkbench(page, testInfo, `settings-backend-row-controls-${isMobile ? "mobile" : "desktop"}`);
+
+      await settings.getByRole("button", { name: "Back to app" }).click();
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
     } finally {
       await server.stop();
     }
@@ -288,6 +390,47 @@ function fontSignature(element: Element) {
   };
 }
 
+async function captureWorkbench(page: Page, testInfo: TestInfo, label: string) {
+  await page.screenshot({
+    fullPage: true,
+    path: testInfo.outputPath(`${label}-${testInfo.project.name}.png`)
+  });
+}
+
+async function assertNoHorizontalOverflow(page: Page, locator: Locator) {
+  const [viewport, result] = await Promise.all([
+    page.viewportSize(),
+    locator.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      return {
+        clientWidth: element.clientWidth,
+        left: box.left,
+        right: box.right,
+        scrollWidth: element.scrollWidth
+      };
+    })
+  ]);
+  expect(viewport).not.toBeNull();
+  expect(result.left).toBeGreaterThanOrEqual(-1);
+  expect(result.right).toBeLessThanOrEqual(viewport!.width + 1);
+  expect(result.scrollWidth).toBeLessThanOrEqual(result.clientWidth + 1);
+}
+
+async function expectControlsFitHorizontally(locator: Locator) {
+  const clipped = await locator.locator("input, textarea, select, button").evaluateAll((controls) =>
+    controls
+      .map((control) => {
+        const element = control as HTMLElement;
+        return {
+          label: element.getAttribute("aria-label") ?? element.textContent?.trim() ?? element.tagName,
+          clippedX: element.scrollWidth > element.clientWidth + 2
+        };
+      })
+      .filter((item) => item.clippedX)
+  );
+  expect(clipped).toEqual([]);
+}
+
 async function openPanel(page: Page, isMobile: boolean, name: "History" | "Status" | "Transcript") {
   if (name === "Status") {
     if (isMobile) {
@@ -302,7 +445,7 @@ async function openPanel(page: Page, isMobile: boolean, name: "History" | "Statu
     }
   }
   if (isMobile) {
-    await page.getByRole("button", { name }).click();
+    await page.getByRole("button", { name, exact: true }).click();
   }
   if (name === "Status") {
     await expect(page.getByRole("region", { name: "Workspace status" })).toBeVisible();

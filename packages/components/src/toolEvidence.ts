@@ -80,9 +80,10 @@ export function evidenceDisplay(block: TranscriptBlock, fallbackText: string): E
   const args = parseJsonLike(metadata.args ?? metadata.arguments);
   const result = toolResultValue(block, metadata);
   const spec = toolDisplaySpec(toolName, metadata);
-  const invocation = execCommandInvocation(toolName, title, args, block.preview ?? "");
-  const displayTitle = invocation ?? toolTitle(toolName, title, spec, args, result);
-  const summary = invocation ? null : toolSummary(spec, result, args);
+  const explicitTitle = explicitToolTitle(toolName, title, metadata);
+  const invocation = explicitTitle ? null : execCommandInvocation(toolName, title, args, block.preview ?? "");
+  const displayTitle = explicitTitle ?? invocation ?? toolTitle(toolName, title, spec, args, result);
+  const summary = invocation || explicitTitle ? null : toolSummary(spec, result, args);
   const sections = toolSections(toolName, spec, args, result, metadata, block);
 
   return {
@@ -92,6 +93,26 @@ export function evidenceDisplay(block: TranscriptBlock, fallbackText: string): E
     summary,
     title: displayTitle
   };
+}
+
+function explicitToolTitle(toolName: string, title: string, metadata: Record<string, unknown>): string | null {
+  const display = stringValue(metadata.display)?.trim();
+  if (display) {
+    return display;
+  }
+  const trimmedTitle = title.trim();
+  if (!trimmedTitle) {
+    return null;
+  }
+  const trimmedTool = toolName.trim();
+  if (
+    trimmedTitle === trimmedTool ||
+    trimmedTitle === "exec_command" ||
+    trimmedTitle.startsWith("exec_command ")
+  ) {
+    return null;
+  }
+  return trimmedTitle;
 }
 
 function toolDisplaySpec(toolName: string, metadata: Record<string, unknown>): ToolDisplaySpec {
