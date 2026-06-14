@@ -164,7 +164,7 @@
   }
 
   .agentRuntimeButton {
-    width: min(190px, calc(100vw - 112px));
+    max-width: min(190px, calc(100vw - 112px));
   }
 
   .composerRuntimeControls .statusSelect select {
@@ -215,7 +215,7 @@
 
 @media (max-width: 420px) {
   .agentRuntimeButton {
-    width: min(168px, calc(100vw - 112px));
+    max-width: min(168px, calc(100vw - 112px));
   }
 
   .agentRuntimePopover {

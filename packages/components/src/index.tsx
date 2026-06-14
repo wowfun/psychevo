@@ -3,7 +3,7 @@ export type { ComposerAttachmentView, ComposerDraftPatch, ComposerProps } from "
 export { DismissibleDetails } from "./dismissibleDetails";
 export type { DismissibleDetailsControls, DismissibleDetailsProps } from "./dismissibleDetails";
 export { HistoryPanel } from "./history";
-export type { HistoryDraftSession, HistoryPanelProps } from "./history";
+export type { HistoryBrowserWorkspace, HistoryDraftSession, HistoryPanelProps } from "./history";
 export { StatusPanel } from "./status";
 export type { StatusPanelProps } from "./status";
 export { MarkdownText, TranscriptPanel } from "./transcript";

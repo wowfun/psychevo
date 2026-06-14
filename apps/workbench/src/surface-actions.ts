@@ -8,6 +8,7 @@ import {
 import {
   ObservabilityReadResultSchema,
   SettingsReadResultSchema,
+  ThreadBrowserResultSchema,
   ThreadListResultSchema,
   ThreadTraceResultSchema,
   WorkspaceChangesResultSchema,
@@ -19,6 +20,7 @@ import {
   type RuntimeOptionsResult,
   type SessionSummary,
   type SettingsReadResult,
+  type ThreadBrowserResult,
   type ThreadSnapshot,
   type WorkspaceChangesResult,
   type WorkspaceDiffResult,
@@ -37,6 +39,7 @@ import {
 import type {
   DebugEvent,
   TraceState,
+  SessionBrowserWorkspaceState,
   WorkbenchAgent,
   WorkbenchBackend,
   WorkbenchCommand
@@ -50,6 +53,7 @@ type SurfaceActionsParams = {
   initScope: GatewayRequestScope | null;
   scopeRef: MutableRefObject<GatewayRequestScope | null>;
   selectedThreadIdRef: MutableRefObject<string | null>;
+  pinnedSessionIds: string[];
   settings: SettingsReadResult | undefined;
   snapshot: ThreadSnapshot;
   viewEpochRef: MutableRefObject<number>;
@@ -72,6 +76,7 @@ type SurfaceActionsParams = {
   setSelectedRuntimeRef: Dispatch<SetStateAction<string>>;
   setSelectedVariant: Dispatch<SetStateAction<string>>;
   setSessions: Dispatch<SetStateAction<SessionSummary[]>>;
+  setSessionBrowserWorkspaces: Dispatch<SetStateAction<SessionBrowserWorkspaceState[]>>;
   setSettings: Dispatch<SetStateAction<SettingsReadResult | undefined>>;
   setSnapshot: Dispatch<SetStateAction<ThreadSnapshot>>;
   setTraceState: Dispatch<SetStateAction<TraceState>>;
@@ -197,6 +202,22 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     if (!nextClient) {
       return [];
     }
+    if (!includeArchived) {
+      const result = ThreadBrowserResultSchema.parse(
+        await nextClient.request("thread/browser", {
+          archived: false,
+          cursor: null,
+          includeSessionIds: browserIncludeSessionIds(),
+          limit: 20,
+          recentDays: 7,
+          workdir: workdir ?? null
+        })
+      );
+      const nextSessions = sessionsFromThreadBrowser(result);
+      params.setSessions(nextSessions);
+      params.setSessionBrowserWorkspaces(workspacesFromThreadBrowser(result));
+      return nextSessions;
+    }
     const result = ThreadListResultSchema.parse(
       await nextClient.request("thread/list", { archived: includeArchived, limit: 100, workdir: workdir ?? null })
     );
@@ -207,6 +228,13 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
       params.setSessions(nextSessions);
     }
     return nextSessions;
+  }
+
+  function browserIncludeSessionIds(): string[] {
+    return Array.from(new Set([
+      params.currentThreadId,
+      ...params.pinnedSessionIds
+    ].filter((id): id is string => Boolean(id))));
   }
 
   async function refreshAgentSurface(nextClient = params.client, scope = params.activeScope ?? params.initScope ?? undefined) {
@@ -380,4 +408,27 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     refreshWorkspaceSurface,
     runAction
   };
+}
+
+export function sessionsFromThreadBrowser(result: ThreadBrowserResult): SessionSummary[] {
+  const seen = new Set<string>();
+  const sessions: SessionSummary[] = [];
+  for (const workspace of result.workspaces) {
+    for (const session of workspace.sessions) {
+      if (seen.has(session.id)) {
+        continue;
+      }
+      seen.add(session.id);
+      sessions.push(normalizeSessionSummary(session));
+    }
+  }
+  return sessions;
+}
+
+export function workspacesFromThreadBrowser(result: ThreadBrowserResult): SessionBrowserWorkspaceState[] {
+  return result.workspaces.map((workspace) => ({
+    workdir: workspace.workdir,
+    hiddenCount: workspace.hiddenCount,
+    nextCursor: workspace.nextCursor
+  }));
 }

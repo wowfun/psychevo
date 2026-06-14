@@ -120,8 +120,11 @@ Gateway endpoint and source scope; native packaging remains outside this topic.
 
 Shared component boundaries, Workbench composition-root expectations,
 app-local module layout, and client-side state-machine requirements are
-specified in [Components](components.md). Large app and package entrypoints
-should remain thin aggregators around semantic modules.
+specified in [Components](components.md). This includes shared session-title
+overflow behavior and Web/TUI-aligned running activity indicators for history,
+composer, and transcript Thinking/tool rows, including persisted elapsed labels
+after tool blocks complete. Large app and package entrypoints should remain
+thin aggregators around semantic modules.
 
 ## Visual Direction
 

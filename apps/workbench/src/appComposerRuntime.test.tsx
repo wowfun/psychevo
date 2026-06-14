@@ -17,6 +17,17 @@ import {
 import { App } from "./App";
 
 describe("Workbench runtime and agent controls", () => {
+  it("omits the branch placeholder when the workspace has no git branch", async () => {
+    gatewayMock.projectBranch = null;
+
+    render(<App />);
+
+    await screen.findByText("/tmp/project");
+    await waitFor(() => {
+      expect(screen.queryByText("no-branch")).toBeNull();
+    });
+  });
+
   it("keeps concrete draft agent selection and submits the selected agent", async () => {
     render(<App />);
 
@@ -36,6 +47,35 @@ describe("Workbench runtime and agent controls", () => {
         params: expect.objectContaining({ agentName: "translate" })
       });
     });
+  });
+
+  it("shows composer feedback when a permission response is rejected", async () => {
+    gatewayMock.snapshot.pendingPermissions = [
+      {
+        requestId: "permission-1",
+        toolName: "exec_command",
+        reason: "requires approval",
+        threadId: "thread-1",
+        turnId: "turn-1"
+      }
+    ];
+    gatewayMock.permissionRespond = () => ({ accepted: false });
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Once" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "permission/respond",
+        params: {
+          requestId: "permission-1",
+          threadId: null,
+          decision: "allowOnce"
+        }
+      });
+    });
+    expect(await screen.findByText("Permission response was not accepted.")).toBeTruthy();
   });
 
   it("submits ACP runtime plan through the shared Plan mode switch", async () => {

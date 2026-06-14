@@ -199,10 +199,12 @@ export function ComposerStatusLine({
         </span>
       ) : null}
       <button className="pathStatusButton" onClick={onPathClick} title={path} type="button">{path || "workspace"}</button>
-      <button className="branchStatusButton" onClick={onBranchClick} type="button">
-        <GitBranch size={13} />
-        <span>{branch || "no-branch"}</span>
-      </button>
+      {branch?.trim() ? (
+        <button className="branchStatusButton" onClick={onBranchClick} type="button">
+          <GitBranch size={13} />
+          <span>{branch}</span>
+        </button>
+      ) : null}
     </div>
   );
 }

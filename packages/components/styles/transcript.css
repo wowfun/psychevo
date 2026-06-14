@@ -275,9 +275,17 @@
   grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
-.pevo-reasoningHeader span,
+.pevo-evidenceLine.is-runningTool {
+  grid-template-columns: auto minmax(0, 16ch) minmax(0, 1fr) auto;
+}
+
+.pevo-evidenceLine.is-runningTool.is-singleTitle {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.pevo-reasoningHeader > span:not(.pevo-evidenceSpinner),
 .pevo-evidenceLine code,
-.pevo-evidenceLine span {
+.pevo-evidenceLine > span:not(.pevo-evidenceSpinner) {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -300,6 +308,20 @@
   border-radius: 0;
   font-style: normal;
   white-space: nowrap;
+}
+
+.pevo-evidenceSpinner {
+  display: inline-block;
+  width: 1.1em;
+  color: var(--pevo-muted-strong);
+  text-align: center;
+}
+
+.pevo-evidenceElapsed {
+  min-width: 42px;
+  font-family: var(--pevo-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .pevo-toolDetail {
@@ -417,7 +439,7 @@
     max-width: none;
   }
 
-  .pevo-evidenceLine span {
+  .pevo-evidenceLine > span:not(.pevo-evidenceSpinner) {
     grid-column: 3 / -1;
   }
 
@@ -435,6 +457,30 @@
   }
 
   .pevo-evidenceLine.is-singleTitle em {
+    grid-column: 3 / 4;
+  }
+
+  .pevo-evidenceLine.is-runningTool.is-singleTitle {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .pevo-evidenceLine.is-runningTool.is-singleTitle code {
+    grid-column: 2 / 3;
+  }
+
+  .pevo-evidenceLine.is-runningTool.is-singleTitle em {
+    grid-column: 3 / 4;
+  }
+
+  .pevo-evidenceLine.is-runningTool code {
+    grid-column: 2 / 3;
+  }
+
+  .pevo-evidenceLine.is-runningTool > span:not(.pevo-evidenceSpinner) {
+    grid-column: 2 / -1;
+  }
+
+  .pevo-evidenceLine.is-runningTool em {
     grid-column: 3 / 4;
   }
 

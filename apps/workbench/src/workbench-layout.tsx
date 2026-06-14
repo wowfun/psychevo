@@ -52,6 +52,8 @@ export function WorkbenchLayout(props: Record<string, any>) {
     host,
     init,
     leftCollapsed,
+    loadingOlderWorkdir,
+    loadOlderSessions,
     loadThreadSearchText,
     mainView,
     mobilePanel,
@@ -89,6 +91,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     selectedRuntimeMode,
     selectedRuntimeRef,
     selectedVariant,
+    sessionBrowserWorkspaces,
     sessionUsage,
     sessions,
     setActiveRightTabId,
@@ -108,6 +111,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     setRuntimeOptionsError,
     setRuntimeOptionsResult,
     setRuntimeSessionId,
+    setCommandFeedback,
     setSelectedModel,
     setSelectedRuntimeMode,
     setSelectedRuntimeRef,
@@ -224,6 +228,8 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   disabled={disabled}
                   draftSession={null}
                   pinnedSessionIds={pinnedSessionIds}
+                  browserWorkspaces={sessionBrowserWorkspaces}
+                  loadingOlderWorkdir={loadingOlderWorkdir}
                   sessions={sessions}
                   onArchive={(threadId) => void runAction(async () => {
                     setDraftSession(null);
@@ -249,6 +255,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   onNewInWorkdir={(workdir) => void runAction(async () => {
                     await startNewThread(workdir);
                   })}
+                  onLoadOlderSessions={(workdir) => void runAction(async () => loadOlderSessions(workdir))}
                   onTogglePinned={togglePinnedSession}
                   onRename={(threadId, title) => void runAction(async () => {
                     await client?.request("thread/rename", { threadId, title });
@@ -434,12 +441,21 @@ export function WorkbenchLayout(props: Record<string, any>) {
                     await refreshSnapshot();
                   })}
                   onPermission={(requestId, decision) => void runAction(async () => {
-                    await client?.request("permission/respond", { requestId, threadId: snapshot.thread?.id ?? null, decision });
+                    const response = await client?.request("permission/respond", { requestId, threadId: snapshot.thread?.id ?? null, decision });
+                    if (!acceptedInteractionResponse(response)) {
+                      setCommandFeedback?.({
+                        accepted: false,
+                        command: "permission/respond",
+                        message: "Permission response was not accepted.",
+                        feedbackAnchor: "composer"
+                      });
+                    }
                     await refreshSnapshot();
                   })}
                 />
               ) : null}
               running={running}
+              runningStartedAtMs={activity.startedAtMs ?? null}
               onAttach={() => void runAction(async () => handleAttachment())}
               onCommand={(command) => void runAction(async () => executeCommand(command, "composer"))}
               onInterrupt={() => void runAction(async () => {
@@ -544,4 +560,10 @@ export function WorkbenchLayout(props: Record<string, any>) {
       </div>
     </main>
   );
+}
+
+function acceptedInteractionResponse(value: unknown): boolean {
+  return typeof value === "object"
+    && value !== null
+    && (value as { accepted?: unknown }).accepted === true;
 }

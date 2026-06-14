@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Bot, Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import type { RuntimeConfigOptionValueView, RuntimeConfigOptionView } from "@psychevo/protocol";
 import { StatusSelect } from "./composer-controls";
 import type { WorkbenchAgent, WorkbenchBackend } from "./types";
@@ -143,7 +143,6 @@ function AgentRuntimeSelector({
         title={`${agentPersonaEnabled ? agentLabel : "Agent unavailable"} / ${runtimeLabel}`}
         onClick={() => setOpen((current) => !current)}
       >
-        <Bot size={14} aria-hidden="true" />
         <span>{displayLabel}</span>
         <ChevronDown size={13} aria-hidden="true" />
       </button>

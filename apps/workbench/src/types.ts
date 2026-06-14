@@ -5,6 +5,7 @@ import type {
   TerminalExitedPayload,
   TerminalOutputPayload,
   ThreadTraceResult,
+  ThreadBrowserCursor,
   WorkspaceDiffResult,
   WorkspaceFileReadResult
 } from "@psychevo/protocol";
@@ -127,6 +128,12 @@ export type TraceState = {
   loading: boolean;
   result: ThreadTraceResult | null;
   threadId: string | null;
+};
+
+export type SessionBrowserWorkspaceState = {
+  workdir: string;
+  hiddenCount: number;
+  nextCursor: ThreadBrowserCursor | null;
 };
 
 export type PendingAttachment = {

@@ -31,8 +31,8 @@ const gatewayMock = vi.hoisted(() => {
     },
     entries: [],
     activity: { running: false, activeTurnId: null, queuedTurns: 0 },
-    pendingPermissions: [],
-    pendingClarifies: []
+    pendingPermissions: [] as Array<Record<string, unknown>>,
+    pendingClarifies: [] as Array<Record<string, unknown>>
   };
   return {
     commandExecute: ((command: string): unknown => {
@@ -47,8 +47,10 @@ const gatewayMock = vi.hoisted(() => {
     commandList: [] as Array<Record<string, unknown>>,
     endpoint: { wsUrl: "ws://127.0.0.1/test", baseUrl: "http://127.0.0.1/test" } as { wsUrl: string; baseUrl: string } | null,
     observabilityRead: null as null | ((params: unknown) => unknown | Promise<unknown>),
+    permissionRespond: (() => ({ accepted: true })) as (params: unknown) => unknown | Promise<unknown>,
     openDownloadLog: [] as string[],
     optimisticLog: [] as string[],
+    projectBranch: "main" as string | null,
     requestLog: [] as Array<{ method: string; params: unknown }>,
     subscribers: [] as Array<(notification: { method: string; params?: unknown }) => void>,
     archivedSessionSummaries: [] as Array<Record<string, unknown>>,
@@ -62,7 +64,7 @@ const gatewayMock = vi.hoisted(() => {
         project: {
           path: scope.workdir,
           displayPath: "/tmp/project",
-          branch: "main"
+          branch: gatewayMock.projectBranch
         },
         memoryResources: { mode: "status_only", available: true },
         secrets: { frontendPersistence: "disabled" },
@@ -153,14 +155,29 @@ vi.mock("@psychevo/client", () => {
         const record = params as { archived?: boolean } | undefined;
         return { sessions: record?.archived ? gatewayMock.archivedSessionSummaries : gatewayMock.sessionSummaries };
       }
+      if (method === "thread/browser") {
+        return {
+          workspaces: [
+            {
+              workdir: gatewayMock.scope.workdir,
+              project: {
+                workdir: gatewayMock.scope.workdir,
+                label: "project",
+                displayPath: "/tmp/project"
+              },
+              sessions: gatewayMock.sessionSummaries,
+              hiddenCount: 0,
+              nextCursor: null
+            }
+          ]
+        };
+      }
       if (method === "thread/start") {
         return {
           ...gatewayMock.snapshot,
           thread: null,
           entries: [],
-          activity: { running: false, activeTurnId: null, queuedTurns: 0 },
-          pendingPermissions: [],
-          pendingClarifies: []
+          activity: { running: false, activeTurnId: null, queuedTurns: 0 }
         };
       }
       if (method === "settings/read") {
@@ -436,6 +453,9 @@ vi.mock("@psychevo/client", () => {
       if (method === "turn/start") {
         return { accepted: true };
       }
+      if (method === "permission/respond") {
+        return gatewayMock.permissionRespond(params);
+      }
       if (method === "terminal/start") {
         return { terminalId: "terminal-1", cwd: gatewayMock.scope.workdir, pid: null };
       }
@@ -561,8 +581,10 @@ afterEach(() => {
   gatewayMock.commandList = [];
   gatewayMock.endpoint = { wsUrl: "ws://127.0.0.1/test", baseUrl: "http://127.0.0.1/test" };
   gatewayMock.observabilityRead = null;
+  gatewayMock.permissionRespond = () => ({ accepted: true });
   gatewayMock.openDownloadLog.length = 0;
   gatewayMock.optimisticLog.length = 0;
+  gatewayMock.projectBranch = "main";
   gatewayMock.requestLog.length = 0;
   gatewayMock.subscribers = [];
   gatewayMock.archivedSessionSummaries = [];
@@ -574,6 +596,8 @@ afterEach(() => {
     backend: { kind: "psychevo" as const, nativeId: "thread-1" },
     sourceKey: "source-key"
   };
+  gatewayMock.snapshot.pendingPermissions = [];
+  gatewayMock.snapshot.pendingClarifies = [];
   gatewayMock.workspaceDiffResult = {
     isGitRepo: true,
     files: [],

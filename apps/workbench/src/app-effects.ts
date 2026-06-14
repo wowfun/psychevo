@@ -391,6 +391,9 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
           if (event.type === "turnStarted" && event.threadId) {
             void params.refreshHistory(nextClient);
           }
+          if (event.type === "activityChanged" || event.type === "titleChanged") {
+            void params.refreshHistory(nextClient);
+          }
           if (event.type === "turnCompleted" && event.threadId) {
             const threadId = event.threadId;
             const eventEpoch = params.viewEpochRef.current;

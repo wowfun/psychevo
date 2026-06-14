@@ -7,6 +7,7 @@ import type { CompletionListResult } from "@psychevo/protocol";
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
 });
 
 describe("Composer completion mentions", () => {
@@ -467,6 +468,59 @@ describe("Composer completion mentions", () => {
     const interruptButton = screen.getByRole("button", { name: "Interrupt active turn" });
     expect(interruptButton.closest(".pevo-composerRightControls")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
+  });
+
+  it("shows active turn elapsed time in the composer footer while running", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-14T00:01:05.000Z"));
+    render(
+      <Composer
+        rightControls={<span>model</span>}
+        running
+        runningStartedAtMs={new Date("2026-06-14T00:00:00.000Z").getTime()}
+        onInterrupt={vi.fn()}
+        onSteer={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    const elapsed = screen.getByLabelText("Active turn elapsed");
+    const footer = elapsed.closest(".pevo-composerFooter");
+    const rightControls = footer?.querySelector(".pevo-composerRightControls");
+    expect(footer).toBeTruthy();
+    expect(elapsed.closest(".pevo-composerRightControls")).toBeNull();
+    expect(rightControls).toBeTruthy();
+    expect(elapsed.compareDocumentPosition(rightControls as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(elapsed.textContent).toContain("1m05s");
+
+    act(() => {
+      vi.advanceTimersByTime(1_200);
+    });
+
+    expect(elapsed.textContent).toContain("1m06s");
+    vi.useRealTimers();
+  });
+
+  it("shows active turn elapsed time when the running activity has no start time", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-14T00:00:00.000Z"));
+    render(
+      <Composer
+        running
+        onInterrupt={vi.fn()}
+        onSteer={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    expect(screen.getByLabelText("Active turn elapsed").textContent).toContain("0s");
+
+    act(() => {
+      vi.advanceTimersByTime(1_200);
+    });
+
+    expect(screen.getByLabelText("Active turn elapsed").textContent).toContain("1s");
+    vi.useRealTimers();
   });
 
   it("shows Queue and Steer only while a running turn has non-empty prompt text", () => {

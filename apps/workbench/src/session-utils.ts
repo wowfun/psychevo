@@ -21,15 +21,38 @@ export function multilineList(value: string): string[] {
 }
 
 export function idleActivity(): ThreadSnapshot["activity"] {
-  return { running: false, activeTurnId: null, queuedTurns: 0 };
+  return {
+    running: false,
+    activeTurnId: null,
+    queuedTurns: 0
+  };
 }
 
 export function normalizeActivity(activity: Partial<ThreadSnapshot["activity"]> | null | undefined): ThreadSnapshot["activity"] {
-  return {
+  const normalized: ThreadSnapshot["activity"] = {
     running: activity?.running === true,
     activeTurnId: typeof activity?.activeTurnId === "string" ? activity.activeTurnId : null,
     queuedTurns: Number.isFinite(activity?.queuedTurns) ? Number(activity?.queuedTurns) : 0
   };
+  if (Number.isFinite(activity?.startedAtMs)) {
+    normalized.startedAtMs = Number(activity?.startedAtMs);
+  }
+  if (Number.isFinite(activity?.updatedAtMs)) {
+    normalized.updatedAtMs = Number(activity?.updatedAtMs);
+  }
+  if (typeof activity?.ownerId === "string") {
+    normalized.ownerId = activity.ownerId;
+  }
+  if (typeof activity?.ownerSurface === "string") {
+    normalized.ownerSurface = activity.ownerSurface;
+  }
+  if (Number.isFinite(activity?.leaseExpiresAtMs)) {
+    normalized.leaseExpiresAtMs = Number(activity?.leaseExpiresAtMs);
+  }
+  if (typeof activity?.takeoverState === "string") {
+    normalized.takeoverState = activity.takeoverState;
+  }
+  return normalized;
 }
 
 export function normalizeSnapshot(snapshot: ThreadSnapshot): ThreadSnapshot {

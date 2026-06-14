@@ -293,6 +293,28 @@
   flex: 1 1 auto;
 }
 
+.pevo-composerTurnStatus {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-width: 62px;
+  gap: 5px;
+  color: var(--pevo-muted-strong);
+  font-family: var(--pevo-mono);
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.pevo-composerTurnSpinner {
+  display: inline-block;
+  width: 1.1em;
+  color: var(--pevo-accent);
+  text-align: center;
+}
+
 .pevo-composerRightControls {
   flex: 0 1 auto;
   justify-content: flex-end;

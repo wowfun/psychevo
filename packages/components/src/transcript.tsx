@@ -22,14 +22,20 @@ type CopyTextHandler = ((text: string) => void | Promise<void>) | undefined;
 const STREAM_REVEAL_INITIAL_CHARS = 24;
 const STREAM_REVEAL_INTERVAL_MS = 24;
 const STREAM_REVEAL_MAX_STEP_CHARS = 16;
+const ACTIVITY_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 
 export function TranscriptPanel({ activity, entries, onCopyText }: TranscriptPanelProps) {
   const [followingBottom, setFollowingBottom] = useState(true);
   const [scrolling, setScrolling] = useState(false);
+  const [activityTick, setActivityTick] = useState(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const scrollIdleTimer = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
   const orderedEntries = useMemo(() => orderTranscriptEntries(entries), [entries]);
   const visibleEntries = useMemo(() => orderedEntries.filter((entry) => visibleBlocks(entry).length > 0), [orderedEntries]);
+  const hasRunningActivityBlock = useMemo(
+    () => visibleEntries.some((entry) => visibleBlocks(entry).some(isRunningActivityBlock)),
+    [visibleEntries]
+  );
   const threadItemsClass = `pevo-threadItems ${scrolling ? "is-scrolling" : ""}`.trim();
 
   useEffect(() => {
@@ -48,6 +54,14 @@ export function TranscriptPanel({ activity, entries, onCopyText }: TranscriptPan
       globalThis.clearTimeout(scrollIdleTimer.current);
     }
   }, []);
+
+  useEffect(() => {
+    if (!hasRunningActivityBlock) {
+      return;
+    }
+    const timer = window.setInterval(() => setActivityTick((value) => value + 1), 120);
+    return () => window.clearInterval(timer);
+  }, [hasRunningActivityBlock]);
 
   return (
     <section className="pevo-panel pevo-transcript" aria-label="Transcript">
@@ -71,7 +85,14 @@ export function TranscriptPanel({ activity, entries, onCopyText }: TranscriptPan
         {visibleEntries.length === 0 ? (
           <div className="pevo-empty pevo-emptyThread">No messages yet</div>
         ) : (
-          visibleEntries.map((entry) => <TranscriptEntryView entry={entry} key={entry.id} onCopyText={onCopyText} />)
+          visibleEntries.map((entry) => (
+            <TranscriptEntryView
+              activityTick={activityTick}
+              entry={entry}
+              key={entry.id}
+              onCopyText={onCopyText}
+            />
+          ))
         )}
       </div>
       {!followingBottom && (
@@ -152,26 +173,36 @@ function isHiddenTranscriptBlock(entry: TranscriptEntry, block: TranscriptBlock)
 }
 
 function TranscriptEntryView({
+  activityTick,
   entry,
   onCopyText
 }: {
+  activityTick: number;
   entry: TranscriptEntry;
   onCopyText: CopyTextHandler;
 }) {
   return (
     <>
       {visibleBlocks(entry).map((block) => (
-        <TranscriptBlockView block={block} entry={entry} key={block.id} onCopyText={onCopyText} />
+        <TranscriptBlockView
+          activityTick={activityTick}
+          block={block}
+          entry={entry}
+          key={block.id}
+          onCopyText={onCopyText}
+        />
       ))}
     </>
   );
 }
 
 function TranscriptBlockView({
+  activityTick,
   block,
   entry,
   onCopyText
 }: {
+  activityTick: number;
   block: TranscriptBlock;
   entry: TranscriptEntry;
   onCopyText: CopyTextHandler;
@@ -241,30 +272,50 @@ function TranscriptBlockView({
     );
   }
   if (block.kind === "reasoning") {
+    const runningReasoning = block.status === "running";
+    const runningElapsed = runningReasoning ? liveBlockElapsed(block) : null;
     return (
       <article
         className={`pevo-reasoning ${block.status === "running" ? "is-streaming" : ""}`}
         data-has-body={text.trim() ? "true" : "false"}
         {...transcriptBlockDataAttributes(entry, block)}
       >
-        <button className="pevo-reasoningHeader" onClick={() => setOpen((value) => !value)} type="button">
-          {open ? <ChevronDown size={15} aria-hidden /> : <ChevronRight size={15} aria-hidden />}
+        <button className={`pevo-reasoningHeader ${runningReasoning ? "is-runningActivity" : ""}`} onClick={() => setOpen((value) => !value)} type="button">
+          {runningReasoning ? (
+            <span className="pevo-evidenceSpinner" aria-hidden="true">
+              {ACTIVITY_SPINNER[activityTick % ACTIVITY_SPINNER.length]}
+            </span>
+          ) : (
+            open ? <ChevronDown size={15} aria-hidden /> : <ChevronRight size={15} aria-hidden />
+          )}
           <span>{reasoningTitle()}</span>
-          {status && <em>{status}</em>}
+          {runningElapsed ? <em className="pevo-evidenceElapsed">{runningElapsed}</em> : status && <em>{status}</em>}
         </button>
         {open && <MarkdownText streaming={block.status === "running"} text={text} />}
       </article>
     );
   }
   const display = evidenceDisplay(block, text);
-  const evidenceLineClass = `pevo-evidenceLine ${display.singleTitle ? "is-singleTitle" : ""}`.trim();
+  const runningTool = isRunningToolActivityBlock(block);
+  const elapsed = runningTool ? liveToolBlockElapsed(block) : transcriptToolBlockElapsed(block);
+  const evidenceLineClass = [
+    "pevo-evidenceLine",
+    display.singleTitle ? "is-singleTitle" : "",
+    runningTool ? "is-runningTool" : ""
+  ].filter(Boolean).join(" ");
   return (
     <article className={`pevo-evidence is-${block.status} is-tool-${display.category}`} {...transcriptBlockDataAttributes(entry, block)}>
       <button className={evidenceLineClass} onClick={() => setOpen((value) => !value)} type="button">
-        {open ? <ChevronDown size={15} aria-hidden /> : <ChevronRight size={15} aria-hidden />}
+        {runningTool ? (
+          <span className="pevo-evidenceSpinner" aria-hidden="true">
+            {ACTIVITY_SPINNER[activityTick % ACTIVITY_SPINNER.length]}
+          </span>
+        ) : (
+          open ? <ChevronDown size={15} aria-hidden /> : <ChevronRight size={15} aria-hidden />
+        )}
         <code>{display.title}</code>
         {display.summary && <span>{display.summary}</span>}
-        {status && <em>{status}</em>}
+        {elapsed ? <em className="pevo-evidenceElapsed">{elapsed}</em> : !runningTool && status && <em>{status}</em>}
       </button>
       {open && display.sections.length > 0 && <ToolDetail display={display} />}
       {artifactIds.length > 0 && (
@@ -366,17 +417,83 @@ function transcriptBlockTimestamp(block: TranscriptBlock): { iso: string; label:
 }
 
 function transcriptBlockElapsed(block: TranscriptBlock): string | null {
+  return transcriptBlockElapsedWithThreshold(block, 0);
+}
+
+function transcriptToolBlockElapsed(block: TranscriptBlock): string | null {
+  return transcriptBlockElapsedWithThreshold(block, 1_000);
+}
+
+function transcriptBlockElapsedWithThreshold(block: TranscriptBlock, minVisibleMs: number): string | null {
   const metadata = asRecord(block.metadata);
-  const value = metadata.elapsed_ms ?? asRecord(metadata.message_metadata).elapsed_ms;
+  const resultMetadata = asRecord(metadata.result_metadata);
+  const blockResultMetadata = asRecord(block.result?.metadata);
+  const messageMetadata = asRecord(metadata.message_metadata);
+  const value = metadata.elapsed_ms
+    ?? metadata.elapsedMs
+    ?? resultMetadata.elapsed_ms
+    ?? resultMetadata.elapsedMs
+    ?? blockResultMetadata.elapsed_ms
+    ?? blockResultMetadata.elapsedMs
+    ?? messageMetadata.elapsed_ms
+    ?? messageMetadata.elapsedMs;
   const elapsedMs = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
   if (!Number.isFinite(elapsedMs) || elapsedMs < 0) {
     return null;
   }
-  const seconds = Math.floor(elapsedMs / 1_000);
+  return compactElapsedMs(elapsedMs, minVisibleMs);
+}
+
+function liveBlockElapsed(block: TranscriptBlock): string | null {
+  return liveBlockElapsedWithThreshold(block, 0);
+}
+
+function liveToolBlockElapsed(block: TranscriptBlock): string | null {
+  return liveBlockElapsedWithThreshold(block, 1_000);
+}
+
+function liveBlockElapsedWithThreshold(block: TranscriptBlock, minVisibleMs: number): string | null {
+  const startedAtMs = isPlausibleTimestampMs(block.createdAtMs)
+    ? block.createdAtMs
+    : block.updatedAtMs;
+  const fallbackNowMs = Date.now();
+  const effectiveStartedAtMs = isPlausibleTimestampMs(startedAtMs) ? startedAtMs : fallbackNowMs;
+  return compactElapsedMs(fallbackNowMs - effectiveStartedAtMs, minVisibleMs);
+}
+
+function isPlausibleTimestampMs(value: number): boolean {
+  return Number.isFinite(value) && value >= 946_684_800_000;
+}
+
+function compactElapsedMs(elapsedMs: number, minVisibleMs = 0): string | null {
+  if (elapsedMs < minVisibleMs) {
+    return null;
+  }
+  const seconds = Math.max(0, Math.floor(elapsedMs / 1_000));
   if (seconds < 60) {
     return `${seconds}s`;
   }
   return `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, "0")}s`;
+}
+
+function isRunningToolActivityBlock(block: TranscriptBlock): boolean {
+  if (block.status !== "running") {
+    return false;
+  }
+  return [
+    "tool",
+    "toolCall",
+    "toolResult",
+    "shell",
+    "file",
+    "web",
+    "mcp",
+    "agent"
+  ].includes(block.kind);
+}
+
+function isRunningActivityBlock(block: TranscriptBlock): boolean {
+  return block.status === "running" && (block.kind === "reasoning" || isRunningToolActivityBlock(block));
 }
 
 function defaultReasoningOpen(block: TranscriptBlock): boolean {

@@ -17,6 +17,7 @@ beforeAll(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
 });
 
 describe("component fallback rendering", () => {
@@ -1045,6 +1046,8 @@ describe("component fallback rendering", () => {
   });
 
   it("renders reasoning under Thinking and hides empty reasoning completions", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-14T00:01:05.000Z"));
     const html = renderToStaticMarkup(
       <TranscriptPanel
         entries={[
@@ -1064,7 +1067,9 @@ describe("component fallback rendering", () => {
                 kind: "reasoning",
                 title: "Reasoning",
                 status: "running",
-                body: "I should inspect the feed data first."
+                body: "I should inspect the feed data first.",
+                createdAtMs: new Date("2026-06-14T00:00:00.000Z").getTime(),
+                updatedAtMs: new Date("2026-06-14T00:00:00.000Z").getTime()
               })
             ]
           })
@@ -1077,9 +1082,47 @@ describe("component fallback rendering", () => {
     expect(html).not.toContain("Reasoning");
     expect(html).not.toContain(">completed<");
     expect(html).not.toContain("empty-reasoning");
+
+    const reasoningRowStart = html.indexOf('data-block-id="visible-reasoning"');
+    const reasoningRowEnd = html.indexOf("</article>", reasoningRowStart);
+    const reasoningRow = html.slice(reasoningRowStart, reasoningRowEnd);
+    expect(reasoningRow).toContain("pevo-evidenceSpinner");
+    expect(reasoningRow).not.toContain("lucide-chevron");
+    expect(reasoningRow).not.toContain(">running<");
+    expect(reasoningRow).toContain(">1m05s<");
   });
 
-  it("hides completed status badges while keeping actionable statuses visible", () => {
+  it("does not render persisted elapsed on completed Thinking rows", () => {
+    const html = renderToStaticMarkup(
+      <TranscriptPanel
+        entries={[
+          transcriptEntry({
+            id: "assistant-reasoning-completed",
+            blocks: [
+              transcriptBlock({
+                id: "completed-reasoning",
+                kind: "reasoning",
+                title: "Reasoning",
+                status: "completed",
+                body: "I inspected the feed data first.",
+                metadata: { elapsed_ms: 65_000 }
+              })
+            ]
+          })
+        ]}
+      />
+    );
+
+    const rowStart = html.indexOf('data-block-id="completed-reasoning"');
+    const rowEnd = html.indexOf("</article>", rowStart);
+    const row = html.slice(rowStart, rowEnd);
+    expect(row).toContain("Thinking");
+    expect(row).not.toContain("1m05s");
+  });
+
+  it("hides completed badges and renders running tool activity", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-14T00:01:05.000Z"));
     const html = renderToStaticMarkup(
       <TranscriptPanel
         entries={[
@@ -1091,14 +1134,34 @@ describe("component fallback rendering", () => {
                 kind: "file",
                 title: "write",
                 preview: "feeds/report.md",
-                status: "completed"
+                status: "completed",
+                metadata: { elapsed_ms: 8_000 }
+              }),
+              transcriptBlock({
+                id: "subsecond-completed-tool",
+                kind: "file",
+                title: "read",
+                preview: "feeds/raw.json",
+                status: "completed",
+                metadata: { elapsed_ms: 800 }
+              }),
+              transcriptBlock({
+                id: "subsecond-running-tool",
+                kind: "shell",
+                title: "exec_command",
+                preview: "python quick.py",
+                status: "running",
+                createdAtMs: new Date("2026-06-14T00:01:04.500Z").getTime(),
+                updatedAtMs: new Date("2026-06-14T00:01:04.500Z").getTime()
               }),
               transcriptBlock({
                 id: "running-tool",
                 kind: "shell",
                 title: "exec_command",
                 preview: "python fetch.py",
-                status: "running"
+                status: "running",
+                createdAtMs: new Date("2026-06-14T00:00:00.000Z").getTime(),
+                updatedAtMs: new Date("2026-06-14T00:00:00.000Z").getTime()
               })
             ]
           })
@@ -1107,8 +1170,37 @@ describe("component fallback rendering", () => {
     );
 
     expect(html).toContain("feeds/report.md");
+    expect(html).toContain("feeds/raw.json");
+    expect(html).toContain("python quick.py");
     expect(html).not.toContain(">completed<");
-    expect(html).toContain(">running<");
+    expect(html).not.toContain(">running<");
+    expect(html).not.toContain(">0s<");
+    expect(html).toContain(">8s<");
+    expect(html).toContain(">1m05s<");
+
+    const completedRowStart = html.indexOf('data-block-id="completed-tool"');
+    const completedRowEnd = html.indexOf("</article>", completedRowStart);
+    const completedRow = html.slice(completedRowStart, completedRowEnd);
+    expect(completedRow).toContain("feeds/report.md");
+    expect(completedRow).toContain(">8s<");
+
+    const runningRowStart = html.indexOf('data-block-id="running-tool"');
+    const runningRowEnd = html.indexOf("</article>", runningRowStart);
+    const runningRow = html.slice(runningRowStart, runningRowEnd);
+    expect(runningRow).toContain("pevo-evidenceSpinner");
+    expect(runningRow).not.toContain("lucide-chevron");
+    expect(runningRow.indexOf("pevo-evidenceSpinner")).toBeLessThan(runningRow.indexOf("<code>"));
+
+    const subsecondCompletedStart = html.indexOf('data-block-id="subsecond-completed-tool"');
+    const subsecondCompletedEnd = html.indexOf("</article>", subsecondCompletedStart);
+    const subsecondCompletedRow = html.slice(subsecondCompletedStart, subsecondCompletedEnd);
+    expect(subsecondCompletedRow).not.toContain(">0s<");
+
+    const subsecondRunningStart = html.indexOf('data-block-id="subsecond-running-tool"');
+    const subsecondRunningEnd = html.indexOf("</article>", subsecondRunningStart);
+    const subsecondRunningRow = html.slice(subsecondRunningStart, subsecondRunningEnd);
+    expect(subsecondRunningRow).toContain("pevo-evidenceSpinner");
+    expect(subsecondRunningRow).not.toContain(">0s<");
   });
 });
 

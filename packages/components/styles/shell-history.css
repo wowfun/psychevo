@@ -272,6 +272,10 @@
   white-space: nowrap;
 }
 
+.pevo-sessionTitleAnchor {
+  min-width: 0;
+}
+
 .pevo-sessionTitleRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -309,7 +313,7 @@
   transition: opacity 80ms ease;
 }
 
-.pevo-sessionMeta b {
+.pevo-sessionMeta b:not(.pevo-sessionRunning) {
   flex: 0 0 auto;
   padding: 1px 5px;
   color: var(--pevo-accent-ink);
@@ -319,10 +323,53 @@
   font-weight: 650;
 }
 
+.pevo-sessionRunning {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  color: var(--pevo-muted-strong);
+  background: transparent;
+  border-radius: 0;
+}
+
+.pevo-sessionSpinner {
+  display: inline-block;
+  width: 1.1em;
+  text-align: center;
+}
+
 .pevo-sessionRow.is-running:not(.is-active) {
   border-color: transparent;
   background: color-mix(in oklch, var(--pevo-panel), transparent 48%);
   box-shadow: var(--pevo-shadow-active);
+}
+
+.pevo-sessionOlderRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+  margin-left: calc(var(--left-nav-icon-column, 0px) + var(--left-nav-gap, 0px) - 3px);
+  padding: 2px 8px;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--pevo-radius-sm);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.pevo-sessionOlderRow:hover:not(:disabled),
+.pevo-sessionOlderRow:focus-visible {
+  color: var(--pevo-text);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 72%);
+}
+
+.pevo-sessionOlderRow:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .pevo-sessionMenu {

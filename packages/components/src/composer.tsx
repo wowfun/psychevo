@@ -14,6 +14,7 @@ export interface ComposerProps {
   requestPanel?: ReactNode;
   rightControls?: ReactNode;
   running: boolean;
+  runningStartedAtMs?: number | null;
   onCommand?(command: string): void;
   onAttach?(): void;
   onInterrupt(): void;
@@ -47,6 +48,7 @@ export function Composer({
   requestPanel,
   rightControls,
   running,
+  runningStartedAtMs,
   onAttach,
   onCommand,
   onInterrupt,
@@ -62,6 +64,8 @@ export function Composer({
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [completion, setCompletion] = useState<CompletionListResult | null>(null);
   const [activeCompletion, setActiveCompletion] = useState(0);
+  const [elapsedNowMs, setElapsedNowMs] = useState(() => Date.now());
+  const [observedRunningStartedAtMs, setObservedRunningStartedAtMs] = useState<number | null>(null);
   const mentionsRef = useRef<GatewayMention[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const completionOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -75,6 +79,30 @@ export function Composer({
   const attachmentItems = attachments ?? [];
   const hasPromptPayload = Boolean(trimmed) || attachmentItems.length > 0;
   const showTurnModeControls = running && !shellMode && Boolean(trimmed);
+  const effectiveRunningStartedAtMs = isPositiveTimestamp(runningStartedAtMs)
+    ? Number(runningStartedAtMs)
+    : observedRunningStartedAtMs;
+  const runningElapsed = running ? compactElapsedLabel(effectiveRunningStartedAtMs, elapsedNowMs) : null;
+  const runningSpinner = running ? activitySpinnerFrame(effectiveRunningStartedAtMs, elapsedNowMs) : null;
+
+  useEffect(() => {
+    if (!running) {
+      setObservedRunningStartedAtMs(null);
+      return;
+    }
+    setObservedRunningStartedAtMs((current) => current ?? Date.now());
+  }, [running]);
+
+  useEffect(() => {
+    if (!running || !isPositiveTimestamp(effectiveRunningStartedAtMs)) {
+      return;
+    }
+    setElapsedNowMs(Date.now());
+    const timer = window.setInterval(() => {
+      setElapsedNowMs(Date.now());
+    }, 120);
+    return () => window.clearInterval(timer);
+  }, [running, effectiveRunningStartedAtMs]);
 
   useLayoutEffect(() => {
     resizeTextarea(textareaRef.current);
@@ -436,6 +464,16 @@ export function Composer({
             </div>
           )}
         </div>
+        {runningElapsed && (
+          <span className="pevo-composerTurnStatus" aria-label="Active turn elapsed">
+            {runningSpinner && (
+              <span className="pevo-composerTurnSpinner" aria-hidden="true">
+                {runningSpinner}
+              </span>
+            )}
+            <span>{runningElapsed}</span>
+          </span>
+        )}
         <div className="pevo-composerRightControls">
           {rightControls && <div className="pevo-composerInlineStatus">{rightControls}</div>}
           <div className="pevo-composerActions">
@@ -496,6 +534,30 @@ function activeCompletionSigil(text: string, cursor: number): "/" | "$" | "@" | 
     }
   }
   return null;
+}
+
+function compactElapsedLabel(startedAtMs: number | null | undefined, nowMs: number): string | null {
+  if (!isPositiveTimestamp(startedAtMs)) {
+    return null;
+  }
+  const elapsedSeconds = Math.max(0, Math.floor((nowMs - Number(startedAtMs)) / 1_000));
+  if (elapsedSeconds < 60) {
+    return `${elapsedSeconds}s`;
+  }
+  return `${Math.floor(elapsedSeconds / 60)}m${String(elapsedSeconds % 60).padStart(2, "0")}s`;
+}
+
+function activitySpinnerFrame(startedAtMs: number | null | undefined, nowMs: number): string | null {
+  if (!isPositiveTimestamp(startedAtMs)) {
+    return null;
+  }
+  const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
+  const elapsedMs = Math.max(0, nowMs - Number(startedAtMs));
+  return frames[Math.floor(elapsedMs / 120) % frames.length] ?? "⠋";
+}
+
+function isPositiveTimestamp(value: number | null | undefined): boolean {
+  return Number.isFinite(value) && Number(value) > 0;
 }
 
 function ClarifyRequest({

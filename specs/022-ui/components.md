@@ -40,7 +40,10 @@ across Web, Desktop, and Mobile shells:
 
 Shared app stores and components must tolerate missing fields only when those
 fields have true idle or empty semantics. Missing activity state is rendered as
-idle, and missing pending request lists are rendered as empty. A Gateway
+idle, and missing pending request lists are rendered as empty. Activity fields
+added for cross-Gateway ownership, such as start time, owner, lease, or takeover
+state, are optional display metadata; their absence must not prevent an idle
+snapshot from rendering. A Gateway
 `ThreadSnapshot` without `entries` is a protocol/projection error, not an empty
 ordinary transcript, because `entries: []` is the only valid representation of a
 real empty transcript. Snapshot defaulting for idle fields is applied at the
@@ -56,6 +59,42 @@ omitted by live or partially upgraded payloads.
 Transcript message action hit areas must not cover or intercept adjacent
 reasoning, tool, status, or message rows; visually stacked rows remain
 independently clickable after live updates reconcile to committed snapshots.
+
+Shared Web activity indicators use the same motion vocabulary as TUI: the
+8-frame spinner advances every 120ms, and elapsed time is formatted as compact
+whole seconds or `1m05s` after one minute. History session rows show only a
+transparent inline running spinner beside the session title, not a filled badge;
+their elapsed timer is intentionally omitted to keep the browser scannable.
+Active turn timers derive from `GatewayActivityView.startedAtMs` and render in
+an independent turn-status slot in the composer footer, under the prompt input
+and between the left and right control groups while the turn is running. If a
+foreign running activity lacks a usable start timestamp, the shell falls back to
+the local time at which it first observed that activity as running so the
+composer still presents an active-turn timer. Running Thinking and tool rows
+derive elapsed time from transcript block timestamps, render the spinner in the
+ordinary expand/collapse arrow position, and render the elapsed timer on the
+right side once the elapsed duration reaches 1 second. Tool rows with elapsed
+duration below 1 second omit the right-side elapsed label. Once tool rows
+complete, their persisted `metadata.elapsed_ms` value remains visible in the
+same right-side elapsed slot instead of disappearing, subject to the same
+1-second display threshold; completed Thinking rows do not show a persisted
+elapsed label.
+Timer updates are visual status, not transcript content, and must not resize
+rows or repeatedly announce through screen readers.
+
+Truncated GUI session titles expose the full title through the browser-native
+`title` tooltip without a custom duplicate popover or row-height change. The
+Workbench agent/runtime selector uses text plus a chevron, without a robot
+icon, and sizes to the current display value with a bounded max width.
+Workspaces that do not report a git branch omit the branch pill instead of
+rendering a `no-branch` placeholder.
+
+Composer request panels are live interaction controls. Permission buttons must
+either resolve the request or surface a transient composer error when the
+Gateway returns `accepted: false`; a failed response must not leave the UI in a
+silent no-op state. Reopened or refreshed Workbench snapshots must not render
+stale permission panels for completed, interrupted, expired, or unrelated
+activities.
 
 The composer component must match TUI submission ergonomics. Plain Enter submits
 unless an IME composition is active or a completion item is being accepted.

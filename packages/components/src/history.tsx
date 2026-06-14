@@ -26,12 +26,15 @@ export interface HistoryPanelProps {
   disabled?: boolean;
   draftSession?: HistoryDraftSession | null;
   pinnedSessionIds?: string[];
+  browserWorkspaces?: HistoryBrowserWorkspace[];
+  loadingOlderWorkdir?: string | null;
   sessions: SessionSummary[];
   onArchive(sessionId: string): void;
   onDelete(sessionId: string): void;
   onExport(sessionId: string): void;
   onNew(): void;
   onCreateWorkspace?(): void;
+  onLoadOlderSessions?(workdir: string): void;
   onNewInWorkdir?(workdir: string): void;
   onTogglePinned?(sessionId: string): void;
   onRename(sessionId: string, title: string): void;
@@ -48,13 +51,25 @@ export interface HistoryDraftSession {
   workdir: string;
 }
 
+export interface HistoryBrowserWorkspace {
+  workdir: string;
+  hiddenCount: number;
+}
+
+const ACTIVITY_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
+
 export function HistoryPanel(props: HistoryPanelProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(() => new Set());
+  const [activityTick, setActivityTick] = useState(0);
   const sessions = Array.isArray(props.sessions) ? props.sessions : [];
   const draftSession = props.archived ? null : props.draftSession ?? null;
   const pinnedSessionIds = new Set(props.pinnedSessionIds ?? []);
+  const browserByWorkdir = useMemo(
+    () => new Map((props.browserWorkspaces ?? []).map((workspace) => [workspace.workdir, workspace])),
+    [props.browserWorkspaces]
+  );
   const groupedSessions = useMemo(
     () => groupSessionsByProject(sessions, draftSession),
     [draftSession, sessions]
@@ -69,6 +84,14 @@ export function HistoryPanel(props: HistoryPanelProps) {
       return next.size === current.size ? current : next;
     });
   }, [groupSignature, groupedSessions]);
+
+  useEffect(() => {
+    if (!sessions.some((session) => session.activity?.running === true)) {
+      return;
+    }
+    const timer = window.setInterval(() => setActivityTick((value) => value + 1), 120);
+    return () => window.clearInterval(timer);
+  }, [sessions]);
 
   function startProjectSession(workdir: string) {
     if (props.onNewInWorkdir) {
@@ -121,6 +144,7 @@ export function HistoryPanel(props: HistoryPanelProps) {
           groupedSessions.map((group) => {
             const collapsed = collapsedProjects.has(group.workdir);
             const groupDraftSession = draftSession?.workdir === group.workdir ? draftSession : null;
+            const browser = browserByWorkdir.get(group.workdir);
             return (
               <section className={`pevo-sessionGroup ${collapsed ? "is-collapsed" : ""}`} key={group.workdir}>
                 <header className="pevo-sessionGroupHeader">
@@ -195,12 +219,20 @@ export function HistoryPanel(props: HistoryPanelProps) {
                             type="button"
                           >
                             <span className="pevo-sessionTitleRow">
-                              <span className="pevo-sessionTitle">{title}</span>
+                              <span className="pevo-sessionTitleAnchor">
+                                <span className="pevo-sessionTitle" title={title}>{title}</span>
+                              </span>
                               <span className="pevo-sessionMeta">
                                 <time className="pevo-sessionTime" dateTime={dateTimeAttribute(session.updatedAtMs)}>
                                   {sessionAgeLabel(session.updatedAtMs)}
                                 </time>
-                                {running && <b>running</b>}
+                                {running && (
+                                  <b className="pevo-sessionRunning" aria-label="running">
+                                    <span className="pevo-sessionSpinner" aria-hidden="true">
+                                      {ACTIVITY_SPINNER[activityTick % ACTIVITY_SPINNER.length]}
+                                    </span>
+                                  </b>
+                                )}
                               </span>
                             </span>
                           </button>
@@ -315,6 +347,17 @@ export function HistoryPanel(props: HistoryPanelProps) {
                     </article>
                   );
                 })}
+                {!collapsed && !props.archived && browser && browser.hiddenCount > 0 && (
+                  <button
+                    className="pevo-sessionOlderRow"
+                    disabled={props.disabled || props.loadingOlderWorkdir === group.workdir || !props.onLoadOlderSessions}
+                    onClick={() => props.onLoadOlderSessions?.(group.workdir)}
+                    type="button"
+                  >
+                    <span>Older sessions</span>
+                    <span>{props.loadingOlderWorkdir === group.workdir ? "Loading" : `${browser.hiddenCount}`}</span>
+                  </button>
+                )}
               </section>
             );
           })

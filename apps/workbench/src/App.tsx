@@ -34,7 +34,7 @@ import {
   SettingsReadResultSchema,
   TerminalExitedPayloadSchema,
   TerminalOutputPayloadSchema,
-  ThreadListResultSchema,
+  ThreadBrowserResultSchema,
   ThreadTraceResultSchema,
   WorkspaceChangeMutationResultSchema,
   WorkspaceChangesResultSchema,
@@ -80,7 +80,11 @@ import {
 import { createCommandActions } from "./command-actions";
 import { createAppActions } from "./app-actions";
 import { useWorkbenchEffects } from "./app-effects";
-import { createSurfaceActions } from "./surface-actions";
+import {
+  createSurfaceActions,
+  sessionsFromThreadBrowser,
+  workspacesFromThreadBrowser
+} from "./surface-actions";
 import { WorkbenchLayout } from "./workbench-layout";
 import {
   LeftUtilityRail,
@@ -153,6 +157,7 @@ import type {
   PendingAttachment,
   RightWorkspaceTab,
   RightWorkspaceTabKind,
+  SessionBrowserWorkspaceState,
   SettingsSection,
   TerminalNotificationEvent,
   TraceState,
@@ -199,6 +204,29 @@ function pacedGatewayEvent(event: GatewayEvent): boolean {
     event.type === "turnCompleted";
 }
 
+function mergeSessionSummaries(current: SessionSummary[], incoming: SessionSummary[]): SessionSummary[] {
+  const byId = new Map(current.map((session) => [session.id, session]));
+  for (const session of incoming) {
+    byId.set(session.id, session);
+  }
+  return Array.from(byId.values()).sort((left, right) => {
+    const rightTime = right.updatedAtMs ?? right.startedAtMs ?? 0;
+    const leftTime = left.updatedAtMs ?? left.startedAtMs ?? 0;
+    return rightTime - leftTime || left.id.localeCompare(right.id);
+  });
+}
+
+function mergeBrowserWorkspaces(
+  current: SessionBrowserWorkspaceState[],
+  incoming: SessionBrowserWorkspaceState[]
+): SessionBrowserWorkspaceState[] {
+  const byWorkdir = new Map(current.map((workspace) => [workspace.workdir, workspace]));
+  for (const workspace of incoming) {
+    byWorkdir.set(workspace.workdir, workspace);
+  }
+  return Array.from(byWorkdir.values());
+}
+
 export function App() {
   const [client, setClient] = useState<GatewayClient | null>(null);
   const [host, setHost] = useState<PsychevoHost | null>(null);
@@ -208,6 +236,8 @@ export function App() {
   const [snapshot, setSnapshot] = useState<ThreadSnapshot>(EMPTY_SNAPSHOT);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [archivedSessions, setArchivedSessions] = useState<SessionSummary[]>([]);
+  const [sessionBrowserWorkspaces, setSessionBrowserWorkspaces] = useState<SessionBrowserWorkspaceState[]>([]);
+  const [loadingOlderWorkdir, setLoadingOlderWorkdir] = useState<string | null>(null);
   const [pinnedSessionIds, setPinnedSessionIds] = useState<string[]>(readPinnedSessionIds);
   const [draftSession, setDraftSession] = useState<HistoryDraftSession | null>(null);
   const [settings, setSettings] = useState<SettingsReadResult | undefined>();
@@ -389,6 +419,7 @@ export function App() {
     client,
     currentThreadId: currentThreadId ?? null,
     initScope: init?.scope ?? null,
+    pinnedSessionIds,
     scopeRef,
     selectedThreadIdRef,
     settings,
@@ -413,6 +444,7 @@ export function App() {
     setSelectedRuntimeRef,
     setSelectedVariant,
     setSessions,
+    setSessionBrowserWorkspaces,
     setSettings,
     setSnapshot,
     setTraceState,
@@ -421,6 +453,33 @@ export function App() {
     setWorkspaceDiff,
     setWorkspaceFiles
   });
+
+  async function loadOlderSessions(workdir: string) {
+    if (!client) {
+      return;
+    }
+    const cursor = sessionBrowserWorkspaces.find((workspace) => workspace.workdir === workdir)?.nextCursor;
+    if (!cursor || loadingOlderWorkdir) {
+      return;
+    }
+    setLoadingOlderWorkdir(workdir);
+    try {
+      const result = ThreadBrowserResultSchema.parse(
+        await client.request("thread/browser", {
+          archived: false,
+          cursor,
+          includeSessionIds: [currentThreadId ?? null, ...pinnedSessionIds].filter((id): id is string => Boolean(id)),
+          limit: 20,
+          recentDays: 7,
+          workdir
+        })
+      );
+      setSessions((current) => mergeSessionSummaries(current, sessionsFromThreadBrowser(result)));
+      setSessionBrowserWorkspaces((current) => mergeBrowserWorkspaces(current, workspacesFromThreadBrowser(result)));
+    } finally {
+      setLoadingOlderWorkdir(null);
+    }
+  }
 
   useWorkbenchEffects({
     activeRightTabKind: activeRightTab?.kind ?? null,
@@ -778,15 +837,15 @@ export function App() {
     commands, composerDraftPatch, contextUsage, controls, copyTranscriptText, createWorkspace, currentThreadId,
     debugEnabled, debugEvents, deleteArchivedSession, deleteBackend, disabled, doctorBackend, endpoint, error,
     executeCommand, extraRuntimeModeValues, handleAttachment, host, init, leftCollapsed, loadThreadSearchText,
-    mainView, mobilePanel, openDiffPreview, openFilePreview, openRightWorkspaceTab, openSettingsSection,
+    loadingOlderWorkdir, loadOlderSessions, mainView, mobilePanel, openDiffPreview, openFilePreview, openRightWorkspaceTab, openSettingsSection,
     pendingClarifies, pendingPermissions, permissionMode, pinnedSessionIds, pinnedSessions, planModeAvailable,
     refreshAgentSurface, refreshHistory, refreshSnapshot, refreshTrace, refreshWorkspaceSurface, rejectWorkspaceChange,
     restoreArchivedSession, revealRightWorkspace, rightCollapsed, rightTabs, rightWidthPx, runnableAgents, runAction,
     runCommandAlternateAction, running, runtimeAcceptsAgentPersona, runtimeBackends, runtimeModeOption,
     runtimeModeUnavailable, runtimeOptionsError, saveBackendDraft, saveFileFromEditor, selectedAgentName, selectedModel,
-    selectedRuntimeMode, selectedRuntimeRef, selectedVariant, sessionUsage, sessions, setActiveRightTabId, setAppearance,
+    selectedRuntimeMode, selectedRuntimeRef, selectedVariant, sessionBrowserWorkspaces, sessionUsage, sessions, setActiveRightTabId, setAppearance,
     setAttachments, setBackendDraft, setDebugEnabled, setDirtyRightTabs, setDraftSession, setLeftCollapsed, setMainView,
-    setMobilePanel, setPermissionMode, setRightCollapsed, setRightTabs, setRightWidthPx, setRuntimeOptionsError,
+    setMobilePanel, setCommandFeedback, setPermissionMode, setRightCollapsed, setRightTabs, setRightWidthPx, setRuntimeOptionsError,
     setRuntimeOptionsResult, setRuntimeSessionId, setSelectedModel, setSelectedRuntimeMode, setSelectedRuntimeRef,
     setSelectedVariant, setSettingsSection, setSnapshot, setWorkMode, setWorkspaceDialogOpen, settings, settingsSection,
     showSessionChrome, snapshot, startNewThread, startShell, status, submitTurn, switchMainView, terminalEvents,

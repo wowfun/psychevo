@@ -88,6 +88,9 @@ test.describe("Workbench composer visual contract", () => {
 
       await forceInterruptVisualState(page);
       await expect(page.getByRole("button", { name: "Interrupt active turn" })).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator(".pevo-composerTurnStatus")).toContainText("1m05s");
+      await expect(page.locator(".pevo-composerTurnSpinner")).toBeVisible();
+      await expect(page.locator(".pevo-composerRightControls .pevo-composerTurnStatus")).toHaveCount(0);
       await assertComposerGeometry(page, { isMobile, plan: true });
       await page.screenshot({
         path: path.join(screenshotDir, `composer-interrupt-${testInfo.project.name}.png`)
@@ -406,14 +409,26 @@ async function forceInterruptVisualState(page: Page) {
   await page.locator(".pevo-composer").evaluate((composer) => {
     composer.classList.add("is-running");
     const button = composer.querySelector<HTMLButtonElement>(".pevo-sendButton");
+    const footer = composer.querySelector<HTMLElement>(".pevo-composerFooter");
+    const rightControls = composer.querySelector<HTMLElement>(".pevo-composerRightControls");
     if (!button) {
       throw new Error("send button not found");
+    }
+    if (!footer || !rightControls) {
+      throw new Error("composer footer controls not found");
     }
     button.disabled = false;
     button.type = "button";
     button.classList.add("is-interrupt");
     button.setAttribute("aria-label", "Interrupt active turn");
     button.innerHTML = `<span class="pevo-stopGlyph" aria-hidden="true"></span>`;
+    if (!composer.querySelector(".pevo-composerTurnStatus")) {
+      const status = document.createElement("span");
+      status.className = "pevo-composerTurnStatus";
+      status.setAttribute("aria-label", "Active turn elapsed");
+      status.innerHTML = `<span class="pevo-composerTurnSpinner" aria-hidden="true">⠼</span><span>1m05s</span>`;
+      footer.insertBefore(status, rightControls);
+    }
   });
 }
 

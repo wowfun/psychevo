@@ -80,9 +80,10 @@
 
 .agentRuntimeButton {
   display: inline-grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, auto) auto;
   align-items: center;
-  width: 190px;
+  width: auto;
+  max-width: min(260px, calc(100vw - 112px));
   min-height: 30px;
   gap: 7px;
   padding: 0 8px;
@@ -97,6 +98,7 @@
 
 .agentRuntimeButton span {
   min-width: 0;
+  max-width: 22ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
