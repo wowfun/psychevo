@@ -109,6 +109,22 @@ Broad deterministic validation:
 - Live editor-client, registry publishing, HTTP/WebSocket transport, and real
   provider validation remain opt-in.
 
+## Opt-In Live ACP Validation
+
+When a change touches ACP peer runtime option handling, run an explicit live
+validation path for both directions when local test credentials and binaries
+are available:
+
+- Psychevo as ACP client against OpenCode ACP: verify live `configOptions`
+  expose OpenCode modes, selecting a mode changes the next turn's peer session,
+  and thinking/text updates stream incrementally.
+- Psychevo as ACP server with an ACP client harness: verify `mode` is exposed
+  as current-runtime mode, setting it updates subsequent runtime input, and
+  context usage updates are emitted when runtime accounting is available.
+
+These checks are not part of the default deterministic gate and must report the
+exact command, isolated config paths, and any skipped prerequisite.
+
 ## Related Topics
 
 - [230 pevo-acp](spec.md) defines the product packaging contract.

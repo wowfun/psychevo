@@ -773,6 +773,19 @@ pub(crate) mod tests {
             Cli::try_parse_from([
                 "pevo",
                 "run",
+                "--runtime",
+                "opencode",
+                "--runtime-option",
+                "mode=build",
+                "hello"
+            ])
+            .is_ok()
+        );
+        assert!(Cli::try_parse_from(["pevo", "run", "--runtime-option", "mode", "hello"]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "pevo",
+                "run",
                 "--isolated",
                 "--project-context",
                 "off",

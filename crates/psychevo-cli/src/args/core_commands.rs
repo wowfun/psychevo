@@ -343,6 +343,19 @@ pub(crate) struct RunArgs {
     )]
     pub(crate) variant: Option<VariantArg>,
     #[arg(
+        long = "runtime",
+        value_name = "ID",
+        help = "Run through a configured runtime backend instead of the native runtime"
+    )]
+    pub(crate) runtime: Option<String>,
+    #[arg(
+        long = "runtime-option",
+        value_name = "KEY=VALUE",
+        value_parser = parse_runtime_option_arg,
+        help = "Set a current-runtime option for this run; repeatable"
+    )]
+    pub(crate) runtime_option: Vec<(String, String)>,
+    #[arg(
         short = 's',
         long,
         value_name = "ID",
@@ -416,6 +429,19 @@ pub(crate) struct RunArgs {
         help = "Prompt text; multiple words are joined and stdin is appended when present"
     )]
     pub(crate) message: Vec<String>,
+}
+
+pub(crate) fn parse_runtime_option_arg(
+    value: &str,
+) -> std::result::Result<(String, String), String> {
+    let Some((key, option_value)) = value.split_once('=') else {
+        return Err("runtime option must use KEY=VALUE form".to_string());
+    };
+    let key = key.trim();
+    if key.is_empty() {
+        return Err("runtime option key must not be empty".to_string());
+    }
+    Ok((key.to_string(), option_value.trim().to_string()))
 }
 
 #[derive(Debug, Parser)]

@@ -41,6 +41,8 @@ Out of scope:
 - optional `--dangerously-skip-permissions`
 - optional `--project-context <git-root|cwd|off>`
 - optional `--isolated`
+- optional `--runtime <id>`
+- repeatable optional `--runtime-option <key=value>`
 - optional `--no-skills`
 - repeatable optional `--skill <name-or-path>`
 
@@ -104,6 +106,16 @@ that would otherwise prompt unless already allowed by policy or safe defaults.
 `--dangerously-skip-permissions` selects `bypassPermissions`; hard/protected
 denies still apply. Permission policy semantics belong to
 [041 Permissions](../041-permissions/spec.md).
+
+`--runtime <id>` selects a configured runtime backend for this invocation. The
+default is native Psychevo runtime behavior. `--runtime-option <key=value>`
+supplies current-runtime session options for backends that expose them. The
+first supported key is `mode`, used by ACP peer runtimes such as OpenCode to
+select the peer ACP `mode` config option. The flag is namespaced as a runtime
+option rather than `--mode` because native Psychevo work mode remains owned by
+runtime defaults and interactive `/mode`. Unknown keys are preserved for
+Gateway/backend validation and must fail with bounded errors when the selected
+runtime cannot honor them.
 
 ## Session Selection
 

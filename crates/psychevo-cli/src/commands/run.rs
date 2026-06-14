@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::env;
 use std::io::{self, IsTerminal, Read, Write};
 use std::process::ExitCode;
@@ -79,6 +80,17 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
         args.project_context.map(|mode| mode.mode())
     };
     let approval_handler = interactive_approval_handler();
+    let runtime_ref = args
+        .runtime
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let runtime_options = args
+        .runtime_option
+        .iter()
+        .cloned()
+        .collect::<BTreeMap<_, _>>();
     let state = StateRuntime::open(&db_path)?;
     let gateway = Gateway::new(state.clone());
     let source = GatewaySource::new("cli", format!("run:{}", std::process::id()))
@@ -111,6 +123,10 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
                 project_context_override,
                 model: args.model.clone(),
                 reasoning_effort: args.variant.map(|variant| variant.as_str().to_string()),
+                runtime_ref,
+                runtime_session_id: None,
+                runtime_options,
+                external_agent_delegate: None,
                 include_reasoning: args.include_reasoning,
                 mode: run_mode,
                 permission_mode,

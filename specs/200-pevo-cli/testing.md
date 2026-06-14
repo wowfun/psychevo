@@ -49,6 +49,9 @@ scripts/validate.sh broad
 - `-m provider/model` works, while unqualified `-m model` rejects.
 - `--variant` accepts the supported set, passes enabled values, and suppresses
   reasoning for `none`.
+- `--runtime <id> --runtime-option mode=value` parses as a runtime-scoped
+  selection and option pair, and does not introduce or accept a generic
+  `--mode` flag for `pevo run`.
 - `--continue` resumes the latest matching run session or creates a new session
   when none exists.
 - `--continue` plus `--session` rejects.

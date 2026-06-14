@@ -27,7 +27,7 @@ The first TUI supports:
 - `/model`
 - `/tools`
 - `/variant <none|minimal|low|medium|high|xhigh|max>`
-- `/mode <plan|default|acceptEdits|dontAsk|bypassPermissions>`
+- `/mode [value]`
 - `/permissions`
 - `/sandbox`
 - `/show-thinking`
@@ -69,6 +69,12 @@ peer thread or peer-capable agent context exposes them. Selecting or submitting
 one sends the peer's un-namespaced slash command through Gateway command
 execution. Psychevo core commands keep priority over any peer command with the
 same name.
+`/mode` follows the current runtime. With the native runtime, `/mode
+<plan|default>` preserves the existing Psychevo work-mode behavior. With an ACP
+peer runtime, `/mode <value>` sets the peer's ACP `mode` session config option;
+bare `/mode` opens the current runtime's mode picker or reports that the
+runtime exposes no modes. Peer-provided modes such as OpenCode modes are shown
+as runtime modes, not as Psychevo agent definitions.
 Slash menu summaries stay compact enough for one-line discovery. Expanded
 `/help` may add short detail lines for commands whose consequences are easy to
 miss, such as local artifact writes, provider calls, session mutation, display

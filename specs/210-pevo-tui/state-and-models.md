@@ -77,10 +77,14 @@ the current transcript projection immediately and must not append a transcript
 status row for raw visibility changes. `/show-raw on` and `/show-raw off` set
 the value explicitly. `/raw` is not a compatibility command.
 
-`/mode <plan|default>` updates the per-workdir mode and persists it. Bare
-`/mode` is not a display command and returns a bounded usage error. Obsolete
-`/mode set <value>` input is not a compatibility command. Mode changes during a
-running turn affect the next submitted prompt.
+`/mode` is scoped to the current runtime. With native Psychevo runtime, `/mode
+<plan|default>` updates the per-workdir native mode and persists it. With an
+ACP peer runtime, `/mode <value>` updates that peer runtime's session mode
+option for the current session and does not rewrite native per-workdir mode.
+Bare `/mode` opens the current runtime mode picker in fullscreen or prints the
+current mode and selectable values in scripted mode. Obsolete `/mode set
+<value>` input is not a compatibility command. Mode changes during a running
+turn affect the next submitted prompt.
 
 ## Runtime Modes
 
