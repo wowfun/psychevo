@@ -69,6 +69,9 @@ pub(crate) async fn spawn_subagent(
             agent.name
         )));
     }
+    if agent.backend.is_some() {
+        return spawn_external_subagent(context, args, tool_call_id, abort, agent).await;
+    }
     let id = Uuid::now_v7().to_string();
     let task_name = args
         .task_name
@@ -120,6 +123,14 @@ pub(crate) async fn spawn_subagent(
     let response_agent_description = agent.description.clone();
     let response_task_name = task_name.clone();
     let response_store = context.state.store().clone();
+    let parent_abort_bridge = if background {
+        None
+    } else {
+        Some(spawn_parent_abort_bridge(
+            abort.clone(),
+            control_handle.clone(),
+        ))
+    };
     let child = ChildRun {
         id: id.clone(),
         context,
@@ -159,7 +170,11 @@ pub(crate) async fn spawn_subagent(
             model_content_string(&model_value),
         ))
     } else {
-        let record = run_child_agent(child).await?;
+        let record = run_child_agent(child).await;
+        if let Some(handle) = parent_abort_bridge {
+            handle.abort();
+        }
+        let record = record?;
         let model_value = subagent_summary_value(Some(&response_store), &record, false);
         let response_child_session_id = record.child_session_id.clone();
         let child_summary = record
@@ -188,6 +203,218 @@ pub(crate) async fn spawn_subagent(
             model_content_string(&model_value),
         ))
     }
+}
+
+fn spawn_parent_abort_bridge(
+    mut parent_abort: AbortSignal,
+    child_control: ControlHandle,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        parent_abort.wait_for_abort().await;
+        child_control.abort();
+    })
+}
+
+async fn spawn_external_subagent(
+    context: AgentToolContext,
+    args: AgentToolArgs,
+    tool_call_id: String,
+    abort: AbortSignal,
+    agent: AgentDefinition,
+) -> Result<ToolOutput> {
+    if abort.aborted() {
+        return Err(Error::Message("parent invocation aborted".to_string()));
+    }
+    if args.fork_context {
+        return Ok(ToolOutput::error(format!(
+            "agent `{}` is backed by an external ACP backend and does not support fork_context; run it as a foreground delegated task",
+            agent.name
+        )));
+    }
+    if args.background.unwrap_or(false) || agent.background.unwrap_or(false) {
+        return Ok(ToolOutput::error(format!(
+            "agent `{}` is backed by an external ACP backend and does not support background delegation yet; run it as a foreground delegated task",
+            agent.name
+        )));
+    }
+    let Some(delegate) = context.external_delegate.clone() else {
+        return Ok(ToolOutput::error(format!(
+            "agent `{}` is backed by an external ACP backend, but this execution context cannot delegate to peer agents",
+            agent.name
+        )));
+    };
+    let Some(backend) = agent.backend.as_ref() else {
+        return Ok(ToolOutput::error(format!(
+            "agent `{}` is missing backend.ref",
+            agent.name
+        )));
+    };
+
+    let id = Uuid::now_v7().to_string();
+    let task_name = args
+        .task_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(sanitize_task_name)
+        .unwrap_or_else(|| default_task_name(&agent.name, &id));
+    let spawn_depth_remaining = child_spawn_depth_remaining(&context, &agent, args.max_spawn_depth);
+    let metadata = child_agent_metadata(ChildAgentMetadataInput {
+        id: &id,
+        task_name: &task_name,
+        agent: &agent,
+        parent_session_id: &context.parent_session_id,
+        role: AgentInvocationRole::Subagent,
+        task: &args.prompt,
+        background: false,
+        fork_context: false,
+        spawn_depth_remaining,
+        context: Some(&context),
+    });
+    let child_session = context.state.store().create_child_session_with_metadata(
+        &context.parent_session_id,
+        &context.workdir,
+        "peer_agent",
+        &agent.name,
+        &format!("acp:{}", backend.name),
+        Some(metadata.clone()),
+    )?;
+    context.state.store().upsert_agent_edge(
+        &context.parent_session_id,
+        &child_session,
+        AgentEdgeStatus::Open,
+        Some(metadata),
+    )?;
+
+    let record = AgentRunRecord {
+        id: id.clone(),
+        task_name: Some(task_name.clone()),
+        agent_name: agent.name.clone(),
+        task: args.prompt.clone(),
+        parent_session_id: context.parent_session_id.clone(),
+        child_session_id: Some(child_session.clone()),
+        role: AgentInvocationRole::Subagent,
+        background: false,
+        status: AgentRunStatus::Running,
+        edge_status: Some(AgentEdgeStatus::Open),
+        started_at_ms: now_ms(),
+        ended_at_ms: None,
+        outcome: None,
+        final_answer: None,
+        error: None,
+        effective_max_spawn_depth: Some(spawn_depth_remaining),
+    };
+    {
+        let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
+        runs.insert(
+            id.clone(),
+            AgentRunState {
+                record,
+                control: None,
+            },
+        );
+    }
+    emit_external_agent_session_start(ExternalAgentSessionStart {
+        context: &context,
+        agent: &agent,
+        id: &id,
+        task_name: &task_name,
+        task: &args.prompt,
+        tool_call_id: &tool_call_id,
+        child_session_id: &child_session,
+        spawn_depth_remaining,
+    });
+
+    let request = ExternalAgentDelegateRequest {
+        run_id: id.clone(),
+        parent_session_id: context.parent_session_id.clone(),
+        child_session_id: child_session.clone(),
+        agent_name: agent.name.clone(),
+        agent_description: agent.description.clone(),
+        backend_ref: backend.name.clone(),
+        prompt: args.prompt.clone(),
+        task_name,
+        model: args.model.clone(),
+        runtime_options: BTreeMap::new(),
+        abort,
+    };
+    let result = delegate.run(request).await;
+    let record = match result {
+        Ok(result) => {
+            let record = update_run_completed(&id, result.outcome, result.final_answer.clone());
+            let _ = context
+                .state
+                .store()
+                .set_agent_edge_status(&result.child_session_id, AgentEdgeStatus::Closed);
+            record
+        }
+        Err(err) => {
+            update_run_failed(&id, &err.to_string());
+            let _ = context
+                .state
+                .store()
+                .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed);
+            let record = {
+                let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
+                runs.get(&id)
+                    .map(|state| state.record.clone())
+                    .unwrap_or_else(|| AgentRunRecord {
+                        id: id.clone(),
+                        task_name: None,
+                        agent_name: agent.name.clone(),
+                        task: args.prompt.clone(),
+                        parent_session_id: context.parent_session_id.clone(),
+                        child_session_id: Some(child_session.clone()),
+                        role: AgentInvocationRole::Subagent,
+                        background: false,
+                        status: AgentRunStatus::Errored,
+                        edge_status: Some(AgentEdgeStatus::Closed),
+                        started_at_ms: now_ms(),
+                        ended_at_ms: Some(now_ms()),
+                        outcome: Some("failed".to_string()),
+                        final_answer: None,
+                        error: Some(err.to_string()),
+                        effective_max_spawn_depth: Some(spawn_depth_remaining),
+                    })
+            };
+            let model_value = subagent_summary_value(Some(context.state.store()), &record, false);
+            return Ok(ToolOutput::error(model_content_string(&model_value)));
+        }
+    };
+    let model_value = subagent_summary_value(Some(context.state.store()), &record, false);
+    let child_summary = record
+        .child_session_id
+        .as_deref()
+        .and_then(|session_id| {
+            context
+                .state
+                .store()
+                .session_summary(session_id)
+                .ok()
+                .flatten()
+        })
+        .map(|summary| agent_child_session_summary_value(context.state.store(), &summary));
+    let response_child_session_id = record.child_session_id.clone();
+    let system_value = json!({
+        "id": record.id,
+        "agent_name": record.agent_name,
+        "agent_description": agent.description,
+        "task_name": record.task_name,
+        "task": record.task,
+        "status": record.status.as_str(),
+        "background": false,
+        "session_id": response_child_session_id,
+        "child_session_id": record.child_session_id,
+        "outcome": record.outcome,
+        "final_answer": record.final_answer,
+        "error": record.error,
+        "child_session": child_summary,
+        "effective_max_spawn_depth": record.effective_max_spawn_depth,
+    });
+    Ok(ToolOutput::ok_with_model_content(
+        system_value,
+        model_content_string(&model_value),
+    ))
 }
 
 pub(crate) fn resolve_agent_tool_name(
@@ -619,7 +846,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     });
     let sink = Arc::new(PersistenceSink {
         store: child.context.state.store().clone(),
-        session_id: child_session,
+        session_id: child_session.clone(),
         prompt_snapshot: None,
         prompt_snapshot_written: Arc::new(Mutex::new(false)),
         prompt_context_evidence: Arc::new(prompt_context_evidence),
@@ -653,6 +880,11 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         Ok(completion) => completion,
         Err(err) => {
             update_run_failed(&child.id, &err.to_string());
+            let _ = child
+                .context
+                .state
+                .store()
+                .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed);
             run_agent_hook_event(
                 Some(&child.agent),
                 "SubagentStop",
@@ -673,6 +905,11 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         .find_map(assistant_text)
         .unwrap_or_default();
     let record = update_run_completed(&child.id, completion.outcome, final_answer.clone());
+    let _ = child
+        .context
+        .state
+        .store()
+        .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed);
     run_agent_hook_event(
         Some(&child.agent),
         "SubagentStop",
@@ -712,6 +949,38 @@ pub(crate) fn emit_agent_session_start(child: &ChildRun, child_session_id: &str)
         "background": child.background,
         "role": invocation_role_str(child.role),
         "effective_max_spawn_depth": child.spawn_depth_remaining,
+    })));
+}
+
+struct ExternalAgentSessionStart<'a> {
+    context: &'a AgentToolContext,
+    agent: &'a AgentDefinition,
+    id: &'a str,
+    task_name: &'a str,
+    task: &'a str,
+    tool_call_id: &'a str,
+    child_session_id: &'a str,
+    spawn_depth_remaining: u8,
+}
+
+fn emit_external_agent_session_start(event: ExternalAgentSessionStart<'_>) {
+    let Some(stream) = &event.context.stream_events else {
+        return;
+    };
+    stream(RunStreamEvent::Event(json!({
+        "type": "agent_session_start",
+        "tool_call_id": event.tool_call_id,
+        "agent_id": event.id,
+        "agent_name": event.agent.name.clone(),
+        "agent_description": event.agent.description.clone(),
+        "task_name": event.task_name,
+        "task": event.task,
+        "parent_session_id": event.context.parent_session_id.clone(),
+        "child_session_id": event.child_session_id,
+        "background": false,
+        "role": invocation_role_str(AgentInvocationRole::Subagent),
+        "backend_ref": event.agent.backend.as_ref().map(|backend| backend.name.clone()),
+        "effective_max_spawn_depth": event.spawn_depth_remaining,
     })));
 }
 

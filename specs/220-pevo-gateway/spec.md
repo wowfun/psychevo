@@ -178,13 +178,69 @@ The composer exposes active, runnable agent definitions from the same catalog
 as a main-agent selector. The empty selector value is displayed as
 `Default Agent` and submits future turns with no `agentName`; concrete
 selections submit that agent name and are persisted to the current session's
-main-agent metadata. Shadowed and invalid definitions remain visible only in the
-Agents panel diagnostics, not in the composer selector. `settings/read` returns
-the current session's selected main Agent in `controls.agent` when a `threadId`
-is supplied, or `null` for a draft/default session. `settings/update` accepts
-`agent: string | null` with a `threadId`, validates concrete Agents against the
-active catalog, and writes either concrete main-agent metadata or an explicit
-session default marker. It does not write project-local Agent defaults.
+main-agent metadata. Backend-backed agents, including generated ACP backend
+agents, are runnable from the composer only when they support the `peer`
+entrypoint; backend registrations that are disabled or `subagent`-only remain
+configurable/diagnosable in Settings > Agents but must not appear in the
+composer selector or remain selected there. Ordinary non-backend agent
+definitions can remain selectable as current-session agents. Shadowed and
+invalid definitions remain visible only in the Agents panel diagnostics, not in
+the composer selector. `settings/read` returns the current session's selected
+main Agent in `controls.agent` when a `threadId` is supplied, or `null` for a
+draft/default session. `settings/update` accepts `agent: string | null` with a
+`threadId`, validates concrete Agents against the active catalog, and writes
+either concrete main-agent metadata or an explicit session default marker. It
+does not write project-local Agent defaults.
+The composer also exposes execution runtime separately from Agent persona,
+although compact GUI surfaces may present both controls through one grouped
+Agent popover. The default runtime is `native`; ACP backend runtimes are
+identified by their backend id. Selecting a peer runtime such as `opencode`
+does not make that backend's internal agents into Psychevo agent definitions.
+Instead, peer-owned selectors such as OpenCode's ACP `mode` option are surfaced
+as runtime session options. If a peer runtime exposes `plan`, Workbench maps
+its shared Plan-mode control to `runtimeOptions.mode = "plan"` and maps the off
+state to the peer runtime's active default mode. Peer modes outside that
+default/plan pair are exposed only when present. `turn/start` accepts optional
+`runtimeRef` and `runtimeOptions` fields; old clients that omit them run on
+`native`. The legacy `mode` field remains the native Psychevo `RunMode`
+control. When `runtimeRef` names an ACP backend, Gateway validates that the
+selected Psychevo Agent is compatible with that runtime. Local Psychevo agent
+definitions such as `translate` are incompatible with OpenCode ACP unless a
+future backend explicitly advertises external agent definition support; GUI
+clients that know a selected runtime cannot accept agent personas should disable
+the Agent persona control and submit no `agentName` instead of relying on
+submit-time prompt-prefix emulation.
+
+Workbench loads peer runtime options on demand through `runtime/options`.
+The request carries the current scope, optional thread id, and runtime ref.
+Gateway initializes or loads the peer ACP session as needed and returns a
+bounded projection of ACP session config options, including id, name,
+description, category, type, current value, and selectable values. Workbench
+uses only the `mode` category/id for the first runtime-mode control, normalizes
+default/plan to the shared composer mode affordance when possible, and keeps
+additional peer modes as a separate runtime mode selector. The selection is
+scoped to the current draft/session and is sent back as `runtimeOptions`, not
+persisted in Settings.
+
+`@agent` has two distinct meanings depending on runtime capability. With
+`runtimeRef = native`, Workbench may submit structured
+`GatewayMentionTarget::Agent` mentions and Gateway/runtime may use the `Agent`
+tool to delegate a task to a local child agent or a backend-backed ACP
+subagent. With `runtimeRef` naming an ACP peer backend, Workbench must not offer
+Psychevo agent completion or submit structured Psychevo agent mentions because
+the peer runtime cannot be assumed to orchestrate Psychevo agents. Literal
+`@agent` text is still allowed in the prompt and is passed through to the peer.
+If an older client submits a structured agent mention whose backend is the same
+as the selected peer runtime, Gateway rejects it with guidance to either remove
+the self-delegation mention or switch back to native runtime for ACP-as-tool
+delegation.
+`turn/interrupt` is a thread/source-scoped active-turn control, not only a
+top-level model-request abort. When a native turn is awaiting a foreground
+Agent tool child invocation, interrupting the parent thread must abort that
+child invocation and settle the parent turn promptly. Persisted child-agent
+edges must close when the child completes, fails, or is interrupted, so
+Workbench Status and session reloads do not continue to show stale running
+agents.
 
 Startup and reconnect call source-default `thread/resume` with `params.scope`.
 Gateway returns the current thread snapshot when a binding exists, or an empty
@@ -279,8 +335,10 @@ transcript entries, copy text, and snapshot reconciliation remain canonical.
 For peer turns, Gateway also maps Workbench's submitted `model` and
 `reasoningEffort` controls to ACP v2 session config options before
 `session/prompt` when the peer offers compatible `model` and `effort` select
-options. Unsupported or unmatched peer options leave the peer default in place
-and emit diagnostic events; they do not fail the user turn.
+options. `runtimeOptions.mode` maps to the peer's `mode` option or `mode`
+category before the same prompt. Unsupported or unmatched peer options leave
+the peer default in place and emit diagnostic events; they do not fail the user
+turn.
 ACP peer `usage_update` events are retained as structured ACP peer events and
 projected into Status observability for the peer session when they include a
 usable `used`/`size` context pair. The Status context total then reflects the
@@ -290,6 +348,10 @@ durable provider accounting exists for that peer turn. That projection is not a
 long-lived session identity: starting a non-ACP-peer turn on the same Psychevo
 session clears the retained peer usage projection while preserving the peer
 native session id so a later peer turn can still resume the ACP backend session.
+Starting a new source draft or switching from a peer runtime back to native
+must clear peer-specific Status labels and usage projections from the visible
+observability panel so stale `reported by ACP peer` state is not shown for a
+native or empty draft session.
 
 `thread/trace` reads the selected thread's persisted observability trace when a
 sidecar exists. It accepts `threadId`, optional `afterSeq`, and optional `limit`.
@@ -369,8 +431,14 @@ finishes or is interrupted.
 The Web Shell uses Gateway `completion/list` for `/`, `$`, and `@` composer
 completion. `$` completion resolves skills, local agents, and ACP capability
 mentions; accepted entries keep the visible `$name` text and send structured
-Gateway mentions on submission. `@` completion is scoped to the launched
-workdir and must not let the browser read arbitrary host files directly.
+Gateway mentions on submission. `@` completion resolves subagent-capable agent
+names alongside workdir-scoped file references; accepted agent entries keep the
+visible `@agent-name` text and send structured Gateway agent mentions on
+submission. Workdir file completion remains scoped to the launched workdir and
+must not let the browser read arbitrary host files directly. When the selected
+runtime is a peer backend that cannot orchestrate Psychevo agents, `@`
+completion omits Psychevo agent candidates but keeps file-reference completion;
+manually typed `@agent-name` text remains prompt text.
 Long completion lists remain keyboard-operable: ArrowUp/ArrowDown and
 Ctrl+P/Ctrl+N update the active option and keep it visible inside the popover
 without moving focus out of the composer textarea.

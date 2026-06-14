@@ -37,6 +37,8 @@ import {
   type ObservabilityReadResult,
   type PermissionRespondParams,
   type RpcNotification,
+  type RuntimeOptionsParams,
+  type RuntimeOptionsResult,
   type SettingsReadParams,
   type SettingsReadResult,
   type SettingsUpdateParams,
@@ -109,6 +111,7 @@ export interface GatewayRequestParams {
   "observability/read": ObservabilityReadParams;
   "initialize": InitializeParams;
   "permission/respond": PermissionRespondParams;
+  "runtime/options": RuntimeOptionsParams;
   "settings/read": SettingsReadParams;
   "settings/update": SettingsUpdateParams;
   "shell/start": ShellStartParams;
@@ -157,6 +160,7 @@ export interface GatewayRequestResults {
   "observability/read": ObservabilityReadResult;
   "initialize": InitializeResult;
   "permission/respond": InteractionRespondResult;
+  "runtime/options": RuntimeOptionsResult;
   "settings/read": SettingsReadResult;
   "settings/update": SettingsReadResult;
   "shell/start": ShellStartResult;

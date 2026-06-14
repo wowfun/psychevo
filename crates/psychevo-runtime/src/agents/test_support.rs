@@ -125,6 +125,7 @@ pub(crate) mod tests {
             denied_agent_names: BTreeSet::new(),
             required_agent_names: Vec::new(),
             spawn_depth_remaining: None,
+            external_delegate: None,
         }
     }
 

@@ -376,6 +376,7 @@ pub(crate) struct AgentToolContext {
     pub(crate) denied_agent_names: BTreeSet<String>,
     pub(crate) required_agent_names: Vec<String>,
     pub(crate) spawn_depth_remaining: Option<u8>,
+    pub(crate) external_delegate: Option<Arc<dyn crate::types::ExternalAgentDelegate>>,
 }
 
 pub(crate) struct AgentRunState {

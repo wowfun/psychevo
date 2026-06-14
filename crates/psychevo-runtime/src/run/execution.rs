@@ -364,6 +364,7 @@ pub(crate) async fn run_live_internal(
                 .unwrap_or_default(),
             required_agent_names: required_agent_mentions.clone(),
             spawn_depth_remaining: None,
+            external_delegate: options.external_agent_delegate.clone(),
         })
     } else {
         None

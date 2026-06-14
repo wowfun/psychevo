@@ -146,14 +146,15 @@ pub(crate) fn update_run_completed(
     if agent_status_is_final(state.record.status) {
         return state.record.clone();
     }
-    state.record.status = if outcome == Outcome::Normal {
-        AgentRunStatus::Completed
-    } else {
-        AgentRunStatus::Errored
+    state.record.status = match outcome {
+        Outcome::Normal => AgentRunStatus::Completed,
+        Outcome::Stopped | Outcome::Aborted => AgentRunStatus::Interrupted,
+        Outcome::Failed => AgentRunStatus::Errored,
     };
     state.record.ended_at_ms = Some(now_ms());
     state.record.outcome = Some(outcome.as_str().to_string());
     state.record.final_answer = Some(final_answer);
+    state.record.edge_status = Some(AgentEdgeStatus::Closed);
     state.record.clone()
 }
 
@@ -167,6 +168,7 @@ pub(crate) fn update_run_failed(id: &str, error: &str) {
         state.record.ended_at_ms = Some(now_ms());
         state.record.outcome = Some("failed".to_string());
         state.record.error = Some(error.to_string());
+        state.record.edge_status = Some(AgentEdgeStatus::Closed);
     }
 }
 

@@ -88,6 +88,7 @@ pub use psychevo_agent_core::{
     AssistantBlock, Message, PendingInputId, TerminalReason, ToolCallBlock, ToolDisplayBodyPolicy,
     ToolDisplayCategory, ToolDisplaySpec, UserContentBlock,
 };
+pub use psychevo_ai::AbortSignal;
 pub use psychevo_ai::Outcome;
 pub use run::{
     reload_session_context, run_live, run_live_streaming, run_live_streaming_controlled,
@@ -128,8 +129,9 @@ pub use types::{
     AgentSpawnOptions, AgentSpawnResult, ApprovalHandler, ApprovalMode, ClarifyAnswer,
     ClarifyQuestion, ClarifyQuestionOption, ClarifyRequestEvent, ClarifyResolvedEvent,
     ClarifyResolvedReason, ClarifyResponse, ClarifyResult, ConfigScope, ConfiguredModel,
-    CustomProviderInput, CustomProviderResult, ImageInput, McpServerInput, McpTransportInput,
-    ModelCatalogEntry, ModelCatalogProvider, ModelMetadataCacheTarget, PermissionApprovalDecision,
+    CustomProviderInput, CustomProviderResult, ExternalAgentDelegate, ExternalAgentDelegateRequest,
+    ExternalAgentDelegateResult, ImageInput, McpServerInput, McpTransportInput, ModelCatalogEntry,
+    ModelCatalogProvider, ModelMetadataCacheTarget, PermissionApprovalDecision,
     PermissionApprovalOutcome, PermissionApprovalRequest, PermissionConfig, PermissionMode,
     ProjectContextInstructionMode, PromptAttachmentDisplay, PromptDisplayMetadata,
     ReloadContextOptions, ReloadContextResult, RunControl, RunControlHandle, RunMode, RunOptions,

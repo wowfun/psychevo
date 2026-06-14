@@ -168,6 +168,26 @@ value is not offered, Psychevo leaves the peer default unchanged and records a
 structured diagnostic event instead of failing the turn. This mapping is a
 session configuration step, not a prompt-prefix convention, and must happen
 before `session/prompt`.
+When Gateway acts as an ACP client, `runtimeOptions.mode` is the current peer
+runtime mode. It maps to the peer's `mode` session config option or `mode`
+category before `session/prompt`, using the same unmatched-value diagnostic
+behavior as model and effort. OpenCode exposes its primary/all agents through
+that ACP `mode` option; Psychevo must present those values as OpenCode runtime
+modes rather than Psychevo agent definitions.
+
+ACP peer backends may also be used as explicit delegated subagents when a
+native Psychevo runtime invokes the `Agent` tool for an agent definition whose
+`backend.ref` names an enabled backend and whose `entrypoints` include
+`subagent`. In that case Gateway acts as the ACP client for the child
+delegation: it starts or reuses the backend session, applies the same
+model/effort/runtime-option mapping supported for peer turns, streams peer
+message, thought, tool, plan, and usage updates into the parent turn's live
+observation path, and persists the delegated child run as peer-backed evidence
+with provider `acp:<backend-id>`. This is an ACP-as-tool path, not a peer
+runtime selection shortcut. When the selected runtime itself is a peer backend,
+literal `@agent` text is passed to that peer as prompt text unless a client
+submits an explicit structured Psychevo agent mention; the peer owns whether
+that text has meaning.
 
 ACP v2 `plan_update` maps to the same live Plan/status projection as v1 `plan`
 when it carries item entries. V2 `usage_update`, `config_option_update`,
@@ -196,15 +216,18 @@ double-count reasoning or cache subcategories. If multiple runtime model turns
 drain under one ACP prompt response, numeric accounting fields are summed and
 inconsistent pricing source or tier strings become `mixed`.
 
-Psychevo ACP servers expose standard ACP v2 session config options for
-session mode, model, and reasoning effort when local configuration can provide
-selectable values. The model option uses provider-qualified ids such as
-`provider/model` and category `model`; the reasoning option uses id `effort`,
-category `thought_level`, and the runtime reasoning effort values
-`none|minimal|low|medium|high|xhigh|max`. `session/set_config_option` updates
-the ACP session state used for subsequent prompts and returns the refreshed
-option set. Slash commands such as `/model` and `/variant` remain supported for
-clients that prefer command text, but they are not the only model-control path.
+Psychevo ACP servers expose standard ACP v2 session config options for current
+runtime, current runtime mode, model, and reasoning effort when local
+configuration can provide selectable values. The mode option always represents
+the selected runtime's mode: native Psychevo uses `default|plan`, while a peer
+runtime uses the peer-provided `mode` option values. The model option uses
+provider-qualified ids such as `provider/model` and category `model`; the
+reasoning option uses id `effort`, category `thought_level`, and the runtime
+reasoning effort values `none|minimal|low|medium|high|xhigh|max`.
+`session/set_config_option` updates the ACP session state used for subsequent
+prompts and returns the refreshed option set. Slash commands such as `/model`,
+`/variant`, and `/mode` remain supported for clients that prefer command text,
+but they are not the only configuration-control path.
 
 ## Commands
 
@@ -294,8 +317,9 @@ must not be advertised as a placeholder.
 
 ## Model, Mode, And Config Projection
 
-ACP may expose model selection, mode selection, and session config options when
-runtime can honor those inputs for future prompts in the same ACP session.
+ACP may expose model selection, current-runtime mode selection, and session
+config options when runtime can honor those inputs for future prompts in the
+same ACP session.
 
 ACP initializes and loads sessions with a model state derived from local config
 and cache-first model metadata. It must not fetch provider catalogs during ACP
@@ -306,9 +330,10 @@ model switching only when they unambiguously resolve to one configured
 provider.
 
 Mode and config updates change ACP session state first. The next runtime
-invocation receives the resolved state through normal runtime inputs. Unsupported
-model, mode, or config values must return bounded protocol errors instead of
-falling back silently.
+invocation receives the resolved state through normal runtime inputs. For peer
+runtimes, the selected mode is forwarded as a peer session config option rather
+than being injected into prompt text. Unsupported model, mode, or config values
+must return bounded protocol errors instead of falling back silently.
 
 ## MCP
 

@@ -897,6 +897,9 @@ impl WebState {
             project_context_override: None,
             model: None,
             reasoning_effort: None,
+            runtime_ref: None,
+            runtime_session_id: None,
+            runtime_options: BTreeMap::new(),
             include_reasoning: false,
             mode: RunMode::Default,
             permission_mode: Some(PermissionMode::Default),
@@ -905,6 +908,7 @@ impl WebState {
             clarify_enabled: true,
             inherited_env: Some(self.inner.inherited_env.clone()),
             agent: None,
+            external_agent_delegate: None,
             no_agents: false,
             no_skills: false,
             skill_inputs: Vec::new(),
@@ -1340,6 +1344,38 @@ async fn handle_rpc(
             state.inner.state.delete_session(&params.thread_id)?;
             Ok(json!({"deleted": true, "threadId": params.thread_id}))
         }
+        "runtime/options" => {
+            let params = request.required_params::<wire::RuntimeOptionsParams>()?;
+            let scope = resolve_required_scope(&state, &auth, params.scope.clone())?;
+            if let Some(thread_id) = params.thread_id.as_deref() {
+                authorize_thread(&state, &auth, thread_id)?;
+            }
+            let runtime_ref = params.runtime_ref.trim();
+            if runtime_ref.is_empty() || runtime_ref == "native" {
+                return Ok(serde_json::to_value(wire::RuntimeOptionsResult {
+                    runtime_ref: "native".to_string(),
+                    runtime_session_id: None,
+                    options: vec![native_runtime_mode_option()],
+                })?);
+            }
+
+            let mut options = state.run_options(scope.workdir.clone(), params.thread_id.clone());
+            options.runtime_ref = Some(runtime_ref.to_string());
+            options.runtime_session_id = params.runtime_session_id.clone();
+            let peer = crate::resolve_peer_turn(&options)?
+                .ok_or_else(|| Error::Message(format!("unknown ACP runtime: {runtime_ref}")))?;
+            let runtime_options = crate::acp_peer::read_acp_peer_runtime_options(
+                peer,
+                scope.workdir.clone(),
+                params.runtime_session_id.clone(),
+            )
+            .await?;
+            Ok(serde_json::to_value(wire::RuntimeOptionsResult {
+                runtime_ref: runtime_ref.to_string(),
+                runtime_session_id: runtime_options.native_session_id,
+                options: runtime_options.options,
+            })?)
+        }
         "turn/start" => {
             let params = request.required_params::<wire::TurnStartParams>()?;
             let scope = resolve_required_scope(&state, &auth, params.scope.clone())?;
@@ -1364,6 +1400,9 @@ async fn handle_rpc(
             let mut options = state.run_options(scope.workdir.clone(), thread_id.clone());
             options.model = params.model;
             options.reasoning_effort = params.reasoning_effort;
+            options.runtime_ref = params.runtime_ref.clone();
+            options.runtime_session_id = params.runtime_session_id.clone();
+            options.runtime_options = params.runtime_options.clone();
             if let Some(mode) = params.mode.as_deref() {
                 options.mode = RunMode::parse(mode)
                     .ok_or_else(|| Error::Message(format!("unknown mode: {mode}")))?;
@@ -1375,7 +1414,7 @@ async fn handle_rpc(
                     })?);
             }
             options.agent = params.agent_name.clone();
-            apply_mentions_to_run_options(&mut options, &params.mentions);
+            apply_mentions_to_run_options(&mut options, &params.mentions)?;
             let source = scope.source.clone();
             let event_state = state.clone();
             let review_workdir = scope.workdir.clone();
@@ -2154,7 +2193,7 @@ fn completion_list_value(
     let mut items = match token.sigil {
         '/' => slash_completion_items(state, scope, params.thread_id.as_deref(), &query)?,
         '$' => dollar_completion_items(state, scope, &query)?,
-        '@' => file_completion_items(&scope.workdir, &query)?,
+        '@' => at_completion_items(state, scope, &query)?,
         _ => Vec::new(),
     };
     items.truncate(MAX_COMPLETION_ITEMS);
@@ -2293,8 +2332,39 @@ fn dollar_completion_items(
         }
     }
 
+    items.extend(agent_completion_items(state, scope, query, '$', None)?);
+    items.sort_by(|left, right| {
+        left.sort_text
+            .cmp(&right.sort_text)
+            .then(left.label.cmp(&right.label))
+    });
+    Ok(items)
+}
+
+fn at_completion_items(
+    state: &WebState,
+    scope: &ResolvedScope,
+    query: &str,
+) -> psychevo_runtime::Result<Vec<wire::CompletionItem>> {
+    let mut items =
+        agent_completion_items(state, scope, query, '@', Some(AgentEntrypoint::Subagent))?;
+    items.extend(file_completion_items(&scope.workdir, query)?);
+    Ok(items)
+}
+
+fn agent_completion_items(
+    state: &WebState,
+    scope: &ResolvedScope,
+    query: &str,
+    sigil: char,
+    required_entrypoint: Option<AgentEntrypoint>,
+) -> psychevo_runtime::Result<Vec<wire::CompletionItem>> {
+    let mut items = Vec::new();
     let agent_catalog = discover_gateway_agents(state, scope)?;
     for agent in agent_catalog.agents {
+        if required_entrypoint.is_some_and(|entrypoint| !agent.supports_entrypoint(entrypoint)) {
+            continue;
+        }
         if !completion_name_matches(&agent.name, Some(&agent.description), query) {
             continue;
         }
@@ -2308,9 +2378,9 @@ fn dollar_completion_items(
             .collect::<Vec<_>>();
         items.push(wire::CompletionItem {
             id: format!("agent:{name}"),
-            sigil: "$".to_string(),
-            label: format!("${name}"),
-            insert_text: format!("${name}"),
+            sigil: sigil.to_string(),
+            label: format!("{sigil}{name}"),
+            insert_text: format!("{sigil}{name}"),
             kind: "agent".to_string(),
             detail: Some(description),
             target: Some(wire::GatewayMentionTarget::Agent {
@@ -2322,11 +2392,6 @@ fn dollar_completion_items(
             sort_text: Some(sort_text),
         });
     }
-    items.sort_by(|left, right| {
-        left.sort_text
-            .cmp(&right.sort_text)
-            .then(left.label.cmp(&right.label))
-    });
     Ok(items)
 }
 
@@ -3310,6 +3375,7 @@ fn workbench_controls_value(
     Ok(wire::WorkbenchControlsView {
         permission_mode: PermissionMode::Default.as_str().to_string(),
         mode: RunMode::Default.as_str().to_string(),
+        runtime_ref: "native".to_string(),
         agent,
         model: selected
             .as_ref()
@@ -3335,6 +3401,26 @@ fn workbench_controls_value(
             .map(str::to_string)
             .collect(),
     })
+}
+
+fn native_runtime_mode_option() -> wire::RuntimeConfigOptionView {
+    wire::RuntimeConfigOptionView {
+        id: "mode".to_string(),
+        name: "Psychevo mode".to_string(),
+        description: None,
+        category: Some("mode".to_string()),
+        option_type: "select".to_string(),
+        current_value: Some(RunMode::Default.as_str().to_string()),
+        values: [RunMode::Default, RunMode::Plan]
+            .into_iter()
+            .map(|mode| wire::RuntimeConfigOptionValueView {
+                value: mode.as_str().to_string(),
+                name: mode.as_str().to_string(),
+                description: None,
+                group: None,
+            })
+            .collect(),
+    }
 }
 
 fn session_control_agent(
@@ -4850,24 +4936,47 @@ fn now_ms() -> i64 {
         .as_millis() as i64
 }
 
-fn apply_mentions_to_run_options(options: &mut RunOptions, mentions: &[wire::GatewayMention]) {
+fn apply_mentions_to_run_options(
+    options: &mut RunOptions,
+    mentions: &[wire::GatewayMention],
+) -> psychevo_runtime::Result<()> {
+    let peer_runtime = options
+        .runtime_ref
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "native");
     for mention in mentions {
-        let wire::GatewayMentionTarget::Skill { name, path } = &mention.target else {
-            continue;
-        };
-        let input = path
-            .as_deref()
-            .filter(|path| !path.trim().is_empty())
-            .unwrap_or(name)
-            .to_string();
-        if !options
-            .skill_inputs
-            .iter()
-            .any(|existing| existing == &input)
-        {
-            options.skill_inputs.push(input);
+        match &mention.target {
+            wire::GatewayMentionTarget::Skill { name, path } => {
+                let input = path
+                    .as_deref()
+                    .filter(|path| !path.trim().is_empty())
+                    .unwrap_or(name)
+                    .to_string();
+                if !options
+                    .skill_inputs
+                    .iter()
+                    .any(|existing| existing == &input)
+                {
+                    options.skill_inputs.push(input);
+                }
+            }
+            wire::GatewayMentionTarget::Agent {
+                name, backend_ref, ..
+            } => {
+                if let (Some(runtime), Some(backend_ref)) = (peer_runtime, backend_ref.as_deref())
+                    && runtime == backend_ref
+                {
+                    return Err(Error::Message(format!(
+                        "{} is already the current runtime; remove @{name} or switch back to Native to delegate to {backend_ref}",
+                        backend_ref
+                    )));
+                }
+            }
+            _ => {}
         }
     }
+    Ok(())
 }
 
 trait TurnStartInputExt {
@@ -5403,6 +5512,37 @@ mod tests {
         )
         .expect("agent definition");
         path
+    }
+
+    #[test]
+    fn peer_runtime_rejects_structured_self_agent_mention() {
+        let (_temp, state) = web_state();
+        let mut options = state.run_options(state.inner.workdir.clone(), None);
+        options.runtime_ref = Some("opencode".to_string());
+        let err = apply_mentions_to_run_options(
+            &mut options,
+            &[wire::GatewayMention {
+                visible_text: "@opencode".to_string(),
+                range: wire::GatewayMentionRange { start: 0, end: 9 },
+                target: wire::GatewayMentionTarget::Agent {
+                    name: "opencode".to_string(),
+                    source: Some("generated".to_string()),
+                    entrypoints: vec!["subagent".to_string()],
+                    backend_ref: Some("opencode".to_string()),
+                },
+            }],
+        )
+        .expect_err("self delegation should be rejected");
+        assert!(err.to_string().contains("already the current runtime"));
+    }
+
+    #[test]
+    fn peer_runtime_allows_literal_agent_text_without_structured_mention() {
+        let (_temp, state) = web_state();
+        let mut options = state.run_options(state.inner.workdir.clone(), None);
+        options.runtime_ref = Some("opencode".to_string());
+        apply_mentions_to_run_options(&mut options, &[]).expect("literal text is not inspected");
+        assert!(options.skill_inputs.is_empty());
     }
 
     fn web_state_with_static() -> (tempfile::TempDir, WebState) {
@@ -6604,6 +6744,55 @@ command = "cursor-agent"
             .filter_map(|item| item["label"].as_str())
             .collect::<Vec<_>>();
         assert!(labels.contains(&"@src/main.rs"));
+    }
+
+    #[tokio::test]
+    async fn completion_list_returns_agent_mentions_for_at_prefix() {
+        let (_temp, state) = web_state();
+        write_agent_definition(
+            &state.inner.workdir.join(".psychevo/agents"),
+            "review",
+            "Review the current task.",
+        );
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let result = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "completion/list".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "text": "@rev",
+                    "cursor": 4
+                })),
+            },
+        )
+        .await
+        .expect("completion/list");
+
+        let items = result["items"].as_array().expect("items");
+        let item = items
+            .iter()
+            .find(|item| item["label"] == "@review")
+            .expect("review agent completion");
+        assert_eq!(item["sigil"], "@");
+        assert_eq!(item["kind"], "agent");
+        assert_eq!(item["target"]["kind"], "agent");
+        assert_eq!(item["target"]["name"], "review");
+        assert!(
+            item["target"]["entrypoints"]
+                .as_array()
+                .expect("entrypoints")
+                .iter()
+                .any(|entrypoint| entrypoint.as_str() == Some("subagent"))
+        );
     }
 
     #[tokio::test]

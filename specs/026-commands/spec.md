@@ -181,6 +181,17 @@ command hidden only because the current GUI surface cannot represent it reports
 `known=true`, `accepted=false`, bounded guidance, and optional alternate action;
 it must not be silently sent to the model.
 
+`/mode` is scoped to the current execution runtime. On the native Psychevo
+runtime it keeps the historical `default|plan` semantics. On an ACP peer
+runtime with a compatible ACP `mode` option, `default` maps to the peer
+runtime's active default mode and `plan` maps to the peer `plan` value when
+present. Peer modes outside that base pair, such as OpenCode-specific modes,
+are addressed by their peer value. Bare `/mode` opens the current runtime's
+mode picker on interactive surfaces, or reports the current mode plus available
+values on scripted surfaces. If the selected runtime does not expose a mode
+option, surfaces return bounded guidance instead of routing the input to the
+model. Surfaces must not display peer modes as Psychevo agent definitions.
+
 Peer-agent ACP commands are dynamic catalog entries sourced from ACP
 `available_commands_update`. They are exposed as namespaced commands of the
 form `/agent:command`. Core Psychevo commands keep their canonical names and

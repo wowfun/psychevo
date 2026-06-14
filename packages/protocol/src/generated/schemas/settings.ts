@@ -156,6 +156,10 @@ export const settingsSchemas = {
           },
           "type": "array"
         },
+        "runtimeRef": {
+          "default": "",
+          "type": "string"
+        },
         "variant": {
           "default": null,
           "type": [
@@ -310,6 +314,10 @@ export const settingsSchemas = {
         "type": "string"
       },
       "type": "array"
+    },
+    "runtimeRef": {
+      "default": "",
+      "type": "string"
     },
     "variant": {
       "default": null,

@@ -8,11 +8,12 @@ use futures::future::BoxFuture;
 use psychevo_agent_core::{
     ControlHandle, ControlReceivers, Message, PendingInputId, TerminalReason,
 };
-use psychevo_ai::Outcome;
+use psychevo_ai::{AbortSignal, Outcome};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::oneshot;
 
+use crate::error::Result;
 use crate::skills::SelectedSkill;
 use crate::state_runtime::StateRuntime;
 
@@ -40,6 +41,9 @@ pub struct RunOptions {
     pub project_context_override: Option<ProjectContextInstructionMode>,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
+    pub runtime_ref: Option<String>,
+    pub runtime_session_id: Option<String>,
+    pub runtime_options: BTreeMap<String, String>,
     pub include_reasoning: bool,
     pub mode: RunMode,
     pub permission_mode: Option<PermissionMode>,
@@ -48,10 +52,40 @@ pub struct RunOptions {
     pub clarify_enabled: bool,
     pub inherited_env: Option<BTreeMap<String, String>>,
     pub agent: Option<String>,
+    pub external_agent_delegate: Option<Arc<dyn ExternalAgentDelegate>>,
     pub no_agents: bool,
     pub no_skills: bool,
     pub skill_inputs: Vec<String>,
     pub mcp_servers: Vec<McpServerInput>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExternalAgentDelegateRequest {
+    pub run_id: String,
+    pub parent_session_id: String,
+    pub child_session_id: String,
+    pub agent_name: String,
+    pub agent_description: String,
+    pub backend_ref: String,
+    pub prompt: String,
+    pub task_name: String,
+    pub model: Option<String>,
+    pub runtime_options: BTreeMap<String, String>,
+    pub abort: AbortSignal,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExternalAgentDelegateResult {
+    pub child_session_id: String,
+    pub final_answer: String,
+    pub outcome: Outcome,
+}
+
+pub trait ExternalAgentDelegate: Send + Sync + fmt::Debug {
+    fn run(
+        &self,
+        request: ExternalAgentDelegateRequest,
+    ) -> BoxFuture<'static, Result<ExternalAgentDelegateResult>>;
 }
 
 #[derive(Debug, Clone)]
@@ -1225,6 +1259,12 @@ impl fmt::Debug for RunControlHandle {
 pub struct RunControl {
     pub(crate) handle: RunControlHandle,
     pub(crate) receivers: ControlReceivers,
+}
+
+impl RunControl {
+    pub fn abort_signal(&self) -> AbortSignal {
+        self.receivers.abort_signal()
+    }
 }
 
 pub fn run_control() -> (RunControlHandle, RunControl) {

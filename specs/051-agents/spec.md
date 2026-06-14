@@ -123,6 +123,24 @@ and instruction-body construction, with additional child-run control guidance
 owned by the subagent runtime. Their persisted child sessions record a
 child-invocation prefix snapshot and prompt-scoped evidence for export and
 last-provider-request reconstruction.
+Foreground child invocations are part of the parent turn's active control
+boundary: aborting or interrupting the parent turn must abort any foreground
+native child loop that the parent is awaiting. Runtime must mark the child run
+as interrupted/aborted and close its persisted parent-child agent edge when
+the child exits. Completed, failed, or interrupted foreground and background
+child invocations must not leave durable `agent_edges` rows in an open state.
+
+When a child invocation targets an agent definition with `backend.ref` and a
+`subagent` entrypoint, runtime treats the `Agent` tool call as an external
+delegation boundary instead of synthesizing a native child loop. Runtime owns
+target validation, effective catalog visibility, unsupported background/fork
+checks, and the model-visible `Agent` tool result shape. The concrete peer
+transport is injected as an optional runtime-to-Gateway delegate because
+Gateway owns ACP client sessions and peer observation. If that delegate is not
+available, the `Agent` tool must return a structured unavailable result rather
+than falling back to a native child session that only has the peer's name.
+Ordinary local Markdown/built-in agents continue to use the existing native
+child-session path.
 
 Interactive clients may treat the selected agent as a session-scoped setting:
 changing it affects only future invocations in that session, not previous
@@ -202,6 +220,11 @@ mode, selected-agent policy, and parent safety policy are applied. If `Agent` is
 not in the effective tool surface, runtime must not inject the agent catalog
 prompt slot for that invocation. If `Agent(review,explore)` is effective,
 runtime must show only those allowed agent definitions, minus denied names.
+Backend-backed agents are advertised in the `Agent` catalog for subagent use
+only when their definition has a `backend.ref`, the referenced backend is
+enabled, and `entrypoints` includes `subagent`. A model call to such a target
+is an explicit delegated task, not a request to change the parent session's
+runtime.
 
 The `skills` frontmatter field preloads selected skill content when supported;
 it is not a callable capability grant. Runtime exposes the skill catalog prompt

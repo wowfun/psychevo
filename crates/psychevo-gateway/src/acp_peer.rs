@@ -8,7 +8,7 @@ use std::sync::{
 
 use agent_client_protocol::schema::{
     ClientCapabilities, ContentBlock, ContentChunk, FileSystemCapabilities, Implementation,
-    InitializeRequest, LoadSessionRequest, NewSessionResponse, PermissionOption,
+    InitializeRequest, LoadSessionRequest, NewSessionRequest, NewSessionResponse, PermissionOption,
     PermissionOptionKind, ProtocolVersion, ReadTextFileRequest, ReadTextFileResponse,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     SelectedPermissionOutcome, SessionNotification, SessionUpdate, WriteTextFileRequest,
@@ -20,7 +20,7 @@ use agent_client_protocol::{
 };
 use futures::{FutureExt, StreamExt, channel::mpsc, channel::oneshot};
 use psychevo_runtime::{
-    AgentDefinition, AssistantBlock, Error, ImageInput, Message, Outcome,
+    AbortSignal, AgentDefinition, AssistantBlock, Error, ImageInput, Message, Outcome,
     PermissionApprovalDecision, PermissionApprovalOutcome, PermissionApprovalRequest, RunResult,
     RunStreamEvent, RunStreamSink, SelectedAgent, ToolCallBlock, UserContentBlock,
 };
@@ -28,12 +28,22 @@ use serde_json::{Map, Value, json};
 use tokio::process::Command;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
-use crate::{ACP_PEER_METADATA_KEY, BackendTurnRequest, ResolvedPeerTurn, gateway_now_ms};
+use crate::{
+    ACP_PEER_METADATA_KEY, BackendTurnRequest, ResolvedPeerTurn, gateway_now_ms, protocol as wire,
+};
+
+const ACP_PEER_ABORT_MESSAGE: &str = "ACP peer turn aborted";
 
 #[derive(Debug)]
 pub(crate) struct AcpPeerTurnResult {
     pub(crate) run: RunResult,
     pub(crate) native_session_id: String,
+}
+
+#[derive(Debug)]
+pub(crate) struct AcpPeerRuntimeOptions {
+    pub(crate) native_session_id: Option<String>,
+    pub(crate) options: Vec<wire::RuntimeConfigOptionView>,
 }
 
 #[derive(Clone)]
@@ -49,10 +59,15 @@ pub(crate) async fn run_acp_peer_turn(
     request: BackendTurnRequest,
     _turn_id: String,
 ) -> psychevo_runtime::Result<AcpPeerTurnResult> {
+    let abort = request
+        .control
+        .as_ref()
+        .map(|control| control.abort_signal());
     let options = request.options;
     let state = options.state.clone();
     let store = state.store();
     let (session_id, existing_native_id) = ensure_local_session(&peer, &options)?;
+    let existing_native_id = existing_native_id.or(options.runtime_session_id.clone());
     let is_new_native_session = existing_native_id.is_none();
     let prompt = peer_prompt_text(
         &peer.agent,
@@ -68,8 +83,10 @@ pub(crate) async fn run_acp_peer_turn(
         prompt,
         peer_model: options.model.clone(),
         peer_reasoning_effort: options.reasoning_effort.clone(),
+        peer_runtime_mode: options.runtime_options.get("mode").cloned(),
         stream: request.stream.clone(),
         approval_handler: options.approval_handler.clone(),
+        abort,
     };
 
     emit_runtime_event(
@@ -93,6 +110,45 @@ pub(crate) async fn run_acp_peer_turn(
     let acp = run_acp_stdio_turn(&peer, &acp_context).await;
     let acp = match acp {
         Ok(acp) => acp,
+        Err(err) if is_acp_peer_abort_error(&err) => {
+            emit_runtime_event(
+                &request.stream,
+                json!({
+                    "type": "turn_complete",
+                    "session_id": session_id.clone(),
+                    "source": "peer_agent",
+                    "outcome": "aborted",
+                }),
+            );
+            let run = RunResult {
+                session_id: session_id.clone(),
+                outcome: Outcome::Aborted,
+                terminal_reason: None,
+                final_answer: String::new(),
+                db_path: state.db_path().to_path_buf(),
+                workdir: options.workdir,
+                provider: format!("acp:{}", peer.backend.id),
+                model: peer.agent.name.clone(),
+                base_url: String::new(),
+                api_key_env: None,
+                reasoning_effort: options.reasoning_effort,
+                context_limit: None,
+                tool_failures: 0,
+                selected_agent: Some(SelectedAgent {
+                    name: peer.agent.name.clone(),
+                    source: peer.agent.source.as_str().to_string(),
+                    path: peer.agent.file_path.clone(),
+                }),
+                selected_skills: Vec::new(),
+                context_snapshot: None,
+                events: Vec::new(),
+                warnings: Vec::new(),
+            };
+            return Ok(AcpPeerTurnResult {
+                run,
+                native_session_id: acp_context.native_session_id.unwrap_or_default(),
+            });
+        }
         Err(err) => {
             emit_runtime_event(
                 &request.stream,
@@ -128,6 +184,7 @@ pub(crate) async fn run_acp_peer_turn(
             &peer,
             Some(&acp.native_session_id),
             acp.usage_update.as_ref(),
+            &options.runtime_options,
         )),
     )?;
     if let Some(title) = acp.session_title.as_deref() {
@@ -199,6 +256,301 @@ pub(crate) async fn run_acp_peer_turn(
         run,
         native_session_id: acp.native_session_id,
     })
+}
+
+pub(crate) async fn read_acp_peer_runtime_options(
+    peer: ResolvedPeerTurn,
+    workdir: PathBuf,
+    native_session_id: Option<String>,
+) -> psychevo_runtime::Result<AcpPeerRuntimeOptions> {
+    match read_acp_peer_runtime_options_v2(&peer, workdir.clone(), native_session_id.clone()).await
+    {
+        Ok(result) => Ok(result),
+        Err(v2_error) => {
+            match read_acp_peer_runtime_options_v1(&peer, workdir, native_session_id).await {
+                Ok(result) => Ok(result),
+                Err(v1_error) => Err(Error::Message(format!(
+                    "ACP peer `{}` runtime options failed: {}; v1 fallback failed: {}",
+                    peer.backend.id, v2_error.error, v1_error
+                ))),
+            }
+        }
+    }
+}
+
+async fn read_acp_peer_runtime_options_v2(
+    peer: &ResolvedPeerTurn,
+    workdir: PathBuf,
+    native_session_id: Option<String>,
+) -> Result<AcpPeerRuntimeOptions, AcpProtocolAttemptError> {
+    let command = peer
+        .backend
+        .command
+        .as_deref()
+        .map(str::trim)
+        .filter(|command| !command.is_empty())
+        .ok_or_else(|| AcpProtocolAttemptError {
+            fallback_safe: false,
+            error: Error::Message(format!(
+                "agent backend `{}` is missing command",
+                peer.backend.id
+            )),
+        })?;
+    let cwd = backend_cwd(&peer.backend.cwd, &workdir);
+    let mut child = Command::new(command);
+    child
+        .args(&peer.backend.args)
+        .envs(&peer.backend.env)
+        .current_dir(&cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = child.spawn().map_err(|err| AcpProtocolAttemptError {
+        fallback_safe: false,
+        error: Error::Message(format!(
+            "failed to spawn ACP backend `{}` ({command}): {err}",
+            peer.backend.id
+        )),
+    })?;
+    let stdin = child.stdin.take().ok_or_else(|| AcpProtocolAttemptError {
+        fallback_safe: false,
+        error: Error::Message(format!(
+            "ACP backend `{}` did not provide stdin",
+            peer.backend.id
+        )),
+    })?;
+    let stdout = child.stdout.take().ok_or_else(|| AcpProtocolAttemptError {
+        fallback_safe: false,
+        error: Error::Message(format!(
+            "ACP backend `{}` did not provide stdout",
+            peer.backend.id
+        )),
+    })?;
+    let transport = ByteStreams::new(stdin.compat_write(), stdout.compat());
+    let result = Client
+        .v2()
+        .name("psychevo-gateway-acp-options")
+        .connect_with(transport, async move |cx| {
+            cx.send_request(
+                acp_v2::InitializeRequest::new(ProtocolVersion::V2)
+                    .capabilities(client_capabilities_v2())
+                    .client_info(
+                        acp_v2::Implementation::new("psychevo-gateway", env!("CARGO_PKG_VERSION"))
+                            .title("Psychevo Gateway"),
+                    ),
+            )
+            .block_task()
+            .await?;
+
+            let (native_session_id, config_options) =
+                if let Some(native_session_id) = native_session_id {
+                    let loaded = cx
+                        .send_request(acp_v2::LoadSessionRequest::new(
+                            native_session_id.clone(),
+                            &workdir,
+                        ))
+                        .block_task()
+                        .await?;
+                    (native_session_id, loaded.config_options.unwrap_or_default())
+                } else {
+                    let created = cx
+                        .send_request(acp_v2::NewSessionRequest::new(&workdir))
+                        .block_task()
+                        .await?;
+                    (
+                        created.session_id.to_string(),
+                        created.config_options.unwrap_or_default(),
+                    )
+                };
+            Ok(AcpPeerRuntimeOptions {
+                native_session_id: Some(native_session_id),
+                options: project_acp_runtime_options(
+                    serde_json::to_value(config_options).unwrap_or(Value::Null),
+                ),
+            })
+        })
+        .await;
+
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+
+    result.map_err(|err| AcpProtocolAttemptError {
+        fallback_safe: true,
+        error: Error::Message(format!("ACP peer `{}` v2 failed: {err}", peer.backend.id)),
+    })
+}
+
+async fn read_acp_peer_runtime_options_v1(
+    peer: &ResolvedPeerTurn,
+    workdir: PathBuf,
+    native_session_id: Option<String>,
+) -> psychevo_runtime::Result<AcpPeerRuntimeOptions> {
+    let command = peer
+        .backend
+        .command
+        .as_deref()
+        .map(str::trim)
+        .filter(|command| !command.is_empty())
+        .ok_or_else(|| {
+            Error::Message(format!(
+                "agent backend `{}` is missing command",
+                peer.backend.id
+            ))
+        })?;
+    let cwd = backend_cwd(&peer.backend.cwd, &workdir);
+    let mut child = Command::new(command);
+    child
+        .args(&peer.backend.args)
+        .envs(&peer.backend.env)
+        .current_dir(&cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = child.spawn().map_err(|err| {
+        Error::Message(format!(
+            "failed to spawn ACP backend `{}` ({command}): {err}",
+            peer.backend.id
+        ))
+    })?;
+    let stdin = child.stdin.take().ok_or_else(|| {
+        Error::Message(format!(
+            "ACP backend `{}` did not provide stdin",
+            peer.backend.id
+        ))
+    })?;
+    let stdout = child.stdout.take().ok_or_else(|| {
+        Error::Message(format!(
+            "ACP backend `{}` did not provide stdout",
+            peer.backend.id
+        ))
+    })?;
+    let transport = ByteStreams::new(stdin.compat_write(), stdout.compat());
+    let result = Client
+        .builder()
+        .name("psychevo-gateway-acp-options")
+        .connect_with(transport, async move |cx| {
+            cx.send_request(
+                InitializeRequest::new(ProtocolVersion::V1)
+                    .client_capabilities(client_capabilities(peer))
+                    .client_info(
+                        Implementation::new("psychevo-gateway", env!("CARGO_PKG_VERSION"))
+                            .title("Psychevo Gateway"),
+                    ),
+            )
+            .block_task()
+            .await?;
+
+            let (native_session_id, config_options) =
+                if let Some(native_session_id) = native_session_id {
+                    let loaded = cx
+                        .send_request(LoadSessionRequest::new(native_session_id.clone(), &workdir))
+                        .block_task()
+                        .await?;
+                    (native_session_id, loaded.config_options.unwrap_or_default())
+                } else {
+                    let created = cx
+                        .send_request(NewSessionRequest::new(&workdir))
+                        .block_task()
+                        .await?;
+                    (
+                        created.session_id.to_string(),
+                        created.config_options.unwrap_or_default(),
+                    )
+                };
+            Ok(AcpPeerRuntimeOptions {
+                native_session_id: Some(native_session_id),
+                options: project_acp_runtime_options(
+                    serde_json::to_value(config_options).unwrap_or(Value::Null),
+                ),
+            })
+        })
+        .await
+        .map_err(|err| Error::Message(format!("ACP peer `{}` v1 failed: {err}", peer.backend.id)));
+
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+    result
+}
+
+fn project_acp_runtime_options(value: Value) -> Vec<wire::RuntimeConfigOptionView> {
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(project_acp_runtime_option)
+        .collect()
+}
+
+fn project_acp_runtime_option(option: &Value) -> Option<wire::RuntimeConfigOptionView> {
+    let id = string_field(option, "id")?;
+    let name = string_field(option, "name").unwrap_or_else(|| id.clone());
+    Some(wire::RuntimeConfigOptionView {
+        id,
+        name,
+        description: string_field(option, "description"),
+        category: string_field(option, "category"),
+        option_type: string_field(option, "type").unwrap_or_else(|| "unknown".to_string()),
+        current_value: current_value_string(option.get("currentValue")),
+        values: project_acp_runtime_option_values(option),
+    })
+}
+
+fn project_acp_runtime_option_values(option: &Value) -> Vec<wire::RuntimeConfigOptionValueView> {
+    let Some(values) = option.get("options").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let grouped = values.iter().any(|value| value.get("options").is_some());
+    if grouped {
+        return values
+            .iter()
+            .flat_map(|group| {
+                let group_name =
+                    string_field(group, "name").or_else(|| string_field(group, "group"));
+                group
+                    .get("options")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(move |value| {
+                        project_acp_runtime_option_value(value, group_name.clone())
+                    })
+            })
+            .collect();
+    }
+    values
+        .iter()
+        .filter_map(|value| project_acp_runtime_option_value(value, None))
+        .collect()
+}
+
+fn project_acp_runtime_option_value(
+    value: &Value,
+    group: Option<String>,
+) -> Option<wire::RuntimeConfigOptionValueView> {
+    let id = string_field(value, "value")?;
+    Some(wire::RuntimeConfigOptionValueView {
+        value: id.clone(),
+        name: string_field(value, "name").unwrap_or(id),
+        description: string_field(value, "description"),
+        group,
+    })
+}
+
+fn current_value_string(value: Option<&Value>) -> Option<String> {
+    match value? {
+        Value::String(value) => Some(value.clone()),
+        Value::Bool(value) => Some(value.to_string()),
+        Value::Number(value) => Some(value.to_string()),
+        value => string_field(value, "value"),
+    }
+}
+
+fn string_field(value: &Value, field: &str) -> Option<String> {
+    value
+        .get(field)
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .filter(|value| !value.is_empty())
 }
 
 struct AcpTurnOutput {
@@ -809,8 +1161,10 @@ struct AcpPeerTurnContext {
     prompt: String,
     peer_model: Option<String>,
     peer_reasoning_effort: Option<String>,
+    peer_runtime_mode: Option<String>,
     stream: Option<RunStreamSink>,
     approval_handler: Option<Arc<dyn psychevo_runtime::ApprovalHandler>>,
+    abort: Option<AbortSignal>,
 }
 
 async fn run_acp_stdio_turn(
@@ -836,6 +1190,18 @@ async fn run_acp_stdio_turn(
     }
 
     run_acp_stdio_turn_v1(peer, context).await
+}
+
+async fn wait_for_optional_abort(abort: Option<AbortSignal>) {
+    if let Some(mut abort) = abort {
+        abort.wait_for_abort().await;
+    } else {
+        std::future::pending::<()>().await;
+    }
+}
+
+fn is_acp_peer_abort_error(err: &Error) -> bool {
+    err.to_string().contains(ACP_PEER_ABORT_MESSAGE)
 }
 
 struct AcpProtocolAttemptError {
@@ -1019,6 +1385,8 @@ async fn run_acp_stdio_turn_v2(
     let turn_prompt = turn.prompt.clone();
     let turn_peer_model = turn.peer_model.clone();
     let turn_peer_reasoning_effort = turn.peer_reasoning_effort.clone();
+    let turn_peer_runtime_mode = turn.peer_runtime_mode.clone();
+    let turn_abort = turn.abort.clone();
 
     let result = Client
         .v2()
@@ -1117,6 +1485,22 @@ async fn run_acp_stdio_turn_v2(
                 .await;
             }
 
+            if let Some(mode) = turn_peer_runtime_mode.as_deref() {
+                apply_acp_v2_config_option(
+                    &cx,
+                    &mut config_options,
+                    &native_session_id,
+                    &turn_local_session_id,
+                    &turn_stream,
+                    AcpPeerConfigSelection {
+                        config_id: "mode",
+                        category: acp_v2::SessionConfigOptionCategory::Mode,
+                        requested: mode,
+                    },
+                )
+                .await;
+            }
+
             let prompt_request = acp_v2::PromptRequest::new(
                 native_session_id.clone(),
                 vec![acp_v2::ContentBlock::Text(acp_v2::TextContent::new(
@@ -1137,6 +1521,8 @@ async fn run_acp_stdio_turn_v2(
                 }
             })?;
             let mut done_rx = done_rx.fuse();
+            let abort = wait_for_optional_abort(turn_abort).fuse();
+            futures::pin_mut!(abort);
 
             loop {
                 futures::select! {
@@ -1158,6 +1544,10 @@ async fn run_acp_stdio_turn_v2(
                             .map_err(|_| agent_client_protocol::Error::internal_error().data("prompt response channel cancelled"))?;
                         response?;
                         break;
+                    }
+                    _ = abort => {
+                        state.finish();
+                        return Err(agent_client_protocol::Error::internal_error().data(ACP_PEER_ABORT_MESSAGE));
                     }
                 }
             }
@@ -1256,6 +1646,7 @@ async fn run_acp_stdio_turn_v1(
     let turn_local_session_id = turn.local_session_id.clone();
     let turn_native_session_id = turn.native_session_id.clone();
     let turn_prompt = turn.prompt.clone();
+    let turn_abort = turn.abort.clone();
 
     let result = Client
         .builder()
@@ -1331,8 +1722,16 @@ async fn run_acp_stdio_turn_v1(
             };
             session.send_prompt(turn_prompt)?;
             let mut state = AcpPeerStreamState::new(turn_stream, turn_local_session_id);
+            let abort = wait_for_optional_abort(turn_abort);
+            tokio::pin!(abort);
             loop {
-                let update = session.read_update().await?;
+                let update = tokio::select! {
+                    update = session.read_update() => update?,
+                    _ = &mut abort => {
+                        state.finish();
+                        return Err(agent_client_protocol::Error::internal_error().data(ACP_PEER_ABORT_MESSAGE));
+                    }
+                };
                 match update {
                     SessionMessage::SessionMessage(dispatch) => {
                         MatchDispatch::new(dispatch)
@@ -1403,6 +1802,7 @@ fn peer_session_metadata(
     peer: &ResolvedPeerTurn,
     native_session_id: Option<&str>,
     usage_update: Option<&Value>,
+    runtime_options: &BTreeMap<String, String>,
 ) -> Value {
     let mut value = json!({
         "agentName": peer.agent.name.clone(),
@@ -1426,12 +1826,17 @@ fn peer_session_metadata(
     {
         object.insert("usageUpdate".to_string(), usage_update.clone());
     }
+    if !runtime_options.is_empty()
+        && let Some(object) = value.as_object_mut()
+    {
+        object.insert("runtimeOptions".to_string(), json!(runtime_options));
+    }
     value
 }
 
 fn peer_root_metadata(peer: &ResolvedPeerTurn, native_session_id: Option<&str>) -> Value {
     json!({
-        ACP_PEER_METADATA_KEY: peer_session_metadata(peer, native_session_id, None),
+        ACP_PEER_METADATA_KEY: peer_session_metadata(peer, native_session_id, None, &BTreeMap::new()),
     })
 }
 

@@ -14,7 +14,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::future::BoxFuture;
 use psychevo_runtime::{
-    AgentDiscoveryOptions, AgentEntrypoint, ApprovalHandler, ClarifyResult, Error,
+    AbortSignal, AgentDiscoveryOptions, AgentEntrypoint, ApprovalHandler, ClarifyResult, Error,
+    ExternalAgentDelegate, ExternalAgentDelegateRequest, ExternalAgentDelegateResult,
     GatewaySourceBindingInput, ImageInput, PermissionApprovalDecision, PermissionApprovalOutcome,
     PermissionApprovalRequest, RunControl, RunControlHandle, RunOptions, RunResult, RunStreamEvent,
     RunStreamSink, StateRuntime, UserShellContextOptions, UserShellOptions, UserShellResult,
@@ -592,6 +593,12 @@ impl Gateway {
         {
             clear_acp_peer_usage_update(&self.state, thread_id)?;
         }
+        if peer.is_none() {
+            options.external_agent_delegate = Some(Arc::new(GatewayExternalAgentDelegate {
+                base_options: options.clone(),
+                stream: stream.clone(),
+            }));
+        }
         let backend_request = BackendTurnRequest {
             options,
             runtime_source: source_name,
@@ -1075,29 +1082,78 @@ pub(crate) struct ResolvedPeerTurn {
     pub(crate) backend: psychevo_runtime::AgentBackendConfig,
 }
 
-fn resolve_peer_turn(options: &RunOptions) -> psychevo_runtime::Result<Option<ResolvedPeerTurn>> {
+pub(crate) fn resolve_peer_turn(
+    options: &RunOptions,
+) -> psychevo_runtime::Result<Option<ResolvedPeerTurn>> {
     if options.no_agents {
         return Ok(None);
     }
-    let Some(agent_input) = options.agent.as_ref() else {
+    let native_runtime_requested = options
+        .runtime_ref
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|value| value == "native");
+    let runtime_ref = options
+        .runtime_ref
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "native");
+    let agent_input = options.agent.as_ref();
+    if runtime_ref.is_none() && agent_input.is_none() {
         return Ok(None);
-    };
+    }
     let env = options
         .inherited_env
         .clone()
         .unwrap_or_else(|| std::env::vars().collect());
     let agents_home = resolve_skills_home(&env, &options.workdir)?;
+    let explicit_inputs = match (agent_input, runtime_ref) {
+        (Some(agent), Some(runtime)) if agent != runtime => {
+            vec![agent.clone(), runtime.to_string()]
+        }
+        (Some(agent), _) => vec![agent.clone()],
+        (None, Some(runtime)) => vec![runtime.to_string()],
+        (None, None) => Vec::new(),
+    };
     let catalog = discover_agents(&AgentDiscoveryOptions {
         home: agents_home.clone(),
         workdir: options.workdir.clone(),
         env: env.clone(),
-        explicit_inputs: vec![agent_input.clone()],
+        explicit_inputs,
         no_agents: false,
     })?;
-    let agent = resolve_agent_definition(&catalog, agent_input, &options.workdir, &env)?;
+    let agent = match (agent_input, runtime_ref) {
+        (Some(agent_input), _) => {
+            resolve_agent_definition(&catalog, agent_input, &options.workdir, &env)?
+        }
+        (None, Some(runtime)) => {
+            resolve_agent_definition(&catalog, runtime, &options.workdir, &env)?
+        }
+        (None, None) => return Ok(None),
+    };
     let Some(backend_ref) = agent.backend.as_ref() else {
+        if let Some(runtime) = runtime_ref {
+            return Err(Error::Message(format!(
+                "agent `{}` cannot run on runtime `{runtime}`; ACP peer runtimes run their own modes, not Psychevo agent definitions",
+                agent.name
+            )));
+        }
         return Ok(None);
     };
+    if native_runtime_requested {
+        return Err(Error::Message(format!(
+            "agent `{}` is backed by ACP runtime `{}` and cannot run on native runtime",
+            agent.name, backend_ref.name
+        )));
+    }
+    if let Some(runtime) = runtime_ref
+        && backend_ref.name != runtime
+    {
+        return Err(Error::Message(format!(
+            "agent `{}` uses backend `{}` and cannot run on runtime `{runtime}`",
+            agent.name, backend_ref.name
+        )));
+    }
     if !agent.supports_entrypoint(AgentEntrypoint::Peer) {
         return Err(Error::Message(format!(
             "agent `{}` references backend `{}` but does not support the peer entrypoint",
@@ -1144,7 +1200,7 @@ fn clear_acp_peer_usage_update(
     if peer.remove("usageUpdate").is_none() {
         return Ok(());
     }
-    let value = (!peer.is_empty()).then(|| Value::Object(peer));
+    let value = (!peer.is_empty()).then_some(Value::Object(peer));
     state
         .store()
         .set_session_metadata_field(session_id, ACP_PEER_METADATA_KEY, value)
@@ -1401,6 +1457,154 @@ pub trait GatewayBackend: Send + Sync + fmt::Debug {
         &self,
         request: BackendTurnRequest,
     ) -> BoxFuture<'static, psychevo_runtime::Result<RunResult>>;
+}
+
+#[derive(Clone)]
+struct GatewayExternalAgentDelegate {
+    base_options: RunOptions,
+    stream: Option<RunStreamSink>,
+}
+
+impl fmt::Debug for GatewayExternalAgentDelegate {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GatewayExternalAgentDelegate")
+            .field("workdir", &self.base_options.workdir)
+            .field("has_stream", &self.stream.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+impl ExternalAgentDelegate for GatewayExternalAgentDelegate {
+    fn run(
+        &self,
+        request: ExternalAgentDelegateRequest,
+    ) -> BoxFuture<'static, psychevo_runtime::Result<ExternalAgentDelegateResult>> {
+        let delegate = self.clone();
+        Box::pin(async move { delegate.run_inner(request).await })
+    }
+}
+
+impl GatewayExternalAgentDelegate {
+    async fn run_inner(
+        self,
+        request: ExternalAgentDelegateRequest,
+    ) -> psychevo_runtime::Result<ExternalAgentDelegateResult> {
+        let peer = resolve_peer_delegate(&self.base_options, &request)?;
+        let child_session_id = request.child_session_id.clone();
+        let mut options = self.base_options.clone();
+        options.session = Some(child_session_id.clone());
+        options.continue_latest = false;
+        options.prompt = request.prompt.clone();
+        options.image_inputs = Vec::new();
+        options.prompt_display = None;
+        options.model = request.model.clone().or(options.model);
+        options.runtime_ref = Some(request.backend_ref.clone());
+        options.runtime_session_id = None;
+        options.runtime_options = request.runtime_options.clone();
+        options.agent = Some(request.agent_name.clone());
+        options.external_agent_delegate = None;
+        let (control_handle, control) = run_control();
+        let abort_bridge =
+            spawn_external_delegate_abort_bridge(request.abort.clone(), control_handle);
+        let stream = self.stream.map(|stream| {
+            let child_session_id = child_session_id.clone();
+            Arc::new(move |event| {
+                stream(RunStreamEvent::scoped(child_session_id.clone(), event));
+            }) as RunStreamSink
+        });
+        let result = acp_peer::run_acp_peer_turn(
+            peer,
+            BackendTurnRequest {
+                options,
+                runtime_source: "agent".to_string(),
+                continue_sources: vec!["agent".to_string()],
+                stream,
+                control: Some(control),
+            },
+            request.run_id,
+        )
+        .await;
+        abort_bridge.abort();
+        let result = result?;
+        Ok(ExternalAgentDelegateResult {
+            child_session_id,
+            final_answer: result.run.final_answer,
+            outcome: result.run.outcome,
+        })
+    }
+}
+
+fn spawn_external_delegate_abort_bridge(
+    mut abort: AbortSignal,
+    control: RunControlHandle,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        abort.wait_for_abort().await;
+        control.abort();
+    })
+}
+
+fn resolve_peer_delegate(
+    options: &RunOptions,
+    request: &ExternalAgentDelegateRequest,
+) -> psychevo_runtime::Result<ResolvedPeerTurn> {
+    if options.no_agents {
+        return Err(Error::Message("agent delegation is disabled".to_string()));
+    }
+    let env = options
+        .inherited_env
+        .clone()
+        .unwrap_or_else(|| std::env::vars().collect());
+    let agents_home = resolve_skills_home(&env, &options.workdir)?;
+    let catalog = discover_agents(&AgentDiscoveryOptions {
+        home: agents_home.clone(),
+        workdir: options.workdir.clone(),
+        env: env.clone(),
+        explicit_inputs: vec![request.agent_name.clone()],
+        no_agents: false,
+    })?;
+    let agent = resolve_agent_definition(&catalog, &request.agent_name, &options.workdir, &env)?;
+    let Some(backend_ref) = agent.backend.as_ref() else {
+        return Err(Error::Message(format!(
+            "agent `{}` is not backed by an ACP backend",
+            agent.name
+        )));
+    };
+    if backend_ref.name != request.backend_ref {
+        return Err(Error::Message(format!(
+            "agent `{}` uses backend `{}` and cannot delegate to backend `{}`",
+            agent.name, backend_ref.name, request.backend_ref
+        )));
+    }
+    if !agent.supports_entrypoint(AgentEntrypoint::Subagent) {
+        return Err(Error::Message(format!(
+            "agent `{}` references backend `{}` but does not support the subagent entrypoint",
+            agent.name, backend_ref.name
+        )));
+    }
+    let backends = load_agent_backend_configs(&agents_home, &options.workdir, &env)?;
+    let backend = backends
+        .get(&backend_ref.name)
+        .cloned()
+        .ok_or_else(|| Error::Message(format!("unknown agent backend: {}", backend_ref.name)))?;
+    if !backend.enabled {
+        return Err(Error::Message(format!(
+            "agent backend `{}` is disabled",
+            backend.id
+        )));
+    }
+    if backend
+        .command
+        .as_deref()
+        .is_none_or(|command| command.trim().is_empty())
+    {
+        return Err(Error::Message(format!(
+            "agent backend `{}` is missing command",
+            backend.id
+        )));
+    }
+    Ok(ResolvedPeerTurn { agent, backend })
 }
 
 #[derive(Debug)]
@@ -1757,6 +1961,9 @@ mod tests {
             project_context_override: None,
             model: None,
             reasoning_effort: None,
+            runtime_ref: None,
+            runtime_session_id: None,
+            runtime_options: std::collections::BTreeMap::new(),
             include_reasoning: false,
             mode: RunMode::Default,
             permission_mode: Some(PermissionMode::Default),
@@ -1765,6 +1972,7 @@ mod tests {
             clarify_enabled: false,
             inherited_env: None,
             agent: None,
+            external_agent_delegate: None,
             no_agents: false,
             no_skills: false,
             skill_inputs: Vec::new(),
@@ -1788,6 +1996,72 @@ mod tests {
             control: None,
             lineage: None,
         }
+    }
+
+    #[test]
+    fn peer_delegate_resolver_accepts_subagent_only_backend_agent() {
+        let backend = Arc::new(FakeBackend::default());
+        let harness = harness(backend);
+        let home = harness._temp.path().join("home");
+        std::fs::create_dir_all(&home).expect("home");
+        std::fs::write(
+            home.join("config.toml"),
+            r#"[agents.backends.fake]
+kind = "acp"
+description = "Fake ACP agent."
+command = "python3"
+args = ["fake_acp.py"]
+entrypoints = ["subagent"]
+"#,
+        )
+        .expect("config");
+        let agents_dir = harness.workdir.join(".psychevo").join("agents");
+        std::fs::create_dir_all(&agents_dir).expect("agents dir");
+        std::fs::write(
+            agents_dir.join("opencode.md"),
+            r#"---
+name: opencode
+description: Delegate to fake ACP.
+backend:
+  ref: fake
+entrypoints: [subagent]
+---
+Delegate.
+"#,
+        )
+        .expect("agent");
+        let mut options = run_options(&harness, "@opencode list tools");
+        options.inherited_env = Some(BTreeMap::from([
+            (
+                "HOME".to_string(),
+                harness._temp.path().display().to_string(),
+            ),
+            ("PSYCHEVO_HOME".to_string(), home.display().to_string()),
+        ]));
+
+        let peer = resolve_peer_delegate(
+            &options,
+            &ExternalAgentDelegateRequest {
+                run_id: "run-1".to_string(),
+                parent_session_id: "parent".to_string(),
+                child_session_id: "child".to_string(),
+                agent_name: "opencode".to_string(),
+                agent_description: "Delegate to fake ACP.".to_string(),
+                backend_ref: "fake".to_string(),
+                prompt: "list tools".to_string(),
+                task_name: "opencode-run".to_string(),
+                model: None,
+                runtime_options: BTreeMap::new(),
+                abort: {
+                    let (_abort_tx, abort_rx) = tokio::sync::watch::channel(false);
+                    AbortSignal::new(abort_rx)
+                },
+            },
+        )
+        .expect("delegate peer");
+        assert_eq!(peer.backend.id, "fake");
+        assert!(peer.agent.supports_entrypoint(AgentEntrypoint::Subagent));
+        assert!(!peer.agent.supports_entrypoint(AgentEntrypoint::Peer));
     }
 
     #[tokio::test]
@@ -2260,6 +2534,98 @@ model = "lmstudio/test-model"
 
         wait.release.notify_one();
         first.await.expect("first task").expect("first turn");
+    }
+
+    #[tokio::test]
+    async fn runtime_ref_resolves_generated_peer_backend_without_agent_selection() {
+        let backend = Arc::new(FakeBackend::default());
+        let harness = harness(backend);
+        let home = harness._temp.path().join("home");
+        std::fs::create_dir_all(&home).expect("home");
+        std::fs::write(
+            home.join("config.toml"),
+            r#"[agents.backends.opencode]
+kind = "acp"
+description = "OpenCode ACP runtime."
+command = "opencode"
+args = ["acp"]
+entrypoints = ["peer"]
+client_capabilities = ["fs.read"]
+"#,
+        )
+        .expect("config");
+
+        let env = BTreeMap::from([
+            (
+                "HOME".to_string(),
+                harness._temp.path().display().to_string(),
+            ),
+            ("PSYCHEVO_HOME".to_string(), home.display().to_string()),
+        ]);
+        let mut options = run_options(&harness, "hello");
+        options.runtime_ref = Some("opencode".to_string());
+        options.inherited_env = Some(env);
+
+        let peer = resolve_peer_turn(&options)
+            .expect("resolve peer")
+            .expect("peer runtime");
+
+        assert_eq!(peer.agent.name, "opencode");
+        assert_eq!(peer.backend.id, "opencode");
+    }
+
+    #[tokio::test]
+    async fn runtime_ref_rejects_local_agent_definitions() {
+        let backend = Arc::new(FakeBackend::default());
+        let harness = harness(backend);
+        let home = harness._temp.path().join("home");
+        std::fs::create_dir_all(&home).expect("home");
+        std::fs::write(
+            home.join("config.toml"),
+            r#"[agents.backends.opencode]
+kind = "acp"
+description = "OpenCode ACP runtime."
+command = "opencode"
+args = ["acp"]
+entrypoints = ["peer"]
+client_capabilities = ["fs.read"]
+"#,
+        )
+        .expect("config");
+        let agents_dir = harness.workdir.join(".psychevo").join("agents");
+        std::fs::create_dir_all(&agents_dir).expect("agents dir");
+        std::fs::write(
+            agents_dir.join("translate.md"),
+            r#"---
+name: translate
+description: Translate messages.
+entrypoints: [subagent]
+---
+Translate the prompt.
+"#,
+        )
+        .expect("agent file");
+
+        let env = BTreeMap::from([
+            (
+                "HOME".to_string(),
+                harness._temp.path().display().to_string(),
+            ),
+            ("PSYCHEVO_HOME".to_string(), home.display().to_string()),
+        ]);
+        let mut options = run_options(&harness, "hello");
+        options.agent = Some("translate".to_string());
+        options.runtime_ref = Some("opencode".to_string());
+        options.inherited_env = Some(env);
+
+        let error = resolve_peer_turn(&options).expect_err("incompatible runtime");
+
+        assert!(
+            error
+                .to_string()
+                .contains("ACP peer runtimes run their own modes"),
+            "{error}"
+        );
     }
 
     #[tokio::test]

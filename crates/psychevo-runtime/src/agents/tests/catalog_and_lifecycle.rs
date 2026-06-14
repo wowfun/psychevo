@@ -79,6 +79,7 @@ Coordinate.
             denied_agent_names: coordinator.tool_policy.denied_agents.clone(),
             required_agent_names: Vec::new(),
             spawn_depth_remaining: None,
+            external_delegate: None,
         },
         AgentToolArgs {
             agent_type: Some("explore-extra".to_string()),

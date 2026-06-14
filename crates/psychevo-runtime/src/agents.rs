@@ -42,9 +42,9 @@ pub(crate) use crate::tool_surface::{
     ClarifyToolSurface, ToolSurfaceAssembly, assemble_tool_surface_with_warnings,
 };
 pub(crate) use crate::types::{
-    ApprovalHandler, ApprovalMode, ModelMetadata, PermissionConfig, PermissionMode,
-    ProjectContextInstructionMode, RunMode, RunStreamEvent, RunStreamSink, SelectedAgent,
-    SessionSummary, SmokeControl,
+    ApprovalHandler, ApprovalMode, ExternalAgentDelegateRequest, ModelMetadata, PermissionConfig,
+    PermissionMode, ProjectContextInstructionMode, RunMode, RunStreamEvent, RunStreamSink,
+    SelectedAgent, SessionSummary, SmokeControl,
 };
 
 #[allow(unused_imports)]

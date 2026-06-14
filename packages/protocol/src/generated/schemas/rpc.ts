@@ -1032,6 +1032,35 @@ export const rpcSchemas = {
       ],
       "type": "object"
     },
+    "RuntimeOptionsParams": {
+      "properties": {
+        "runtimeRef": {
+          "type": "string"
+        },
+        "runtimeSessionId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        "threadId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "runtimeRef",
+        "scope"
+      ],
+      "type": "object"
+    },
     "SettingsReadParams": {
       "properties": {
         "threadId": {
@@ -1377,6 +1406,27 @@ export const rpcSchemas = {
           ]
         },
         "reasoningEffort": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimeOptions": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "runtimeRef": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimeSessionId": {
           "default": null,
           "type": [
             "string",
@@ -1760,6 +1810,24 @@ export const rpcSchemas = {
         },
         "params": {
           "$ref": "#/definitions/TurnInterruptParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "runtime/options"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/RuntimeOptionsParams"
         }
       },
       "required": [

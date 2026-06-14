@@ -74,6 +74,9 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
             .get("reasoning_effort")
             .and_then(serde_json::Value::as_str)
             .map(str::to_string),
+        runtime_ref: None,
+        runtime_session_id: None,
+        runtime_options: std::collections::BTreeMap::new(),
         include_reasoning: false,
         mode,
         permission_mode: None,
@@ -82,6 +85,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
         clarify_enabled: false,
         inherited_env: Some(env.clone()),
         agent: None,
+        external_agent_delegate: None,
         no_agents: options.no_agents,
         no_skills: options.no_skills,
         skill_inputs: Vec::new(),
@@ -188,6 +192,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
                 .unwrap_or_default(),
             required_agent_names: Vec::new(),
             spawn_depth_remaining: None,
+            external_delegate: None,
         })
     } else {
         None
@@ -306,6 +311,9 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         project_context_override: None,
         model: options.model.clone(),
         reasoning_effort: options.reasoning_effort.clone(),
+        runtime_ref: None,
+        runtime_session_id: None,
+        runtime_options: std::collections::BTreeMap::new(),
         include_reasoning: false,
         mode: options.mode,
         permission_mode: options.permission_mode,
@@ -314,6 +322,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         clarify_enabled: false,
         inherited_env: options.inherited_env.clone(),
         agent: options.selected_parent_agent.clone(),
+        external_agent_delegate: None,
         no_agents: false,
         no_skills: options.no_skills,
         skill_inputs: options.skill_inputs.clone(),
@@ -474,6 +483,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
             .unwrap_or_default(),
         required_agent_names: Vec::new(),
         spawn_depth_remaining: None,
+        external_delegate: None,
     };
     let agent = spawn_child_agent_background(context, child_agent, options.prompt)?;
     Ok(AgentSpawnResult {

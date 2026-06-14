@@ -877,6 +877,12 @@ pub struct TurnStartParams {
     #[serde(default)]
     pub agent_name: Option<String>,
     #[serde(default)]
+    pub runtime_ref: Option<String>,
+    #[serde(default)]
+    pub runtime_session_id: Option<String>,
+    #[serde(default)]
+    pub runtime_options: BTreeMap<String, String>,
+    #[serde(default)]
     pub input: Vec<GatewayInputPart>,
     #[serde(default)]
     pub mentions: Vec<GatewayMention>,
@@ -908,6 +914,54 @@ pub struct TurnInterruptParams {
     pub thread_id: Option<String>,
     #[serde(default)]
     pub source_key: Option<SourceKey>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeOptionsParams {
+    pub scope: GatewayRequestScope,
+    #[serde(default)]
+    pub thread_id: Option<String>,
+    pub runtime_ref: String,
+    #[serde(default)]
+    pub runtime_session_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeConfigOptionValueView {
+    pub value: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub group: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeConfigOptionView {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub category: Option<String>,
+    #[serde(rename = "type")]
+    pub option_type: String,
+    #[serde(default)]
+    pub current_value: Option<String>,
+    #[serde(default)]
+    pub values: Vec<RuntimeConfigOptionValueView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeOptionsResult {
+    pub runtime_ref: String,
+    #[serde(default)]
+    pub runtime_session_id: Option<String>,
+    pub options: Vec<RuntimeConfigOptionView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -1054,6 +1108,8 @@ pub struct WorkbenchProjectView {
 pub struct WorkbenchControlsView {
     pub permission_mode: String,
     pub mode: String,
+    #[serde(default)]
+    pub runtime_ref: String,
     #[serde(default)]
     pub agent: Option<String>,
     #[serde(default)]
@@ -1784,6 +1840,8 @@ pub enum ClientRequest {
     TurnSteer(TurnSteerParams),
     #[serde(rename = "turn/interrupt")]
     TurnInterrupt(TurnInterruptParams),
+    #[serde(rename = "runtime/options")]
+    RuntimeOptions(RuntimeOptionsParams),
     #[serde(rename = "completion/list")]
     CompletionList(CompletionListParams),
     #[serde(rename = "command/list")]
@@ -2012,7 +2070,7 @@ fn schema_group_module(name: &str) -> &'static str {
     if name.starts_with("Shell") {
         return "shell";
     }
-    if name.starts_with("Turn") {
+    if name.starts_with("Turn") || name.starts_with("Runtime") {
         return "turn";
     }
     if name.starts_with("Permission")
@@ -2264,6 +2322,10 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(TurnStartParams),
         exported_type!(TurnSteerParams),
         exported_type!(TurnInterruptParams),
+        exported_type!(RuntimeOptionsParams),
+        exported_type!(RuntimeConfigOptionValueView),
+        exported_type!(RuntimeConfigOptionView),
+        exported_type!(RuntimeOptionsResult),
         exported_type!(TurnStartResult),
         exported_type!(TurnControlResult),
         exported_type!(TurnResultPayload),

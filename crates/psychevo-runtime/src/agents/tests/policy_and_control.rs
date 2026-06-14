@@ -1,6 +1,89 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
+#[derive(Debug, Default)]
+struct FakeExternalAgentDelegate {
+    calls: Arc<Mutex<Vec<ExternalAgentDelegateRequest>>>,
+}
+
+impl crate::types::ExternalAgentDelegate for FakeExternalAgentDelegate {
+    fn run(
+        &self,
+        request: ExternalAgentDelegateRequest,
+    ) -> BoxFuture<'static, Result<crate::types::ExternalAgentDelegateResult>> {
+        self.calls
+            .lock()
+            .expect("delegate calls lock poisoned")
+            .push(request.clone());
+        Box::pin(async move {
+            Ok(crate::types::ExternalAgentDelegateResult {
+                child_session_id: request.child_session_id,
+                final_answer: "delegated final".to_string(),
+                outcome: Outcome::Normal,
+            })
+        })
+    }
+}
+
+#[derive(Debug, Default)]
+struct AbortAwareExternalAgentDelegate {
+    started: Arc<tokio::sync::Notify>,
+}
+
+impl crate::types::ExternalAgentDelegate for AbortAwareExternalAgentDelegate {
+    fn run(
+        &self,
+        request: ExternalAgentDelegateRequest,
+    ) -> BoxFuture<'static, Result<crate::types::ExternalAgentDelegateResult>> {
+        let started = Arc::clone(&self.started);
+        Box::pin(async move {
+            started.notify_waiters();
+            let mut abort = request.abort.clone();
+            abort.wait_for_abort().await;
+            Ok(crate::types::ExternalAgentDelegateResult {
+                child_session_id: request.child_session_id,
+                final_answer: String::new(),
+                outcome: Outcome::Aborted,
+            })
+        })
+    }
+}
+
+#[derive(Debug, Default)]
+struct AbortAwareProvider {
+    started: Arc<tokio::sync::Notify>,
+}
+
+impl GenerationProvider for AbortAwareProvider {
+    fn stream(
+        &self,
+        _request: psychevo_ai::GenerationRequest,
+        mut abort: AbortSignal,
+    ) -> BoxFuture<'static, psychevo_ai::Result<psychevo_ai::GenerationStream>> {
+        let started = Arc::clone(&self.started);
+        Box::pin(async move {
+            started.notify_waiters();
+            abort.wait_for_abort().await;
+            let stream: psychevo_ai::GenerationStream = Box::pin(futures::stream::iter([Ok(
+                psychevo_ai::StreamEvent::Done {
+                    outcome: Outcome::Aborted,
+                    finish_reason: Some("aborted".to_string()),
+                },
+            )]));
+            Ok(stream)
+        })
+    }
+}
+
+fn backend_backed_agent(name: &str, backend: &str) -> AgentDefinition {
+    let mut agent = built_in_agent(name, "Backend agent", "Delegates.", None);
+    agent.backend = Some(AgentBackendRef {
+        name: backend.to_string(),
+    });
+    agent.entrypoints = default_subagent_entrypoints();
+    agent
+}
+
 #[test]
 pub(crate) fn agent_control_tool_schemas_describe_parameters() {
     let tmp = TempDir::new().expect("tmp");
@@ -393,6 +476,303 @@ pub(crate) async fn foreground_agent_tool_result_uses_compact_model_summary() {
     assert!(model_value.get("agent_id").is_none());
     assert!(model_value.get("child_session_id").is_none());
     assert!(model_value.get("effective_max_spawn_depth").is_none());
+}
+
+#[tokio::test]
+pub(crate) async fn foreground_child_agent_closes_edge_after_completion() {
+    let tmp = TempDir::new().expect("tmp");
+    let db_path = tmp.path().join("state.sqlite");
+    let store = SqliteStore::open(&db_path).expect("store");
+    let parent = store
+        .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+        .expect("parent");
+    let catalog = AgentCatalog {
+        agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
+        shadowed_agents: Vec::new(),
+        diagnostics: Vec::new(),
+    };
+    let (_tx, rx) = watch::channel(false);
+    let output = spawn_subagent(
+        test_agent_tool_context(
+            &tmp,
+            Arc::new(FakeProvider::new(vec![vec![
+                RawStreamEvent::Text("child final".to_string()),
+                RawStreamEvent::Done(Outcome::Normal),
+            ]])),
+            store.clone(),
+            db_path,
+            parent,
+            catalog,
+        ),
+        AgentToolArgs {
+            agent_type: Some("worker".to_string()),
+            name: None,
+            prompt: "Summarize this task.".to_string(),
+            task_name: None,
+            background: Some(false),
+            model: None,
+            fork_context: false,
+            fork_turns: None,
+            max_turns: Some(1),
+            max_spawn_depth: None,
+        },
+        "call".to_string(),
+        AbortSignal::new(rx),
+    )
+    .await
+    .expect("spawn");
+
+    let child_session = output.json["child_session_id"]
+        .as_str()
+        .expect("child session");
+    let edge = store
+        .find_agent_edge(child_session)
+        .expect("edge")
+        .expect("edge");
+    assert_eq!(edge.status, AgentEdgeStatus::Closed);
+}
+
+#[tokio::test]
+pub(crate) async fn parent_abort_interrupts_foreground_child_agent() {
+    let tmp = TempDir::new().expect("tmp");
+    let db_path = tmp.path().join("state.sqlite");
+    let store = SqliteStore::open(&db_path).expect("store");
+    let parent = store
+        .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+        .expect("parent");
+    let catalog = AgentCatalog {
+        agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
+        shadowed_agents: Vec::new(),
+        diagnostics: Vec::new(),
+    };
+    let provider = Arc::new(AbortAwareProvider::default());
+    let started = Arc::clone(&provider.started);
+    let (abort_tx, rx) = watch::channel(false);
+    let task = tokio::spawn(spawn_subagent(
+        test_agent_tool_context(&tmp, provider, store.clone(), db_path, parent, catalog),
+        AgentToolArgs {
+            agent_type: Some("worker".to_string()),
+            name: None,
+            prompt: "Wait until interrupted.".to_string(),
+            task_name: None,
+            background: Some(false),
+            model: None,
+            fork_context: false,
+            fork_turns: None,
+            max_turns: Some(1),
+            max_spawn_depth: None,
+        },
+        "call".to_string(),
+        AbortSignal::new(rx),
+    ));
+
+    started.notified().await;
+    abort_tx.send(true).expect("abort");
+    let output = tokio::time::timeout(Duration::from_secs(2), task)
+        .await
+        .expect("child should settle after parent abort")
+        .expect("join")
+        .expect("spawn");
+
+    assert_eq!(output.json["status"], "interrupted");
+    assert_eq!(output.json["outcome"], "aborted");
+    let child_session = output.json["child_session_id"]
+        .as_str()
+        .expect("child session");
+    let edge = store
+        .find_agent_edge(child_session)
+        .expect("edge")
+        .expect("edge");
+    assert_eq!(edge.status, AgentEdgeStatus::Closed);
+}
+
+#[tokio::test]
+pub(crate) async fn backend_backed_agent_tool_uses_external_delegate() {
+    let tmp = TempDir::new().expect("tmp");
+    let db_path = tmp.path().join("state.sqlite");
+    let store = SqliteStore::open(&db_path).expect("store");
+    let parent = store
+        .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+        .expect("parent");
+    let catalog = AgentCatalog {
+        agents: vec![backend_backed_agent("opencode", "opencode")],
+        shadowed_agents: Vec::new(),
+        diagnostics: Vec::new(),
+    };
+    let delegate = Arc::new(FakeExternalAgentDelegate::default());
+    let mut context = test_agent_tool_context(
+        &tmp,
+        Arc::new(FakeProvider::new(Vec::new())),
+        store.clone(),
+        db_path,
+        parent.clone(),
+        catalog,
+    );
+    context.external_delegate =
+        Some(delegate.clone() as Arc<dyn crate::types::ExternalAgentDelegate>);
+    let (_tx, rx) = watch::channel(false);
+    let output = spawn_subagent(
+        context,
+        AgentToolArgs {
+            agent_type: Some("opencode".to_string()),
+            name: None,
+            prompt: "List your tools.".to_string(),
+            task_name: None,
+            background: Some(false),
+            model: None,
+            fork_context: false,
+            fork_turns: None,
+            max_turns: None,
+            max_spawn_depth: None,
+        },
+        "call".to_string(),
+        AbortSignal::new(rx),
+    )
+    .await
+    .expect("delegate spawn");
+
+    assert!(!output.is_error);
+    assert_eq!(output.json["agent_name"], "opencode");
+    assert_eq!(output.json["final_answer"], "delegated final");
+    let child_session = output.json["child_session_id"]
+        .as_str()
+        .expect("child session");
+    let summary = store
+        .session_summary(child_session)
+        .expect("summary")
+        .expect("child summary");
+    assert_eq!(summary.provider, "acp:opencode");
+    let edge = store
+        .find_agent_edge(child_session)
+        .expect("edge")
+        .expect("edge");
+    assert_eq!(edge.parent_session_id, parent);
+    assert_eq!(edge.status, AgentEdgeStatus::Closed);
+    let calls = delegate.calls.lock().expect("delegate calls");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].backend_ref, "opencode");
+    assert_eq!(calls[0].prompt, "List your tools.");
+    assert_eq!(calls[0].child_session_id, child_session);
+}
+
+#[tokio::test]
+pub(crate) async fn parent_abort_reaches_backend_backed_agent_delegate() {
+    let tmp = TempDir::new().expect("tmp");
+    let db_path = tmp.path().join("state.sqlite");
+    let store = SqliteStore::open(&db_path).expect("store");
+    let parent = store
+        .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+        .expect("parent");
+    let catalog = AgentCatalog {
+        agents: vec![backend_backed_agent("opencode", "opencode")],
+        shadowed_agents: Vec::new(),
+        diagnostics: Vec::new(),
+    };
+    let delegate = Arc::new(AbortAwareExternalAgentDelegate::default());
+    let started = Arc::clone(&delegate.started);
+    let mut context = test_agent_tool_context(
+        &tmp,
+        Arc::new(FakeProvider::new(Vec::new())),
+        store.clone(),
+        db_path,
+        parent,
+        catalog,
+    );
+    context.external_delegate =
+        Some(delegate.clone() as Arc<dyn crate::types::ExternalAgentDelegate>);
+    let (abort_tx, rx) = watch::channel(false);
+    let task = tokio::spawn(spawn_subagent(
+        context,
+        AgentToolArgs {
+            agent_type: Some("opencode".to_string()),
+            name: None,
+            prompt: "Wait until interrupted.".to_string(),
+            task_name: None,
+            background: Some(false),
+            model: None,
+            fork_context: false,
+            fork_turns: None,
+            max_turns: None,
+            max_spawn_depth: None,
+        },
+        "call".to_string(),
+        AbortSignal::new(rx),
+    ));
+
+    started.notified().await;
+    abort_tx.send(true).expect("abort");
+    let output = tokio::time::timeout(Duration::from_secs(2), task)
+        .await
+        .expect("delegate should settle after parent abort")
+        .expect("join")
+        .expect("spawn");
+
+    assert_eq!(output.json["status"], "interrupted");
+    assert_eq!(output.json["outcome"], "aborted");
+    let child_session = output.json["child_session_id"]
+        .as_str()
+        .expect("child session");
+    let edge = store
+        .find_agent_edge(child_session)
+        .expect("edge")
+        .expect("edge");
+    assert_eq!(edge.status, AgentEdgeStatus::Closed);
+}
+
+#[tokio::test]
+pub(crate) async fn backend_backed_agent_tool_without_delegate_returns_unavailable_error() {
+    let tmp = TempDir::new().expect("tmp");
+    let db_path = tmp.path().join("state.sqlite");
+    let store = SqliteStore::open(&db_path).expect("store");
+    let parent = store
+        .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+        .expect("parent");
+    let catalog = AgentCatalog {
+        agents: vec![backend_backed_agent("opencode", "opencode")],
+        shadowed_agents: Vec::new(),
+        diagnostics: Vec::new(),
+    };
+    let (_tx, rx) = watch::channel(false);
+    let output = spawn_subagent(
+        test_agent_tool_context(
+            &tmp,
+            Arc::new(FakeProvider::new(Vec::new())),
+            store.clone(),
+            db_path,
+            parent,
+            catalog,
+        ),
+        AgentToolArgs {
+            agent_type: Some("opencode".to_string()),
+            name: None,
+            prompt: "List your tools.".to_string(),
+            task_name: None,
+            background: Some(false),
+            model: None,
+            fork_context: false,
+            fork_turns: None,
+            max_turns: None,
+            max_spawn_depth: None,
+        },
+        "call".to_string(),
+        AbortSignal::new(rx),
+    )
+    .await
+    .expect("tool output");
+
+    assert!(output.is_error);
+    assert!(
+        output
+            .model_content
+            .as_deref()
+            .unwrap_or_default()
+            .contains("cannot delegate to peer agents")
+            || output
+                .json
+                .to_string()
+                .contains("cannot delegate to peer agents")
+    );
+    assert!(store.list_agent_edges().expect("edges").is_empty());
 }
 
 #[tokio::test]
