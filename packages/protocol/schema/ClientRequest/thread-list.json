@@ -1,0 +1,51 @@
+{
+  "$id": "ClientRequest/thread-list.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ThreadListParams": {
+      "properties": {
+        "archived": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "limit": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "workdir": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
+  "properties": {
+    "method": {
+      "enum": [
+        "thread/list"
+      ],
+      "type": "string"
+    },
+    "params": {
+      "$ref": "#/definitions/ThreadListParams"
+    }
+  },
+  "required": [
+    "method",
+    "params"
+  ],
+  "title": "ClientRequest thread/list",
+  "type": "object"
+}

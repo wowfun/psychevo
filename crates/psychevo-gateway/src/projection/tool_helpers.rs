@@ -1,0 +1,386 @@
+fn live_tool_entry(
+    turn_id: &str,
+    value: &Value,
+    status: TranscriptBlockStatus,
+    body: Option<String>,
+) -> TranscriptEntry {
+    let tool_name = value
+        .get("tool_name")
+        .and_then(Value::as_str)
+        .unwrap_or("tool");
+    let tool_call_id = value
+        .get("tool_call_id")
+        .and_then(Value::as_str)
+        .unwrap_or(tool_name);
+    let metadata = tool_value_metadata(value);
+    let title = live_tool_title(tool_name, &metadata);
+    live_entry(
+        turn_id,
+        &format!("tool:{tool_call_id}"),
+        TranscriptEntryRole::Assistant,
+        tool_kind(tool_name),
+        status,
+        Some(title),
+        body,
+        Some(metadata),
+    )
+}
+
+fn live_tool_title(tool_name: &str, metadata: &Value) -> String {
+    if let Some(display) = metadata
+        .get("display")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|display| !display.is_empty())
+    {
+        return display.to_string();
+    }
+    if tool_name == "exec_command"
+        && let Some(command) = metadata
+            .get("args")
+            .and_then(|args| args.get("cmd"))
+            .and_then(Value::as_str)
+            .and_then(first_shell_command_line)
+    {
+        return format!("exec_command {command}");
+    }
+    tool_name.to_string()
+}
+
+fn first_shell_command_line(text: &str) -> Option<&str> {
+    let mut first_non_empty = None;
+    for line in text.lines().map(str::trim) {
+        if line.is_empty() {
+            continue;
+        }
+        first_non_empty.get_or_insert(line);
+        if !line.starts_with('#') {
+            return Some(line);
+        }
+    }
+    first_non_empty
+}
+
+#[allow(clippy::too_many_arguments)]
+fn live_entry(
+    turn_id: &str,
+    id_suffix: &str,
+    role: TranscriptEntryRole,
+    kind: TranscriptBlockKind,
+    status: TranscriptBlockStatus,
+    title: Option<String>,
+    body: Option<String>,
+    metadata: Option<Value>,
+) -> TranscriptEntry {
+    let now = crate::gateway_now_ms();
+    let id = format!("live:{turn_id}:{id_suffix}");
+    TranscriptEntry {
+        id: id.clone(),
+        thread_id: String::new(),
+        turn_id: Some(turn_id.to_string()),
+        message_seq: None,
+        role,
+        status,
+        source: "runtime.stream".to_string(),
+        blocks: vec![TranscriptBlock {
+            id,
+            kind,
+            status,
+            order: 0,
+            source: "runtime.stream".to_string(),
+            title,
+            preview: body.as_deref().map(|text| compact_text(text, 240)),
+            detail: body.clone(),
+            body,
+            artifact_ids: Vec::new(),
+            metadata,
+            result: None,
+            created_at_ms: now,
+            updated_at_ms: now,
+        }],
+        metadata: None,
+        usage: None,
+        accounting: None,
+        created_at_ms: now,
+        updated_at_ms: now,
+    }
+}
+
+fn assistant_message_metadata(value: &Value) -> Value {
+    let mut metadata = serde_json::json!({
+        "usage": value.get("usage").cloned().unwrap_or(Value::Null),
+        "metadata": value.get("metadata").cloned().unwrap_or(Value::Null),
+        "accounting": value.get("accounting").cloned().unwrap_or(Value::Null),
+    });
+    if let Some(object) = metadata.as_object_mut()
+        && let Some(message) = value.get("message")
+    {
+        for key in ["provider", "model", "finish_reason", "outcome"] {
+            if let Some(field) = message.get(key).filter(|field| !field.is_null()) {
+                object.insert(key.to_string(), field.clone());
+            }
+        }
+    }
+    metadata
+}
+
+fn assistant_phase_metadata(value: &Value) -> Value {
+    let mut metadata = assistant_message_metadata(value);
+    if let Some(object) = metadata.as_object_mut() {
+        object.insert(
+            "projection".to_string(),
+            Value::String("assistant_phase".to_string()),
+        );
+    }
+    metadata
+}
+
+fn assistant_message_is_tool_call_turn(message: Option<&Value>) -> bool {
+    let Some(message) = message else {
+        return false;
+    };
+    if message
+        .get("finish_reason")
+        .and_then(Value::as_str)
+        .is_some_and(|finish_reason| finish_reason == "tool_calls")
+    {
+        return true;
+    }
+    if message
+        .get("tool_calls")
+        .is_some_and(|value| !value.is_null())
+    {
+        return true;
+    }
+    message
+        .get("content")
+        .and_then(Value::as_array)
+        .is_some_and(|blocks| {
+            blocks.iter().any(|block| {
+                matches!(
+                    block.get("type").and_then(Value::as_str),
+                    Some("tool_call" | "tool_calls" | "tool_use")
+                )
+            })
+        })
+}
+
+fn tool_value_metadata(value: &Value) -> Value {
+    let mut object = serde_json::Map::new();
+    object.insert("projection".to_string(), Value::String("tool".to_string()));
+    for key in [
+        "type",
+        "tool_name",
+        "tool_call_id",
+        "outcome",
+        "source",
+        "display",
+        "result",
+        "metadata",
+    ] {
+        if let Some(field) = value.get(key) {
+            object.insert(key.to_string(), field.clone());
+        }
+    }
+    if let Some(args) = value.get("args").cloned().or_else(|| {
+        value
+            .get("arguments_json")
+            .and_then(Value::as_str)
+            .and_then(|raw| serde_json::from_str(raw).ok())
+    }) {
+        object.insert("args".to_string(), args);
+    }
+    if !object.contains_key("outcome") {
+        object.insert("outcome".to_string(), Value::String("normal".to_string()));
+    }
+    Value::Object(object)
+}
+
+fn tool_name_from_value(value: &Value) -> &str {
+    value
+        .get("tool_name")
+        .and_then(Value::as_str)
+        .unwrap_or("tool")
+}
+
+fn tool_call_id_from_value<'a>(value: &'a Value, fallback: &'a str) -> &'a str {
+    value
+        .get("tool_call_id")
+        .and_then(Value::as_str)
+        .unwrap_or(fallback)
+}
+
+fn tool_args_from_value(value: &Value) -> Option<Value> {
+    value.get("args").cloned().or_else(|| {
+        value
+            .get("arguments_json")
+            .and_then(Value::as_str)
+            .and_then(|raw| serde_json::from_str(raw).ok())
+    })
+}
+
+fn exec_session_id_from_args_value(value: &Value) -> Option<u64> {
+    value.get("session_id").and_then(Value::as_u64)
+}
+
+fn exec_session_id_from_result_value(value: &Value) -> Option<u64> {
+    value
+        .get("result")
+        .and_then(|result| result.get("session_id"))
+        .and_then(Value::as_u64)
+}
+
+fn exec_result_running_value(value: &Value) -> bool {
+    exec_session_id_from_result_value(value).is_some()
+        && value
+            .get("result")
+            .and_then(|result| result.get("exit_code"))
+            .is_none_or(Value::is_null)
+}
+
+fn exec_result_completed_value(value: &Value) -> bool {
+    value
+        .get("result")
+        .and_then(|result| result.get("exit_code"))
+        .is_some_and(|exit_code| !exit_code.is_null())
+}
+
+fn tool_event_failed(value: &Value) -> bool {
+    value
+        .get("outcome")
+        .and_then(Value::as_str)
+        .is_some_and(|outcome| outcome != "normal")
+}
+
+fn tool_result_output_runtime(value: &Value) -> String {
+    value
+        .get("result")
+        .and_then(|result| result.get("output"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn tool_result_output_value(value: &Value) -> String {
+    value
+        .get("result")
+        .and_then(|result| result.get("output"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn merge_output(existing: &mut String, next: &str) {
+    if next.is_empty() || existing.ends_with(next) {
+        return;
+    }
+    if next.starts_with(existing.as_str()) {
+        *existing = next.to_string();
+    } else {
+        existing.push_str(next);
+    }
+}
+
+fn set_metadata_field(metadata: &mut Value, key: &str, value: Value) {
+    if let Some(object) = metadata.as_object_mut() {
+        object.insert(key.to_string(), value);
+    }
+}
+
+fn set_metadata_result_field(metadata: &mut Value, key: &str, value: Value) {
+    let Some(object) = metadata.as_object_mut() else {
+        return;
+    };
+    let result = object
+        .entry("result".to_string())
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    if !result.is_object() {
+        *result = Value::Object(serde_json::Map::new());
+    }
+    if let Some(result) = result.as_object_mut() {
+        result.insert(key.to_string(), value);
+    }
+}
+
+fn result_body_from_metadata(metadata: &Value) -> Option<String> {
+    metadata
+        .get("result")
+        .and_then(|result| result.get("output"))
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .or_else(|| {
+            metadata
+                .get("result")
+                .and_then(|result| serde_json::to_string(result).ok())
+        })
+}
+
+fn runtime_value_metadata(value: &Value) -> Value {
+    let mut object = value.as_object().cloned().unwrap_or_default();
+    object.insert(
+        "projection".to_string(),
+        Value::String("runtimeValue".to_string()),
+    );
+    Value::Object(object)
+}
+
+fn selected_skills_from_value(value: &Value) -> Vec<GatewaySelectedSkill> {
+    value
+        .get("selected_skills")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|skill| {
+            Some(GatewaySelectedSkill {
+                name: skill.get("name")?.as_str()?.to_string(),
+                path: skill
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            })
+        })
+        .collect()
+}
+
+fn tool_kind(tool_name: &str) -> TranscriptBlockKind {
+    match tool_name {
+        "exec_command" | "write_stdin" => TranscriptBlockKind::Shell,
+        "read" | "write" | "edit" | "apply_patch" => TranscriptBlockKind::File,
+        "web_fetch" | "web_search" => TranscriptBlockKind::Web,
+        "mcp" | "mcp_call" => TranscriptBlockKind::Mcp,
+        "clarify" => TranscriptBlockKind::Clarify,
+        _ => TranscriptBlockKind::ToolCall,
+    }
+}
+
+fn json_preview(value: &Value) -> Option<String> {
+    serde_json::to_string(value).ok()
+}
+
+fn message_text(message: Option<&Value>) -> Option<String> {
+    let text = message?
+        .get("content")?
+        .as_array()?
+        .iter()
+        .filter_map(|block| {
+            (block.get("type").and_then(Value::as_str) == Some("text"))
+                .then(|| block.get("text").and_then(Value::as_str))
+                .flatten()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    (!text.is_empty()).then_some(text)
+}
+
+fn compact_text(text: &str, max_chars: usize) -> String {
+    let mut output = String::new();
+    for (index, ch) in text.chars().enumerate() {
+        if index >= max_chars {
+            output.push_str("...");
+            return output;
+        }
+        output.push(ch);
+    }
+    output
+}

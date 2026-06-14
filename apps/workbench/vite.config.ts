@@ -48,9 +48,11 @@ export default defineConfig({
           if (normalized.includes("/node_modules/")) {
             return "vendor";
           }
-          const schemaMatch = normalized.match(/\/packages\/protocol\/src\/generated\/schemas\/([^/.]+)\.ts$/);
+          const schemaMatch = normalized.match(
+            /\/packages\/protocol\/src\/generated\/schemas\/(.+)\.ts$/
+          );
           if (schemaMatch?.[1]) {
-            return `protocol-schema-${schemaMatch[1]}`;
+            return `protocol-schema-${schemaMatch[1].replace(/\//g, "-")}`;
           }
           if (normalized.includes("/packages/protocol/")) {
             return "protocol-runtime";

@@ -1,0 +1,42 @@
+{
+  "$id": "ServerNotification/terminal-output.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "TerminalOutputPayload": {
+      "properties": {
+        "dataBase64": {
+          "type": "string"
+        },
+        "stream": {
+          "type": "string"
+        },
+        "terminalId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "dataBase64",
+        "stream",
+        "terminalId"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "method": {
+      "enum": [
+        "terminal/output"
+      ],
+      "type": "string"
+    },
+    "params": {
+      "$ref": "#/definitions/TerminalOutputPayload"
+    }
+  },
+  "required": [
+    "method",
+    "params"
+  ],
+  "title": "ServerNotification terminal/output",
+  "type": "object"
+}

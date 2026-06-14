@@ -1,0 +1,88 @@
+fn thread_key(thread_id: &str) -> String {
+    format!("thread:{thread_id}")
+}
+
+fn source_key_key(source_key: &SourceKey) -> String {
+    format!("source:{}", source_key.0)
+}
+
+fn wrap_stream(
+    stream: Option<RunStreamSink>,
+    event_sink: Option<GatewayEventSink>,
+    turn_id: String,
+    thread_id: Option<String>,
+) -> Option<RunStreamSink> {
+    match (stream, event_sink) {
+        (None, None) => None,
+        (stream, event_sink) => {
+            let projector = Arc::new(Mutex::new(GatewayLiveProjector::new(thread_id)));
+            Some(Arc::new(move |event: RunStreamEvent| {
+                if let Some(event_sink) = &event_sink
+                    && let Some(event) = projector
+                        .lock()
+                        .expect("gateway live projector poisoned")
+                        .project(&turn_id, &event)
+                {
+                    event_sink(event);
+                }
+                if let Some(stream) = &stream {
+                    stream(event);
+                }
+            }))
+        }
+    }
+}
+
+fn apply_input_parts(
+    options: &mut RunOptions,
+    input: &[GatewayInputPart],
+) -> psychevo_runtime::Result<()> {
+    if input.is_empty() {
+        return Ok(());
+    }
+    let mut prompt_parts = Vec::new();
+    let mut image_inputs = Vec::new();
+    for part in input {
+        match part {
+            GatewayInputPart::Text { text } => prompt_parts.push(text.clone()),
+            GatewayInputPart::Context {
+                text,
+                visible_to_model,
+                ..
+            } if *visible_to_model => prompt_parts.push(text.clone()),
+            GatewayInputPart::Context { .. } => {}
+            GatewayInputPart::Image { input } => {
+                image_inputs.push(gateway_image_input_into_runtime(input.clone()))
+            }
+        }
+    }
+    options.prompt = prompt_parts.join("\n");
+    options.image_inputs = image_inputs;
+    if options.prompt.trim().is_empty() && options.image_inputs.is_empty() {
+        return Err(Error::Message("gateway turn input is empty".to_string()));
+    }
+    Ok(())
+}
+
+fn gateway_image_input_into_runtime(input: GatewayImageInput) -> ImageInput {
+    match input {
+        GatewayImageInput::LocalPath { path } => ImageInput::LocalPath(path.into()),
+        GatewayImageInput::Url { url } => ImageInput::ImageUrl(url),
+    }
+}
+
+fn permission_decision_from_runtime(decision: &PermissionApprovalDecision) -> PermissionDecision {
+    match decision.outcome {
+        PermissionApprovalOutcome::AllowOnce => PermissionDecision::AllowOnce,
+        PermissionApprovalOutcome::AllowSession => PermissionDecision::AllowSession,
+        PermissionApprovalOutcome::AllowAlways => PermissionDecision::AllowAlways,
+        PermissionApprovalOutcome::Deny => PermissionDecision::Deny,
+    }
+}
+
+pub(crate) fn gateway_now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}

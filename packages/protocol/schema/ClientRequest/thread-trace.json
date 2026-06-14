@@ -1,0 +1,52 @@
+{
+  "$id": "ClientRequest/thread-trace.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ThreadTraceParams": {
+      "properties": {
+        "afterSeq": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "limit": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "threadId"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "method": {
+      "enum": [
+        "thread/trace"
+      ],
+      "type": "string"
+    },
+    "params": {
+      "$ref": "#/definitions/ThreadTraceParams"
+    }
+  },
+  "required": [
+    "method",
+    "params"
+  ],
+  "title": "ClientRequest thread/trace",
+  "type": "object"
+}

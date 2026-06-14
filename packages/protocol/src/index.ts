@@ -1,5 +1,9 @@
 import Ajv, { type ValidateFunction } from "ajv";
-import { gatewaySchemas, type GatewaySchemaName } from "./generated/schemas";
+import {
+  gatewaySchemaRefs,
+  gatewaySchemas,
+  type GatewaySchemaName
+} from "./generated/schemas";
 export * from "./generated";
 export type {
   GatewayActivityView as GatewayActivity,
@@ -36,6 +40,7 @@ import type {
 
 const ajv = new Ajv({ allErrors: true, strict: false, validateFormats: false });
 const compiled = new Map<GatewaySchemaName, ValidateFunction>();
+let schemaRefsRegistered = false;
 
 export type SafeParseResult<T> =
   | { data: T; success: true }
@@ -131,7 +136,18 @@ function validator(name: GatewaySchemaName): ValidateFunction {
   if (existing) {
     return existing;
   }
+  registerSchemaRefs();
   const validate = ajv.compile(gatewaySchemas[name]);
   compiled.set(name, validate);
   return validate;
+}
+
+function registerSchemaRefs(): void {
+  if (schemaRefsRegistered) {
+    return;
+  }
+  for (const schemaRef of gatewaySchemaRefs) {
+    ajv.addSchema(schemaRef);
+  }
+  schemaRefsRegistered = true;
 }

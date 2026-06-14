@@ -1,0 +1,34 @@
+{
+  "$id": "ClientRequest/terminal-terminate.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "TerminalTerminateParams": {
+      "properties": {
+        "terminalId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "terminalId"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "method": {
+      "enum": [
+        "terminal/terminate"
+      ],
+      "type": "string"
+    },
+    "params": {
+      "$ref": "#/definitions/TerminalTerminateParams"
+    }
+  },
+  "required": [
+    "method",
+    "params"
+  ],
+  "title": "ClientRequest terminal/terminate",
+  "type": "object"
+}

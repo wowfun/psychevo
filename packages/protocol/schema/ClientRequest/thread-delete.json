@@ -1,0 +1,34 @@
+{
+  "$id": "ClientRequest/thread-delete.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ThreadIdParams": {
+      "properties": {
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "threadId"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "method": {
+      "enum": [
+        "thread/delete"
+      ],
+      "type": "string"
+    },
+    "params": {
+      "$ref": "#/definitions/ThreadIdParams"
+    }
+  },
+  "required": [
+    "method",
+    "params"
+  ],
+  "title": "ClientRequest thread/delete",
+  "type": "object"
+}
