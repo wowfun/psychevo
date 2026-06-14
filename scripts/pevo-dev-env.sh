@@ -84,44 +84,53 @@ def load(path):
             rows.append(json.loads(raw))
     return rows
 
+def completed_entries(events):
+    for event in events:
+        if event.get("type") == "entry.completed":
+            entry = event.get("entry") or {}
+            if isinstance(entry, dict):
+                yield entry
+
+def entry_blocks(events):
+    for entry in completed_entries(events):
+        for block in entry.get("blocks") or []:
+            if isinstance(block, dict):
+                yield block
+
 def final_text(events):
     text = ""
     for event in events:
-        if event.get("type") != "message_end":
+        if event.get("type") in {"turn.completed", "turn.failed"}:
+            final_answer = event.get("finalAnswer")
+            if isinstance(final_answer, str) and final_answer:
+                text = final_answer
+    if text:
+        return text
+    parts = []
+    for entry in completed_entries(events):
+        if entry.get("role") != "assistant":
             continue
-        message = event.get("message") or {}
-        if message.get("role") != "assistant":
-            continue
-        parts = []
-        for block in message.get("content") or []:
-            if block.get("type") == "text":
-                parts.append(block.get("text") or "")
-        if parts:
-            text = "\n".join(parts)
+        for block in entry.get("blocks") or []:
+            if block.get("kind") == "text" and block.get("body"):
+                parts.append(block["body"])
+    if parts:
+        text = "\n".join(parts)
     return text
 
 first = load(first_path)
 second = load(second_path)
 combined = first + second
 
-if not any(event.get("type") == "reasoning_delta" and event.get("text") for event in combined):
-    raise SystemExit(f"{provider}: missing reasoning_delta")
-if not any(event.get("type") == "reasoning_end" and event.get("text") for event in combined):
-    raise SystemExit(f"{provider}: missing reasoning_end")
+if not any(block.get("kind") == "reasoning" and block.get("body") for block in entry_blocks(combined)):
+    raise SystemExit(f"{provider}: missing reasoning transcript entry")
 if not any(
-    event.get("type") == "tool_execution_start" and event.get("tool_name") == "read"
-    for event in first
-):
-    raise SystemExit(f"{provider}: first run did not call read")
-if not any(
-    event.get("type") == "tool_execution_end"
-    and event.get("tool_name") == "read"
-    and event.get("outcome") == "normal"
-    for event in first
+    (block.get("metadata") or {}).get("tool_name") == "read"
+    and (block.get("metadata") or {}).get("outcome") == "normal"
+    for block in entry_blocks(first)
 ):
     raise SystemExit(f"{provider}: first run did not complete read")
-first_session = next((event.get("session_id") for event in first if event.get("type") == "run_start"), None)
-second_session = next((event.get("session_id") for event in second if event.get("type") == "run_start"), None)
+first_session = next((event.get("threadId") for event in first if event.get("type") == "thread.started"), None)
+second_session = next((event.get("threadId") for event in second if event.get("type") == "thread.started"), None)
 if not first_session or first_session != second_session:
     raise SystemExit(f"{provider}: --continue did not reuse the session")
 if token not in final_text(first):

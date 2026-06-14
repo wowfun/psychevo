@@ -143,7 +143,7 @@ Sleep 300 ms
 Screenshot "10-agent-tool-running.png"
 Ctrl+T
 Enter
-Wait+Screen /Checking terminology/
+Wait+Screen /Alt\+P/
 Sleep 300 ms
 Screenshot "11-agent-session-running.png"
 Sleep 5600 ms

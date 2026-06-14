@@ -36,6 +36,22 @@ Large source files should be split by durable ownership boundaries, not by
 mechanical line-count slices. Generated files, lockfiles, snapshots, and
 baseline inventories are not ordinary module-layout targets.
 
+Extracted implementation files must be named for the responsibility they own.
+Placeholder split names such as `part_001.rs`, `chunk-a.ts`, or other purely
+ordinal buckets are not acceptable refactor endpoints, even when they satisfy
+line-count thresholds. If a file cannot be split further without obscuring the
+owning boundary, the facade or entrypoint role must be explicit in the file name
+or documented by the owning spec.
+
+For ordinary source and specification files under `apps/`, `crates/`,
+`packages/`, and `specs/`, production modules should normally remain below 900
+lines after a structural refactor. Test modules should normally remain below
+1200 lines. A file that exceeds those limits must either be a generated artifact
+or a documented facade/entrypoint whose remaining size is explained by a stable
+public boundary. Generated artifacts may be split only by changing their
+generator or source schema organization; checked-in generated files are never
+manually edited as a refactor shortcut.
+
 Crate roots may act as facades. Established root-level re-exports should remain
 stable unless the owning topic intentionally changes the public interface.
 Private helper modules should use the narrowest practical visibility, normally

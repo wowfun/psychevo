@@ -34,6 +34,10 @@ Out of scope:
   and does not introduce benchmark or task axes
 - generic runtime debug tables as canonical sources for v1 conversion
 
+## Attachments
+
+- [Testing](testing.md) defines deterministic validation expectations.
+
 ## Position
 
 The CLI lives under `tools/peval-py/` and is runnable with `uv`. Its console

@@ -95,7 +95,7 @@ class Handler(BaseHTTPRequestHandler):
                         }
                     ],
                 },
-                delay=4.0,
+                delay=12.0,
             )
             self.send_event(
                 {

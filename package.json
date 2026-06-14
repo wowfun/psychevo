@@ -9,7 +9,8 @@
     "e2e": "pnpm --filter @psychevo/workbench build && playwright test",
     "e2e:live": "pnpm --filter @psychevo/workbench build && playwright test --grep @live",
     "e2e:live-skill": "pnpm --filter @psychevo/workbench build && PSYCHEVO_PLAYWRIGHT_LIVE_SKILL=1 playwright test apps/workbench/e2e/live-skill.spec.ts",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
     "@playwright/test": "^1.52.0",

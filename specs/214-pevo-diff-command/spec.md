@@ -89,6 +89,10 @@ cannot be isolated from the unified diff, the client may show the full diff
 with the selected file highlighted. Empty, non-git, binary, unreadable, and
 truncated states use the same structured placeholders as `/diff`.
 
+## Attachments
+
+- [Testing](testing.md) defines diff validation expectations.
+
 ## Related Topics
 
 - [026 Commands](../026-commands/spec.md)

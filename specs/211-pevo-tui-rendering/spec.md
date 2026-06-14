@@ -67,6 +67,10 @@ not durable transcript facts and must not remain as unowned `Meta` rows after
 committed replacement. If the committed slice includes message sequences
 already present from history reload, the TUI skips those entries instead of
 duplicating old transcript rows.
+Local slash-command feedback emitted while a foreground turn is active, such as
+`/status`, is display-only turn-local UI. If it is retained after committed
+replacement, it must remain after the committed turn slice rather than being
+left above the prompt or assistant rows that replaced the live overlay.
 Completed message-derived assistant entries may render a quiet committed footer
 under the owning answer row, but that footer must carry the same entry identity
 and source lineage as the committed assistant block so it is not removed or

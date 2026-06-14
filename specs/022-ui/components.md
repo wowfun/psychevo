@@ -1,0 +1,380 @@
+# Components
+
+Shared components are controlled. They receive state and callbacks from an app
+or client store and do not instantiate Gateway clients, read localStorage, or
+write global config.
+
+Package implementation files follow the same component-family boundary as the
+public package contract. Large `packages/*/src/index.*` files must remain thin
+package entrypoints that re-export semantic modules; transcript, composer,
+history/sessions, status, host runtime, and client reducers should live in
+dedicated files so feature work does not keep expanding a shared monolith.
+App packages follow the same rule. Files such as `apps/*/src/App.*` are
+composition roots for wiring state, host/client calls, and high-level layout;
+semantic UI surfaces, inspector panes, sidebar chrome, composer controls,
+data normalization, and storage helpers must live in separate app-local modules.
+Large app CSS entrypoints should aggregate smaller style files by surface or
+layout area instead of accumulating all page, pane, and component overrides in
+one stylesheet.
+
+First-slice component families include transcript, tool evidence,
+artifact preview/detail, composer, history, status/queue,
+settings, diff/export/share, workspace file review/editing, permission,
+clarify, tabs, buttons, inputs, and layout primitives. Components should
+support desktop density and mobile/shell collapse without requiring a separate
+native component tree.
+
+The client package owns headless UX state machines that must behave the same
+across Web, Desktop, and Mobile shells:
+
+- a transcript reducer that keeps canonical snapshot entries, live overlay
+  entries, and optimistic user messages separate, then reconciles them when
+  committed entries or snapshots arrive
+- a completion reducer that detects `/`, `$`, and `@` ranges, discards stale
+  async results, and exposes selection/navigation state independent of DOM
+- a bottom-follow controller that follows new output only while the user is at
+  the bottom or has just submitted input
+- mention encoding helpers that preserve visible composer text while carrying
+  structured Gateway mention targets through immediate follow-up edits and
+  submission
+
+Shared app stores and components must tolerate missing fields only when those
+fields have true idle or empty semantics. Missing activity state is rendered as
+idle, and missing pending request lists are rendered as empty. A Gateway
+`ThreadSnapshot` without `entries` is a protocol/projection error, not an empty
+ordinary transcript, because `entries: []` is the only valid representation of a
+real empty transcript. Snapshot defaulting for idle fields is applied at the
+client app-store boundary before strict protocol validation; transcript entries
+are not defaulted.
+For an explicitly selected history session whose summary reports
+`messageCount > 0`, `No messages yet` is not an acceptable ordinary transcript
+state. The client must either render the message-derived entries returned by
+`thread/read` or `thread/resume`, or surface a clear snapshot/projection error
+instead of silently presenting the session as empty.
+Transcript block child arrays such as artifact ids are rendered as empty when
+omitted by live or partially upgraded payloads.
+Transcript message action hit areas must not cover or intercept adjacent
+reasoning, tool, status, or message rows; visually stacked rows remain
+independently clickable after live updates reconcile to committed snapshots.
+
+The composer component must match TUI submission ergonomics. Plain Enter submits
+unless an IME composition is active or a completion item is being accepted.
+Shift+Enter, Ctrl+Enter, Alt+Enter, and Ctrl+J insert a newline. During an
+active turn, plain prompt submission steers the running turn by default; queueing
+the next turn is an explicit mode or command. The Queue/Steer segmented control
+is only rendered while a turn is active and the prompt editor contains non-empty
+text, so an empty composer does not present unavailable turn-routing choices.
+The composer also owns an explicit shell input mode shared by Web and generic
+Desktop shells. Typing `!` in an empty composer switches to shell mode without
+putting a literal bang in the editable text; imported, pasted, or restored text
+that begins with `!` is interpreted as shell mode and edited without that
+prefix. Shell submission calls a dedicated shell callback with the stripped
+command. Empty shell mode presents bounded shell help, and Escape or backspace
+on an empty shell editor returns to prompt mode. Slash completion is suppressed
+in shell mode, while `@` file completion remains available.
+The composer supports bounded attachments supplied by the host file picker.
+Attachment chips are controlled component state with remove actions, and the
+submit button is enabled when either prompt text or pending attachments are
+present. Attachments are submitted through typed Gateway input parts rather
+than through ordinary transcript history or browser-only file path access.
+Workbench shells center the visible composer input band on the same reading
+column as ordinary transcript rows on wide surfaces so prompt entry remains
+visually connected to the transcript.
+Attachment entry is exposed as a compact `+` menu in the composer action row.
+The menu contains an `Add images and files` file/image picker action and the
+runtime mode switch. Plan mode is toggled from this menu rather than from the
+footer: default mode renders the switch off, plan mode renders it on and shows a
+quiet `Plan` chip immediately to the right of the Agent selector. Hovering or
+focusing that chip reveals a close control that returns the session to default
+mode. Composer send and interrupt controls live in the same footer row as the
+`+`, Agent, and `Plan` controls, aligned to the row's right edge with a stable
+height so the composer does not gain an extra row when Plan is active. Model,
+Variant, and context-usage controls sit immediately to the left of that
+send/interrupt slot; the compact model indicator displays provider-qualified
+model values using the segment after the final `/`, retains the full value for
+submission, and leaves native selector options as full `provider/model` values.
+The compact model label must size from that short model segment while reserving
+space for the native selector affordance so selected characters are not covered,
+and the model label and context-usage popover must not clip their selected
+value, summary, or visible usage details at desktop or narrow Workbench widths.
+Context and session observability controls are display-only chrome. Compact
+surfaces may show context percent, session tokens, cache-read percent, and
+estimated cost. The composer context popover remains compact and must not show
+prompt/category detail breakdowns and opening it must not reveal, focus, or
+change the open state of the right Status inspector. Full breakdowns belong in
+the right Status inspector: they summarize the session usage facts first, then
+show prompt/context token categories in the same category order and labels as
+TUI `/context` where possible. The right Status view uses a stacked prompt-token
+bar for category proportions, with hover/focus text showing each category token
+count and percent. Category rows themselves are not independently collapsible
+and do not carry per-row meter bars; instead, all prompt-token category detail
+rows live under one `Prompt tokens` disclosure that is closed by default.
+Expanded category details may show only numeric/counting facts, such as skill
+entry token estimates, history role counts, project-context counts,
+selected-skill-context counts, and tool counts. These values come from Gateway
+`observability/read`, clear on new detached drafts or no-active-session states,
+and must not become transcript content, command feedback, local prompt text, or
+model-visible context. Observability refreshes are scoped to the selected view
+epoch/session: a delayed response for a previously selected session must be
+discarded after the user creates or selects a different session or detached
+draft.
+Permission,
+path, and branch remain in the quieter status line. The default send control is
+a compact circular arrow-up button; during an
+active turn, the same slot becomes an interrupt control with a Codex-like filled
+square stop glyph inside the same circular button. The prompt textarea grows with
+message line count until its bounded maximum height, then scrolls internally.
+The composer does not expose the browser's native textarea resize grip.
+
+Workbench composer controls distinguish Agent persona from execution Runtime
+while presenting them through one compact `Agent` control. Opening the control
+shows two flat, directly selectable row groups separated by a divider: the
+upper group configures the Psychevo main agent, and the lower group configures
+the execution runtime (`native` or an enabled ACP peer backend). The popover
+must not contain nested native select menus for these two groups. If the
+selected runtime cannot accept a Psychevo agent persona, the upper agent group
+is disabled and the turn is submitted without `agentName`; this is not treated
+as a submit-time conflict.
+The existing composer `Plan mode` affordance represents the current runtime's
+base `default`/`plan` mode pair. Native runtime maps it to Psychevo
+`RunMode`; a peer runtime that exposes `plan` maps it to ACP
+`runtimeOptions.mode = "plan"`, while the off/default state maps to that
+runtime's active default mode. Runtime session options are conditionally
+displayed after the combined Agent control only for peer modes outside that
+base pair. For OpenCode ACP, peer-provided ACP `mode` values such as `build` or
+`review` are displayed as OpenCode runtime modes, not Psychevo agents; `plan`
+is handled by the shared Plan affordance instead of a duplicate selector.
+Runtime options are scoped to the current draft/session and must not be stored
+in Settings. The controls stay compact, list-like, keyboard accessible, and
+responsive; visual validation must cover desktop and a narrow mobile width with
+the OpenCode mode selector open.
+
+Completion popovers are shared controlled components. `/` lists Gateway slash
+commands, `$` lists skills, local agents, and ACP capability mentions, and `@`
+lists workdir file references plus subagent-capable agent names. Accepted `@`
+agent entries keep visible `@agent-name` text and submit structured Gateway
+agent mentions while still allowing the runtime's text scanner to recognize
+the same prompt form as TUI when the current runtime can orchestrate Psychevo
+agent delegation. Native runtime supports this structured `@agent` path. Peer
+runtime prompts may still contain literal `@agent-name` text, but Workbench
+does not offer Psychevo agent completion or submit structured Psychevo agent
+mentions for a runtime that cannot orchestrate them; that text is left for the
+peer runtime to interpret. Arrow keys, Ctrl+N/Ctrl+P, Tab, Enter, Escape, and
+pointer selection have the same semantics on every shell that has a keyboard.
+Keyboard navigation must keep the active completion option scrolled into view
+inside the popover, including long `$` skill/agent lists whose active item moves
+beyond the visible panel. Mobile shells may present the same completion state
+through touch lists or sheets. Completion ordering is query-aware: exact and
+prefix matches against the visible command/skill/agent/file label rank before
+substring or description-only matches, so pressing Enter accepts the item the
+typed token visibly points at.
+Slash completion rows may include a short destination label such as Panel,
+Preview, Prompt, Download, or Extension. Those labels are derived from Gateway
+command presentation metadata, not from frontend command-name allowlists.
+
+Workbench applies slash command results to the region that owns the result.
+Commands/help, sessions/history, and status commands switch the relevant
+Workbench panel. Diff opens the preview surface. Context, usage, and status
+details focus the status area. Export and share invoke host download/share
+actions. Active-turn control commands update turn state and show display-only
+feedback near the trigger. Dynamic skill and bundle slash commands submit a
+model turn while the transcript-visible user input remains the original slash
+line. Panel-targeted slash actions reveal collapsed regions, such as the right
+Status inspector or left History sidebar, so the command has an immediate
+visible result. Composer-triggered `/help` and `/commands` open closeable
+overlays over the current transcript instead of replacing the active session
+surface. GUI `/agents` is not exposed by Web/Desktop discovery, completion, or
+panel routing; current-session agent selection belongs to the composer agent
+selector. Other command feedback is display-only, session-scoped transient UI
+and must not become ordinary transcript history; it is cleared on session or
+workdir switches and when the user submits new input. Successful feedback with
+no follow-up action may auto-dismiss after a short delay and may be dismissed by
+clicking outside the feedback panel. Error feedback and feedback with an action
+must remain until an explicit clear, context switch, or new input.
+
+The Settings Agents section is the Workbench app-level ACP client configuration
+surface. It shows configurable Profile-level ACP backend registrations and their
+diagnostics, but not the read-only effective agent catalog or the current
+session's running/background child-agent status. Backend create/edit controls
+are embedded inside Settings > Agents rather than opened in a modal. GUI backend
+writes are Profile-only and update the active `$PSYCHEVO_HOME/config.toml`; the
+form does not expose a target selector. Project-level backend definitions may
+still be read by Gateway and affect runtime behavior, but Workbench does not
+show, edit, or delete them from Settings because they are not configurable from
+this GUI surface. Workbench does not expose inactive profiles in this surface.
+Each listed Profile ACP backend exposes its enabled state as a row-level switch
+in Settings > Agents, so users can enable or disable configured backends without
+opening the editor. The row also exposes ordinary checkbox controls for the
+backend's `peer` and `subagent` entrypoints. The embedded backend editor does
+not duplicate the enabled or entrypoint controls.
+The create control is an icon-only add button that opens a generic empty ACP
+backend editor; users can configure OpenCode or any other ACP-compatible backend
+by filling the backend id, a single JSON command configuration, and capabilities.
+The command JSON input replaces separate Command, Args, and Env fields and uses
+an in-field placeholder such as `{"command":"opencode","args":["acp"],"env":{}}`.
+It writes through the existing `backend/write` `command`, `args`, and `env`
+fields after validation; no Workbench-specific wire shape is introduced. The
+editor treats Label and Description as optional metadata, so only backend ID and
+a JSON `command` string are required to save. The CWD field presents the default
+invocation workdir as an empty value with an `Invocation workdir` placeholder and a compact
+`Resolves to <path>` helper. Empty CWD and the internal `invocation` sentinel
+resolve to the active Gateway request scope workdir; relative CWD values resolve
+under that workdir, and absolute values resolve as entered.
+
+Ordinary transcript components consume typed transcript entries/blocks and typed
+Gateway events. They must not display raw runtime event names such as
+`runtimeRaw`, `entryCompleted`, or `turnCompleted` as user-facing transcript content. Raw
+diagnostics belong in logs, tests, or explicit developer tooling, not the
+ordinary Workbench transcript surface. Empty prompt or assistant placeholder
+blocks are not visible transcript rows; they must not render as standalone user
+or bot icons while the optimistic/canonical prompt reconciliation is settling.
+Only real reasoning blocks render under the user-facing label `Thinking`;
+protocol labels such as `Reasoning` and projection markers such as `Preamble`
+are never ordinary transcript header text. Assistant text remains assistant
+text even when the same assistant message also contains tool calls.
+
+Transcript rendering supports Markdown for user and assistant text, including
+CommonMark block structure, GFM tables/task lists, links, inline code, fenced
+code blocks, and streaming caret placement at the end of the final rendered
+block. Running assistant text and running reasoning blocks must reveal newly
+available text through a local display buffer so a peer or provider that sends
+large chunks, or multiple chunks in one browser frame, still produces visible
+incremental progress. This reveal layer is presentation-only: transcript state,
+copy actions, persistence, and reconciliation continue to use the canonical
+Gateway text. The transcript panel header, user text, assistant text, reasoning rows,
+and tool/evidence rows do not render decorative role, cognition, or kind icons.
+Assistant text renders on the ordinary page background. Transcript rows share a
+centered reading column so user and assistant turns remain visually related on
+wide Workbench surfaces. User text aligns right within that reading column and
+is the only ordinary text message with a filled bubble; fenced code blocks and
+code previews keep a dedicated filled code surface. Inline code remains a
+typographic monospace distinction and does not render as a filled chip.
+Ordinary chat text, reasoning rows, tool/evidence summaries, and assistant
+messages do not use accent fill or permanent card fill. Each text block exposes
+a quiet hover/focus affordance row anchored just outside the bubble, so hidden
+controls do not reserve layout height or inflate the message geometry. User
+rows include a copy action and the block timestamp. Assistant rows include
+copy, compact elapsed
+duration immediately left of the timestamp, and the timestamp, using the same
+completed-turn format as TUI metadata. The action copies the raw Markdown source
+for that text block through the host clipboard boundary. Feedback controls such
+as thumbs up or thumbs down are not part of this first interaction.
+The hover affordance must keep a continuous pointer path from the message block
+to the action row; moving from the text to Copy must not pass through a dead
+zone that hides the controls before the pointer reaches the button.
+Reasoning blocks are collapsible, default-expanded while running, and render
+incrementally before assistant text. Tool/evidence rows render one summary
+header and one expandable detail body; arguments or results must not be
+duplicated between preview and detail.
+Completed protocol status is not shown as a default badge for ordinary
+completed transcript rows. Status badges are reserved for actionable states such
+as running, failed, cancelled, needs-input, or informational diagnostics.
+
+Assistant text blocks emitted before or between tool calls are visible assistant
+message text, not Thinking content and not a separate `Preamble` row. Projection
+metadata may mark such text as a phase note, but the renderer must keep it in
+the assistant text channel and preserve its canonical position before the tool
+calls it introduces. A live assistant update that carries no visible text or a
+no-text reasoning completion must not render an empty row. If a visible
+assistant text update arrives after one or more trailing live tool rows for the
+same turn, the client transcript reducer must anchor that text before those
+tool rows until the committed transcript slice supplies canonical message/block
+ordering.
+Live reasoning deltas are real live Thinking observations until the committed
+turn slice replaces the same-turn overlay. Gateway may still emit an
+authoritative assistant segment snapshot derived from `message_end.content[]`,
+marked by `metadata.authoritativeBlocks === true`; when it does, the client
+reducer replaces the entry's block array with the supplied blocks instead of
+merging by id. Because the public runtime `message_end` payload can hide
+assistant reasoning, Gateway must include any preserved non-empty live
+reasoning block in that authoritative snapshot when final content omits
+reasoning. Blocks that disappear from the authoritative snapshot, such as text
+that was earlier misclassified by a provider and is later supplied as
+assistant text, must disappear from the UI immediately.
+An optimistic prompt submitted before `turnStarted` is still part of the active
+turn live overlay. Once the turn id is known, Workbench binds that prompt to
+the turn and keeps it before same-turn assistant and tool live rows until a
+committed user entry replaces it. Authoritative assistant segment snapshots
+also clear stale same-turn pending-only tool overlay rows that have been
+superseded by the segment's final tool blocks.
+Workbench must not continuously refresh ordinary transcript snapshots during a
+normal active turn just to discover live text. Live Gateway events own that
+display path until `turnCompleted` supplies committed entries. If a reconnect,
+manual refresh, or explicit `thread/read` returns message-derived entries for a
+still-active turn, reconciliation treats those message-derived entries as
+authoritative for any covered prompt, assistant text, reasoning, or tool blocks
+and removes overlapping same-turn live overlay blocks instead of rendering both
+the snapshot projection and the live projection. This replacement is block
+level: a live entry with one uncovered running block may be retained, but any
+covered assistant text, reasoning, or tool blocks inside that entry are removed
+before rendering. A covered block must not survive only because a different
+block in the same live entry was not covered by the snapshot.
+The same rule applies to live events that arrive after a reconnect or explicit
+snapshot refresh. If an incoming live block is already represented by a
+message-derived block, the client either uses that message-derived block as the
+display anchor for transient tool status/output or drops the covered live block;
+it must not append a second live row with the same assistant text or tool call.
+
+Tool/evidence rows follow the same reducer semantics as the TUI: a tool row's
+collapsed header is derived from the call name plus argument subject, while
+results stay in structured expanded detail or a secondary summary. Continuation
+tools such as an empty `write_stdin` poll for a yielded `exec_command` are not
+independent transcript rows; their output, terminal status, and elapsed time are
+merged into the owning `exec_command` row. Only non-empty stdin input is allowed
+to render as its own compact terminal interaction. Long command, path, or query
+headers must elide inside the row so the optional status marker and row border
+remain visible at desktop and narrow widths. Full commands, SQL, arguments, and
+results belong in structured expandable sections such as Command, Input, Output,
+Files, Diff, Web, Error, or Status. Ordinary transcript rendering must not show
+raw argument/result JSON in either collapsed headers or expanded details; raw
+event payloads belong only in explicit developer diagnostics such as Debug.
+Shell-command rows render the invocation-style subject `exec_command <cmd>` in
+both TUI and Workbench. Workbench must not split an `exec_command` row into a
+truncated tool-name column such as `exec_command p...` plus a second command
+summary column; the collapsed row uses one clipped invocation title with the
+status marker kept visible. Full commands, arguments, results, and internal
+tool metadata remain available through structured expandable detail or Debug.
+
+Workbench tool display projection consumes `metadata.display` when present,
+using the same `ToolDisplaySpec` concepts as the runtime/TUI (`category`,
+title-argument keys, title-result keys, summary keys, body keys, and body
+policy). When no display spec is present, Workbench applies built-in defaults
+for core tools such as `exec_command`, `write_stdin`, file tools, web tools,
+clarify, Agent, MCP tools, and generic extension tools. This projection is a UI
+rendering concern and does not change transcript ordering or tool execution
+semantics.
+
+Transcript components must render message-derived entries in canonical order
+even when an app store or reconnect path provides a temporarily shuffled array.
+Durable entries are ordered by `TranscriptEntry.messageSeq`; blocks inside an
+entry are ordered by `TranscriptBlock.order`, then creation time and id for
+deterministic rendering. Live-only entries must carry explicit turn-local
+ordering from Gateway, either as block order inside a single live assistant
+entry or as comparable live order metadata. Clients must not infer semantic
+order from timestamp/id tie-breaks. Multiple model steps inside one turn keep
+their observed segment order: real Thinking, assistant text, tools, and later
+assistant text stay where they happened. Clients replace the live overlay with
+the committed entries instead of matching rows by text overlap.
+Workbench transcript rows carry nonvisual diagnostic attributes for entry id,
+block id, block kind, and turn id so browser validation can report the actual
+projection shape behind screenshots without exposing those internal labels to
+users.
+
+When a snapshot replace arrives while live rows are still running, the client
+keeps unmatched live overlay entries for the active turn. When a turn completion
+event carries committed entries, the client removes live overlay entries for
+that turn and merges the committed slice by stable entry id/message sequence.
+The replacement must not leave empty live reasoning, stale assistant updates, or
+duplicate tool rows behind.
+Live entries that remain after snapshot reconciliation must still be coherent
+standalone observations. If covered blocks are removed and no visible block is
+left, the entire live entry is dropped.
+Selecting a historical session with persisted messages must apply the same
+message-derived transcript visibility rules as reconnect and live completion:
+non-empty user and assistant text blocks remain visible, while only truly empty
+reasoning/text blocks are filtered from the rendered transcript.
+
+TUI direct runtime rendering follows the same transcript rule as Gateway
+transcript rendering. Assistant text that is later confirmed to be part of a
+`tool_calls` message remains assistant text in its observed position; only
+provider/model reasoning is allowed to become a visible Thinking row.

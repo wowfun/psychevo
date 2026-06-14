@@ -56,6 +56,9 @@ scripts/validate.sh broad
   when none exists.
 - `--continue` plus `--session` rejects.
 - `PSYCHEVO_CONFIG` plus `PSYCHEVO_DB` allows isolated runs without global home.
+- Repo-local live validation checks typed `entry.completed` reasoning and tool
+  blocks, `turn.completed.finalAnswer`, and `thread.started` reuse for
+  `--continue`.
 
 ## Runtime Coverage
 

@@ -1,0 +1,434 @@
+# Web Shell
+
+The first Web Shell is `apps/workbench`. Source installs build
+`apps/workbench/dist` and copy it to the install-share location beside the
+`pevo` binary: `../share/psychevo/web`. Runtime asset resolution prefers an
+explicit internal static dir, then `PSYCHEVO_WEB_DIST`, then the install-share
+location, then a recognizable source checkout's `apps/workbench/dist`, and
+last the legacy current-working-directory `apps/workbench/dist` fallback.
+
+`pevo gateway open` and `pevo web` do not run `pnpm` implicitly. If assets are
+missing, lifecycle JSON reports `workbench_dist_missing` with the searched
+paths, `PSYCHEVO_WEB_DIST`, the build command, and the install command instead
+of only echoing one missing cwd-derived path.
+
+The Web Shell source kind is `web`. Source identity is derived from source kind
+plus canonical workdir unless the client provides an explicit `rawId`. Multiple
+managed browser clients for the same workdir share one source/thread, active
+queue, event stream, and control surface.
+
+Gateway request scopes remain workdir-scoped and do not carry profile
+selectors. Workbench may display the profile reported by `initialize`, but the
+first-slice browser UI does not switch profiles inside an existing Gateway
+process. Launching another profile requires a separate `pevo -p <name> web` or
+equivalent process.
+
+Workspace-management RPCs are UI conveniences, not a second execution scope.
+`workspace/create` accepts a display name, creates a direct child directory
+under the configured workspace root, returns the canonical workdir and matching
+`GatewayRequestScope`, and updates the browser session to that scope. It must
+reject empty names, path separators, `.`/`..`, and names that resolve outside
+the workspace root. The created workdir then behaves exactly like any other
+workdir for sessions, files, diff, skills, agents, and `.psychevo` overlays.
+
+The Web Shell uses the same Gateway agent and command APIs as TUI. Its Agents
+panel lists local, generated peer, Markdown-shadowed peer, invalid, and
+shadowed definitions from the shared catalog. It can open peer threads, run
+subagents, edit Markdown agent definitions, display backend diagnostics, and
+execute `/agent:command` namespaced peer slash commands.
+Gateway exposes agent and backend management as typed RPCs rather than
+Workbench-only JSON shapes. Agent RPCs cover list/read/write/delete/status.
+Backend RPCs cover list/write/delete/doctor and always resolve against the
+request scope's workdir plus the active profile home. Backend writes must name
+an explicit target, `project` or `profile`; project writes update
+`<workdir>/.psychevo/config.toml`, while profile writes update the active
+profile config, normally `$PSYCHEVO_HOME/config.toml` and the explicit
+`PSYCHEVO_CONFIG` file when that environment override is active. Workbench GUI backend forms are embedded in
+Settings > Agents and only submit Profile-level writes or deletes; they do not
+expose the backend target selector. `backend/write` treats blank label and
+description as absent optional metadata, while backend views still expose an
+effective label that falls back to the backend id for display. Blank CWD writes
+the internal `invocation` sentinel; ACP peer launch resolves empty or
+`invocation` CWD to the active request scope workdir, relative CWD values under
+that workdir, and absolute values as entered. Workbench exposes backend enabled
+state and `peer`/`subagent` entrypoint selection as row-level controls in
+Settings > Agents and persists them with the same Profile-level backend write
+path. Workbench may present Command, Args, and Env as one JSON editor for
+usability, but it still submits the existing `backend/write` `command`, `args`,
+and `env` fields after client-side validation. A single Gateway process never
+reads or writes inactive profiles.
+These RPCs expose Gateway-owned camelCase views. They must not leak runtime
+internal snake_case status records or arbitrary `serde_json::Value` projections
+into Workbench-facing contracts. `agent/list` returns active and shadowed agent
+views plus diagnostics; `agent/status` returns structured run views and control
+state for the selected thread or all runs; `backend/list` returns effective ACP
+backend views with source targets and diagnostics.
+The composer exposes active, runnable agent definitions from the same catalog
+as a main-agent selector. The empty selector value is displayed as
+`Default Agent` and submits future turns with no `agentName`; concrete
+selections submit that agent name and are persisted to the current session's
+main-agent metadata. Backend-backed agents, including generated ACP backend
+agents, are runnable from the composer only when they support the `peer`
+entrypoint; backend registrations that are disabled or `subagent`-only remain
+configurable/diagnosable in Settings > Agents but must not appear in the
+composer selector or remain selected there. Ordinary non-backend agent
+definitions can remain selectable as current-session agents. Shadowed and
+invalid definitions remain visible only in the Agents panel diagnostics, not in
+the composer selector. `settings/read` returns the current session's selected
+main Agent in `controls.agent` when a `threadId` is supplied, or `null` for a
+draft/default session. `settings/update` accepts `agent: string | null` with a
+`threadId`, validates concrete Agents against the active catalog, and writes
+either concrete main-agent metadata or an explicit session default marker. It
+does not write project-local Agent defaults.
+The composer also exposes execution runtime separately from Agent persona,
+although compact GUI surfaces may present both controls through one grouped
+Agent popover. The default runtime is `native`; ACP backend runtimes are
+identified by their backend id. Selecting a peer runtime such as `opencode`
+does not make that backend's internal agents into Psychevo agent definitions.
+Instead, peer-owned selectors such as OpenCode's ACP `mode` option are surfaced
+as runtime session options. If a peer runtime exposes `plan`, Workbench maps
+its shared Plan-mode control to `runtimeOptions.mode = "plan"` and maps the off
+state to the peer runtime's active default mode. Peer modes outside that
+default/plan pair are exposed only when present. `turn/start` accepts optional
+`runtimeRef` and `runtimeOptions` fields; old clients that omit them run on
+`native`. The legacy `mode` field remains the native Psychevo `RunMode`
+control. When `runtimeRef` names an ACP backend, Gateway validates that the
+selected Psychevo Agent is compatible with that runtime. Local Psychevo agent
+definitions such as `translate` are incompatible with OpenCode ACP unless a
+future backend explicitly advertises external agent definition support; GUI
+clients that know a selected runtime cannot accept agent personas should disable
+the Agent persona control and submit no `agentName` instead of relying on
+submit-time prompt-prefix emulation.
+
+Workbench loads peer runtime options on demand through `runtime/options`.
+The request carries the current scope, optional thread id, and runtime ref.
+Gateway initializes or loads the peer ACP session as needed and returns a
+bounded projection of ACP session config options, including id, name,
+description, category, type, current value, and selectable values. Workbench
+uses only the `mode` category/id for the first runtime-mode control, normalizes
+default/plan to the shared composer mode affordance when possible, and keeps
+additional peer modes as a separate runtime mode selector. The selection is
+scoped to the current draft/session and is sent back as `runtimeOptions`, not
+persisted in Settings.
+
+`@agent` has two distinct meanings depending on runtime capability. With
+`runtimeRef = native`, Workbench may submit structured
+`GatewayMentionTarget::Agent` mentions and Gateway/runtime may use the `Agent`
+tool to delegate a task to a local child agent or a backend-backed ACP
+subagent. With `runtimeRef` naming an ACP peer backend, Workbench must not offer
+Psychevo agent completion or submit structured Psychevo agent mentions because
+the peer runtime cannot be assumed to orchestrate Psychevo agents. Literal
+`@agent` text is still allowed in the prompt and is passed through to the peer.
+If an older client submits a structured agent mention whose backend is the same
+as the selected peer runtime, Gateway rejects it with guidance to either remove
+the self-delegation mention or switch back to native runtime for ACP-as-tool
+delegation.
+`turn/interrupt` is a thread/source-scoped active-turn control, not only a
+top-level model-request abort. When a native turn is awaiting a foreground
+Agent tool child invocation, interrupting the parent thread must abort that
+child invocation and settle the parent turn promptly. Persisted child-agent
+edges must close when the child completes, fails, or is interrupted, so
+Workbench Status and session reloads do not continue to show stale running
+agents.
+
+Startup and reconnect call source-default `thread/resume` with `params.scope`.
+Gateway returns the current thread snapshot when a binding exists, or an empty
+source snapshot before the first turn. The client treats Gateway snapshot data
+as authoritative and does not infer active turns, queues, permissions, or
+clarify requests from stale local state.
+Every `ThreadSnapshot` response includes the `entries` array. A missing
+`entries` field is a protocol error and must not be interpreted by Web clients
+as an empty transcript.
+When `thread/read` or explicit `thread/resume` targets a session whose
+`SessionSummaryView.messageCount` is greater than zero, Gateway must project the
+persisted messages into non-empty `TranscriptEntry[]` whenever those messages
+contain visible user or assistant content. A history selection must not return a
+normal empty transcript snapshot for such a session.
+
+`thread/start` is a new-source operation, not a session-creation operation. It
+clears the current source binding and returns an empty source snapshot with
+`thread = null`, without archiving the previously selected thread or inserting a
+placeholder session. That empty source snapshot is a detached draft: delayed
+events or read-only snapshot refreshes for previously running threads must not
+bind it back to an older thread. Only the draft's own first accepted prompt or
+shell result may attach the Web view to the newly resolved runtime thread.
+When another turn for the same browser/project source is already running,
+`thread/start` creates an internal draft source lane for the returned snapshot.
+The draft lane lets the first prompt or shell command start immediately instead
+of queueing behind the previous turn. The lane may appear as
+`ThreadSnapshot.scope.source.rawId`, but it is internal routing state: it must
+not appear in session history rows, grouping, search, display titles, or
+runtime `source` classifications. When the draft resolves to a durable thread,
+Gateway may bind the canonical project source to that new thread only if no
+newer source generation has superseded it; stale completions from previously
+running turns must not overwrite the binding.
+Web clients may show a local draft row for this detached draft in their History
+UI, but that row is not a persisted session and must not be exposed as a
+Gateway `SessionSummaryView`.
+Starting another new session while an unpersisted local draft is selected
+replaces the client-local draft row instead of accumulating multiple draft rows;
+only an accepted prompt or shell command can turn a draft into a durable
+session.
+When the detached draft is started from a project scope, the draft row appears
+inside that project's Sessions group rather than as a global item above all
+projects. If the target project has no persisted visible sessions yet, the
+client may create a temporary project group for the draft.
+`source/reset` is stronger: it ends and archives the previously bound thread,
+clears the source binding, and returns the same empty source snapshot without
+creating a replacement session.
+
+If the user submits a prompt from an empty source snapshot, the Web Gateway
+validates the input before resolving or creating a concrete thread. A valid
+first prompt starts against the source key; runtime creates the durable session
+when it persists the first user request, and Gateway binds the source to that
+session after the result resolves. Live events may initially arrive before a
+durable thread id is known, but completion and snapshot refreshes must carry the
+owning `threadId`, so a background running turn cannot be projected into
+whichever thread is currently visible.
+Workbench updates the active thread binding from `turnStarted` and live entry
+events, but ordinary transcript rendering during the active turn is driven by
+Gateway live transcript events. It must not poll `thread/read` on a timer during
+the turn and then merge the returned message-derived entries with the same live
+overlay. Snapshot reads during reconnect or explicit refresh may return
+in-progress message-derived entries; those entries replace any overlapping
+same-turn live overlay blocks rather than appearing as a second copy. A live
+entry may keep only blocks that remain uncovered by the message-derived
+snapshot; covered assistant text, reasoning, and tool blocks are removed even
+when another block in that live entry is still running.
+If more live events arrive after that snapshot, Workbench continues applying
+the same rule to the incoming event. A live tool update for an already
+message-derived tool call may update that message-derived tool row's transient
+running state, but it must not render as a separate duplicate live row.
+For ACP peer-agent turns selected from the Workbench composer, Gateway is the
+ACP client and uses `agent-client-protocol` 0.14.0. It must prefer ACP protocol
+v2 and fall back to v1 when initialization cannot negotiate the newer version.
+Gateway streams the peer's standard `session/update` notifications through this
+same live transcript path. `agent_message_chunk` updates appear as incremental
+assistant text, `agent_thought_chunk` updates appear as a live `Thinking`
+reasoning block, ACP tool updates appear as live tool rows, and v1 `plan` plus
+v2 `plan_update` item updates appear as a live plan/status row. `usage_update`
+is retained and forwarded as a live usage event; available-command, mode,
+config, and unknown/future updates are retained structurally for diagnostics
+and future surfaces. The final snapshot persists accumulated text and reasoning
+and must not erase already-rendered ACP peer tool or plan blocks from the live
+entry. Persisted ACP peer tool results carry the peer display title and source
+metadata so a post-turn snapshot or reload does not collapse a peer-provided
+tool title back to a generic local tool command label. Web/Desktop behavior
+must therefore match ACP event-stream semantics rather than showing only a
+synthesized final answer.
+Workbench must make running ACP peer text visually incremental even when the
+peer emits coarse chunks or the browser receives several gateway events in one
+render frame. It may use a presentation-only reveal buffer for running
+assistant text and reasoning blocks, but Gateway event state, persisted
+transcript entries, copy text, and snapshot reconciliation remain canonical.
+For peer turns, Gateway also maps Workbench's submitted `model` and
+`reasoningEffort` controls to ACP v2 session config options before
+`session/prompt` when the peer offers compatible `model` and `effort` select
+options. `runtimeOptions.mode` maps to the peer's `mode` option or `mode`
+category before the same prompt. Unsupported or unmatched peer options leave
+the peer default in place and emit diagnostic events; they do not fail the user
+turn.
+ACP peer `usage_update` events are retained as structured ACP peer events and
+projected into Status observability for the peer session when they include a
+usable `used`/`size` context pair. The Status context total then reflects the
+peer-reported context window rather than the local prompt estimate, and the
+session usage summary uses the peer-reported used tokens and cost when no
+durable provider accounting exists for that peer turn. That projection is not a
+long-lived session identity: starting a non-ACP-peer turn on the same Psychevo
+session clears the retained peer usage projection while preserving the peer
+native session id so a later peer turn can still resume the ACP backend session.
+Starting a new source draft or switching from a peer runtime back to native
+must clear peer-specific Status labels and usage projections from the visible
+observability panel so stale `reported by ACP peer` state is not shown for a
+native or empty draft session.
+
+`thread/trace` reads the selected thread's persisted observability trace when a
+sidecar exists. It accepts `threadId`, optional `afterSeq`, and optional `limit`.
+The result returns `available`, bounded `events`, `warnings`, `truncated`, and
+`nextAfterSeq`. The API is for debugging and evaluation timing enrichment only:
+`events` may include legacy schema v1 records or compact schema v2 facts, and
+debug surfaces must render them as generic JSON rather than transcript data.
+Trace read failures and missing trace files must not affect transcript reads,
+live transcript rendering, turn execution, or ordinary Workbench interaction.
+Workbench must not feed `thread/trace` records into transcript rendering.
+
+`observability/read` returns the shared UI observability projection for a
+request `scope` and optional `threadId`. Its `context` field uses the same shape
+as `context/read`, including safe structured per-category counting details when
+available; its `usage` field is a session-level summary of persisted visible
+message/accounting facts for context input, billable input/output, reasoning,
+cache read/write, provider-reported total tokens, estimated cost,
+unknown-pricing message count, provider/model, and derived cache-read percent.
+The method is display-only and must not return prompt text, message bodies,
+tool argument bodies, provider request text, raw trace records, or other raw
+provider payloads. Category details are limited to numeric/counting facts such
+as skill token estimates, history role counts, project-context counts,
+selected-skill-context counts, and tool counts. It respects the selected session
+and any resume/authorization boundary used by `thread/read` and
+`thread/resume`. If no session is active or selected, `context` is unavailable
+and `usage.available` is false.
+
+`context/read` remains supported for compatibility. Workbench and future GUI
+status/detail surfaces should prefer `observability/read` so context-window,
+token, cache, and cost displays stay consistent across resume and session
+switches.
+
+Creating a new Web thread or selecting an existing history thread rebinds the
+current Web source without archiving the previously selected thread. Only an
+explicit `source/reset`, archive action, or delete action may remove a thread
+from the active history list.
+
+Workbench history is a global session browser. `thread/list` with no workdir
+filter returns all human-visible sessions from the local state database; the
+stored session workdir is used only for grouping and for the target scope on
+resume. Rows are grouped by workdir, with the current workdir first and all
+other workdirs ordered by latest session activity. Runtime `source` may appear
+in diagnostics but must not appear in history rows/search or decide whether
+GUI, TUI, ACP, Web, or Desktop sessions are visible by default.
+
+When Workbench resumes a session from another workdir, it switches the active
+scope to that session's stored workdir before accepting more input. The file
+tree, `@` completion, diff/status panes, agents, skills, and subsequent turns
+refresh against the resumed workdir. Cross-workdir resume must not splice the
+old session's transcript into the launch workdir. Archiving, restoring,
+renaming, and deleting sessions operate from the same global list and must
+respect running/current-session guards across every source.
+Starting a new session from another workdir group switches the active browser
+scope to that stored workdir and returns an empty source snapshot for that
+workdir, without first requiring the user to resume an older session.
+
+The left Sessions browser owns the session-history controls. It has one
+compact header with the history icon to the left of `Sessions`; it does not
+render a separate `History` title or an `active across projects` subtitle. The
+header includes one expand/collapse-all toggle for project groups; when any
+project is collapsed it expands all groups, otherwise it collapses all groups.
+Each project group can be collapsed independently, shows only the project label
+in its header, and has a right-aligned `+` action for starting a new session in
+that project. Group headers do not show session counts. Session rows put the
+display title and timestamp on the same line with the timestamp right-aligned;
+the row does not show project name or entry count under the title. The archive
+history toggle belongs in Settings rather than the Sessions header. The
+Sessions scroller reserves a stable scrollbar gutter so project header actions
+do not shift horizontally as overflow appears or disappears.
+
+Selecting or creating a Web thread is allowed while another thread is running.
+The original thread continues in the background, remains visible in history with
+running/queued state, and can be interrupted by selecting it or by thread-scoped
+controls. Running threads cannot be archived or deleted until their active turn
+finishes or is interrupted.
+
+The Web Shell uses Gateway `completion/list` for `/`, `$`, and `@` composer
+completion. `$` completion resolves skills, local agents, and ACP capability
+mentions; accepted entries keep the visible `$name` text and send structured
+Gateway mentions on submission. `@` completion resolves subagent-capable agent
+names alongside workdir-scoped file references; accepted agent entries keep the
+visible `@agent-name` text and send structured Gateway agent mentions on
+submission. Workdir file completion remains scoped to the launched workdir and
+must not let the browser read arbitrary host files directly. When the selected
+runtime is a peer backend that cannot orchestrate Psychevo agents, `@`
+completion omits Psychevo agent candidates but keeps file-reference completion;
+manually typed `@agent-name` text remains prompt text.
+Long completion lists remain keyboard-operable: ArrowUp/ArrowDown and
+Ctrl+P/Ctrl+N update the active option and keep it visible inside the popover
+without moving focus out of the composer textarea.
+
+The Web Shell `Search` action opens a center-surface search view. The first
+slice searches the current workdir's known session ids, session titles, and
+visible message text from `thread/read` snapshots. Search results resume the
+matching session in the transcript surface; they do not create a right-side
+utility tab and do not search arbitrary host files.
+
+The Web Shell executes shared slash commands through `command/execute` when the
+command has a Gateway representation. Host-only results such as copy, export,
+share, and download are returned as structured client actions and performed by
+the host adapter.
+`command/list` is a typed Gateway protocol method returning the same
+capability-filtered catalog used by slash completion. The catalog and
+`command/execute` behavior are projected from the runtime command registry;
+Web must not carry a separate hard-coded slash inventory beyond applying typed
+host actions returned by Gateway. Unknown slash-looking input, including
+absolute-path-looking input, is returned as prompt passthrough instead of a
+local command error.
+The Web/Desktop surface profile is derived by Gateway from the request source
+and is not declared by the browser client. `command/list` includes runtime
+presentation metadata (`presentationKind`, `destination`, `feedbackAnchor`, and
+optional `alternateAction`) for visible commands. Commands hidden because
+Workbench cannot represent them are omitted from discovery and slash completion;
+GUI `/agents` is one such hidden command because current-session agent selection
+is handled by the composer selector and app-level ACP backend configuration
+lives in Settings > Agents. If a hidden command is typed explicitly,
+`command/execute` returns `known=true`, `accepted=false`, bounded guidance, and
+optional alternate action. Unknown slash-looking input returns `known=false`
+with a `passThroughPrompt` host action.
+
+Workbench applies command results by destination rather than by transcript
+insertion. Navigation commands switch panels, structured inspection commands
+open their domain view such as preview or status, active-turn controls update
+local activity state, submit-style slash commands start a normal model turn, and
+export commands invoke the host download/share path. Display-only feedback from
+commands must not be persisted as transcript entries. Panel host actions must
+reveal their destination in desktop and mobile layouts; focusing Status or
+History is not sufficient if the corresponding inspector/sidebar is collapsed.
+Undo and redo slash commands execute through `command/execute` and return host
+actions instead of adding transcript rows. `sessionUndo` includes the current
+thread id, restored prompt text, and reverted message count; `sessionRedo`
+includes the current thread id, restored message count, and whether redo
+completed the revert chain. Workbench refreshes the thread snapshot, history,
+and workspace-derived views after either action; `/undo` places the restored
+prompt in the composer and `/redo` clears it. If a turn is running, Gateway
+does not restore snapshots and instead returns a local interrupt action with
+bounded feedback asking the user to rerun the command after the turn settles.
+Composer-triggered help or browse actions for commands and agents use closeable
+overlays over the current transcript so the active session and composer remain
+visible. Composer-triggered inspect feedback may be mirrored near the composer
+while the destination panel is revealed. Queue actions preserve the original
+slash line as their display text when they submit expanded prompt text through
+`turn/start`. Display-only command feedback and overlays are transient to the
+current session/workdir and are cleared on session switches and new input.
+Successful display-only feedback with no follow-up action may auto-dismiss after
+a short delay and may be dismissed by clicking outside its panel. Error feedback
+and feedback with follow-up actions must remain until explicit dismissal or a
+normal transient clear.
+
+Workbench refreshes `observability/read` after `thread/resume`, `thread/read`,
+turn completion, undo/redo workspace refresh, and explicit session switches,
+including same-workdir resume where the file tree and diff may not otherwise
+need to change. New detached drafts or no-active-session states clear stale
+session usage metrics, and delayed observability responses from a previous
+selected thread or view epoch must not reapply to the current Status panel.
+Compact UI surfaces may show context percent, session tokens, cache-read
+percent, and estimated cost; richer details belong in the right Status view.
+Opening the compact composer context/status popover is a local display action
+and must not reveal, focus, or change the open state of the right Status
+inspector.
+
+The Web Shell supports TUI-compatible shell mode through `shell/start`.
+`shell/start` accepts `scope`, optional `threadId`, and a stripped local shell
+`command`; it returns whether the command was accepted plus the owning thread id
+when known. When a shell command is the first user request for an empty source
+snapshot, the accepted response may have `threadId = null`; the later
+`shell/result.thread.id` is authoritative. Execution uses the runtime user-shell
+executor, not the provider-callable `exec_command` tool surface. Live shell
+start/end events are projected through the ordinary Gateway event stream as
+shell evidence rows. After completion or error, Gateway sends a notification
+that lets Workbench refresh the owning snapshot and history.
+
+Shell mode is an explicit composer mode, not a literal prompt prefix. Entering
+`!` in an empty composer switches into shell mode and displays the shell marker;
+submitting sends only the stripped command to `shell/start`. Imported, pasted,
+or history-restored composer text that begins with `!` enters shell mode with
+the bang stripped. Empty shell mode shows bounded shell help, and Escape or
+backspace on an empty shell composer exits shell mode. Slash completion is
+disabled in shell mode; `@` completion remains available.
+
+If no agent turn is active, `shell/start` runs as the thread's active local
+activity and participates in interrupt and queue state. If an agent turn is
+active for the same thread, shell mode starts an auxiliary shell task and
+injects the bounded result into the active turn context. If a standalone shell
+activity is already active, later prompt or shell submissions are queued behind
+that activity.
+
+Persisted user-shell context must reload as shell evidence, not as raw
+`<user_shell_command>` XML prompt text. The visible command line uses the
+prompt-surface `!<command>` label while model-visible context continues to use
+the bounded runtime user-shell XML record.

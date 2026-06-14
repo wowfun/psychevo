@@ -54,6 +54,10 @@ artifacts by default. View rows include task family, failure class, evaluator
 message/details, trajectory links, and artifact links. Case workspaces are not
 retained by default.
 
+## Attachments
+
+- [Testing](testing.md) defines benchmark validation expectations.
+
 ## Related Topics
 
 - [350 Coding Evaluation](../350-coding-evaluation/spec.md)

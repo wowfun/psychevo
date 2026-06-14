@@ -63,6 +63,10 @@ keys avoid exposing raw local paths.
 the stored thread/workdir binding. `thread/list` uses an explicit workdir
 filter.
 
+## Attachments
+
+- [Testing](testing.md) defines headless server validation expectations.
+
 ## Related Topics
 
 - [021 Gateway](../021-gateway/spec.md) defines the transport-neutral Gateway.

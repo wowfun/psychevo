@@ -101,6 +101,18 @@ the touched subsystem. When a refactor spans multiple crates or product
 surfaces, it should also run the broad deterministic validation gate when one
 exists.
 
+Large-file refactors should include a structural inventory pass over the touched
+workspace roots. The canonical inventory excludes build and runtime artifact
+directories such as `target/`, `dist/`, `node_modules/`, `coverage/`,
+`test-results/`, and `.local/`, then reports oversized files by category:
+ordinary production/specification, test, and generated artifact. The inventory
+is evidence for the refactor; it should not become a brittle default test over
+volatile generated lists.
+
+Inventory success is not sufficient by itself. Review should also confirm that
+new module boundaries are semantic and that extracted files are not mechanical
+ordinal slices such as `part_001.rs` or `part_a.ts`.
+
 Tests should assert behavior and stable invariants before volatile inventories,
 generated prose, provider catalogs, incidental terminal formatting, or
 implementation-private storage layouts.

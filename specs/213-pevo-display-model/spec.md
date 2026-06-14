@@ -198,6 +198,10 @@ ordinary transcript projection.
 ACP/WebUI/IM adapters may map transcript entries into client-native update shapes,
 but must not require TUI-specific layout fields.
 
+## Attachments
+
+- [Testing](testing.md) defines display-model validation expectations.
+
 ## Related Topics
 
 - [026 Commands](../026-commands/spec.md)
