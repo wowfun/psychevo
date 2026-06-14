@@ -7,7 +7,7 @@ psychevo_self_edit: deny
 
 Define the fullscreen ledger layout, evidence projection, rendering rules, and
 visual diagnostic expectations. Shared surface language and component contracts
-come from [080 Design System](../080-design-system/spec.md).
+come from [075 Design System](../075-design-system/spec.md).
 
 This topic is the source of truth for how the fullscreen TUI looks and how
 Gateway transcript entries become ledger rows. Transcript state ownership is

@@ -147,6 +147,33 @@ panel lists local, generated peer, Markdown-shadowed peer, invalid, and
 shadowed definitions from the shared catalog. It can open peer threads, run
 subagents, edit Markdown agent definitions, display backend diagnostics, and
 execute `/agent:command` namespaced peer slash commands.
+Gateway exposes agent and backend management as typed RPCs rather than
+Workbench-only JSON shapes. Agent RPCs cover list/read/write/delete/status.
+Backend RPCs cover list/write/delete/doctor and always resolve against the
+request scope's workdir plus the active profile home. Backend writes must name
+an explicit target, `project` or `profile`; project writes update
+`<workdir>/.psychevo/config.toml`, while profile writes update the active
+profile config, normally `$PSYCHEVO_HOME/config.toml` and the explicit
+`PSYCHEVO_CONFIG` file when that environment override is active. Workbench GUI backend forms are embedded in
+Settings > Agents and only submit Profile-level writes or deletes; they do not
+expose the backend target selector. `backend/write` treats blank label and
+description as absent optional metadata, while backend views still expose an
+effective label that falls back to the backend id for display. Blank CWD writes
+the internal `invocation` sentinel; ACP peer launch resolves empty or
+`invocation` CWD to the active request scope workdir, relative CWD values under
+that workdir, and absolute values as entered. Workbench exposes backend enabled
+state and `peer`/`subagent` entrypoint selection as row-level controls in
+Settings > Agents and persists them with the same Profile-level backend write
+path. Workbench may present Command, Args, and Env as one JSON editor for
+usability, but it still submits the existing `backend/write` `command`, `args`,
+and `env` fields after client-side validation. A single Gateway process never
+reads or writes inactive profiles.
+These RPCs expose Gateway-owned camelCase views. They must not leak runtime
+internal snake_case status records or arbitrary `serde_json::Value` projections
+into Workbench-facing contracts. `agent/list` returns active and shadowed agent
+views plus diagnostics; `agent/status` returns structured run views and control
+state for the selected thread or all runs; `backend/list` returns effective ACP
+backend views with source targets and diagnostics.
 The composer exposes active, runnable agent definitions from the same catalog
 as a main-agent selector. The empty selector value is displayed as
 `Default Agent` and submits future turns with no `agentName`; concrete
@@ -227,6 +254,42 @@ If more live events arrive after that snapshot, Workbench continues applying
 the same rule to the incoming event. A live tool update for an already
 message-derived tool call may update that message-derived tool row's transient
 running state, but it must not render as a separate duplicate live row.
+For ACP peer-agent turns selected from the Workbench composer, Gateway is the
+ACP client and uses `agent-client-protocol` 0.14.0. It must prefer ACP protocol
+v2 and fall back to v1 when initialization cannot negotiate the newer version.
+Gateway streams the peer's standard `session/update` notifications through this
+same live transcript path. `agent_message_chunk` updates appear as incremental
+assistant text, `agent_thought_chunk` updates appear as a live `Thinking`
+reasoning block, ACP tool updates appear as live tool rows, and v1 `plan` plus
+v2 `plan_update` item updates appear as a live plan/status row. `usage_update`
+is retained and forwarded as a live usage event; available-command, mode,
+config, and unknown/future updates are retained structurally for diagnostics
+and future surfaces. The final snapshot persists accumulated text and reasoning
+and must not erase already-rendered ACP peer tool or plan blocks from the live
+entry. Persisted ACP peer tool results carry the peer display title and source
+metadata so a post-turn snapshot or reload does not collapse a peer-provided
+tool title back to a generic local tool command label. Web/Desktop behavior
+must therefore match ACP event-stream semantics rather than showing only a
+synthesized final answer.
+Workbench must make running ACP peer text visually incremental even when the
+peer emits coarse chunks or the browser receives several gateway events in one
+render frame. It may use a presentation-only reveal buffer for running
+assistant text and reasoning blocks, but Gateway event state, persisted
+transcript entries, copy text, and snapshot reconciliation remain canonical.
+For peer turns, Gateway also maps Workbench's submitted `model` and
+`reasoningEffort` controls to ACP v2 session config options before
+`session/prompt` when the peer offers compatible `model` and `effort` select
+options. Unsupported or unmatched peer options leave the peer default in place
+and emit diagnostic events; they do not fail the user turn.
+ACP peer `usage_update` events are retained as structured ACP peer events and
+projected into Status observability for the peer session when they include a
+usable `used`/`size` context pair. The Status context total then reflects the
+peer-reported context window rather than the local prompt estimate, and the
+session usage summary uses the peer-reported used tokens and cost when no
+durable provider accounting exists for that peer turn. That projection is not a
+long-lived session identity: starting a non-ACP-peer turn on the same Psychevo
+session clears the retained peer usage projection while preserving the peer
+native session id so a later peer turn can still resume the ACP backend session.
 
 `thread/trace` reads the selected thread's persisted observability trace when a
 sidecar exists. It accepts `threadId`, optional `afterSeq`, and optional `limit`.
@@ -240,15 +303,19 @@ Workbench must not feed `thread/trace` records into transcript rendering.
 
 `observability/read` returns the shared UI observability projection for a
 request `scope` and optional `threadId`. Its `context` field uses the same shape
-as `context/read`; its `usage` field is a session-level summary of persisted
-visible message/accounting facts for context input, billable input/output,
-reasoning, cache read/write, provider-reported total tokens, estimated cost,
+as `context/read`, including safe structured per-category counting details when
+available; its `usage` field is a session-level summary of persisted visible
+message/accounting facts for context input, billable input/output, reasoning,
+cache read/write, provider-reported total tokens, estimated cost,
 unknown-pricing message count, provider/model, and derived cache-read percent.
 The method is display-only and must not return prompt text, message bodies,
-tool argument bodies, provider request text, or raw trace records. It respects
-the selected session and any resume/authorization boundary used by
-`thread/read` and `thread/resume`. If no session is active or selected,
-`context` is unavailable and `usage.available` is false.
+tool argument bodies, provider request text, raw trace records, or other raw
+provider payloads. Category details are limited to numeric/counting facts such
+as skill token estimates, history role counts, project-context counts,
+selected-skill-context counts, and tool counts. It respects the selected session
+and any resume/authorization boundary used by `thread/read` and
+`thread/resume`. If no session is active or selected, `context` is unavailable
+and `usage.available` is false.
 
 `context/read` remains supported for compatibility. Workbench and future GUI
 status/detail surfaces should prefer `observability/read` so context-window,
@@ -330,9 +397,12 @@ and is not declared by the browser client. `command/list` includes runtime
 presentation metadata (`presentationKind`, `destination`, `feedbackAnchor`, and
 optional `alternateAction`) for visible commands. Commands hidden because
 Workbench cannot represent them are omitted from discovery and slash completion;
-if typed explicitly, `command/execute` returns `known=true`, `accepted=false`,
-bounded guidance, and optional alternate action. Unknown slash-looking input
-returns `known=false` with a `passThroughPrompt` host action.
+GUI `/agents` is one such hidden command because current-session agent selection
+is handled by the composer selector and app-level ACP backend configuration
+lives in Settings > Agents. If a hidden command is typed explicitly,
+`command/execute` returns `known=true`, `accepted=false`, bounded guidance, and
+optional alternate action. Unknown slash-looking input returns `known=false`
+with a `passThroughPrompt` host action.
 
 Workbench applies command results by destination rather than by transcript
 insertion. Navigation commands switch panels, structured inspection commands
@@ -358,14 +428,22 @@ while the destination panel is revealed. Queue actions preserve the original
 slash line as their display text when they submit expanded prompt text through
 `turn/start`. Display-only command feedback and overlays are transient to the
 current session/workdir and are cleared on session switches and new input.
+Successful display-only feedback with no follow-up action may auto-dismiss after
+a short delay and may be dismissed by clicking outside its panel. Error feedback
+and feedback with follow-up actions must remain until explicit dismissal or a
+normal transient clear.
 
 Workbench refreshes `observability/read` after `thread/resume`, `thread/read`,
 turn completion, undo/redo workspace refresh, and explicit session switches,
 including same-workdir resume where the file tree and diff may not otherwise
 need to change. New detached drafts or no-active-session states clear stale
-session usage metrics. Compact UI surfaces may show context percent, session
-tokens, cache-read percent, and estimated cost; richer details belong in the
-right Status view and the composer context/status popover.
+session usage metrics, and delayed observability responses from a previous
+selected thread or view epoch must not reapply to the current Status panel.
+Compact UI surfaces may show context percent, session tokens, cache-read
+percent, and estimated cost; richer details belong in the right Status view.
+Opening the compact composer context/status popover is a local display action
+and must not reveal, focus, or change the open state of the right Status
+inspector.
 
 The Web Shell supports TUI-compatible shell mode through `shell/start`.
 `shell/start` accepts `scope`, optional `threadId`, and a stripped local shell
@@ -407,11 +485,17 @@ the same Web/Desktop tree.
 
 The desktop layout is a three-surface workbench:
 
-- left: collapse control, `New Session`, `Search`, `Artifacts`, global
+- left: collapse control, `New Session`, `Search`, global
   `Pinned`, project-grouped Sessions with expand/collapse and per-project new
-  session actions, and a bottom utility rail for Settings. Agents, Skills,
-  Tools, and MCP remain deferred utility surfaces and are hidden from the rail
-  until the product explicitly enables them.
+  session actions, and a bottom utility rail for Settings. Settings is the
+  persistent app-level configuration center whose left navigation lists
+  `Appearance`, `Debug`, and `Agents` directly, with bottom-aligned
+  `Archived sessions` for archived-session management; the Agents section
+  contains embedded Profile-level ACP backend configuration. The ordinary
+  Workbench left sidebar always lists active sessions and does not become an
+  archived-session filter.
+  Composer-triggered `/commands` remains a closeable overlay over the transcript.
+  GUI `/agents` is not exposed by Web/Desktop command discovery or panel routing.
 - center: transcript/workbench and bottom-fixed composer
 - right: a resizable workspace with a status/navigation home and typed tabs for
   `Review`, `Terminal`, and `Files`
@@ -514,7 +598,18 @@ WebSocket connection that created them and are cleaned up on explicit
 termination, process exit, or connection close. Terminal output is never
 persisted as session history or model-visible context.
 
-Settings includes a local appearance control with `dark` and `light` choices.
+Settings is an app-level configuration center, not an embedded session panel.
+When active, it replaces the Workbench session shell and hides the session
+list, composer, mobile Workbench panel tabs, and right inspector. It does not
+show a separate top Settings header or top-right close button; its return
+control sits at the top of the Settings left navigation, followed by a settings
+search field, and the current project/workdir path is not repeated there. The
+internal left navigation lists `Appearance`, `Debug`, and `Agents` directly,
+with `Archived sessions` pinned to the bottom.
+`Appearance` includes a local appearance control with `dark` and `light`
+choices, `Archived sessions` directly lists archived sessions for restore/delete
+workflows, and `Debug` owns the local Debug switch. The ordinary Workbench left
+sidebar remains an active-session list and must not switch to archived sessions.
 The default is the dark ledger appearance. The setting is a Workbench host
 preference and does not require Gateway to persist provider/runtime
 configuration. The light palette is a warm reading-paper treatment with ivory
@@ -522,8 +617,21 @@ canvas, warm paper panels, taupe borders, warm charcoal text, and low-chroma
 amber/taupe active states rather than cool blue chrome. The dark palette keeps
 the near-black ledger structure, removes cold blue sidebar bias, and uses
 higher-luminance primary, muted, and navigation text so Gateway-rendered
-status/settings data remains readable under both appearances.
-Settings also includes a local Debug switch. Enabling Debug adds a right-side
+status/settings data remains readable under both appearances. The `Agents`
+section shows only configurable Profile-level ACP backend registrations and
+diagnostics; it does not list the read-only effective agent catalog or
+Project-level backend definitions because those are not configurable from the
+GUI. Its icon-only add control opens a generic empty ACP backend editor rather
+than an OpenCode-specific preset. Each listed Profile ACP backend exposes its
+enabled state as a row-level switch in Settings > Agents plus ordinary
+checkboxes for the `peer` and `subagent` entrypoints. The editor does not
+duplicate those row controls. The editor only requires ID and a valid command
+string inside its Command JSON input; Label and Description are optional
+metadata, and default CWD is shown as the invocation workdir with a
+resolved-path helper instead of the raw `invocation` sentinel.
+Session-scoped Agent,
+Model, Variant, and Permission mode controls remain in the composer/status
+surfaces and are not duplicated in Settings. Enabling Debug adds a right-side
 `Debug` tab after `Files` and displays the current Workbench event stream and
 Gateway notifications there. Debug output is diagnostic chrome, hidden by
 default, and must not become transcript history or model-visible context.

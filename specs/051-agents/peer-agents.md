@@ -18,7 +18,8 @@ Out of scope:
 
 - network relay, LAN exposure, cloud agent registries, and automatic discovery
 - durable cron or scheduled peer-agent execution
-- built-in templates for specific ACP agents beyond a generic ACP template
+- broad built-in templates for specific ACP agents beyond explicitly supported
+  product shortcuts such as OpenCode
 - making external agents model providers
 
 ## Backend Registration
@@ -48,15 +49,23 @@ Defaults are:
 - `cwd = "invocation"`
 - `args = []`
 - `env = {}`
-- `label = <backend id>`
+- `label = <backend id>` as the effective display fallback when no explicit
+  label is configured
 
-`description` is required for generated agent catalog visibility. Backends
-without a description may still appear in diagnostics but must not generate a
-model-visible agent.
+`description` is optional metadata. Generated agent descriptions fall back to
+the effective label and then the backend id, so an enabled backend can generate
+a model-visible agent without duplicating the backend name in a description
+field.
 
-Global and project config use the normal deep-merge behavior; project config may
-define or override command-bearing backends. `enabled = false` disables the
-generated agent and makes Markdown definitions that reference the backend
+Profile-global and project config use the normal deep-merge behavior. The active
+profile's `$PSYCHEVO_HOME/config.toml` supplies reusable backends for that
+profile, while the current workdir's `.psychevo/config.toml` may add or
+override command-bearing backends. If an invocation uses an explicit
+`PSYCHEVO_CONFIG`, that file replaces the active profile config for backend
+loading, but the current workdir overlay still applies afterward. Workbench may
+edit either the active profile config or the current project overlay, but it
+must not switch profiles inside one Gateway process. `enabled = false` disables
+the generated agent and makes Markdown definitions that reference the backend
 non-runnable with a diagnostic.
 
 ## Agent Definitions
@@ -82,7 +91,7 @@ diagnostic. Markdown definitions may define identity, body instructions,
 entrypoints, skills, MCP scope, model preference, effort, background behavior,
 and tool policy.
 
-Each enabled backend with a description generates a default agent definition
+Each enabled backend generates a default agent definition
 using the backend id as the agent name. Generated agents default to the
 backend's `entrypoints`, have no instruction body, and send no extra prompt
 wrapper. A same-name Markdown definition shadows the generated definition and
@@ -115,6 +124,20 @@ External ACP `session/request_permission` requests are projected as Gateway
 permission requests. If no interactive approval handler is available, requests
 fail closed and the peer timeline records a diagnostic.
 
+Workbench exposes configured Profile ACP backends in Settings > Agents as an
+app-level peer-agent configuration surface. Users can add, edit, delete, enable,
+disable, choose `peer`/`subagent` entrypoints, and run backend diagnostics for
+Profile-level registrations. Project-level backend definitions can still be
+read by Gateway and affect runtime behavior, but Workbench does not edit them
+from Settings. Backend management is configuration editing; it does not grant
+execution permission beyond the existing selected-agent policy and Gateway
+permission flow.
+
+Workbench uses a generic ACP backend add action rather than an OpenCode-specific
+shortcut. The editor represents `command`, `args`, and `env` as one JSON input,
+for example `{ "command": "opencode", "args": ["acp"], "env": {} }`, and writes
+the parsed values to the normal backend registration fields.
+
 ## Execution Semantics
 
 Top-level peer threads use a Psychevo-local thread id as the durable public
@@ -141,9 +164,33 @@ thread timeline.
 
 Psychevo acts as an ACP client for peer agents. It starts stdio processes,
 initializes ACP, creates or loads sessions, sends prompts, maps session updates
-to Gateway events, and persists normalized semantic timeline rows. Live ACP
-updates provide immediacy; Psychevo's normalized timeline is authoritative for
-reloads across TUI, Web, Desktop, and future surfaces.
+to Gateway events, and persists normalized semantic timeline rows. Gateway
+uses `agent-client-protocol` 0.14.0 and prefers ACP protocol v2, falling back to
+ACP v1 only when the peer cannot negotiate that version. Live ACP updates
+provide immediacy; Psychevo's normalized timeline is authoritative for reloads
+across TUI, Web, Desktop, and future surfaces.
+
+ACP peer execution must consume the standard `session/update` event stream while
+the prompt is active. It must not collapse a peer turn through a final-string
+helper that discards intermediate updates. `agent_message_chunk` text updates
+map to incremental assistant text events before the final stop reason, and the
+final persisted assistant message contains the accumulated text.
+`agent_thought_chunk` text updates map to Gateway reasoning deltas so Workbench
+and other live surfaces show a running `Thinking` block; the completed
+reasoning text is persisted as an assistant reasoning block for history
+reloads. `tool_call` and `tool_call_update` updates map to live transcript tool
+blocks with ACP raw input, output, status, locations, display title, and
+original update metadata retained; persisted tool results keep enough peer
+display metadata for history reloads to preserve the ACP tool title. V1 `plan`
+and v2 `plan_update` item updates map to a live plan/status block. Newer
+plan-operation updates are retained as structured ACP peer events, and when
+they carry a complete display body they may be projected through the same
+plan/status path. Session metadata, available-command, mode, config, usage, and
+future ACP update variants are retained as structured ACP peer runtime events
+even when they do not yet have a dedicated visible Workbench control.
+`usage_update` is additionally forwarded as a live usage event for observability
+surfaces. Unsupported variants must not block supported message, thought, tool,
+and plan streaming from continuing.
 
 Markdown body instructions are delivered by first trying a supported ACP
 config/system-like option. If unavailable, the body is prepended to the first
@@ -168,9 +215,12 @@ Initial Gateway implementation slice:
   resident for the lifetime of the Psychevo thread.
 - Gateway persists prompt and assistant timeline rows plus session metadata with
   the selected agent, backend id, and ACP native session id.
-- Client callbacks initially advertise and implement `fs.read` and `fs.write`
-  when allowed by backend capabilities and the selected agent tool policy.
-  `terminal` is not advertised until terminal lifecycle projection lands.
+- V1 client callbacks advertise and implement `fs.read` and `fs.write` when
+  allowed by backend capabilities and the selected agent tool policy.
+  `terminal` is not advertised until terminal lifecycle projection lands. ACP
+  v2 in SDK schema 0.13.6 removes the v1 `fs` and `terminal` client
+  capabilities, so the v2 initialization path must not claim those callbacks;
+  filesystem callbacks are available only on v1 fallback.
 - ACP permission requests and write-file callbacks use the existing Gateway
   approval handler when available; otherwise they fail closed.
 

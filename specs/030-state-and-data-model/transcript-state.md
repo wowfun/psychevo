@@ -112,4 +112,4 @@ messages without replacing them as the ordinary transcript source.
 - [030 State and Data Model](spec.md)
 - [030 Session Record Model](session-record-model.md)
 - [213 pevo Display Model](../213-pevo-display-model/spec.md)
-- [040 Storage and Persistence](../040-storage-and-persistence/spec.md)
+- [031 Storage and Persistence](../031-storage-and-persistence/spec.md)

@@ -327,12 +327,12 @@ forms accepted by shared non-picker surfaces are
 `/permissions allow|ask|deny <rule>` and
 `/permissions remove <allow|ask|deny> <rule>`; TUI may continue to offer richer
 picker affordances for the same policy edits. Permission policy semantics are
-defined by [035 Permissions](../035-permissions/spec.md); this topic owns only
+defined by [041 Permissions](../041-permissions/spec.md); this topic owns only
 the interactive projection.
 
 `/sandbox` shows the effective sandbox mode, backend, confinement status, and
 configured roots. Sandbox enforcement semantics are defined by
-[036 Sandbox](../036-sandbox/spec.md); this topic owns only the interactive
+[045 Sandbox](../045-sandbox/spec.md); this topic owns only the interactive
 projection.
 
 Fullscreen `/tools` opens a searchable bottom pane of built-in and configured

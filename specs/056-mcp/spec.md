@@ -135,7 +135,7 @@ Runtime does not need to persist every discovered MCP candidate by default.
   scoped tool surface semantics.
 - [020 Interfaces](../020-interfaces/spec.md) defines caller-facing interface
   semantics.
-- [035 Permissions](../035-permissions/spec.md) defines permission policy and
+- [041 Permissions](../041-permissions/spec.md) defines permission policy and
   approval semantics.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines
   capability contribution boundaries.

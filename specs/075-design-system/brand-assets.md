@@ -1,11 +1,11 @@
 ---
-name: 085. Brand Assets
+name: 075. Brand Assets Attachment
 psychevo_self_edit: deny
 ---
 
-# 085. Brand Assets
+# 075. Brand Assets Attachment
 
-Define Psychevo's tracked brand asset locations and usage rules. This topic
+Define Psychevo's tracked brand asset locations and usage rules. This attachment
 keeps public-facing logo assets separate from ignored local design exploration
 and from the terminal-native design-system rules.
 
@@ -20,7 +20,7 @@ and from the terminal-native design-system rules.
 Out of scope:
 
 - TUI rendering, terminal color roles, and glyph language; those belong to
-  [080 Design System](../080-design-system/spec.md)
+  [Design System](spec.md)
 - runtime behavior, CLI commands, package publishing mechanics, or installer
   behavior
 - exploratory design candidates under ignored local workspaces
@@ -55,4 +55,4 @@ fallbacks are separate derived assets and should not replace
 
 ## Related Topics
 
-- [080 Design System](../080-design-system/spec.md)
+- [Design System](spec.md)

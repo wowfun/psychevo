@@ -80,7 +80,7 @@ Self-evolution is a later capability domain. Any future evaluate-modify-retain-o
 - [007 Tool Surface](../007-tool-surface/spec.md) defines agent-invocation scoped tool surface and toolset expansion semantics.
 - [009 Resource Surface](../009-resource-surface/spec.md) defines resource decisions for working context and tool operations.
 - [020 Interfaces](../020-interfaces/spec.md) defines caller-facing invocation, observation, and completion semantics.
-- [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines material retrieval through session and evidence relationships.
+- [031 Storage and Persistence](../031-storage-and-persistence/spec.md) defines material retrieval through session and evidence relationships.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability source, availability, and conflict boundaries.
 - [110 Coding Core Tools](../110-coding-core-tools/spec.md) defines the required `coding-core` toolset.
 - [055 Skills](../055-skills/spec.md) defines optional skill discovery, view, and management behavior.

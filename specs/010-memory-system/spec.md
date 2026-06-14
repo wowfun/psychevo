@@ -52,7 +52,7 @@ Retained memory is memory material preserved for possible later recall.
 
 Memory recall selects retained memory as context candidates. Recall does not make memory model-visible by itself.
 
-Memory persistence boundaries are defined by [040 Storage and Persistence](../040-storage-and-persistence/spec.md). This spec does not define storage, retrieval, ranking, provider routing, background refresh, synchronization, or capacity management.
+Memory persistence boundaries are defined by [031 Storage and Persistence](../031-storage-and-persistence/spec.md). This spec does not define storage, retrieval, ranking, provider routing, background refresh, synchronization, or capacity management.
 
 ## Projection Boundary
 
@@ -86,5 +86,5 @@ Durable evidence remains the source for execution facts. Memory may reference ev
 - [006 Context Assembly](../006-context-assembly/spec.md) defines how memory recall candidates may become model context.
 - [008 Session Continuity](../008-session-continuity/spec.md) defines session continuity, which stays separate from cross-session memory.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines how memory facts relate to other state families.
-- [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines optional persistence boundaries for retained memory facts.
+- [031 Storage and Persistence](../031-storage-and-persistence/spec.md) defines optional persistence boundaries for retained memory facts.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines how capability contributions may provide memory candidates or providers.

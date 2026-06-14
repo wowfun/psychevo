@@ -52,6 +52,14 @@ A workdir-local `<workdir>/.psychevo` remains an overlay for config, agents,
 skills, and other directory-scoped resources. It does not select, own, or
 override the active profile.
 
+ACP peer-agent backends follow the same rule. Profile-global backend
+registrations live in the active profile home and are visible only to Gateway,
+TUI, ACP, and Workbench processes launched for that profile. Project-local
+backend registrations live in `<workdir>/.psychevo/config.toml` and overlay the
+active profile for that workdir. Workbench may manage both locations for the
+currently running profile/workdir, but it must not aggregate or mutate inactive
+profiles.
+
 GUI and desktop shells may create user-facing workdirs under a configurable
 workspace root. The default root is `~/workspaces`; the default no-project GUI
 workdir is `<workspace-root>/general`. This root is profile configuration, not
@@ -78,7 +86,10 @@ treated as a custom default-style active home.
 After resolution, commands pass the resolved active profile home to existing
 runtime layers as `PSYCHEVO_HOME`. `PSYCHEVO_DB` and `PSYCHEVO_CONFIG` keep
 their existing override semantics and may bypass the home for the specific
-database or config path they name.
+database or config path they name. ACP peer-agent backend loading treats an
+explicit `PSYCHEVO_CONFIG` as the profile-level config source, then still merges
+the current workdir's `.psychevo/config.toml` overlay so Project-target backend
+edits are immediately effective.
 
 Selecting a missing named profile fails with a clear local error that points to
 `pevo profile create <name>`.

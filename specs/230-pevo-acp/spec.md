@@ -74,6 +74,17 @@ Runtime remains the owner of session coordination, model resolution, tool
 surface assembly, capability source normalization, permission policy, command
 metadata, persistence, and evidence.
 
+The server exposes runtime model controls through standard ACP session config
+options. On `session/new` and `session/load`, clients receive `mode`, `model`,
+and `effort` options when values are available from local configuration.
+`session/set_config_option` updates the in-memory ACP session and returns the
+refreshed option set; the next prompt passes those values to Gateway/runtime.
+`pevo acp` also continues to send ACP `usage_update` notifications from runtime
+context snapshots so connected clients can show context-window usage. When a
+turn has provider/runtime token accounting but no context snapshot, `pevo acp`
+uses the resolved model context limit plus the best available total-token
+accounting as a fallback usage update.
+
 ACP sessions use the same runtime project context configuration as `pevo run`.
 The server does not add ACP-specific project-context protocol fields. Workspace
 `.psychevo/config.toml` may set `[project_context].instructions` to `git-root`,
@@ -86,16 +97,27 @@ turn queueing, steering, interrupt, permission, clarify, and source-to-thread
 binding use Gateway semantics. Transport-local state is not durable session
 evidence.
 
-ACP request handling must return protocol version `V1` in initialize
-responses, advertise only implemented optional capabilities, and avoid
-placeholder logout support. Runtime usage, accounting, turns, warnings, and
-context-window updates are projected according to [027 ACP](../027-acp/spec.md)
-without mutating the durable transcript.
+ACP request handling uses the SDK ACP v2 agent builder and v2 typed handlers.
+Initialize responses return protocol version `V2` to v2 clients, while v1
+clients are handled through the SDK compatibility layer when a v2 operation has
+a lossless or documented compatibility projection. The server advertises only
+implemented optional capabilities and avoids placeholder logout support. Runtime
+usage, accounting, turns, warnings, and context-window updates are projected
+according to [027 ACP](../027-acp/spec.md) without mutating the durable
+transcript.
+
+Mode is exposed through the ACP session config option surface. `pevo acp` does
+not register the v1-only `session/set_mode` handler; clients set mode with
+`session/set_config_option` using the `mode` config id. New and loaded sessions
+return the current config options in their response instead of relying on the
+deprecated v1 `modes` field.
 
 `PSYCHEVO_ACP_TERMINAL_OUTPUT` affects only ACP presentation. It does not make
 the editor execute Psychevo commands, and `pevo acp` must continue to route
 `exec_command`, yielded command sessions, and `write_stdin` through runtime and
-Gateway semantics.
+Gateway semantics. Under ACP v2 schema 0.13.6, terminal-output presentation is
+encoded as text content plus `_meta` terminal output fields because the v2 tool
+content model no longer has the v1 terminal content variant.
 
 `psychevo-acp` sends ACP command availability after the client receives or can
 apply the ACP session id. It also handles supported slash-command prompts

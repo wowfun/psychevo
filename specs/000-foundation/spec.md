@@ -27,6 +27,7 @@ Out of scope:
 - [001 Architecture](../001-architecture/spec.md) defines Rust workspace layout, crate boundaries, runtime topology, and dependency direction.
 - [005 Durable Evidence](../005-durable-evidence/spec.md) defines the durable evidence contract downstream of the execution evidence principle.
 - [010 Memory System](../010-memory-system/spec.md) defines the optional memory boundary downstream of the execution substrate.
-- [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines the persistence boundary downstream of execution evidence.
+- [031 Storage and Persistence](../031-storage-and-persistence/spec.md) defines the persistence boundary downstream of execution evidence.
+- [040 Environment](../040-environment/spec.md) defines local host environment and authority boundaries.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines how capability contributions remain outside the minimal core until runtime selection.
 - [070 Experience](../070-experience/spec.md) defines cross-cutting UX and DX defaults for user-facing and developer-facing work.

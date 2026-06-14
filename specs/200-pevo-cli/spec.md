@@ -340,7 +340,7 @@ any action that would otherwise prompt unless it already matches
 `permissions.allow` or a safe default. `--dangerously-skip-permissions` is the
 explicit bypass flag and selects `bypassPermissions`; hard denies still apply.
 Permission semantics, rule precedence, approval modes, and hard-deny behavior
-are defined by [035 Permissions](../035-permissions/spec.md); this topic owns
+are defined by [041 Permissions](../041-permissions/spec.md); this topic owns
 only the concrete `pevo` command spelling and output surface.
 
 `pevo config permissions list/remove` manages the current workdir's
@@ -389,7 +389,7 @@ the installed binary, and optionally initializes the global Psychevo home.
 - [051 Subagents](../051-agents/subagents.md) defines subagent command semantics.
 - [120 Provider Registry](../120-provider-registry/spec.md) defines
   provider/model configuration and resolution.
-- [035 Permissions](../035-permissions/spec.md) defines permission rules,
+- [041 Permissions](../041-permissions/spec.md) defines permission rules,
   approval modes, and bypass semantics.
 - [230 pevo-acp](../230-pevo-acp/spec.md) owns the ACP server packaging behind
   `pevo acp`.

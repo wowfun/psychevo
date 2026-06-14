@@ -40,5 +40,5 @@ local estimate derived from persisted accounting columns and is not a bill.
 ## Related Topics
 
 - [200 pevo CLI](spec.md) defines the product CLI surface.
-- [040 SQLite Persistence](../040-storage-and-persistence/sqlite-persistence.md)
+- [031 SQLite Persistence](../031-storage-and-persistence/sqlite-persistence.md)
   defines persisted accounting columns.

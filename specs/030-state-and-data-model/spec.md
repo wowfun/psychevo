@@ -89,7 +89,7 @@ Each state family keeps its source-of-truth ownership in its owning spec. This s
 
 Durable facts must be representable through durable evidence or another durable system owned by a later spec. Final loop-visible messages, terminal outcomes, tool request and result relationships, resource decisions that affect execution, and evidence-linked memory facts fall into this class when the owning specs require them.
 
-[040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines the persistence boundary for durable facts. This spec defines recoverability classes, not persistence substrate behavior.
+[031 Storage and Persistence](../031-storage-and-persistence/spec.md) defines the persistence boundary for durable facts. This spec defines recoverability classes, not persistence substrate behavior.
 
 Reconstructable facts may be rebuilt from durable facts, configuration, source material, or provider/runtime capability discovery. Context projections, summary context, selected tool surfaces, tool declaration snapshots, resource facts, capability extension candidates, capability assembly selections, and memory recall candidates may be reconstructable when their source material remains available. This spec does not guarantee deterministic reconstruction.
 
@@ -130,5 +130,5 @@ Recoverability class is semantic. It does not define persistence format, retenti
 - [010 Memory System](../010-memory-system/spec.md) defines memory state boundaries.
 - [020 Interfaces](../020-interfaces/spec.md) defines caller-facing interface projection for session and agent-invocation state.
 - [021 Gateway](../021-gateway/spec.md) defines source-to-thread and live gateway state semantics.
-- [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines persistence boundaries for durable semantic facts.
+- [031 Storage and Persistence](../031-storage-and-persistence/spec.md) defines persistence boundaries for durable semantic facts.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability extension state boundaries.

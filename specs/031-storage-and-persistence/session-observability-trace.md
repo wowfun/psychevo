@@ -1,5 +1,5 @@
 ---
-name: 040. Session Observability Trace Sidecar
+name: 031. Session Observability Trace Sidecar
 psychevo_self_edit: deny
 ---
 

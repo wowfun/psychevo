@@ -58,7 +58,7 @@ interfaces without semver compatibility until a later SDK or package publishing
 topic declares otherwise.
 
 The root `assets/` directory remains the canonical tracked brand asset source
-defined by [085 Brand Assets](../085-brand-assets/spec.md). `@psychevo/assets`
+defined by [075 Brand Assets](../075-design-system/brand-assets.md). `@psychevo/assets`
 packages those assets and theme tokens for Web consumers; it does not replace
 the canonical asset location.
 
@@ -168,6 +168,9 @@ state. The client must either render the message-derived entries returned by
 instead of silently presenting the session as empty.
 Transcript block child arrays such as artifact ids are rendered as empty when
 omitted by live or partially upgraded payloads.
+Transcript message action hit areas must not cover or intercept adjacent
+reasoning, tool, status, or message rows; visually stacked rows remain
+independently clickable after live updates reconcile to committed snapshots.
 
 The composer component must match TUI submission ergonomics. Plain Enter submits
 unless an IME composition is active or a completion item is being accepted.
@@ -209,11 +212,25 @@ and the model label and context-usage popover must not clip their selected
 value, summary, or visible usage details at desktop or narrow Workbench widths.
 Context and session observability controls are display-only chrome. Compact
 surfaces may show context percent, session tokens, cache-read percent, and
-estimated cost, while full breakdowns belong in the context/status popover or
-right Status inspector. These values come from Gateway `observability/read`,
-clear on new detached drafts or no-active-session states, and must not become
-transcript content, command feedback, local prompt text, or model-visible
-context.
+estimated cost. The composer context popover remains compact and must not show
+prompt/category detail breakdowns and opening it must not reveal, focus, or
+change the open state of the right Status inspector. Full breakdowns belong in
+the right Status inspector: they summarize the session usage facts first, then
+show prompt/context token categories in the same category order and labels as
+TUI `/context` where possible. The right Status view uses a stacked prompt-token
+bar for category proportions, with hover/focus text showing each category token
+count and percent. Category rows themselves are not independently collapsible
+and do not carry per-row meter bars; instead, all prompt-token category detail
+rows live under one `Prompt tokens` disclosure that is closed by default.
+Expanded category details may show only numeric/counting facts, such as skill
+entry token estimates, history role counts, project-context counts,
+selected-skill-context counts, and tool counts. These values come from Gateway
+`observability/read`, clear on new detached drafts or no-active-session states,
+and must not become transcript content, command feedback, local prompt text, or
+model-visible context. Observability refreshes are scoped to the selected view
+epoch/session: a delayed response for a previously selected session must be
+discarded after the user creates or selects a different session or detached
+draft.
 Permission,
 path, and branch remain in the quieter status line. The default send control is
 a compact circular arrow-up button; during an
@@ -238,7 +255,7 @@ Preview, Prompt, Download, or Extension. Those labels are derived from Gateway
 command presentation metadata, not from frontend command-name allowlists.
 
 Workbench applies slash command results to the region that owns the result.
-Commands, sessions/history, agents, and status commands switch the relevant
+Commands/help, sessions/history, and status commands switch the relevant
 Workbench panel. Diff opens the preview surface. Context, usage, and status
 details focus the status area. Export and share invoke host download/share
 actions. Active-turn control commands update turn state and show display-only
@@ -246,11 +263,45 @@ feedback near the trigger. Dynamic skill and bundle slash commands submit a
 model turn while the transcript-visible user input remains the original slash
 line. Panel-targeted slash actions reveal collapsed regions, such as the right
 Status inspector or left History sidebar, so the command has an immediate
-visible result. Composer-triggered `/help`, `/commands`, and `/agents` open
-closeable overlays over the current transcript instead of replacing the active
-session surface. Other command feedback is display-only, session-scoped
-transient UI and must not become ordinary transcript history; it is cleared on
-session or workdir switches and when the user submits new input.
+visible result. Composer-triggered `/help` and `/commands` open closeable
+overlays over the current transcript instead of replacing the active session
+surface. GUI `/agents` is not exposed by Web/Desktop discovery, completion, or
+panel routing; current-session agent selection belongs to the composer agent
+selector. Other command feedback is display-only, session-scoped transient UI
+and must not become ordinary transcript history; it is cleared on session or
+workdir switches and when the user submits new input. Successful feedback with
+no follow-up action may auto-dismiss after a short delay and may be dismissed by
+clicking outside the feedback panel. Error feedback and feedback with an action
+must remain until an explicit clear, context switch, or new input.
+
+The Settings Agents section is the Workbench app-level ACP client configuration
+surface. It shows configurable Profile-level ACP backend registrations and their
+diagnostics, but not the read-only effective agent catalog or the current
+session's running/background child-agent status. Backend create/edit controls
+are embedded inside Settings > Agents rather than opened in a modal. GUI backend
+writes are Profile-only and update the active `$PSYCHEVO_HOME/config.toml`; the
+form does not expose a target selector. Project-level backend definitions may
+still be read by Gateway and affect runtime behavior, but Workbench does not
+show, edit, or delete them from Settings because they are not configurable from
+this GUI surface. Workbench does not expose inactive profiles in this surface.
+Each listed Profile ACP backend exposes its enabled state as a row-level switch
+in Settings > Agents, so users can enable or disable configured backends without
+opening the editor. The row also exposes ordinary checkbox controls for the
+backend's `peer` and `subagent` entrypoints. The embedded backend editor does
+not duplicate the enabled or entrypoint controls.
+The create control is an icon-only add button that opens a generic empty ACP
+backend editor; users can configure OpenCode or any other ACP-compatible backend
+by filling the backend id, a single JSON command configuration, and capabilities.
+The command JSON input replaces separate Command, Args, and Env fields and uses
+an in-field placeholder such as `{"command":"opencode","args":["acp"],"env":{}}`.
+It writes through the existing `backend/write` `command`, `args`, and `env`
+fields after validation; no Workbench-specific wire shape is introduced. The
+editor treats Label and Description as optional metadata, so only backend ID and
+a JSON `command` string are required to save. The CWD field presents the default
+invocation workdir as an empty value with an `Invocation workdir` placeholder and a compact
+`Resolves to <path>` helper. Empty CWD and the internal `invocation` sentinel
+resolve to the active Gateway request scope workdir; relative CWD values resolve
+under that workdir, and absolute values resolve as entered.
 
 Ordinary transcript components consume typed transcript entries/blocks and typed
 Gateway events. They must not display raw runtime event names such as
@@ -267,7 +318,12 @@ text even when the same assistant message also contains tool calls.
 Transcript rendering supports Markdown for user and assistant text, including
 CommonMark block structure, GFM tables/task lists, links, inline code, fenced
 code blocks, and streaming caret placement at the end of the final rendered
-block. The transcript panel header, user text, assistant text, reasoning rows,
+block. Running assistant text and running reasoning blocks must reveal newly
+available text through a local display buffer so a peer or provider that sends
+large chunks, or multiple chunks in one browser frame, still produces visible
+incremental progress. This reveal layer is presentation-only: transcript state,
+copy actions, persistence, and reconciliation continue to use the canonical
+Gateway text. The transcript panel header, user text, assistant text, reasoning rows,
 and tool/evidence rows do not render decorative role, cognition, or kind icons.
 Assistant text renders on the ordinary page background. Transcript rows share a
 centered reading column so user and assistant turns remain visually related on
@@ -448,7 +504,8 @@ selected so the composer is ready immediately, but it is hidden from the left
 Sessions browser until the first accepted prompt or shell command creates a
 durable session. Startup does not proactively open the right workspace; users
 reveal it from the right-column control or by taking an explicit file/diff
-action.
+action. If a user navigates to another primary surface while startup is still
+finishing, startup must not force the main surface back to Transcript.
 
 When revealed without an active tab, the right workspace shows a
 status/navigation home. The home summarizes current connection, session,
@@ -574,16 +631,35 @@ are both ordinary workdirs; UI may show project affordances such as Git branch
 only when the current workdir supports them. Creating a GUI workspace is an
 icon-only Sessions header action immediately to the left of the
 expand/collapse-all Sessions control, not a standalone primary left-nav item.
-The Settings center page exposes an explicit
-icon-only return/close control that switches back to the Transcript, carries a
-hover tooltip, and does not require users to infer the left utility icon as a
-close action. The left sidebar collapse
+The Settings center page exposes an explicit return control at the top of its
+own left navigation, followed by a settings search field. It does not show a
+separate top Settings header, top-right close button, or current
+project/workdir path. Settings is a compact app-level configuration center
+rather than a single-column preference list or an embedded session panel. When
+Settings is active, it replaces the Workbench session shell: the session list,
+composer, mobile Workbench panel tabs, and right inspector are hidden. The
+internal Settings navigation lists app-level settings directly in the left
+column: `Appearance`, `Debug`, `Agents`, and bottom-aligned
+`Archived sessions`. The right side renders only the selected item.
+`Appearance` owns the light/dark Workbench preference, `Debug` owns the local
+developer-diagnostics switch, `Agents` owns embedded Profile-level ACP backend
+management, and `Archived sessions` directly displays archived sessions with
+restore/delete actions. Outside Settings, the Workbench left sidebar always
+shows active sessions; archived sessions are not a sidebar filter state.
+Session-scoped controls such as Agent,
+Model, Variant, and Permission mode do not appear in Settings; the
+current-session agent can only be chosen through the composer agent selector.
+Command catalog browsing is a transient transcript overlay, not a Settings
+section, and MCP/integration or observability placeholders do not appear in
+Settings until they become app-level configuration surfaces. The internal
+Settings navigation becomes horizontal tabs on narrow layouts and follows the
+same low-emphasis selected-row treatment as the left sidebar. The left sidebar collapse
 control sits in the
 same brand row as the logo/name and is icon-only; it must align to the right
 edge of the session column. When the left sidebar is collapsed, the same
 control becomes the expand affordance and uses a scaled Psychevo logo mark
 instead of the generic panel icon. Collapsed sidebar chrome keeps the primary
-action icons, such as New Session, Search, and Artifacts, visible directly below
+action icons, such as New Session and Search, visible directly below
 the logo toggle while hiding their text labels, and keeps the Settings utility
 icon in the bottom utility rail at its normal vertical position. It must not
 keep Pinned or Sessions list components mounted. The transcript surface starts
@@ -593,13 +669,15 @@ separate connection endpoint header. The right inspector expand/collapse
 control is fixed to the top-right edge of the transcript column, above the
 transcript surface, so inspector tabs remain only tab choices and collapsed
 inspector state does not reserve a separate right-side rail.
-The Status inspector treats the full, unshortened session id as a primary
-identifier row spanning the inspector width; connection, turn, queued, and
-similar metrics may remain in compact columns below it. Context-window,
-session-token, cache-read, and cost metrics are compact Status facts, not
-transcript rows. They may be summarized in columns and expanded into a detail
-breakdown, but they must only display numeric/accounting facts and provider or
-model labels.
+The Status inspector treats the full, unshortened session id as the header
+subtitle directly under `Status`; it does not repeat the project path there and
+does not render a separate Session/Connection/Turn/Queued metric grid. Context
+window, session-token, cache-read, cost, reasoning, and other useful usage
+totals are compact Status facts, not transcript rows. They sit directly below
+the session id as a single observability group instead of being duplicated in a
+primary metric grid. The compact usage grid must not repeat Messages, Provider,
+or Model once the context label/status already identifies the active provider
+usage source.
 
 Appearance is a frontend/host preference, not a provider or secret setting.
 In light appearance, Workbench uses a warm reading-paper palette rather than a
@@ -616,7 +694,7 @@ adapter and applied before ordinary panel rendering when available. Theme
 switching must preserve the same layout, density, button background rules, and
 status/diff preview behavior.
 In dark appearance, primary shell labels such as `New Session`, `Search`,
-`Artifacts`, `Pinned`, `Sessions`, `Settings`, and transcript state labels such
+`Pinned`, `Sessions`, `Settings`, and transcript state labels such
 as `Thinking` must use readable foreground tokens rather than the faintest
 muted text color. Dark surfaces use neutral warm-black tokens rather than a
 cold blue sidebar hue, and primary text should sit in a higher luminance range
@@ -625,11 +703,11 @@ legible while preserving the dark ledger structure. Filled user bubbles and
 selected navigation rows must remain visibly separated from the page background
 without becoming saturated accent surfaces.
 
-Settings also provides a local Debug switch. When enabled, the right inspector
-adds a `Debug` tab after `Files`; when disabled, the tab is absent. The Debug
-tab shows the current Workbench event stream and Gateway notifications as
-developer diagnostics, separate from ordinary transcript content and hidden by
-default.
+Settings Debug provides a local Debug switch. When enabled, the right
+inspector adds a `Debug` tab after `Files`; when disabled, the tab is absent.
+The Debug tab shows the current Workbench event stream and Gateway notifications
+as developer diagnostics, separate from ordinary transcript content and hidden
+by default.
 
 Mobile uses the same component tree with compact chrome: top status must not
 crowd the composer or tab rail, collapsed sidebars must keep fixed-size icon
@@ -663,8 +741,8 @@ after prompt submission.
 - [021 Gateway](../021-gateway/spec.md) defines Gateway thread, turn, source,
   and transport semantics.
 - [070 Experience](../070-experience/spec.md) defines shared UX/DX defaults.
-- [080 Design System](../080-design-system/spec.md) defines current TUI design
+- [075 Design System](../075-design-system/spec.md) defines current TUI design
   language and shared experience constraints.
-- [085 Brand Assets](../085-brand-assets/spec.md) defines canonical brand asset
+- [075 Brand Assets](../075-design-system/brand-assets.md) defines canonical brand asset
   locations.
 - [220 pevo Gateway](../220-pevo-gateway/spec.md) defines the concrete Web Shell.

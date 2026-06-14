@@ -124,7 +124,7 @@ owning harness should make the artifact boundary explicit.
   evidence semantics for inspectable agent-invocation facts.
 - [020 Interfaces](../020-interfaces/spec.md) defines caller-facing observation
   boundaries that automation may consume.
-- [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines
+- [031 Storage and Persistence](../031-storage-and-persistence/spec.md) defines
   persistence boundaries for evidence-backed material.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines the
   preceding foundation layer for extension contributions.

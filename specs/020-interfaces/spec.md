@@ -136,5 +136,5 @@ mapping is owned by [027 ACP](../027-acp/spec.md).
 - [230 pevo-acp](../230-pevo-acp/spec.md) defines the concrete ACP server
   packaging for the `pevo` product.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines semantic state relationships projected through interfaces.
-- [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines persistence boundaries for evidence-backed result material.
+- [031 Storage and Persistence](../031-storage-and-persistence/spec.md) defines persistence boundaries for evidence-backed result material.
 - [070 Experience](../070-experience/spec.md) defines cross-cutting UX and DX defaults for caller-facing and developer-facing behavior.

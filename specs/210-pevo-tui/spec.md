@@ -6,7 +6,7 @@ psychevo_self_edit: deny
 Define the first interactive terminal surface for `pevo`.
 
 This topic implements the terminal-specific surface defined by
-[080 Design System](../080-design-system/spec.md). It also builds on
+[075 Design System](../075-design-system/spec.md). It also builds on
 [200 pevo CLI](../200-pevo-cli/spec.md) and [026 Commands](../026-commands/spec.md),
 and routes live coding-agent turns through `psychevo-gateway`. Runtime remains
 the execution and persistence kernel behind Gateway. For interactive
@@ -178,7 +178,7 @@ request text.
   translation boundaries.
 - [120 Provider Registry](../120-provider-registry/spec.md) defines
   provider/model resolution.
-- [040 SQLite Persistence](../040-storage-and-persistence/sqlite-persistence.md)
+- [031 SQLite Persistence](../031-storage-and-persistence/sqlite-persistence.md)
   defines session and message persistence.
 - [055 Skills](../055-skills/spec.md) defines skill discovery, model visibility,
   tools, and lifecycle behavior.

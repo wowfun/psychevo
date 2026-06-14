@@ -77,7 +77,7 @@ Runtime assembles model context for generation requests. [006 Context Assembly](
 Runtime wires the resource surface for non-model resources used by context
 assembly and tool execution. [009 Resource Surface](../009-resource-surface/spec.md)
 defines resource boundaries, access gates, and resource decisions.
-[035 Permissions](../035-permissions/spec.md) defines the concrete runtime
+[041 Permissions](../041-permissions/spec.md) defines the concrete runtime
 permission policy that may specialize those gates. This spec does not define
 permission rule languages, approval UX, sandbox behavior, path rules, concrete
 enforcement mechanics, or security policy.
@@ -89,7 +89,7 @@ resolved permission configuration, runtime mode, permission mode, approval mode,
 approval handler availability, and session-scoped grants. Permission assembly
 is invocation state: it constrains tool execution and resource operations but
 does not change which tool declarations runtime may expose.
-[035 Permissions](../035-permissions/spec.md) owns permission semantics, rule
+[041 Permissions](../041-permissions/spec.md) owns permission semantics, rule
 precedence, approval behavior, and fallback policy.
 
 Runtime resolves optional capability targets and toolset hints from built-in, runtime-provided, or external contributions. If required capability material, working context, toolset, model, resource boundary, or evidence wiring cannot be assembled, runtime rejects the request before `agent_start`. A before-agent-start rejection is an invocation rejection, not a failed agent invocation. [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability source, contribution, activation, availability, and conflict boundaries. This spec does not define plugin manifests, extension APIs, package formats, discovery paths, hot reload, startup protocols, shutdown protocols, or healthcheck protocols.
@@ -120,7 +120,7 @@ optimistic pending UI. Runtime does not own next-turn queue scheduling; product
 entrypoints may keep caller-owned queues and start later invocations through
 normal runtime entrypoints.
 
-Runtime connects agent-invocation assembly facts, tool declaration snapshot facts, `agent_start` and `agent_end` events, AI generation outcomes, tool outcomes, messages, resource decisions, and terminal outcomes to an evidence sink. An evidence sink is the runtime-wired destination for durable session and agent-invocation evidence. [005 Durable Evidence](../005-durable-evidence/spec.md) defines durable evidence semantics. [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines the persistence substrate boundary. This spec does not define record shape, storage format, trace format, replay semantics, or session storage format.
+Runtime connects agent-invocation assembly facts, tool declaration snapshot facts, `agent_start` and `agent_end` events, AI generation outcomes, tool outcomes, messages, resource decisions, and terminal outcomes to an evidence sink. An evidence sink is the runtime-wired destination for durable session and agent-invocation evidence. [005 Durable Evidence](../005-durable-evidence/spec.md) defines durable evidence semantics. [031 Storage and Persistence](../031-storage-and-persistence/spec.md) defines the persistence substrate boundary. This spec does not define record shape, storage format, trace format, replay semantics, or session storage format.
 
 When the AI layer reports normalized usage or allowlisted provider metadata,
 runtime may associate those facts with the nearest completed assistant message
@@ -144,7 +144,7 @@ parsing, terminal layout, editor protocol payloads, or WebUI rendering.
 - [001 Architecture](../001-architecture/spec.md) defines Rust workspace layout, crate boundaries, runtime coordination, and dependency direction.
 - [002 Agent Execution](../002-agent-execution/spec.md) defines agent-core execution semantics and core event families.
 - [003 AI Protocol](../003-ai-protocol/spec.md) defines provider-neutral generation semantics consumed by agent execution.
-- [035 Permissions](../035-permissions/spec.md) defines runtime permission
+- [041 Permissions](../041-permissions/spec.md) defines runtime permission
   policy, approval semantics, and permission modes wired by runtime.
 - [005 Durable Evidence](../005-durable-evidence/spec.md) defines the durable evidence contract connected by runtime evidence sink wiring.
 - [006 Context Assembly](../006-context-assembly/spec.md) defines model context assembly and transformation boundaries.
@@ -154,7 +154,7 @@ parsing, terminal layout, editor protocol payloads, or WebUI rendering.
 - [010 Memory System](../010-memory-system/spec.md) defines optional memory boundaries outside required agent-invocation assembly.
 - [020 Interfaces](../020-interfaces/spec.md) defines caller-facing invocation, observation, completion, and control-signal semantics.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines runtime assembly state relationships.
-- [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines persistence substrate boundaries for runtime-wired durable facts.
+- [031 Storage and Persistence](../031-storage-and-persistence/spec.md) defines persistence substrate boundaries for runtime-wired durable facts.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability contributions resolved by runtime into agent-invocation scoped selections.
 - [051 Agents](../051-agents/spec.md) defines selected agent definitions.
 - [051 Subagents](../051-agents/subagents.md) defines child-agent control behavior.

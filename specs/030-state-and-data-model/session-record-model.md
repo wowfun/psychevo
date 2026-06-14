@@ -123,5 +123,5 @@ The first implementation slice does not introduce:
 
 - [030 State and Data Model](spec.md) defines the semantic state model.
 - [008 Session Continuity](../008-session-continuity/spec.md) defines session continuity semantics.
-- [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines storage boundaries.
-- [040 SQLite Persistence](../040-storage-and-persistence/sqlite-persistence.md) defines the default SQLite implementation contract.
+- [031 Storage and Persistence](../031-storage-and-persistence/spec.md) defines storage boundaries.
+- [031 SQLite Persistence](../031-storage-and-persistence/sqlite-persistence.md) defines the default SQLite implementation contract.

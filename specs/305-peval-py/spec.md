@@ -548,7 +548,11 @@ adapter was inferred, and session rows with one-based `index`, `session_id`, and
 accepts `session_ids` for DB payloads; each selected session creates or updates
 one independent refreshable source before the response report is rebuilt. For
 path and DB payloads, a single string may contain multiple paths parsed with
-standard shell-like quoting. New source imports are all-or-nothing: if any
+Windows-safe shell-like quoting: quoted paths may contain spaces, unquoted
+Windows drive paths such as `C:\Users\me\state.db` keep their backslashes,
+Windows drive and UNC paths are treated as absolute-like paths and are not
+resolved under the workspace root, and POSIX hosts may map existing drive paths
+through `/mnt/<drive>/...`. New source imports are all-or-nothing: if any
 newly submitted source fails to load, convert, or refresh, the endpoint returns
 a JSON error and does not persist any source from that request. Refreshing an
 already persisted source keeps the existing status-and-log behavior. `POST
@@ -585,12 +589,16 @@ row instead of forcing a single horizontally scrolling node track.
 Each row shows a compact left-to-right node track where each ATIF step is one
 node. Overview nodes use a neutral visual style and show source initials:
 `S` for system, `U` for user, `A` for agent, and `?` for unknown or unsupported
-sources. All rows share a grid width based on the largest step count among
-visible sessions, so nodes at the same step index align vertically and shorter
-trajectories leave empty positions at the end. Clicking a Trajectory Overview
-row selects that Trial. Clicking a node selects that Trial and opens a fixed
-right-side Step details drawer showing the same expanded step markup and block
-content used by the final Steps section. On desktop, the drawer uses a wider
+sources. Nodes with positive `trajectory_meta.steps[].duration_ms` also render a
+subtle duration heat fill or ring scaled against the slowest timed step in that
+same visible Trial; untimed or zero-duration nodes remain neutral, and selected
+node styling stays stronger than heat styling. Node title and aria text include
+the step duration when available. All rows share a grid width based on the
+largest step count among visible sessions, so nodes at the same step index align
+vertically and shorter trajectories leave empty positions at the end. Clicking a
+Trajectory Overview row selects that Trial. Clicking a node selects that Trial
+and opens a fixed right-side Step details drawer showing the same expanded step
+markup and block content used by the final Steps section. On desktop, the drawer uses a wider
 inspection width than the initial compact rail so longer reasoning, tool, and
 observation content can be read without excessive wrapping. The widened drawer
 must not obscure the middle report content: when it opens on desktop, the page

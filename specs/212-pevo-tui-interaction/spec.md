@@ -7,7 +7,7 @@ psychevo_self_edit: deny
 
 Define fullscreen input handling, keymaps, slash commands, file completion,
 shell escapes, and local selection behavior. Shared interaction principles and
-visual treatment come from [080 Design System](../080-design-system/spec.md).
+visual treatment come from [075 Design System](../075-design-system/spec.md).
 
 This topic is the source of truth for how users control the fullscreen TUI.
 Rendering of the resulting transcript rows and panels is defined by
@@ -123,5 +123,5 @@ leave the current transcript state consistent with the latest Gateway event.
   state, sessions, and cross-cutting behavior.
 - [211 pevo TUI Rendering](../211-pevo-tui-rendering/spec.md) defines
   transcript, status-line, sidebar, and visual projection behavior.
-- [035 Permissions](../035-permissions/spec.md) defines permission modes and
+- [041 Permissions](../041-permissions/spec.md) defines permission modes and
   approval semantics projected through interactive commands.

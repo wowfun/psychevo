@@ -148,5 +148,5 @@ requests abort after `agent_start`; the invocation must end with outcome
   command behavior.
 - [110 Tool I/O](../110-coding-core-tools/tool-io.md) defines the first-slice
   coding tool parameter and result contracts.
-- [040 SQLite Persistence](../040-storage-and-persistence/sqlite-persistence.md)
+- [031 SQLite Persistence](../031-storage-and-persistence/sqlite-persistence.md)
   defines the durable session/message shape.

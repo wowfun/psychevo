@@ -77,5 +77,5 @@ credential values.
 - [200 pevo CLI](spec.md) defines the product CLI surface.
 - [120 Provider Registry](../120-provider-registry/spec.md) defines the config
   schema consumed by `pevo run`.
-- [040 SQLite Persistence](../040-storage-and-persistence/sqlite-persistence.md)
+- [031 SQLite Persistence](../031-storage-and-persistence/sqlite-persistence.md)
   defines the SQLite persistence shape.

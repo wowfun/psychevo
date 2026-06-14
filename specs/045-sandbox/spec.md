@@ -1,14 +1,15 @@
 ---
-name: 036. Sandbox
+name: 045. Sandbox
 psychevo_self_edit: deny
 ---
 
-# 036. Sandbox
+# 045. Sandbox
 
 Define Psychevo's v1 local sandbox enforcement for model-visible coding
 operations. Sandbox enforcement sits below permissions: permissions decide
 whether an operation may be attempted, while sandbox policy constrains where
-that operation can write when it runs.
+that operation can write when it runs inside the local environment defined by
+[040 Environment](../040-environment/spec.md).
 
 ## Scope
 
@@ -191,7 +192,9 @@ surface; v1 does not add new RPC request fields.
 
 ## Related Topics
 
-- [035 Permissions](../035-permissions/spec.md) defines policy gates that run
+- [040 Environment](../040-environment/spec.md) defines the local host
+  environment and authority boundary that sandbox enforcement constrains.
+- [041 Permissions](../041-permissions/spec.md) defines policy gates that run
   before sandbox enforcement.
 - [110 Coding Core Tools](../110-coding-core-tools/spec.md) defines the
   model-visible tools whose write and shell behavior this topic constrains.

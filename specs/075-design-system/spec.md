@@ -1,9 +1,9 @@
 ---
-name: 080. Design System
+name: 075. Design System
 psychevo_self_edit: deny
 ---
 
-# 080. Design System
+# 075. Design System
 
 Define Psychevo's shared visual and interaction system. This topic is the
 source of truth for TUI surface language; implementation-specific TUI rendering
@@ -175,6 +175,11 @@ blocks, measured heights, and shared column measurements.
 Design-system tests are deterministic. They should verify visual roles,
 adaptive theme fallback, component layout, cache invalidation, and interaction
 semantics without live providers, API keys, or terminal palette dependence.
+
+## Attachments
+
+- [Brand Assets](brand-assets.md) defines canonical tracked logo and brand
+  asset locations and usage rules.
 
 ## Related Topics
 

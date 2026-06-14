@@ -101,7 +101,7 @@ Agent execution observes assistant-requested tool calls and invokes runtime-supp
 Resource gates and permission policy may affect execution after a tool request
 and before or during the execution binding.
 [009 Resource Surface](../009-resource-surface/spec.md) defines allow, deny, and
-defer resource decision semantics. [035 Permissions](../035-permissions/spec.md)
+defer resource decision semantics. [041 Permissions](../041-permissions/spec.md)
 defines the concrete runtime permission policy for local tool execution. This
 spec does not define permission semantics, approval UX, sandbox behavior,
 resource policy rules, path rules, or failure policy.
@@ -120,7 +120,7 @@ A tool result artifact is loop-visible result material produced after a tool exe
 - [002 Agent Execution](../002-agent-execution/spec.md) defines tool execution lifecycle, ordering, and tool-result message semantics.
 - [003 AI Protocol](../003-ai-protocol/spec.md) defines provider-neutral tool-call and generation request semantics.
 - [004 Runtime Contract](../004-runtime-contract/spec.md) defines agent-invocation assembly and wiring responsibilities.
-- [035 Permissions](../035-permissions/spec.md) defines permission policy that
+- [041 Permissions](../041-permissions/spec.md) defines permission policy that
   may gate execution after a model-visible tool request.
 - [005 Durable Evidence](../005-durable-evidence/spec.md) defines durable linkage for tool requests, execution outcomes, and result artifacts.
 - [006 Context Assembly](../006-context-assembly/spec.md) defines model context assembly, which stays separate from tool declarations and generation controls.

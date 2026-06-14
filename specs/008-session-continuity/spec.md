@@ -32,7 +32,7 @@ A session identity identifies one continuity boundary. This spec does not define
 
 Every started agent invocation has a session boundary. The session may be persistent or ephemeral/in-memory.
 
-An ephemeral session may exist only for one accepted agent invocation or process lifetime. Its durable behavior remains governed by [004 Runtime Contract](../004-runtime-contract/spec.md), [005 Durable Evidence](../005-durable-evidence/spec.md), and [040 Storage and Persistence](../040-storage-and-persistence/spec.md).
+An ephemeral session may exist only for one accepted agent invocation or process lifetime. Its durable behavior remains governed by [004 Runtime Contract](../004-runtime-contract/spec.md), [005 Durable Evidence](../005-durable-evidence/spec.md), and [031 Storage and Persistence](../031-storage-and-persistence/spec.md).
 
 Persistent sessions do not automatically end at `agent_end`. A persistent session ends at explicit lifecycle boundaries such as close, reset, switch to another session, resume of a different session, branch, expiry, or compression when an implementation defines those actions.
 
@@ -55,7 +55,7 @@ Session continuity must be backed by durable evidence. A session may select, ret
 
 Durable evidence remains the source for finalized messages, generation outcomes, tool outcomes, terminal agent-invocation outcomes, and causal relationships. Continuity inputs offered to a later agent invocation must come from those durable facts or retained session messages.
 
-Session persistence boundaries are defined by [040 Storage and Persistence](../040-storage-and-persistence/spec.md). This spec defines continuity semantics, not storage behavior.
+Session persistence boundaries are defined by [031 Storage and Persistence](../031-storage-and-persistence/spec.md). This spec defines continuity semantics, not storage behavior.
 
 If continuity metadata is attached, it must not redefine execution, AI protocol, runtime, context assembly, or durable evidence semantics. Metadata shape, keys, serialization, persistence, and replay behavior belong outside this spec.
 
@@ -98,5 +98,5 @@ semantics.
 - [006 Context Assembly](../006-context-assembly/spec.md) defines how continuity inputs may become model context.
 - [010 Memory System](../010-memory-system/spec.md) defines optional cross-session memory, separate from session continuity.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines how session continuity facts relate to other state families.
-- [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines optional persistence boundaries for session continuity facts.
+- [031 Storage and Persistence](../031-storage-and-persistence/spec.md) defines optional persistence boundaries for session continuity facts.
 - [051 Subagents](../051-agents/subagents.md) defines subagent lineage and control semantics.

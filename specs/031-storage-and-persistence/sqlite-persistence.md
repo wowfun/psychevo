@@ -1,11 +1,11 @@
 ---
-name: 040. SQLite Persistence Attachment
+name: 031. SQLite Persistence Attachment
 psychevo_self_edit: deny
 ---
 
 Define the default SQLite persistence implementation contract for the first implementation slice.
 
-This attachment is part of [040 Storage and Persistence](spec.md). It is not an independently numbered spec and does not introduce a new public interface.
+This attachment is part of [031 Storage and Persistence](spec.md). It is not an independently numbered spec and does not introduce a new public interface.
 
 ## Scope
 
@@ -323,7 +323,7 @@ This attachment does not define public locators, path formats, cursor formats, d
 
 ## Related Topics
 
-- [040 Storage and Persistence](spec.md) defines the storage boundary.
+- [031 Storage and Persistence](spec.md) defines the storage boundary.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines semantic state relationships.
 - [030 Session Record Model](../030-state-and-data-model/session-record-model.md) defines logical session and message records.
 - [005 Durable Evidence](../005-durable-evidence/spec.md) defines evidence semantics.

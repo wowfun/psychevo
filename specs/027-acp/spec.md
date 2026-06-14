@@ -48,6 +48,14 @@ command, model, config, or session behavior.
 Concrete product specs choose how Psychevo exposes an ACP server. This topic
 owns the protocol mapping, not the product process that hosts it.
 
+When Psychevo exposes an ACP server, the server uses the SDK's ACP v2 agent
+builder and v2 typed request, response, and notification surface. ACP v1
+clients are served through the SDK compatibility layer when the requested
+operation can be represented in both protocol versions. V1-only request paths
+such as `session/set_mode` are not registered by the server; mode is exposed as
+a session config option so v2 clients see the native config surface and v1
+clients receive the best available compatibility projection.
+
 ## Sessions
 
 ACP session ids identify active ACP session actors. Each actor maps to a
@@ -89,13 +97,14 @@ data becomes a data URL; non-empty image URIs pass through as image URLs.
 Image file resources use the runtime image pipeline. Audio and unsupported
 resources degrade to explicit visible text.
 
-Text resource links use the ACP client filesystem read capability first when
-the client advertises it, then local file reading as a fallback. Client reads
-use a fixed line limit, and all text resources are capped at 512 KiB after
-decoding. Remote HTTP(S) resource links are not fetched proactively and degrade
-to a visible resource-link note. Resource handling records prompt-scoped
-summaries in runtime context evidence; text that is actually inlined for the
-model is persisted in the user message for new runs.
+Text resource links are resolved only when they are local paths or file URIs
+inside the session workdir context. All text resources are capped at 512 KiB
+after decoding. Remote HTTP(S) resource links are not fetched proactively and
+degrade to a visible resource-link note. Resource handling records
+prompt-scoped summaries in runtime context evidence; text that is actually
+inlined for the model is persisted in the user message for new runs. ACP v2
+schema 0.13.6 does not expose the v1 client filesystem callback surface, so
+server-side prompt resource resolution must not depend on client fs callbacks.
 
 Gateway transcript observation maps to ACP session updates:
 
@@ -126,17 +135,76 @@ display enhancement. Runtime remains the executor and permission authority. The
 ACP layer must not delegate command execution to client `terminal/create`, and
 must not use client terminal presentation to bypass runtime `exec_command`,
 `write_stdin`, yield-session, persistence, permission, or accounting semantics.
+When the negotiated protocol is ACP v2, terminal-style presentation is limited
+to textual command/output content plus reserved metadata because v2 schema
+0.13.6 removed the v1 `ToolCallContent::Terminal` variant.
+
+When Psychevo is the ACP client for a configured peer agent, the same
+observation semantics apply in reverse at the peer boundary: ACP
+`session/update` `agent_message_chunk` text is an incremental assistant text
+stream, and `agent_thought_chunk` text is incremental reasoning. The peer-client
+bridge prefers the newest ACP protocol version supported by the SDK and peer,
+falling back to ACP v1 only when initialization proves the peer cannot negotiate
+the newer version. With the Rust ACP SDK line used by Psychevo, this means
+`agent-client-protocol` 0.14.0 with schema 0.13.6: the peer bridge first tries
+ACP protocol v2 and falls back to v1 for peers such as older OpenCode builds
+that still negotiate v1. It must forward updates into Gateway live events before the
+prompt stop reason and persist their accumulated semantic content for reload. It
+must not use an SDK convenience path that ignores non-text updates or withholds
+text chunks until the turn is complete. Standard ACP tool-call and plan updates
+are projected into Gateway live transcript structures where possible, and all
+standard session-update variants are retained as structured peer events for
+diagnostics and future surface support. Newer ACP updates without a dedicated
+Psychevo projection must still be retained as raw structured peer events when
+the negotiated SDK layer can decode them.
+
+When the peer exposes session config options, Psychevo maps its active
+turn-level controls onto the peer before sending the prompt. A Workbench or
+Gateway `model` value is applied to the peer's `model` session config option
+when that option exists and contains a matching select value. A
+`reasoning_effort` value is applied to the peer's `effort` session config
+option when present. If the peer does not expose the option or the selected
+value is not offered, Psychevo leaves the peer default unchanged and records a
+structured diagnostic event instead of failing the turn. This mapping is a
+session configuration step, not a prompt-prefix convention, and must happen
+before `session/prompt`.
+
+ACP v2 `plan_update` maps to the same live Plan/status projection as v1 `plan`
+when it carries item entries. V2 `usage_update`, `config_option_update`,
+`available_commands_update`, and unknown/future session updates are retained as
+structured `acp_peer_session_update` records, with `usage_update` also mirrored
+as a live Gateway usage event. In SDK schema 0.13.6, v2 no longer advertises the
+v1 client `fs` and `terminal` capabilities, and v1 filesystem request methods
+do not convert to v2. Psychevo therefore does not claim those callbacks on the
+v2 initialization path; filesystem callbacks remain available on v1 fallback
+only, gated by backend `client_capabilities`, selected-agent tool policy, and
+Gateway permission checks.
 
 Runtime usage and accounting are projected at the ACP prompt boundary. When the
 ACP SDK exposes unstable usage fields, Psychevo sends `PromptResponse.usage`
 for provider token usage and puts Psychevo-specific accounting, turns, and
 warnings under `_meta.psychevo`. ACP `UsageUpdate` is reserved for context
 window snapshots and cumulative session cost; its tokens are not added to
-provider usage. Provider-reported total tokens are authoritative when present;
-otherwise totals are `input + output` and do not double-count reasoning or
-cache subcategories. If multiple runtime model turns drain under one ACP
-prompt response, numeric accounting fields are summed and inconsistent pricing
-source or tier strings become `mixed`.
+provider usage. Psychevo sends `usage_update` to connected ACP clients after a
+runtime context snapshot is available, using the snapshot's used token estimate,
+context limit, and cumulative cost when known. If the runtime turn has no
+context snapshot but provider/runtime accounting has token totals and the
+resolved model has a context limit, Psychevo still sends `usage_update` using
+the best available total-token accounting. Provider-reported total tokens are
+authoritative when present; otherwise totals are `input + output` and do not
+double-count reasoning or cache subcategories. If multiple runtime model turns
+drain under one ACP prompt response, numeric accounting fields are summed and
+inconsistent pricing source or tier strings become `mixed`.
+
+Psychevo ACP servers expose standard ACP v2 session config options for
+session mode, model, and reasoning effort when local configuration can provide
+selectable values. The model option uses provider-qualified ids such as
+`provider/model` and category `model`; the reasoning option uses id `effort`,
+category `thought_level`, and the runtime reasoning effort values
+`none|minimal|low|medium|high|xhigh|max`. `session/set_config_option` updates
+the ACP session state used for subsequent prompts and returns the refreshed
+option set. Slash commands such as `/model` and `/variant` remain supported for
+clients that prefer command text, but they are not the only model-control path.
 
 ## Commands
 
@@ -283,7 +351,7 @@ always when runtime can persist a safe rule, and deny.
   semantics.
 - [026 Commands](../026-commands/spec.md) defines shared command metadata.
 - [021 Gateway](../021-gateway/spec.md) defines source mapping and thread/turn orchestration.
-- [035 Permissions](../035-permissions/spec.md) defines runtime permission
+- [041 Permissions](../041-permissions/spec.md) defines runtime permission
   policy.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines
   capability contribution boundaries.

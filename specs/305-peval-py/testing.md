@@ -181,7 +181,12 @@ Coverage must verify:
 - serve HTTP `POST /api/sources` accepts shell-quoted multi-path strings for
   path and DB payloads, rejects malformed quoted input clearly, treats `auto`
   adapter as no override, and persists no new source/trial/log rows when a
-  submitted source fails to load, convert, or refresh.
+  submitted source fails to load, convert, or refresh. Path parsing tests cover
+  quoted paths, unquoted Windows drive paths with backslashes, `C:/...` paths,
+  UNC paths, relative workspace paths, Windows absolute-like paths not being
+  prefixed with the workspace root, and POSIX `/mnt/<drive>/...` fallback when
+  the mapped path exists. `/api/db-sessions` and `/api/sources` both cover this
+  shared parsing behavior.
 - serve HTTP exposes `POST /api/sources/{source_key}/delete`; tests verify it
   removes only peval-py state rows for the source, keeps source files untouched,
   returns clear errors for unknown sources, and is covered by the same-origin
@@ -215,8 +220,10 @@ Coverage must verify:
 - Trajectory Overview renders one session row per currently filtered and sorted
   Leaderboard row, preserving the same row count and order, aligns step nodes by
   the largest visible step count, renders neutral lettered nodes for `S`
-  system, `U` user, `A` agent, and `?` unknown roles, and row/node clicks
-  update the selected Trial panel.
+  system, `U` user, `A` agent, and `?` unknown roles, renders positive step
+  durations as per-Trial heat on nodes while leaving untimed or zero-duration
+  nodes neutral, includes duration text in node title/aria labels, and row/node
+  clicks update the selected Trial panel.
 - Clicking a Trajectory Overview node opens a Step details drawer that reuses
   the final Steps section's expanded step markup, supports close and Escape,
   closes when the user clicks blank page space outside the drawer, swaps content

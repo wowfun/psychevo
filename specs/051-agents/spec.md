@@ -97,8 +97,11 @@ slice.
 
 Configured external backends may generate default agent definitions. Generated
 definitions follow normal catalog precedence and are shadowed by Markdown
-definitions with the same name. Generated definitions are runnable only when
-the referenced backend is enabled and defines a non-empty description.
+definitions with the same name. Generated definitions are runnable when the
+referenced backend is enabled. Their description uses the configured backend
+description when present, otherwise the backend label, otherwise the backend id,
+so descriptive metadata is useful but not required to launch a configured ACP
+backend.
 
 ## Selected-Agent Behavior
 

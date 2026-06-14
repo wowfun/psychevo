@@ -291,7 +291,7 @@ text.
 - [004 Runtime Contract](../004-runtime-contract/spec.md) defines agent-invocation assembly and tool surface wiring.
 - [007 Tool Surface](../007-tool-surface/spec.md) defines agent-invocation scoped tool declarations, generation-request tool declaration snapshots, execution bindings, and toolset expansion.
 - [009 Resource Surface](../009-resource-surface/spec.md) defines resource decisions that may affect tool execution.
-- [035 Permissions](../035-permissions/spec.md) defines the concrete runtime
+- [041 Permissions](../041-permissions/spec.md) defines the concrete runtime
   permission policy that may deny or defer core tool execution.
 - [005 Durable Evidence](../005-durable-evidence/spec.md) defines durable linkage for tool requests, outcomes, and result artifacts.
 - [055 Skills](../055-skills/spec.md) defines optional skill adjunct tools.

@@ -112,7 +112,7 @@ transcript message.
   context as model-visible context.
 - [008 Session Continuity](../008-session-continuity/spec.md) defines sessions
   as continuity boundaries.
-- [040 SQLite Persistence](../040-storage-and-persistence/sqlite-persistence.md)
+- [031 SQLite Persistence](../031-storage-and-persistence/sqlite-persistence.md)
   defines the storage shape for checkpoints.
 - [120 Provider Registry](../120-provider-registry/spec.md) defines provider
   and model configuration resolution.

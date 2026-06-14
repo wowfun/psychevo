@@ -111,7 +111,7 @@ Broad deterministic validation:
 - [130 Context Compaction](spec.md) defines the functional contract.
 - [006 Context Assembly](../006-context-assembly/spec.md) defines hidden
   summary context projection.
-- [040 SQLite Persistence](../040-storage-and-persistence/sqlite-persistence.md)
+- [031 SQLite Persistence](../031-storage-and-persistence/sqlite-persistence.md)
   defines checkpoint storage.
 - [120 Provider Registry Testing](../120-provider-registry/testing.md) covers
   provider and compression configuration resolution.

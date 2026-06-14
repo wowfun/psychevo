@@ -103,7 +103,7 @@ invocation. `plan` selects the read-only runtime mode; `dontAsk` denies actions
 that would otherwise prompt unless already allowed by policy or safe defaults.
 `--dangerously-skip-permissions` selects `bypassPermissions`; hard/protected
 denies still apply. Permission policy semantics belong to
-[035 Permissions](../035-permissions/spec.md).
+[041 Permissions](../041-permissions/spec.md).
 
 ## Session Selection
 
@@ -208,7 +208,7 @@ estimate in local state, not a provider bill.
 - [025 CLI](../025-cli/spec.md) defines command-line foundation semantics.
 - [120 Provider Registry](../120-provider-registry/spec.md) defines provider
   and model resolution.
-- [035 Permissions](../035-permissions/spec.md) defines permission mode and
+- [041 Permissions](../041-permissions/spec.md) defines permission mode and
   approval semantics.
 - [100 Runtime Assembly](../100-coding-agent/runtime-assembly.md) defines how
   runtime assembles the built-in coding agent.

@@ -39,7 +39,7 @@ Durable evidence prepares for replay. Future replay work should be able to use d
 
 Evidence sink failures must be observable. This spec does not require runtime to fail closed, retry, block, or continue in a specific way when evidence wiring fails.
 
-Durable evidence persistence is governed by [040 Storage and Persistence](../040-storage-and-persistence/spec.md). This spec defines evidence semantics, not persistence substrate behavior.
+Durable evidence persistence is governed by [031 Storage and Persistence](../031-storage-and-persistence/spec.md). This spec defines evidence semantics, not persistence substrate behavior.
 
 Durable evidence is the source substrate for session continuity. [008 Session Continuity](../008-session-continuity/spec.md) defines how sessions may select, retain, or organize evidence-backed facts.
 
@@ -71,7 +71,7 @@ Agent invocation, turn, message, tool execution, and generation lifecycle events
 
 Streaming message updates, AI stream progress, tool execution progress, and UI-facing updates may be captured by an implementation. This spec does not require them for the durable evidence contract.
 
-This spec does not require dedicated activity, fact, or reference tables. [030 State and Data Model](../030-state-and-data-model/spec.md) and [040 Storage and Persistence](../040-storage-and-persistence/spec.md) define first-slice state and storage boundaries.
+This spec does not require dedicated activity, fact, or reference tables. [030 State and Data Model](../030-state-and-data-model/spec.md) and [031 Storage and Persistence](../031-storage-and-persistence/spec.md) define first-slice state and storage boundaries.
 
 ## Related Topics
 
@@ -86,5 +86,5 @@ This spec does not require dedicated activity, fact, or reference tables. [030 S
 - [009 Resource Surface](../009-resource-surface/spec.md) defines resource decisions related to durable evidence.
 - [010 Memory System](../010-memory-system/spec.md) defines memory candidates and mutations that may link to durable evidence.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines semantic state relationships that durable evidence may represent.
-- [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines the persistence substrate boundary for durable evidence facts.
+- [031 Storage and Persistence](../031-storage-and-persistence/spec.md) defines the persistence substrate boundary for durable evidence facts.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines extension facts that may affect runtime assembly and evidence relationships.

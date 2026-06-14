@@ -81,7 +81,7 @@ Future lifecycle or tool-refresh APIs must route through runtime-owned selection
 
 Extension facts that affect agent-invocation assembly should be observable. These facts may include selected contributions, omitted unavailable contributions, degraded contributions that affected selection, conflicts that caused omission or resolution, tool-refresh contribution facts, and source identity for selected contributions.
 
-Durable evidence and persistence remain owned by adjacent specs. [005 Durable Evidence](../005-durable-evidence/spec.md) defines durable evidence semantics for inspectable agent-invocation facts. [030 State and Data Model](../030-state-and-data-model/spec.md) defines state relationships. [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines persistence boundaries.
+Durable evidence and persistence remain owned by adjacent specs. [005 Durable Evidence](../005-durable-evidence/spec.md) defines durable evidence semantics for inspectable agent-invocation facts. [030 State and Data Model](../030-state-and-data-model/spec.md) defines state relationships. [031 Storage and Persistence](../031-storage-and-persistence/spec.md) defines persistence boundaries.
 
 This spec does not require every discovered source, every candidate contribution, every conflict, or every availability signal to become durable.
 
@@ -148,7 +148,7 @@ context evidence.
 - [010 Memory System](../010-memory-system/spec.md) defines optional memory boundaries.
 - [020 Interfaces](../020-interfaces/spec.md) defines caller-facing interface semantics.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines semantic state relationships.
-- [040 Storage and Persistence](../040-storage-and-persistence/spec.md) defines persistence boundaries for durable semantic facts.
+- [031 Storage and Persistence](../031-storage-and-persistence/spec.md) defines persistence boundaries for durable semantic facts.
 - [055 Skills](../055-skills/spec.md) defines skill packages, discovery, tools, CLI commands, scanning, and provenance.
 - [056 MCP](../056-mcp/spec.md) defines MCP source, naming, dispatch, permission, and evidence boundaries.
 - [027 ACP](../027-acp/spec.md) defines ACP-provided MCP source projection.

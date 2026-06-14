@@ -123,18 +123,18 @@ the command name, slash label, usage, summary, aliases, argument kind, source,
 and optional presentation metadata for GUI-like surfaces. TUI, Web, Desktop,
 ACP, and messaging surfaces must project the shared catalog rather than
 inventing separate slash semantics.
-Web and Desktop shells present the shared catalog as a command utility panel.
-Executing `/help` or `/commands` opens that panel, `/agents` opens the agents
-panel, `/status` opens status, and `/sessions` or `/history` opens history.
-These panel switches are host display effects, not ordinary transcript facts.
-When the target panel can be collapsed or hidden in the current layout, the host
-must reveal the target region instead of only changing a selected tab or mobile
-panel marker. Display-only command feedback for these effects must have a
-visible local landing area, such as the composer trigger feedback or the
-commands panel, without adding transcript rows. Web/Desktop composer-triggered
-help and browse commands may use closeable overlays over the current transcript
-when replacing the transcript would make returning to the active session
-unclear.
+Web and Desktop shells present the shared catalog through transient command
+overlays for composer browse flows, not through a Settings command section.
+Executing `/help` or `/commands` from the composer opens the closeable overlay
+over the current transcript. GUI `/agents` is not exposed by Web/Desktop
+discovery or slash completion, and typed `/agents` must not open an Agents
+overlay or Settings section. `/status` opens status, and `/sessions` or
+`/history` opens history. These panel switches are host display effects, not
+ordinary transcript facts. When the target panel can be collapsed or hidden in
+the current layout, the host must reveal the target region instead of only
+changing a selected tab or mobile panel marker. Display-only command feedback
+for these effects must have a visible local landing area, such as the composer
+trigger feedback or command overlay, without adding transcript rows.
 The Web/Desktop catalog is capability-filtered by the runtime registry and may
 include dynamic backend-provided commands when runtime exposes them. Client-side
 presentation may hide only commands that the Gateway/runtime marks unavailable
@@ -145,7 +145,7 @@ GUI presentation metadata is derived from runtime command metadata rather than
 from frontend command-name allowlists. `presentationKind` uses:
 
 - `navigate` for commands that switch an existing surface, such as commands,
-  sessions, agents, or status.
+  sessions, or status.
 - `inspect` for observational structured views such as diff, context, usage,
   and status details.
 - `control` for active-turn or local state controls.

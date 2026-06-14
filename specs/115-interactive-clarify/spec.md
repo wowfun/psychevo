@@ -45,7 +45,7 @@ style it as part of the option label, not bury it in the description.
 
 `clarify` is a sequential tool. It must not be used to approve dangerous
 commands, file writes, or permission escalation; those remain owned by the
-permission approval flow defined by [035 Permissions](../035-permissions/spec.md).
+permission approval flow defined by [041 Permissions](../041-permissions/spec.md).
 
 ## Availability
 
@@ -136,5 +136,5 @@ where execution-only responders are unavailable.
   declaration snapshots and execution bindings.
 - [110 Coding Core Tools](../110-coding-core-tools/spec.md) defines the core
   coding toolset that clarify augments but does not join.
-- [035 Permissions](../035-permissions/spec.md) owns permission approval.
+- [041 Permissions](../041-permissions/spec.md) owns permission approval.
 - [210 Pevo TUI](../210-pevo-tui/spec.md) owns fullscreen TUI behavior.
