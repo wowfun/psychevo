@@ -47,7 +47,9 @@ pub(crate) fn send_gateway_event_update(
         | GatewayEvent::PermissionRequested { .. }
         | GatewayEvent::PermissionResolved { .. }
         | GatewayEvent::ClarifyRequested { .. }
-        | GatewayEvent::ClarifyResolved { .. } => {}
+        | GatewayEvent::ClarifyResolved { .. }
+        | GatewayEvent::ActivityChanged { .. }
+        | GatewayEvent::TitleChanged { .. } => {}
     }
 }
 

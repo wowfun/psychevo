@@ -148,6 +148,8 @@ fn gateway_event_session_id(event: &GatewayEvent) -> Option<&str> {
         | GatewayEvent::EntryCompleted { entry, .. } => {
             (!entry.thread_id.is_empty()).then_some(entry.thread_id.as_str())
         }
+        GatewayEvent::ActivityChanged { thread_id, .. } => thread_id.as_deref(),
+        GatewayEvent::TitleChanged { thread_id, .. } => Some(thread_id.as_str()),
         GatewayEvent::EntryDelta { .. }
         | GatewayEvent::PermissionRequested { .. }
         | GatewayEvent::PermissionResolved { .. }
@@ -155,6 +157,16 @@ fn gateway_event_session_id(event: &GatewayEvent) -> Option<&str> {
         | GatewayEvent::ClarifyResolved { .. }
         | GatewayEvent::Warning { .. } => None,
     }
+}
+
+fn gateway_block_tool_call_id(block: &TranscriptBlock) -> Option<&str> {
+    block
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("tool_call_id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
 }
 
 fn gateway_block_tool_value(block: &TranscriptBlock) -> Option<Value> {

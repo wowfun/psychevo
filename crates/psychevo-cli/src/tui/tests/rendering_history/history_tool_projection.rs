@@ -336,7 +336,9 @@ pub(crate) fn history_tool_result_restores_elapsed_duration() {
         .find(|row| row.kind == TranscriptKind::Explored)
         .expect("tool row");
     assert_eq!(row.tool_elapsed, Some(Duration::from_millis(230)));
-    assert!(line_text(&tool_lines(row, false, true, 32)[0]).ends_with("0s"));
+    let title = line_text(&tool_lines(row, false, true, 32)[0]);
+    assert!(title.contains("read src/lib.rs"), "{title}");
+    assert!(!title.contains("0s"), "{title}");
 }
 
 #[test]

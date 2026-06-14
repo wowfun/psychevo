@@ -484,7 +484,7 @@ pub(crate) fn running_tool_title_right_aligns_elapsed_duration() {
     );
     row.tool_started = Some(
         Instant::now()
-            .checked_sub(Duration::from_millis(120))
+            .checked_sub(Duration::from_millis(1_200))
             .expect("instant"),
     );
 
@@ -492,8 +492,27 @@ pub(crate) fn running_tool_title_right_aligns_elapsed_duration() {
 
     assert!(title.contains("exec_command cargo"));
     assert!(!title.starts_with("• "));
-    assert!(title.ends_with("0s"));
+    assert!(title.ends_with("1s"));
     assert_eq!(UnicodeWidthStr::width(title.as_str()), 35);
+}
+
+#[test]
+pub(crate) fn running_tool_title_hides_subsecond_elapsed_duration() {
+    let mut row = TranscriptRow::with_title(
+        TranscriptKind::Ran,
+        "exec_command cargo test --workspace --all-targets",
+        "running",
+    );
+    row.tool_started = Some(
+        Instant::now()
+            .checked_sub(Duration::from_millis(120))
+            .expect("instant"),
+    );
+
+    let title = line_text(&tool_lines(&row, false, true, 36)[0]);
+
+    assert!(title.contains("exec_command cargo"));
+    assert!(!title.contains("0s"));
 }
 
 #[test]
@@ -569,7 +588,7 @@ pub(crate) fn completed_tool_title_uses_fixed_elapsed_duration() {
 
     let title = line_text(&tool_lines(&row, false, true, 32)[0]);
 
-    assert!(title.ends_with("0s"));
+    assert!(!title.contains("0s"));
     assert!(!title.contains("5."));
 }
 

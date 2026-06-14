@@ -651,9 +651,10 @@ impl TuiApp {
         })?);
         ui.loaded_session_message_count = summaries.len();
         let summary_count = summaries.len();
-        let suppress_latest_terminal_meta = ui.status_has_running(Some(&session_id));
-        let active_tool_call_ids =
-            history_active_tool_call_ids_for_reload(ui, &session_id, &summaries)?;
+        let activity = self.sync_gateway_activity_for_session(ui, &session_id);
+        let live_owner = ui.local_status_has_running(Some(&session_id)) || activity.running;
+        let suppress_latest_terminal_meta = live_owner;
+        let active_tool_call_ids = history_active_tool_call_ids_for_reload(&summaries, live_owner)?;
         let mut history_prompts = Vec::new();
         for (index, summary) in summaries.into_iter().enumerate() {
             let value = serde_json::to_value(summary.message)?;
@@ -678,12 +679,37 @@ impl TuiApp {
             .list_agent_edges_for_parent(&session_id)?;
         ui.reconcile_history_agent_rows(&agent_edges, agent_catalog.as_ref());
         ui.visible_turn_started = ui
-            .history_prompt_started_ms
-            .and_then(instant_from_wall_timestamp_ms);
+            .foreign_gateway_activity_started(&session_id)
+            .or_else(|| {
+                ui.history_prompt_started_ms
+                    .and_then(instant_from_wall_timestamp_ms)
+            });
+        if live_owner {
+            ui.turn_session_id = Some(session_id.clone());
+        }
         ui.replace_session_history_prompts(history_prompts);
+        if activity.running && activity.owner_id.as_deref() != Some(self.gateway.owner_id()) {
+            self.replay_foreign_gateway_live_events_for_session(ui, &session_id)?;
+        }
         ui.scroll_to_bottom();
         ui.refresh_sidebar(self);
         Ok(())
+    }
+
+    pub(crate) fn sync_gateway_activity_for_session(
+        &self,
+        ui: &mut FullscreenUi<'_>,
+        session_id: &str,
+    ) -> GatewayActivity {
+        let activity = self
+            .gateway
+            .activity_for_selector(GatewayThreadSelector::thread_id(session_id));
+        if activity.running && activity.owner_id.as_deref() != Some(self.gateway.owner_id()) {
+            ui.observe_foreign_gateway_activity(session_id, &activity);
+        } else {
+            ui.clear_foreign_gateway_activity(session_id);
+        }
+        activity
     }
 }
 
@@ -764,12 +790,10 @@ pub(crate) fn live_agent_reload_due(last_check: Option<Instant>, now: Instant) -
 }
 
 pub(crate) fn history_active_tool_call_ids_for_reload(
-    ui: &FullscreenUi<'_>,
-    session_id: &str,
     summaries: &[TuiMessageSummary],
+    live_owner: bool,
 ) -> Result<BTreeSet<String>> {
     let mut active = BTreeSet::new();
-    let live_owner = ui.status_has_running(Some(session_id));
     for summary in summaries {
         let value = serde_json::to_value(&summary.message)?;
         if value.get("role").and_then(Value::as_str) == Some("tool_result") {

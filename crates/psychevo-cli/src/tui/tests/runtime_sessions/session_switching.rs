@@ -536,6 +536,23 @@ pub(crate) async fn sessions_panel_selection_does_not_reorder_by_view_time() {
     let Some(BottomPanel::Sessions(panel)) = &ui.bottom_panel else {
         panic!("expected sessions panel");
     };
+    assert_eq!(session_panel_ids(panel), vec![newer.clone()]);
+    assert!(panel.rows.iter().any(
+        |row| matches!(&row.value, BottomSelectionValue::LoadOlderSessions(workdir) if workdir == app.workdir.to_string_lossy().as_ref())
+    ));
+
+    for ch in "load older".chars() {
+        app.handle_bottom_panel_key(
+            &mut ui,
+            KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
+        )
+        .expect("load older query");
+    }
+    app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("load older");
+    let Some(BottomPanel::Sessions(panel)) = &ui.bottom_panel else {
+        panic!("expected sessions panel");
+    };
     assert_eq!(session_panel_ids(panel), vec![newer.clone(), older.clone()]);
 
     for ch in "model-a".chars() {

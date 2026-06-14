@@ -319,10 +319,20 @@ impl TuiApp {
         &self,
         ui: &FullscreenUi<'_>,
     ) -> Option<(GatewayThreadSelector, Option<String>)> {
-        let running = ui
+        let Some(running) = ui
             .running
             .as_ref()
-            .filter(|running| matches!(running.task, RunningTask::Agent(_)))?;
+            .filter(|running| matches!(running.task, RunningTask::Agent(_)))
+        else {
+            let session_id = self.current_session.as_deref()?;
+            if !ui.foreign_gateway_activity_matches_current_session(Some(session_id)) {
+                return None;
+            }
+            return Some((
+                GatewayThreadSelector::thread_id(session_id),
+                ui.foreign_gateway_activity_turn_id(session_id),
+            ));
+        };
         let selector = if let Some(selector) = running.selector.clone() {
             selector
         } else {

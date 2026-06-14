@@ -64,6 +64,18 @@ observations; covered prompt, reasoning, assistant text, and tool blocks must
 not remain as a second copy merely because another block in the same live entry
 is still running. Full snapshot replacement is reserved for reload, resume,
 rewind, and session switching.
+When live observations cross a process boundary, the owning Gateway may persist
+the typed live event as a short-lived delivery buffer. That buffer does not
+change transcript fact ownership: committed runtime `messages` are still the
+only ordinary durable transcript source, and live entries must still be
+discarded or reconciled when committed entries arrive.
+Workbench and TUI both consume that buffer for sessions they display. A
+foreign live event is applied only when its thread identity matches the visible
+session or an explicitly tracked running session; otherwise it is ignored or
+left for that session's later replay. Replaying retained live events must use
+the same block, turn, and message identity reconciliation as ordinary streaming
+events so a history-derived tool row is refreshed in place instead of duplicated
+or marked interrupted while a valid foreign owner is still running.
 After such a snapshot is loaded, later live updates for an already
 message-derived block use the message-derived entry as the display anchor.
 Covered live text/reasoning blocks are dropped; covered live tool updates may
@@ -86,6 +98,14 @@ Projection must preserve stable call identity fields, including arguments,
 content index, call index, assistant message sequence, and result message
 sequence, so display surfaces can associate terminal updates with the block
 created when the tool call first appeared.
+When a tool result carries execution timing, projection normalizes it onto the
+tool block as `metadata.elapsed_ms`. Message metadata `elapsed_ms` is
+authoritative; otherwise stable result fields such as `elapsed_ms` or
+`duration_ms` are used. This keeps completed tool elapsed display consistent
+across ordinary completed commands and yielded `exec_command` completions.
+Display surfaces keep the normalized timing fact even when it is shorter than
+1 second, but tool-row right-side elapsed labels are omitted until the duration
+reaches 1 second.
 Live projection has the same argument-preservation requirement: if a yielded
 `exec_command` result arrives without `args.cmd`, Gateway must recover the
 cached arguments from the earlier tool call event before emitting the live

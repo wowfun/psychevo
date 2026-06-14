@@ -50,6 +50,12 @@ pub(crate) struct TuiApprovalRequest {
     pub(crate) response: oneshot::Sender<PermissionApprovalDecision>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct ForeignGatewayActivity {
+    pub(crate) active_turn_id: Option<String>,
+    pub(crate) started: Instant,
+}
+
 pub(crate) struct AuxiliaryShellTask {
     pub(crate) session_id: Option<String>,
     pub(crate) control: RunControlHandle,

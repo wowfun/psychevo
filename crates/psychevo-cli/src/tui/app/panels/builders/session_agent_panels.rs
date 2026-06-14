@@ -4,48 +4,65 @@ impl TuiApp {
         view: SessionListView,
     ) -> Result<BottomSelectionPanel> {
         let current_session = self.current_session.as_deref();
-        let rows = self
-            .tui_sessions(view)?
-            .into_iter()
-            .map(|session| {
-                let summary = session.summary;
-                let title = summary
-                    .title
-                    .clone()
-                    .filter(|title| !title.trim().is_empty())
-                    .unwrap_or_else(|| short_session(&summary.id).to_string());
-                let provider_model = format!("{}/{}", summary.provider, summary.model);
-                let description = Some(format!(
-                    "{}  {}  messages={}",
-                    session.project_display_path, provider_model, session.visible_message_count
-                ));
-                let search_text = format!(
-                    "{} {} {} {} {} {}",
-                    summary.id,
-                    title,
-                    session.project_label,
-                    session.project_display_path,
-                    summary.provider,
-                    summary.model
-                );
-                BottomSelectionRow {
-                    label: title,
-                    description,
-                    detail: Some(format!(
-                        "{} {}",
-                        format_session_date(summary.updated_at_ms),
-                        format_session_time(summary.updated_at_ms)
-                    )),
-                    group: Some(session.project_label),
-                    search_text,
-                    is_current: current_session.is_some_and(|id| id == summary.id),
-                    is_default: false,
-                    style: BottomRowStyle::Normal,
-                    footer: None,
-                    value: BottomSelectionValue::Session(summary.id),
+        let recent_since_ms = wall_now_ms().saturating_sub(7 * 86_400_000);
+        let mut groups: BTreeMap<String, Vec<TuiSessionDisplaySummary>> = BTreeMap::new();
+        for session in self.tui_sessions(view)? {
+            groups
+                .entry(session.summary.workdir.clone())
+                .or_default()
+                .push(session);
+        }
+        let mut rows = Vec::new();
+        for (workdir, mut sessions) in groups {
+            sessions.sort_by(|left, right| {
+                right
+                    .summary
+                    .updated_at_ms
+                    .cmp(&left.summary.updated_at_ms)
+                    .then_with(|| left.summary.id.cmp(&right.summary.id))
+            });
+            let limit = self
+                .session_browser_limits
+                .get(&workdir)
+                .copied()
+                .unwrap_or(20);
+            let mut visible_count = 0usize;
+            let mut hidden_count = 0usize;
+            let expanded = limit > 20;
+            let project_label = sessions
+                .first()
+                .map(|session| session.project_label.clone())
+                .unwrap_or_else(|| session_project_label(&workdir));
+            for session in sessions {
+                let is_current = current_session.is_some_and(|id| id == session.summary.id);
+                let in_recent_window = session.summary.updated_at_ms >= recent_since_ms;
+                if is_current {
+                    rows.push(tui_session_selection_row(session, current_session));
+                    continue;
                 }
-            })
-            .collect();
+                let show_normal = visible_count < limit && (expanded || in_recent_window);
+                if show_normal {
+                    visible_count = visible_count.saturating_add(1);
+                    rows.push(tui_session_selection_row(session, current_session));
+                } else {
+                    hidden_count = hidden_count.saturating_add(1);
+                }
+            }
+            if hidden_count > 0 && view == SessionListView::Active {
+                rows.push(BottomSelectionRow {
+                    label: "Load older sessions".to_string(),
+                    description: Some("Show 20 more sessions in this workspace".to_string()),
+                    detail: Some(format!("{hidden_count} hidden")),
+                    group: Some(project_label),
+                    search_text: format!("load older sessions {workdir}"),
+                    is_current: false,
+                    is_default: false,
+                    style: BottomRowStyle::Action,
+                    footer: Some("Enter load  Esc close  Type search".to_string()),
+                    value: BottomSelectionValue::LoadOlderSessions(workdir),
+                });
+            }
+        }
         let mut panel = BottomSelectionPanel::new_sessions(view, rows);
         if let Some(session_id) = current_session {
             panel.select_value_key(&format!("session:{session_id}"));
@@ -518,4 +535,46 @@ impl TuiApp {
         Ok(panel)
     }
 
+}
+
+fn tui_session_selection_row(
+    session: TuiSessionDisplaySummary,
+    current_session: Option<&str>,
+) -> BottomSelectionRow {
+    let summary = session.summary;
+    let title = summary
+        .title
+        .clone()
+        .filter(|title| !title.trim().is_empty())
+        .unwrap_or_else(|| short_session(&summary.id).to_string());
+    let provider_model = format!("{}/{}", summary.provider, summary.model);
+    let description = Some(format!(
+        "{}  {}  messages={}",
+        session.project_display_path, provider_model, session.visible_message_count
+    ));
+    let search_text = format!(
+        "{} {} {} {} {} {}",
+        summary.id,
+        title,
+        session.project_label,
+        session.project_display_path,
+        summary.provider,
+        summary.model
+    );
+    BottomSelectionRow {
+        label: title,
+        description,
+        detail: Some(format!(
+            "{} {}",
+            format_session_date(summary.updated_at_ms),
+            format_session_time(summary.updated_at_ms)
+        )),
+        group: Some(session.project_label),
+        search_text,
+        is_current: current_session.is_some_and(|id| id == summary.id),
+        is_default: false,
+        style: BottomRowStyle::Normal,
+        footer: None,
+        value: BottomSelectionValue::Session(summary.id),
+    }
 }

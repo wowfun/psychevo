@@ -32,11 +32,13 @@ material that is already marked as reasoning and never by replaying provider
 wire fields as visible assistant text.
 
 When history contains an assistant tool-call message without persisted tool
-results, TUI may keep those tool rows live only when the current TUI process
-still owns the matching running turn for that session. After a process restart
-or any other history-only reload without a live owner, those orphaned tool
-calls render as interrupted historical evidence with no spinner or live
-elapsed timer. TUI does not automatically retry or resume those tool calls.
+results, TUI may keep those tool rows live when the current TUI process owns
+the matching running turn or when shared Gateway activity reports a non-stale
+foreign owner for that session. After a process restart or any other
+history-only reload without either local ownership or valid durable ownership,
+those orphaned tool calls render as interrupted historical evidence with no
+spinner or live elapsed timer. TUI does not automatically retry or resume those
+tool calls.
 If the orphaned call was an `Agent` call and persisted agent-edge metadata can
 identify the child session, the row may still expose the child `Open` action,
 but it remains an interrupted historical row rather than a running spinner.
@@ -115,6 +117,14 @@ boundary. Non-terminal scripted `/sessions`, `/resume`, and `/continue`
 continue to print only active sessions, using the same global human-visible
 list.
 
+The fullscreen session pane uses the shared session-browser defaults. For each
+workspace it initially shows sessions updated within the last 7 days, capped to
+20 rows, while keeping the current session and any running session visible even
+outside that window. Older rows are represented by a selectable
+workspace-scoped `older sessions` row; pressing Enter expands the next 20 rows
+for that workspace. Expanding, searching, and selecting sessions are read-only
+and must not update persisted recency.
+
 When the fullscreen session pane opens and the current visible session appears
 in the active view, the selected-row arrow defaults to that current session
 instead of the first latest-activity row. If no current session appears in the
@@ -128,6 +138,30 @@ change row height, change click targets, or rewrite persisted session recency.
 The current-session marker remains reserved for the visible session; when a
 visible session is also running, the fixed bottom status line remains the
 primary running indicator.
+
+Fullscreen TUI tool rows render elapsed duration on the right side of the row
+header only once the active or persisted tool duration reaches 1 second.
+Sub-second tool durations are still kept in row state and persistence metadata
+but are not shown as a `0s` right-side label. The fixed bottom turn-status
+timer may still show `0s` while a turn has been running for less than 1 second.
+
+TUI publishes Gateway activity ownership while it runs turns and shell
+activities. The ownership record includes an owner id, source key, turn id,
+lease, generation, and active timestamps so other Gateway processes can show
+running state, relay live transcript events, and route thread-scoped controls.
+If another Gateway takes over a stale activity generation, late events from the
+old TUI owner must be ignored rather than rendered into the current transcript
+or clearing the new owner.
+
+TUI also observes Gateway activity ownership published by other surfaces. When
+the current visible session has a non-stale foreign activity, TUI treats that
+activity as the session's live owner for history reload, bottom running status,
+tool-row timers, and thread-scoped interrupt routing. TUI replays retained
+foreign `gateway_live_events` for the visible session and polls later events by
+monotonic sequence; events for unrelated sessions must not mutate the current
+transcript or session recency. Foreign live events are display overlays only:
+committed runtime messages remain the transcript source of truth and replace
+live overlays when the turn completes.
 
 Both active and archived session views are ordered latest-activity-first by the
 persisted session latest-activity time. Restoring an archived session exposes it

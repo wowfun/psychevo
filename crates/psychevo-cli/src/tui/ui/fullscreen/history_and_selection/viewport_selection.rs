@@ -42,6 +42,8 @@ impl<'a> FullscreenUi<'a> {
             thinking_visible: app.thinking_visible,
             raw_visible: app.raw_visible,
             running: None,
+            foreign_gateway_activities: BTreeMap::new(),
+            applied_gateway_live_event_seqs: BTreeSet::new(),
             auxiliary_agent_tasks: Vec::new(),
             agent_child_event_backlog: BTreeMap::new(),
             session_live_event_backlog: BTreeMap::new(),

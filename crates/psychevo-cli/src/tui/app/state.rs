@@ -42,6 +42,8 @@ pub(crate) struct TuiApp {
     pub(crate) slash_config: EffectiveSlashConfig,
     pub(crate) btw_side: Option<BtwSideState>,
     pub(crate) last_live_agent_reload_check: Option<Instant>,
+    pub(crate) last_gateway_live_event_seq: i64,
+    pub(crate) session_browser_limits: BTreeMap<String, usize>,
     pub(crate) side_cleanup_task: Option<SideCleanupTask>,
     pub(crate) compaction_task: Option<CompactionTask>,
     pub(crate) diff_task: Option<DiffTask>,

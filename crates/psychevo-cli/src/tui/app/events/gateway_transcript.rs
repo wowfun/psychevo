@@ -119,6 +119,7 @@ impl TuiApp {
                     .running
                     .as_ref()
                     .and_then(|running| running.selector.clone())
+                    .or_else(|| owner_session.map(GatewayThreadSelector::thread_id))
                     .unwrap_or_else(|| {
                         GatewayThreadSelector::source(self.gateway_source().source_key())
                     });
@@ -167,6 +168,7 @@ impl TuiApp {
                 });
                 false
             }
+            GatewayEvent::ActivityChanged { .. } | GatewayEvent::TitleChanged { .. } => false,
             GatewayEvent::Warning {
                 message,
                 suggestion,
@@ -447,7 +449,17 @@ impl TuiApp {
             _ => {
                 let key = format!("gateway:{}", block.id);
                 let kind = transcript_kind_for_block(block.kind);
-                let idx = ui.tool_rows.get(&key).copied().unwrap_or_else(|| {
+                let tool_call_id = gateway_block_tool_call_id(&block).map(str::to_string);
+                let idx = ui
+                    .tool_rows
+                    .get(&key)
+                    .copied()
+                    .or_else(|| {
+                        tool_call_id
+                            .as_deref()
+                            .and_then(|id| ui.tool_rows.get(&tool_id_key(id)).copied())
+                    })
+                    .unwrap_or_else(|| {
                     let mut row = TranscriptRow::with_title(
                         kind,
                         transcript_block_title(&block),
@@ -464,11 +476,16 @@ impl TuiApp {
                     ui.tool_rows.insert(key.clone(), idx);
                     idx
                 });
+                ui.tool_rows.insert(key, idx);
+                if let Some(tool_call_id) = tool_call_id.as_deref() {
+                    ui.tool_rows.insert(tool_id_key(tool_call_id), idx);
+                }
                 let active = {
                     let row = &mut ui.transcript[idx];
                     row.kind = kind;
                     row.title = transcript_block_title(&block);
                     row.tool_name = block.title.clone();
+                    row.tool_call_id = tool_call_id;
                     row.failed = block.status == TranscriptBlockStatus::Failed;
                     row.interrupted = block.status == TranscriptBlockStatus::Cancelled;
                     row.text = transcript_block_running_text(&block);

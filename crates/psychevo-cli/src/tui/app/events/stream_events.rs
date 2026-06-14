@@ -25,6 +25,7 @@ impl TuiApp {
         changed |= ui.drain_file_search_results();
         changed |= ui.drain_permission_approval_requests();
         changed |= self.maybe_reload_live_agent_session(ui)?;
+        changed |= self.drain_foreign_gateway_live_events(ui)?;
 
         let (had_pending, active_tool_frame_requested) =
             self.drain_available_fullscreen_stream_events(ui);
@@ -157,6 +158,147 @@ impl TuiApp {
             changed = true;
         }
         Ok(changed)
+    }
+
+    pub(crate) fn replay_foreign_gateway_live_events_for_session(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        session_id: &str,
+    ) -> Result<bool> {
+        let mut changed = false;
+        let mut after_seq = 0;
+        loop {
+            let records = self
+                .state_runtime
+                .store()
+                .list_gateway_live_events_after(after_seq, 500)?;
+            if records.is_empty() {
+                break;
+            }
+            for record in &records {
+                after_seq = after_seq.max(record.seq);
+            }
+            for record in records {
+                changed |= self.apply_foreign_gateway_live_event_record(
+                    ui,
+                    record,
+                    Some(session_id),
+                )?;
+            }
+        }
+        Ok(changed)
+    }
+
+    pub(crate) fn drain_foreign_gateway_live_events(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+    ) -> Result<bool> {
+        let records = self
+            .state_runtime
+            .store()
+            .list_gateway_live_events_after(self.last_gateway_live_event_seq, 100)?;
+        let mut changed = false;
+        for record in records {
+            self.last_gateway_live_event_seq = self.last_gateway_live_event_seq.max(record.seq);
+            changed |= self.apply_foreign_gateway_live_event_record(ui, record, None)?;
+        }
+        Ok(changed)
+    }
+
+    fn apply_foreign_gateway_live_event_record(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        record: GatewayLiveEventRecord,
+        expected_session: Option<&str>,
+    ) -> Result<bool> {
+        if record.owner_id.as_deref() == Some(self.gateway.owner_id()) {
+            return Ok(false);
+        }
+        let event = match serde_json::from_value::<GatewayEvent>(record.event.clone()) {
+            Ok(event) => event,
+            Err(_) => return Ok(false),
+        };
+        let Some(session_id) = self.gateway_live_event_session_id(&record, &event)? else {
+            return Ok(false);
+        };
+        if expected_session.is_some_and(|expected| expected != session_id) {
+            return Ok(false);
+        }
+        if expected_session.is_none() && self.current_session.as_deref() != Some(session_id.as_str())
+        {
+            return Ok(false);
+        }
+        if !ui.mark_gateway_live_event_applied(record.seq) {
+            return Ok(false);
+        }
+        Ok(self.apply_foreign_gateway_live_event(ui, &session_id, event)?)
+    }
+
+    fn gateway_live_event_session_id(
+        &self,
+        record: &GatewayLiveEventRecord,
+        event: &GatewayEvent,
+    ) -> Result<Option<String>> {
+        if let Some(thread_id) = record.thread_id.as_ref().filter(|value| !value.is_empty()) {
+            return Ok(Some(thread_id.clone()));
+        }
+        if let Some(thread_id) = gateway_event_session_id(event) {
+            return Ok(Some(thread_id.to_string()));
+        }
+        let Some(activity_id) = record.activity_id.as_deref() else {
+            return Ok(None);
+        };
+        Ok(self
+            .state_runtime
+            .store()
+            .gateway_activity(activity_id)?
+            .and_then(|activity| activity.thread_id))
+    }
+
+    fn apply_foreign_gateway_live_event(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        session_id: &str,
+        event: GatewayEvent,
+    ) -> Result<bool> {
+        match event {
+            GatewayEvent::ActivityChanged { activity, .. } => {
+                if activity.running && activity.owner_id.as_deref() != Some(self.gateway.owner_id())
+                {
+                    ui.observe_foreign_gateway_activity_values(
+                        session_id,
+                        activity.active_turn_id,
+                        activity.started_at_ms,
+                    );
+                } else {
+                    ui.clear_foreign_gateway_activity(session_id);
+                }
+                Ok(true)
+            }
+            GatewayEvent::TitleChanged {
+                title,
+                display_title,
+                ..
+            } => {
+                if self.current_session.as_deref() == Some(session_id) {
+                    self.current_session_title = title.or(display_title);
+                }
+                Ok(true)
+            }
+            GatewayEvent::TurnCompleted { .. } => {
+                self.apply_gateway_event(ui, Some(session_id), event);
+                ui.clear_foreign_gateway_activity(session_id);
+                if !ui.local_status_has_running(Some(session_id)) {
+                    ui.visible_turn_started = None;
+                    ui.turn_session_id = None;
+                }
+                if self.current_session.as_deref() == Some(session_id) {
+                    self.refresh_current_session_title()?;
+                }
+                Ok(true)
+            }
+            _ => Ok(self.apply_gateway_event(ui, Some(session_id), event)),
+        }
     }
 
     pub(crate) fn drain_available_fullscreen_stream_events(

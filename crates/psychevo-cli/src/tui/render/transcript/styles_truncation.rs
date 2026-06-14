@@ -166,6 +166,7 @@ pub(crate) fn fit_expand_hint(hint: &str, max_width: usize) -> String {
 pub(crate) fn tool_elapsed_label(row: &TranscriptRow) -> Option<String> {
     row.tool_elapsed
         .or_else(|| active_tool_elapsed(row))
+        .filter(|elapsed| *elapsed >= Duration::from_secs(1))
         .map(format_duration_compact)
 }
 

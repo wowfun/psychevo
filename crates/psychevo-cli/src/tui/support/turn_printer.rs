@@ -117,7 +117,9 @@ impl TurnPrinter {
             | GatewayEvent::PermissionRequested { .. }
             | GatewayEvent::PermissionResolved { .. }
             | GatewayEvent::ClarifyRequested { .. }
-            | GatewayEvent::ClarifyResolved { .. } => {}
+            | GatewayEvent::ClarifyResolved { .. }
+            | GatewayEvent::ActivityChanged { .. }
+            | GatewayEvent::TitleChanged { .. } => {}
         }
         out.flush()
     }

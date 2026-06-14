@@ -39,6 +39,8 @@ pub(crate) struct FullscreenUi<'a> {
     pub(crate) thinking_visible: bool,
     pub(crate) raw_visible: bool,
     pub(crate) running: Option<RunningTurn>,
+    pub(crate) foreign_gateway_activities: BTreeMap<String, ForeignGatewayActivity>,
+    pub(crate) applied_gateway_live_event_seqs: BTreeSet<i64>,
     pub(crate) auxiliary_agent_tasks: Vec<AuxiliaryAgentTask>,
     pub(crate) agent_child_event_backlog: BTreeMap<String, Vec<RunStreamEvent>>,
     pub(crate) session_live_event_backlog: BTreeMap<String, Vec<RunStreamEvent>>,

@@ -18,8 +18,8 @@ pub(crate) use crossterm::terminal::{
 };
 pub(crate) use psychevo_ai::Outcome;
 pub(crate) use psychevo_gateway::{
-    Gateway, GatewayEvent, GatewayEventSink, GatewaySource, GatewayThreadSelector, SendTurnRequest,
-    TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
+    Gateway, GatewayActivity, GatewayEvent, GatewayEventSink, GatewaySource, GatewayThreadSelector,
+    SendTurnRequest, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
     TranscriptEntryRole,
 };
 pub(crate) use psychevo_runtime::{
@@ -28,11 +28,11 @@ pub(crate) use psychevo_runtime::{
     ClarifyQuestion, ClarifyRequestEvent, ClarifyResolvedEvent, ClarifyResolvedReason,
     ClarifyResponse, ClarifyResult, CompactSessionOptions, CompactionReason, CompactionResult,
     ConfigScope, ConfiguredModel, ContextFormatOptions, ContextOptions, ContextSnapshot,
-    CustomProviderInput, ImageInput, InstallOptions, LoadedMainAgent, MAX_AGENT_SPAWN_DEPTH_CAP,
-    ModelCatalogEntry, ModelCatalogProvider, ModelMetadataCacheTarget, PendingInputId,
-    PermissionApprovalDecision, PermissionApprovalOutcome, PermissionApprovalRequest,
-    PermissionMode, PromptAttachmentDisplay, PromptDisplayMetadata, ReloadContextOptions,
-    RunControlHandle, RunMode, RunOptions, RunStreamEvent, RunStreamSink,
+    CustomProviderInput, GatewayLiveEventRecord, ImageInput, InstallOptions, LoadedMainAgent,
+    MAX_AGENT_SPAWN_DEPTH_CAP, ModelCatalogEntry, ModelCatalogProvider, ModelMetadataCacheTarget,
+    PendingInputId, PermissionApprovalDecision, PermissionApprovalOutcome,
+    PermissionApprovalRequest, PermissionMode, PromptAttachmentDisplay, PromptDisplayMetadata,
+    ReloadContextOptions, RunControlHandle, RunMode, RunOptions, RunStreamEvent, RunStreamSink,
     SESSION_MAIN_AGENT_METADATA_KEY, SessionArtifactKind, SessionExportFormat,
     SessionExportOptions, SessionExportWriteResult, SessionSummary, SessionUndoOptions,
     SessionUsageOptions, SessionUsageSummary, SkillBundle, SkillCatalog, SkillDiscoveryOptions,
@@ -158,6 +158,10 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
     let color = io::stdout().is_terminal() && env_value("NO_COLOR", &env_map).is_none();
     let (clipboard_result_tx, clipboard_result_rx) = std::sync::mpsc::channel();
     let gateway = Gateway::new(state_runtime.clone());
+    let last_gateway_live_event_seq = state_runtime
+        .store()
+        .latest_gateway_live_event_seq()
+        .unwrap_or_default();
     let mut app = TuiApp {
         env_map,
         home,
@@ -198,6 +202,8 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
         slash_config,
         btw_side: None,
         last_live_agent_reload_check: None,
+        last_gateway_live_event_seq,
+        session_browser_limits: BTreeMap::new(),
         side_cleanup_task: None,
         compaction_task: None,
         diff_task: None,

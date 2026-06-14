@@ -257,6 +257,214 @@ pub(crate) async fn load_history_keeps_unfinished_tool_call_active_with_live_own
 }
 
 #[test]
+pub(crate) fn load_history_keeps_unfinished_tool_call_active_with_foreign_gateway_activity() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let session_id = store
+        .create_session_with_metadata(
+            &app.workdir,
+            "web",
+            "mimo-v2.5-pro",
+            "xiaomi-token-plan",
+            None,
+        )
+        .expect("session");
+    app.current_session = Some(session_id.clone());
+    let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
+    insert_unfinished_write_call(&conn, &session_id);
+    claim_foreign_gateway_activity(&store, &conn, &session_id, wall_now_ms() + 60_000, 91_000);
+
+    let mut ui = FullscreenUi::new(&app);
+    app.load_current_session_history(&mut ui).expect("history");
+
+    let row = ui
+        .transcript
+        .iter()
+        .find(|row| row.title == "write feeds/2026-05-10/hackernews-hot-06-42.md")
+        .expect("write row");
+    assert_eq!(row.text, "preparing");
+    assert!(!row.interrupted);
+    assert!(row.tool_started.is_some());
+    assert!(ui.tool_rows.contains_key(&tool_id_key("call_write_report")));
+    assert!(ui.status_has_running(Some(&session_id)));
+    assert!(
+        ui.status_running_elapsed(Some(&session_id))
+            .is_some_and(|elapsed| elapsed >= Duration::from_secs(90))
+    );
+}
+
+#[test]
+pub(crate) fn load_history_keeps_stale_foreign_gateway_activity_interrupted() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let session_id = store
+        .create_session_with_metadata(
+            &app.workdir,
+            "web",
+            "mimo-v2.5-pro",
+            "xiaomi-token-plan",
+            None,
+        )
+        .expect("session");
+    app.current_session = Some(session_id.clone());
+    let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
+    insert_unfinished_write_call(&conn, &session_id);
+    claim_foreign_gateway_activity(&store, &conn, &session_id, wall_now_ms() - 1, 91_000);
+
+    let mut ui = FullscreenUi::new(&app);
+    app.load_current_session_history(&mut ui).expect("history");
+
+    let row = ui
+        .transcript
+        .iter()
+        .find(|row| row.title == "write feeds/2026-05-10/hackernews-hot-06-42.md")
+        .expect("write row");
+    assert_eq!(row.text, "interrupted");
+    assert!(row.interrupted);
+    assert!(row.tool_started.is_none());
+    assert!(!ui.status_has_running(Some(&session_id)));
+}
+
+#[test]
+pub(crate) fn current_foreign_gateway_activity_interrupt_routes_control_command() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let session_id = store
+        .create_session_with_metadata(
+            &app.workdir,
+            "web",
+            "mimo-v2.5-pro",
+            "xiaomi-token-plan",
+            None,
+        )
+        .expect("session");
+    app.current_session = Some(session_id.clone());
+    let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
+    insert_unfinished_write_call(&conn, &session_id);
+    claim_foreign_gateway_activity(&store, &conn, &session_id, wall_now_ms() + 60_000, 1_000);
+
+    let mut ui = FullscreenUi::new(&app);
+    app.load_current_session_history(&mut ui).expect("history");
+
+    assert!(app.request_current_session_interrupt(&mut ui));
+    assert!(ui.interrupt_requested);
+    let commands = store
+        .pending_gateway_control_commands("gateway:web:test", 10)
+        .expect("pending commands");
+    assert!(
+        commands
+            .iter()
+            .any(|command| command.command_kind == "interrupt"),
+        "{commands:?}"
+    );
+}
+
+#[test]
+pub(crate) fn load_history_replays_foreign_gateway_live_events_into_active_tool_row() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let session_id = store
+        .create_session_with_metadata(
+            &app.workdir,
+            "web",
+            "mimo-v2.5-pro",
+            "xiaomi-token-plan",
+            None,
+        )
+        .expect("session");
+    let unrelated_session = store
+        .create_session_with_metadata(&app.workdir, "web", "mock-model", "mock", None)
+        .expect("unrelated session");
+    app.current_session = Some(session_id.clone());
+    let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
+    insert_unfinished_write_call(&conn, &session_id);
+    claim_foreign_gateway_activity(&store, &conn, &session_id, wall_now_ms() + 60_000, 91_000);
+    append_foreign_gateway_event(
+        &store,
+        &session_id,
+        GatewayEvent::EntryUpdated {
+            turn_id: "turn-web".to_string(),
+            entry: gateway_tool_entry(
+                &session_id,
+                "turn-web",
+                "call_write_report",
+                TranscriptBlockStatus::Running,
+                "writing report",
+            ),
+        },
+    );
+    append_foreign_gateway_event(
+        &store,
+        &unrelated_session,
+        GatewayEvent::EntryUpdated {
+            turn_id: "turn-other".to_string(),
+            entry: gateway_tool_entry(
+                &unrelated_session,
+                "turn-other",
+                "call_other",
+                TranscriptBlockStatus::Running,
+                "unrelated update",
+            ),
+        },
+    );
+
+    let mut ui = FullscreenUi::new(&app);
+    app.load_current_session_history(&mut ui).expect("history");
+
+    let rows = ui
+        .transcript
+        .iter()
+        .filter(|row| row.tool_call_id.as_deref() == Some("call_write_report"))
+        .collect::<Vec<_>>();
+    assert_eq!(rows.len(), 1, "{:?}", ui.transcript);
+    assert_eq!(rows[0].text, "running");
+    assert!(!rows[0].interrupted);
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| !row.text.contains("unrelated update")),
+        "{:?}",
+        ui.transcript
+    );
+
+    append_foreign_gateway_event(
+        &store,
+        &session_id,
+        GatewayEvent::TurnCompleted {
+            thread_id: Some(session_id.clone()),
+            turn_id: "turn-web".to_string(),
+            outcome: Some("normal".to_string()),
+            committed_entries: vec![gateway_answer_entry(&session_id, "turn-web", 2, "done")],
+        },
+    );
+    assert!(
+        app.drain_foreign_gateway_live_events(&mut ui)
+            .expect("drain foreign events")
+    );
+    assert!(!ui.status_has_running(Some(&session_id)));
+    assert!(
+        ui.transcript
+            .iter()
+            .any(|row| row.kind == TranscriptKind::Answer && row.text == "done"),
+        "{:?}",
+        ui.transcript
+    );
+    assert_eq!(
+        ui.transcript
+            .iter()
+            .filter(|row| row.tool_call_id.as_deref() == Some("call_write_report"))
+            .count(),
+        0,
+        "{:?}",
+        ui.transcript
+    );
+}
+
+#[test]
 pub(crate) fn load_history_does_not_rehydrate_aborted_tool_calls_as_running() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
@@ -473,4 +681,164 @@ pub(crate) fn message_history_orders_assistant_preamble_before_tool_after_reload
         "{:?}",
         ui.transcript
     );
+}
+
+fn insert_unfinished_write_call(conn: &rusqlite::Connection, session_id: &str) {
+    insert_tui_message(
+        conn,
+        session_id,
+        1,
+        "assistant",
+        1,
+        serde_json::json!({
+            "role": "assistant",
+            "content": [{
+                "type": "tool_call",
+                "id": "call_write_report",
+                "name": "write",
+                "arguments": {
+                    "path": "feeds/2026-05-10/hackernews-hot-06-42.md",
+                    "content": "report body"
+                },
+                "arguments_json": "{\"path\":\"feeds/2026-05-10/hackernews-hot-06-42.md\",\"content\":\"report body\"}",
+                "arguments_error": null,
+                "content_index": 0,
+                "call_index": 0
+            }],
+            "timestamp_ms": 1,
+            "finish_reason": "tool_calls",
+            "outcome": "normal",
+            "model": "mimo-v2.5-pro",
+            "provider": "xiaomi-token-plan"
+        }),
+    );
+}
+
+fn claim_foreign_gateway_activity(
+    store: &SqliteStore,
+    conn: &rusqlite::Connection,
+    session_id: &str,
+    lease_expires_at_ms: i64,
+    started_elapsed_ms: i64,
+) {
+    store
+        .claim_gateway_activity(psychevo_runtime::GatewayActivityClaimInput {
+            activity_id: "activity-web",
+            thread_id: Some(session_id),
+            source_key: Some("source:web:test"),
+            turn_id: Some("turn-web"),
+            kind: "turn",
+            owner_id: "gateway:web:test",
+            owner_surface: Some("web"),
+            lease_expires_at_ms,
+            queued_turns: 0,
+            superseded_activity_id: None,
+            intent: None,
+        })
+        .expect("claim foreign activity");
+    conn.execute(
+        "UPDATE gateway_activities SET started_at_ms = ?2 WHERE activity_id = ?1",
+        rusqlite::params![
+            "activity-web",
+            wall_now_ms().saturating_sub(started_elapsed_ms)
+        ],
+    )
+    .expect("set activity start");
+}
+
+fn append_foreign_gateway_event(store: &SqliteStore, session_id: &str, event: GatewayEvent) {
+    let event = serde_json::to_value(event).expect("gateway event value");
+    store
+        .append_gateway_live_event(
+            Some("activity-web"),
+            Some("gateway:web:test"),
+            Some(session_id),
+            Some("turn-web"),
+            &event,
+        )
+        .expect("append gateway live event");
+}
+
+fn gateway_tool_entry(
+    session_id: &str,
+    turn_id: &str,
+    tool_call_id: &str,
+    status: TranscriptBlockStatus,
+    text: &str,
+) -> TranscriptEntry {
+    TranscriptEntry {
+        id: format!("entry-{tool_call_id}"),
+        thread_id: session_id.to_string(),
+        turn_id: Some(turn_id.to_string()),
+        message_seq: None,
+        role: TranscriptEntryRole::Assistant,
+        status,
+        source: "runtime.stream".to_string(),
+        blocks: vec![TranscriptBlock {
+            id: format!("live:{turn_id}:tool:{tool_call_id}"),
+            kind: TranscriptBlockKind::File,
+            status,
+            order: 0,
+            source: "runtime.stream".to_string(),
+            title: Some("write feeds/2026-05-10/hackernews-hot-06-42.md".to_string()),
+            body: Some(text.to_string()),
+            preview: Some(text.to_string()),
+            detail: Some(text.to_string()),
+            artifact_ids: Vec::new(),
+            metadata: Some(serde_json::json!({
+                "projection": "tool",
+                "tool_call_id": tool_call_id,
+                "args": {
+                    "path": "feeds/2026-05-10/hackernews-hot-06-42.md",
+                    "content": "report body"
+                }
+            })),
+            result: None,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        }],
+        metadata: None,
+        usage: None,
+        accounting: None,
+        created_at_ms: 1,
+        updated_at_ms: 1,
+    }
+}
+
+fn gateway_answer_entry(
+    session_id: &str,
+    turn_id: &str,
+    message_seq: i64,
+    text: &str,
+) -> TranscriptEntry {
+    TranscriptEntry {
+        id: format!("answer-{message_seq}"),
+        thread_id: session_id.to_string(),
+        turn_id: Some(turn_id.to_string()),
+        message_seq: Some(message_seq),
+        role: TranscriptEntryRole::Assistant,
+        status: TranscriptBlockStatus::Completed,
+        source: "runtime.message".to_string(),
+        blocks: vec![TranscriptBlock {
+            id: format!("answer-{message_seq}:text"),
+            kind: TranscriptBlockKind::Text,
+            status: TranscriptBlockStatus::Completed,
+            order: 0,
+            source: "runtime.message".to_string(),
+            title: None,
+            body: Some(text.to_string()),
+            preview: Some(text.to_string()),
+            detail: Some(text.to_string()),
+            artifact_ids: Vec::new(),
+            metadata: None,
+            result: None,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        }],
+        metadata: None,
+        usage: None,
+        accounting: None,
+        created_at_ms: 1,
+        updated_at_ms: 1,
+    }
 }

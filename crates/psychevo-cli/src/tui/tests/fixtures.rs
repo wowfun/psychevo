@@ -108,6 +108,8 @@ pub(crate) fn test_app(temp: &tempfile::TempDir) -> TuiApp {
         slash_config: EffectiveSlashConfig::default(),
         btw_side: None,
         last_live_agent_reload_check: None,
+        last_gateway_live_event_seq: 0,
+        session_browser_limits: BTreeMap::new(),
         side_cleanup_task: None,
         compaction_task: None,
         diff_task: None,

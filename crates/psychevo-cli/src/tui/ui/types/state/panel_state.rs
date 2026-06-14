@@ -192,6 +192,7 @@ pub(crate) struct BottomSelectionRow {
 #[derive(Debug, Clone)]
 pub(crate) enum BottomSelectionValue {
     Session(String),
+    LoadOlderSessions(String),
     AgentRunning {
         id: String,
         child_session_id: String,

@@ -765,6 +765,9 @@ impl BottomSelectionValue {
     pub(crate) fn key(&self) -> String {
         match self {
             BottomSelectionValue::Session(id) => format!("session:{id}"),
+            BottomSelectionValue::LoadOlderSessions(workdir) => {
+                format!("sessions:load-older:{workdir}")
+            }
             BottomSelectionValue::AgentRunning {
                 child_session_id, ..
             } => {
