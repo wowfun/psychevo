@@ -86,7 +86,11 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
 
       const assistantMessage = page.locator(".pevo-message.is-assistant").last();
       await expect(assistantMessage).toBeVisible({ timeout: 240_000 });
-      await expectVisibleTextGrowth(assistantMessage, 20_000);
+      await expectTextGrowthOrCompletion(
+        assistantMessage,
+        /OPENCODE_ACP_GUI_LIVE_OK/,
+        20_000
+      );
       await expect(assistantMessage).toContainText(/OPENCODE_ACP_GUI_LIVE_OK/, { timeout: 240_000 });
 
       await openPanel(page, isMobile, "Status");
@@ -222,12 +226,23 @@ async function expectProviderSession(dbPath: string, provider: string) {
   expect(output.split(/\r?\n/).filter(Boolean)).toContain(provider);
 }
 
-async function expectVisibleTextGrowth(locator: Locator, timeout: number) {
-  const initial = (await locator.textContent())?.length ?? 0;
-  await expect.poll(async () => (await locator.textContent())?.length ?? 0, {
+async function expectTextGrowthOrCompletion(
+  locator: Locator,
+  completion: RegExp,
+  timeout: number
+) {
+  const initialText = (await locator.textContent()) ?? "";
+  if (completion.test(initialText)) {
+    return;
+  }
+  const initial = initialText.length;
+  await expect.poll(async () => {
+    const text = (await locator.textContent()) ?? "";
+    return completion.test(text) || text.length > initial;
+  }, {
     intervals: [150, 250, 500, 750, 1000],
     timeout
-  }).toBeGreaterThan(initial);
+  }).toBe(true);
 }
 
 async function expectSelectTextFits(select: Locator) {

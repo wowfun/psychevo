@@ -809,8 +809,9 @@ impl<'a> FullscreenUi<'a> {
     }
 
     pub(crate) fn push_status(&mut self, text: impl Into<String>) {
-        self.transcript
-            .push(TranscriptRow::simple(TranscriptKind::Status, text));
+        let mut row = TranscriptRow::simple(TranscriptKind::Status, text);
+        self.tag_active_turn_local_row(&mut row);
+        self.transcript.push(row);
     }
 
     pub(crate) fn set_ephemeral_status(&mut self, text: impl Into<String>) {
@@ -853,6 +854,7 @@ impl<'a> FullscreenUi<'a> {
         }
         let mut row = TranscriptRow::with_title(TranscriptKind::Command, command, body);
         row.failed = failed;
+        self.tag_active_turn_local_row(&mut row);
         self.transcript.push(row);
     }
 
