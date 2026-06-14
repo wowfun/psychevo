@@ -6,6 +6,7 @@ import { clientRequestThreadResumeSchema } from './rpc/client-request/thread-res
 import { clientRequestThreadReadSchema } from './rpc/client-request/thread-read';
 import { clientRequestThreadTraceSchema } from './rpc/client-request/thread-trace';
 import { clientRequestThreadListSchema } from './rpc/client-request/thread-list';
+import { clientRequestThreadBrowserSchema } from './rpc/client-request/thread-browser';
 import { clientRequestThreadRenameSchema } from './rpc/client-request/thread-rename';
 import { clientRequestThreadArchiveSchema } from './rpc/client-request/thread-archive';
 import { clientRequestThreadRestoreSchema } from './rpc/client-request/thread-restore';
@@ -13,6 +14,7 @@ import { clientRequestThreadDeleteSchema } from './rpc/client-request/thread-del
 import { clientRequestTurnStartSchema } from './rpc/client-request/turn-start';
 import { clientRequestTurnSteerSchema } from './rpc/client-request/turn-steer';
 import { clientRequestTurnInterruptSchema } from './rpc/client-request/turn-interrupt';
+import { clientRequestTurnTakeoverSchema } from './rpc/client-request/turn-takeover';
 import { clientRequestRuntimeOptionsSchema } from './rpc/client-request/runtime-options';
 import { clientRequestCompletionListSchema } from './rpc/client-request/completion-list';
 import { clientRequestCommandListSchema } from './rpc/client-request/command-list';
@@ -264,6 +266,9 @@ export const rpcSchemas = {
       "$ref": "ClientRequest/thread-list.json"
     },
     {
+      "$ref": "ClientRequest/thread-browser.json"
+    },
+    {
       "$ref": "ClientRequest/thread-rename.json"
     },
     {
@@ -283,6 +288,9 @@ export const rpcSchemas = {
     },
     {
       "$ref": "ClientRequest/turn-interrupt.json"
+    },
+    {
+      "$ref": "ClientRequest/turn-takeover.json"
     },
     {
       "$ref": "ClientRequest/runtime-options.json"
@@ -419,6 +427,7 @@ export const rpcSchemaRefs = [
   clientRequestThreadReadSchema,
   clientRequestThreadTraceSchema,
   clientRequestThreadListSchema,
+  clientRequestThreadBrowserSchema,
   clientRequestThreadRenameSchema,
   clientRequestThreadArchiveSchema,
   clientRequestThreadRestoreSchema,
@@ -426,6 +435,7 @@ export const rpcSchemaRefs = [
   clientRequestTurnStartSchema,
   clientRequestTurnSteerSchema,
   clientRequestTurnInterruptSchema,
+  clientRequestTurnTakeoverSchema,
   clientRequestRuntimeOptionsSchema,
   clientRequestCompletionListSchema,
   clientRequestCommandListSchema,

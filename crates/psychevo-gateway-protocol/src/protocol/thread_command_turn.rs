@@ -74,6 +74,48 @@ pub struct ThreadListResult {
     pub sessions: Vec<SessionSummaryView>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadBrowserParams {
+    #[serde(default)]
+    pub workdir: Option<String>,
+    #[serde(default)]
+    pub archived: Option<bool>,
+    #[serde(default)]
+    pub cursor: Option<ThreadBrowserCursor>,
+    #[serde(default)]
+    pub include_session_ids: Vec<String>,
+    #[serde(default)]
+    pub recent_days: Option<i64>,
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadBrowserCursor {
+    pub workdir: String,
+    pub offset: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadBrowserResult {
+    pub workspaces: Vec<ThreadBrowserWorkspace>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadBrowserWorkspace {
+    pub workdir: String,
+    pub project: SessionProjectView,
+    pub sessions: Vec<SessionSummaryView>,
+    #[serde(default)]
+    pub hidden_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<ThreadBrowserCursor>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadMutationResult {
@@ -357,6 +399,15 @@ pub struct TurnInterruptParams {
     pub source_key: Option<SourceKey>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnTakeoverParams {
+    #[serde(default)]
+    pub thread_id: Option<String>,
+    #[serde(default)]
+    pub source_key: Option<SourceKey>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeOptionsParams {
@@ -420,6 +471,13 @@ pub struct TurnControlResult {
     pub interrupted: Option<bool>,
     #[serde(default)]
     pub cleared: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnTakeoverResult {
+    pub accepted: bool,
+    pub activity: GatewayActivityView,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]

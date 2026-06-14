@@ -11,6 +11,25 @@ export const threadSessionSchemas = {
         "null"
       ]
     },
+    "leaseExpiresAtMs": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "ownerId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ownerSurface": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "queuedTurns": {
       "format": "uint",
       "minimum": 0.0,
@@ -18,6 +37,26 @@ export const threadSessionSchemas = {
     },
     "running": {
       "type": "boolean"
+    },
+    "startedAtMs": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "takeoverState": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "updatedAtMs": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
     }
   },
   "required": [
@@ -60,6 +99,25 @@ export const threadSessionSchemas = {
             "null"
           ]
         },
+        "leaseExpiresAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ownerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ownerSurface": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "queuedTurns": {
           "format": "uint",
           "minimum": 0.0,
@@ -67,6 +125,26 @@ export const threadSessionSchemas = {
         },
         "running": {
           "type": "boolean"
+        },
+        "startedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "takeoverState": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [

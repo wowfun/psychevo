@@ -210,6 +210,100 @@ export const threadControlSchemas = {
   "title": "ThreadListParams",
   "type": "object"
 },
+  ThreadBrowserParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ThreadBrowserCursor": {
+      "properties": {
+        "offset": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "offset",
+        "workdir"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "archived": {
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "cursor": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ThreadBrowserCursor"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "includeSessionIds": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "limit": {
+      "default": null,
+      "format": "uint",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "recentDays": {
+      "default": null,
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "workdir": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "ThreadBrowserParams",
+  "type": "object"
+},
+  ThreadBrowserCursor: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "offset": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "workdir": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "offset",
+    "workdir"
+  ],
+  "title": "ThreadBrowserCursor",
+  "type": "object"
+},
   ThreadIdParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {

@@ -5,21 +5,7 @@ impl Gateway {
         request: SendTurnRequest,
         turn_id: String,
     ) -> psychevo_runtime::Result<GatewayTurnResult> {
-        let event_sink = request.event_sink.clone().map(|event_sink| {
-            let gateway = self.clone();
-            let queue_key = queue_key.to_string();
-            Arc::new(move |event: GatewayEvent| {
-                if let GatewayEvent::TurnStarted {
-                    thread_id: Some(thread_id),
-                    ..
-                } = &event
-                {
-                    gateway.register_active_thread_alias(&queue_key, thread_id);
-                }
-                event_sink(event);
-            }) as GatewayEventSink
-        });
-        let event_sink_for_completion = event_sink.clone();
+        let base_event_sink = request.event_sink.clone();
         let queue_source = request.source.clone();
         let bind_source = request.bind_source.clone().or_else(|| queue_source.clone());
         let bind_source_generation = bind_source
@@ -44,6 +30,48 @@ impl Gateway {
             options.session = Some(thread_id);
             options.continue_latest = false;
         }
+        let source_name = request
+            .runtime_source
+            .clone()
+            .unwrap_or_else(|| "gateway".to_string());
+        let durable_source_key = if request.thread_id.is_some() {
+            None
+        } else {
+            queue_source
+                .as_ref()
+                .or(bind_source.as_ref())
+                .map(|source| source.source_key().0)
+        };
+        let durable_intent = json!({
+            "kind": "turn",
+            "threadId": active_thread_id.clone(),
+            "sourceKey": durable_source_key.clone(),
+            "runtimeSource": source_name.clone(),
+            "workdir": options.workdir.to_string_lossy(),
+            "input": request.input,
+        });
+        let durable_activity = Some(
+            self.claim_durable_gateway_activity(DurableGatewayActivityClaim {
+                activity_id: &turn_id,
+                thread_id: active_thread_id.as_deref(),
+                source_key: durable_source_key.as_deref(),
+                turn_id: Some(&turn_id),
+                kind: "turn",
+                owner_surface: Some(&source_name),
+                queued_turns: 0,
+                intent: Some(durable_intent),
+            })?,
+        );
+        let _heartbeat = durable_activity
+            .clone()
+            .map(|activity| self.spawn_durable_activity_heartbeat(activity));
+        let event_sink = self.wrap_gateway_event_sink(
+            base_event_sink,
+            durable_activity.clone(),
+            Some(queue_key.to_string()),
+            Some(turn_id.clone()),
+        );
+        let event_sink_for_completion = event_sink.clone();
         let first_committed_seq = active_thread_id
             .as_deref()
             .and_then(|thread_id| {
@@ -88,9 +116,6 @@ impl Gateway {
             active_thread_id.clone(),
         );
         let result_lineage = request.lineage.clone();
-        let source_name = request
-            .runtime_source
-            .unwrap_or_else(|| "gateway".to_string());
         let continue_sources = if request.continue_sources.is_empty() {
             vec![source_name.clone()]
         } else {
@@ -184,7 +209,15 @@ impl Gateway {
                 outcome: Some(result.outcome.as_str().to_string()),
                 committed_entries: committed_entries.clone(),
             });
+            if let Ok(Some(summary)) = self.state.store().session_summary(&result.session_id) {
+                event_sink(GatewayEvent::TitleChanged {
+                    thread_id: result.session_id.clone(),
+                    title: summary.title.clone(),
+                    display_title: summary.title,
+                });
+            }
         }
+        self.finish_durable_gateway_activity(durable_activity.as_ref(), "completed");
 
         Ok(GatewayTurnResult {
             thread: GatewayThread {
@@ -215,7 +248,7 @@ impl Gateway {
             Some(control_handle),
             ActiveActivityKind::Shell,
         );
-        self.run_shell_with_control(request, shell_id, control, None)
+        self.run_shell_with_control(request, shell_id, control, None, Some(queue_key))
             .await
     }
 
@@ -226,7 +259,7 @@ impl Gateway {
         inject_into: RunControlHandle,
     ) -> psychevo_runtime::Result<GatewayShellResult> {
         let (_control_handle, control) = run_control();
-        self.run_shell_with_control(request, shell_id, control, Some(inject_into))
+        self.run_shell_with_control(request, shell_id, control, Some(inject_into), None)
             .await
     }
 
@@ -236,6 +269,7 @@ impl Gateway {
         shell_id: String,
         control: RunControl,
         inject_into: Option<RunControlHandle>,
+        queue_key: Option<&str>,
     ) -> psychevo_runtime::Result<GatewayShellResult> {
         let queue_source = request.source.clone();
         let bind_source = request.bind_source.clone().or_else(|| queue_source.clone());
@@ -247,6 +281,7 @@ impl Gateway {
             .map(|source| self.source_generation(source));
         let mut context = request.context;
         context.state = self.state.clone();
+        let explicit_thread_or_session = request.thread_id.is_some() || context.session.is_some();
         let active_thread_id = request
             .thread_id
             .clone()
@@ -261,6 +296,39 @@ impl Gateway {
             context.session = Some(thread_id);
             context.continue_latest = false;
         }
+        let durable_source_key = if explicit_thread_or_session {
+            None
+        } else {
+            queue_source
+                .as_ref()
+                .or(bind_source.as_ref())
+                .map(|source| source.source_key().0)
+        };
+        let durable_intent = json!({
+            "kind": "shell",
+            "threadId": active_thread_id.clone(),
+            "sourceKey": durable_source_key.clone(),
+            "runtimeSource": context.source.clone(),
+            "workdir": request.workdir.to_string_lossy(),
+            "command": request.command.clone(),
+        });
+        let durable_activity = if inject_into.is_none() {
+            Some(self.claim_durable_gateway_activity(DurableGatewayActivityClaim {
+                activity_id: &shell_id,
+                thread_id: active_thread_id.as_deref(),
+                source_key: durable_source_key.as_deref(),
+                turn_id: Some(&shell_id),
+                kind: "shell",
+                owner_surface: Some(&context.source),
+                queued_turns: 0,
+                intent: Some(durable_intent),
+            })?)
+        } else {
+            None
+        };
+        let _heartbeat = durable_activity
+            .clone()
+            .map(|activity| self.spawn_durable_activity_heartbeat(activity));
         let first_committed_seq = active_thread_id
             .as_deref()
             .and_then(|thread_id| {
@@ -271,11 +339,17 @@ impl Gateway {
             })
             .and_then(|summaries| summaries.last().map(|summary| summary.session_seq + 1))
             .unwrap_or(1);
-        let event_sink_for_completion = request.event_sink.clone();
+        let event_sink = self.wrap_gateway_event_sink(
+            request.event_sink.clone(),
+            durable_activity.clone(),
+            queue_key.map(str::to_string),
+            Some(shell_id.clone()),
+        );
+        let event_sink_for_completion = event_sink.clone();
         let shell_event_id = shell_id.clone();
         let stream = wrap_stream(
             request.stream,
-            request.event_sink,
+            event_sink,
             shell_id,
             active_thread_id.clone(),
         );
@@ -329,6 +403,7 @@ impl Gateway {
                 });
             }
         }
+        self.finish_durable_gateway_activity(durable_activity.as_ref(), "completed");
         Ok(GatewayShellResult {
             thread: GatewayThread {
                 id: session_id,

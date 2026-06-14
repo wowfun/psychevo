@@ -98,16 +98,35 @@ disambiguation for the turn, but they do not override the explicit top-level
 `agentName` used to choose the executor for the turn.
 
 Each gateway thread has at most one active turn. Normal inputs submitted while
-a turn is active enter a Gateway-owned in-memory FIFO queue for the same
-source/thread selector. Queued callers wait for their own turn result; Gateway
-serializes execution before invoking the backend. Steer input targets the
-active turn and may be updated or canceled until runtime commits it. Interrupt
-aborts the active turn and clears pending in-memory control state for that
-turn.
+a turn is active enter a Gateway-owned FIFO queue for the same source/thread
+selector. Queued callers wait for their own turn result; Gateway serializes
+execution before invoking the backend. Steer input targets the active turn and
+may be updated or canceled until runtime commits it. Interrupt aborts the active
+turn and clears pending in-memory control state for that turn.
 
-The queue is not durable in the first slice. Completed history and
-`Persistent` source-to-thread mappings are durable; active process state and
-`Process` source bindings are not.
+Gateway active state is observable across processes. The owning Gateway records
+a durable activity claim with thread id when known, source key, turn id,
+activity kind, owner id, generation, start/update timestamps, lease expiry, and
+queued-turn count. The in-process `RunControlHandle` remains the fast path for
+the owner, but every Gateway must merge local active state with durable activity
+when reporting `GatewayActivityView`, mutation guards, and session summaries.
+Expired leases are stale rather than authoritative. A stale owner may be
+superseded by a newer generation; late completion or release from the old
+generation must not clear the new owner.
+
+Another Gateway may take over stale or cooperatively released work by claiming a
+new generation and continuing from persisted transcript state plus bounded turn
+intent. Takeover is continuation, not hot migration: runtime futures, provider
+streams, tool processes, and `RunControlHandle`s are not moved between
+processes. If continuation is impossible, Gateway exposes a bounded failure and
+does not start a duplicate owner for the same generation.
+
+Control APIs first try the local owner. For a foreign owner, Gateway records a
+durable control command addressed to that activity owner. The live owner polls
+and applies interrupt, steer, permission, clarify, and cooperative takeover
+commands against its in-memory controls. If the owner lease expires before the
+command is applied, the caller may retry through takeover or receive a bounded
+stale-owner error.
 
 Starting a new thread or resuming a history thread rebinds the source key
 without archiving, ending, or deleting the previously bound thread. Historical
@@ -120,6 +139,18 @@ start the turn against that id. `entryStarted`, `entryUpdated`, and
 `entryCompleted` events must carry transcript entries whose `threadId` is the
 owning thread id; clients must not assign live entries to the currently visible
 thread as a fallback.
+
+Live Gateway events are also relayed across Gateway processes. The owner stores
+presentation-only live events with a monotonic sequence and short retention.
+Other Gateway servers may watch or poll those events and re-emit ordinary
+`gateway/event` notifications to their clients. Committed runtime messages
+remain the durable transcript source of truth; live event storage is only a
+cross-process delivery buffer and may be compacted after completion.
+Local interactive surfaces such as TUI may also poll this buffer directly when
+they share the same state database. They must filter events by thread/activity
+identity, skip events owned by their own Gateway process, and use durable
+activity leases to decide whether an unfinished history tool call is still live
+or should be rendered as an interrupted orphan.
 
 Assistant messages whose runtime finish reason is `tool_calls`, or whose
 content includes tool-call blocks, are tool-call preambles rather than final
@@ -165,6 +196,11 @@ authoritative; Gateway only provides a request/response rendezvous.
 
 Permission responses use the existing runtime decision vocabulary:
 `allow_once`, `allow_session`, `allow_always`, and `deny`.
+Permission response routing must tolerate source-started turns that materialize
+a concrete thread id after execution begins. If a pending permission was
+registered against a source queue key, a later thread-scoped response for that
+same active turn must resolve through the active thread alias instead of
+returning a silent rejection.
 
 Clarify responses must be explicitly associated with a request id. Natural
 language adapters may implement a source-aware resolver that converts the next
@@ -212,6 +248,7 @@ First-slice JSON-RPC methods include:
 - `thread/resume`
 - `thread/read`
 - `thread/list`
+- `thread/browser`
 - `thread/rename`
 - `thread/archive`
 - `thread/restore`
@@ -219,6 +256,7 @@ First-slice JSON-RPC methods include:
 - `turn/start`
 - `turn/steer`
 - `turn/interrupt`
+- `turn/takeover`
 - `source/reset`
 - `permission/respond`
 - `clarify/respond`
@@ -246,11 +284,14 @@ perform. Unsupported commands return structured feedback rather than silently
 falling back to prompt text.
 
 Transport-level `turn/steer` includes `expected_turn_id` and is rejected when
-the supplied id does not match the active turn. `thread/resume` may resolve by
-source instead of by thread id; reconnecting clients use it to recover the
-current Gateway-owned snapshot after WebSocket reconnection. The snapshot is a
-transport projection of the current thread transcript, active turn id, queued
-turn count, and pending permission/clarify requests. It is not durable evidence.
+the supplied id does not match the active turn. `turn/takeover` targets a thread
+or source selector; it supersedes stale durable activity directly or records a
+cooperative takeover command for a still-leased foreign owner. `thread/resume`
+may resolve by source instead of by thread id; reconnecting clients use it to
+recover the current Gateway-owned snapshot after WebSocket reconnection. The
+snapshot is a transport projection of the current thread transcript, active turn
+id, queued turn count, and pending permission/clarify requests. It is not
+durable evidence.
 
 For Web and future shell clients, the persistent source key is derived from the
 canonical workdir rather than from a browser tab or device profile. Multiple
@@ -289,6 +330,14 @@ running state. A `SessionSummaryView` carries enough display projection for
 every surface to render the same row: stable id, workdir/project metadata,
 title, fallback display title, preview, visible-entry count, persisted counts,
 archive timestamp, and activity.
+
+`thread/browser` is the paged session-browser contract for product surfaces. By
+default it groups sessions by workspace, shows sessions updated within the last
+7 days, caps the initial visible set to 20 sessions per workspace, and returns a
+per-workspace cursor plus hidden count for older rows. Current, running, and
+explicitly included session ids remain visible even when they fall outside the
+default window. Each cursor fetch returns 20 additional sessions for that
+workspace without mutating session recency.
 
 Explicit `thread/resume` may target a session from a different workdir than
 the caller's current scope. In that case Gateway rebinds the caller's source to

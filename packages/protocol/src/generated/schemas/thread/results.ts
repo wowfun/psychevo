@@ -20,6 +20,25 @@ export const threadResultSchemas = {
             "null"
           ]
         },
+        "leaseExpiresAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ownerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ownerSurface": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "queuedTurns": {
           "format": "uint",
           "minimum": 0.0,
@@ -27,6 +46,26 @@ export const threadResultSchemas = {
         },
         "running": {
           "type": "boolean"
+        },
+        "startedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "takeoverState": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [
@@ -181,14 +220,45 @@ export const threadResultSchemas = {
     },
     "PendingPermissionView": {
       "properties": {
+        "activityId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "leaseExpiresAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ownerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "reason": {
           "type": "string"
         },
         "requestId": {
           "type": "string"
         },
+        "threadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "toolName": {
           "type": "string"
+        },
+        "turnId": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -470,13 +540,32 @@ export const threadResultSchemas = {
   "title": "ThreadSnapshot",
   "type": "object"
 },
-  ThreadListResult: {
+  ThreadBrowserResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "GatewayActivityView": {
       "properties": {
         "activeTurnId": {
           "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "leaseExpiresAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ownerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ownerSurface": {
           "type": [
             "string",
             "null"
@@ -489,6 +578,562 @@ export const threadResultSchemas = {
         },
         "running": {
           "type": "boolean"
+        },
+        "startedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "takeoverState": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "queuedTurns",
+        "running"
+      ],
+      "type": "object"
+    },
+    "SessionProjectView": {
+      "properties": {
+        "displayPath": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "displayPath",
+        "label",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "SessionSummaryView": {
+      "properties": {
+        "activity": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/GatewayActivityView"
+            }
+          ],
+          "default": {
+            "activeTurnId": null,
+            "queuedTurns": 0,
+            "running": false
+          }
+        },
+        "archivedAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "displayTitle": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "endReason": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "endedAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "messageCount": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "model": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "preview": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project": {
+          "$ref": "#/definitions/SessionProjectView"
+        },
+        "provider": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "startedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "title": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "toolCallCount": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "updatedAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "visibleEntryCount": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "messageCount",
+        "project",
+        "startedAtMs",
+        "toolCallCount",
+        "visibleEntryCount",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "ThreadBrowserCursor": {
+      "properties": {
+        "offset": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "offset",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "ThreadBrowserWorkspace": {
+      "properties": {
+        "hiddenCount": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadBrowserCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "project": {
+          "$ref": "#/definitions/SessionProjectView"
+        },
+        "sessions": {
+          "items": {
+            "$ref": "#/definitions/SessionSummaryView"
+          },
+          "type": "array"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project",
+        "sessions",
+        "workdir"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "workspaces": {
+      "items": {
+        "$ref": "#/definitions/ThreadBrowserWorkspace"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "workspaces"
+  ],
+  "title": "ThreadBrowserResult",
+  "type": "object"
+},
+  ThreadBrowserWorkspace: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayActivityView": {
+      "properties": {
+        "activeTurnId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "leaseExpiresAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ownerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ownerSurface": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "queuedTurns": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "running": {
+          "type": "boolean"
+        },
+        "startedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "takeoverState": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "queuedTurns",
+        "running"
+      ],
+      "type": "object"
+    },
+    "SessionProjectView": {
+      "properties": {
+        "displayPath": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "displayPath",
+        "label",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "SessionSummaryView": {
+      "properties": {
+        "activity": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/GatewayActivityView"
+            }
+          ],
+          "default": {
+            "activeTurnId": null,
+            "queuedTurns": 0,
+            "running": false
+          }
+        },
+        "archivedAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "displayTitle": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "endReason": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "endedAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "messageCount": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "model": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "preview": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project": {
+          "$ref": "#/definitions/SessionProjectView"
+        },
+        "provider": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "startedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "title": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "toolCallCount": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "updatedAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "visibleEntryCount": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "messageCount",
+        "project",
+        "startedAtMs",
+        "toolCallCount",
+        "visibleEntryCount",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "ThreadBrowserCursor": {
+      "properties": {
+        "offset": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "offset",
+        "workdir"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "hiddenCount": {
+      "default": 0,
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "nextCursor": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ThreadBrowserCursor"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "project": {
+      "$ref": "#/definitions/SessionProjectView"
+    },
+    "sessions": {
+      "items": {
+        "$ref": "#/definitions/SessionSummaryView"
+      },
+      "type": "array"
+    },
+    "workdir": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project",
+    "sessions",
+    "workdir"
+  ],
+  "title": "ThreadBrowserWorkspace",
+  "type": "object"
+},
+  ThreadListResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayActivityView": {
+      "properties": {
+        "activeTurnId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "leaseExpiresAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ownerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ownerSurface": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "queuedTurns": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "running": {
+          "type": "boolean"
+        },
+        "startedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "takeoverState": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [
@@ -663,6 +1308,25 @@ export const threadResultSchemas = {
             "null"
           ]
         },
+        "leaseExpiresAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ownerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ownerSurface": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "queuedTurns": {
           "format": "uint",
           "minimum": 0.0,
@@ -670,6 +1334,26 @@ export const threadResultSchemas = {
         },
         "running": {
           "type": "boolean"
+        },
+        "startedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "takeoverState": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [

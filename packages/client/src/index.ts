@@ -51,6 +51,8 @@ import {
   type TerminalStartResult,
   type TerminalTerminateParams,
   type TerminalWriteParams,
+  type ThreadBrowserParams,
+  type ThreadBrowserResult,
   type ThreadDeleteResult,
   type ThreadIdParams,
   type ThreadListParams,
@@ -67,6 +69,7 @@ import {
   type TurnStartParams,
   type TurnStartResult,
   type TurnSteerParams,
+  type TurnTakeoverResult,
   type WorkspaceChangeFileParams,
   type WorkspaceChangeMutationResult,
   type WorkspaceChangesParams,
@@ -121,6 +124,7 @@ export interface GatewayRequestParams {
   "terminal/terminate": TerminalTerminateParams;
   "terminal/write": TerminalWriteParams;
   "thread/archive": ThreadIdParams;
+  "thread/browser": ThreadBrowserParams;
   "thread/delete": ThreadIdParams;
   "thread/list": ThreadListParams;
   "thread/read": ThreadReadParams;
@@ -132,6 +136,7 @@ export interface GatewayRequestParams {
   "turn/interrupt": { sourceKey?: string | null; threadId?: string | null };
   "turn/start": TurnStartParams;
   "turn/steer": TurnSteerParams;
+  "turn/takeover": { sourceKey?: string | null; threadId?: string | null };
   "workspace/change/accept": WorkspaceChangeFileParams;
   "workspace/change/reject": WorkspaceChangeFileParams;
   "workspace/changes": WorkspaceChangesParams;
@@ -170,6 +175,7 @@ export interface GatewayRequestResults {
   "terminal/terminate": TerminalMutationResult;
   "terminal/write": TerminalMutationResult;
   "thread/archive": ThreadMutationResult;
+  "thread/browser": ThreadBrowserResult;
   "thread/delete": ThreadDeleteResult;
   "thread/list": ThreadListResult;
   "thread/read": ThreadSnapshot;
@@ -181,6 +187,7 @@ export interface GatewayRequestResults {
   "turn/interrupt": TurnControlResult;
   "turn/start": TurnStartResult;
   "turn/steer": TurnControlResult;
+  "turn/takeover": TurnTakeoverResult;
   "workspace/change/accept": WorkspaceChangeMutationResult;
   "workspace/change/reject": WorkspaceChangeMutationResult;
   "workspace/changes": WorkspaceChangesResult;

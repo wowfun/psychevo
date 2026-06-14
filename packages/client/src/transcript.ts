@@ -63,6 +63,11 @@ export function applyLiveTranscriptEvent(
           : snapshot.activity
       };
     }
+    case "activityChanged":
+      return {
+        ...snapshot,
+        activity: event.activity
+      };
     default:
       return snapshot;
   }
@@ -187,6 +192,10 @@ function eventThreadIdForEvent(event: GatewayEvent): string | null {
     case "entryUpdated":
     case "entryCompleted":
       return event.entry.threadId || null;
+    case "activityChanged":
+      return event.threadId || null;
+    case "titleChanged":
+      return event.threadId || null;
     default:
       return null;
   }

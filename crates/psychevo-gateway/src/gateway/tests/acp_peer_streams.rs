@@ -367,3 +367,38 @@ tools: [read]
             }
         ));
     }
+
+    #[tokio::test]
+    async fn submit_permission_accepts_thread_alias_for_source_started_request() {
+        let backend = Arc::new(FakeBackend::default());
+        backend.request_permission();
+        let harness = harness(backend);
+        let source = GatewaySource::new("tui", "workdir").process();
+        let source_queue_key = source_key_key(&source.source_key());
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let mut request = request(&harness, source.clone(), "permission");
+        request.event_sink = Some(Arc::new(move |event| {
+            let _ = event_tx.send(event);
+        }));
+
+        let gateway = harness.gateway.clone();
+        let turn = tokio::spawn(async move { gateway.send_turn(request).await });
+
+        loop {
+            let event = event_rx.recv().await.expect("gateway event");
+            if let GatewayEvent::PermissionRequested { request_id, .. } = event {
+                assert_eq!(request_id, "permission-1");
+                break;
+            }
+        }
+
+        harness
+            .gateway
+            .register_active_thread_alias(&source_queue_key, "thread-materialized");
+        assert!(harness.gateway.submit_permission(
+            GatewayThreadSelector::thread_id("thread-materialized"),
+            "permission-1",
+            PermissionApprovalDecision::allow_once(),
+        ));
+        turn.await.expect("turn task").expect("turn");
+    }

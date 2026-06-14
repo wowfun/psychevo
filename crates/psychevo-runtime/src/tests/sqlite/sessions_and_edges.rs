@@ -49,7 +49,7 @@ pub(crate) fn sqlite_schema_v18_rejects_unknown_state_database() {
 }
 
 #[test]
-pub(crate) fn sqlite_schema_v18_stores_prompt_prefixes_and_gateway_bindings_without_runtime_debug()
+pub(crate) fn sqlite_schema_v19_stores_prompt_prefixes_and_gateway_bindings_without_runtime_debug()
 {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
@@ -72,7 +72,7 @@ pub(crate) fn sqlite_schema_v18_stores_prompt_prefixes_and_gateway_bindings_with
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 18);
+    assert_eq!(user_version, 19);
     assert!(sqlite_columns(&conn, "timeline_items").is_empty());
     assert!(sqlite_columns(&conn, "timeline_artifacts").is_empty());
     assert!(sqlite_columns(&conn, "timeline_debug_events").is_empty());

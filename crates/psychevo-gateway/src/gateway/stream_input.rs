@@ -79,10 +79,3 @@ fn permission_decision_from_runtime(decision: &PermissionApprovalDecision) -> Pe
         PermissionApprovalOutcome::Deny => PermissionDecision::Deny,
     }
 }
-
-pub(crate) fn gateway_now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
-}

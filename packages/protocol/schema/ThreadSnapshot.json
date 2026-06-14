@@ -17,6 +17,25 @@
             "null"
           ]
         },
+        "leaseExpiresAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ownerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ownerSurface": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "queuedTurns": {
           "format": "uint",
           "minimum": 0.0,
@@ -24,6 +43,26 @@
         },
         "running": {
           "type": "boolean"
+        },
+        "startedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "takeoverState": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [
@@ -178,14 +217,45 @@
     },
     "PendingPermissionView": {
       "properties": {
+        "activityId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "leaseExpiresAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ownerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "reason": {
           "type": "string"
         },
         "requestId": {
           "type": "string"
         },
+        "threadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "toolName": {
           "type": "string"
+        },
+        "turnId": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

@@ -4,6 +4,12 @@ pub struct GatewayActivity {
     pub running: bool,
     pub active_turn_id: Option<String>,
     pub queued_turns: usize,
+    pub started_at_ms: Option<i64>,
+    pub updated_at_ms: Option<i64>,
+    pub owner_id: Option<String>,
+    pub owner_surface: Option<String>,
+    pub lease_expires_at_ms: Option<i64>,
+    pub takeover_state: Option<String>,
 }
 
 #[derive(Debug, Default)]

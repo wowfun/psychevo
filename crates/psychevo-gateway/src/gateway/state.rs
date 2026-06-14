@@ -7,6 +7,7 @@ pub struct Gateway {
     process_bindings: Arc<Mutex<HashMap<String, String>>>,
     source_generations: Arc<Mutex<HashMap<String, u64>>>,
     pending_permissions: PendingPermissionMap,
+    owner_id: Arc<String>,
 }
 
 impl fmt::Debug for Gateway {

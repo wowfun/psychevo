@@ -25,6 +25,7 @@ import type {
   SettingsReadResult,
   TerminalExitedPayload,
   TerminalOutputPayload,
+  ThreadBrowserResult,
   ThreadListResult,
   ThreadTraceResult,
   ThreadSnapshot,
@@ -57,6 +58,8 @@ export const JsonRpcErrorResponseSchema =
   schema<JsonRpcErrorResponse>("JsonRpcErrorResponse");
 export const GatewayEventSchema = schema<GatewayEvent>("GatewayEvent");
 export const ThreadSnapshotSchema = schema<ThreadSnapshot>("ThreadSnapshot");
+export const ThreadBrowserResultSchema =
+  schema<ThreadBrowserResult>("ThreadBrowserResult");
 export const ThreadListResultSchema = schema<ThreadListResult>("ThreadListResult");
 export const ThreadTraceResultSchema = schema<ThreadTraceResult>("ThreadTraceResult");
 export const CompletionListResultSchema =

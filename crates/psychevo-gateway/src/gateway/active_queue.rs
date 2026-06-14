@@ -195,15 +195,10 @@ impl Gateway {
         selector: &GatewayThreadSelector,
         expected_turn_id: Option<&str>,
     ) -> Option<RunControlHandle> {
-        let selector_keys = self.selector_keys(selector);
+        let selector_keys = self.selector_keys_with_active_aliases(selector);
         let active = self.active.lock().expect("gateway active map poisoned");
-        let aliases = self
-            .active_aliases
-            .lock()
-            .expect("gateway active alias map poisoned");
         let mut seen = HashSet::new();
         for key in selector_keys {
-            let key = aliases.get(&key).cloned().unwrap_or(key);
             if !seen.insert(key.clone()) {
                 continue;
             }
@@ -219,6 +214,27 @@ impl Gateway {
             }
         }
         None
+    }
+
+    fn selector_keys_with_active_aliases(&self, selector: &GatewayThreadSelector) -> Vec<String> {
+        let selector_keys = self.selector_keys(selector);
+        let aliases = self
+            .active_aliases
+            .lock()
+            .expect("gateway active alias map poisoned");
+        let mut keys = Vec::new();
+        let mut seen = HashSet::new();
+        for key in selector_keys {
+            if seen.insert(key.clone()) {
+                keys.push(key.clone());
+            }
+            if let Some(primary) = aliases.get(&key)
+                && seen.insert(primary.clone())
+            {
+                keys.push(primary.clone());
+            }
+        }
+        keys
     }
 
     fn selector_keys(&self, selector: &GatewayThreadSelector) -> Vec<String> {

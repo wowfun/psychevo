@@ -15,7 +15,10 @@ impl SqliteStore {
         let user_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
         let has_schema =
             sqlite_table_exists(&conn, "sessions")? || sqlite_table_exists(&conn, "messages")?;
-        if user_version != 0 && user_version != SQLITE_SCHEMA_VERSION {
+        if user_version != 0
+            && !(MIN_SUPPORTED_SQLITE_SCHEMA_VERSION..=SQLITE_SCHEMA_VERSION)
+                .contains(&user_version)
+        {
             return Err(Error::Config(format!(
                 "state database schema version {user_version} is not supported; run `pevo init --reset-state` or set PSYCHEVO_DB to a new state database"
             )));
@@ -165,6 +168,46 @@ impl SqliteStore {
                 lineage_json TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS gateway_activities (
+                activity_id TEXT PRIMARY KEY,
+                thread_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+                source_key TEXT,
+                turn_id TEXT,
+                kind TEXT NOT NULL,
+                status TEXT NOT NULL,
+                owner_id TEXT NOT NULL,
+                owner_surface TEXT,
+                generation INTEGER NOT NULL,
+                started_at_ms INTEGER NOT NULL,
+                updated_at_ms INTEGER NOT NULL,
+                lease_expires_at_ms INTEGER NOT NULL,
+                queued_turns INTEGER NOT NULL DEFAULT 0,
+                superseded_activity_id TEXT,
+                intent_json TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS gateway_live_events (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                activity_id TEXT,
+                owner_id TEXT,
+                thread_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+                turn_id TEXT,
+                event_json TEXT NOT NULL,
+                created_at_ms INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS gateway_control_commands (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                activity_id TEXT NOT NULL,
+                owner_id TEXT NOT NULL,
+                command_kind TEXT NOT NULL,
+                status TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at_ms INTEGER NOT NULL,
+                updated_at_ms INTEGER NOT NULL,
+                error TEXT
+            );
+
             CREATE INDEX IF NOT EXISTS idx_messages_session_seq
                 ON messages(session_id, session_seq);
             CREATE INDEX IF NOT EXISTS idx_context_evidence_prompt
@@ -179,6 +222,18 @@ impl SqliteStore {
                 ON session_compactions(session_id, created_after_session_seq, created_at_ms);
             CREATE INDEX IF NOT EXISTS idx_gateway_source_bindings_thread
                 ON gateway_source_bindings(thread_id, updated_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_gateway_activities_thread
+                ON gateway_activities(thread_id, status, updated_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_gateway_activities_source
+                ON gateway_activities(source_key, status, updated_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_gateway_activities_owner
+                ON gateway_activities(owner_id, status, updated_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_gateway_live_events_seq
+                ON gateway_live_events(seq);
+            CREATE INDEX IF NOT EXISTS idx_gateway_live_events_thread
+                ON gateway_live_events(thread_id, seq);
+            CREATE INDEX IF NOT EXISTS idx_gateway_control_commands_owner
+                ON gateway_control_commands(owner_id, status, id);
             "#,
         )?;
         if !sqlite_column_exists(&conn, "context_evidence", "provider_group")? {
@@ -191,6 +246,9 @@ impl SqliteStore {
         }
         if !sqlite_column_exists(&conn, "context_evidence", "context_kind")? {
             conn.execute_batch("ALTER TABLE context_evidence ADD COLUMN context_kind TEXT;")?;
+        }
+        if !sqlite_column_exists(&conn, "gateway_live_events", "owner_id")? {
+            conn.execute_batch("ALTER TABLE gateway_live_events ADD COLUMN owner_id TEXT;")?;
         }
         conn.pragma_update(None, "user_version", SQLITE_SCHEMA_VERSION)?;
         Ok(Self {

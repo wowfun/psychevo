@@ -71,6 +71,307 @@
     }
 
     #[tokio::test]
+    async fn thread_browser_pages_workspace_sessions_and_keeps_include_exceptions() {
+        let (_temp, state) = web_state();
+        let workdir = state.inner.workdir.display().to_string();
+        let store = state.inner.state.store();
+        let mut ids = Vec::new();
+        for index in 0..25 {
+            let id = store
+                .create_session_with_metadata(
+                    &state.inner.workdir,
+                    "web",
+                    &format!("fake-model-{index}"),
+                    "fake-provider",
+                    None,
+                )
+                .expect("session");
+            ids.push(id);
+        }
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let first = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!(1)),
+                method: "thread/browser".to_string(),
+                params: Some(json!({ "workdir": workdir.clone(), "limit": 20 })),
+            },
+        )
+        .await
+        .expect("thread/browser first page");
+        let workspace = &first["workspaces"][0];
+        assert_eq!(workspace["sessions"].as_array().expect("sessions").len(), 20);
+        assert_eq!(workspace["hiddenCount"], 5);
+        assert_eq!(workspace["nextCursor"]["offset"], 20);
+
+        let second = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!(2)),
+                method: "thread/browser".to_string(),
+                params: Some(json!({ "cursor": workspace["nextCursor"].clone(), "limit": 20 })),
+            },
+        )
+        .await
+        .expect("thread/browser second page");
+        let second_workspace = &second["workspaces"][0];
+        assert_eq!(
+            second_workspace["sessions"]
+                .as_array()
+                .expect("second sessions")
+                .len(),
+            5
+        );
+        assert_eq!(second_workspace["hiddenCount"], 0);
+        assert!(second_workspace["nextCursor"].is_null());
+        let included_id = second_workspace["sessions"][0]["id"]
+            .as_str()
+            .expect("included candidate")
+            .to_string();
+
+        let included = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!(3)),
+                method: "thread/browser".to_string(),
+                params: Some(json!({
+                    "workdir": workdir.clone(),
+                    "limit": 20,
+                    "includeSessionIds": [included_id.clone()],
+                })),
+            },
+        )
+        .await
+        .expect("thread/browser included session");
+        let sessions = included["workspaces"][0]["sessions"]
+            .as_array()
+            .expect("included sessions");
+        assert_eq!(sessions.len(), 21);
+        assert!(sessions.iter().any(|session| session["id"] == included_id));
+        assert_eq!(included["workspaces"][0]["hiddenCount"], 4);
+    }
+
+    #[tokio::test]
+    async fn thread_snapshot_prunes_pending_permission_without_live_activity() {
+        let (_temp, state) = web_state();
+        let session_id = state
+            .inner
+            .state
+            .store()
+            .create_session_with_metadata(
+                &state.inner.workdir,
+                "web",
+                "fake-model",
+                "fake-provider",
+                None,
+            )
+            .expect("session");
+        state
+            .inner
+            .pending_permissions
+            .lock()
+            .expect("pending permissions")
+            .insert(
+                "permission-1".to_string(),
+                PendingPermissionView {
+                    request_id: "permission-1".to_string(),
+                    tool_name: "exec_command".to_string(),
+                    reason: "requires approval".to_string(),
+                    thread_id: Some(session_id.clone()),
+                    turn_id: Some("turn-1".to_string()),
+                    activity_id: Some("missing-activity".to_string()),
+                    owner_id: Some("gateway:foreign".to_string()),
+                    lease_expires_at_ms: Some(gateway_now_ms() + 60_000),
+                },
+            );
+        let scope = ResolvedScope {
+            workdir: state.inner.workdir.clone(),
+            source: state.inner.source.clone(),
+        };
+
+        let snapshot = thread_snapshot(&state, &scope, Some(&session_id)).expect("snapshot");
+
+        assert_eq!(
+            snapshot["pendingPermissions"]
+                .as_array()
+                .expect("pending permissions")
+                .len(),
+            0
+        );
+        assert!(
+            !state
+                .inner
+                .pending_permissions
+                .lock()
+                .expect("pending permissions")
+                .contains_key("permission-1")
+        );
+    }
+
+    #[tokio::test]
+    async fn thread_snapshot_removes_pending_permission_after_activity_finishes() {
+        let (_temp, state) = web_state();
+        let store = state.inner.state.store();
+        let session_id = store
+            .create_session_with_metadata(
+                &state.inner.workdir,
+                "web",
+                "fake-model",
+                "fake-provider",
+                None,
+            )
+            .expect("session");
+        let owner_id = "gateway:foreign";
+        let activity = store
+            .claim_gateway_activity(psychevo_runtime::GatewayActivityClaimInput {
+                activity_id: "activity-1",
+                thread_id: Some(&session_id),
+                source_key: None,
+                turn_id: Some("turn-1"),
+                kind: "turn",
+                owner_id,
+                owner_surface: Some("tui"),
+                lease_expires_at_ms: gateway_now_ms() + 60_000,
+                queued_turns: 0,
+                superseded_activity_id: None,
+                intent: None,
+            })
+            .expect("claim activity");
+        state
+            .inner
+            .pending_permissions
+            .lock()
+            .expect("pending permissions")
+            .insert(
+                "permission-1".to_string(),
+                PendingPermissionView {
+                    request_id: "permission-1".to_string(),
+                    tool_name: "exec_command".to_string(),
+                    reason: "requires approval".to_string(),
+                    thread_id: Some(session_id.clone()),
+                    turn_id: Some("turn-1".to_string()),
+                    activity_id: Some(activity.activity_id.clone()),
+                    owner_id: Some(owner_id.to_string()),
+                    lease_expires_at_ms: Some(activity.lease_expires_at_ms),
+                },
+            );
+        let scope = ResolvedScope {
+            workdir: state.inner.workdir.clone(),
+            source: state.inner.source.clone(),
+        };
+
+        let running = thread_snapshot(&state, &scope, Some(&session_id)).expect("running snapshot");
+        assert_eq!(
+            running["pendingPermissions"]
+                .as_array()
+                .expect("running permissions")
+                .len(),
+            1
+        );
+
+        store
+            .finish_gateway_activity(
+                &activity.activity_id,
+                owner_id,
+                activity.generation,
+                "failed",
+            )
+            .expect("finish activity");
+        let finished =
+            thread_snapshot(&state, &scope, Some(&session_id)).expect("finished snapshot");
+
+        assert_eq!(
+            finished["pendingPermissions"]
+                .as_array()
+                .expect("finished permissions")
+                .len(),
+            0
+        );
+        assert!(
+            !state
+                .inner
+                .pending_permissions
+                .lock()
+                .expect("pending permissions")
+                .contains_key("permission-1")
+        );
+    }
+
+    #[tokio::test]
+    async fn turn_completed_event_removes_pending_permission_panel() {
+        let (_temp, state) = web_state();
+        let session_id = state
+            .inner
+            .state
+            .store()
+            .create_session_with_metadata(
+                &state.inner.workdir,
+                "web",
+                "fake-model",
+                "fake-provider",
+                None,
+            )
+            .expect("session");
+        state.record_event_with_context(
+            &GatewayEvent::PermissionRequested {
+                request_id: "permission-1".to_string(),
+                tool_name: "exec_command".to_string(),
+                summary: "exec_command".to_string(),
+                reason: "requires approval".to_string(),
+                matched_rule: None,
+                suggested_rule: None,
+                allow_always: true,
+                timeout_secs: 300,
+            },
+            PendingInteractionContext {
+                thread_id: Some(session_id.clone()),
+                turn_id: Some("turn-1".to_string()),
+                activity_id: Some("turn-1".to_string()),
+                owner_id: Some(state.inner.gateway.owner_id().to_string()),
+                lease_expires_at_ms: Some(gateway_now_ms() + 60_000),
+            },
+        );
+
+        state.record_event(&GatewayEvent::TurnCompleted {
+            thread_id: Some(session_id.clone()),
+            turn_id: "turn-1".to_string(),
+            outcome: Some("failed".to_string()),
+            committed_entries: Vec::new(),
+        });
+        let scope = ResolvedScope {
+            workdir: state.inner.workdir.clone(),
+            source: state.inner.source.clone(),
+        };
+        let snapshot = thread_snapshot(&state, &scope, Some(&session_id)).expect("snapshot");
+
+        assert_eq!(
+            snapshot["pendingPermissions"]
+                .as_array()
+                .expect("pending permissions")
+                .len(),
+            0
+        );
+        assert!(
+            !state
+                .inner
+                .pending_permissions
+                .lock()
+                .expect("pending permissions")
+                .contains_key("permission-1")
+        );
+    }
+
+    #[tokio::test]
     async fn browser_cross_project_resume_authorizes_followup_rpcs_on_same_connection() {
         let (temp, state) = web_state();
         let other_workdir = temp.path().join("other-work");

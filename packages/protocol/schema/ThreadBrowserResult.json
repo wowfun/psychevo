@@ -202,19 +202,74 @@
         "workdir"
       ],
       "type": "object"
+    },
+    "ThreadBrowserCursor": {
+      "properties": {
+        "offset": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "offset",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "ThreadBrowserWorkspace": {
+      "properties": {
+        "hiddenCount": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadBrowserCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "project": {
+          "$ref": "#/definitions/SessionProjectView"
+        },
+        "sessions": {
+          "items": {
+            "$ref": "#/definitions/SessionSummaryView"
+          },
+          "type": "array"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project",
+        "sessions",
+        "workdir"
+      ],
+      "type": "object"
     }
   },
   "properties": {
-    "sessions": {
+    "workspaces": {
       "items": {
-        "$ref": "#/definitions/SessionSummaryView"
+        "$ref": "#/definitions/ThreadBrowserWorkspace"
       },
       "type": "array"
     }
   },
   "required": [
-    "sessions"
+    "workspaces"
   ],
-  "title": "ThreadListResult",
+  "title": "ThreadBrowserResult",
   "type": "object"
 }

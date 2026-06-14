@@ -23,7 +23,8 @@ pub(crate) use crate::types::{
     TuiMessageSummary,
 };
 
-pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 18;
+pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 19;
+pub(crate) const MIN_SUPPORTED_SQLITE_SCHEMA_VERSION: i64 = 18;
 pub(crate) const SESSION_REVERT_METADATA_KEY: &str = "revert";
 pub(crate) const MESSAGE_UNDO_METADATA_KEY: &str = "undo";
 pub(crate) const MESSAGE_PRE_SNAPSHOT_KEY: &str = "pre_snapshot";
@@ -108,6 +109,72 @@ pub struct GatewaySourceBindingRecord {
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
     pub lineage: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GatewayActivityClaimInput<'a> {
+    pub activity_id: &'a str,
+    pub thread_id: Option<&'a str>,
+    pub source_key: Option<&'a str>,
+    pub turn_id: Option<&'a str>,
+    pub kind: &'a str,
+    pub owner_id: &'a str,
+    pub owner_surface: Option<&'a str>,
+    pub lease_expires_at_ms: i64,
+    pub queued_turns: usize,
+    pub superseded_activity_id: Option<&'a str>,
+    pub intent: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GatewayActivityRecord {
+    pub activity_id: String,
+    pub thread_id: Option<String>,
+    pub source_key: Option<String>,
+    pub turn_id: Option<String>,
+    pub kind: String,
+    pub status: String,
+    pub owner_id: String,
+    pub owner_surface: Option<String>,
+    pub generation: i64,
+    pub started_at_ms: i64,
+    pub updated_at_ms: i64,
+    pub lease_expires_at_ms: i64,
+    pub queued_turns: usize,
+    pub superseded_activity_id: Option<String>,
+    pub intent: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GatewayLiveEventRecord {
+    pub seq: i64,
+    pub activity_id: Option<String>,
+    pub owner_id: Option<String>,
+    pub thread_id: Option<String>,
+    pub turn_id: Option<String>,
+    pub event: Value,
+    pub created_at_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GatewayControlCommandInput<'a> {
+    pub activity_id: &'a str,
+    pub owner_id: &'a str,
+    pub command_kind: &'a str,
+    pub payload: Value,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GatewayControlCommandRecord {
+    pub id: i64,
+    pub activity_id: String,
+    pub owner_id: String,
+    pub command_kind: String,
+    pub status: String,
+    pub payload: Value,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -252,6 +319,8 @@ use store_agent_mailbox::*;
 pub(crate) mod store_compactions;
 #[allow(unused_imports)]
 use store_compactions::*;
+#[path = "store/gateway_activity.rs"]
+pub(crate) mod store_gateway_activity;
 #[path = "store/gateway_bindings.rs"]
 pub(crate) mod store_gateway_bindings;
 #[path = "store/lifecycle.rs"]

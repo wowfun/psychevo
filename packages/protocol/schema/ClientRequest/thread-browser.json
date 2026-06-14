@@ -1,0 +1,94 @@
+{
+  "$id": "ClientRequest/thread-browser.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ThreadBrowserCursor": {
+      "properties": {
+        "offset": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "offset",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "ThreadBrowserParams": {
+      "properties": {
+        "archived": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadBrowserCursor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "includeSessionIds": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "limit": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "recentDays": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "workdir": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
+  "properties": {
+    "method": {
+      "enum": [
+        "thread/browser"
+      ],
+      "type": "string"
+    },
+    "params": {
+      "$ref": "#/definitions/ThreadBrowserParams"
+    }
+  },
+  "required": [
+    "method",
+    "params"
+  ],
+  "title": "ClientRequest thread/browser",
+  "type": "object"
+}

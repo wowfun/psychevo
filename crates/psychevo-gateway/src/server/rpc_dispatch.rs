@@ -142,6 +142,10 @@ fn shell_redirect() -> Response<Body> {
 async fn handle_socket(socket: WebSocket, state: WebState, auth: AuthContext) {
     let (mut sender, mut receiver) = socket.split();
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<String>();
+    let relay = tokio::spawn(spawn_gateway_live_event_relay(
+        state.clone(),
+        out_tx.clone(),
+    ));
     let writer = tokio::spawn(async move {
         while let Some(message) = out_rx.recv().await {
             if sender.send(WsMessage::Text(message.into())).await.is_err() {
@@ -165,8 +169,59 @@ async fn handle_socket(socket: WebSocket, state: WebState, auth: AuthContext) {
             _ => {}
         }
     }
+    relay.abort();
     drop(out_tx);
+    let _ = relay.await;
     let _ = writer.await;
+}
+
+async fn spawn_gateway_live_event_relay(state: WebState, out_tx: mpsc::UnboundedSender<String>) {
+    let mut last_seq = state
+        .inner
+        .state
+        .store()
+        .latest_gateway_live_event_seq()
+        .unwrap_or_default();
+    let mut last_cleanup_ms = gateway_now_ms();
+    let mut tick = tokio::time::interval(Duration::from_millis(250));
+    loop {
+        tick.tick().await;
+        let events = match state
+            .inner
+            .state
+            .store()
+            .list_gateway_live_events_after(last_seq, 100)
+        {
+            Ok(events) => events,
+            Err(_) => continue,
+        };
+        for record in events {
+            last_seq = last_seq.max(record.seq);
+            if record.owner_id.as_deref() == Some(state.inner.gateway.owner_id()) {
+                continue;
+            }
+            let Ok(event) = serde_json::from_value::<GatewayEvent>(record.event.clone()) else {
+                continue;
+            };
+            let context = state.pending_context_for_live_event(&record);
+            state.record_event_with_context(&event, context);
+            if out_tx
+                .send(rpc_notification("gateway/event", json!(event)))
+                .is_err()
+            {
+                return;
+            }
+        }
+        let now = gateway_now_ms();
+        if now.saturating_sub(last_cleanup_ms) > 60_000 {
+            let _ = state
+                .inner
+                .state
+                .store()
+                .cleanup_gateway_live_events_before(now - 10 * 60_000);
+            last_cleanup_ms = now;
+        }
+    }
 }
 
 async fn handle_rpc_text(
@@ -303,6 +358,15 @@ async fn handle_rpc(
                     .collect::<psychevo_runtime::Result<Vec<_>>>()?,
             }))
         }
+        "thread/browser" => {
+            let params = request.params::<wire::ThreadBrowserParams>()?;
+            let requested_workdir = params
+                .workdir
+                .clone()
+                .or_else(|| params.cursor.as_ref().map(|cursor| cursor.workdir.clone()));
+            let workdir = resolve_session_workdir_filter(&state, &auth, requested_workdir)?;
+            thread_browser_value(&state, params, workdir)
+        }
         "thread/rename" => {
             let params = request.required_params::<wire::ThreadRenameParams>()?;
             authorize_thread(&state, &auth, &params.thread_id)?;
@@ -311,7 +375,29 @@ async fn handle_rpc(
                 .state
                 .store()
                 .set_session_title(&params.thread_id, &params.title)?;
-            Ok(json!({"session": session_summary_by_id(&state, &params.thread_id)?}))
+            let session = session_summary_by_id(&state, &params.thread_id)?;
+            let event = GatewayEvent::TitleChanged {
+                thread_id: params.thread_id.clone(),
+                title: session
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                display_title: session
+                    .get("displayTitle")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            };
+            if let Ok(event_value) = serde_json::to_value(&event) {
+                let _ = state.inner.state.store().append_gateway_live_event(
+                    None,
+                    None,
+                    Some(&params.thread_id),
+                    None,
+                    &event_value,
+                );
+            }
+            let _ = out_tx.send(rpc_notification("gateway/event", json!(event)));
+            Ok(json!({"session": session}))
         }
         "thread/archive" => {
             let params = request.required_params::<wire::ThreadIdParams>()?;
@@ -414,11 +500,18 @@ async fn handle_rpc(
             options.agent = params.agent_name.clone();
             apply_mentions_to_run_options(&mut options, &params.mentions)?;
             let source = scope.source.clone();
+            let event_selector = thread_id
+                .as_ref()
+                .map(GatewayThreadSelector::thread_id)
+                .unwrap_or_else(|| GatewayThreadSelector::source(scope.source.source_key()));
+            let event_thread_id = thread_id.clone();
             let event_state = state.clone();
             let review_workdir = scope.workdir.clone();
             let event_tx = out_tx.clone();
             let event_sink: GatewayEventSink = Arc::new(move |event| {
-                event_state.record_event(&event);
+                let context =
+                    event_state.pending_context_for_selector(&event_selector, event_thread_id.as_deref());
+                event_state.record_event_with_context(&event, context);
                 event_state.record_review_event(&event, &review_workdir);
                 let _ = event_tx.send(rpc_notification("gateway/event", json!(event)));
             });
@@ -466,12 +559,21 @@ async fn handle_rpc(
                 timestamp_ms: gateway_now_ms(),
             };
             let selector = selector_from_thread_or_default(&state, &auth, params.thread_id)?;
-            let accepted =
-                state
-                    .inner
-                    .gateway
-                    .steer_turn(selector, Some(&params.expected_turn_id), message);
-            Ok(json!({"accepted": accepted.is_some()}))
+            let accepted = state
+                .inner
+                .gateway
+                .steer_turn(
+                    selector.clone(),
+                    Some(&params.expected_turn_id),
+                    message.clone(),
+                )
+                .is_some()
+                || state.inner.gateway.steer_foreign_turn(
+                    selector,
+                    Some(&params.expected_turn_id),
+                    message,
+                );
+            Ok(json!({"accepted": accepted}))
         }
         "turn/interrupt" => {
             let params = request.params::<wire::TurnInterruptParams>()?;
@@ -489,6 +591,22 @@ async fn handle_rpc(
             let interrupted = state.inner.gateway.interrupt_turn(selector.clone());
             let cleared = state.inner.gateway.clear_queue(selector);
             Ok(json!({"interrupted": interrupted, "cleared": cleared}))
+        }
+        "turn/takeover" => {
+            let params = request.params::<wire::TurnTakeoverParams>()?;
+            if let Some(thread_id) = &params.thread_id {
+                authorize_thread(&state, &auth, thread_id)?;
+            }
+            let selector = if let Some(thread_id) = params.thread_id {
+                GatewayThreadSelector::thread_id(thread_id)
+            } else if let Some(source_key) = params.source_key {
+                GatewayThreadSelector::source(source_key)
+            } else {
+                let scope = default_resolved_scope(&state, &auth)?;
+                state.selector(&scope.source)
+            };
+            let (accepted, activity) = state.inner.gateway.takeover_turn(selector)?;
+            Ok(json!({"accepted": accepted, "activity": activity}))
         }
         "completion/list" => {
             let params = request.required_params::<wire::CompletionListParams>()?;
@@ -587,6 +705,9 @@ async fn handle_rpc(
                     .inner
                     .gateway
                     .submit_permission(selector, &params.request_id, decision);
+            if !accepted {
+                state.remove_pending_permission(&params.request_id);
+            }
             Ok(json!({"accepted": accepted}))
         }
         "clarify/respond" => {
@@ -746,10 +867,17 @@ async fn handle_rpc(
             {
                 bind_source_to_thread(&state, &scope, thread_id)?;
             }
+            let event_selector = thread_id
+                .as_ref()
+                .map(GatewayThreadSelector::thread_id)
+                .unwrap_or_else(|| GatewayThreadSelector::source(scope.source.source_key()));
+            let event_thread_id = thread_id.clone();
             let event_state = state.clone();
             let event_tx = out_tx.clone();
             let event_sink: GatewayEventSink = Arc::new(move |event| {
-                event_state.record_event(&event);
+                let context =
+                    event_state.pending_context_for_selector(&event_selector, event_thread_id.as_deref());
+                event_state.record_event_with_context(&event, context);
                 let _ = event_tx.send(rpc_notification("gateway/event", json!(event)));
             });
             let context = user_shell_context_options(&state, &scope, thread_id.clone());

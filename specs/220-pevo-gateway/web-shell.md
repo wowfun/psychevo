@@ -221,6 +221,14 @@ peer emits coarse chunks or the browser receives several gateway events in one
 render frame. It may use a presentation-only reveal buffer for running
 assistant text and reasoning blocks, but Gateway event state, persisted
 transcript entries, copy text, and snapshot reconciliation remain canonical.
+Pending permission approvals returned by `thread/read` or `thread/resume` are
+scoped interaction requests, not global Web server chrome. The Web shell keeps
+optional pending metadata such as thread id, turn id, activity id, owner id, and
+lease expiry with each permission request so reconnects can keep still-valid
+foreign approvals visible while pruning stale, completed, interrupted, expired,
+or wrong-thread requests before snapshot serialization. If `permission/respond`
+returns `accepted: false`, Workbench must show a composer-scoped transient error
+and refresh the snapshot instead of making the approval buttons appear inert.
 For peer turns, Gateway also maps Workbench's submitted `model` and
 `reasoningEffort` controls to ACP v2 session config options before
 `session/prompt` when the peer offers compatible `model` and `effort` select
@@ -278,13 +286,21 @@ current Web source without archiving the previously selected thread. Only an
 explicit `source/reset`, archive action, or delete action may remove a thread
 from the active history list.
 
-Workbench history is a global session browser. `thread/list` with no workdir
-filter returns all human-visible sessions from the local state database; the
-stored session workdir is used only for grouping and for the target scope on
-resume. Rows are grouped by workdir, with the current workdir first and all
-other workdirs ordered by latest session activity. Runtime `source` may appear
-in diagnostics but must not appear in history rows/search or decide whether
-GUI, TUI, ACP, Web, or Desktop sessions are visible by default.
+Workbench history is a global session browser. `thread/browser` returns grouped
+human-visible sessions from the local state database; the stored session workdir
+is used for grouping and for the target scope on resume. Rows are grouped by
+workdir, with the current workdir first and all other workdirs ordered by latest
+session activity. Runtime `source` may appear in diagnostics but must not appear
+in history rows/search or decide whether GUI, TUI, ACP, Web, or Desktop
+sessions are visible by default.
+
+Each workspace group initially shows sessions updated within the last 7 days,
+capped to 20 rows. Current, running, and pinned sessions remain visible even
+when older than that default window. Sessions outside the default set are
+collapsed behind one older-sessions row per workspace; activating it appends the
+next 20 rows for that workspace and preserves the existing group collapse
+state. Browsing, expanding, pinning, and selecting rows must not update session
+recency.
 
 When Workbench resumes a session from another workdir, it switches the active
 scope to that session's stored workdir before accepting more input. The file
@@ -316,6 +332,14 @@ The original thread continues in the background, remains visible in history with
 running/queued state, and can be interrupted by selecting it or by thread-scoped
 controls. Running threads cannot be archived or deleted until their active turn
 finishes or is interrupted.
+
+Workbench receives live activity from every Gateway process that shares the
+state database. A TUI-owned turn must appear as running in the session browser,
+`thread/read` snapshots, and thread-scoped controls. When Workbench enters a
+foreign running session, it subscribes through the Web Gateway's relayed
+`gateway/event` stream and updates the visible transcript without requiring the
+user to switch away and back. On completion, Workbench still refreshes the
+snapshot so committed entries replace the live overlay.
 
 The Web Shell uses Gateway `completion/list` for `/`, `$`, and `@` composer
 completion. `$` completion resolves skills, local agents, and ACP capability

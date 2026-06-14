@@ -360,7 +360,12 @@ impl WebState {
         }
     }
 
+    #[cfg(test)]
     fn record_event(&self, event: &GatewayEvent) {
+        self.record_event_with_context(event, PendingInteractionContext::default());
+    }
+
+    fn record_event_with_context(&self, event: &GatewayEvent, context: PendingInteractionContext) {
         match event {
             GatewayEvent::PermissionRequested {
                 request_id,
@@ -378,6 +383,11 @@ impl WebState {
                             request_id: request_id.clone(),
                             tool_name: tool_name.clone(),
                             reason: reason.clone(),
+                            thread_id: context.thread_id,
+                            turn_id: context.turn_id,
+                            activity_id: context.activity_id,
+                            owner_id: context.owner_id,
+                            lease_expires_at_ms: context.lease_expires_at_ms,
                         },
                     );
             }
@@ -387,6 +397,11 @@ impl WebState {
                     .lock()
                     .expect("web pending permissions poisoned")
                     .remove(request_id);
+            }
+            GatewayEvent::TurnCompleted {
+                thread_id, turn_id, ..
+            } => {
+                self.remove_pending_permissions_for_completed_turn(thread_id.as_deref(), turn_id);
             }
             GatewayEvent::ClarifyRequested { request_id, raw } => {
                 self.inner
@@ -412,6 +427,81 @@ impl WebState {
         }
     }
 
+    fn pending_context_for_live_event(
+        &self,
+        record: &psychevo_runtime::GatewayLiveEventRecord,
+    ) -> PendingInteractionContext {
+        let mut context = PendingInteractionContext {
+            thread_id: record.thread_id.clone(),
+            turn_id: record.turn_id.clone(),
+            activity_id: record.activity_id.clone(),
+            owner_id: record.owner_id.clone(),
+            lease_expires_at_ms: None,
+        };
+        if let Some(activity_id) = &record.activity_id
+            && let Ok(Some(activity)) = self.inner.state.store().gateway_activity(activity_id)
+        {
+            if context.thread_id.is_none() {
+                context.thread_id = activity.thread_id;
+            }
+            if context.turn_id.is_none() {
+                context.turn_id = activity.turn_id;
+            }
+            if context.owner_id.is_none() {
+                context.owner_id = Some(activity.owner_id);
+            }
+            context.lease_expires_at_ms = Some(activity.lease_expires_at_ms);
+        }
+        context
+    }
+
+    fn pending_context_for_selector(
+        &self,
+        selector: &GatewayThreadSelector,
+        thread_id: Option<&str>,
+    ) -> PendingInteractionContext {
+        let activity = self.inner.gateway.activity_for_selector(selector.clone());
+        PendingInteractionContext {
+            thread_id: thread_id.map(str::to_string),
+            turn_id: activity.active_turn_id.clone(),
+            activity_id: activity.active_turn_id,
+            owner_id: activity
+                .owner_id
+                .or_else(|| Some(self.inner.gateway.owner_id().to_string())),
+            lease_expires_at_ms: activity.lease_expires_at_ms,
+        }
+    }
+
+    fn remove_pending_permission(&self, request_id: &str) {
+        self.inner
+            .pending_permissions
+            .lock()
+            .expect("web pending permissions poisoned")
+            .remove(request_id);
+    }
+
+    fn remove_pending_permissions_for_completed_turn(
+        &self,
+        thread_id: Option<&str>,
+        turn_id: &str,
+    ) {
+        self.inner
+            .pending_permissions
+            .lock()
+            .expect("web pending permissions poisoned")
+            .retain(|_, permission| {
+                if permission.turn_id.as_deref() == Some(turn_id) {
+                    return false;
+                }
+                if let Some(thread_id) = thread_id
+                    && permission.thread_id.as_deref() == Some(thread_id)
+                {
+                    return false;
+                }
+                true
+            });
+    }
+
     fn record_review_event(&self, event: &GatewayEvent, workdir: &Path) {
         match event {
             GatewayEvent::TurnStarted {
@@ -435,6 +525,25 @@ struct PendingPermissionView {
     request_id: String,
     tool_name: String,
     reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thread_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    turn_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    activity_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    owner_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lease_expires_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct PendingInteractionContext {
+    thread_id: Option<String>,
+    turn_id: Option<String>,
+    activity_id: Option<String>,
+    owner_id: Option<String>,
+    lease_expires_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]

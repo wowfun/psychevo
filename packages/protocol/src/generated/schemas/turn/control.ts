@@ -474,6 +474,27 @@ export const turnControlSchemas = {
   "title": "TurnInterruptParams",
   "type": "object"
 },
+  TurnTakeoverParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "sourceKey": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "threadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "TurnTakeoverParams",
+  "type": "object"
+},
   TurnStartResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
@@ -515,6 +536,88 @@ export const turnControlSchemas = {
     }
   },
   "title": "TurnControlResult",
+  "type": "object"
+},
+  TurnTakeoverResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayActivityView": {
+      "properties": {
+        "activeTurnId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "leaseExpiresAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ownerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ownerSurface": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "queuedTurns": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "running": {
+          "type": "boolean"
+        },
+        "startedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "takeoverState": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "queuedTurns",
+        "running"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "accepted": {
+      "type": "boolean"
+    },
+    "activity": {
+      "$ref": "#/definitions/GatewayActivityView"
+    }
+  },
+  "required": [
+    "accepted",
+    "activity"
+  ],
+  "title": "TurnTakeoverResult",
   "type": "object"
 },
 } as const;

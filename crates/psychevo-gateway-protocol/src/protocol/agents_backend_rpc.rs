@@ -414,6 +414,8 @@ pub enum ClientRequest {
     ThreadTrace(ThreadTraceParams),
     #[serde(rename = "thread/list")]
     ThreadList(ThreadListParams),
+    #[serde(rename = "thread/browser")]
+    ThreadBrowser(ThreadBrowserParams),
     #[serde(rename = "thread/rename")]
     ThreadRename(ThreadRenameParams),
     #[serde(rename = "thread/archive")]
@@ -428,6 +430,8 @@ pub enum ClientRequest {
     TurnSteer(TurnSteerParams),
     #[serde(rename = "turn/interrupt")]
     TurnInterrupt(TurnInterruptParams),
+    #[serde(rename = "turn/takeover")]
+    TurnTakeover(TurnTakeoverParams),
     #[serde(rename = "runtime/options")]
     RuntimeOptions(RuntimeOptionsParams),
     #[serde(rename = "completion/list")]

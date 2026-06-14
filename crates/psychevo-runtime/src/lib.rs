@@ -121,8 +121,10 @@ pub use stats::{session_usage_summary, usage_stats};
 pub use store::{AgentEdgeRecord, AgentEdgeStatus};
 pub use store::{
     ChildSessionSnapshotInput, ContextEvidenceInput, ContextEvidenceRecord,
-    GatewaySourceBindingInput, GatewaySourceBindingRecord, SessionCompactionInput,
-    SessionCompactionRecord, SessionMessageRecord, SqliteStore,
+    GatewayActivityClaimInput, GatewayActivityRecord, GatewayControlCommandInput,
+    GatewayControlCommandRecord, GatewayLiveEventRecord, GatewaySourceBindingInput,
+    GatewaySourceBindingRecord, SessionCompactionInput, SessionCompactionRecord,
+    SessionMessageRecord, SqliteStore,
 };
 pub use tools::tool_names_for_mode;
 pub use types::{

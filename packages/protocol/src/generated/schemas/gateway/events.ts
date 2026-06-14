@@ -21,6 +21,69 @@ export const gatewayEventSchemas = {
   GatewayEvent: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "GatewayActivityView": {
+      "properties": {
+        "activeTurnId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "leaseExpiresAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ownerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ownerSurface": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "queuedTurns": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "running": {
+          "type": "boolean"
+        },
+        "startedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "takeoverState": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "queuedTurns",
+        "running"
+      ],
+      "type": "object"
+    },
     "GatewaySelectedSkill": {
       "properties": {
         "name": {
@@ -611,6 +674,60 @@ export const gatewayEventSchemas = {
       "required": [
         "kind",
         "message",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "activity": {
+          "$ref": "#/definitions/GatewayActivityView"
+        },
+        "threadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "enum": [
+            "activityChanged"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "activity",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "displayTitle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "enum": [
+            "titleChanged"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "threadId",
         "type"
       ],
       "type": "object"

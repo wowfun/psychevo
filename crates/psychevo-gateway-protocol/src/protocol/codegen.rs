@@ -445,7 +445,15 @@ fn schema_group_module(name: &str) -> &'static str {
     if name.starts_with("Transcript") {
         return "transcript";
     }
-    if matches!(name, "ThreadSnapshot" | "ThreadListResult" | "ThreadMutationResult" | "ThreadDeleteResult") {
+    if matches!(
+        name,
+        "ThreadSnapshot"
+            | "ThreadListResult"
+            | "ThreadBrowserResult"
+            | "ThreadBrowserWorkspace"
+            | "ThreadMutationResult"
+            | "ThreadDeleteResult"
+    ) {
         return "thread/results";
     }
     if name.starts_with("ThreadTrace") {
@@ -471,8 +479,13 @@ fn schema_group_module(name: &str) -> &'static str {
     }
     if matches!(
         name,
-        "TurnStartParams" | "TurnSteerParams" | "TurnInterruptParams" | "TurnStartResult"
+        "TurnStartParams"
+            | "TurnSteerParams"
+            | "TurnInterruptParams"
+            | "TurnTakeoverParams"
+            | "TurnStartResult"
             | "TurnControlResult"
+            | "TurnTakeoverResult"
     ) {
         return "turn/control";
     }
@@ -735,6 +748,10 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(ThreadTraceParams),
         exported_type!(ThreadTraceResult),
         exported_type!(ThreadListParams),
+        exported_type!(ThreadBrowserParams),
+        exported_type!(ThreadBrowserCursor),
+        exported_type!(ThreadBrowserResult),
+        exported_type!(ThreadBrowserWorkspace),
         exported_type!(ThreadIdParams),
         exported_type!(ThreadRenameParams),
         exported_type!(ThreadListResult),
@@ -791,12 +808,14 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(TurnStartParams),
         exported_type!(TurnSteerParams),
         exported_type!(TurnInterruptParams),
+        exported_type!(TurnTakeoverParams),
         exported_type!(RuntimeOptionsParams),
         exported_type!(RuntimeConfigOptionValueView),
         exported_type!(RuntimeConfigOptionView),
         exported_type!(RuntimeOptionsResult),
         exported_type!(TurnStartResult),
         exported_type!(TurnControlResult),
+        exported_type!(TurnTakeoverResult),
         exported_type!(TurnResultPayload),
         exported_type!(TurnRunResult),
         exported_type!(TurnErrorPayload),

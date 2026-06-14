@@ -93,6 +93,18 @@ pub enum GatewayEvent {
         source_path: Option<String>,
         suggestion: Option<String>,
     },
+    ActivityChanged {
+        #[serde(rename = "threadId")]
+        thread_id: Option<String>,
+        activity: GatewayActivityView,
+    },
+    TitleChanged {
+        #[serde(rename = "threadId")]
+        thread_id: String,
+        title: Option<String>,
+        #[serde(rename = "displayTitle")]
+        display_title: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -228,6 +240,24 @@ pub struct GatewayActivityView {
     #[serde(default)]
     pub active_turn_id: Option<String>,
     pub queued_turns: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub started_at_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub updated_at_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub owner_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub owner_surface: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub lease_expires_at_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub takeover_state: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -236,6 +266,21 @@ pub struct PendingPermissionView {
     pub request_id: String,
     pub tool_name: String,
     pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub thread_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub turn_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub activity_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub owner_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub lease_expires_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]

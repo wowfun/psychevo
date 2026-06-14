@@ -9,3 +9,5 @@ pub use sessions_and_edges::*;
 mod accounting_compaction;
 #[allow(unused_imports)]
 pub use accounting_compaction::*;
+#[path = "sqlite/gateway_activity.rs"]
+mod gateway_activity;

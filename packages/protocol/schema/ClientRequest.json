@@ -20,6 +20,9 @@
       "$ref": "ClientRequest/thread-list.json"
     },
     {
+      "$ref": "ClientRequest/thread-browser.json"
+    },
+    {
       "$ref": "ClientRequest/thread-rename.json"
     },
     {
@@ -39,6 +42,9 @@
     },
     {
       "$ref": "ClientRequest/turn-interrupt.json"
+    },
+    {
+      "$ref": "ClientRequest/turn-takeover.json"
     },
     {
       "$ref": "ClientRequest/runtime-options.json"
