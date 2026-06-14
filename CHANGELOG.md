@@ -2,29 +2,23 @@
 
 ## 2026-06-14
 
-- Split oversized Workbench, Gateway, Runtime, CLI/TUI, ACP, Eval, component
-  styles, generated protocol schemas, and specs along semantic module
-  boundaries, with inventory enforcement for large-file thresholds.
-- Added missing testing specs for remaining numbered `100+` topics and codified
-  responsibility-named module splits instead of ordinal `part_*` files.
-- Fixed live transcript projection across Workbench, Gateway, and TUI for mixed
-  durable/live ordering, yielded `exec_command` completion, active-turn local
-  feedback placement, and repo-local live validation harness readiness.
-- Expanded ACP interoperability across Gateway, Workbench, and `pevo acp` with
-  session-update streams, v2/v1 negotiation, runtime-mode mapping, live
-  Thinking/tool/plan/usage telemetry, `@agent` delegation, deterministic
-  and opt-in ACP Playwright flows.
-- Reworked Workbench/Status into a unified Settings surface with embedded
-  Profile ACP backend editing, safe peer filtering, grouped Agent/Runtime
-  composer controls, `@agent` completion, and streamlined queue/steer and
-  status routing.
-- Added typed agent/backend/status Gateway RPCs, protocol schemas, and
-  Workbench/client wiring for configurable agents and ACP backends.
+- Added durable Gateway activity and session-browser infrastructure with
+  ownership leases, stale takeover, 7-day paged browsing, and matched
+  Workbench/TUI running timers.
+- Polished running-state UX with spinner-driven session rows, turn timers,
+  inline Thinking/tool progress states, improved composer/status controls, and
+  concise elapsed rendering.
+- Fixed cross-surface live/projection consistency: rejoin durable foreign sessions,
+  preserve active tool timing, keep completed Thinking rows clean, and route
+  source-owned approvals to the correct turn lifecycle.
+- Split major UI/runtime/protocol surfaces into semantic modules and added
+  module-based inventory checks.
+- Expanded ACP interoperability (session-update streams, v2/v1 negotiation,
+  runtime-mode mapping, `@agent` delegation, status telemetry) plus unified
+  Workbench Settings and typed agent/backend/status control surfaces.
 - Fixed child-agent interruption propagation across Workbench, Gateway, and ACP
-  delegation paths.
-- Realigned foundation specs around storage, environment, permissions, sandbox,
-  and design-system numbering, including related spec links.
-- Fixed `peval-py serve` path handling and report duration heat.
+  delegates; aligned runtime/spec foundations and retained `peval-py` duration
+  heat fixes.
 
 ## 2026-06-12
 
