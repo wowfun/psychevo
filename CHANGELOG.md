@@ -2,6 +2,14 @@
 
 ## 2026-06-14
 
+- Split oversized Workbench, Gateway, Runtime, CLI/TUI, ACP, Eval, component
+  styles, generated protocol schemas, and specs along semantic module
+  boundaries, with inventory enforcement for large-file thresholds.
+- Added missing testing specs for remaining numbered `100+` topics and codified
+  responsibility-named module splits instead of ordinal `part_*` files.
+- Fixed live transcript projection across Workbench, Gateway, and TUI for mixed
+  durable/live ordering, yielded `exec_command` completion, active-turn local
+  feedback placement, and repo-local live validation harness readiness.
 - Expanded ACP interoperability across Gateway, Workbench, and `pevo acp` with
   session-update streams, v2/v1 negotiation, runtime-mode mapping, live
   Thinking/tool/plan/usage telemetry, `@agent` delegation, deterministic
