@@ -563,13 +563,26 @@ function renderTrajectoryOverviewRow(row) {
   const selected = row.trial_key === selectedKey();
   const session = row.session_id || row.trial_key || "-";
   const agent = agentNameFor(row);
-  return `<div class="trajectory-row ${selected ? "selected-row" : ""}" data-trial-key="${esc(row.trial_key)}" title="${esc(row.trial_key)}"><div class="trajectory-label"><strong>${esc(session)}</strong><span>${esc(agent)}</span></div><div class="trajectory-track">${steps.map((step, index) => renderTrajectoryNode(step, index, row.trial_key)).join("")}</div></div>`;
+  const timingModel = trajectoryOverviewTimingModel(row.trial_key);
+  return `<div class="trajectory-row ${selected ? "selected-row" : ""}" data-trial-key="${esc(row.trial_key)}" title="${esc(row.trial_key)}"><div class="trajectory-label"><strong>${esc(session)}</strong><span>${esc(agent)}</span></div><div class="trajectory-track">${steps.map((step, index) => renderTrajectoryNode(step, index, row.trial_key, timingModel)).join("")}</div></div>`;
 }
-function renderTrajectoryNode(step, index, trialKey) {
-  const stepId = String(step?.step_id ?? index + 1);
+function trajectoryOverviewTimingModel(trialKey) {
+  const meta = metaFor(trialKey);
+  const steps = meta?.steps || [];
+  return { meta, maxStepDurationMs: maxPositiveMetric(steps.map(item => item.duration_ms)) };
+}
+function overviewStepMeta(meta, stepId) {
+  return (meta?.steps || []).find(item => String(item.step_id) === String(stepId)) || {};
+}
+function renderTrajectoryNode(step, index, trialKey, timingModel) {
+  const rawStepId = step?.step_id ?? index + 1;
+  const stepId = String(rawStepId);
   const selected = state.selectedStep?.trialKey === trialKey && String(state.selectedStep?.stepId) === stepId;
-  const label = stepTitle(step, index);
-  return `<button class="trajectory-node ${selected ? "selected-node" : ""}" type="button" data-trial-key="${esc(trialKey)}" data-step-id="${esc(stepId)}" title="${esc(label)}" aria-label="${esc(label)}"><span class="trajectory-node-letter">${esc(roleLetter(step?.source))}</span></button>`;
+  const stepDuration = overviewStepMeta(timingModel?.meta, rawStepId).duration_ms;
+  const ratio = timingRatio(stepDuration, timingModel?.maxStepDurationMs);
+  const classes = ["trajectory-node", selected ? "selected-node" : "", timeGradientClass(ratio)].filter(Boolean).join(" ");
+  const label = stepTitle(step, index, stepDuration, ratio);
+  return `<button class="${esc(classes)}" type="button" data-trial-key="${esc(trialKey)}" data-step-id="${esc(stepId)}"${timeGradientStyle(ratio)} title="${esc(label)}" aria-label="${esc(label)}"><span class="trajectory-node-letter">${esc(roleLetter(step?.source))}</span></button>`;
 }
 function roleLetter(source) {
   const role = lower(source);
@@ -578,11 +591,13 @@ function roleLetter(source) {
   if (role === "agent") return "A";
   return "?";
 }
-function stepTitle(step, index) {
+function stepTitle(step, index, stepDuration = null, durationRatio = null) {
   const id = step?.step_id ?? index + 1;
   const role = step?.source || "unknown";
   const preview = shortText(valuePreview(step?.message).trim() || valuePreview(step?.reasoning_content).trim() || firstToolName(step));
-  return preview ? `#${id} ${role}: ${preview}` : `#${id} ${role}`;
+  const duration = hasMetricValue(stepDuration) ? timeTitle("step", stepDuration, durationRatio, "slowest step") : "";
+  const head = duration ? `#${id} ${role}; ${duration}` : `#${id} ${role}`;
+  return preview ? `${head}: ${preview}` : head;
 }
 function bindTrajectoryControls(target) {
   target.querySelectorAll("[data-step-id]").forEach(node => {

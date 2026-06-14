@@ -192,6 +192,11 @@ class PevalPyReportHtmlTests(unittest.TestCase):
         self.assertIn("trajectory-overview-title", html)
         self.assertIn("trajectory-node", html)
         self.assertIn("trajectory-node-letter", html)
+        self.assertIn("trajectory-node.time-gradient", html)
+        self.assertIn("function trajectoryOverviewTimingModel", html)
+        self.assertIn("function overviewStepMeta", html)
+        self.assertIn("timeGradientClass(ratio)", html)
+        self.assertIn('timeTitle("step", stepDuration, durationRatio, "slowest step")', html)
         self.assertIn('if (role === "system") return "S"', html)
         self.assertIn('if (role === "user") return "U"', html)
         self.assertIn('if (role === "agent") return "A"', html)
@@ -1331,6 +1336,117 @@ console.log(result);
         self.assertIn("drawer-open", result["rendered"])
 
 
+    def test_html_trajectory_overview_nodes_render_duration_heat(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("node is required to execute report.js interaction helpers")
+        report = {
+            "schema_version": 18,
+            "includes": ["core", "comparison"],
+            "trajectory": [
+                {
+                    "trajectory_id": "trial:overview",
+                    "session_id": "overview",
+                    "agent": {"name": "psychevo"},
+                    "steps": [
+                        {"step_id": 1, "source": "user", "message": "start"},
+                        {"step_id": 2, "source": "agent", "message": "fast"},
+                        {"step_id": 3, "source": "agent", "message": "slow"},
+                    ],
+                    "final_metrics": {},
+                }
+            ],
+            "trajectory_meta": [
+                {
+                    "trial_key": "trial:overview",
+                    "status": "passed",
+                    "steps": [
+                        {"step_id": 1, "duration_ms": 0},
+                        {"step_id": 2, "duration_ms": 120},
+                        {"step_id": 3, "duration_ms": 240},
+                    ],
+                    "warnings": [],
+                }
+            ],
+            "comparison": {
+                "leaderboard": {
+                    "entries": [
+                        {
+                            "trial_key": "trial:overview",
+                            "session_id": "overview",
+                            "adapter": "psychevo",
+                        }
+                    ]
+                }
+            },
+        }
+        asset = load_asset_text("report.js")
+        self.assertIn("\nrender(data());", asset)
+        asset = asset.rsplit("\nrender(data());", 1)[0]
+        script = f"""
+const vm = require("vm");
+const asset = {json.dumps(asset)};
+const report = {json.dumps(report)};
+const context = {{
+  document: {{
+    body: {{ classList: {{ toggle() {{}} }} }},
+    addEventListener() {{}},
+    getElementById: () => null,
+    querySelector: () => null,
+  }},
+  window: {{ addEventListener() {{}} }},
+  console,
+  JSON,
+  Number,
+  String,
+  Object,
+  Math,
+  Date,
+  Set,
+  Array,
+  RegExp,
+  report,
+}};
+vm.createContext(context);
+vm.runInContext(asset, context);
+const result = vm.runInContext(`
+  state.view = report;
+  state.selectedTrial = "trial:overview";
+  state.selectedStep = {{ trialKey: "trial:overview", stepId: "3" }};
+  renderTrajectoryOverviewRow(report.comparison.leaderboard.entries[0]);
+`, context);
+console.log(result);
+"""
+        node = subprocess.run(
+            ["node"],
+            input=script,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(node.returncode, 0, node.stderr)
+        row_html = node.stdout
+        buttons = {
+            match.group("id"): match.group("tag")
+            for match in re.finditer(
+                r'(?P<tag><button class="[^"]*"[^>]*data-step-id="(?P<id>[^"]+)"[^>]*>)',
+                row_html,
+            )
+        }
+
+        self.assertIn("1", buttons)
+        self.assertIn("2", buttons)
+        self.assertIn("3", buttons)
+        self.assertNotIn("time-gradient", buttons["1"])
+        self.assertIn("step 0.0s", buttons["1"])
+        self.assertIn("time-gradient", buttons["2"])
+        self.assertIn("--time-pct: 50.0%", buttons["2"])
+        self.assertIn("time-gradient", buttons["3"])
+        self.assertIn("selected-node", buttons["3"])
+        self.assertIn("--time-pct: 100.0%", buttons["3"])
+        self.assertIn("step 0.2s; 100% of slowest step", buttons["3"])
+
+
     def test_html_submenu_outside_click_closer_only_targets_menus(self) -> None:
         if not shutil.which("node"):
             self.skipTest("node is required to execute report.js interaction helpers")
@@ -1456,6 +1572,8 @@ console.log(result);
         self.assertIn(".source-add-actions", css)
         self.assertIn(".source-form select", css)
         self.assertNotIn(".adapter-choice-group", css)
+        self.assertIn(".trajectory-node.time-gradient", css)
+        self.assertIn(".trajectory-node.selected-node.time-gradient", css)
         self.assertIn(".serve-notice", css)
         self.assertIn(
             compact_css_text(

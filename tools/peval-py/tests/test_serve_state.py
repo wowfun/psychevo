@@ -10,9 +10,12 @@ from peval_py.inputs import parse_adapter_assignments
 from peval_py.serve import (
     DEFAULT_PORT_END,
     DEFAULT_PORT_START,
+    HttpError,
     LocalHTTPServer,
     bind_server,
     make_handler,
+    source_path_values,
+    workspace_relative_path,
 )
 from peval_py.state import (
     REFRESH_LOG_LIMIT,
@@ -343,6 +346,67 @@ class PevalPyServeStateTests(unittest.TestCase):
                 thread.join(timeout=5)
                 store.close()
 
+    def test_source_path_values_preserve_windows_paths_and_wsl_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp))
+            store = open_workspace_state(str(root))
+            try:
+                values = source_path_values(
+                    store,
+                    {
+                        "path": (
+                            r"C:\Users\kevin\AppData\Local\state.db "
+                            r'"D:\Data Dir\session.jsonl" '
+                            r"C:/Users/kevin/.hermes/state.db "
+                            r"\\server\share\state.db "
+                            "relative.jsonl"
+                        )
+                    },
+                    "path",
+                )
+                self.assertEqual(
+                    values,
+                    [
+                        r"C:\Users\kevin\AppData\Local\state.db",
+                        r"D:\Data Dir\session.jsonl",
+                        "C:/Users/kevin/.hermes/state.db",
+                        r"\\server\share\state.db",
+                        str(root / "relative.jsonl"),
+                    ],
+                )
+
+                mount_root = root / "mnt"
+                mapped = mount_root / "c" / "Users" / "kevin" / ".hermes" / "state.db"
+                mapped.parent.mkdir(parents=True)
+                mapped.write_text("", encoding="utf-8")
+                self.assertEqual(
+                    workspace_relative_path(
+                        store,
+                        r"C:\Users\kevin\.hermes\state.db",
+                        windows_mount_root=mount_root,
+                    ),
+                    str(mapped),
+                )
+                self.assertEqual(
+                    workspace_relative_path(
+                        store,
+                        "C:/Users/kevin/.hermes/state.db",
+                        windows_mount_root=mount_root,
+                    ),
+                    str(mapped),
+                )
+            finally:
+                store.close()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp))
+            store = open_workspace_state(str(root))
+            try:
+                with self.assertRaisesRegex(HttpError, "path list is invalid"):
+                    source_path_values(store, {"path": '"unterminated'}, "path")
+            finally:
+                store.close()
+
     def test_http_db_session_inspect_infers_adapters_and_batch_adds_sources(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = peval_py_workspace(Path(tmp))
@@ -432,6 +496,77 @@ class PevalPyServeStateTests(unittest.TestCase):
                     },
                     {"hermes-latest", "hermes-old"},
                 )
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+                store.close()
+
+    def test_http_sources_and_db_inspect_use_windows_path_wsl_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp))
+            mount_root = root / "mnt"
+            mapped_db = mount_root / "c" / "Users" / "kevin" / ".hermes" / "state.db"
+            mapped_path = mount_root / "d" / "sessions" / "common.jsonl"
+            mapped_db.parent.mkdir(parents=True)
+            mapped_path.parent.mkdir(parents=True)
+            create_hermes_db(mapped_db)
+            shutil.copy(FIXTURES / "common_session.jsonl", mapped_path)
+
+            config = ToolConfig(adapter="opencode")
+            store = open_workspace_state(str(root))
+            server = LocalHTTPServer(
+                ("127.0.0.1", 0),
+                make_handler(store, config),
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            port = server.server_port
+            origin = f"http://127.0.0.1:{port}"
+            try:
+                with patch("peval_py.serve.WINDOWS_DRIVE_MOUNT_ROOT", mount_root):
+                    status, _, body = request_json(
+                        port,
+                        "POST",
+                        "/api/db-sessions",
+                        {"db": r"C:\Users\kevin\.hermes\state.db"},
+                        origin=origin,
+                    )
+                    self.assertEqual(status, 200)
+                    self.assertEqual(body["db"], str(mapped_db))
+                    self.assertEqual(body["adapter"], "hermes")
+                    self.assertEqual(body["sessions"][0]["session_id"], "hermes-latest")
+
+                    status, _, body = request_json(
+                        port,
+                        "POST",
+                        "/api/sources",
+                        {
+                            "db": r"C:\Users\kevin\.hermes\state.db",
+                            "adapter": "hermes",
+                            "session_ids": ["hermes-latest"],
+                        },
+                        origin=origin,
+                    )
+                    self.assertEqual(status, 200)
+                    self.assertEqual(body["sources"][0]["db_path"], str(mapped_db))
+                    self.assertEqual(body["sources"][0]["session_id"], "hermes-latest")
+
+                    status, _, body = request_json(
+                        port,
+                        "POST",
+                        "/api/sources",
+                        {
+                            "path": r"D:\sessions\common.jsonl",
+                            "adapter": "opencode",
+                        },
+                        origin=origin,
+                    )
+                    self.assertEqual(status, 200)
+                    self.assertIn(
+                        str(mapped_path),
+                        {source["input_path"] for source in body["sources"]},
+                    )
             finally:
                 server.shutdown()
                 server.server_close()

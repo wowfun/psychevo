@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import shlex
 import sys
 from argparse import Namespace
@@ -31,6 +33,8 @@ DEFAULT_PORT_START = 58010
 DEFAULT_PORT_END = 58029
 LOCALHOSTS = {"127.0.0.1", "localhost", "::1"}
 MAX_JSON_BODY_BYTES = UPLOAD_LIMIT_BYTES + 2 * 1024 * 1024
+WINDOWS_DRIVE_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
+WINDOWS_DRIVE_MOUNT_ROOT = Path("/mnt")
 
 
 class HttpError(Exception):
@@ -350,13 +354,29 @@ def source_path_values(
     raw = optional_string(payload.get(key))
     if raw is None:
         return []
-    try:
-        parts = [part for part in shlex.split(raw) if part]
-    except ValueError as exc:
-        raise HttpError(400, f"{key} path list is invalid: {exc}") from exc
+    parts = split_source_path_list(raw, key)
     if not parts:
         raise HttpError(400, f"{key} path list is empty")
     return [workspace_relative_path(store, part) for part in parts]
+
+
+def split_source_path_list(raw: str, key: str) -> list[str]:
+    try:
+        raw_parts = shlex.split(raw, posix=False)
+    except ValueError as exc:
+        raise HttpError(400, f"{key} path list is invalid: {exc}") from exc
+    return [
+        unquote_path_token(part)
+        for part in raw_parts
+        if unquote_path_token(part)
+    ]
+
+
+def unquote_path_token(raw: object) -> str:
+    text = str(raw).strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in {"'", '"'}:
+        return text[1:-1]
+    return text
 
 
 def adapter_override_payload(payload: dict[str, Any]) -> str | None:
@@ -382,13 +402,51 @@ def session_ids_payload(payload: dict[str, Any]) -> list[str] | None:
     return session_ids
 
 
-def workspace_relative_path(store: ServeStateStore, raw_path: str | None) -> str | None:
+def workspace_relative_path(
+    store: ServeStateStore,
+    raw_path: str | None,
+    *,
+    windows_mount_root: Path | None = None,
+) -> str | None:
     if raw_path is None:
         return None
-    path = Path(raw_path).expanduser()
+    text = unquote_path_token(raw_path)
+    if not text:
+        return None
+    if is_windows_absolute_like_path(text):
+        return resolve_windows_absolute_like_path(text, windows_mount_root)
+    path = Path(text).expanduser()
     if not path.is_absolute():
         path = store.paths.root / path
     return str(path)
+
+
+def is_windows_absolute_like_path(path: str) -> bool:
+    return bool(WINDOWS_DRIVE_PATH_RE.match(path)) or path.startswith("\\\\") or path.startswith("//")
+
+
+def resolve_windows_absolute_like_path(
+    raw_path: str,
+    windows_mount_root: Path | None = None,
+) -> str:
+    if os.name == "nt":
+        return str(Path(raw_path).expanduser())
+    original = Path(raw_path).expanduser()
+    if original.exists():
+        return str(original)
+    mapped = windows_drive_mount_path(raw_path, windows_mount_root or WINDOWS_DRIVE_MOUNT_ROOT)
+    if mapped is not None and mapped.exists():
+        return str(mapped)
+    return raw_path
+
+
+def windows_drive_mount_path(raw_path: str, mount_root: Path) -> Path | None:
+    if not WINDOWS_DRIVE_PATH_RE.match(raw_path):
+        return None
+    drive = raw_path[0].lower()
+    rest = raw_path[2:].lstrip("\\/")
+    parts = [part for part in re.split(r"[\\/]+", rest) if part]
+    return Path(mount_root) / drive / Path(*parts)
 
 
 def source_keys_payload(payload: dict[str, Any]) -> list[str] | None:

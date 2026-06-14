@@ -348,12 +348,15 @@ Serve UI mode only adds web-only controls around that shared body. It shows a
 compact source/status toolbar and opens source management in a modal for
 Session/ATIF paths, SQLite DBs, input tables, JSONL uploads, ATIF JSON uploads,
 and report JSON uploads. The path and DB fields accept multiple pasted paths;
-quote paths that contain spaces. Adapter controls are compact dropdowns in each
-form's action row next to the add/upload action and default to `auto`, which
-uses the same inference/default adapter rules as the CLI. Failed imports show
-the server error and are not saved as sources. Sources can be archived for later
-restore or deleted from peval-py state without deleting the original file or
-database. Source import forms and Timeline diagnostic sections use transparent
+quote paths that contain spaces. Windows drive paths such as `C:\...`, `D:\...`,
+and UNC paths are preserved instead of being resolved under the workspace root;
+when `serve` runs on POSIX and an existing `/mnt/<drive>/...` path matches, that
+WSL-style path is used. Adapter controls are compact dropdowns in each form's
+action row next to the add/upload action and default to `auto`, which uses the
+same inference/default adapter rules as the CLI. Failed imports show the server
+error and are not saved as sources. Sources can be archived for later restore or
+deleted from peval-py state without deleting the original file or database.
+Source import forms and Timeline diagnostic sections use transparent
 report-integrated shells, while inputs and menus keep solid readable surfaces.
 
 In the Leaderboard, web UI mode may add row checkboxes for export selection and
@@ -363,9 +366,10 @@ visible checked rows when any currently visible row is checked, otherwise they
 use the current filtered and sorted visible rows. JSON and HTML exports follow
 the same row scope as table exports. Export and table filter menus close when
 clicking outside them. Long Trajectory Overview rows wrap nodes onto additional
-lines. Timeline Waterfall and Timeline Detail Table sections are collapsible,
-and clicking user/system markers or timed rows opens the corresponding Step
-details drawer.
+lines, and timed nodes use duration heat relative to the slowest step in that
+Trial so slow steps stand out without adding text labels. Timeline Waterfall and
+Timeline Detail Table sections are collapsible, and clicking user/system markers
+or timed rows opens the corresponding Step details drawer.
 
 For SQLite DB sources, the modal includes an Inspect flow. Enter or paste one
 DB path, optionally choose an adapter, and click Inspect DB. Without an explicit

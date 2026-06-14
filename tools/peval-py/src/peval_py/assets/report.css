@@ -521,6 +521,18 @@ th.num .filter-menu {
   height:100%;
   border-radius:inherit;
 }
+.trajectory-node.time-gradient {
+  --time-fill:#dfca93;
+  --time-fill-soft:#fff8e7;
+  background:conic-gradient(from -90deg,var(--time-fill) 0 var(--time-pct),var(--time-fill-soft) var(--time-pct) 100%);
+  border-color:color-mix(in oklch,var(--time-fill),#27231b 18%);
+}
+.trajectory-node.time-gradient .trajectory-node-letter {
+  width:18px;
+  height:18px;
+  background:rgba(255,252,244,.84);
+  box-shadow:0 0 0 1px rgba(49,42,25,.08);
+}
 .trajectory-node:hover {
   transform:scale(1.12);
   box-shadow:0 0 0 3px rgba(49,95,143,.18);
@@ -529,6 +541,10 @@ th.num .filter-menu {
   border-color:var(--focus);
   background:color-mix(in oklch,var(--focus),var(--surface) 88%);
   box-shadow:0 0 0 3px rgba(49,95,143,.20);
+}
+.trajectory-node.selected-node.time-gradient {
+  background:color-mix(in oklch,var(--focus),var(--surface) 88%);
+  box-shadow:0 0 0 3px rgba(49,95,143,.24),inset 0 -3px 0 var(--time-fill);
 }
 .trace-title {
   display:flex;
